@@ -6,7 +6,7 @@ This project defines the public, contract-only builder and application lifecycle
 
 ## Public surface
 
-- `ISecretStoreApplicationBuilder` extends the shared host-builder contract and builds an `ISecretStoreApplication`.
+- `ISecretStoreApplicationBuilder` extends the shared host-builder contract, registers host-service instances or context-aware factories, and builds an `ISecretStoreApplication`.
 - `ISecretStoreApplication` exposes the shared host lifecycle plus `RunAsync`.
 
-The current application is an empty filler that exists to make the area SDK and shared framework consumable. Secret persistence, trust, and certificate behavior are outside this slice.
+The current application is a composition-only filler that is empty by default. Caller-registered services participate in the shared ordered lifecycle; secret persistence, trust, and certificate behavior remain outside this slice.

@@ -7,7 +7,7 @@ The application and builder are fillers pending the area's program.
 ## Projects
 
 - `Assimalign.Cohesion.Scheduler` contains the existing scheduler domain contracts and the public area-root application and builder contracts.
-- `Assimalign.Cohesion.Scheduler.Hosting` provides the concrete creation entry point and the current empty host lifecycle.
+- `Assimalign.Cohesion.Scheduler.Hosting` provides the concrete creation entry point and the caller-configurable host-service lifecycle.
 - `Assimalign.Cohesion.Scheduler.Cron` provides the existing cron schedule and crontab model.
 - `Assimalign.Cohesion.Scheduler.Timer` reserves the timer-based scheduling implementation and is currently project scaffolding.
 

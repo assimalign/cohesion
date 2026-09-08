@@ -21,13 +21,12 @@ namespace Assimalign.Cohesion.Database.Hosting;
 /// </summary>
 /// <remarks>
 /// The builder wraps a <see cref="DatabaseApplicationOptions"/> instance, exposed
-/// through <see cref="Options"/> for the hosting-only composition surface the root
-/// interface deliberately omits (additional host services on
-/// <c>Options.Services</c>). Engine registrations go to <c>Options.Engines</c>;
-/// server registrations go to <c>Options.Servers</c>, with deferred factories
-/// resolved at <see cref="Build"/> in registration order against the application
-/// context — mirroring the Web area's context-receiving
-/// <c>AddServer(Func&lt;IWebApplicationContext, IWebApplicationServer&gt;)</c>.
+/// through <see cref="Options"/> for hosting-specific settings and fully manual
+/// composition. Engine registrations go to <c>Options.Engines</c>; service and
+/// server registrations preserve their respective registration order, with
+/// deferred factories resolved once at <see cref="Build"/> against the final
+/// application context. All services are materialized ahead of the server
+/// lifecycle adapters, regardless of fluent call order.
 /// </remarks>
 public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 {
@@ -41,6 +40,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     // wrapped as trivial factories so an instance registered after a deferred
     // factory still lands after it in the context's Servers list.
     private readonly List<Func<IDatabaseApplicationContext, IDatabaseServer>> _serverRegistrations = new();
+    private readonly List<Func<IDatabaseApplicationContext, IHostService>> _serviceRegistrations = new();
     private bool _isBuilt;
 
     /// <summary>
@@ -126,7 +126,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentException.ThrowIfNullOrWhiteSpace(databaseName);
 
-        _options.Services.Add(new DefaultDatabaseProvisioner(engine, databaseName));
+        AddService(new DefaultDatabaseProvisioner(engine, databaseName));
         return this;
     }
 
@@ -172,6 +172,26 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         return this;
     }
 
+    /// <inheritdoc cref="IDatabaseApplicationBuilder.AddService(IHostService)" />
+    public DatabaseApplicationBuilder AddService(IHostService service)
+    {
+        ArgumentNullException.ThrowIfNull(service);
+
+        _serviceRegistrations.Add(_ => service);
+
+        return this;
+    }
+
+    /// <inheritdoc cref="IDatabaseApplicationBuilder.AddService(Func{IDatabaseApplicationContext, IHostService})" />
+    public DatabaseApplicationBuilder AddService(Func<IDatabaseApplicationContext, IHostService> service)
+    {
+        ArgumentNullException.ThrowIfNull(service);
+
+        _serviceRegistrations.Add(service);
+
+        return this;
+    }
+
     /// <inheritdoc cref="IDatabaseApplicationBuilder.AddServer(IDatabaseServer)" />
     public DatabaseApplicationBuilder AddServer(IDatabaseServer server)
     {
@@ -193,10 +213,9 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     }
 
     /// <summary>
-    /// Builds the <see cref="DatabaseApplication"/> from the registered engines and
-    /// servers. Deferred server factories run here, in registration order, each
-    /// receiving the application context (final engine list plus every server
-    /// registered ahead of it).
+    /// Builds the <see cref="DatabaseApplication"/> from the registered engines,
+    /// lifecycle services, and servers. Deferred factories run here in their
+    /// respective registration order against the final application context.
     /// </summary>
     /// <returns>The composed application, ready to start.</returns>
     /// <exception cref="InvalidOperationException">The application has already been built, or a deferred server factory returned null.</exception>
@@ -217,6 +236,14 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 ?? throw new InvalidOperationException("A deferred server factory returned null.");
 
             _options.Servers.Add(server);
+        }
+
+        foreach (Func<IDatabaseApplicationContext, IHostService> registration in _serviceRegistrations)
+        {
+            IHostService service = registration.Invoke(context)
+                ?? throw new InvalidOperationException("A deferred host service factory returned null.");
+
+            _options.Services.Add(service);
         }
 
         if (_controlPlane is not null)
@@ -276,6 +303,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     }
 
     IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddEngine(IDatabaseEngine engine) => AddEngine(engine);
+    IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddService(IHostService service) => AddService(service);
+    IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddService(Func<IDatabaseApplicationContext, IHostService> service) => AddService(service);
     IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddServer(IDatabaseServer server) => AddServer(server);
     IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddServer(Func<IDatabaseApplicationContext, IDatabaseServer> configure) => AddServer(configure);
     IDatabaseApplication IDatabaseApplicationBuilder.Build() => Build();

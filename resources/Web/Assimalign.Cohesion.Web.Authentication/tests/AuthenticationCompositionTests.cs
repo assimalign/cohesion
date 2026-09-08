@@ -10,6 +10,7 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Security.DataProtection;
 using Assimalign.Cohesion.Web;
@@ -170,6 +171,10 @@ public sealed class AuthenticationCompositionTests : IDisposable
         }
 
         public IWebApplicationBuilder AddFeature(Func<IWebApplicationContext, IHttpFeature> configure) => this;
+
+        public IWebApplicationBuilder AddService(IHostService service) => this;
+
+        public IWebApplicationBuilder AddService(Func<IWebApplicationContext, IHostService> factory) => this;
 
         public IWebApplicationBuilder AddServer(IWebApplicationServer server) => this;
 

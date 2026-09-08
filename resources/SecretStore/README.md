@@ -7,7 +7,7 @@ The application and builder are fillers pending the area's program.
 ## Projects
 
 - `Assimalign.Cohesion.SecretStore` defines the public area-root application and builder contracts alongside the existing secret-store abstraction.
-- `Assimalign.Cohesion.SecretStore.Hosting` provides the concrete creation entry point and the current empty host lifecycle.
+- `Assimalign.Cohesion.SecretStore.Hosting` provides the concrete creation entry point and the caller-configurable host-service lifecycle.
 - `Assimalign.Cohesion.SecretStore.Client` is the thin, Core-only HTTP protocol client used by gateways to read secret bytes and PEM certificates and to carry generic commands.
 
 ## Layering and dependencies

@@ -7,7 +7,7 @@ The application and builder are fillers pending the area's program.
 ## Projects
 
 - `Assimalign.Cohesion.IdentityHub` defines the public area-root application and builder contracts alongside the existing identity domain contracts.
-- `Assimalign.Cohesion.IdentityHub.Hosting` provides the concrete creation entry point and the current empty host lifecycle.
+- `Assimalign.Cohesion.IdentityHub.Hosting` provides the concrete creation entry point and host lifecycle with explicit `IHostService` registration.
 - `Assimalign.Cohesion.IdentityHub.Models` contains the existing tenant, user, group, application, role, credential, and service-principal model types.
 
 ## Layering and dependencies

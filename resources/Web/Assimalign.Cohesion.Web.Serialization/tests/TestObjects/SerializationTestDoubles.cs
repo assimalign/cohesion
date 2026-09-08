@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web;
 
@@ -117,6 +118,10 @@ internal sealed class TestWebApplicationBuilder : IWebApplicationBuilder
     }
 
     public IWebApplicationBuilder AddFeature(Func<IWebApplicationContext, IHttpFeature> configure) => this;
+
+    public IWebApplicationBuilder AddService(IHostService service) => this;
+
+    public IWebApplicationBuilder AddService(Func<IWebApplicationContext, IHostService> factory) => this;
 
     public IWebApplicationBuilder AddServer(IWebApplicationServer server) => this;
 

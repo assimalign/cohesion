@@ -11,7 +11,7 @@ Assembly: `Assimalign.Cohesion.NatGateway.Hosting`
 
 - `CreateBuilder(string[] args)` validates the argument array and returns an `INatGatewayApplicationBuilder`.
 - The arguments are reserved for later runtime-context integration; the current filler does not interpret them.
-- Building the returned builder registers no hosted services.
+- Building the returned builder materializes its registered service factories once against the new NatGateway context and preserves registration order; no services are added by default.
 
 ## Exceptions
 

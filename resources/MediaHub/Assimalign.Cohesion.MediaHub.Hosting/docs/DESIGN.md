@@ -4,11 +4,11 @@
 
 The hosting module implements the area root's contract-only application seam. Public construction is limited to `MediaHubApplication.CreateBuilder(args)`; the builder, `Host<TContext>` implementation, context, and options are internal.
 
-## Filler execution model
+## Composition execution model
 
-The built host deliberately exposes an empty `HostedServices` collection and a production `HostEnvironment`. It can start, observe cancellation, and stop through the shared host lifecycle without claiming that media-hub behavior exists.
+Each build creates a new context, invokes every registered service factory exactly once against that context, and exposes the materialized services as an ordered, read-only `HostedServices` snapshot. The shared host starts services in registration order and stops them in reverse; an unconfigured builder still produces an empty collection and a production `HostEnvironment`.
 
-`ContentIoService` and `StreamingEndpointService` remain as dormant future service stubs. The filler builder does not register them.
+`ContentIoService` and `StreamingEndpointService` remain as dormant future service stubs and are not registered by default.
 
 ## Boundaries
 

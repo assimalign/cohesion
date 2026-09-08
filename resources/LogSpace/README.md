@@ -7,7 +7,7 @@ The application and builder are fillers pending the area's program.
 ## Projects
 
 - `Assimalign.Cohesion.LogSpace` defines the public area-root application and builder contracts.
-- `Assimalign.Cohesion.LogSpace.Hosting` provides the concrete creation entry point and the current empty host lifecycle.
+- `Assimalign.Cohesion.LogSpace.Hosting` provides the concrete creation entry point and host lifecycle with explicit `IHostService` registration.
 - `Assimalign.Cohesion.LogSpace.Telemetry` reserves the area-specific telemetry integration surface and is currently project scaffolding.
 
 ## Layering and dependencies

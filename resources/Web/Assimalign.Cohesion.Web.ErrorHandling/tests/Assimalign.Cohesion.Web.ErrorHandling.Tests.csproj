@@ -10,6 +10,7 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ErrorHandling" />
 		<!-- The no-clobber tests fabricate a started-response streaming feature (HasStarted). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />

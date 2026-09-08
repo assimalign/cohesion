@@ -10,7 +10,7 @@ The root retains its existing IdentityModel dependency and now also references t
 
 ## Filler lifecycle
 
-The current implementation registers no hosted services and always uses the production host environment. It exists only to complete the SDK/framework path; the existing identity domain types and their historical `Assimalign.Cohesion.Identity` namespace remain unchanged in this slice.
+The current implementation registers no area services by default and always uses the production host environment. The builder accepts `IHostService` instances and `Func<IHostContext, IHostService>` factories; each factory is materialized once per `Build()` against that application's context. Services start in registration order and stop in reverse registration order. The filler exists only to complete the SDK/framework path; the existing identity domain types and their historical `Assimalign.Cohesion.Identity` namespace remain unchanged in this slice.
 
 ## AOT posture
 

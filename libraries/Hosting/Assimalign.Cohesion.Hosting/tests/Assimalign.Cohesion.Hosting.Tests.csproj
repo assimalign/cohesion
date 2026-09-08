@@ -4,9 +4,6 @@
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
-	  <Compile Remove="HostBuilderTests.cs" />
-	</ItemGroup>
-	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="xunit" />

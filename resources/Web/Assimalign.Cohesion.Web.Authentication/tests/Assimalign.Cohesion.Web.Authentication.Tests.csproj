@@ -10,6 +10,7 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
 		<!-- The composition tests drive the handler packages' grafted AddCookie/AddJwtBearer
 		     verbs end-to-end, so the test project (not the library) references them. -->

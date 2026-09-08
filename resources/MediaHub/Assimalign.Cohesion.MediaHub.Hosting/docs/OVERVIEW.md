@@ -6,13 +6,13 @@ Provides the public `MediaHubApplication.CreateBuilder(args)` entry point and th
 
 ## Current Evaluation
 
-- Status: contract-only filler with an empty lifecycle
+- Status: composition-capable filler with no default services
 - Project references: Assimalign.Cohesion.MediaHub and Assimalign.Cohesion.Hosting
 
 ## Primary Responsibilities
 
 - Validate application arguments and return the area-root builder interface.
-- Build an internal `Host<MediaHubApplicationContext>` with a production environment and no hosted services.
+- Materialize caller-registered service instances and context-aware factories into an ordered lifecycle snapshot for an internal `Host<MediaHubApplicationContext>`.
 - Preserve the hosting-isolation boundary and an AOT-safe construction path.
 
 The old `ContentIoService` and `StreamingEndpointService` future-service stubs remain in the project but are not registered. Ambient `ResourceRuntime` integration is deferred to design item 12.

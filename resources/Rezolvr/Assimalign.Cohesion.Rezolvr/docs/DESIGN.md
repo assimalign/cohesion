@@ -8,9 +8,11 @@ The area root owns only the contracts that feature packages compose against. `IR
 
 The root references only the shared Hosting foundation. The concrete builder, host, context, and options remain internal to `Assimalign.Cohesion.Rezolvr.Hosting`; feature libraries must not reference that runtime module.
 
-## Filler lifecycle
+## Composition lifecycle
 
-The current implementation registers no hosted services and always uses the production host environment. It exists only to complete the SDK/framework path until DNS resolution behavior is implemented.
+The builder accepts existing `IHostService` instances and factories that receive the newly created area `IHostContext`. Each factory is invoked once per `Build()`, and the resulting services are retained in registration order so the shared host starts them in that order and stops them in reverse. The collection is empty when callers register nothing, and the host environment remains production.
+
+No DNS resolver service is registered by default. The seam remains composition-only until DNS resolution behavior is implemented.
 
 ## AOT posture
 

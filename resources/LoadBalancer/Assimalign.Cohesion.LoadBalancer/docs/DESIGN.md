@@ -10,7 +10,7 @@ The root references the shared Hosting foundation while preserving its existing 
 
 ## Filler lifecycle
 
-The current implementation registers no hosted services and always uses the production host environment. It exists only to complete the SDK/framework path until load-balancing behavior is implemented.
+The current implementation registers no area services by default and always uses the production host environment. The builder accepts `IHostService` instances and `Func<IHostContext, IHostService>` factories; each factory is materialized once per `Build()` against that application's context. Services start in registration order and stop in reverse registration order. The filler exists only to complete the SDK/framework path until load-balancing behavior is implemented.
 
 ## AOT posture
 

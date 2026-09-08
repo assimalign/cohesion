@@ -11,7 +11,9 @@ public abstract class HostContext : IHostContext
     private readonly Lock _lock;
     private readonly HostId _hostId;
     private HostState _state;
-    private TaskCompletionSource? _stoppedSource;
+    private TaskCompletionSource? _shutdownSource;
+    private Action? _shutdownCallback;
+    private bool _isShutdownRequested;
 
     protected HostContext()
     {
@@ -38,55 +40,85 @@ public abstract class HostContext : IHostContext
     /// Gets or sets the optional pipeline that wraps complete runs of this host.
     /// </summary>
     /// <remarks>
-    /// The runner is captured when <see cref="Host{TContext}.RunAsync"/> begins. Setting this
+    /// The runner is captured when the host's <c>RunAsync</c> extension begins. Setting this
     /// property does not affect a run that is already active.
     /// </remarks>
     public IHostRunner? Runner { get; set; }
 
-    internal Action? ShutdownCallback { get; set; }
-
     /// <summary>
-    /// Returns a task that completes when the host's run ends - a transition to
-    /// <see cref="HostState.Stopped"/> or <see cref="HostState.Failed"/> - or a completed
-    /// task when it already has. The signal resets on a later start, so each run produces
-    /// a fresh signal.
+    /// Returns a task that completes when shutdown is requested or the host begins stopping,
+    /// stops, or fails. The signal resets on a later start, so each run produces a fresh signal.
     /// </summary>
-    internal Task WhenStoppedAsync()
+    /// <param name="cancellationToken">Cancels this caller's wait without stopping the host.</param>
+    /// <returns>A task that represents the shutdown wait.</returns>
+    public Task WaitForShutdownAsync(CancellationToken cancellationToken = default)
     {
+        Task shutdownTask;
+
         lock (_lock)
         {
-            if (IsTerminal(_state))
+            if (_isShutdownRequested || IsStoppingOrTerminal(_state))
             {
                 return Task.CompletedTask;
             }
 
-            _stoppedSource ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            return _stoppedSource.Task;
+            _shutdownSource ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            shutdownTask = _shutdownSource.Task;
         }
+
+        return cancellationToken.CanBeCanceled
+            ? shutdownTask.WaitAsync(cancellationToken)
+            : shutdownTask;
     }
 
     internal void SetState(HostState state)
     {
-        TaskCompletionSource? stoppedSource = null;
+        TaskCompletionSource? shutdownSource = null;
 
         lock (_lock)
         {
             _state = state;
 
-            if (IsTerminal(state) && _stoppedSource is not null)
+            if (state is HostState.Starting && _shutdownCallback is null)
             {
-                stoppedSource = _stoppedSource;
-                _stoppedSource = null;
+                _isShutdownRequested = false;
+            }
+            else if (IsStoppingOrTerminal(state))
+            {
+                _isShutdownRequested = true;
+                shutdownSource = _shutdownSource;
+                _shutdownSource = null;
             }
         }
 
         // Complete outside the lock so awaiter continuations never run under it.
-        stoppedSource?.TrySetResult();
+        shutdownSource?.TrySetResult();
+    }
+
+    internal void BeginStart(Action shutdownCallback)
+    {
+        ArgumentNullException.ThrowIfNull(shutdownCallback);
+
+        lock (_lock)
+        {
+            _shutdownCallback = shutdownCallback;
+            _isShutdownRequested = false;
+            _state = HostState.Starting;
+        }
+    }
+
+    internal void ClearShutdownCallback()
+    {
+        lock (_lock)
+        {
+            _shutdownCallback = null;
+        }
     }
 
     internal bool TryBeginStop(Action? onTransition = null)
     {
+        TaskCompletionSource? shutdownSource;
+
         lock (_lock)
         {
             if (_state is not HostState.Started)
@@ -96,20 +128,37 @@ public abstract class HostContext : IHostContext
 
             onTransition?.Invoke();
             _state = HostState.Stopping;
-            return true;
+            _isShutdownRequested = true;
+            shutdownSource = _shutdownSource;
+            _shutdownSource = null;
         }
+
+        shutdownSource?.TrySetResult();
+        return true;
     }
 
-    private static bool IsTerminal(HostState state)
+    private static bool IsStoppingOrTerminal(HostState state)
     {
-        return state is HostState.Stopped or HostState.Failed;
+        return state is HostState.Stopping or HostState.Stopped or HostState.Failed;
     }
 
     public void Shutdown()
     {
-        InvalidOperationException.ThrowIf(ShutdownCallback is null, "Host has not started.");
+        Action shutdownCallback;
+        TaskCompletionSource? shutdownSource;
 
-        ShutdownCallback.Invoke();
+        lock (_lock)
+        {
+            InvalidOperationException.ThrowIf(_shutdownCallback is null, "Host has not started.");
+
+            shutdownCallback = _shutdownCallback;
+            _isShutdownRequested = true;
+            shutdownSource = _shutdownSource;
+            _shutdownSource = null;
+        }
+
+        shutdownSource?.TrySetResult();
+        shutdownCallback.Invoke();
     }
 
     internal bool TryShutdown(
@@ -117,20 +166,25 @@ public abstract class HostContext : IHostContext
         Action? onAccepted = null)
     {
         Action? shutdownCallback;
+        TaskCompletionSource? shutdownSource;
 
         lock (_lock)
         {
             if (_state is not HostState.Started ||
                 !isCurrentRun.Invoke() ||
-                ShutdownCallback is null)
+                _shutdownCallback is null)
             {
                 return false;
             }
 
-            shutdownCallback = ShutdownCallback;
+            shutdownCallback = _shutdownCallback;
             onAccepted?.Invoke();
+            _isShutdownRequested = true;
+            shutdownSource = _shutdownSource;
+            _shutdownSource = null;
         }
 
+        shutdownSource?.TrySetResult();
         shutdownCallback.Invoke();
         return true;
     }

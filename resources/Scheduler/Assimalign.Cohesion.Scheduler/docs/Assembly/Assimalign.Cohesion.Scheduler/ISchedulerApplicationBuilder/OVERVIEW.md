@@ -9,13 +9,15 @@ Assembly: `Assimalign.Cohesion.Scheduler`
 
 ## Surface and behavior
 
+- `AddService(IHostService service)` registers an existing service instance.
+- `AddService(Func<IHostContext, IHostService> factory)` registers a factory that is invoked once per build against the new Scheduler context.
 - `Build()` creates a configured Scheduler application.
 
-The current filler builder has no feature registrations and produces an application with an empty hosted-service collection. The concrete builder remains internal to `Assimalign.Cohesion.Scheduler.Hosting`.
+Registrations retain insertion order. The shared host starts the materialized services in that order and stops them in reverse; a builder with no registrations still produces an empty collection. The concrete builder remains internal to `Assimalign.Cohesion.Scheduler.Hosting`.
 
 ## Exceptions
 
-The filler `Build()` operation has no documented exceptions.
+`AddService` throws `ArgumentNullException` for a null service or factory. `Build()` throws `InvalidOperationException` when a factory returns null, and otherwise propagates factory failures.
 
 ## Usage
 

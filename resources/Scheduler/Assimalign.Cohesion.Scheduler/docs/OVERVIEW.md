@@ -6,7 +6,7 @@ This project contains scheduler contracts and defines the public, contract-only 
 
 ## Application surface
 
-- `ISchedulerApplicationBuilder` extends the shared host-builder contract and builds an `ISchedulerApplication`.
+- `ISchedulerApplicationBuilder` extends the shared host-builder contract, registers host-service instances or context-aware factories, and builds an `ISchedulerApplication`.
 - `ISchedulerApplication` exposes the shared host lifecycle plus `RunAsync`.
 
-The current application is an empty filler that exists to make the area SDK and shared framework consumable. Scheduling behavior is outside this slice.
+The current application is a composition-only filler that is empty by default. Caller-registered services participate in the shared ordered lifecycle; scheduling behavior remains outside this slice.

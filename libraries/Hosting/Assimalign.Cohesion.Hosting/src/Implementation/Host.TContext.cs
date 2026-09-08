@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Hosting;
 /// needed.
 /// </remarks>
 /// <typeparam name="TContext">The type of the host context used by the host. Must derive from HostContext.</typeparam>
-public abstract class Host<TContext> : IHost where TContext : HostContext
+public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext : HostContext
 {
     private readonly HostOptions<TContext> _options;
 
@@ -45,7 +45,12 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
     IHostContext IHost.Context => Context;
 
 
-    async Task IHost.StartAsync(CancellationToken cancellationToken)
+    Task IHost.StartAsync(CancellationToken cancellationToken)
+    {
+        return StartAsyncCore(cancellationToken);
+    }
+
+    private async Task StartAsyncCore(CancellationToken callerCancellationToken)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
@@ -55,30 +60,48 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
             return;
         }
 
-        Init(cancellationToken);
+        Init(callerCancellationToken);
 
-        SetState(HostState.Starting);
+        CancellationTokenSource runCancellationTokenSource = _cancellationTokenSource!;
+        Action shutdownCallback = () =>
+        {
+            try
+            {
+                runCancellationTokenSource.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The host already stopped and reset this run's state.
+            }
+        };
+
+        // Publish the shutdown callback and the Starting state atomically. Once callers can
+        // observe Starting, Shutdown must be accepted for this run and must not be erased by
+        // a later state transition.
+        Context.BeginStart(shutdownCallback);
+
+        using var startupTimeoutSource = new CancellationTokenSource();
+
+        if (_options.StartupTimeout != Timeout.InfiniteTimeSpan)
+        {
+            startupTimeoutSource.CancelAfter(_options.StartupTimeout);
+        }
+
+        using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
+            runCancellationTokenSource.Token,
+            startupTimeoutSource.Token);
+
+        CancellationToken cancellationToken = cancellationTokenSource.Token;
+
+        // A cancelled start (caller token or StartupTimeout) signals shutdown so a parked
+        // RunAsync can unwind. Init has always run by this point, so the shutdown callback
+        // is set; the registration dies with the startup token source.
+        using CancellationTokenRegistration startupCancellationRegistration =
+            cancellationToken.Register(Context.Shutdown);
 
         try
         {
             await OnStartingAsync(cancellationToken).ConfigureAwait(false);
-
-            using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-            if (_options.StartupTimeout != Timeout.InfiniteTimeSpan)
-            {
-                cancellationTokenSource.CancelAfter(_options.StartupTimeout);
-            }
-
-            cancellationToken = cancellationTokenSource.Token;
-
-            // A cancelled start (caller token or StartupTimeout) signals shutdown so a parked
-            // RunAsync can unwind. Init has always run by this point, so the shutdown callback
-            // is set; the registration dies with the startup token source.
-            cancellationToken.Register(() =>
-            {
-                Context.Shutdown();
-            });
 
             List<Exception> exceptions = new();
             bool concurrent = _options.StartServicesConcurrently;
@@ -126,8 +149,12 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
                 ThrowIfError();
             }
 
-            Volatile.Read(ref _hostRun)?.HostStarted(
-                Context.ShutdownCallback);
+            // A service is allowed to ignore its cancellation token. Re-check the combined
+            // startup token before publishing readiness so an expired budget can never become
+            // a transient or successful Started transition.
+            cancellationToken.ThrowIfCancellationRequested();
+
+            Volatile.Read(ref _hostRun)?.HostStarted(shutdownCallback);
             SetState(HostState.Started);
 
             await OnStartedAsync(cancellationToken).ConfigureAwait(false);
@@ -149,11 +176,26 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
                 }
             }
         }
-        catch
+        catch (Exception exception)
         {
+            // Capture cancellation provenance before rollback. Compensation can legitimately
+            // run past StartupTimeout; that later timer edge must not relabel an unrelated
+            // cancellation that originally failed startup.
+            bool startupTimedOut = exception is OperationCanceledException &&
+                !callerCancellationToken.IsCancellationRequested &&
+                startupTimeoutSource.IsCancellationRequested &&
+                _options.StartupTimeout != Timeout.InfiniteTimeSpan;
+
             // A failed or cancelled start must not wedge the host in Starting with
             // partially-started services leaked: compensate, mark Failed, rethrow.
             await RollbackStartAsync().ConfigureAwait(false);
+
+            if (startupTimedOut)
+            {
+                throw new HostStartupException(
+                    $"Host '{Id}' exceeded its startup readiness budget of {_options.StartupTimeout}.",
+                    exception);
+            }
 
             throw;
         }
@@ -320,10 +362,21 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
     /// <returns>A task that represents the complete host run.</returns>
     /// <exception cref="ObjectDisposedException">The host has already been disposed.</exception>
     /// <remarks>
-    /// When <see cref="HostContext.Runner"/> is set, this method delegates the complete run to
-    /// that pipeline. Otherwise, the host executes its lifecycle directly.
+    /// This compatibility member and the <see cref="IHost"/> extension share the same run
+    /// coordinator. When <see cref="HostContext.Runner"/> is set, both routes delegate the
+    /// complete lifetime to that pipeline.
     /// </remarks>
     public Task RunAsync(CancellationToken cancellationToken = default)
+    {
+        return RunHostAsync(cancellationToken);
+    }
+
+    Task IHostRunDispatcher.RunAsync(CancellationToken cancellationToken)
+    {
+        return RunHostAsync(cancellationToken);
+    }
+
+    private Task RunHostAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
@@ -350,12 +403,14 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
 
         Init(cancellationToken);
 
-        // Capture this run's state locally: a direct StopAsync resets the fields while
-        // this method is parked on the run signal.
-        CancellationTokenSource runTokenSource = _cancellationTokenSource!;
+        // Capture this run's completion signal locally: a direct StopAsync resets the
+        // fields while this method is parked on the run signal.
         TaskCompletionSource<Host<TContext>> runCompletionSource = _taskCompletionSource!;
 
-        await (this as IHost).StartAsync(runTokenSource.Token).ConfigureAwait(false);
+        // Preserve the runner's token as cancellation provenance. The per-run token also
+        // carries Context.Shutdown, but a startup timeout must not turn that internal signal
+        // into an apparent caller cancellation.
+        await StartAsyncCore(cancellationToken).ConfigureAwait(false);
 
         hostRun.Started();
 
@@ -476,20 +531,6 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
         _cancellationTokenSource = cancellationTokenSource;
         _taskCompletionSource = taskCompletionSource;
 
-        // The callback captures this run's source: the coordinator disposes it on stop,
-        // and a shutdown signal arriving after that is a no-op, not a fault.
-        Context.ShutdownCallback = () =>
-        {
-            try
-            {
-                cancellationTokenSource.Cancel();
-            }
-            catch (ObjectDisposedException)
-            {
-                // The host already stopped and reset this run's state.
-            }
-        };
-
         // Complete the run signal on shutdown. TrySetResult: the coordinator also
         // completes the signal when StopAsync is called directly.
         cancellationTokenSource.Token.Register(() =>
@@ -503,7 +544,7 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
     /// <summary>
     /// Best-effort compensation for a failed or cancelled start: stops whatever managed to
     /// start (newest first, without the lifecycle stop ceremony), unparks a waiting
-    /// <see cref="RunAsync"/>, resets run-state, and marks the host <see cref="HostState.Failed"/>.
+    /// <c>RunAsync</c>, resets run-state, and marks the host <see cref="HostState.Failed"/>.
     /// Rollback failures are swallowed so they never mask the original fault, which the
     /// caller rethrows.
     /// </summary>
@@ -541,7 +582,7 @@ public abstract class Host<TContext> : IHost where TContext : HostContext
         _cancellationTokenSource?.Dispose();
         _cancellationTokenSource = null;
         _taskCompletionSource = null;
-        Context.ShutdownCallback = null;
+        Context.ClearShutdownCallback();
         _isInit = false;
     }
 

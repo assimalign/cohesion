@@ -172,12 +172,16 @@ surface. Child roots never reference the root.
 - **The application builder is a root seam; the implementation is not** (owner
   direction, 2026-07-13). `IDatabaseApplicationBuilder`/`IDatabaseApplication`
   live here so **model packages register their engines and servers without
-  knowing the hosting layer**: `Database.Sql` ships `AddSqlDatabase(...)` and
+  knowing the hosting implementation**: `Database.Sql` ships `AddSqlDatabase(...)` and
   `AddSqlServer(...)` as `extension(IDatabaseApplicationBuilder)` members and
   never references `Database.Hosting` (COHRES001 intact); the hosting module
   ships the implementation (`DatabaseApplicationBuilder`) and the creation
-  entry point (`DatabaseApplication.CreateBuilder()`). Multiple `AddServer`
-  registrations are allowed — servers are per-model. This mirrors the Web area exactly
+  entry point (`DatabaseApplication.CreateBuilder()`). The root seam also accepts
+  plain Hosting `IHostService` instances and context factories through
+  `AddService`; those services start in registration order before all servers and
+  stop in reverse order after the servers drain. This is a lifecycle contract,
+  not a DI or configuration surface. Multiple `AddServer` registrations are
+  allowed — servers are per-model. This mirrors the Web area exactly
   (`IWebApplicationBuilder` in the `Web` root, `WebApplication.CreateBuilder()`
   in `Web.Hosting`, `AddAuthentication` in `Web.Authentication`) — and the
   pattern is the **cross-area expectation**: every area root provides
@@ -276,6 +280,8 @@ compiler; the root does not discover or activate them dynamically.
 - No connection/network concepts (that is the per-model server machinery in
   the model packages — `SqlDatabaseServer` in `Database.Sql` — and
   `Database.Client`).
-- No DI or configuration surface (that is `Database.Hosting`'s seam alone).
+- No DI or configuration surface. The root references plain Hosting only for
+  the `IHostService` lifecycle value accepted by the application-builder seam;
+  hosting implementation and configuration remain in `Database.Hosting`.
 - No model-specific request or result types — models subclass the
   `Database.Execution` family in their own packages.

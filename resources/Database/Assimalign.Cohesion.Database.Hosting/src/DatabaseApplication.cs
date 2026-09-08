@@ -23,9 +23,9 @@ using Assimalign.Cohesion.Hosting;
 /// the servers start last and drain first. Engines take no part in the lifecycle:
 /// they are data machines — operational from creation, durably flushed and closed
 /// by whichever composition root created and disposes them. Compose an application
-/// through <see cref="CreateBuilder()"/> (the builder-first surface — model
-/// packages register engines and servers on the root's
-/// <see cref="IDatabaseApplicationBuilder"/> seam) or construct it directly from
+/// through <see cref="CreateBuilder()"/> (the builder-first surface: model packages
+/// register engines and servers on the root's <see cref="IDatabaseApplicationBuilder"/>
+/// seam, while composition roots register lifecycle services there) or construct it directly from
 /// fully populated <see cref="DatabaseApplicationOptions"/>.
 /// </remarks>
 public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDatabaseApplication
@@ -107,8 +107,9 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
     /// <summary>
     /// Creates a builder for composing a database application — the entry point of
     /// the area's builder pattern (mirrors <c>WebApplication.CreateBuilder()</c>).
-    /// Model packages register their engines and servers on the returned builder
-    /// through the root's <see cref="IDatabaseApplicationBuilder"/> seam.
+    /// Model packages register their engines and servers on the returned root
+    /// <see cref="IDatabaseApplicationBuilder"/> seam; composition roots register lifecycle
+    /// services on that same seam.
     /// </summary>
     /// <returns>A new application builder over default options.</returns>
     public static DatabaseApplicationBuilder CreateBuilder()

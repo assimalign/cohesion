@@ -28,9 +28,13 @@ Per-run cancellation signals that shutdown should begin; it is not the graceful-
 cancelled run token from pre-cancelling every service drain. Coordinator-owned reset makes a cleanly
 stopped or compensated host restartable without relying on a derived hook calling `base`.
 
+`IHostContext.WaitForShutdownAsync` is the public lifecycle observation seam. It completes when
+shutdown is requested or the current lifetime begins stopping, stops, or fails; cancelling one
+wait abandons only that caller and does not signal the host. A later start creates a fresh signal.
+
 ## Complete-run pipeline
 
-`HostContext.Runner` is an optional pipeline around `Host.RunAsync`. The host captures the runner
+`HostContext.Runner` is an optional pipeline around `IHost.RunAsync`. The host captures the runner
 once at the start of each run, creates a new `IHostRun`, and rejects concurrent re-entry even when a
 runner delays before executing that handle. Replacing `HostContext.Runner` affects only later runs.
 
@@ -44,6 +48,35 @@ runner delays before executing that handle. Replacing `HostContext.Runner` affec
 A runner can subscribe to platform signals, enforce policy, or translate failures without an
 internal host decorator. Plain runs use the same handle with no observer, so the extension point
 does not create a second lifecycle implementation.
+
+## Nested host composition
+
+`IHost.AsService()` returns an internal `HostToServiceWrapper(IHost)` exposed only as an
+`IHostService`. Its `StartAsync` awaits the nested host's complete startup and returns only when the
+child reports `Started`, so the parent cannot report readiness early. The parent's startup token
+also bounds the await even for an external `IHost` implementation that does not itself observe the
+token; expiry is surfaced by the parent as `HostStartupException`.
+
+The wrapper retains the raw child startup operation for that nested lifetime. If the parent's
+bounded readiness wait ends while an external child is still starting, parent rollback records a
+deferred stop, makes an immediate best-effort stop request, and returns without awaiting the
+unbounded child operation. When that operation eventually settles, the wrapper retries the stop for
+a still-`Starting` or `Started` child, even when the outer token has already expired. A child that
+starts after the outer budget therefore cannot escape as a running orphan, and the incomplete
+cleanup prevents the same wrapper from beginning a new nested lifetime.
+
+Stopping the wrapper passes the parent's still-live drain token to the child. The child's own
+`ShutdownTimeout` is linked inside its `StopAsync`, making the effective budget the shorter of the
+remaining parent budget and the child's budget. One stop task is retained per nested lifetime so
+concurrent callers join the same child drain and observe the same failure. Serial parent shutdown
+uses the host's normal reverse-registration traversal; strict reverse dependency order therefore
+requires `StopServicesConcurrently` to remain disabled.
+
+Nesting is lifecycle composition, not process-policy composition. The wrapper calls only the
+child's `StartAsync` and `StopAsync`; it never invokes, replaces, or clears the child's
+`HostContext.Runner`. Only the outer host's direct `RunAsync` owns the process-level runner and its
+supervisor protocol. Child startup and stop failures flow through the wrapper and fault the
+parent's complete run.
 
 ### Observer contract
 

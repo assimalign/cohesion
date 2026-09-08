@@ -40,6 +40,10 @@ machines this module never drives (see `docs/DESIGN.md`).
   engine's `State` and `Workers` inventory into one Database contribution.
 - `DatabaseApplicationOptions` collects the servers, the embedded engine
   registrations, and additional `IHostService`s.
+- `IDatabaseApplicationBuilder.AddService` registers a plain `IHostService`
+  instance or a factory over the final `IDatabaseApplicationContext`; services
+  retain registration order, start before all servers, and stop after them in
+  reverse order.
 - `DatabaseApplicationBuilder.Provision` and `AddDatabase` register code-first
   before-accept provisioning; `AddDatabase` retains the completed C# schema.
   Provisioning creates only after `OpenDatabaseAsync` reports
@@ -73,8 +77,10 @@ await using var app = builder.Build();
 await app.RunAsync();   // starts services, then the servers (the engine is already live)
 ```
 
-Hosting-only composition (additional host services) lives on `builder.Options`;
-constructing `new DatabaseApplication(options)` directly from fully populated
+Additional host services can be registered through the root seam with
+`builder.AddService(service)` or its typed context-factory overload.
+`builder.Options.Services` remains available for fully manual option composition,
+and constructing `new DatabaseApplication(options)` directly from fully populated
 options remains supported. A custom or embedded host creates a model server
 (`SqlDatabaseServer.Create(engine, options)`) and drives
 `IDatabaseServer.StartAsync`/`StopAsync` on its own lifecycle — or skips servers

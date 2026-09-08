@@ -11,7 +11,7 @@ Assembly: `Assimalign.Cohesion.MediaHub.Hosting`
 
 - `CreateBuilder(string[] args)` validates the argument array and returns an `IMediaHubApplicationBuilder`.
 - The arguments are reserved for later runtime-context integration; the current filler does not interpret them.
-- Building the returned builder registers no hosted services.
+- Building the returned builder materializes its registered service factories once against the new MediaHub context and preserves registration order; no services are added by default.
 
 ## Exceptions
 

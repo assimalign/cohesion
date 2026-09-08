@@ -13,6 +13,7 @@ using Assimalign.Cohesion.Web.Hosting.Internal;
 
 public sealed class WebApplicationContext : HostContext, IWebApplicationContext
 {
+    private IReadOnlyList<IHostService> _applicationServices = Array.Empty<IHostService>();
     private readonly Lazy<IServiceProvider> _serviceProvider;
     internal WebApplicationContext(ServiceProviderBuilder builder)
     {
@@ -26,7 +27,8 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
     public FileSystemPath? ContentRootPath { get; init; }
     public IServiceProvider ServiceProvider => _serviceProvider.Value;
     public override IHostEnvironment Environment => ServiceProvider.GetRequiredService<IHostEnvironment>();
-    public override IEnumerable<IHostService> HostedServices => ServiceProvider.GetRequiredService<IEnumerable<IHostService>>();
+    public override IEnumerable<IHostService> HostedServices => _applicationServices.Concat(
+        ServiceProvider.GetRequiredService<IEnumerable<IHostService>>());
     public IEnumerable<IWebApplicationServer> Servers => HostedServices
         .Select(static service => service is WebApplicationServerLifecycleAdapter adapter
             ? adapter.Server
@@ -34,4 +36,10 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
         .OfType<IWebApplicationServer>();
     public IEnumerable<IWebApplicationMiddleware> Middleware => ServiceProvider.GetRequiredService<IEnumerable<IWebApplicationMiddleware>>();
     public IEnumerable<IHttpFeature> Features => ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
+
+    internal void SetApplicationServices(IReadOnlyList<IHostService> applicationServices)
+    {
+        ArgumentNullException.ThrowIfNull(applicationServices);
+        _applicationServices = applicationServices;
+    }
 }

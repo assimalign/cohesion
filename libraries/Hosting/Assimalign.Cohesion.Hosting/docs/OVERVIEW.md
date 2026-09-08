@@ -21,11 +21,15 @@ service contracts, execution base classes, and public complete-run pipeline.
 - `DedicatedThreadService` hosts synchronous blocking work on a dedicated background thread.
 - `IHostRunner`, `IHostRun`, and `IHostRunObserver` expose one complete host lifetime without
   coupling the host to a transport or supervisor.
-- `Host.AsService()` adapts a host into an `IHostService` for nested composition.
+- `IHost.Run()` / `IHost.RunAsync()` execute a complete lifetime through the configured runner.
+- `IHost.AsService()` adapts any host into an `IHostService` for nested composition without
+  executing the nested host's runner.
+- `IHostContext.WaitForShutdownAsync()` observes a shutdown request or terminal transition without
+  polling.
 
 ## Public run seam
 
-`HostContext.Runner` is captured when `Host.RunAsync` begins. The runner receives a fresh,
+`HostContext.Runner` is captured when `IHost.RunAsync` begins. The runner receives a fresh,
 one-shot `IHostRun`; it may configure `ShutdownTimeout` and then delegates to
 `IHostRun.RunAsync(observer, token)`. A runner that never invokes the handle never starts the host.
 Re-entering the host while that run is active is rejected.

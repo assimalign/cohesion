@@ -45,8 +45,10 @@ public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplication
     public IList<IDatabaseServer> Servers { get; } = new List<IDatabaseServer>();
 
     /// <summary>
-    /// Gets the additional host services composed ahead of the servers. They start
-    /// before the servers and stop after the servers have drained.
+    /// Gets the additional host services composed ahead of the servers, including
+    /// services registered through <see cref="IDatabaseApplicationBuilder.AddService(IHostService)"/>.
+    /// They start in registration order before the servers and stop in reverse
+    /// registration order after the servers have drained.
     /// </summary>
     public IList<IHostService> Services { get; } = new List<IHostService>();
 }

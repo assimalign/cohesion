@@ -32,6 +32,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     private readonly ReadOnlyMemory<byte> _bootstrapCredential;
     private readonly bool _requireControlPlaneAuthentication;
     private readonly List<IHealthContributor> _healthContributors = new();
+    private readonly List<Func<IWebApplicationContext, IHostService>> _serviceRegistrations = new();
 
     private IWebApplicationPipeline? _pipeline;
 
@@ -139,6 +140,24 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         return this;
     }
 
+    /// <inheritdoc cref="IWebApplicationBuilder.AddService(IHostService)" />
+    public WebApplicationBuilder AddService(IHostService service)
+    {
+        ArgumentNullException.ThrowIfNull(service);
+
+        _serviceRegistrations.Add(_ => service);
+        return this;
+    }
+
+    /// <inheritdoc cref="IWebApplicationBuilder.AddService(Func{IWebApplicationContext, IHostService})" />
+    public WebApplicationBuilder AddService(Func<IWebApplicationContext, IHostService> factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+
+        _serviceRegistrations.Add(factory);
+        return this;
+    }
+
     /// <summary>
     /// 
     /// </summary>
@@ -177,6 +196,16 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
                     _context,
                     pipeline);
         });
+
+        var applicationServices = new IHostService[_serviceRegistrations.Count];
+        for (int index = 0; index < _serviceRegistrations.Count; index++)
+        {
+            applicationServices[index] = _serviceRegistrations[index].Invoke(_context)
+                ?? throw new InvalidOperationException(
+                    "The web application service factory returned null.");
+        }
+
+        _context.SetApplicationServices(applicationServices);
 
         if (_controlPlane is not null)
         {
@@ -289,6 +318,14 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     IHost IHostBuilder.Build()
     {
         return Build();
+    }
+    IWebApplicationBuilder IWebApplicationBuilder.AddService(IHostService service)
+    {
+        return AddService(service);
+    }
+    IWebApplicationBuilder IWebApplicationBuilder.AddService(Func<IWebApplicationContext, IHostService> factory)
+    {
+        return AddService(factory);
     }
     IWebApplicationBuilder IWebApplicationBuilder.AddServer(IWebApplicationServer server)
     {

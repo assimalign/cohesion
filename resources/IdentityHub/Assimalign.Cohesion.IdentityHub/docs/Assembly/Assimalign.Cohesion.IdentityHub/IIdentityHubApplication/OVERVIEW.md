@@ -12,7 +12,7 @@ Assembly: `Assimalign.Cohesion.IdentityHub`
 - `RunAsync(CancellationToken cancellationToken = default)` starts the host, waits for shutdown, and completes after the host has stopped.
 - The inherited `IHost` members expose the host identity, context, start, stop, and disposal lifecycle.
 
-The current filler implementation registers no hosted services. A token that is already cancelled still drives the host through a clean start-and-stop transition; cancellation after startup requests graceful shutdown.
+The current filler implementation registers no hosted services by default. Services explicitly added through `IIdentityHubApplicationBuilder` participate in the same lifecycle. A token that is already cancelled still drives the host through a clean start-and-stop transition; cancellation after startup requests graceful shutdown.
 
 ## Exceptions
 

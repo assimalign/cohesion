@@ -26,6 +26,10 @@ for the later schema-compilation and migration stages. These remain before-accep
 operations regardless of fluent verb order because additional services always
 start before server wrappers. Creation follows only an exact
 `DatabaseNotFoundException`; other open failures abort startup.
+The root `IDatabaseApplicationBuilder.AddService` seam accepts either an
+`IHostService` instance or a factory over the final database application context.
+Registered services start in order before all servers and stop in reverse order
+after the servers drain.
 Concurrent service start/stop options are rejected at construction and lifecycle
 settings are snapshotted, so retained mutable options cannot bypass this ordering.
 

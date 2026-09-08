@@ -8,9 +8,11 @@ The area root owns the scheduler contracts that feature packages compose against
 
 The root references only shared foundation libraries. The concrete application builder, host, context, and options remain internal to `Assimalign.Cohesion.Scheduler.Hosting`; feature libraries must not reference that runtime module.
 
-## Filler lifecycle
+## Composition lifecycle
 
-The current hosting implementation registers no scheduled work or hosted services and always uses the production host environment. It completes the SDK/framework path without claiming that scheduling behavior is ready.
+The builder accepts existing `IHostService` instances and factories that receive the newly created area `IHostContext`. Each factory is invoked once per `Build()`, and the resulting services are retained in registration order so the shared host starts them in that order and stops them in reverse. The collection is empty when callers register nothing, and the host environment remains production.
+
+No scheduled work or scheduler service is registered by default. The seam remains composition-only without claiming that scheduling behavior is ready.
 
 The two incomplete legacy runtime sources remain preserved on disk but are excluded from the filler assembly because they still depend on the absent `TickerOptionsBuilder` implementation and obsolete thread-abort behavior. Checked-in generated value-type bodies are likewise preserved but excluded from compilation because current source generation supplies those bodies. The scheduler program must replace those legacy internals before runtime scheduling behavior is enabled.
 

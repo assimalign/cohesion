@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,6 +13,65 @@ namespace Assimalign.Cohesion.VpnGateway.Hosting.Tests;
 
 public class ApplicationLifecycleTests
 {
+    [Fact(DisplayName = "Cohesion Test [VpnGateway.Hosting] - AddService: Should honor mixed registration lifecycle order")]
+    public async Task AddService_WithInstanceAndFactory_ShouldStartInRegistrationOrderAndStopInReverseOrder()
+    {
+        // Arrange
+        List<string> events = [];
+        RecordingService firstService = new("first", events);
+        RecordingService secondService = new("second", events);
+        IVpnGatewayApplicationBuilder builder = VpnGatewayApplication.CreateBuilder([]);
+        IHostContext? factoryContext = null;
+        var factoryCount = 0;
+
+        builder
+            .AddService(firstService)
+            .AddService(context =>
+            {
+                factoryCount++;
+                factoryContext = context;
+                return secondService;
+            });
+
+        await using IVpnGatewayApplication application = builder.Build();
+
+        // Act
+        await application.StartAsync();
+        await application.StopAsync();
+
+        // Assert
+        factoryCount.ShouldBe(1);
+        factoryContext.ShouldBeSameAs(application.Context);
+        application.Context.HostedServices.ShouldBe(new IHostService[] { firstService, secondService });
+        events.ShouldBe(new[] { "first:start", "second:start", "second:stop", "first:stop" });
+    }
+
+    [Fact(DisplayName = "Cohesion Test [VpnGateway.Hosting] - AddService: Null registrations should fail explicitly")]
+    public void AddService_WithNullRegistration_ShouldRejectRegistration()
+    {
+        // Arrange
+        IVpnGatewayApplicationBuilder builder = VpnGatewayApplication.CreateBuilder([]);
+
+        // Act and assert
+        Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
+        Should.Throw<ArgumentNullException>(() => builder.AddService(
+            (Func<IHostContext, IHostService>)null!));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [VpnGateway.Hosting] - Build: Null service factory result should fail explicitly")]
+    public void Build_WithNullServiceFactoryResult_ShouldRejectService()
+    {
+        // Arrange
+        IVpnGatewayApplicationBuilder builder = VpnGatewayApplication.CreateBuilder([]);
+        builder.AddService(_ => null!);
+
+        // Act
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        exception.Message.ShouldContain("service factory returned null", Case.Insensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [VpnGateway] - RunAsync: Should stop cleanly when cancellation is requested")]
     public async Task RunAsync_WhenCancellationIsRequested_ShouldStopCleanly()
     {
@@ -24,5 +85,25 @@ public class ApplicationLifecycleTests
 
         // Assert
         application.Context.State.ShouldBe(HostState.Stopped);
+    }
+
+    private sealed class RecordingService(
+        string name,
+        ICollection<string> events) : IHostService
+    {
+        public ServiceId Id { get; } = ServiceId.New();
+
+        public Task StartAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            events.Add($"{name}:start");
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken = default)
+        {
+            events.Add($"{name}:stop");
+            return Task.CompletedTask;
+        }
     }
 }

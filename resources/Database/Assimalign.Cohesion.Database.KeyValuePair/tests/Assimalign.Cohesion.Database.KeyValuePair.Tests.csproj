@@ -15,6 +15,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<!-- The KeyValueDatabaseServer wire suite runs over the in-memory
 		     Connections driver. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />

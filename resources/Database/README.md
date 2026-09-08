@@ -53,7 +53,7 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 
 - `libraries/Core` — foundational primitives (everywhere)
 - `libraries/Hosting/Assimalign.Cohesion.Hosting` — host lifecycle and the per-service execution
-  menu used by `Database.Hosting`
+  menu exposed by the Database root's `AddService` seam and implemented by `Database.Hosting`
 - `libraries/Hosting/Assimalign.Cohesion.Hosting.Resources` — the opt-in resource runtime,
   context, control-plane, and protected-mount contracts used by enabled executables and
   `Database.ApplicationModel`

@@ -11,11 +11,11 @@ Assembly: `Assimalign.Cohesion.IoTHub.Hosting`
 
 - `CreateBuilder(string[] args)` validates the argument array and returns an `IIoTHubApplicationBuilder`.
 - The arguments are reserved for later runtime-context integration; the current filler does not interpret them.
-- Building the returned builder registers no hosted services.
+- Building the returned builder materializes its explicitly registered host services in registration order; no services are registered automatically.
 
 ## Exceptions
 
-`CreateBuilder` throws `ArgumentNullException` when `args` is `null`.
+`CreateBuilder` throws `ArgumentNullException` when `args` is `null`. Building throws `InvalidOperationException` when a registered service factory returns null.
 
 ## Usage
 

@@ -9,13 +9,15 @@ Assembly: `Assimalign.Cohesion.EmailHub`
 
 ## Surface and behavior
 
+- `AddService(IHostService service)` registers an existing lifecycle service.
+- `AddService(Func<IHostContext, IHostService> factory)` creates a lifecycle service once per `Build()` from that application's context.
 - `Build()` creates a configured email hub application.
 
-The current filler builder has no feature registrations and produces an application with an empty hosted-service collection. The concrete builder remains internal to `Assimalign.Cohesion.EmailHub.Hosting`.
+The current filler builder has no area feature or service registrations by default. Explicit services are exposed in registration order, start in that order, and stop in reverse order. The concrete builder remains internal to `Assimalign.Cohesion.EmailHub.Hosting`.
 
 ## Exceptions
 
-The filler `Build()` operation has no documented exceptions.
+`AddService` throws `ArgumentNullException` for a null service or factory. `Build()` throws `InvalidOperationException` when a service factory returns null.
 
 ## Usage
 

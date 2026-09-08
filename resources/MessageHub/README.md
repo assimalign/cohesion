@@ -7,7 +7,7 @@ The application and builder are fillers pending the area's program.
 ## Projects
 
 - `Assimalign.Cohesion.MessageHub` defines the public area-root application and builder contracts alongside the existing message-hub abstraction.
-- `Assimalign.Cohesion.MessageHub.Hosting` provides the concrete creation entry point and the current empty host lifecycle.
+- `Assimalign.Cohesion.MessageHub.Hosting` provides the concrete creation entry point and the caller-configurable host-service lifecycle.
 - `Assimalign.Cohesion.MessageHub.Client` contains the existing client-side contract surface and remains an early implementation.
 
 ## Layering and dependencies

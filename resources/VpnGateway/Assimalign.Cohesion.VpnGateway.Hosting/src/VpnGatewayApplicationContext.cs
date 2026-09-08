@@ -7,10 +7,17 @@ namespace Assimalign.Cohesion.VpnGateway.Hosting;
 
 internal sealed class VpnGatewayApplicationContext : HostContext
 {
-    private static readonly IReadOnlyList<IHostService> _hostedServices = Array.Empty<IHostService>();
+    private IReadOnlyList<IHostService> _hostedServices = Array.Empty<IHostService>();
     private readonly IHostEnvironment _environment = new HostEnvironment("production");
 
     public override IHostEnvironment Environment => _environment;
 
     public override IEnumerable<IHostService> HostedServices => _hostedServices;
+
+    internal void SetHostedServices(IHostService[] hostedServices)
+    {
+        ArgumentNullException.ThrowIfNull(hostedServices);
+
+        _hostedServices = Array.AsReadOnly(hostedServices);
+    }
 }

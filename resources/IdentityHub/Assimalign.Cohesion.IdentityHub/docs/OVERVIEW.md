@@ -6,7 +6,7 @@ This project defines the public, contract-only builder and application lifecycle
 
 ## Public application surface
 
-- `IIdentityHubApplicationBuilder` extends the shared host-builder contract and builds an `IIdentityHubApplication`.
+- `IIdentityHubApplicationBuilder` extends the shared build-only host-builder contract, registers `IHostService` instances or context factories, and builds an `IIdentityHubApplication`.
 - `IIdentityHubApplication` exposes the shared host lifecycle plus `RunAsync`.
 
-The current application is an empty filler that exists to make the area SDK and shared framework consumable. Identity-provider behavior is outside this slice.
+The current application remains a filler with no area behavior or hosted services registered by default. Consumers can add explicit lifecycle services through the area builder; identity-provider behavior is outside this slice.

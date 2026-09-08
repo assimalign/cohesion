@@ -142,7 +142,8 @@ HTTP surface without becoming part of the Database reference API.
 
 Composition is **builder-first**. The root's `IDatabaseApplicationBuilder` is the seam model
 packages register engines and servers on — `Database.Sql` ships `AddSqlDatabase(...)` and
-`AddSqlServer(...)` — while `Database.Hosting` implements the builder and exposes
+`AddSqlServer(...)` — and composition roots register ordered lifecycle services on through
+`AddService`. `Database.Hosting` implements the builder and exposes
 `DatabaseApplication.CreateBuilder(args)`. The `args` overload checks the calling assembly's
 generated registration: when `CohesionApplicationModel=enabled` generated a Database default
 control plane, the builder honors it together with `Hosting.Resources`

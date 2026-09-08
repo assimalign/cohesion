@@ -22,10 +22,11 @@ dependency cost is always opt-in. The breakdown signal — this file's reason to
 is the root absorbing anything feature- or model-specific; that is an architecture
 conversation, not a convenience call.
 
-The root references `Assimalign.Cohesion.Http` and nothing else. No DI, no
-configuration, no logging: composition integration is `Web.Hosting`'s one job, and the
-root must stay importable by every feature library without dragging a composition
-surface along.
+The root references `Assimalign.Cohesion.Http` plus the plain, Core-only
+`Assimalign.Cohesion.Hosting` lifecycle contracts needed by the public `AddService`
+seam. It still references no DI, configuration, logging, or area runtime package:
+composition integration is `Web.Hosting`'s one job, and the root remains importable by
+every feature library without dragging that runtime surface along.
 
 ## The pipeline model (middleware-first)
 
@@ -42,6 +43,20 @@ extensibility mechanism, which is why the pipeline contracts here stay this smal
 `Use(Func<IHttpContext, WebApplicationMiddleware, Task>)` adapter that bridges
 application lambdas onto the core `Use(Func<WebApplicationMiddleware, WebApplicationMiddleware>)`
 registration form.
+
+## Application lifecycle services
+
+`IWebApplicationBuilder.AddService` accepts an `IHostService` instance or a factory over
+the final `IWebApplicationContext`. The factory runs once when the application is built,
+which makes a nested host's `AsService()` wrapper and other lifecycle components
+composable through the public area-root builder seam without exposing the concrete
+`WebApplicationBuilder`.
+
+Application services and Web servers form two ordered phases rather than one interleaved
+list: services start first in service-registration order, then servers start in
+server-registration order. Host shutdown reverses the full sequence, so every server
+drains before application services stop. This ordering holds regardless of whether an
+`AddService` call appeared before or after an `AddServer` call in the fluent composition.
 
 ## Server lifecycle contract
 

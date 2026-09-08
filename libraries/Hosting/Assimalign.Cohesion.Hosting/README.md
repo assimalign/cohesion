@@ -19,10 +19,15 @@ SDK generates calls to `Hosting.Resources.ResourceRuntime`; Resources travels be
 and Health follows as its dependency. Delivery is not activation: resource behavior remains disabled
 until `CohesionApplicationModel=enabled` generates the registration used by an area builder.
 
-Set `HostContext.Runner` to an `IHostRunner` to wrap future calls to `Host.RunAsync`. A runner
+Set `HostContext.Runner` to an `IHostRunner` to wrap future calls to `IHost.RunAsync`. A runner
 receives a one-shot `IHostRun`, may set its `ShutdownTimeout`, and must call `IHostRun.RunAsync` to
 execute the host. An optional `IHostRunObserver` sees the transitions that occur in order:
 `Started`, `Stopping`, optional `DrainAborted`, and `Stopped`. If a stop is accepted while
 `OnStartedAsync` is still running, `Started` is omitted and the sequence begins with `Stopping`.
 A direct `StopAsync` and the active `RunAsync` join the same stop operation and observe the same
 stop failure.
+
+Any `IHost` can be nested through `AsService()`. The parent does not run the child's runner: it
+awaits the child's `StartAsync` readiness boundary, passes its remaining startup and shutdown
+budgets through the service adapter, and stops nested hosts in reverse registration order. Child
+startup and drain failures therefore surface from the parent's complete `RunAsync` task.

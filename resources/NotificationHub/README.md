@@ -7,7 +7,7 @@ The application and builder are fillers pending the area's program.
 ## Projects
 
 - `Assimalign.Cohesion.NotificationHub` defines the public area-root application and builder contracts alongside the existing notification-hub abstraction.
-- `Assimalign.Cohesion.NotificationHub.Hosting` provides the concrete creation entry point and the current empty host lifecycle.
+- `Assimalign.Cohesion.NotificationHub.Hosting` provides the concrete creation entry point and the caller-configurable host-service lifecycle.
 - `Assimalign.Cohesion.NotificationHub.Client` contains the existing client-side contract surface and remains an early implementation.
 
 ## Layering and dependencies

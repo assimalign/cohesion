@@ -41,6 +41,23 @@ Three properties fall out of that intent and shape the whole implementation:
 - **Shutdown is deterministic.** Stopping the server drains what is in flight and
   releases every resource, without leaving an unobserved exception behind.
 
+## Application lifecycle composition
+
+The root `IWebApplicationBuilder.AddService` seam registers application lifecycle
+services independently of server registration. At `Build`, `WebApplicationBuilder`
+invokes each deferred service factory exactly once against the final
+`IWebApplicationContext` and freezes the resulting services in registration order.
+`WebApplicationContext.HostedServices` enumerates that snapshot before the DI-owned
+server-service registrations, including the constructor-reserved default-server slot.
+
+The Web host rejects concurrent service start or stop, so this two-phase enumeration is
+the lifecycle guarantee: every application service starts before any Web server, services
+preserve their own registration order, and reverse host shutdown drains every server
+before stopping application services. Keeping the application-service snapshot outside
+the server's DI registry is intentional; otherwise the default server, registered when
+the concrete builder is constructed, would precede later `AddService` calls and violate
+the public contract.
+
 ## Server dispatch model
 
 ```

@@ -6,7 +6,7 @@ This project defines the public, contract-only builder and application lifecycle
 
 ## Public surface
 
-- `IRezolvrApplicationBuilder` extends the shared host-builder contract and builds an `IRezolvrApplication`.
+- `IRezolvrApplicationBuilder` extends the shared host-builder contract, registers host-service instances or context-aware factories, and builds an `IRezolvrApplication`.
 - `IRezolvrApplication` exposes the shared host lifecycle plus `RunAsync`.
 
-The current application is an empty filler that exists to make the area SDK and shared framework consumable. Rezolvr remains a standalone DNS server product; DNS behavior is outside this slice.
+The current application is a composition-only filler that is empty by default. Caller-registered services participate in the shared ordered lifecycle; Rezolvr remains a standalone DNS server product, and DNS behavior is outside this slice.

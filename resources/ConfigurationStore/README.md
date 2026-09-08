@@ -8,7 +8,7 @@ The application and builder are fillers pending the area's program.
 
 - `Assimalign.Cohesion.ConfigurationStore` defines the public area-root application and builder contracts alongside the existing loader abstraction.
 - `Assimalign.Cohesion.ConfigurationStore.Client` is the thin, Core-only HTTP protocol client used by gateways to read configuration namespace snapshots and carry generic commands.
-- `Assimalign.Cohesion.ConfigurationStore.Hosting` provides the concrete creation entry point and the current empty host lifecycle.
+- `Assimalign.Cohesion.ConfigurationStore.Hosting` provides the concrete creation entry point and host lifecycle with explicit `IHostService` registration.
 
 ## Layering and dependencies
 

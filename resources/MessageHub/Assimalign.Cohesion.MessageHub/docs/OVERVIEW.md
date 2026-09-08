@@ -6,7 +6,7 @@ This project defines the public, contract-only builder and application lifecycle
 
 ## Public surface
 
-- `IMessageHubApplicationBuilder` extends the shared host-builder contract and builds an `IMessageHubApplication`.
+- `IMessageHubApplicationBuilder` extends the shared host-builder contract, registers host-service instances or context-aware factories, and builds an `IMessageHubApplication`.
 - `IMessageHubApplication` exposes the shared host lifecycle plus `RunAsync`.
 
-The current application is an empty filler that exists to make the area SDK and shared framework consumable. Message-broker behavior is outside this slice.
+The current application is a composition-only filler that is empty by default. Caller-registered services participate in the shared ordered lifecycle; message-broker behavior remains outside this slice.

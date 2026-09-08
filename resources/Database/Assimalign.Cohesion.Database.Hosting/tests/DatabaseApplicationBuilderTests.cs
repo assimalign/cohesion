@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 /// <summary>
 /// Tests for the application builder — the area's instance of the cross-area
-/// builder pattern: engines and servers register against the root's
+/// builder pattern: engines, lifecycle services, and servers register against the root's
 /// <c>IDatabaseApplicationBuilder</c> seam, a deferred server factory receives the
 /// application context at build (the Web shape), and the built
 /// <c>IDatabaseApplication</c> exposes the composition through its context.
@@ -40,6 +40,70 @@ public class DatabaseApplicationBuilderTests
 
         await application.StopAsync(DatabaseHostTestHarness.Timeout());
         engine.State.ShouldBe(EngineState.Running);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - AddService: an instance registered through the root builder runs before the server")]
+    public async Task AddService_WithInstance_RegistersThroughRootBuilderAndRunsBeforeServer()
+    {
+        // Arrange
+        var log = new List<string>();
+        var service = new RecordingService(log, "service");
+        var server = new RecordingServer(log, "server");
+        IDatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
+
+        // Act
+        IDatabaseApplicationBuilder returnedBuilder = builder.AddService(service);
+        builder.AddServer(server);
+        IDatabaseApplication application = builder.Build();
+        await application.StartAsync(DatabaseHostTestHarness.Timeout());
+        await application.StopAsync(DatabaseHostTestHarness.Timeout());
+
+        // Assert
+        returnedBuilder.ShouldBeSameAs(builder);
+        log.ShouldBe(["service:start", "server:start", "server:stop", "service:stop"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - AddService: a context factory resolves once and preserves service lifecycle order")]
+    public async Task AddService_WithContextFactory_ReceivesFinalContextOnceAndPreservesRegistrationOrder()
+    {
+        // Arrange: register the server first to prove service/server grouping is
+        // independent of fluent call order, while service order remains faithful.
+        var log = new List<string>();
+        var engine = new RecordingEngine();
+        var firstService = new RecordingService(log, "first-service");
+        var secondService = new RecordingService(log, "second-service");
+        var server = new RecordingServer(log, "server", engine);
+        IDatabaseApplicationContext? observedContext = null;
+        int factoryCalls = 0;
+        IDatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
+        builder.AddServer(server);
+        builder.AddService(firstService);
+        builder.AddService(context =>
+        {
+            factoryCalls++;
+            observedContext = context;
+            return secondService;
+        });
+        builder.AddEngine(engine);
+
+        // Act
+        IDatabaseApplication application = builder.Build();
+        await application.StartAsync(DatabaseHostTestHarness.Timeout());
+        await application.StopAsync(DatabaseHostTestHarness.Timeout());
+
+        // Assert
+        factoryCalls.ShouldBe(1);
+        IDatabaseApplicationContext actualContext = observedContext.ShouldNotBeNull();
+        actualContext.ShouldBeSameAs(application.Context);
+        actualContext.Engines.ShouldHaveSingleItem().ShouldBeSameAs(engine);
+        actualContext.Servers.ShouldHaveSingleItem().ShouldBeSameAs(server);
+        log.ShouldBe([
+            "first-service:start",
+            "second-service:start",
+            "server:start",
+            "server:stop",
+            "second-service:stop",
+            "first-service:stop"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Deferred server factory receives the context with the final engine list")]

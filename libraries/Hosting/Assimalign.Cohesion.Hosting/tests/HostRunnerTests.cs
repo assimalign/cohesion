@@ -43,8 +43,9 @@ public class HostRunnerTests
         // Arrange
         var observer = new RecordingObserver();
         var runner = new PassthroughRunner(observer);
-        var host = new TestHost(new TestHostOptions());
-        host.Context.Runner = runner;
+        var concreteHost = new TestHost(new TestHostOptions());
+        concreteHost.Context.Runner = runner;
+        IHost host = concreteHost;
         using var timeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
         // Act
@@ -55,6 +56,26 @@ public class HostRunnerTests
 
         // Assert
         runner.InvocationCount.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Interface host: Runs without the concrete host coordinator")]
+    public async Task RunAsync_WithInterfaceOnlyHost_StartsWaitsAndStops()
+    {
+        // Arrange
+        var host = new InterfaceOnlyHost();
+        IHost interfaceHost = host;
+        using var timeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        // Act
+        Task run = interfaceHost.RunAsync(timeoutSource.Token);
+        await WaitForStateAsync(interfaceHost, HostState.Started, timeoutSource.Token);
+        interfaceHost.Context.Shutdown();
+        await run.WaitAsync(timeoutSource.Token);
+
+        // Assert
+        host.StartCount.ShouldBe(1);
+        host.StopCount.ShouldBe(1);
+        interfaceHost.Context.State.ShouldBe(HostState.Stopped);
     }
 
     [Fact(DisplayName = DisplayPrefix + "Run guard: Rejects re-entry while a run is active")]
@@ -274,6 +295,95 @@ public class HostRunnerTests
         while (host.Context.State != expected)
         {
             await Task.Delay(TimeSpan.FromMilliseconds(10), cancellationToken);
+        }
+    }
+
+    private static async Task WaitForStateAsync(
+        IHost host,
+        HostState expected,
+        CancellationToken cancellationToken)
+    {
+        while (host.Context.State != expected)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(10), cancellationToken);
+        }
+    }
+
+    private sealed class InterfaceOnlyHost : IHost
+    {
+        internal InterfaceOnlyHost()
+        {
+            Context = new InterfaceOnlyHostContext();
+        }
+
+        public HostId Id => Context.HostId;
+
+        public InterfaceOnlyHostContext Context { get; }
+
+        IHostContext IHost.Context => Context;
+
+        internal int StartCount { get; private set; }
+
+        internal int StopCount { get; private set; }
+
+        public Task StartAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            StartCount++;
+            Context.SetState(HostState.Started);
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            StopCount++;
+            Context.SetState(HostState.Stopped);
+            return Task.CompletedTask;
+        }
+
+        public void Dispose()
+        {
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class InterfaceOnlyHostContext : IHostContext
+    {
+        private readonly TaskCompletionSource _shutdownSource =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public HostId HostId { get; } = HostId.New();
+
+        public HostState State { get; private set; } = HostState.Idle;
+
+        public IHostEnvironment Environment { get; } = new HostEnvironment("Test");
+
+        public IEnumerable<IHostService> HostedServices => Array.Empty<IHostService>();
+
+        public Task WaitForShutdownAsync(CancellationToken cancellationToken = default)
+        {
+            return cancellationToken.CanBeCanceled
+                ? _shutdownSource.Task.WaitAsync(cancellationToken)
+                : _shutdownSource.Task;
+        }
+
+        public void Shutdown()
+        {
+            _shutdownSource.TrySetResult();
+        }
+
+        internal void SetState(HostState state)
+        {
+            State = state;
+            if (state is HostState.Stopping or HostState.Stopped or HostState.Failed)
+            {
+                _shutdownSource.TrySetResult();
+            }
         }
     }
 

@@ -3,11 +3,14 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
+using Assimalign.Cohesion.Hosting;
+
 /// <summary>
 /// A minimal <see cref="IDatabaseApplicationBuilder"/> that records registrations,
-/// proving the model verbs compose against the area root's builder seam alone —
-/// no hosting reference is involved anywhere in these tests (COHRES001 stays
-/// intact for <c>Database.KeyValuePair</c>).
+/// proving the model verbs compose against the area root's builder seam without
+/// a Database.Hosting dependency. The test names plain Hosting only to implement
+/// the root seam's service members (COHRES001 stays intact for
+/// <c>Database.KeyValuePair</c>).
 /// </summary>
 internal sealed class RecordingApplicationBuilder : IDatabaseApplicationBuilder
 {
@@ -24,6 +27,12 @@ internal sealed class RecordingApplicationBuilder : IDatabaseApplicationBuilder
         _engines.Add(engine);
         return this;
     }
+
+    public IDatabaseApplicationBuilder AddService(IHostService service)
+        => throw new NotSupportedException("Host service composition is the hosting layer's job — deliberately not simulated here.");
+
+    public IDatabaseApplicationBuilder AddService(Func<IDatabaseApplicationContext, IHostService> service)
+        => throw new NotSupportedException("Deferred factories resolve at Build — the hosting layer's job, deliberately not simulated here.");
 
     public IDatabaseApplicationBuilder AddServer(IDatabaseServer server)
     {

@@ -146,18 +146,22 @@ the `WebApplication.CreateBuilder()` idiom. The split of responsibilities:
   engine registration (`AddEngine` — server-less, embedded registrations) and
   server registration (`AddServer` — an instance, or a factory deferred to
   `Build` that receives the **application context**, mirroring the Web area's
-  context-receiving factory). Model verbs like `Database.Sql`'s
+  context-receiving factory). It also carries `AddService` for a plain Hosting
+  `IHostService` instance or a context factory resolved once at `Build`. Services
+  preserve registration order, start before all servers, and stop in reverse
+  order after every server drains. Model verbs like `Database.Sql`'s
   `AddSqlDatabase(...)` / `AddSqlServer(...)` compose against this seam only, so
-  a model registers itself **without knowing the hosting layer** — registration
-  is dependency-free (values and options objects; no container).
+  a model registers itself **without knowing the hosting implementation** — registration
+  remains values and typed factories only (no container).
 - **This module's `DatabaseApplicationBuilder`** implements the seam over a
   `DatabaseApplicationOptions` instance and exposes it (`builder.Options`) for
-  the hosting-only surface the root interface deliberately omits: additional
-  host services. Deferred server factories resolve at `Build()` in registration
+  hosting-specific settings and fully manual option composition. Deferred service
+  and server factories resolve at `Build()` in their respective registration
   order against the live context (instance registrations are wrapped as trivial
-  factories, so ordering is registration-faithful across both overloads); the
-  context wraps the live option lists, so a factory observes every registration
-  made before it — engines *and* earlier servers. `Build()` returns the concrete
+  factories, so ordering is registration-faithful across each pair of overloads).
+  Service factories resolve after the server registry is complete, so they receive
+  the final engine and server view; lifecycle materialization still places every
+  service ahead of every server adapter. `Build()` returns the concrete
   `DatabaseApplication` (the guided richer signature; the interface member
   forwards), which implements the root's `IDatabaseApplication` — `Context` +
   start/stop, the Web shape.
@@ -210,9 +214,9 @@ references `Database.ApplicationModel`.
 
 ## Status and non-goals
 
-- No DI-container surface on the builder — registration stays values/options
-  only, per the area composition rules (`*.Hosting` remains the DI seam for
-  everything else).
+- No DI-container surface on the builder — registration stays values and typed
+  context factories only, per the area composition rules (`*.Hosting` remains
+  the DI seam for everything else).
 - No governance/quotas (#167). The application-context engine/worker aggregate and
   HTTP delivery seam are present; model-specific diagnostics can contribute
   additional `Hosting.Health` `IHealthContributor`s later.

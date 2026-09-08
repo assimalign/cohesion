@@ -7,7 +7,7 @@ The application and builder are fillers pending the area's program.
 ## Projects
 
 - `Assimalign.Cohesion.Rezolvr` defines the public area-root application and builder contracts for the standalone server product.
-- `Assimalign.Cohesion.Rezolvr.Hosting` provides the concrete creation entry point and the current empty host lifecycle.
+- `Assimalign.Cohesion.Rezolvr.Hosting` provides the concrete creation entry point and the caller-configurable host-service lifecycle.
 
 ## Layering and dependencies
 
