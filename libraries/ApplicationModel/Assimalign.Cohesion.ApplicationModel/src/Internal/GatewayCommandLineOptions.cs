@@ -8,6 +8,9 @@ internal sealed class GatewayCommandLineOptions
 {
     private readonly List<string> _externalBindings = new();
     private readonly List<ResourceName> _realize = new();
+    private string? _developerName;
+    private string? _peerName;
+    private string? _exportSource;
 
     public GatewayRunMode RunMode { get; private set; } = GatewayRunMode.Run;
 
@@ -24,6 +27,8 @@ internal sealed class GatewayCommandLineOptions
 
     public IReadOnlyList<ResourceName> Realize =>
         new ReadOnlyCollection<ResourceName>(_realize);
+
+    public GatewayCommand? Command { get; private set; }
 
     public static GatewayCommandLineOptions Parse(string[]? args)
     {
@@ -76,8 +81,25 @@ internal sealed class GatewayCommandLineOptions
                     "--realize",
                     inlineValue));
             }
+            else if (TrySplit(argument, "--developer", out inlineValue))
+            {
+                options._developerName = ReadRequiredValue(
+                    args,
+                    ref index,
+                    "--developer",
+                    inlineValue);
+            }
+            else if (TrySplit(argument, "--peer", out inlineValue))
+            {
+                options._peerName = ReadRequiredValue(args, ref index, "--peer", inlineValue);
+            }
+            else if (TrySplit(argument, "--from", out inlineValue))
+            {
+                options._exportSource = ReadRequiredValue(args, ref index, "--from", inlineValue);
+            }
         }
 
+        options.ValidateCommand();
         return options;
     }
 
@@ -178,9 +200,56 @@ internal sealed class GatewayCommandLineOptions
             return GatewayRunMode.Render;
         }
 
+        if (string.Equals(value, "trust-issue", StringComparison.OrdinalIgnoreCase))
+        {
+            return GatewayRunMode.TrustIssue;
+        }
+
+        if (string.Equals(value, "trust-add", StringComparison.OrdinalIgnoreCase))
+        {
+            return GatewayRunMode.TrustAdd;
+        }
+
         throw new ArgumentException(
-            $"Unknown gateway run mode '{value}'. Expected run, apply, teardown, bootstrap, describe, or render.",
+            $"Unknown gateway run mode '{value}'. Expected run, apply, teardown, bootstrap, " +
+            "describe, render, trust-issue, or trust-add.",
             nameof(value));
+    }
+
+    private void ValidateCommand()
+    {
+        if (RunMode == GatewayRunMode.TrustIssue)
+        {
+            if (_peerName is not null || _exportSource is not null)
+            {
+                throw new ArgumentException(
+                    "Options '--peer' and '--from' are not valid with --mode trust-issue.");
+            }
+
+            Command = new GatewayCommand(RunMode, developerName: _developerName);
+            return;
+        }
+
+        if (RunMode == GatewayRunMode.TrustAdd)
+        {
+            if (_developerName is not null)
+            {
+                throw new ArgumentException(
+                    "Option '--developer' is not valid with --mode trust-add.");
+            }
+
+            Command = new GatewayCommand(
+                RunMode,
+                peerName: _peerName,
+                exportSource: _exportSource);
+            return;
+        }
+
+        if (_developerName is not null || _peerName is not null || _exportSource is not null)
+        {
+            throw new ArgumentException(
+                "Options '--developer', '--peer', and '--from' require --mode trust-issue or trust-add.");
+        }
     }
 
     private static bool ParseBoolean(string option, string value)

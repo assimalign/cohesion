@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Text.Json;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
@@ -22,14 +21,43 @@ public class ApplicationGatewayOptions
     public string ApplicationVersion { get; set; } = "1";
 
     /// <summary>
-    /// Gets or sets the application's public JSON Web Key published in export documents.
-    /// Private key material must never be assigned to this property.
+    /// Gets or sets an explicit parameter-document path. When omitted, each application loads
+    /// <c>&lt;ExportDirectory&gt;/&lt;application&gt;/parameters.json</c> when that file exists.
     /// </summary>
-    public JsonElement? TrustKey { get; set; }
+    public string? ParameterFile { get; set; }
+
+    /// <summary>
+    /// Gets or sets the Hosting-free client seam used for SecretStore and ConfigurationStore
+    /// source resolution. Defaults to the thin protocol-client implementation.
+    /// </summary>
+    public IGatewayStoreClient StoreClient { get; set; } = GatewayStoreClient.Instance;
+
+    /// <summary>Gets or sets the time source used to issue credentials.</summary>
+    public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
+    /// <summary>
+    /// Gets or sets the lifetime of a resource bootstrap credential. Defaults to 24 hours and
+    /// may not exceed 24 hours.
+    /// </summary>
+    public TimeSpan BootstrapCredentialLifetime { get; set; } = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// Gets or sets the lifetime of a developer export token. Defaults to 8 hours and may not
+    /// exceed 8 hours.
+    /// </summary>
+    public TimeSpan DeveloperTokenLifetime { get; set; } = TimeSpan.FromHours(8);
+
+    /// <summary>
+    /// Gets or sets the optional platform-native repository for application gateway trust
+    /// keys. When omitted, keys are persisted beneath the gateway's application-scoped local
+    /// state directory with DataProtection at rest.
+    /// </summary>
+    public IGatewayTrustKeyRepository? TrustKeyRepository { get; set; }
 
     /// <summary>
     /// Gets or sets the optional client used by external-resource resolvers that query a peer
-    /// gateway control plane.
+    /// gateway control plane. Remote implementations are responsible for attaching the
+    /// bootstrap or developer credential required by that control plane.
     /// </summary>
     public IControlPlaneClient? ControlPlaneClient { get; set; }
 
@@ -65,12 +93,24 @@ public class ApplicationGatewayOptions
 
         ArgumentException.ThrowIfNullOrWhiteSpace(ApplicationVersion);
 
-        if (TrustKey is JsonElement trustKey && trustKey.ValueKind != JsonValueKind.Object)
+        if (ParameterFile is not null && string.IsNullOrWhiteSpace(ParameterFile))
         {
             throw new ArgumentException(
-                "TrustKey must be a public JSON Web Key object when specified.",
-                nameof(TrustKey));
+                "ParameterFile must not be empty when specified.",
+                nameof(ParameterFile));
         }
+
+        ArgumentNullException.ThrowIfNull(StoreClient);
+        ArgumentNullException.ThrowIfNull(TimeProvider);
+
+        ValidateLifetime(
+            BootstrapCredentialLifetime,
+            TimeSpan.FromHours(24),
+            nameof(BootstrapCredentialLifetime));
+        ValidateLifetime(
+            DeveloperTokenLifetime,
+            TimeSpan.FromHours(8),
+            nameof(DeveloperTokenLifetime));
 
         if (ReadinessBudget <= TimeSpan.Zero)
         {
@@ -87,6 +127,16 @@ public class ApplicationGatewayOptions
                     $"Controller registration at index {index} is null.",
                     nameof(Controllers));
             }
+        }
+    }
+
+    private static void ValidateLifetime(TimeSpan value, TimeSpan maximum, string name)
+    {
+        if (value <= TimeSpan.Zero || value > maximum)
+        {
+            throw new ArgumentOutOfRangeException(
+                name,
+                $"{name} must be greater than zero and no longer than {maximum.TotalHours} hours.");
         }
     }
 }

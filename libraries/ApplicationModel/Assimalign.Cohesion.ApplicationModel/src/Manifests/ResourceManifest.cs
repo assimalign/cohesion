@@ -262,6 +262,7 @@ public sealed record ResourceManifest
         }
 
         var mountNames = new HashSet<string>(StringComparer.Ordinal);
+        var mountKinds = new Dictionary<string, ResourceMountKind>(StringComparer.Ordinal);
 
         foreach (ResourceManifestMount mount in Mounts)
         {
@@ -281,6 +282,8 @@ public sealed record ResourceManifest
                     $"Resource manifest contains duplicate mount name '{mount.Name}'.");
             }
 
+            mountKinds.Add(mount.Name, mount.Kind);
+
             if (!Enum.IsDefined(mount.Kind))
             {
                 throw new InvalidDataException(
@@ -297,6 +300,38 @@ public sealed record ResourceManifest
             {
                 throw new InvalidDataException(
                     $"Volume mount '{mount.Name}' must declare a non-empty size.");
+            }
+
+            ValidateMountSource(mount);
+        }
+
+        foreach (ResourceManifestEndpoint endpoint in Endpoints)
+        {
+            if (endpoint.Certificate is null)
+            {
+                continue;
+            }
+
+            // Reserved for the later ACME/public-CA certificate realizer. It is deliberately
+            // not interpreted as a mount name by item 25.
+            if (string.Equals(endpoint.Certificate, "public", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(endpoint.Certificate) ||
+                !mountKinds.TryGetValue(endpoint.Certificate, out ResourceMountKind certificateKind))
+            {
+                throw new InvalidDataException(
+                    $"Resource manifest endpoint '{endpoint.Name}' certificate mount " +
+                    $"'{endpoint.Certificate}' does not name a declared mount.");
+            }
+
+            if (certificateKind != ResourceMountKind.Secret)
+            {
+                throw new InvalidDataException(
+                    $"Resource manifest endpoint '{endpoint.Name}' certificate mount " +
+                    $"'{endpoint.Certificate}' must be a Secret mount.");
             }
         }
 
@@ -353,6 +388,57 @@ public sealed record ResourceManifest
         ValidateLifecycle();
 
         return this;
+    }
+
+    private static void ValidateMountSource(ResourceManifestMount mount)
+    {
+        if (mount.Source is null)
+        {
+            return;
+        }
+
+        if (mount.Kind == ResourceMountKind.Volume)
+        {
+            throw new InvalidDataException(
+                $"Volume mount '{mount.Name}' cannot declare Source.");
+        }
+
+        if (string.IsNullOrWhiteSpace(mount.Source))
+        {
+            throw new InvalidDataException(
+                $"Mount '{mount.Name}' Source must not be empty.");
+        }
+
+        if (mount.Source.StartsWith("literal:", StringComparison.Ordinal))
+        {
+            if (mount.Kind != ResourceMountKind.Configuration)
+            {
+                throw new InvalidDataException(
+                    $"Mount '{mount.Name}' uses literal:, which is allowed only for Configuration mounts.");
+            }
+
+            return;
+        }
+
+        if (mount.Source.StartsWith("parameter:", StringComparison.Ordinal))
+        {
+            if (mount.Source.Length == "parameter:".Length)
+            {
+                throw new InvalidDataException(
+                    $"Mount '{mount.Name}' parameter source must name a parameter.");
+            }
+
+            return;
+        }
+
+        int separator = mount.Source.IndexOf(':');
+        if (separator <= 0 || separator == mount.Source.Length - 1 ||
+            mount.Source.IndexOf(':', separator + 1) >= 0)
+        {
+            throw new InvalidDataException(
+                $"Mount '{mount.Name}' Source '{mount.Source}' must use parameter:<name>, " +
+                "literal:<value>, or <resource>:<key>.");
+        }
     }
 
     private HashSet<string> ValidateEndpoints()

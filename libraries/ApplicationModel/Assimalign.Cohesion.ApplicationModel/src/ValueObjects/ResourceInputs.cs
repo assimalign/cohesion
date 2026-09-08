@@ -13,6 +13,7 @@ public sealed class ResourceInputs
     /// <summary>Gets an input set with no mounts or bootstrap credential.</summary>
     public static ResourceInputs Empty { get; } = new(
         new Dictionary<string, ResourceMountInput>(StringComparer.Ordinal),
+        ReadOnlyMemory<byte>.Empty,
         ReadOnlyMemory<byte>.Empty);
 
     /// <summary>Initializes an immutable resource input set.</summary>
@@ -26,6 +27,26 @@ public sealed class ResourceInputs
     public ResourceInputs(
         IReadOnlyDictionary<string, ResourceMountInput> mounts,
         ReadOnlyMemory<byte> bootstrapCredential)
+        : this(mounts, bootstrapCredential, ReadOnlyMemory<byte>.Empty)
+    {
+    }
+
+    /// <summary>Initializes an immutable resource input set with its public trust key.</summary>
+    /// <param name="mounts">Inputs keyed by plan mount name.</param>
+    /// <param name="bootstrapCredential">
+    /// The short-lived bootstrap credential, or empty content when none is required.
+    /// The value is defensively copied.
+    /// </param>
+    /// <param name="applicationTrustKey">
+    /// The application's public JSON Web Key encoded as UTF-8, or empty content when unavailable.
+    /// The value is defensively copied.
+    /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="mounts"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A mount name is empty or a mount input is <see langword="null"/>.</exception>
+    public ResourceInputs(
+        IReadOnlyDictionary<string, ResourceMountInput> mounts,
+        ReadOnlyMemory<byte> bootstrapCredential,
+        ReadOnlyMemory<byte> applicationTrustKey)
     {
         ArgumentNullException.ThrowIfNull(mounts);
 
@@ -45,6 +66,9 @@ public sealed class ResourceInputs
         BootstrapCredential = bootstrapCredential.IsEmpty
             ? ReadOnlyMemory<byte>.Empty
             : bootstrapCredential.ToArray();
+        ApplicationTrustKey = applicationTrustKey.IsEmpty
+            ? ReadOnlyMemory<byte>.Empty
+            : applicationTrustKey.ToArray();
     }
 
     /// <summary>Gets immutable mount inputs keyed by plan mount name.</summary>
@@ -52,4 +76,10 @@ public sealed class ResourceInputs
 
     /// <summary>Gets the immutable bootstrap credential, or empty content when none was issued.</summary>
     public ReadOnlyMemory<byte> BootstrapCredential { get; }
+
+    /// <summary>
+    /// Gets the application's public JSON Web Key encoded as UTF-8, or empty content when none
+    /// was supplied.
+    /// </summary>
+    public ReadOnlyMemory<byte> ApplicationTrustKey { get; }
 }

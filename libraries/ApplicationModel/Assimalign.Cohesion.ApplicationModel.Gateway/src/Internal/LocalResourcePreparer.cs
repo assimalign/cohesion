@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -39,6 +40,14 @@ internal sealed class LocalResourcePreparer
         var environment = new Dictionary<string, string>(
             compilation.Environment,
             StringComparer.Ordinal);
+
+        if (!compilation.Inputs.ApplicationTrustKey.IsEmpty)
+        {
+            GatewayEnvironmentVariables.Set(
+                environment,
+                ResourceEnvironment.ApplicationTrustKey,
+                Encoding.UTF8.GetString(compilation.Inputs.ApplicationTrustKey.Span));
+        }
 
         IReadOnlyList<ResourceEndpoint> declaredEndpoints = GetDeclaredEndpoints(resource);
         IReadOnlyList<ResourceEndpoint> observedEndpoints = await _ports.ResolveAsync(

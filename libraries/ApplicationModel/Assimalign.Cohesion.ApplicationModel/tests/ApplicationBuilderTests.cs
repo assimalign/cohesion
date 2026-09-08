@@ -333,7 +333,34 @@ public class ApplicationBuilderTests
         ArgumentException error = Should.Throw<ArgumentException>(
             () => Application.CreateBuilder(["--mode=launch"]));
 
-        error.Message.ShouldContain("run, apply, teardown, bootstrap, describe, or render");
+        error.Message.ShouldContain("describe, render, trust-issue, or trust-add");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Trust command modes require all of their arguments")]
+    [InlineData("--mode=trust-issue")]
+    [InlineData("--mode=trust-add", "--peer=peer-a")]
+    [InlineData("--mode=trust-add", "--from=exports/peer-a/export.json")]
+    public void CreateBuilder_TrustCommandMissingRequiredArgument_Throws(params string[] args)
+    {
+        // Act
+        Action createBuilder = () => Application.CreateBuilder(ApplicationName.Parse("appa"), args);
+
+        // Assert
+        Should.Throw<ArgumentException>(createBuilder);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Trust command arguments are rejected by other modes")]
+    [InlineData("--mode=run", "--developer=developer-a")]
+    [InlineData("--mode=trust-issue", "--developer=developer-a", "--peer=peer-a")]
+    [InlineData("--mode=trust-issue", "--developer=developer-a", "--from=exports/peer-a/export.json")]
+    [InlineData("--mode=trust-add", "--peer=peer-a", "--from=exports/peer-a/export.json", "--developer=developer-a")]
+    public void CreateBuilder_TrustCommandArgumentForDifferentMode_Throws(params string[] args)
+    {
+        // Act
+        Action createBuilder = () => Application.CreateBuilder(ApplicationName.Parse("appa"), args);
+
+        // Assert
+        Should.Throw<ArgumentException>(createBuilder);
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - AddResource defers custom planning until Build")]

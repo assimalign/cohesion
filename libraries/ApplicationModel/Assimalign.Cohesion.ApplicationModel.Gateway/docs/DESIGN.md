@@ -19,16 +19,26 @@ This package implements the control-plane contracts defined in
   `IApplicationResourceStateManager` for gateway authors.
 - **`LocalGateway`** (+ `LocalGatewayOptions`) — the default gateway for local development,
   which realizes each resource as a supervised child process.
+- **`IGatewayStoreClient`**, **`IApplicationTrustGateway`**, and
+  **`ITrustedIssuerProvider`** — the Hosting-free seams for late-bound inputs and
+  per-application trust.
+- **`IImageRealizer`** — the platform seam that turns a digest-pinned image reference into an
+  `IContainerImageArtifact` without putting registry or platform I/O in the base algorithm.
 - Internal pieces: `ResourceControlContext`, `LocalResourceResolver`, port and mount
   materializers, the probe runner, `LocalGatewayProcessSupervisor`, `LocalProcessStateStore`,
   `LocalProcessSignal`, `LocalPlanController`, `ExecutableArtifact`.
-- **`UseLocalGateway()`** and **`AddExecutable(...)`** builder extensions.
+- **`UseLocalGateway()`**, **`AddExecutable(...)`**, and **`AddContainer(...)`** builder
+  extensions.
 
-It references the Core-only `Assimalign.Cohesion.ApplicationModel` and
-`Assimalign.Cohesion.Security.DataProtection` packages, and is `IsAotCompatible` / AOT-gated —
-no reflection, no `Microsoft.Extensions.*`. Publishing the concrete reference
-state manager is the signed-off, narrowly scoped exception to the repository's interface-first
-default; the interface remains the control-plane contract.
+It references the Core-only `Assimalign.Cohesion.ApplicationModel`, the thin
+`Assimalign.Cohesion.SecretStore.Client` and
+`Assimalign.Cohesion.ConfigurationStore.Client` protocol packages, IdentityModel's
+`JsonWebToken` package, and the DataProtection/ProtectedData primitives. The two client
+references are the signed O13 exception: a gateway may depend on the narrow `<Area>.Client`
+surface needed for resolution, but **never** on an area's `*.Hosting` package. The package is
+`IsAotCompatible` / AOT-gated — no reflection, no `Microsoft.Extensions.*`. Publishing the
+concrete reference state manager is the signed-off, narrowly scoped exception to the repository's
+interface-first default; the interface remains the control-plane contract.
 
 ## The generic algorithm (why the base owns it)
 
@@ -48,9 +58,10 @@ Kubernetes — is the *same* algorithm with different hooks, so it is written on
 4. **Start the single observer** (`StartObserverAsync`) — the only writer of observed status
    into `State`. Controllers only *apply* desired state; they never own steady-state.
 5. **Reconcile in dependency order**: after dependencies have satisfied their initial gate,
-   resolve `ResourceInputs { Mounts, BootstrapCredential }` for this pass, compile the immutable
-   plan plus artifact, inputs, and observed dependencies, and call `ReconcileAsync`. A controller
-   may set `Skipped`; its dependents become `Skipped` while independent resources continue.
+   resolve `ResourceInputs { Mounts, BootstrapCredential, ApplicationTrustKey }` for this pass,
+   compile the immutable plan plus artifact, inputs, and observed dependencies, and call
+   `ReconcileAsync`. A controller may set `Skipped`; its dependents become `Skipped` while
+   independent resources continue.
 6. **Gate once from the plan**: call `WaitForStateAsync` with
    `plan.Workload.Gate.Terminals` and a per-resource budget, then admit the resource exactly when
    `Gate.Satisfying` contains the reached state. Long-running kinds satisfy on `Running`; a Job
@@ -144,6 +155,116 @@ the registration under the same lock.
   `--restart-orphans` (or `LocalGatewayOptions.RestartOrphans`) instead gracefully stops each
   verified child and launches a fresh attempt.
 
+## Item #968 — late-bound inputs, application trust, and opaque workloads
+
+### Gateway-owned mount-source resolution (signed O13)
+
+`ApplicationGateway.ResolveInputsAsync` is the sole default resolver. It runs after a
+resource's dependencies pass their initial gate and runs again on every reconcile; resources
+consume already-resolved inputs and never pull orchestration data themselves. Each
+`MountBinding.Source` is handled as follows:
+
+- an omitted source resolves to empty content (or an empty gateway-created Volume claim);
+- `literal:<value>` is UTF-8 content and is valid only for a Configuration mount;
+- `parameter:<name>` resolves from the application parameter document, then from
+  `ApplicationGatewayOptions.Parameters`; generated gateway startup applies repeatable
+  `--parameter name=value` values last. The default document is
+  `.cohesion/<application>/parameters.json` unless `ParameterFile` is explicit. Windows reads
+  CurrentUser-DPAPI ciphertext; on POSIX the gateway enforces mode 0600 before reading.
+  A Volume cannot declare a parameter or any other source;
+- `<resource>:<key>` must name an unambiguous declared dependency that is `Running` and has an
+  observed control-plane endpoint. A Secret mount reads bytes from a `SecretStore`; a
+  Configuration mount reads a namespace from a `ConfigurationStore` and encodes its
+  ordinal-key-ordered values as JSON. A mismatched store kind is unresolved.
+
+Missing parameters, malformed references, unavailable endpoints, client failures, and kind
+mismatches produce a typed unresolved `ResourceMountInput` with the source-specific reason.
+`LocalPlanController` refuses that input before applying the process; every platform controller
+must preserve the same no-partial-realization rule.
+
+For a store reference, the gateway uses the source resource's one credential for the current
+reconcile pass and calls
+`IGatewayStoreClient`. Its default implementation delegates only to the thin
+`SecretStore.Client` and `ConfigurationStore.Client` protocol packages. This is the narrow,
+signed O13 boundary: sharing those client contracts avoids hand-rolling their wire protocols,
+while `*.Hosting` remains forbidden and no store client enters a resource runtime.
+
+A manifest endpoint can designate a Secret mount through its `Certificate` field. That path
+uses `IGatewayStoreClient.ReadCertificateAsync` and accepts a PEM leaf when the store supports
+it. Item 31's CA enrollment and leaf issuance are **not available yet**; an unavailable leaf
+remains a named, typed unresolved input. This package neither self-issues a certificate nor
+silently substitutes another source.
+
+### Per-application trust and rotating credentials
+
+The gateway owns one ECDSA P-256 signing key per application and gateway identity. The private
+PKCS#8 value stays under `.cohesion/<application>/trust/<gateway>/` and is encrypted at rest with
+`Assimalign.Cohesion.Security.DataProtection`, scoped by application and gateway; the protecting
+key ring is DPAPI-backed on Windows and uses 0700 directories/0600 files on POSIX. DataProtection
+is only the at-rest primitive — ECDSA is the signer — and the private key never enters a
+resource, export, or trusted-issuer document. `IGatewayTrustKeyRepository` is the platform
+override for a durable native Secret; the protected local repository is the default.
+
+The public-only JWK carries `kty=EC`, `crv=P-256`, `alg=ES256`, `use=sig`, and an RFC 7638
+thumbprint `kid`. The same JWK is supplied through `ResourceInputs.ApplicationTrustKey`, emitted
+as `COHESION_APPLICATION_TRUST_KEY` for a local child, and published as
+`ApplicationExportDocument.TrustKey`; platform compilers receive it through the same immutable
+inputs. The application's own public key is always retained in its trusted-issuer snapshot.
+
+Every reconcile creates one fresh ES256 bootstrap JWT per resource with issuer = application,
+subject = gateway, audience = target resource, a new `jti`, and bounded `iat`/`nbf`/`exp`
+(24 hours maximum). Every gateway-side call to that resource during the pass reuses the same
+credential. Rotation means replacing the credential on every reconcile, not exposing
+the signer or placing the token value directly in an environment variable. The carrier contract
+is:
+
+| Realization | Bootstrap credential carrier |
+|---|---|
+| Local out-of-process | Private `.state/bootstrap.token` file named by `COHESION_BOOTSTRAP_TOKEN_PATH`; 0600 on POSIX, DataProtection ciphertext on Windows; atomically replaced. |
+| In-process | Value on the per-invocation ambient `ResourceContext`. |
+| Docker | tmpfs file, implemented by the Docker platform compiler. |
+| Kubernetes | Secret volume, implemented by the Kubernetes platform compiler. |
+
+Peer verification keys are `TrustedIssuer` records exposed through
+`ITrustedIssuerProvider`. The gateway reads `trusted-issuers.json` from **that application's
+own** `SecretStore`, using its observed running endpoint or, only in Development, its declared
+local port and
+an audience-bound bootstrap credential, then refreshes the snapshot after reconciliation.
+Loading or storing a peer grant may fall back to the application-local trusted-issuers document
+only in Development. A definite not-found means that no peer grants exist yet outside
+Development; Development keeps its local fallback until the store contains a replacement
+document. Every other malformed or unavailable store read outside Development is fatal.
+Platform gateways resolve a
+stable native endpoint for one-shot trust commands through `TryResolveOwnSecretStoreEndpoint`;
+`trust-add` outside Development requires that own store. Refreshing peers never removes the
+application's self key.
+
+The one-shot gateway command modes are the low-level surface used by later CLI wrappers:
+
+- `--mode trust-issue --developer <name>` prints a short-lived ES256 developer token with
+  audience `cohesion-export`, a new `jti`, and an eight-hour maximum lifetime. Rotating the
+  application key invalidates credentials signed by the old key.
+- `--mode trust-add --peer <peer> --from <file-or-https-uri>` validates that the peer name exactly
+  matches the exported application and that the export contains its public JWK, then writes the
+  grant to the **verifying application's** own `SecretStore`. A remote source requires an
+  authorization-configured `IControlPlaneClient`; plaintext HTTP is limited to Development
+  loopback. Only Development may use the local fallback document.
+
+### Opaque executable and container entry points
+
+- `AddExecutable(...)` is the explicit LocalGateway-only escape hatch for a plain apphost or
+  native executable with no manifest/control plane. It requires either an enabled readiness
+  probe or a stdout ready marker and can configure endpoints, probes, environment, restart
+  policy.
+- `AddContainer(...)` turns an opaque OCI image into a generic deployment plan. The image must
+  end in an immutable `@sha256:<64-hex-digits>` digest, and the caller must declare at least one
+  endpoint and an enabled readiness probe; the options also carry startup/liveness probes,
+  environment, and restart policy.
+- `IImageRealizer.RealizeAsync(resource, imageReference, cancellationToken)` is the platform
+  boundary that converts that digest-pinned reference to an `IContainerImageArtifact`. This
+  package defines the seam but does not pull, build, load, or publish images; Docker and
+  Kubernetes gateways own those operations and their corresponding plan controllers.
+
 ## Item #964 — external resolution and multi-model composition
 
 This package implements the gateway-side half of the item 23 contracts. It does not implement
@@ -230,6 +351,9 @@ cover persisted ports and contract environment, default and explicit HTTP readin
 injection and startup gating, optional absence, Composite re-export names, mount materialization,
 prefixed stdout/stderr, `AddExecutable` marker readiness, the full exponential-backoff sequence,
 graceful and forced stop classification, PID-file re-attachment, and explicit orphan restart.
+Item #968 tests additionally cover literal/parameter/store resolution, typed certificate
+unavailability, fresh audience-bound ES256 credentials, per-application persisted trust keys,
+bounded developer tokens, digest enforcement for `AddContainer`, and parameter CLI precedence.
 
 ## Non-goals
 

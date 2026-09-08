@@ -405,8 +405,9 @@ public class ApplicationGatewayTests
         Encoding.UTF8.GetString(inputs.Mounts["token"].Content.Span).ShouldBe("s3cret");
         inputs.Mounts["external"].IsResolved.ShouldBeFalse();
         string unresolvedReason = inputs.Mounts["external"].UnresolvedReason.ShouldNotBeNull();
-        unresolvedReason.ShouldContain("gateway 'test'", Case.Insensitive);
-        inputs.BootstrapCredential.IsEmpty.ShouldBeTrue();
+        unresolvedReason.ShouldContain("declared dependency", Case.Insensitive);
+        inputs.BootstrapCredential.IsEmpty.ShouldBeFalse();
+        inputs.ApplicationTrustKey.IsEmpty.ShouldBeFalse();
 
         await ((IApplicationGateway)gateway).StopAsync();
     }

@@ -62,5 +62,26 @@ public static class LocalGatewayExtensions
             configure(options);
             return builder.UseGateway(new LocalGateway(options));
         }
+
+        /// <summary>
+        /// Selects a <see cref="LocalGateway"/> and applies gateway-runtime arguments such as
+        /// repeatable <c>--parameter name=value</c> bindings.
+        /// </summary>
+        /// <param name="args">The original gateway command-line arguments.</param>
+        /// <param name="configure">Optional local gateway configuration.</param>
+        /// <returns>The builder, for chaining.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException">A gateway-runtime argument is malformed.</exception>
+        public IApplicationBuilder UseLocalGateway(
+            string[] args,
+            Action<LocalGatewayOptions>? configure = null)
+        {
+            ArgumentNullException.ThrowIfNull(args);
+
+            var options = new LocalGatewayOptions();
+            configure?.Invoke(options);
+            ApplicationGatewayCommandLine.Apply(options, args);
+            return builder.UseGateway(new LocalGateway(options));
+        }
     }
 }

@@ -14,6 +14,7 @@
   <ItemGroup>
     <CohesionEndpoint Update="http" DevPort="18080" />
     <CohesionMount Include="cache" Kind="Configuration" Source="parameter:cache-path" />
+    <CohesionMount Include="token" Kind="Secret" Source="parameter:api-token" />
     <CohesionSetting Include="Orders:PageSize" Default="50" Type="int" />
     <CohesionResourceReference Include="..\EnabledDatabase\EnabledDatabase.csproj" Endpoints="db" />
     <CohesionResourceProperty Include="web.kind" Value="Api" />

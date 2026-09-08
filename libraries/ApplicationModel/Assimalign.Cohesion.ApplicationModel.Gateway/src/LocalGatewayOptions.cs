@@ -48,12 +48,6 @@ public sealed class LocalGatewayOptions : ApplicationGatewayOptions
     public int MaximumRestartAttempts { get; set; } = 5;
 
     /// <summary>
-    /// The time source used for probe intervals and restart backoff. Defaults to
-    /// <see cref="TimeProvider.System"/>.
-    /// </summary>
-    public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
-
-    /// <summary>
     /// How long to wait for a child process to exit during shutdown before it is force-killed.
     /// This is the fallback for manifest-less executables; manifest-backed resources use
     /// their lifecycle grace. Defaults to 30&#160;seconds.
@@ -70,8 +64,6 @@ public sealed class LocalGatewayOptions : ApplicationGatewayOptions
     internal void Validate()
     {
         ValidateCommon();
-        ArgumentNullException.ThrowIfNull(TimeProvider);
-
         if (ProbeInterval <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(ProbeInterval), "ProbeInterval must be greater than zero.");

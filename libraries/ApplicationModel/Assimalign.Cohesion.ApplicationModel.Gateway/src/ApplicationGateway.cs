@@ -1,8 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Core;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
@@ -17,15 +23,23 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// readiness is admitted once per start and later <see cref="ResourceLifecycle.Degraded"/>
 /// observations never re-gate dependents.
 /// </remarks>
-public abstract class ApplicationGateway : IMultiModelApplicationGateway
+public abstract class ApplicationGateway :
+    IMultiModelApplicationGateway,
+    IApplicationGatewayCommandHandler,
+    IApplicationTrustGateway
 {
     private const string LiteralPrefix = "literal:";
     private const string ParameterPrefix = "parameter:";
+    private const string TrustedIssuersFileName = "trusted-issuers.json";
 
     private readonly ApplicationGatewayOptions _options;
     private readonly ExternalResourceController _externalController;
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
+    private readonly object _trustStatesGate = new();
     private readonly Dictionary<ApplicationResourceKey, IResourceArtifact> _artifacts = new();
+    private readonly Dictionary<ApplicationName, IReadOnlyDictionary<string, string>> _parameters = new();
+    private readonly Dictionary<ApplicationName, ApplicationTrustState> _trust = new();
+    private readonly Dictionary<BootstrapCredentialKey, string> _bootstrapCredentials = new();
     private readonly HashSet<ApplicationResourceKey> _admitted = new();
     private readonly List<RealizedResource> _realized = new();
     private IReadOnlyList<ModelResource> _order = Array.Empty<ModelResource>();
@@ -70,6 +84,23 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Validates resource-specific platform requirements that are not represented by the
+    /// platform-neutral plan. The default accepts the resource.
+    /// </summary>
+    /// <param name="model">The application model that owns the resource.</param>
+    /// <param name="descriptor">The immutable resource descriptor.</param>
+    /// <param name="plan">The validated realization plan.</param>
+    /// <exception cref="InvalidOperationException">
+    /// The resource cannot be realized by this gateway.
+    /// </exception>
+    protected virtual void ValidateResource(
+        IApplicationModel model,
+        IApplicationResourceDescriptor descriptor,
+        ResourcePlan plan)
+    {
+    }
+
+    /// <summary>
     /// Gets the default readiness budget. Existing gateway subclasses may override this
     /// common value; new implementations can override <see cref="GetReadinessBudget"/>
     /// when the budget varies by resource plan.
@@ -93,8 +124,9 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
 
     /// <summary>
     /// Resolves late-bound inputs after the descriptor's dependencies have passed initial
-    /// readiness. The default resolves <c>literal:</c> and <c>parameter:</c> sources and
-    /// returns typed unresolved values for sources requiring a gateway-specific resolver.
+    /// readiness. The default resolves <c>literal:</c>, <c>parameter:</c>, and
+    /// <c>&lt;resource&gt;:&lt;key&gt;</c> sources and uses the resource's ES256 bootstrap credential
+    /// for the current reconcile pass.
     /// </summary>
     /// <param name="descriptor">The built descriptor being reconciled.</param>
     /// <param name="context">The control context for this reconcile pass.</param>
@@ -109,7 +141,7 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
     /// <exception cref="OperationCanceledException">
     /// <paramref name="cancellationToken"/> is canceled.
     /// </exception>
-    protected virtual ValueTask<ResourceInputs> ResolveInputsAsync(
+    protected virtual async ValueTask<ResourceInputs> ResolveInputsAsync(
         IApplicationResourceDescriptor descriptor,
         IResourceControlContext context,
         CancellationToken cancellationToken)
@@ -120,6 +152,7 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
         ResourcePlan plan = descriptor.Plan ?? throw new InvalidOperationException(
             $"Resource '{descriptor.Resource.Name}' has no realization plan.");
         var resolved = new Dictionary<string, ResourceMountInput>(StringComparer.Ordinal);
+        IReadOnlyDictionary<string, string> parameters = GetParameters(context.Model.Name);
 
         foreach (MountBinding mount in plan.Container.Mounts)
         {
@@ -136,18 +169,37 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
 
             if (source.StartsWith(LiteralPrefix, StringComparison.Ordinal))
             {
-                resolved.Add(
-                    mount.Mount,
-                    ResourceMountInput.Resolved(
+                resolved.Add(mount.Mount, mount.Kind == ResourceMountKind.Configuration
+                    ? ResourceMountInput.Resolved(
                         source,
-                        Encoding.UTF8.GetBytes(source[LiteralPrefix.Length..])));
+                        Encoding.UTF8.GetBytes(source[LiteralPrefix.Length..]))
+                    : ResourceMountInput.Unresolved(
+                        source,
+                        $"Literal source '{source}' is allowed only for Configuration mounts; " +
+                        $"mount '{mount.Mount}' on resource '{plan.Resource}' is '{mount.Kind}'."));
                 continue;
             }
 
             if (source.StartsWith(ParameterPrefix, StringComparison.Ordinal))
             {
                 string parameter = source[ParameterPrefix.Length..];
-                if (_options.Parameters.TryGetValue(parameter, out string? value))
+                if (mount.Kind == ResourceMountKind.Volume)
+                {
+                    resolved.Add(
+                        mount.Mount,
+                        ResourceMountInput.Unresolved(
+                            source,
+                            $"Volume mount '{mount.Mount}' on resource '{plan.Resource}' cannot declare a source."));
+                }
+                else if (string.IsNullOrWhiteSpace(parameter))
+                {
+                    resolved.Add(
+                        mount.Mount,
+                        ResourceMountInput.Unresolved(
+                            source,
+                            $"Parameter source for mount '{mount.Mount}' on resource '{plan.Resource}' has no name."));
+                }
+                else if (parameters.TryGetValue(parameter, out string? value))
                 {
                     resolved.Add(
                         mount.Mount,
@@ -166,16 +218,325 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
                 continue;
             }
 
-            resolved.Add(
-                mount.Mount,
-                ResourceMountInput.Unresolved(
-                    source,
-                    $"Gateway '{Name}' has no resolver for mount source '{source}' on resource " +
-                    $"'{plan.Resource}'."));
+            if (!TryParseResourceSource(source, out ResourceName sourceResource, out string? sourceKey))
+            {
+                resolved.Add(
+                    mount.Mount,
+                    ResourceMountInput.Unresolved(
+                        source,
+                        $"Mount source '{source}' on resource '{plan.Resource}' must use " +
+                        "parameter:<name>, literal:<value>, or <resource>:<key>."));
+                continue;
+            }
+
+            if (!TryResolveSourceResource(
+                    context,
+                    sourceResource,
+                    out ResourceManifest? sourceManifest,
+                    out ResourceDependencyObservation? observation,
+                    out string? sourceFailure))
+            {
+                resolved.Add(
+                    mount.Mount,
+                    ResourceMountInput.Unresolved(source, sourceFailure!));
+                continue;
+            }
+
+            if (!TryResolveControlPlaneEndpoint(
+                    sourceManifest!,
+                    observation!,
+                    out Uri? endpoint,
+                    out string? endpointFailure))
+            {
+                resolved.Add(
+                    mount.Mount,
+                    ResourceMountInput.Unresolved(source, endpointFailure!));
+                continue;
+            }
+
+            if (!CanSendCredential(context.Model, endpoint!, out string? securityFailure))
+            {
+                resolved.Add(
+                    mount.Mount,
+                    ResourceMountInput.Unresolved(source, securityFailure!));
+                continue;
+            }
+
+            string credential = GetOrIssueBootstrapToken(
+                context.Model,
+                sourceManifest!.Name);
+            try
+            {
+                ResourceMountInput input = await ResolveStoreSourceAsync(
+                        context,
+                        plan,
+                        mount,
+                        source,
+                        sourceKey!,
+                        sourceManifest,
+                        endpoint!,
+                        credential,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                resolved.Add(mount.Mount, input);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (
+                exception is HttpRequestException or InvalidDataException or JsonException or
+                    NotSupportedException or ArgumentException)
+            {
+                resolved.Add(
+                    mount.Mount,
+                    ResourceMountInput.Unresolved(
+                        source,
+                        $"Mount '{mount.Mount}' on resource '{plan.Resource}' could not resolve " +
+                        $"'{source}' through '{sourceManifest.Name}': {exception.Message}"));
+            }
         }
 
-        return ValueTask.FromResult(
-            new ResourceInputs(resolved, ReadOnlyMemory<byte>.Empty));
+        string bootstrapCredential = GetOrIssueBootstrapToken(
+            context.Model,
+            descriptor.Resource.Name);
+        ApplicationTrustState trust = GetTrustState(context.Model.Name);
+        return new ResourceInputs(
+            resolved,
+            Encoding.ASCII.GetBytes(bootstrapCredential),
+            trust.PublicKey);
+    }
+
+    private async ValueTask<ResourceMountInput> ResolveStoreSourceAsync(
+        IResourceControlContext context,
+        ResourcePlan plan,
+        MountBinding mount,
+        string source,
+        string key,
+        ResourceManifest sourceManifest,
+        Uri endpoint,
+        string credential,
+        CancellationToken cancellationToken)
+    {
+        if (mount.Kind == ResourceMountKind.Secret &&
+            string.Equals(sourceManifest.Kind, "SecretStore", StringComparison.OrdinalIgnoreCase))
+        {
+            if (IsCertificateMount(context, mount.Mount))
+            {
+                try
+                {
+                    string certificate = await _options.StoreClient
+                        .ReadCertificateAsync(endpoint, credential, key, cancellationToken)
+                        .ConfigureAwait(false);
+                    return ResourceMountInput.Resolved(source, Encoding.UTF8.GetBytes(certificate));
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception) when (
+                    exception is HttpRequestException or InvalidDataException or NotSupportedException)
+                {
+                    return ResourceMountInput.Unresolved(
+                        source,
+                        $"Certificate '{key}' for mount '{mount.Mount}' on resource " +
+                        $"'{plan.Resource}' is not available from SecretStore " +
+                        $"'{sourceManifest.Name}': {exception.Message}");
+                }
+            }
+
+            ReadOnlyMemory<byte> secret = await _options.StoreClient
+                .ReadSecretAsync(endpoint, credential, key, cancellationToken)
+                .ConfigureAwait(false);
+            return ResourceMountInput.Resolved(source, secret);
+        }
+
+        if (mount.Kind == ResourceMountKind.Configuration &&
+            string.Equals(sourceManifest.Kind, "ConfigurationStore", StringComparison.OrdinalIgnoreCase))
+        {
+            IReadOnlyDictionary<string, string?> configuration = await _options.StoreClient
+                .ReadConfigurationAsync(endpoint, credential, key, cancellationToken)
+                .ConfigureAwait(false);
+            return ResourceMountInput.Resolved(source, SerializeConfiguration(configuration));
+        }
+
+        return ResourceMountInput.Unresolved(
+            source,
+            $"Mount '{mount.Mount}' on resource '{plan.Resource}' is '{mount.Kind}', but source " +
+            $"resource '{sourceManifest.Name}' is kind '{sourceManifest.Kind}'. Secret mounts " +
+            "require SecretStore and Configuration mounts require ConfigurationStore.");
+    }
+
+    private static bool TryParseResourceSource(
+        string source,
+        out ResourceName resource,
+        out string? key)
+    {
+        int separator = source.IndexOf(':');
+        if (separator <= 0 || separator == source.Length - 1 ||
+            source.IndexOf(':', separator + 1) >= 0)
+        {
+            resource = default;
+            key = null;
+            return false;
+        }
+
+        string resourceName = source[..separator];
+        key = source[(separator + 1)..];
+        if (string.IsNullOrWhiteSpace(resourceName) || string.IsNullOrWhiteSpace(key))
+        {
+            resource = default;
+            key = null;
+            return false;
+        }
+
+        resource = (ResourceName)resourceName;
+        return true;
+    }
+
+    private static bool TryResolveSourceResource(
+        IResourceControlContext context,
+        ResourceName sourceResource,
+        out ResourceManifest? manifest,
+        out ResourceDependencyObservation? observation,
+        out string? failure)
+    {
+        manifest = null;
+        observation = null;
+        failure = null;
+
+        for (int index = 0; index < context.ObservedDependencies.Count; index++)
+        {
+            ResourceDependencyObservation candidate = context.ObservedDependencies[index];
+            if (candidate.Resource != sourceResource)
+            {
+                continue;
+            }
+
+            if (observation is not null)
+            {
+                failure = $"Mount source resource '{sourceResource}' is ambiguous across application references.";
+                return false;
+            }
+
+            observation = candidate;
+        }
+
+        if (observation is null)
+        {
+            failure = $"Mount source resource '{sourceResource}' is not a declared dependency of " +
+                $"resource '{context.Resource.Name}'. Add a resource reference so its observed endpoint " +
+                "is available before source resolution.";
+            return false;
+        }
+
+        for (int index = 0; index < context.Model.Manifests.Count; index++)
+        {
+            ResourceManifest candidate = context.Model.Manifests[index];
+            if (candidate.Name == observation.Resource && candidate.Application == observation.Application)
+            {
+                manifest = candidate;
+                break;
+            }
+        }
+
+        if (manifest is null)
+        {
+            failure = $"Mount source resource '{observation.Application}/{observation.Resource}' has no " +
+                "manifest in the active application model.";
+            return false;
+        }
+
+        if (observation.State != ResourceLifecycle.Running)
+        {
+            failure = $"Mount source resource '{observation.Application}/{observation.Resource}' is " +
+                $"'{observation.State}', not Running.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryResolveControlPlaneEndpoint(
+        ResourceManifest manifest,
+        ResourceDependencyObservation observation,
+        out Uri? endpoint,
+        out string? failure)
+    {
+        for (int index = 0; index < observation.Endpoints.Count; index++)
+        {
+            ResourceEndpoint candidate = observation.Endpoints[index];
+            if (!string.Equals(
+                    candidate.Name,
+                    manifest.ControlPlane.Endpoint,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!Uri.TryCreateEndpoint(
+                    candidate.Scheme,
+                    candidate.Host,
+                    candidate.Port,
+                    path: null,
+                    out endpoint))
+            {
+                break;
+            }
+
+            failure = null;
+            return true;
+        }
+
+        endpoint = null;
+        failure = $"Mount source resource '{manifest.Application}/{manifest.Name}' has no observed " +
+            $"'{manifest.ControlPlane.Endpoint}' control-plane endpoint.";
+        return false;
+    }
+
+    private static bool IsCertificateMount(IResourceControlContext context, string mount)
+    {
+        int descriptorIndex = IndexOfDescriptor(context.Model.Descriptors, context.Descriptor);
+        ResourceManifest manifest = context.Model.Manifests[descriptorIndex];
+        for (int index = 0; index < manifest.Endpoints.Count; index++)
+        {
+            if (string.Equals(manifest.Endpoints[index].Certificate, mount, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static byte[] SerializeConfiguration(
+        IReadOnlyDictionary<string, string?> configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        var keys = new List<string>(configuration.Keys);
+        keys.Sort(StringComparer.Ordinal);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            for (int index = 0; index < keys.Count; index++)
+            {
+                string key = keys[index];
+                string? value = configuration[key];
+                if (value is null)
+                {
+                    writer.WriteNull(key);
+                }
+                else
+                {
+                    writer.WriteString(key, value);
+                }
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return stream.ToArray();
     }
 
     /// <summary>
@@ -281,6 +642,255 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
             $"Application '{model.Name}' is not part of the active gateway '{Name}' session.");
     }
 
+    /// <summary>
+    /// Resolves an application's own SecretStore endpoint when it is not available from the
+    /// active observed-state view. Platform gateways override this for stable native service
+    /// discovery, including one-shot trust commands that do not open a reconcile session.
+    /// </summary>
+    /// <param name="model">The application that owns the SecretStore.</param>
+    /// <param name="store">The application's own SecretStore manifest.</param>
+    /// <param name="endpoint">The platform-native control-plane endpoint when resolved.</param>
+    /// <returns><see langword="true"/> when an endpoint was resolved; otherwise, <see langword="false"/>.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="model"/> or <paramref name="store"/> is <see langword="null"/>.
+    /// </exception>
+    protected virtual bool TryResolveOwnSecretStoreEndpoint(
+        IApplicationModel model,
+        ResourceManifest store,
+        out Uri? endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(store);
+        endpoint = null;
+        return false;
+    }
+
+    /// <inheritdoc/>
+    public IReadOnlyList<TrustedIssuer> GetTrustedIssuers(ApplicationName application)
+    {
+        lock (_trustStatesGate)
+        {
+            return GetTrustStateCore(application).Snapshot();
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task ExecuteCommandAsync(
+        IApplicationModel model,
+        GatewayCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(command);
+
+        if (command.Mode == GatewayRunMode.TrustIssue)
+        {
+            string token = await IssueDeveloperTokenAsync(
+                    model,
+                    command.DeveloperName!,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await Console.Out.WriteLineAsync(token.AsMemory(), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (command.Mode == GatewayRunMode.TrustAdd)
+        {
+            ApplicationExportDocument export = await ReadPeerExportAsync(
+                    model,
+                    command.ExportSource!,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await AddTrustedIssuerAsync(
+                    model,
+                    command.PeerName!,
+                    export,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        throw new NotSupportedException(
+            $"Gateway '{Name}' does not implement command mode '{command.Mode}'.");
+    }
+
+    /// <inheritdoc/>
+    public async Task<string> IssueDeveloperTokenAsync(
+        IApplicationModel model,
+        string developerName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentException.ThrowIfNullOrWhiteSpace(developerName);
+
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _options.ValidateCommon();
+            ApplicationTrustState trust = await EnsureTrustStateAsync(model, cancellationToken)
+                .ConfigureAwait(false);
+            return trust.Issue(
+                "cohesion-export",
+                developerName,
+                _options.DeveloperTokenLifetime,
+                _options.TimeProvider.GetUtcNow());
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task AddTrustedIssuerAsync(
+        IApplicationModel model,
+        string peerName,
+        ApplicationExportDocument export,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentException.ThrowIfNullOrWhiteSpace(peerName);
+        ArgumentNullException.ThrowIfNull(export);
+        _ = export.ToModel();
+
+        if (!string.Equals(peerName, export.Application, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                $"Trust peer '{peerName}' does not match export application '{export.Application}'.");
+        }
+
+        if (string.Equals(export.Application, model.Name.ToString(), StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                $"Application '{model.Name}' cannot add its own export as a peer trust grant.");
+        }
+
+        JsonElement publicKey = export.TrustKey ?? throw new InvalidDataException(
+            $"Application export '{export.Application}' has no trustKey.");
+        var issuer = new TrustedIssuer(export.Application, publicKey);
+
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _options.ValidateCommon();
+            ApplicationTrustState trust = await EnsureTrustStateAsync(model, cancellationToken)
+                .ConfigureAwait(false);
+            bool stored = false;
+            if (TryGetOwnSecretStoreEndpoint(model, out ResourceManifest? store, out Uri? endpoint))
+            {
+                if (!CanSendCredential(model, endpoint!, out string? securityFailure))
+                {
+                    throw new InvalidOperationException(securityFailure);
+                }
+
+                string credential = GetOrIssueBootstrapToken(model, store!.Name);
+                try
+                {
+                    await _options.StoreClient.StoreTrustedIssuerAsync(
+                            endpoint!,
+                            credential,
+                            model.Owner,
+                            issuer.Issuer,
+                            Encoding.UTF8.GetBytes(issuer.PublicKey.GetRawText()),
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    stored = true;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception) when (
+                    model.Environment.IsDevelopment &&
+                    exception is HttpRequestException or InvalidDataException or NotSupportedException)
+                {
+                    // Development is the only environment allowed to fall back to the
+                    // application-local trusted-issuers document.
+                }
+            }
+
+            if (!stored)
+            {
+                if (!model.Environment.IsDevelopment)
+                {
+                    throw new InvalidOperationException(
+                        $"Application '{model.Name}' has no reachable own SecretStore endpoint " +
+                        $"for trust grant '{peerName}'. Local fallback is Development-only.");
+                }
+
+                await TrustedIssuerDocument.WriteFileAsync(
+                        GetTrustedIssuersPath(model.Name),
+                        MergeTrustedIssuers(trust.Snapshot(), issuer),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            trust.AddOrReplace(issuer);
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task RotateTrustKeyAsync(
+        IApplicationModel model,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _options.ValidateCommon();
+            ApplicationTrustState trust = await EnsureTrustStateAsync(model, cancellationToken)
+                .ConfigureAwait(false);
+            GatewayTrustKey replacement = await RotateTrustKeyCoreAsync(
+                    model.Name,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            trust.ReplaceKey(replacement);
+            RemoveBootstrapCredentials(model.Name);
+            if (model.Environment.IsDevelopment)
+            {
+                await TrustedIssuerDocument.WriteFileAsync(
+                        GetTrustedIssuersPath(model.Name),
+                        trust.Snapshot(),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    private async Task<ApplicationExportDocument> ReadPeerExportAsync(
+        IApplicationModel model,
+        string source,
+        CancellationToken cancellationToken)
+    {
+        if (Uri.TryCreate(source, UriKind.Absolute, out Uri? endpoint) &&
+            (string.Equals(endpoint.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!CanSendCredential(model, endpoint, out string? securityFailure))
+            {
+                throw new InvalidOperationException(securityFailure);
+            }
+
+            IControlPlaneClient client = _options.ControlPlaneClient ?? throw new InvalidOperationException(
+                $"Trust export source '{source}' is a control-plane URI, but no " +
+                $"{nameof(ApplicationGatewayOptions.ControlPlaneClient)} is configured.");
+            return await client.GetApplicationAsync(endpoint, cancellationToken).ConfigureAwait(false);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return ApplicationExportDocument.Load(Path.GetFullPath(source));
+    }
+
     void IApplicationGateway.Validate(IApplicationModel model) => Validate(Singleton(model));
 
     Task IApplicationGateway.StartAsync(
@@ -329,6 +939,7 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
             try
             {
                 await ReconcilePassAsync(cancellationToken).ConfigureAwait(false);
+                await RefreshTrustedIssuersAsync(cancellationToken).ConfigureAwait(false);
                 // Run-mode cancellation is also the application lifetime signal. Once every
                 // resource is ready, finish publishing the matching discovery snapshot; the
                 // subsequent StopAsync call withdraws it.
@@ -358,6 +969,7 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
             ValidateCore(snapshot);
             await EnsureSessionAsync(snapshot, cancellationToken).ConfigureAwait(false);
             await ReconcilePassAsync(cancellationToken).ConfigureAwait(false);
+            await RefreshTrustedIssuersAsync(cancellationToken).ConfigureAwait(false);
             await PublishApplicationExportsAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -419,6 +1031,7 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
                         $"the application plan supplied to gateway '{Name}'.");
                 }
 
+                ValidateResource(model, descriptor, plan);
                 ResolveController(plan);
             }
         }
@@ -445,6 +1058,8 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
 
         try
         {
+            await InitializeApplicationStateAsync(models, cancellationToken).ConfigureAwait(false);
+
             foreach (ModelResource item in _order)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -469,6 +1084,10 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
 
     private async Task ReconcilePassAsync(CancellationToken cancellationToken)
     {
+        // Every pass starts a fresh credential generation. A resource receives exactly one
+        // token for the pass, and all gateway-side calls to that resource reuse that token.
+        _bootstrapCredentials.Clear();
+
         foreach (ModelResource item in _order)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -596,7 +1215,7 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
                 model,
                 _options.ApplicationVersion,
                 endpoints,
-                _options.TrustKey);
+                GetTrustState(model.Name).PublicJwk);
             await PublishApplicationExportAsync(document, cancellationToken).ConfigureAwait(false);
         }
     }
@@ -1074,13 +1693,474 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
         _realized.Add(new RealizedResource(item, controller, context));
     }
 
+    private async Task InitializeApplicationStateAsync(
+        IReadOnlyList<IApplicationModel> models,
+        CancellationToken cancellationToken)
+    {
+        for (int index = 0; index < models.Count; index++)
+        {
+            IApplicationModel model = models[index];
+            await EnsureTrustStateAsync(model, cancellationToken).ConfigureAwait(false);
+            _parameters.Add(
+                model.Name,
+                await ReadParametersAsync(model, cancellationToken).ConfigureAwait(false));
+        }
+    }
+
+    private async Task<ApplicationTrustState> EnsureTrustStateAsync(
+        IApplicationModel model,
+        CancellationToken cancellationToken)
+    {
+        lock (_trustStatesGate)
+        {
+            if (_trust.TryGetValue(model.Name, out ApplicationTrustState? existing))
+            {
+                return existing;
+            }
+        }
+
+        GatewayTrustKey key = await LoadOrCreateTrustKeyAsync(
+                model.Name,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var created = new ApplicationTrustState(model.Name, Name, key);
+        try
+        {
+            if (model.Environment.IsDevelopment)
+            {
+                string path = GetTrustedIssuersPath(model.Name);
+                if (File.Exists(path))
+                {
+                    byte[] content = await File.ReadAllBytesAsync(path, cancellationToken)
+                        .ConfigureAwait(false);
+                    try
+                    {
+                        created.ReplacePeers(TrustedIssuerDocument.Parse(content));
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(content);
+                    }
+                }
+            }
+
+            lock (_trustStatesGate)
+            {
+                if (_trust.TryGetValue(model.Name, out ApplicationTrustState? existing))
+                {
+                    created.Dispose();
+                    return existing;
+                }
+
+                _trust.Add(model.Name, created);
+                return created;
+            }
+        }
+        catch
+        {
+            created.Dispose();
+            throw;
+        }
+    }
+
+    private async Task<IReadOnlyDictionary<string, string>> ReadParametersAsync(
+        IApplicationModel model,
+        CancellationToken cancellationToken)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal);
+        string path = _options.ParameterFile is null
+            ? Path.Combine(GetApplicationDirectory(model.Name), "parameters.json")
+            : Path.GetFullPath(_options.ParameterFile);
+        if (File.Exists(path))
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(
+                    path,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+
+            byte[] persisted = await File.ReadAllBytesAsync(path, cancellationToken)
+                .ConfigureAwait(false);
+            byte[]? plaintext = null;
+            try
+            {
+                plaintext = OperatingSystem.IsWindows()
+                    ? ProtectedData.Unprotect(
+                        persisted,
+                        optionalEntropy: null,
+                        DataProtectionScope.CurrentUser)
+                    : persisted;
+                using JsonDocument document = JsonDocument.Parse(plaintext);
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    throw new InvalidDataException(
+                        $"Gateway parameter file '{path}' must contain a JSON object.");
+                }
+
+                foreach (JsonProperty property in document.RootElement.EnumerateObject())
+                {
+                    if (property.Value.ValueKind != JsonValueKind.String)
+                    {
+                        throw new InvalidDataException(
+                            $"Gateway parameter '{property.Name}' in '{path}' must be a string.");
+                    }
+
+                    parameters.Add(property.Name, property.Value.GetString()!);
+                }
+            }
+            catch (CryptographicException exception) when (OperatingSystem.IsWindows())
+            {
+                throw new InvalidDataException(
+                    $"Gateway parameter file '{path}' could not be decrypted for the current user.",
+                    exception);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(persisted);
+                if (plaintext is not null && !ReferenceEquals(plaintext, persisted))
+                {
+                    CryptographicOperations.ZeroMemory(plaintext);
+                }
+            }
+        }
+
+        foreach ((string name, string value) in _options.Parameters)
+        {
+            parameters[name] = value;
+        }
+
+        return parameters;
+    }
+
+    private async Task RefreshTrustedIssuersAsync(CancellationToken cancellationToken)
+    {
+        for (int index = 0; index < _activeModels.Count; index++)
+        {
+            IApplicationModel model = _activeModels[index];
+            if (!TryGetOwnSecretStoreEndpoint(model, out ResourceManifest? store, out Uri? endpoint))
+            {
+                if (store is not null && !model.Environment.IsDevelopment)
+                {
+                    throw new InvalidOperationException(
+                        $"Application '{model.Name}' could not load TrustedIssuers because its own " +
+                        $"SecretStore '{store.Name}' has no observed control-plane endpoint.");
+                }
+
+                continue;
+            }
+
+            if (!CanSendCredential(model, endpoint!, out string? securityFailure))
+            {
+                if (model.Environment.IsDevelopment)
+                {
+                    continue;
+                }
+
+                throw new InvalidOperationException(securityFailure);
+            }
+
+            string credential = GetOrIssueBootstrapToken(model, store!.Name);
+            try
+            {
+                ReadOnlyMemory<byte> content = await _options.StoreClient
+                    .ReadSecretAsync(endpoint!, credential, TrustedIssuersFileName, cancellationToken)
+                    .ConfigureAwait(false);
+                GetTrustState(model.Name).ReplacePeers(TrustedIssuerDocument.Parse(content));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (HttpRequestException exception) when (
+                exception.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                // A production application with no peer grants has no persisted document yet.
+                // Development retains its explicitly permitted local fallback until the
+                // application's store contains a replacement document.
+                if (!model.Environment.IsDevelopment)
+                {
+                    GetTrustState(model.Name).ReplacePeers(Array.Empty<TrustedIssuer>());
+                }
+            }
+            catch (Exception exception) when (
+                model.Environment.IsDevelopment &&
+                exception is HttpRequestException or InvalidDataException or JsonException or
+                    NotSupportedException)
+            {
+                // The signed design allows only Development to retain its local fallback while
+                // the application's own SecretStore is unavailable.
+            }
+            catch (Exception exception) when (
+                exception is HttpRequestException or InvalidDataException or JsonException or
+                    NotSupportedException)
+            {
+                throw new InvalidOperationException(
+                    $"Application '{model.Name}' could not load TrustedIssuers from its own " +
+                    $"SecretStore '{store!.Name}'.",
+                    exception);
+            }
+        }
+    }
+
+    private bool TryGetOwnSecretStoreEndpoint(
+        IApplicationModel model,
+        out ResourceManifest? store,
+        out Uri? endpoint)
+    {
+        for (int index = 0; index < model.Manifests.Count; index++)
+        {
+            ResourceManifest candidate = model.Manifests[index];
+            if (candidate.Application != model.Name ||
+                !string.Equals(candidate.Kind, "SecretStore", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            store = candidate;
+            if (_activeModels.Count != 0)
+            {
+                IApplicationResourceStateManager state = GetApplicationState(model);
+                IApplicationResource resource = model.Descriptors[index].Resource;
+                if (state.GetState(resource.Id) == ResourceLifecycle.Running)
+                {
+                    IReadOnlyList<ResourceEndpoint> observed = state.GetObservedEndpoints(resource.Id);
+                    for (int endpointIndex = 0; endpointIndex < observed.Count; endpointIndex++)
+                    {
+                        ResourceEndpoint candidateEndpoint = observed[endpointIndex];
+                        if (string.Equals(
+                                candidateEndpoint.Name,
+                                candidate.ControlPlane.Endpoint,
+                                StringComparison.Ordinal) &&
+                            Uri.TryCreateEndpoint(
+                                candidateEndpoint.Scheme,
+                                candidateEndpoint.Host,
+                                candidateEndpoint.Port,
+                                path: null,
+                                out endpoint))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            if (TryResolveOwnSecretStoreEndpoint(model, candidate, out endpoint))
+            {
+                if (endpoint is null || !endpoint.IsEndpoint)
+                {
+                    throw new InvalidOperationException(
+                        $"Gateway '{Name}' resolved invalid own SecretStore endpoint '{endpoint}' " +
+                        $"for application '{model.Name}'.");
+                }
+
+                return true;
+            }
+
+            if (model.Environment.IsDevelopment)
+            {
+                for (int endpointIndex = 0; endpointIndex < candidate.Endpoints.Count; endpointIndex++)
+                {
+                    ResourceManifestEndpoint declared = candidate.Endpoints[endpointIndex];
+                    if (string.Equals(
+                            declared.Name,
+                            candidate.ControlPlane.Endpoint,
+                            StringComparison.Ordinal) &&
+                        declared.DevPort is int devPort &&
+                        Uri.TryCreateEndpoint(
+                            declared.Scheme,
+                            "127.0.0.1",
+                            devPort,
+                            path: null,
+                            out endpoint))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            endpoint = null;
+            return false;
+        }
+
+        store = null;
+        endpoint = null;
+        return false;
+    }
+
+    private string GetOrIssueBootstrapToken(IApplicationModel model, ResourceName audience)
+    {
+        var key = new BootstrapCredentialKey(model.Name, audience);
+        if (_bootstrapCredentials.TryGetValue(key, out string? existing))
+        {
+            return existing;
+        }
+
+        ApplicationTrustState trust = GetTrustState(model.Name);
+        string issued = trust.Issue(
+            audience.ToString(),
+            Name.ToString(),
+            _options.BootstrapCredentialLifetime,
+            _options.TimeProvider.GetUtcNow());
+        _bootstrapCredentials.Add(key, issued);
+        return issued;
+    }
+
+    private async Task<GatewayTrustKey> LoadOrCreateTrustKeyAsync(
+        ApplicationName application,
+        CancellationToken cancellationToken)
+    {
+        IGatewayTrustKeyRepository repository = _options.TrustKeyRepository
+            ?? new GatewayTrustKeyStore(GetStateRoot());
+        ECDsa signingKey = await repository
+            .LoadOrCreateAsync(application, Name, cancellationToken)
+            .ConfigureAwait(false);
+        return CreateOwnedTrustKey(signingKey);
+    }
+
+    private async Task<GatewayTrustKey> RotateTrustKeyCoreAsync(
+        ApplicationName application,
+        CancellationToken cancellationToken)
+    {
+        IGatewayTrustKeyRepository repository = _options.TrustKeyRepository
+            ?? new GatewayTrustKeyStore(GetStateRoot());
+        ECDsa signingKey = await repository
+            .RotateAsync(application, Name, cancellationToken)
+            .ConfigureAwait(false);
+        return CreateOwnedTrustKey(signingKey);
+    }
+
+    private static GatewayTrustKey CreateOwnedTrustKey(ECDsa signingKey)
+    {
+        ArgumentNullException.ThrowIfNull(signingKey);
+        try
+        {
+            return new GatewayTrustKey(signingKey);
+        }
+        catch
+        {
+            signingKey.Dispose();
+            throw;
+        }
+    }
+
+    private static bool CanSendCredential(
+        IApplicationModel model,
+        Uri endpoint,
+        out string? failure)
+    {
+        if (string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            (model.Environment.IsDevelopment &&
+             string.Equals(endpoint.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+             endpoint.IsLoopback))
+        {
+            failure = null;
+            return true;
+        }
+
+        failure = $"Application '{model.Name}' refuses to send a bearer credential to " +
+            $"non-TLS endpoint '{endpoint}'. Use HTTPS, or loopback HTTP in Development.";
+        return false;
+    }
+
+    private void RemoveBootstrapCredentials(ApplicationName application)
+    {
+        var keys = new List<BootstrapCredentialKey>();
+        foreach (BootstrapCredentialKey key in _bootstrapCredentials.Keys)
+        {
+            if (key.Application == application)
+            {
+                keys.Add(key);
+            }
+        }
+
+        for (int index = 0; index < keys.Count; index++)
+        {
+            _bootstrapCredentials.Remove(keys[index]);
+        }
+    }
+
+    private ApplicationTrustState GetTrustState(ApplicationName application)
+    {
+        lock (_trustStatesGate)
+        {
+            return GetTrustStateCore(application);
+        }
+    }
+
+    private ApplicationTrustState GetTrustStateCore(ApplicationName application)
+    {
+        return _trust.TryGetValue(application, out ApplicationTrustState? trust)
+            ? trust
+            : throw new InvalidOperationException(
+                $"Trust has not been initialized for application '{application}' on gateway '{Name}'.");
+    }
+
+    private IReadOnlyDictionary<string, string> GetParameters(ApplicationName application)
+    {
+        return _parameters.TryGetValue(application, out IReadOnlyDictionary<string, string>? parameters)
+            ? parameters
+            : _options.Parameters as IReadOnlyDictionary<string, string>
+                ?? new Dictionary<string, string>(_options.Parameters, StringComparer.Ordinal);
+    }
+
+    private string GetStateRoot()
+    {
+        string? stateDirectory = (_options as LocalGatewayOptions)?.StateDirectory;
+        return Path.GetFullPath(
+            stateDirectory ??
+            _options.ExportDirectory ??
+            Path.Combine(Environment.CurrentDirectory, ".cohesion"));
+    }
+
+    private string GetApplicationDirectory(ApplicationName application) =>
+        Path.Combine(GetStateRoot(), application.ToString());
+
+    private string GetTrustedIssuersPath(ApplicationName application) =>
+        Path.Combine(GetApplicationDirectory(application), "trust", TrustedIssuersFileName);
+
+    private static IReadOnlyList<TrustedIssuer> MergeTrustedIssuers(
+        IReadOnlyList<TrustedIssuer> current,
+        TrustedIssuer added)
+    {
+        var issuers = new Dictionary<string, TrustedIssuer>(StringComparer.Ordinal);
+        for (int index = 0; index < current.Count; index++)
+        {
+            TrustedIssuer issuer = current[index];
+            issuers[issuer.Issuer] = issuer;
+        }
+
+        issuers[added.Issuer] = added;
+        var names = new List<string>(issuers.Keys);
+        names.Sort(StringComparer.Ordinal);
+        var result = new TrustedIssuer[names.Count];
+        for (int index = 0; index < result.Length; index++)
+        {
+            result[index] = issuers[names[index]];
+        }
+
+        return result;
+    }
+
     private void ResetSession()
     {
+        lock (_trustStatesGate)
+        {
+            foreach (ApplicationTrustState trust in _trust.Values)
+            {
+                trust.Dispose();
+            }
+
+            _trust.Clear();
+        }
+
         for (int index = 0; index < _applicationStates.Count; index++)
         {
             _applicationStates[index].OwnedState?.Dispose();
         }
 
+        _bootstrapCredentials.Clear();
+        _parameters.Clear();
         _artifacts.Clear();
         _admitted.Clear();
         _realized.Clear();
@@ -1323,6 +2403,10 @@ public abstract class ApplicationGateway : IMultiModelApplicationGateway
     private readonly record struct ApplicationResourceKey(
         ApplicationName Application,
         ResourceId Resource);
+
+    private readonly record struct BootstrapCredentialKey(
+        ApplicationName Application,
+        ResourceName Resource);
 
     private readonly record struct ModelResource(
         IApplicationModel Model,

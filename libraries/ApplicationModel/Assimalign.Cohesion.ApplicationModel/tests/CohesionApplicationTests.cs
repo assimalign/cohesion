@@ -95,6 +95,86 @@ public class CohesionApplicationTests
         gateway.StartedModel.ShouldBeSameAs(app.Model);
     }
 
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Trust issue arguments build and dispatch a validated gateway command")]
+    [InlineData("--mode", "trust-issue", "--developer", "developer-a")]
+    [InlineData("--mode=trust-issue", "--developer=developer-a")]
+    public async Task RunAsync_TrustIssueArguments_DispatchesValidatedCommand(params string[] args)
+    {
+        // Arrange
+        var gateway = new FakeCommandGateway();
+        IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse("appa"), args)
+            .UseGateway(gateway);
+        builder.AddResource(new FakeResource("worker"));
+        builder.RunMode.ShouldBe(GatewayRunMode.TrustIssue);
+        IApplication app = builder.Build();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+
+        // Act
+        await app.RunAsync(cancellation.Token);
+
+        // Assert
+        app.Model.RunMode.ShouldBe(GatewayRunMode.TrustIssue);
+        gateway.Calls.ShouldBe(new[] { "command" });
+        gateway.ExecutedModel.ShouldBeSameAs(app.Model);
+        GatewayCommand command = gateway.ExecutedCommand.ShouldNotBeNull();
+        command.Mode.ShouldBe(GatewayRunMode.TrustIssue);
+        command.DeveloperName.ShouldBe("developer-a");
+        command.PeerName.ShouldBeNull();
+        command.ExportSource.ShouldBeNull();
+        gateway.ExecutedCancellationToken.ShouldBe(cancellation.Token);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Trust add arguments build and dispatch a validated gateway command")]
+    [InlineData("--mode", "trust-add", "--peer", "peer-a", "--from", "exports/peer-a/export.json")]
+    [InlineData("--mode=trust-add", "--peer=peer-a", "--from=exports/peer-a/export.json")]
+    public async Task RunAsync_TrustAddArguments_DispatchesValidatedCommand(params string[] args)
+    {
+        // Arrange
+        var gateway = new FakeCommandGateway();
+        IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse("appa"), args)
+            .UseGateway(gateway);
+        builder.AddResource(new FakeResource("worker"));
+        builder.RunMode.ShouldBe(GatewayRunMode.TrustAdd);
+        IApplication app = builder.Build();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+
+        // Act
+        await app.RunAsync(cancellation.Token);
+
+        // Assert
+        app.Model.RunMode.ShouldBe(GatewayRunMode.TrustAdd);
+        gateway.Calls.ShouldBe(new[] { "command" });
+        gateway.ExecutedModel.ShouldBeSameAs(app.Model);
+        GatewayCommand command = gateway.ExecutedCommand.ShouldNotBeNull();
+        command.Mode.ShouldBe(GatewayRunMode.TrustAdd);
+        command.DeveloperName.ShouldBeNull();
+        command.PeerName.ShouldBe("peer-a");
+        command.ExportSource.ShouldBe("exports/peer-a/export.json");
+        gateway.ExecutedCancellationToken.ShouldBe(cancellation.Token);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Trust commands name gateways without command support")]
+    [InlineData("--mode=trust-issue", "--developer=developer-a")]
+    [InlineData("--mode=trust-add", "--peer=peer-a", "--from=exports/peer-a/export.json")]
+    public async Task RunAsync_TrustCommandWithoutHandler_ThrowsNamedNotSupported(params string[] args)
+    {
+        // Arrange
+        var gateway = new FakeGateway("lifecycle-only");
+        IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse("appa"), args)
+            .UseGateway(gateway);
+        builder.AddResource(new FakeResource("worker"));
+        IApplication app = builder.Build();
+
+        // Act
+        NotSupportedException error = await Should.ThrowAsync<NotSupportedException>(
+            () => app.RunAsync(CancellationToken.None));
+
+        // Assert
+        error.Message.ShouldContain("lifecycle-only", Case.Sensitive);
+        error.Message.ShouldContain(app.Model.RunMode.ToString(), Case.Sensitive);
+        gateway.Calls.ShouldBeEmpty();
+    }
+
     [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Unimplemented modes refuse before gateway contact")]
     [InlineData(GatewayRunMode.Bootstrap)]
     [InlineData(GatewayRunMode.Render)]

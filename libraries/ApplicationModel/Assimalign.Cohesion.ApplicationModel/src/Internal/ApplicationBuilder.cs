@@ -154,7 +154,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
 
         IApplicationModel model = BuildModel(validate: true);
         _gateway.Validate(model);
-        return new CohesionApplication(model, _gateway);
+        return new CohesionApplication(model, _gateway, command: _options.Command);
     }
 
     private bool HasRealizedResource()

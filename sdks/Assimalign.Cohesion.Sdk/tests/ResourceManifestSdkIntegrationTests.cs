@@ -129,7 +129,13 @@ public sealed class ResourceManifestSdkIntegrationTests
         webLifecycle.GetProperty("maxReplicas").ValueKind.ShouldBe(JsonValueKind.Null);
         webLifecycle.GetProperty("stopGraceSeconds").GetInt32().ShouldBe(30);
         webLifecycle.GetProperty("restartPolicy").GetString().ShouldBe("OnFailure");
-        web.GetProperty("mounts").EnumerateArray().Single().GetProperty("name").GetString().ShouldBe("cache");
+        JsonElement[] webMounts = web.GetProperty("mounts").EnumerateArray().ToArray();
+        webMounts.Single(mount => mount.GetProperty("name").GetString() == "cache")
+            .GetProperty("kind").GetString().ShouldBe("Configuration");
+        JsonElement secretMount = webMounts.Single(
+            mount => mount.GetProperty("name").GetString() == "token");
+        secretMount.GetProperty("kind").GetString().ShouldBe("Secret");
+        secretMount.GetProperty("source").GetString().ShouldBe("parameter:api-token");
         web.GetProperty("settings").EnumerateArray().Single().GetProperty("key").GetString().ShouldBe("Orders:PageSize");
         web.GetProperty("properties").GetProperty("web.kind").GetString().ShouldBe("Api");
 

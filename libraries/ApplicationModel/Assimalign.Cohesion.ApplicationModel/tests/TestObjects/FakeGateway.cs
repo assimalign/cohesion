@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Tests;
 /// An <see cref="IApplicationGateway"/> that records its lifecycle calls so tests can assert
 /// start/stop ordering without a real platform.
 /// </summary>
-internal sealed class FakeGateway : IApplicationGateway
+internal class FakeGateway : IApplicationGateway
 {
     public FakeGateway(string name = "fake")
     {

@@ -314,11 +314,13 @@ internal static class GatewaySourceWriter
         source.AppendLine("public sealed class CohesionGatewayProviders");
         source.AppendLine("{");
         source.AppendLine("    private readonly string selected;");
+        source.AppendLine("    private readonly string[] args;");
         source.AppendLine("    private global::Assimalign.Cohesion.ApplicationModel.IApplicationGateway? gateway;");
         source.AppendLine();
-        source.AppendLine("    internal CohesionGatewayProviders(string selected)");
+        source.AppendLine("    internal CohesionGatewayProviders(string selected, string[] args)");
         source.AppendLine("    {");
         source.AppendLine("        this.selected = selected;");
+        source.AppendLine("        this.args = args;");
         source.AppendLine("    }");
         source.AppendLine();
         foreach (GatewayProvider provider in providers)
@@ -336,6 +338,7 @@ internal static class GatewaySourceWriter
             source.AppendLine();
             source.Append("        var options = new ").Append(provider.OptionsType).AppendLine("();");
             source.AppendLine("        configure?.Invoke(options);");
+            source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ApplicationGatewayCommandLine.Apply(options, args);");
             source.Append("        gateway = new ").Append(provider.GatewayType).AppendLine("(options);");
             source.AppendLine("    }");
             source.AppendLine();
@@ -351,13 +354,24 @@ internal static class GatewaySourceWriter
         source.AppendLine("        {");
         foreach (GatewayProvider provider in providers)
         {
-            source.Append("            ").Append(Literal(provider.Name.ToLowerInvariant())).Append(" => new ")
-                .Append(provider.GatewayType).AppendLine("(),");
+            source.Append("            ").Append(Literal(provider.Name.ToLowerInvariant())).Append(" => Create")
+                .Append(provider.MemberName).AppendLine("(),");
         }
         source.AppendLine("            _ => throw UnknownGateway(selected)");
         source.AppendLine("        };");
         source.AppendLine("    }");
         source.AppendLine();
+        foreach (GatewayProvider provider in providers)
+        {
+            source.Append("    private global::Assimalign.Cohesion.ApplicationModel.IApplicationGateway Create")
+                .Append(provider.MemberName).AppendLine("()");
+            source.AppendLine("    {");
+            source.Append("        var options = new ").Append(provider.OptionsType).AppendLine("();");
+            source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ApplicationGatewayCommandLine.Apply(options, args);");
+            source.Append("        return new ").Append(provider.GatewayType).AppendLine("(options);");
+            source.AppendLine("    }");
+            source.AppendLine();
+        }
         WriteUnknownGateway(source, providers, 4);
         source.AppendLine("}");
         source.AppendLine();
@@ -376,15 +390,8 @@ internal static class GatewaySourceWriter
         source.AppendLine("        public global::Assimalign.Cohesion.ApplicationModel.IApplicationBuilder UseGateway(string[] args)");
         source.AppendLine("        {");
         source.AppendLine("            string selected = ResolveGateway(builder, args);");
-        source.AppendLine("            return selected.ToLowerInvariant() switch");
-        source.AppendLine("            {");
-        foreach (GatewayProvider provider in providers)
-        {
-            source.Append("                ").Append(Literal(provider.Name.ToLowerInvariant()))
-                .Append(" => builder.UseGateway(new ").Append(provider.GatewayType).AppendLine("()),");
-        }
-        source.AppendLine("                _ => throw UnknownGateway(selected)");
-        source.AppendLine("            };");
+        source.AppendLine("            var gateways = new CohesionGatewayProviders(selected, args);");
+        source.AppendLine("            return builder.UseGateway(gateways.CreateSelected());");
         source.AppendLine("        }");
         source.AppendLine();
         source.AppendLine("        /// <summary>Selects and optionally configures the requested contributed gateway provider.</summary>");
@@ -397,7 +404,7 @@ internal static class GatewaySourceWriter
         source.AppendLine("        {");
         source.AppendLine("            global::System.ArgumentNullException.ThrowIfNull(configure);");
         source.AppendLine("            string selected = ResolveGateway(builder, args);");
-        source.AppendLine("            var gateways = new CohesionGatewayProviders(selected);");
+        source.AppendLine("            var gateways = new CohesionGatewayProviders(selected, args);");
         source.AppendLine("            configure(gateways);");
         source.AppendLine("            return builder.UseGateway(gateways.CreateSelected());");
         source.AppendLine("        }");

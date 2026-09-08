@@ -406,6 +406,13 @@ public sealed class ApplicationExportDocument
             throw new InvalidDataException("Application-export trustKey must be a JSON object when present.");
         }
 
+        if (TrustKey is JsonElement publicTrustKey &&
+            publicTrustKey.TryGetProperty("d", out _))
+        {
+            throw new InvalidDataException(
+                "Application-export trustKey must contain public key material only.");
+        }
+
         if (!string.Equals(Application, Model.Application, StringComparison.Ordinal))
         {
             throw new InvalidDataException(

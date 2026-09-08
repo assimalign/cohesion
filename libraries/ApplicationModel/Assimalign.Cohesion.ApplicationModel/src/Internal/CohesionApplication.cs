@@ -13,12 +13,18 @@ internal sealed class CohesionApplication : IApplication
 {
     private readonly IApplicationGateway _gateway;
     private readonly TimeSpan? _shutdownTimeout;
+    private readonly GatewayCommand? _command;
 
-    public CohesionApplication(IApplicationModel model, IApplicationGateway gateway, TimeSpan? shutdownTimeout = null)
+    public CohesionApplication(
+        IApplicationModel model,
+        IApplicationGateway gateway,
+        TimeSpan? shutdownTimeout = null,
+        GatewayCommand? command = null)
     {
         Model = model ?? throw new ArgumentNullException(nameof(model));
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
         _shutdownTimeout = shutdownTimeout;
+        _command = command;
     }
 
     public IApplicationModel Model { get; }
@@ -31,9 +37,27 @@ internal sealed class CohesionApplication : IApplication
             GatewayRunMode.Apply => _gateway.ReconcileAsync(Model, cancellationToken),
             GatewayRunMode.Teardown => _gateway.UninstallAsync(Model, cancellationToken),
             GatewayRunMode.Describe => ApplicationModelDocumentWriter.WriteAsync(Model, cancellationToken),
+            GatewayRunMode.TrustIssue or GatewayRunMode.TrustAdd => RunCommandAsync(cancellationToken),
             _ => throw new NotSupportedException(
                 $"Gateway run mode '{Model.RunMode}' is not implemented until its platform execution/compiler support is available. No gateway operation was attempted."),
         };
+    }
+
+    private Task RunCommandAsync(CancellationToken cancellationToken)
+    {
+        if (_command is null)
+        {
+            throw new InvalidOperationException(
+                $"Gateway run mode '{Model.RunMode}' has no validated command arguments.");
+        }
+
+        if (_gateway is not IApplicationGatewayCommandHandler handler)
+        {
+            throw new NotSupportedException(
+                $"Gateway '{_gateway.Name}' does not implement command mode '{Model.RunMode}'.");
+        }
+
+        return handler.ExecuteCommandAsync(Model, _command, cancellationToken);
     }
 
     private async Task RunCoreAsync(CancellationToken cancellationToken)

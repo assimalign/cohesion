@@ -92,7 +92,8 @@ public sealed class GatewaySdkIntegrationTests
         source.ShouldContain("AddAllResources()");
         source.ShouldContain("UseGateway(string[] args)");
         source.ShouldContain("global::System.Action<CohesionGatewayProviders> configure");
-        source.ShouldContain("new global::Assimalign.Cohesion.ApplicationModel.Gateway.LocalGateway()");
+        source.ShouldContain("ApplicationGatewayCommandLine.Apply(options, args)");
+        source.ShouldContain("new global::Assimalign.Cohesion.ApplicationModel.Gateway.LocalGateway(options)");
         source.ShouldNotContain(".InProcess(");
         source.ShouldNotContain("ApplicationModel.Gateway.InProcess");
 

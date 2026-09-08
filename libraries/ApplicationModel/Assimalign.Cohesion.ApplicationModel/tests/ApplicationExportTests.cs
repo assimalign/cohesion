@@ -333,6 +333,24 @@ public class ApplicationExportTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Application export rejects private trust-key material")]
+    public void ApplicationExportDocument_PrivateTrustKey_ShouldThrowInvalidData()
+    {
+        // Arrange
+        using JsonDocument trustKeyDocument = JsonDocument.Parse(
+            """{"kty":"EC","crv":"P-256","x":"x","y":"y","d":"private"}""");
+
+        // Act
+        InvalidDataException error = Should.Throw<InvalidDataException>(() =>
+            ApplicationExportDocument.Create(
+                CreateModel(),
+                "1.2.3",
+                trustKey: trustKeyDocument.RootElement));
+
+        // Assert
+        error.Message.ShouldContain("public key material only", Case.Insensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Application export rejects null embedded model resources with a typed data error")]
     public void ApplicationExportDocument_ModelContainsNullResource_ShouldThrowInvalidData()
     {

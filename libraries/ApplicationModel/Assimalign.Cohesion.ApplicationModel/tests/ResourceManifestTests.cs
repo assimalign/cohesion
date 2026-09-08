@@ -51,8 +51,13 @@ public class ResourceManifestTests
                   "name": "data",
                   "kind": "Volume",
                   "containerPath": "/cohesion/data",
-                  "size": "10Gi",
-                  "source": "parameter:data"
+                  "size": "10Gi"
+                },
+                {
+                  "name": "tls",
+                  "kind": "Secret",
+                  "containerPath": "/cohesion/tls",
+                  "source": "appa-secretstore:certs/appa-api"
                 }
               ],
               "settings": [
@@ -92,6 +97,8 @@ public class ResourceManifestTests
         manifest.ControlPlane.Path.ShouldBe("/cohesion/v1");
         manifest.Mounts[0].Kind.ShouldBe(ResourceMountKind.Volume);
         manifest.Mounts[0].Size.ShouldBe("10Gi");
+        manifest.Mounts[1].Kind.ShouldBe(ResourceMountKind.Secret);
+        manifest.Mounts[1].Source.ShouldBe("appa-secretstore:certs/appa-api");
         manifest.Settings[0].Type.ShouldBe("int");
         manifest.References[0].Endpoints.ShouldContain("db");
         manifest.Commands[0].Kind.ShouldBe("rezolvr.record");
@@ -237,6 +244,38 @@ public class ResourceManifestTests
 
         exception.Message.ShouldContain("data", Case.Sensitive);
         exception.Message.ShouldContain("size", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should require endpoint certificates to name Secret mounts")]
+    [InlineData("missing", ResourceMountKind.Secret, "does not name a declared mount")]
+    [InlineData("tls", ResourceMountKind.Configuration, "must be a Secret mount")]
+    public void Validate_WithInvalidCertificateMount_ShouldThrow(
+        string certificate,
+        ResourceMountKind mountKind,
+        string expectedMessage)
+    {
+        ResourceManifest baseline = CreateManifest();
+        ResourceManifest manifest = baseline with
+        {
+            Endpoints =
+            [
+                baseline.Endpoints[0] with { Certificate = certificate },
+            ],
+            Mounts =
+            [
+                new ResourceManifestMount
+                {
+                    Name = "tls",
+                    Kind = mountKind,
+                    ContainerPath = "/cohesion/tls",
+                    Source = "parameter:tls",
+                },
+            ],
+        };
+
+        InvalidDataException exception = Should.Throw<InvalidDataException>(() => manifest.Validate());
+
+        exception.Message.ShouldContain(expectedMessage, Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should reject an empty command kind")]

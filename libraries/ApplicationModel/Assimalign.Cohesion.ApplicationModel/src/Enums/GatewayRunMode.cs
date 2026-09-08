@@ -34,4 +34,14 @@ public enum GatewayRunMode
     /// Writes the selected gateway's compiled platform objects and exits.
     /// </summary>
     Render,
+
+    /// <summary>
+    /// Issues a short-lived export token for a developer identity and exits.
+    /// </summary>
+    TrustIssue,
+
+    /// <summary>
+    /// Adds a peer gateway from a trust export and exits.
+    /// </summary>
+    TrustAdd,
 }

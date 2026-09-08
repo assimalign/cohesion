@@ -375,14 +375,20 @@ public sealed class CohesionCreateResourceManifest : Task
                 Log.LogError($"CohesionMount '{name}' requires Size when Kind is Volume.");
             }
             string? source = NullIfEmpty(item.GetMetadata("Source"));
-            if (source is not null && !string.Equals(kind, "Configuration", StringComparison.OrdinalIgnoreCase))
+            if (source is not null && string.Equals(kind, "Volume", StringComparison.OrdinalIgnoreCase))
             {
-                Log.LogError($"CohesionMount '{name}' Source is valid only when Kind is Configuration.");
+                Log.LogError($"CohesionMount '{name}' Source is not valid when Kind is Volume.");
             }
             else if (source is not null && !IsMountSource(source))
             {
                 Log.LogError(
                     $"CohesionMount '{name}' Source must use parameter:<name>, <resource>:<key>, or literal:<value>.");
+            }
+            else if (source is not null &&
+                source.StartsWith("literal:", StringComparison.Ordinal) &&
+                !string.Equals(kind, "Configuration", StringComparison.OrdinalIgnoreCase))
+            {
+                Log.LogError($"CohesionMount '{name}' literal: Source is valid only when Kind is Configuration.");
             }
             string path = item.GetMetadata("ContainerPath").Trim();
             if (path.Length == 0)
@@ -719,15 +725,22 @@ public sealed class CohesionCreateResourceManifest : Task
                         $"Cohesion resource manifest '{path}' volume mount '{mountName}' does not declare size.");
                 }
                 string? source = OptionalString(mount, "source", path);
-                if (source is not null && !string.Equals(kind, "Configuration", StringComparison.OrdinalIgnoreCase))
+                if (source is not null && string.Equals(kind, "Volume", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidDataException(
-                        $"Cohesion resource manifest '{path}' mount '{mountName}' declares Source outside a Configuration mount.");
+                        $"Cohesion resource manifest '{path}' volume mount '{mountName}' declares Source.");
                 }
                 if (source is not null && !IsMountSource(source))
                 {
                     throw new InvalidDataException(
                         $"Cohesion resource manifest '{path}' mount '{mountName}' has invalid Source '{source}'.");
+                }
+                if (source is not null &&
+                    source.StartsWith("literal:", StringComparison.Ordinal) &&
+                    !string.Equals(kind, "Configuration", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException(
+                        $"Cohesion resource manifest '{path}' secret mount '{mountName}' cannot use a literal: Source.");
                 }
                 result.Mounts.Add(new ResourceMountModel(
                     mountName,
@@ -1210,7 +1223,8 @@ public sealed class CohesionCreateResourceManifest : Task
         }
 
         int separator = source.IndexOf(':');
-        return separator > 0 && separator < source.Length - 1;
+        return separator > 0 && separator < source.Length - 1 &&
+            source.IndexOf(':', separator + 1) < 0;
     }
 
     private static bool IsOneOf(string value, params string[] choices)

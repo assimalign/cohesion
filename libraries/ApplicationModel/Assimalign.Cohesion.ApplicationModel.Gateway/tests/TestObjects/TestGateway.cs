@@ -16,6 +16,7 @@ internal sealed class TestGateway : ApplicationGateway
     private readonly IApplicationResourceStateManager _state;
     private readonly IReadOnlyList<IApplicationResourceController> _controllers;
     private readonly Func<IApplicationResourceDescriptor, IResourceControlContext, CancellationToken, ValueTask<ResourceInputs>>? _inputResolver;
+    private readonly Func<IApplicationModel, ResourceManifest, Uri?>? _ownSecretStoreEndpointResolver;
     private readonly ResourceName _name;
 
     public List<string> Gathered { get; } = new();
@@ -26,13 +27,15 @@ internal sealed class TestGateway : ApplicationGateway
         TimeSpan? readinessBudget = null,
         ApplicationGatewayOptions? options = null,
         Func<IApplicationResourceDescriptor, IResourceControlContext, CancellationToken, ValueTask<ResourceInputs>>? inputResolver = null,
-        ResourceName? name = null)
+        ResourceName? name = null,
+        Func<IApplicationModel, ResourceManifest, Uri?>? ownSecretStoreEndpointResolver = null)
         : base(Configure(options, readinessBudget))
     {
         _state = state;
         _controllers = controllers;
         _inputResolver = inputResolver;
         _name = name ?? (ResourceName)"test";
+        _ownSecretStoreEndpointResolver = ownSecretStoreEndpointResolver;
     }
 
     public override ResourceName Name => _name;
@@ -54,6 +57,15 @@ internal sealed class TestGateway : ApplicationGateway
         _inputResolver is null
             ? base.ResolveInputsAsync(descriptor, context, cancellationToken)
             : _inputResolver(descriptor, context, cancellationToken);
+
+    protected override bool TryResolveOwnSecretStoreEndpoint(
+        IApplicationModel model,
+        ResourceManifest store,
+        out Uri? endpoint)
+    {
+        endpoint = _ownSecretStoreEndpointResolver?.Invoke(model, store);
+        return endpoint is not null;
+    }
 
     protected override Task PublishApplicationExportAsync(
         ApplicationExportDocument document,

@@ -87,10 +87,58 @@ internal sealed class ExecutableResourceOptionsBuilder : IExecutableResourceOpti
             ArgumentException.ThrowIfNullOrWhiteSpace(endpoint.Name);
             ArgumentException.ThrowIfNullOrWhiteSpace(endpoint.Scheme);
 
+            if (endpoint.Port is < 0 or > 65535)
+            {
+                throw new InvalidOperationException(
+                    $"Executable endpoint '{endpoint.Name}' has invalid port '{endpoint.Port}'; " +
+                    "expected zero for allocation or a value from 1 through 65535.");
+            }
+
             if (!names.Add(endpoint.Name))
             {
                 throw new InvalidOperationException($"Executable endpoint '{endpoint.Name}' is declared more than once.");
             }
+        }
+
+        ValidateProbe("readiness", ReadinessProbe, names);
+        ValidateProbe("startup", StartupProbe, names);
+        ValidateProbe("liveness", LivenessProbe, names);
+    }
+
+    private static void ValidateProbe(
+        string role,
+        IProbeSpec? probe,
+        IReadOnlySet<string> endpointNames)
+    {
+        if (probe is null)
+        {
+            return;
+        }
+
+        if (!Enum.IsDefined(probe.Kind))
+        {
+            throw new InvalidOperationException(
+                $"The executable {role} probe has unsupported kind '{probe.Kind}'.");
+        }
+
+        if (probe.Kind is ProbeKind.Http or ProbeKind.Tcp && probe.Address is null &&
+            (string.IsNullOrWhiteSpace(probe.Endpoint) || !endpointNames.Contains(probe.Endpoint)))
+        {
+            throw new InvalidOperationException(
+                $"The executable {role} probe endpoint '{probe.Endpoint}' does not name a declared endpoint.");
+        }
+
+        if (probe.Kind == ProbeKind.Exec &&
+            (probe.Command.Count == 0 || string.IsNullOrWhiteSpace(probe.Command[0])))
+        {
+            throw new InvalidOperationException(
+                $"The executable {role} exec probe must declare a non-empty command.");
+        }
+
+        if (probe.Kind == ProbeKind.Grpc)
+        {
+            throw new InvalidOperationException(
+                $"The executable {role} probe cannot use gRPC because IProbeSpec does not carry a gRPC service name.");
         }
     }
 }
