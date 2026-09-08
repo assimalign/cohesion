@@ -1,0 +1,40 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnablePreviewFeatures>true</EnablePreviewFeatures>
+    <IsAotCompatible>true</IsAotCompatible>
+    <RootNamespace>GatewaySmoke</RootNamespace>
+    <CohesionApplicationModel>disabled</CohesionApplicationModel>
+    <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
+    <CohesionResourceName>gateway-smoke-gateway</CohesionResourceName>
+    <CohesionGateways>Local;JitTest</CohesionGateways>
+    <CohesionIsApplicationSet>true</CohesionIsApplicationSet>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionResourceReference Include="..\GatewaySmokeWeb\GatewaySmokeWeb.csproj" />
+    <CohesionResourceReference Include="..\GatewaySmokeDatabase\GatewaySmokeDatabase.csproj" />
+    <CohesionGatewayProvider Include="JitTest"
+      Name="jit-test"
+      GatewayType="global::Assimalign.Cohesion.ApplicationModel.Gateway.LocalGateway"
+      OptionsType="global::Assimalign.Cohesion.ApplicationModel.Gateway.LocalGatewayOptions"
+      RequiresJit="true" />
+  </ItemGroup>
+
+  <Target Name="CaptureGatewayReferenceItems" AfterTargets="Build">
+    <WriteLinesToFile
+      File="$(BaseIntermediateOutputPath)gateway-project-references.txt"
+      Lines="@(ProjectReference->'%(Filename)|%(ReferenceOutputAssembly)|%(OutputItemType)')"
+      Overwrite="true" />
+    <WriteLinesToFile
+      File="$(BaseIntermediateOutputPath)gateway-reference-paths.txt"
+      Lines="@(ReferencePath->'%(Filename)')"
+      Overwrite="true" />
+    <WriteLinesToFile
+      File="$(BaseIntermediateOutputPath)gateway-aot.txt"
+      Lines="$(CohesionGatewayRequiresJit)|$(PublishAot)"
+      Overwrite="true" />
+  </Target>
+
+</Project>

@@ -49,7 +49,7 @@
 		shared reference converter projects these canonical items after this target
 		has evaluated.
 	-->
-	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(CohesionResourceApplicationModel)' != ''">
+	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(CohesionResourceApplicationModel)' != '' and '$(CohesionSkipResourceApplicationModelReference)' != 'true'">
 		<_CohesionResourceApplicationModelProject
 			Include="$(CohesionRepositoryDirectory)resources\**\src\$(CohesionResourceApplicationModel).csproj"
 			Condition="'$(CohesionRepositoryDirectory)' != ''" />
@@ -90,7 +90,12 @@
 		<ProjectReference
 			Include="@(_CohesionResourceProjectReference)"
 			ReferenceOutputAssembly="false"
-			OutputItemType="CohesionResourceManifest" />
+			OutputItemType="CohesionResourceManifest"
+			Condition="'$(CohesionResourceReferencesAreRuntime)' != 'true'" />
+		<ProjectReference
+			Include="@(_CohesionResourceProjectReference)"
+			ReferenceOutputAssembly="true"
+			Condition="'$(CohesionResourceReferencesAreRuntime)' == 'true'" />
 		<PackageReference
 			Include="@(_CohesionResourcePackageReference)"
 			PrivateAssets="all" />
@@ -254,7 +259,7 @@
 			</_CohesionGetManifestResult>
 			<_CohesionGetManifestResult
 				Include="@(_CohesionReferencedManifest)"
-				Condition="'$(_CohesionResourceEnabled)' == 'true' and ('%(_CohesionReferencedManifest.IsSelf)' == 'true' or '%(_CohesionReferencedManifest.Application)' == '$(_CohesionResolvedApplicationName)')">
+				Condition="'$(_CohesionResourceEnabled)' == 'true'">
 				<IsSelf>false</IsSelf>
 			</_CohesionGetManifestResult>
 		</ItemGroup>

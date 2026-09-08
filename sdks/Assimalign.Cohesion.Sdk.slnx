@@ -33,6 +33,13 @@
 	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.EventHub/Tasks/">
 		<Project Path="Assimalign.Cohesion.Sdk.EventHub/Tasks/Assimalign.Cohesion.Sdk.EventHub.Tasks.csproj" />
 	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Gateway/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Gateway/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.Gateway/Tasks/Assimalign.Cohesion.Sdk.Gateway.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Gateway/tests/">
+		<Project Path="Assimalign.Cohesion.Sdk.Gateway/tests/Assimalign.Cohesion.Sdk.Gateway.Tests.csproj" />
+	</Folder>
 	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.IdentityHub/" />
 	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.IdentityHub/Tasks/">
 		<Project Path="Assimalign.Cohesion.Sdk.IdentityHub/Tasks/Assimalign.Cohesion.Sdk.IdentityHub.Tasks.csproj" />

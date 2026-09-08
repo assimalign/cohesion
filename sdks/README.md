@@ -1,25 +1,28 @@
 ## Cohesion SDKs
 
-Cohesion ships a family of MSBuild SDKs, one per application domain. They chain
-through a common base (`Assimalign.Cohesion.Sdk`), which itself chains through
-`Microsoft.NET.Sdk`. Pick the SDK that matches what you're building:
+Cohesion ships a family of MSBuild SDKs: one per resource area and one for
+application gateways. They chain through a common base
+(`Assimalign.Cohesion.Sdk`), which itself chains through `Microsoft.NET.Sdk`.
+Pick the SDK that matches what you're building:
 
 | SDK | Use when… |
 | --- | --- |
 | `Assimalign.Cohesion.Sdk`          | Generic Cohesion app — services, hosts, libraries with no domain affinity. |
 | `Assimalign.Cohesion.Sdk.Web`      | HTTP / web-surface application. |
 | `Assimalign.Cohesion.Sdk.Database` | Database-resident application (migrations, seeded schemas, etc.). |
+| `Assimalign.Cohesion.Sdk.Gateway`  | Application gateway generated from resource manifests and contributed providers. |
 
-Every resource domain under `resources/` has a matching SDK (`Sdk.ApiManager`,
-`Sdk.ConfigurationStore`, `Sdk.EventHub`, …) — the three above are just the most
-common entry points. The full set mirrors the folders under `sdks/`.
+Every resource area under `resources/` has a matching SDK (`Sdk.ApiManager`,
+`Sdk.ConfigurationStore`, `Sdk.EventHub`, …). `Sdk.Gateway` is deliberately not
+a resource-area SDK: it is the NuGet-only orchestration composition root and has
+no matching `Assimalign.Cohesion.App.Gateway` framework.
 
 ## Consumption
 
-Pin the SDK version inline:
+The base SDK can be pinned inline:
 
 ```xml
-<Project Sdk="Assimalign.Cohesion.Sdk.Web/10.0.0">
+<Project Sdk="Assimalign.Cohesion.Sdk/10.0.1-preview.3">
     <PropertyGroup>
         <OutputType>Exe</OutputType>
         <TargetFramework>net10.0</TargetFramework>
@@ -27,14 +30,19 @@ Pin the SDK version inline:
 </Project>
 ```
 
-…or factor the version out into `global.json`:
+Layered Cohesion SDKs import the base SDK without an inline version. Pin both the
+selected SDK and `Assimalign.Cohesion.Sdk` in `global.json`; a Gateway consumer's
+minimum pin set is:
 
 ```json
 {
+    "sdk": {
+        "version": "10.0.300",
+        "rollForward": "latestFeature"
+    },
     "msbuild-sdks": {
-        "Assimalign.Cohesion.Sdk":          "10.0.0",
-        "Assimalign.Cohesion.Sdk.Web":      "10.0.0",
-        "Assimalign.Cohesion.Sdk.Database": "10.0.0"
+        "Assimalign.Cohesion.Sdk":         "10.0.1-preview.3",
+        "Assimalign.Cohesion.Sdk.Gateway": "10.0.1-preview.3"
     }
 }
 ```
@@ -44,10 +52,40 @@ that handles `Microsoft.NET.Sdk.Web`, `Microsoft.NET.Sdk.Worker`, etc. Works in
 Visual Studio, Rider, the dotnet CLI, and any other MSBuild client with no
 installer, no admin rights, and no custom resolver.
 
+## Gateway SDK boundary
+
+`Assimalign.Cohesion.Sdk.Gateway` always enables `CohesionApplicationModel` and
+builds an executable Composite resource. Its MSBuild task reads referenced
+`resource.json` documents and generates `Gateway.CreateBuilder(args)`, manifest
+constants, same-application `Add*` verbs, boundary-crossing `Externals`, referenced
+gateway `Applications`, `AddAllResources()`, and provider-driven `UseGateway(args)`.
+
+Providers are not discovered by reflection. Packages contribute
+`CohesionGatewayProvider` items through `buildTransitive` props; the
+semicolon-delimited `<CohesionGateways>` property selects which provider packages
+are restored. Each item names its provider, gateway type, options type, and whether
+the package requires JIT. Cohesion source therefore never names a platform type.
+
+The orchestration plane is delivered through PackageReferences, never an
+`App.Gateway` framework. In-process composition is the narrow exception that adds
+the explicit resource-area frameworks needed by nested project references.
+
+The current implementation remains guarded while Gateway.InProcess,
+Gateway.ControlPlane, external Docker/Kubernetes provider contributions, and a
+first-restore manifest dependency channel are incomplete. Web and Database are the
+only typed ApplicationModel mappings today. The transitional SDK dependency set
+must not be expanded to every area merely to hide the restore-order gap; see
+[`Sdk.Gateway` design](./Assimalign.Cohesion.Sdk.Gateway/docs/DESIGN.md) for the
+required restore-visible producer contract and release gates.
+
 ## Implicit Cohesion.App framework reference
 
-All Cohesion SDKs implicitly include `<FrameworkReference Include="Assimalign.Cohesion.App" />`.
-That single reference resolves — via the `KnownFrameworkReference` registration
+The base and resource-area Cohesion SDKs implicitly include
+`<FrameworkReference Include="Assimalign.Cohesion.App" />`. `Sdk.Gateway` is the
+exception: it suppresses that implicit reference to preserve its NuGet-only
+orchestration boundary, and in-process composition adds required area frameworks
+explicitly. The base framework reference resolves — via the
+`KnownFrameworkReference` registration
 in [Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props](./Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props) —
 to two NuGet packages:
 

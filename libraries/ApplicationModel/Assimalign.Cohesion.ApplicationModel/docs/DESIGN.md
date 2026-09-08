@@ -45,6 +45,11 @@ The internal application-environment implementation delegates process resolution
 `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"` precedence rule out of the
 orchestration package.
 
+`CohesionApplicationAttribute` records the SDK-selected application name in gateway assembly
+metadata for build and tooling inspection. It is not a runtime discovery mechanism: generated
+gateway code supplies the same identity directly to `Application.CreateBuilder(ApplicationName,
+args)`, preserving the package's no-reflection boundary.
+
 ## Design intent and why-this-not-that
 
 - **`IApplication` does not extend a host abstraction.** A host runs inside one

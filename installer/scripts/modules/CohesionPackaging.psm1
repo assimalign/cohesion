@@ -301,6 +301,7 @@ $script:CohesionReleaseSdk = @(
     'Assimalign.Cohesion.Sdk'
     'Assimalign.Cohesion.Sdk.Web'
     'Assimalign.Cohesion.Sdk.Database'
+    'Assimalign.Cohesion.Sdk.Gateway'
     'Assimalign.Cohesion.Sdk.ApiManager'
     'Assimalign.Cohesion.Sdk.ConfigurationStore'
     'Assimalign.Cohesion.Sdk.EmailHub'
@@ -424,8 +425,6 @@ $script:CohesionCiMatrixExclusion = [ordered]@{
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/src/Assimalign.Cohesion.Scheduler.Cron.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/src/Assimalign.Cohesion.Scheduler.Timer.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'resources/Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/Hosting1.csproj' = 'Example project is not an independently shipped CI matrix entry.'
-    'sdks/Assimalign.Cohesion.Sdk.Database/Tasks/Assimalign.Cohesion.Sdk.Database.Tasks.csproj' = 'SDK task projects await the dedicated sdk-smoke workflow in design item 4.'
-    'sdks/Assimalign.Cohesion.Sdk/Tasks/Assimalign.Cohesion.Sdk.Tasks.csproj' = 'SDK task projects await the dedicated sdk-smoke workflow in design item 4.'
     'tooling/Cli/src/Assimalign.Cohesion.Cli/Assimalign.Cohesion.Cli.csproj' = 'Legacy tooling has no dedicated CI workflow; onboarding requires a separate release decision.'
     'tooling/scripts/src/Assimalign.Cohesion.DevScripts/Assimalign.Cohesion.DevScripts.csproj' = 'Legacy tooling has no dedicated CI workflow; onboarding requires a separate release decision.'
 }

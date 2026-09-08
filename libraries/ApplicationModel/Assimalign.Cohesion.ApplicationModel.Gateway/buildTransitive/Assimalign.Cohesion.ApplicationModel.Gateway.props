@@ -1,0 +1,15 @@
+<Project>
+	<!--
+		Provider metadata is the only contract consumed by Sdk.Gateway. Generated
+		gateway code remains independent of platform types until a provider package
+		contributes one of these items.
+	-->
+	<ItemGroup>
+		<CohesionGatewayProvider Include="Local">
+			<Name>local</Name>
+			<GatewayType>global::Assimalign.Cohesion.ApplicationModel.Gateway.LocalGateway</GatewayType>
+			<OptionsType>global::Assimalign.Cohesion.ApplicationModel.Gateway.LocalGatewayOptions</OptionsType>
+			<RequiresJit>false</RequiresJit>
+		</CohesionGatewayProvider>
+	</ItemGroup>
+</Project>

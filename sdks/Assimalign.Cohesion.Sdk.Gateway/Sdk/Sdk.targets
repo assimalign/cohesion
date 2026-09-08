@@ -1,0 +1,70 @@
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<!--
+		These values are deliberately forced after the consuming project has been
+		evaluated and before the base resource targets compute their enabled state.
+	-->
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<CohesionApplicationModel>enabled</CohesionApplicationModel>
+		<CohesionResourceKind>Composite</CohesionResourceKind>
+		<CohesionResourceApplicationModel>Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane</CohesionResourceApplicationModel>
+		<CohesionResourceReferencesAreRuntime Condition="'$(CohesionGatewayInProcess)' == 'true'">true</CohesionResourceReferencesAreRuntime>
+
+		<_CohesionGatewayInProcessSelected>$([System.Text.RegularExpressions.Regex]::IsMatch('$(CohesionGateways)', '(^|;)\s*InProcess\s*(;|$)', System.Text.RegularExpressions.RegexOptions.IgnoreCase))</_CohesionGatewayInProcessSelected>
+		<_CohesionGatewayDockerSelected>$([System.Text.RegularExpressions.Regex]::IsMatch('$(CohesionGateways)', '(^|;)\s*Docker\s*(;|$)', System.Text.RegularExpressions.RegexOptions.IgnoreCase))</_CohesionGatewayDockerSelected>
+		<_CohesionGatewayKubernetesSelected>$([System.Text.RegularExpressions.Regex]::IsMatch('$(CohesionGateways)', '(^|;)\s*Kubernetes\s*(;|$)', System.Text.RegularExpressions.RegexOptions.IgnoreCase))</_CohesionGatewayKubernetesSelected>
+
+		<_CohesionGatewayInProcessProject>$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway.InProcess\src\Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.csproj</_CohesionGatewayInProcessProject>
+		<_CohesionGatewayControlPlaneProject>$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane\src\Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.csproj</_CohesionGatewayControlPlaneProject>
+		<_CohesionGatewayInProcessAvailable Condition="Exists('$(_CohesionGatewayInProcessProject)')">true</_CohesionGatewayInProcessAvailable>
+		<_CohesionGatewayInProcessAvailable Condition="'$(_CohesionGatewayInProcessAvailable)' == ''">false</_CohesionGatewayInProcessAvailable>
+		<_CohesionGatewayControlPlaneAvailable Condition="Exists('$(_CohesionGatewayControlPlaneProject)')">true</_CohesionGatewayControlPlaneAvailable>
+		<_CohesionGatewayControlPlaneAvailable Condition="'$(_CohesionGatewayControlPlaneAvailable)' == ''">false</_CohesionGatewayControlPlaneAvailable>
+	</PropertyGroup>
+
+	<!--
+		The resolved-manifest dependency descriptor required for selective first restore
+		does not exist yet. Keep the finite set of shipped typed planners and protected
+		mount clients restore-visible; CohesionCreateResourceVerbs still reports the
+		exact manifest-derived sets for validation.
+	-->
+	<ItemGroup>
+		<!-- Refresh metadata whose consumer-facing properties are set after Sdk.props. -->
+		<CohesionEndpoint Update="admin" ContainerPort="$(CohesionGatewayAdminPort)" />
+		<CohesionGatewayPackage Update="Local;InProcess" Version="$(CohesionVersion)" />
+		<CohesionGatewayPackage Update="Docker;Kubernetes" Version="$(CohesionPlatformsVersion)" />
+		<CohesionResourceProperty Include="composite.applicationSet" Value="true" Condition="'$(CohesionIsApplicationSet)' == 'true'" />
+
+		<_CohesionGatewayInProcessPackage Include="@(CohesionGatewayPackage->WithMetadataValue('Identity', 'InProcess'))" />
+		<_CohesionGatewayDockerPackage Include="@(CohesionGatewayPackage->WithMetadataValue('Identity', 'Docker'))" />
+		<_CohesionGatewayKubernetesPackage Include="@(CohesionGatewayPackage->WithMetadataValue('Identity', 'Kubernetes'))" />
+
+		<_CohesionGatewayWebApplicationModelProject Include="$(CohesionRepositoryDirectory)resources\Web\Assimalign.Cohesion.Web.ApplicationModel\src\Assimalign.Cohesion.Web.ApplicationModel.csproj" Condition="Exists('$(CohesionRepositoryDirectory)resources\Web\Assimalign.Cohesion.Web.ApplicationModel\src\Assimalign.Cohesion.Web.ApplicationModel.csproj')" />
+		<_CohesionGatewayDatabaseApplicationModelProject Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.ApplicationModel\src\Assimalign.Cohesion.Database.ApplicationModel.csproj" Condition="Exists('$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.ApplicationModel\src\Assimalign.Cohesion.Database.ApplicationModel.csproj')" />
+		<_CohesionGatewaySecretStoreClientProject Include="$(CohesionRepositoryDirectory)resources\SecretStore\Assimalign.Cohesion.SecretStore.Client\src\Assimalign.Cohesion.SecretStore.Client.csproj" Condition="Exists('$(CohesionRepositoryDirectory)resources\SecretStore\Assimalign.Cohesion.SecretStore.Client\src\Assimalign.Cohesion.SecretStore.Client.csproj')" />
+		<_CohesionGatewayConfigurationStoreClientProject Include="$(CohesionRepositoryDirectory)resources\ConfigurationStore\Assimalign.Cohesion.ConfigurationStore.Client\src\Assimalign.Cohesion.ConfigurationStore.Client.csproj" Condition="Exists('$(CohesionRepositoryDirectory)resources\ConfigurationStore\Assimalign.Cohesion.ConfigurationStore.Client\src\Assimalign.Cohesion.ConfigurationStore.Client.csproj')" />
+
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ApplicationModel" ProjectPath="@(_CohesionGatewayWebApplicationModelProject)" Condition="'@(_CohesionGatewayWebApplicationModelProject)' != ''" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.ApplicationModel" ProjectPath="@(_CohesionGatewayDatabaseApplicationModelProject)" Condition="'@(_CohesionGatewayDatabaseApplicationModelProject)' != ''" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.SecretStore.Client" ProjectPath="@(_CohesionGatewaySecretStoreClientProject)" Condition="'@(_CohesionGatewaySecretStoreClientProject)' != ''" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore.Client" ProjectPath="@(_CohesionGatewayConfigurationStoreClientProject)" Condition="'@(_CohesionGatewayConfigurationStoreClientProject)' != ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.Web.ApplicationModel" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayWebApplicationModelProject)' == ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.Database.ApplicationModel" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayDatabaseApplicationModelProject)' == ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.SecretStore.Client" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewaySecretStoreClientProject)' == ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.ConfigurationStore.Client" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayConfigurationStoreClientProject)' == ''" />
+
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane" ProjectPath="$(_CohesionGatewayControlPlaneProject)" Condition="'$(_CohesionGatewayControlPlaneAvailable)' == 'true' and '$(CohesionRepositoryDirectory)' != ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane" Version="$(CohesionVersion)" Condition="'$(_CohesionGatewayControlPlaneAvailable)' == 'true' and '$(CohesionRepositoryDirectory)' == ''" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" ProjectPath="$(_CohesionGatewayInProcessProject)" Condition="('$(_CohesionGatewayInProcessSelected)' == 'True' or '$(CohesionGatewayInProcess)' == 'true') and '$(_CohesionGatewayInProcessAvailable)' == 'true' and '$(CohesionRepositoryDirectory)' != ''" />
+		<CohesionPackageReference Include="@(_CohesionGatewayInProcessPackage->'%(PackageId)')" Version="%(_CohesionGatewayInProcessPackage.Version)" Condition="('$(_CohesionGatewayInProcessSelected)' == 'True' or '$(CohesionGatewayInProcess)' == 'true') and '$(_CohesionGatewayInProcessAvailable)' == 'true' and '$(CohesionRepositoryDirectory)' == ''" />
+
+		<CohesionPackageReference Include="@(_CohesionGatewayDockerPackage->'%(PackageId)')" Version="%(_CohesionGatewayDockerPackage.Version)" Condition="'$(_CohesionGatewayDockerSelected)' == 'True'" />
+		<CohesionPackageReference Include="@(_CohesionGatewayKubernetesPackage->'%(PackageId)')" Version="%(_CohesionGatewayKubernetesPackage.Version)" Condition="'$(_CohesionGatewayKubernetesSelected)' == 'True'" />
+
+		<FrameworkReference Include="Assimalign.Cohesion.App.Web" Condition="'$(CohesionGatewayInProcess)' == 'true'" />
+		<FrameworkReference Include="Assimalign.Cohesion.App.Database" Condition="'$(CohesionGatewayInProcess)' == 'true'" />
+	</ItemGroup>
+
+	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.targets" />
+	<Import Project="..\Targets\Sdk.Gateway.targets" />
+</Project>

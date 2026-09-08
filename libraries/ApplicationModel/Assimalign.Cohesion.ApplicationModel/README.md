@@ -5,6 +5,11 @@ model, importing resources owned by another application, and composing several a
 models through one gateway. The package contains no hosting, transport, configuration, or
 platform implementation and remains NativeAOT-safe.
 
+The gateway SDK records its build-selected identity as
+`[assembly: CohesionApplication("appa")]` for build and tooling inspection. This metadata is
+descriptive only: generated `Gateway.CreateBuilder(args)` passes the same name directly to
+`Application.CreateBuilder(ApplicationName, args)`, and runtime code does not reflect the attribute.
+
 ## Build and run one model
 
 ```csharp

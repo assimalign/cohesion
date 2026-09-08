@@ -1,0 +1,100 @@
+<Project>
+	<PropertyGroup>
+		<CohesionGatewaySourcePath Condition="'$(CohesionGatewaySourcePath)' == ''">$(IntermediateOutputPath)cohesion/Gateway.g.cs</CohesionGatewaySourcePath>
+		<ValidateExecutableReferencesMatchSelfContained Condition="'$(CohesionGatewayInProcess)' == 'true'">false</ValidateExecutableReferencesMatchSelfContained>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Compile Include="$(CohesionGatewaySourcePath)" Link="Gateway.g.cs" Visible="false" />
+	</ItemGroup>
+
+	<PropertyGroup>
+		<CohesionGatewayRequiresJit Condition="'$(CohesionGatewayRequiresJit)' == ''">false</CohesionGatewayRequiresJit>
+		<PublishAot Condition="'$(CohesionGatewayAot)' == 'true'">true</PublishAot>
+		<PublishAot Condition="'$(CohesionGatewayAot)' == 'false'">false</PublishAot>
+		<PublishAot Condition="'$(CohesionGatewayAot)' == 'auto' and '$(CohesionGatewayRequiresJit)' == 'true'">false</PublishAot>
+		<PublishAot Condition="'$(CohesionGatewayAot)' == 'auto' and '$(CohesionGatewayRequiresJit)' != 'true'">true</PublishAot>
+	</PropertyGroup>
+
+	<Target
+		Name="CohesionResolveGatewayAot"
+		BeforeTargets="CollectPackageReferences;ProcessFrameworkReferences;PrepareForBuild;Publish">
+		<ItemGroup>
+			<_CohesionGatewayJitProvider
+				Include="@(CohesionGatewayProvider)"
+				Condition="'%(CohesionGatewayProvider.RequiresJit)' == 'true'" />
+		</ItemGroup>
+		<PropertyGroup>
+			<CohesionGatewayRequiresJit Condition="'@(_CohesionGatewayJitProvider)' != ''">true</CohesionGatewayRequiresJit>
+			<CohesionGatewayRequiresJit Condition="'@(_CohesionGatewayJitProvider)' == ''">false</CohesionGatewayRequiresJit>
+			<PublishAot Condition="'$(CohesionGatewayAot)' == 'true'">true</PublishAot>
+			<PublishAot Condition="'$(CohesionGatewayAot)' == 'false'">false</PublishAot>
+			<PublishAot Condition="'$(CohesionGatewayAot)' == 'auto' and '$(CohesionGatewayRequiresJit)' == 'true'">false</PublishAot>
+			<PublishAot Condition="'$(CohesionGatewayAot)' == 'auto' and '$(CohesionGatewayRequiresJit)' != 'true'">true</PublishAot>
+		</PropertyGroup>
+	</Target>
+
+	<Target
+		Name="CohesionValidateGatewayConfiguration"
+		BeforeTargets="PrepareForBuild;CoreCompile"
+		DependsOnTargets="CohesionResolveGatewayAot">
+		<Error Condition="'$(CohesionApplicationName)' == ''" Text="Sdk.Gateway requires CohesionApplicationName." />
+		<Error Condition="'$(CohesionGatewayAot)' != 'auto' and '$(CohesionGatewayAot)' != 'true' and '$(CohesionGatewayAot)' != 'false'" Text="CohesionGatewayAot must be auto, true, or false." />
+		<Error Condition="'$(CohesionGatewayInProcess)' != 'true' and '$(CohesionGatewayInProcess)' != 'false'" Text="CohesionGatewayInProcess must be true or false." />
+		<Error
+			Condition="('$(_CohesionGatewayInProcessSelected)' == 'True' or '$(CohesionGatewayInProcess)' == 'true') and '$(_CohesionGatewayInProcessAvailable)' != 'true'"
+			Text="Sdk.Gateway selected InProcess, but Assimalign.Cohesion.ApplicationModel.Gateway.InProcess is not present in this checkout (design item 24). Remove InProcess or land item 24 before enabling it." />
+		<Message
+			Condition="'$(_CohesionGatewayControlPlaneAvailable)' != 'true'"
+			Importance="High"
+			Text="Sdk.Gateway: Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane is not present in this checkout (design item 23a); the generated gateway manifest records the contract, but its gateway control plane cannot be hosted until that package lands." />
+		<Message
+			Condition="'$(CohesionGatewayAot)' != 'auto' or '$(CohesionGatewayRequiresJit)' == 'true'"
+			Importance="High"
+			Text="Sdk.Gateway AOT selection: CohesionGatewayAot=$(CohesionGatewayAot), CohesionGatewayRequiresJit=$(CohesionGatewayRequiresJit), PublishAot=$(PublishAot)." />
+	</Target>
+
+	<Target
+		Name="CohesionCreateResourceVerbs"
+		AfterTargets="ResolveProjectReferences"
+		BeforeTargets="CoreCompile"
+		DependsOnTargets="CohesionResolveResourceReferences"
+		Inputs="$(MSBuildProjectFullPath);$(MSBuildAllProjects);@(_CohesionReferencedManifest);@(CohesionResourceManifest);@(CohesionGatewayProvider)"
+		Outputs="$(CohesionGatewaySourcePath)">
+		<CohesionCreateResourceVerbs
+			SourceOutputPath="$(CohesionGatewaySourcePath)"
+			ProjectFullPath="$(MSBuildProjectFullPath)"
+			ApplicationName="$(CohesionApplicationName)"
+			Gateways="$(CohesionGateways)"
+			ResourceReferences="@(CohesionResourceReference)"
+			ReferencedManifests="@(_CohesionReferencedManifest);@(CohesionResourceManifest->WithMetadataValue('IsSelf', 'false'))"
+			ResourceKinds="@(CohesionGatewayResourceKind)"
+			GatewayProviders="@(CohesionGatewayProvider)"
+			ClientKinds="@(CohesionGatewayClientKind)">
+			<Output TaskParameter="RequiredApplicationModels" ItemName="_CohesionGatewayRequiredApplicationModel" />
+			<Output TaskParameter="RequiredClientPackages" ItemName="_CohesionGatewayRequiredClientPackage" />
+		</CohesionCreateResourceVerbs>
+		<Message Importance="Low" Text="Sdk.Gateway manifest application models: @(_CohesionGatewayRequiredApplicationModel)." />
+		<Message Importance="Low" Text="Sdk.Gateway manifest mount clients: @(_CohesionGatewayRequiredClientPackage)." />
+		<ItemGroup>
+			<FileWrites Include="$(CohesionGatewaySourcePath)" />
+		</ItemGroup>
+	</Target>
+
+	<Target Name="CohesionValidateGatewayHostingIsolation" AfterTargets="ResolveAssemblyReferences" Condition="'$(CohesionGatewayInProcess)' != 'true'">
+		<ItemGroup>
+			<_CohesionForbiddenGatewayHostingReference
+				Include="@(ReferencePath)"
+				Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(Filename)', '^Assimalign\.Cohesion\..+\.Hosting$', System.Text.RegularExpressions.RegexOptions.IgnoreCase))" />
+		</ItemGroup>
+		<Error
+			Condition="'@(_CohesionForbiddenGatewayHostingReference)' != ''"
+			Code="COHGW001"
+			File="$(MSBuildProjectFullPath)"
+			Text="Out-of-process Sdk.Gateway project '$(MSBuildProjectName)' resolved forbidden Hosting assembly '%(_CohesionForbiddenGatewayHostingReference.Filename)'. Remove the runtime reference or set CohesionGatewayInProcess=true for the sanctioned Composite boundary." />
+	</Target>
+
+	<Target Name="CohesionCleanGatewaySource" AfterTargets="Clean">
+		<Delete Files="$(CohesionGatewaySourcePath)" />
+	</Target>
+</Project>

@@ -1,0 +1,16 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnablePreviewFeatures>true</EnablePreviewFeatures>
+    <IsAotCompatible>true</IsAotCompatible>
+    <CohesionApplicationName>disabled-test</CohesionApplicationName>
+    <CohesionResourceName>disabled-test-gateway</CohesionResourceName>
+    <CohesionGateways>Local</CohesionGateways>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionResourceReference Include="..\DisabledResource\DisabledResource.csproj" />
+  </ItemGroup>
+
+</Project>
