@@ -18,7 +18,7 @@ jobs:
             'Assimalign.Cohesion.ApplicationModel'
         ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         name: "Checkout: ${{ matrix.projects }}"
 
       - uses: ./.github/actions/build
