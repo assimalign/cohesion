@@ -60,6 +60,31 @@
 	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/tests/">
 		<Project Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/tests/Assimalign.Cohesion.ApplicationModel.Gateway.Tests.csproj" />
 	</Folder>
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/">
+		<File Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/README.md" />
+	</Folder>
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/">
+		<File Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/DESIGN.md" />
+		<File Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/Assembly/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/">
+		<File Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/Assembly/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/Assembly/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/GatewayControlPlane/">
+		<File Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/Assembly/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/GatewayControlPlane/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/Assembly/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/GatewayControlPlaneOptions/">
+		<File Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/Assembly/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/GatewayControlPlaneOptions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/Assembly/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/IResourceCommandDispatcher/">
+		<File Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/Assembly/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/IResourceCommandDispatcher/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/src/">
+		<Project Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/src/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.csproj" />
+	</Folder>
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/tests/">
+		<Project Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/tests/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Tests.csproj" />
+	</Folder>
 	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/">
 		<File Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/README.md" />
 	</Folder>

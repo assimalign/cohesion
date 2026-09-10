@@ -356,12 +356,17 @@ internal static class GatewaySourceWriter
         source.AppendLine("{");
         source.AppendLine("    private readonly string selected;");
         source.AppendLine("    private readonly string[] args;");
+        source.AppendLine("    private readonly global::Assimalign.Cohesion.ApplicationModel.GatewayRunMode runMode;");
         source.AppendLine("    private global::Assimalign.Cohesion.ApplicationModel.IApplicationGateway? gateway;");
         source.AppendLine();
-        source.AppendLine("    internal CohesionGatewayProviders(string selected, string[] args)");
+        source.AppendLine("    internal CohesionGatewayProviders(");
+        source.AppendLine("        string selected,");
+        source.AppendLine("        string[] args,");
+        source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.GatewayRunMode runMode)");
         source.AppendLine("    {");
         source.AppendLine("        this.selected = selected;");
         source.AppendLine("        this.args = args;");
+        source.AppendLine("        this.runMode = runMode;");
         source.AppendLine("    }");
         source.AppendLine();
         foreach (GatewayProvider provider in providers)
@@ -380,6 +385,7 @@ internal static class GatewaySourceWriter
             source.Append("        var options = new ").Append(provider.OptionsType).AppendLine("();");
             source.AppendLine("        configure?.Invoke(options);");
             source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ApplicationGatewayCommandLine.Apply(options, args);");
+            source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.GatewayControlPlane.Configure(options, runMode);");
             source.Append("        gateway = new ").Append(provider.GatewayType).AppendLine("(options);");
             source.AppendLine("    }");
             source.AppendLine();
@@ -409,6 +415,7 @@ internal static class GatewaySourceWriter
             source.AppendLine("    {");
             source.Append("        var options = new ").Append(provider.OptionsType).AppendLine("();");
             source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ApplicationGatewayCommandLine.Apply(options, args);");
+            source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.GatewayControlPlane.Configure(options, runMode);");
             source.Append("        return new ").Append(provider.GatewayType).AppendLine("(options);");
             source.AppendLine("    }");
             source.AppendLine();
@@ -431,7 +438,7 @@ internal static class GatewaySourceWriter
         source.AppendLine("        public global::Assimalign.Cohesion.ApplicationModel.IApplicationBuilder UseGateway(string[] args)");
         source.AppendLine("        {");
         source.AppendLine("            string selected = ResolveGateway(builder, args);");
-        source.AppendLine("            var gateways = new CohesionGatewayProviders(selected, args);");
+        source.AppendLine("            var gateways = new CohesionGatewayProviders(selected, args, builder.RunMode);");
         source.AppendLine("            return builder.UseGateway(gateways.CreateSelected());");
         source.AppendLine("        }");
         source.AppendLine();
@@ -445,7 +452,7 @@ internal static class GatewaySourceWriter
         source.AppendLine("        {");
         source.AppendLine("            global::System.ArgumentNullException.ThrowIfNull(configure);");
         source.AppendLine("            string selected = ResolveGateway(builder, args);");
-        source.AppendLine("            var gateways = new CohesionGatewayProviders(selected, args);");
+        source.AppendLine("            var gateways = new CohesionGatewayProviders(selected, args, builder.RunMode);");
         source.AppendLine("            configure(gateways);");
         source.AppendLine("            return builder.UseGateway(gateways.CreateSelected());");
         source.AppendLine("        }");

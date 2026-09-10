@@ -175,10 +175,10 @@ There are two portable documents with different jobs:
   the complete model document. It has source-generated `Create`/`Parse`/`Load`/`Save`/`ToModel`
   paths and validates cross-document identity, hashes, kinds, and endpoint names.
 
-`export.json` is a storage convention, not an automatic side effect of this Layer-1 package. The
-HTTP endpoints that publish or fetch the document are item 23a, not part of the item 23 contract
-implementation. Likewise, Kubernetes export/import is a platform integration, not implemented
-here.
+`export.json` remains a storage convention rather than a side effect of this Layer-1 package.
+`Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` implements item 23a's authenticated
+HTTP publication and fetch endpoints over this exact document. Kubernetes export/import remains
+a platform integration and is not implemented here.
 
 ## Application-set composition
 
@@ -253,6 +253,8 @@ Docker or Kubernetes integrations.
 
 - `…ApplicationModel.Gateway` (Layer 2a) — the guided `ApplicationGateway` base +
   `LocalGateway`; implements the control-plane contracts defined here.
+- `…ApplicationModel.Gateway.ControlPlane` — the hosting-free authenticated HTTP server/client
+  behind `Gateway(...)`, plus the resource command dispatch seam.
 - `…ApplicationModel.Gateway.{Platform}` (Layer 2b) — platform compilers and controllers supplied
   outside this contract package.
 - `{Resource}.ApplicationModel` (Layer 3d) — Core-only manifest packages that

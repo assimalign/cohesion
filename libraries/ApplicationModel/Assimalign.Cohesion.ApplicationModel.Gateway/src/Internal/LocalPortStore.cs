@@ -160,7 +160,7 @@ internal sealed class LocalPortStore
                 return;
             }
 
-            if (document.Resources.Count == 0)
+            if (document.Resources.Count == 0 && document.ControlPlane is null)
             {
                 File.Delete(path);
             }
@@ -168,6 +168,51 @@ internal sealed class LocalPortStore
             {
                 await SaveAsync(path, document, cancellationToken).ConfigureAwait(false);
             }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<int> ResolveControlPlaneAsync(
+        ApplicationName application,
+        CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            string applicationDirectory = GetApplicationDirectory(application);
+            string path = Path.Combine(applicationDirectory, "ports.json");
+            PortAllocationDocument document = await LoadAsync(path, cancellationToken).ConfigureAwait(false);
+            if (document.ControlPlane is int persistedPort)
+            {
+                if (persistedPort is < 1 or > 65535)
+                {
+                    throw new InvalidDataException(
+                        $"Persisted control-plane port '{persistedPort}' for application '{application}' is invalid.");
+                }
+
+                return persistedPort;
+            }
+
+            var allocated = new HashSet<int>();
+            foreach (Dictionary<string, int> resourcePorts in document.Resources.Values)
+            {
+                foreach (int port in resourcePorts.Values)
+                {
+                    if (port is >= 1 and <= 65535)
+                    {
+                        allocated.Add(port);
+                    }
+                }
+            }
+
+            int controlPlanePort = AllocatePort(allocated);
+            document.ControlPlane = controlPlanePort;
+            Directory.CreateDirectory(applicationDirectory);
+            await SaveAsync(path, document, cancellationToken).ConfigureAwait(false);
+            return controlPlanePort;
         }
         finally
         {
@@ -213,6 +258,12 @@ internal sealed class LocalPortStore
     private static HashSet<int> CollectAllocatedPorts(PortAllocationDocument document, string resource)
     {
         var allocated = new HashSet<int>();
+        if (document.ControlPlane is int controlPlanePort &&
+            controlPlanePort is >= 1 and <= 65535)
+        {
+            allocated.Add(controlPlanePort);
+        }
+
         foreach ((string currentResource, Dictionary<string, int> ports) in document.Resources)
         {
             if (string.Equals(currentResource, resource, StringComparison.Ordinal))
@@ -311,6 +362,8 @@ internal sealed class LocalPortStore
 
 internal sealed class PortAllocationDocument
 {
+    public int? ControlPlane { get; set; }
+
     public Dictionary<string, Dictionary<string, int>> Resources { get; init; } =
         new(StringComparer.Ordinal);
 }

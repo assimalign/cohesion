@@ -16,8 +16,6 @@
 
 		<_CohesionGatewayInProcessProject>$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway.InProcess\src\Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.csproj</_CohesionGatewayInProcessProject>
 		<_CohesionGatewayControlPlaneProject>$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane\src\Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.csproj</_CohesionGatewayControlPlaneProject>
-		<_CohesionGatewayControlPlaneAvailable Condition="Exists('$(_CohesionGatewayControlPlaneProject)')">true</_CohesionGatewayControlPlaneAvailable>
-		<_CohesionGatewayControlPlaneAvailable Condition="'$(_CohesionGatewayControlPlaneAvailable)' == ''">false</_CohesionGatewayControlPlaneAvailable>
 	</PropertyGroup>
 
 	<!--
@@ -51,8 +49,8 @@
 		<CohesionPackageReference Include="Assimalign.Cohesion.SecretStore.Client" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewaySecretStoreClientProject)' == ''" />
 		<CohesionPackageReference Include="Assimalign.Cohesion.ConfigurationStore.Client" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayConfigurationStoreClientProject)' == ''" />
 
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane" ProjectPath="$(_CohesionGatewayControlPlaneProject)" Condition="'$(_CohesionGatewayControlPlaneAvailable)' == 'true' and '$(CohesionRepositoryDirectory)' != ''" />
-		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane" Version="$(CohesionVersion)" Condition="'$(_CohesionGatewayControlPlaneAvailable)' == 'true' and '$(CohesionRepositoryDirectory)' == ''" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane" ProjectPath="$(_CohesionGatewayControlPlaneProject)" Condition="'$(CohesionRepositoryDirectory)' != ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane" Version="$(CohesionVersion)" Condition="'$(CohesionRepositoryDirectory)' == ''" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" ProjectPath="$(_CohesionGatewayInProcessProject)" Condition="'$(_CohesionGatewayInProcessSelected)' == 'True' and '$(CohesionRepositoryDirectory)' != ''" />
 		<CohesionPackageReference Include="@(_CohesionGatewayInProcessPackage->'%(PackageId)')" Version="@(_CohesionGatewayInProcessPackage->'%(Version)')" Condition="'$(_CohesionGatewayInProcessSelected)' == 'True' and '$(CohesionRepositoryDirectory)' == ''" />
 

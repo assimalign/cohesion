@@ -11,6 +11,9 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 internal sealed class ApplicationTrustState : IDisposable
 {
+    private const string TokenUseClaim = "cohesion_token_use";
+    private const string GatewayTokenUse = "gateway";
+
     private readonly object _gate = new();
     private readonly Dictionary<string, TrustedIssuer> _issuers = new(StringComparer.Ordinal);
     private GatewayTrustKey _key;
@@ -49,7 +52,12 @@ internal sealed class ApplicationTrustState : IDisposable
         }
     }
 
-    public string Issue(string audience, string subject, TimeSpan lifetime, DateTimeOffset now)
+    public string Issue(
+        string audience,
+        string subject,
+        TimeSpan lifetime,
+        DateTimeOffset now,
+        bool allowControlPlaneCommands = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(audience);
         ArgumentException.ThrowIfNullOrWhiteSpace(subject);
@@ -67,6 +75,11 @@ internal sealed class ApplicationTrustState : IDisposable
                 ExpiresAt = now.Add(lifetime),
             };
             descriptor.Audiences.Add(audience);
+            if (allowControlPlaneCommands)
+            {
+                descriptor.Claims.Add(new IdentityClaim(TokenUseClaim, GatewayTokenUse));
+            }
+
             return JsonWebTokenWriter.CreateEs256(_key.PrivateKey, _key.KeyId).Write(descriptor);
         }
     }

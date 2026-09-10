@@ -29,7 +29,8 @@ Tasks/Assimalign.Cohesion.Sdk.Gateway.Tasks.dll
 It imports `Assimalign.Cohesion.Sdk`, but it does not create or reference an
 `Assimalign.Cohesion.App.Gateway` framework. The orchestration plane consists of
 `Assimalign.Cohesion.ApplicationModel`,
-`Assimalign.Cohesion.ApplicationModel.Gateway`, optional provider packages, and the
+`Assimalign.Cohesion.ApplicationModel.Gateway`,
+`Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane`, optional provider packages, and the
 narrow client packages required to resolve protected mount sources.
 
 The Gateway props must set `CohesionAutoIncludeAppFramework=false` before importing the
@@ -97,7 +98,9 @@ is:
 `UseGateway(args)` honors the builder's parsed request, then `COHESION_GATEWAY`, then the
 Development-only Local default. Unknown or unavailable providers fail with the generated
 set of valid names. The overload taking `Action<CohesionGatewayProviders>` executes only
-the callback for the selected provider.
+the callback for the selected provider. Both construction paths install the ControlPlane
+resolver client in every mode and the server factory only for `Run` and `Apply`; `Describe` and
+`Render` never bind a listener.
 
 ## Restore-time dependency contract
 
@@ -166,12 +169,11 @@ contribute child-only `buildTransitive` behavior. Completing those semantics req
 restore-visible producer descriptor described above. This exception does not authorize an
 `App.Gateway` framework or allow Hosting references in an ordinary out-of-process gateway.
 
-## Current guarded gaps
+## Current integration gaps
 
 The following are explicit integration gates, not behavior the SDK may emulate with
 stubs:
 
-- The Gateway.ControlPlane package and server have not landed.
 - The provider contribution contract has no Docker or Kubernetes implementation in this
   repository.
 - `CohesionPlatformsVersion` has no repository-wide version source beyond the SDK's

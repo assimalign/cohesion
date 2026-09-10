@@ -56,8 +56,9 @@ none of those bindings uses the unresolved resolver. Supported command-line form
 `Cohesion__External__<name>__File`, `...__Gateway`, or
 `...__Endpoints__<endpoint>`; colon-separated aliases are accepted too.
 
-`Gateway(...)` is only a typed binding in this package. A caller or gateway must supply an
-`IControlPlaneClient`; the HTTP implementation and endpoint hosting are separate work.
+`Gateway(...)` is only a typed binding in this package. A caller or gateway supplies an
+`IControlPlaneClient`; `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` provides the
+shipped authenticated HTTP client and endpoint host.
 Platform-specific bindings such as Kubernetes import are contributed outside this package.
 
 ## External lifecycle
@@ -134,7 +135,7 @@ requested name once across all members.
 The set supports `Run`, `Apply`, and `Teardown`. The shared gateway owns one lifecycle session and
 must isolate state by `(application, resource)` so equal resource names/identifiers in different
 models cannot collide. This package defines that composition seam; SDK-generated
-`Applications.<Name>`, HTTP control-plane hosting, and Kubernetes export/import are not claimed by
-this implementation.
+`Applications.<Name>` and HTTP control-plane composition are supplied by the Gateway SDK and
+`...Gateway.ControlPlane`; Kubernetes export/import remains a platform integration.
 
 See [docs/DESIGN.md](docs/DESIGN.md) for lifecycle rationale and package boundaries.

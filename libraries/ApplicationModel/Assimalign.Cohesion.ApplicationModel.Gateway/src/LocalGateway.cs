@@ -18,6 +18,7 @@ public sealed class LocalGateway : ApplicationGateway
     private readonly LocalResourceResolver _resolver;
     private readonly IReadOnlyList<IApplicationResourceController> _controllers;
     private readonly LocalGatewayProcessSupervisor _supervisor;
+    private readonly LocalPortStore _ports;
 
     /// <summary>
     /// Initializes a new <see cref="LocalGateway"/> with default options.
@@ -47,10 +48,10 @@ public sealed class LocalGateway : ApplicationGateway
         string stateDirectory = _options.StateDirectory
             ?? Path.Combine(Environment.CurrentDirectory, ".cohesion");
         _options.ExportDirectory ??= stateDirectory;
-        var ports = new LocalPortStore(stateDirectory);
+        _ports = new LocalPortStore(stateDirectory);
         var mounts = new LocalMountMaterializer(stateDirectory);
         var processState = new LocalProcessStateStore(stateDirectory);
-        var preparer = new LocalResourcePreparer(ports, mounts, _options);
+        var preparer = new LocalResourcePreparer(_ports, mounts, _options);
         _supervisor = new LocalGatewayProcessSupervisor(_options, processState);
         _controllers = new IApplicationResourceController[]
         {
@@ -68,6 +69,18 @@ public sealed class LocalGateway : ApplicationGateway
     protected override IApplicationResourceStateManager State => _state;
 
     internal IApplicationResourceStateManager ResourceStates => _state;
+
+    /// <inheritdoc/>
+    protected override async ValueTask<Uri> ResolveControlPlaneAddressAsync(
+        IApplicationModel model,
+        CancellationToken cancellationToken)
+    {
+        int port = await _ports.ResolveControlPlaneAsync(
+                model.Name,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return Uri.CreateEndpoint(Uri.UriSchemeHttp, "127.0.0.1", port);
+    }
 
     /// <inheritdoc/>
     protected override void ValidateResource(

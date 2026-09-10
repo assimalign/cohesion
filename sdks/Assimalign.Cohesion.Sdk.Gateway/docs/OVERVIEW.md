@@ -73,6 +73,11 @@ packages are restored only when their names appear in `CohesionGateways`, at
 `CohesionPlatformsVersion`. A provider with `RequiresJit=true` makes
 `CohesionGatewayAot=auto` select `PublishAot=false` for the whole gateway executable.
 
+`Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` is a fixed gateway dependency rather
+than a selectable provider. Generated `UseGateway(args)` composition installs its authenticated
+resolver client in every mode and serves its listener for the realizing `Run` and `Apply` modes;
+`Describe` and `Render` stay listener-free.
+
 Selecting `InProcess` does not by itself authorize resource assembly loading. A gateway with
 project resources must also set `CohesionGatewayInProcess=true`. The two-factor gate promotes
 only enabled, composable, same-application project resources into compiler/runtime references
@@ -88,9 +93,6 @@ the restore-visible resource dependency descriptor described in the design is av
 The SDK must not be presented as a complete production gateway until these dependency
 contracts are available and covered by package-boundary CI:
 
-- `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` is not present; the
-  generated Composite manifest records its control-plane contract, but no gateway
-  control-plane host can serve it yet.
 - Docker and Kubernetes provider packages and their `CohesionGatewayProvider`
   contributions live outside this repository and require an agreed
   `CohesionPlatformsVersion`.

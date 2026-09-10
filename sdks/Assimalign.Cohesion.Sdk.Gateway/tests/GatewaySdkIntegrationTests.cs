@@ -94,6 +94,8 @@ public sealed class GatewaySdkIntegrationTests
         source.ShouldContain("UseGateway(string[] args)");
         source.ShouldContain("global::System.Action<CohesionGatewayProviders> configure");
         source.ShouldContain("ApplicationGatewayCommandLine.Apply(options, args)");
+        source.ShouldContain("Gateway.ControlPlane.GatewayControlPlane.Configure(options, runMode)");
+        source.ShouldContain("new CohesionGatewayProviders(selected, args, builder.RunMode)");
         source.ShouldContain("new global::Assimalign.Cohesion.ApplicationModel.Gateway.LocalGateway(options)");
         source.ShouldNotContain(".InProcess(");
         source.ShouldNotContain("ApplicationModel.Gateway.InProcess");
@@ -152,6 +154,9 @@ public sealed class GatewaySdkIntegrationTests
         ContainsOrdinalIgnoreCase(referencePaths, "GatewaySmokeDatabase").ShouldBeFalse();
         ContainsOrdinalIgnoreCase(referencePaths, "Assimalign.Cohesion.Web.Hosting").ShouldBeFalse();
         ContainsOrdinalIgnoreCase(referencePaths, "Assimalign.Cohesion.Database.Hosting").ShouldBeFalse();
+        ContainsOrdinalIgnoreCase(
+            referencePaths,
+            "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane").ShouldBeTrue();
 
         string gatewayOutput = workspace.BuildOutputDirectory("GatewaySmoke");
         Directory.EnumerateFiles(gatewayOutput, "GatewaySmokeWeb.dll", SearchOption.AllDirectories)
@@ -174,6 +179,11 @@ public sealed class GatewaySdkIntegrationTests
         root.GetProperty("gateway").GetString().ShouldBe("local");
         root.GetProperty("owner").GetString().ShouldBe("gateway-smoke@local");
         root.GetProperty("mode").GetString().ShouldBe("describe");
+        File.Exists(Path.Combine(
+            gatewayDirectory,
+            ".cohesion",
+            "gateway-smoke",
+            "control-plane.json")).ShouldBeFalse();
 
         JsonElement[] resources = root.GetProperty("resources").EnumerateArray().ToArray();
         resources.Length.ShouldBe(2);

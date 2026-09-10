@@ -56,10 +56,16 @@ public class ApplicationGatewayOptions
 
     /// <summary>
     /// Gets or sets the optional client used by external-resource resolvers that query a peer
-    /// gateway control plane. Remote implementations are responsible for attaching the
-    /// bootstrap or developer credential required by that control plane.
+    /// gateway control plane. An <see cref="IAuthenticatedControlPlaneClient"/> receives the
+    /// gateway-issued export credential and trusted-peer snapshot for each resolution.
     /// </summary>
     public IControlPlaneClient? ControlPlaneClient { get; set; }
+
+    /// <summary>
+    /// Gets or sets the optional factory that serves each application's gateway control plane.
+    /// When omitted, the gateway continues to publish file exports only.
+    /// </summary>
+    public IApplicationGatewayControlPlaneFactory? ControlPlane { get; set; }
 
     /// <summary>
     /// Gets domain-authored controller overrides. Controllers are consulted in registration

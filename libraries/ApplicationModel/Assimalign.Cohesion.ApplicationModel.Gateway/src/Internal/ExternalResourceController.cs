@@ -12,11 +12,11 @@ internal sealed class ExternalResourceController : IApplicationResourceControlle
 {
     internal const string PlanHint = "cohesion.external";
 
-    private readonly IControlPlaneClient? _controlPlaneClient;
+    private readonly Func<IApplicationModel, IControlPlaneClient?> _controlPlaneClient;
 
-    public ExternalResourceController(IControlPlaneClient? controlPlaneClient)
+    public ExternalResourceController(Func<IApplicationModel, IControlPlaneClient?> controlPlaneClient)
     {
-        _controlPlaneClient = controlPlaneClient;
+        _controlPlaneClient = controlPlaneClient ?? throw new ArgumentNullException(nameof(controlPlaneClient));
     }
 
     public bool CanRealize(ResourcePlan plan, out string? reason)
@@ -52,7 +52,7 @@ internal sealed class ExternalResourceController : IApplicationResourceControlle
             .ResolveAsync(
                 new ExternalResourceResolutionContext(
                     external.Declaration,
-                    _controlPlaneClient),
+                    _controlPlaneClient(context.Model)),
                 cancellationToken)
             .ConfigureAwait(false);
 

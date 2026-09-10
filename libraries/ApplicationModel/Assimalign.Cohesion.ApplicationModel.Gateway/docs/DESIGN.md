@@ -19,9 +19,9 @@ This package implements the control-plane contracts defined in
   `IApplicationResourceStateManager` for gateway authors.
 - **`LocalGateway`** (+ `LocalGatewayOptions`) — the default gateway for local development,
   which realizes each resource as a supervised child process.
-- **`IGatewayStoreClient`**, **`IApplicationTrustGateway`**, and
-  **`ITrustedIssuerProvider`** — the Hosting-free seams for late-bound inputs and
-  per-application trust.
+- **`IGatewayStoreClient`**, **`IApplicationTrustGateway`**, **`ITrustedIssuerProvider`**, and
+  **`IResourceCommandCredentialProvider`** — the Hosting-free seams for late-bound inputs,
+  per-application trust, and resource-scoped command dispatch credentials.
 - **`IImageRealizer`** — the platform seam that turns a digest-pinned image reference into an
   `IContainerImageArtifact` without putting registry or platform I/O in the base algorithm.
 - Internal pieces: `ResourceControlContext`, `LocalResourceResolver`, port and mount
@@ -228,8 +228,11 @@ is:
 Peer verification keys are `TrustedIssuer` records exposed through
 `ITrustedIssuerProvider`. The gateway reads `trusted-issuers.json` from **that application's
 own** `SecretStore`, using its observed running endpoint or, only in Development, its declared
-local port and
-an audience-bound bootstrap credential, then refreshes the snapshot after reconciliation.
+local port and an audience-bound bootstrap credential. The gateway refreshes that snapshot before a
+reconciliation pass when the store is already observed and immediately after its own store first reaches
+`Running`, so later remote resources in the same pass can use newly loaded peer grants. The topological
+walk prefers the application's own store among otherwise independent roots while preserving its declared
+dependencies, preventing declaration order from placing first-pass remote resolution ahead of trust.
 Loading or storing a peer grant may fall back to the application-local trusted-issuers document
 only in Development. A definite not-found means that no peer grants exist yet outside
 Development; Development keeps its local fallback until the store contains a replacement
@@ -265,10 +268,11 @@ The one-shot gateway command modes are the low-level surface used by later CLI w
   package defines the seam but does not pull, build, load, or publish images; Docker and
   Kubernetes gateways own those operations and their corresponding plan controllers.
 
-## Item #964 — external resolution and multi-model composition
+## Items #964 and #965 — external resolution, composition, and control-plane serving
 
-This package implements the gateway-side half of the item 23 contracts. It does not implement
-item 23a's HTTP control-plane package or a platform's Kubernetes importer/exposure.
+This package implements the gateway-side lifecycle seams for items 23 and 23a. The hosting-free
+HTTP server and client live in `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane`;
+platform Kubernetes importer/exposure remains item 37.
 
 ### Resolver controller and lifecycle
 
@@ -302,7 +306,8 @@ the peer application to stop or delete its resource.
 
 The built-in `Gateway(...)` resolver remains transport-neutral. It returns an actionable
 unresolved result when no `IControlPlaneClient` was configured, and otherwise asks that client for
-an `ApplicationExportDocument`. Supplying the actual HTTP client/server belongs to item 23a.
+an `ApplicationExportDocument`. The ControlPlane package supplies the authenticated HTTP client,
+while static and file clients remain usable for tests and offline workflows.
 
 ### One gateway session for several models
 
@@ -323,8 +328,8 @@ until the active collection has stopped.
 `ApplicationDeclaration` at run start (local `--mode describe`, file export, or a supplied
 control-plane client), then invokes this batch seam for `Run`, `Apply`, or `Teardown`. No
 `Gateway.CreateModel` reflection or runtime assembly scan is involved. SDK-generated
-`Applications.<Name>` declarations, HTTP endpoints, and Kubernetes ConfigMap import/export are
-outside this package's #964 implementation.
+`Applications.<Name>` declarations and ControlPlane composition are supplied by the Gateway SDK;
+Kubernetes ConfigMap import/export remains outside this package's implementation.
 
 After each successful start or reconcile pass, the base gateway creates one validated,
 source-generated `ApplicationExportDocument` per active model from its observed endpoint state.
@@ -335,6 +340,15 @@ override `PublishApplicationExportAsync` to publish the identical document throu
 control plane without changing the model or wire contract. Successful stop and teardown withdraw
 the document through `RemoveApplicationExportAsync`, preventing a resolver from advertising
 endpoints after their resources are no longer running.
+
+When `ApplicationGatewayOptions.ControlPlane` is configured, the base gateway also owns one
+control-plane instance per active application. Each instance receives that exact export document,
+the application-scoped observed-state view, and the application's own trusted-issuer provider.
+`LocalGateway` binds it to a stable port from the persisted local port store; the ControlPlane
+package publishes `.cohesion/<application>/control-plane.json` only after the listener and model
+are ready, and removes that metadata when the listener stops. The server obtains a target
+resource's current bootstrap token through `IResourceCommandCredentialProvider`; developer export
+tokens cannot mutate the command surface.
 
 ## Testing posture
 

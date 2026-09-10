@@ -17,6 +17,7 @@ jobs:
         projects: [
             'Assimalign.Cohesion.ApplicationModel',
             'Assimalign.Cohesion.ApplicationModel.Gateway',
+            'Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane',
             'Assimalign.Cohesion.ApplicationModel.Gateway.InProcess'
         ]
     steps:

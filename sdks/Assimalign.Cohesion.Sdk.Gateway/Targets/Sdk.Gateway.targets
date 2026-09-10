@@ -45,10 +45,6 @@
 			File="$(MSBuildProjectFullPath)"
 			Text="Sdk.Gateway selected InProcess for project resources, but CohesionGatewayInProcess is not enabled. Set CohesionGatewayInProcess=true to opt into loading the enabled, composable project-resource closure in the gateway process." />
 		<Message
-			Condition="'$(_CohesionGatewayControlPlaneAvailable)' != 'true'"
-			Importance="High"
-			Text="Sdk.Gateway: Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane is not present in this checkout (design item 23a); the generated gateway manifest records the contract, but its gateway control plane cannot be hosted until that package lands." />
-		<Message
 			Condition="'$(CohesionGatewayAot)' != 'auto' or '$(CohesionGatewayRequiresJit)' == 'true'"
 			Importance="High"
 			Text="Sdk.Gateway AOT selection: CohesionGatewayAot=$(CohesionGatewayAot), CohesionGatewayRequiresJit=$(CohesionGatewayRequiresJit), PublishAot=$(PublishAot)." />

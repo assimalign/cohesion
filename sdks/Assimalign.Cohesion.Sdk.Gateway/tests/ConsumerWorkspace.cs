@@ -28,15 +28,21 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.Core",
         "Assimalign.Cohesion.ApplicationModel",
         "Assimalign.Cohesion.ApplicationModel.Gateway",
+        "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane",
         "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess",
         "Assimalign.Cohesion.Connections",
+        "Assimalign.Cohesion.Connections.Tcp",
         "Assimalign.Cohesion.IdentityModel",
         "Assimalign.Cohesion.IdentityModel.Token",
         "Assimalign.Cohesion.IdentityModel.Token.JsonWebToken",
         "Assimalign.Cohesion.Hosting",
         "Assimalign.Cohesion.Hosting.Health",
         "Assimalign.Cohesion.Hosting.Resources",
+        "Assimalign.Cohesion.Http",
+        "Assimalign.Cohesion.Http.Connections",
         "Assimalign.Cohesion.Security.DataProtection",
+        "Assimalign.Cohesion.Web",
+        "Assimalign.Cohesion.Web.Routing",
         "Assimalign.Cohesion.Web.ApplicationModel",
         "Assimalign.Cohesion.Database.ApplicationModel",
         "Assimalign.Cohesion.SecretStore.Client",
@@ -45,7 +51,9 @@ internal sealed class ConsumerWorkspace : IDisposable
 
     private static readonly string RepositoryRoot = FindRepositoryRoot();
     public static string TargetFramework { get; } = ResolveTargetFramework();
-    private static readonly string PackageVersion = ResolvePackageVersion();
+    private static readonly string PackageVersion =
+        Environment.GetEnvironmentVariable("COHESION_GATEWAY_TEST_PACKAGE_VERSION")
+        ?? ResolvePackageVersion();
     private static readonly string TestProjectsRoot = Path.Combine(
         RepositoryRoot,
         "sdks",
@@ -62,7 +70,11 @@ internal sealed class ConsumerWorkspace : IDisposable
 
     public static ConsumerWorkspace Create(params string[] fixtureNames)
     {
-        string feedDirectory = Path.Combine(RepositoryRoot, "_out", "packages");
+        string? configuredFeed = Environment.GetEnvironmentVariable(
+            "COHESION_GATEWAY_TEST_PACKAGE_FEED");
+        string feedDirectory = string.IsNullOrWhiteSpace(configuredFeed)
+            ? Path.Combine(RepositoryRoot, "_out", "packages")
+            : Path.GetFullPath(configuredFeed);
         string[] missingPackages = RequiredPackageIds
             .Select(packageId => Path.Combine(feedDirectory, $"{packageId}.{PackageVersion}.nupkg"))
             .Where(packagePath => !File.Exists(packagePath))

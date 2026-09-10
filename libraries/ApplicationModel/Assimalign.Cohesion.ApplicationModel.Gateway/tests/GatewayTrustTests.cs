@@ -271,6 +271,58 @@ public sealed class GatewayTrustTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - TrustedIssuers: Own SecretStore precedes an independent remote on the first production pass")]
+    public async Task StartAsync_WhenRemoteIsDeclaredBeforeOwnSecretStore_ShouldLoadTrustFirst()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var peerKey = new GatewayTrustKey(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+        byte[] document = TrustedIssuerDocument.Write(
+            [new TrustedIssuer("peer", peerKey.PublicJwk)]);
+        var storeClient = new TrustedIssuerStoreClient(document);
+        var gateway = new TestGateway(
+            new InMemoryResourceStateManager(),
+            [new TrustStoreController()],
+            options: new ApplicationGatewayOptions
+            {
+                ExportDirectory = root,
+                StoreClient = storeClient,
+            },
+            name: "test-gateway");
+        var resolver = new TrustAwareExternalResolver(gateway);
+        IApplicationBuilder builder = Application
+            .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", "Production"])
+            .UseGateway(gateway);
+        builder.RemoteReference(
+            CreateExternalDeclaration(),
+            options => options.Bind(resolver));
+        builder.AddResource(CreateSecretStoreManifest());
+        IApplicationModel model = builder.Build().Model;
+        IApplicationGateway control = gateway;
+        bool started = false;
+
+        try
+        {
+            // Act
+            await control.StartAsync(model, cancellation.Token);
+            started = true;
+
+            // Assert
+            resolver.PeerWasTrusted.ShouldBeTrue();
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(document);
+            if (started)
+            {
+                await control.StopAsync(CancellationToken.None);
+            }
+
+            DeleteTestDirectory(root);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - TrustedIssuers: Development store absence preserves the local fallback")]
     public async Task StartAsync_WhenDevelopmentStoreHasNoDocument_ShouldPreserveLocalFallback()
     {
@@ -451,6 +503,45 @@ public sealed class GatewayTrustTests
             RestartPolicy = "Never",
         },
     };
+
+    private static ExternalResourceDeclaration CreateExternalDeclaration() => new(
+        "external-api",
+        "peer",
+        ["https"],
+        optional: false,
+        new ResourceManifest
+        {
+            Name = "external-api",
+            Application = "peer",
+            Kind = "test",
+            ApplicationModel = "Assimalign.Cohesion.Test.ApplicationModel",
+            Artifact = new ResourceManifestArtifact
+            {
+                Assembly = "peer.dll",
+                AppHost = "peer",
+            },
+            Endpoints =
+            [
+                new ResourceManifestEndpoint
+                {
+                    Name = "https",
+                    Scheme = "https",
+                    Protocol = "tcp",
+                    ContainerPort = 443,
+                },
+            ],
+            ControlPlane = new ResourceManifestControlPlane
+            {
+                Endpoint = "https",
+                Path = "/cohesion/v1",
+            },
+            Lifecycle = new ResourceManifestLifecycle
+            {
+                Workload = WorkloadKind.Deployment,
+                Replicas = 1,
+                RestartPolicy = "Never",
+            },
+        });
 
     private static void AssertToken(
         JsonWebToken token,
@@ -664,6 +755,38 @@ public sealed class GatewayTrustTests
             StoredCredential = credential;
             StoredIssuer = issuer;
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class TrustAwareExternalResolver(TestGateway gateway) : IExternalResourceResolver
+    {
+        public bool PeerWasTrusted { get; private set; }
+
+        public ValueTask<ExternalResourceResolution> ResolveAsync(
+            ExternalResourceResolutionContext context,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            IReadOnlyList<TrustedIssuer> issuers = gateway.GetTrustedIssuers("appa");
+            for (int index = 0; index < issuers.Count; index++)
+            {
+                if (string.Equals(issuers[index].Issuer, "peer", StringComparison.Ordinal))
+                {
+                    PeerWasTrusted = true;
+                    break;
+                }
+            }
+
+            return ValueTask.FromResult(
+                PeerWasTrusted
+                    ? new ExternalResourceResolution(
+                        resolved: true,
+                        [new ResourceEndpoint("https", "https", 443, IsPublic: true, Host: "peer.test")],
+                        context.Declaration.ManifestHash,
+                        ApplicationExportDocument.CurrentSchemaVersion,
+                        "Resolved after loading the peer trust grant.")
+                    : ExternalResourceResolution.Unresolved(
+                        "The peer trust grant was not loaded before external resolution."));
         }
     }
 

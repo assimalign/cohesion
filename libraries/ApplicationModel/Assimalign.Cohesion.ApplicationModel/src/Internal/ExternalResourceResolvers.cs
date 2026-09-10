@@ -163,7 +163,11 @@ internal static class ExternalEndpointConverter
 
         if (modelResource is null ||
             (declaration.Manifest is not null &&
-             modelResource.Manifest.Application != declaration.Application))
+             (!string.Equals(
+                  export.Application,
+                  declaration.Application.ToString(),
+                  StringComparison.Ordinal) ||
+              modelResource.Manifest.Application != declaration.Application)))
         {
             return ExternalResourceResolution.Unresolved(
                 $"Export for application '{export.Application}' contains resource '{declaration.Name}', " +

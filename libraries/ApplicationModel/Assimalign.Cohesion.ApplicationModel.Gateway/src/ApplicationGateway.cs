@@ -26,7 +26,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 public abstract class ApplicationGateway :
     IMultiModelApplicationGateway,
     IApplicationGatewayCommandHandler,
-    IApplicationTrustGateway
+    IApplicationTrustGateway,
+    IResourceCommandCredentialProvider
 {
     private const string LiteralPrefix = "literal:";
     private const string ParameterPrefix = "parameter:";
@@ -35,11 +36,13 @@ public abstract class ApplicationGateway :
     private readonly ApplicationGatewayOptions _options;
     private readonly ExternalResourceController _externalController;
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
+    private readonly object _credentialGate = new();
     private readonly object _trustStatesGate = new();
     private readonly Dictionary<ApplicationResourceKey, IResourceArtifact> _artifacts = new();
     private readonly Dictionary<ApplicationName, IReadOnlyDictionary<string, string>> _parameters = new();
     private readonly Dictionary<ApplicationName, ApplicationTrustState> _trust = new();
     private readonly Dictionary<BootstrapCredentialKey, string> _bootstrapCredentials = new();
+    private readonly Dictionary<ApplicationName, IApplicationGatewayControlPlane> _controlPlanes = new();
     private readonly HashSet<ApplicationResourceKey> _admitted = new();
     private readonly List<RealizedResource> _realized = new();
     private IReadOnlyList<ModelResource> _order = Array.Empty<ModelResource>();
@@ -60,7 +63,7 @@ public abstract class ApplicationGateway :
     protected ApplicationGateway(ApplicationGatewayOptions options)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _externalController = new ExternalResourceController(_options.ControlPlaneClient);
+        _externalController = new ExternalResourceController(CreateControlPlaneClient);
     }
 
     /// <inheritdoc/>
@@ -616,6 +619,22 @@ public abstract class ApplicationGateway :
         ApplicationExportWriter.DeleteAsync(application, _options.ExportDirectory, cancellationToken);
 
     /// <summary>
+    /// Resolves the address on which an application's configured gateway control plane binds.
+    /// The default requests an ephemeral IPv4 loopback port.
+    /// </summary>
+    /// <param name="model">The application whose control plane will be served.</param>
+    /// <param name="cancellationToken">Signals that address resolution should be abandoned.</param>
+    /// <returns>The absolute HTTP endpoint to bind.</returns>
+    protected virtual ValueTask<Uri> ResolveControlPlaneAddressAsync(
+        IApplicationModel model,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(new Uri("http://127.0.0.1:0", UriKind.Absolute));
+    }
+
+    /// <summary>
     /// Gets the application-scoped state view for <paramref name="model"/> in the active
     /// gateway session. Multi-model observers must use this view so equal resource identifiers
     /// in different applications remain isolated.
@@ -672,6 +691,24 @@ public abstract class ApplicationGateway :
         {
             return GetTrustStateCore(application).Snapshot();
         }
+    }
+
+    /// <inheritdoc/>
+    string IResourceCommandCredentialProvider.GetResourceCommandCredential(
+        ApplicationName application,
+        ResourceName resource)
+    {
+        for (int index = 0; index < _activeModels.Count; index++)
+        {
+            IApplicationModel model = _activeModels[index];
+            if (model.Name == application)
+            {
+                return GetOrIssueBootstrapToken(model, resource);
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Application '{application}' is not active in gateway '{Name}'.");
     }
 
     /// <inheritdoc/>
@@ -1086,7 +1123,12 @@ public abstract class ApplicationGateway :
     {
         // Every pass starts a fresh credential generation. A resource receives exactly one
         // token for the pass, and all gateway-side calls to that resource reuse that token.
-        _bootstrapCredentials.Clear();
+        lock (_credentialGate)
+        {
+            _bootstrapCredentials.Clear();
+        }
+
+        await RefreshAvailableTrustedIssuersAsync(cancellationToken).ConfigureAwait(false);
 
         foreach (ModelResource item in _order)
         {
@@ -1165,6 +1207,15 @@ public abstract class ApplicationGateway :
             if (Contains(plan.Workload.Gate.Satisfying, reached))
             {
                 _admitted.Add(item.Key);
+                if (IsOwnSecretStore(model, descriptor))
+                {
+                    await RefreshTrustedIssuersAsync(
+                            model,
+                            requireEndpoint: true,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
                 continue;
             }
 
@@ -1217,6 +1268,66 @@ public abstract class ApplicationGateway :
                 endpoints,
                 GetTrustState(model.Name).PublicJwk);
             await PublishApplicationExportAsync(document, cancellationToken).ConfigureAwait(false);
+
+            if (_options.ControlPlane is not null)
+            {
+                IApplicationGatewayControlPlane controlPlane = await GetOrStartControlPlaneAsync(
+                        model,
+                        state,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                await controlPlane.PublishAsync(document, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task<IApplicationGatewayControlPlane> GetOrStartControlPlaneAsync(
+        IApplicationModel model,
+        IApplicationResourceStateManager state,
+        CancellationToken cancellationToken)
+    {
+        if (_controlPlanes.TryGetValue(model.Name, out IApplicationGatewayControlPlane? existing))
+        {
+            return existing;
+        }
+
+        IApplicationGatewayControlPlaneFactory factory = _options.ControlPlane
+            ?? throw new InvalidOperationException("No gateway control-plane factory is configured.");
+        IApplicationGatewayControlPlane controlPlane = factory.Create(model.Name)
+            ?? throw new InvalidOperationException(
+                $"The gateway control-plane factory returned null for application '{model.Name}'.");
+        Uri address = await ResolveControlPlaneAddressAsync(model, cancellationToken).ConfigureAwait(false);
+        if (!address.IsAbsoluteUri ||
+            (address.Scheme != Uri.UriSchemeHttp && address.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new InvalidOperationException(
+                $"Gateway control-plane address '{address}' must be an absolute HTTP endpoint.");
+        }
+
+        try
+        {
+            await controlPlane.StartAsync(
+                    address,
+                    model,
+                    state,
+                    this,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            _controlPlanes.Add(model.Name, controlPlane);
+            return controlPlane;
+        }
+        catch
+        {
+            try
+            {
+                await controlPlane.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Preserve the actionable startup failure.
+            }
+
+            throw;
         }
     }
 
@@ -1349,10 +1460,14 @@ public abstract class ApplicationGateway :
                 }
             }
 
+            Exception? controlPlaneFailure = await StopControlPlanesAsync(cancellationToken)
+                .ConfigureAwait(false);
+            failure ??= controlPlaneFailure;
+
             Exception? exportFailure = await RemoveApplicationExportsAsync(cancellationToken)
                 .ConfigureAwait(false);
             failure ??= exportFailure;
-            exportsRemoved = exportFailure is null;
+            exportsRemoved = controlPlaneFailure is null && exportFailure is null;
         }
         finally
         {
@@ -1435,10 +1550,14 @@ public abstract class ApplicationGateway :
                 }
             }
 
+            Exception? controlPlaneFailure = await StopControlPlanesAsync(cancellationToken)
+                .ConfigureAwait(false);
+            failure ??= controlPlaneFailure;
+
             Exception? exportFailure = await RemoveApplicationExportsAsync(cancellationToken)
                 .ConfigureAwait(false);
             failure ??= exportFailure;
-            exportsRemoved = exportFailure is null;
+            exportsRemoved = controlPlaneFailure is null && exportFailure is null;
         }
         finally
         {
@@ -1483,6 +1602,36 @@ public abstract class ApplicationGateway :
         return failure;
     }
 
+    private async Task<Exception?> StopControlPlanesAsync(CancellationToken cancellationToken)
+    {
+        Exception? failure = null;
+        for (int index = 0; index < _activeModels.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ApplicationName application = _activeModels[index].Name;
+            if (!_controlPlanes.TryGetValue(application, out IApplicationGatewayControlPlane? controlPlane))
+            {
+                continue;
+            }
+
+            try
+            {
+                await controlPlane.StopAsync(cancellationToken).ConfigureAwait(false);
+                _controlPlanes.Remove(application);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                failure ??= exception;
+            }
+        }
+
+        return failure;
+    }
+
     private async Task RollBackAsync(CancellationToken cancellationToken)
     {
         for (int index = _realized.Count - 1; index >= 0; index--)
@@ -1516,9 +1665,11 @@ public abstract class ApplicationGateway :
             }
         }
 
+        Exception? controlPlaneFailure = await StopControlPlanesAsync(CancellationToken.None)
+            .ConfigureAwait(false);
         Exception? exportFailure = await RemoveApplicationExportsAsync(CancellationToken.None)
             .ConfigureAwait(false);
-        if (exportFailure is null)
+        if (controlPlaneFailure is null && exportFailure is null)
         {
             ResetSession();
         }
@@ -1837,70 +1988,110 @@ public abstract class ApplicationGateway :
     {
         for (int index = 0; index < _activeModels.Count; index++)
         {
-            IApplicationModel model = _activeModels[index];
-            if (!TryGetOwnSecretStoreEndpoint(model, out ResourceManifest? store, out Uri? endpoint))
-            {
-                if (store is not null && !model.Environment.IsDevelopment)
-                {
-                    throw new InvalidOperationException(
-                        $"Application '{model.Name}' could not load TrustedIssuers because its own " +
-                        $"SecretStore '{store.Name}' has no observed control-plane endpoint.");
-                }
+            await RefreshTrustedIssuersAsync(
+                    _activeModels[index],
+                    requireEndpoint: true,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
 
-                continue;
-            }
+    private async Task RefreshAvailableTrustedIssuersAsync(CancellationToken cancellationToken)
+    {
+        for (int index = 0; index < _activeModels.Count; index++)
+        {
+            await RefreshTrustedIssuersAsync(
+                    _activeModels[index],
+                    requireEndpoint: false,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
 
-            if (!CanSendCredential(model, endpoint!, out string? securityFailure))
-            {
-                if (model.Environment.IsDevelopment)
-                {
-                    continue;
-                }
-
-                throw new InvalidOperationException(securityFailure);
-            }
-
-            string credential = GetOrIssueBootstrapToken(model, store!.Name);
-            try
-            {
-                ReadOnlyMemory<byte> content = await _options.StoreClient
-                    .ReadSecretAsync(endpoint!, credential, TrustedIssuersFileName, cancellationToken)
-                    .ConfigureAwait(false);
-                GetTrustState(model.Name).ReplacePeers(TrustedIssuerDocument.Parse(content));
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (HttpRequestException exception) when (
-                exception.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
-                // A production application with no peer grants has no persisted document yet.
-                // Development retains its explicitly permitted local fallback until the
-                // application's store contains a replacement document.
-                if (!model.Environment.IsDevelopment)
-                {
-                    GetTrustState(model.Name).ReplacePeers(Array.Empty<TrustedIssuer>());
-                }
-            }
-            catch (Exception exception) when (
-                model.Environment.IsDevelopment &&
-                exception is HttpRequestException or InvalidDataException or JsonException or
-                    NotSupportedException)
-            {
-                // The signed design allows only Development to retain its local fallback while
-                // the application's own SecretStore is unavailable.
-            }
-            catch (Exception exception) when (
-                exception is HttpRequestException or InvalidDataException or JsonException or
-                    NotSupportedException)
+    private async Task RefreshTrustedIssuersAsync(
+        IApplicationModel model,
+        bool requireEndpoint,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetOwnSecretStoreEndpoint(model, out ResourceManifest? store, out Uri? endpoint))
+        {
+            if (requireEndpoint && store is not null && !model.Environment.IsDevelopment)
             {
                 throw new InvalidOperationException(
-                    $"Application '{model.Name}' could not load TrustedIssuers from its own " +
-                    $"SecretStore '{store!.Name}'.",
-                    exception);
+                    $"Application '{model.Name}' could not load TrustedIssuers because its own " +
+                    $"SecretStore '{store.Name}' has no observed control-plane endpoint.");
+            }
+
+            return;
+        }
+
+        if (!CanSendCredential(model, endpoint!, out string? securityFailure))
+        {
+            if (model.Environment.IsDevelopment)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(securityFailure);
+        }
+
+        string credential = GetOrIssueBootstrapToken(model, store!.Name);
+        try
+        {
+            ReadOnlyMemory<byte> content = await _options.StoreClient
+                .ReadSecretAsync(endpoint!, credential, TrustedIssuersFileName, cancellationToken)
+                .ConfigureAwait(false);
+            GetTrustState(model.Name).ReplacePeers(TrustedIssuerDocument.Parse(content));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (HttpRequestException exception) when (
+            exception.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            // A production application with no peer grants has no persisted document yet.
+            // Development retains its explicitly permitted local fallback until the
+            // application's store contains a replacement document.
+            if (!model.Environment.IsDevelopment)
+            {
+                GetTrustState(model.Name).ReplacePeers(Array.Empty<TrustedIssuer>());
             }
         }
+        catch (Exception exception) when (
+            model.Environment.IsDevelopment &&
+            exception is HttpRequestException or InvalidDataException or JsonException or
+                NotSupportedException)
+        {
+            // The signed design allows only Development to retain its local fallback while
+            // the application's own SecretStore is unavailable.
+        }
+        catch (Exception exception) when (
+            exception is HttpRequestException or InvalidDataException or JsonException or
+                NotSupportedException)
+        {
+            throw new InvalidOperationException(
+                $"Application '{model.Name}' could not load TrustedIssuers from its own " +
+                $"SecretStore '{store.Name}'.",
+                exception);
+        }
+    }
+
+    private static bool IsOwnSecretStore(
+        IApplicationModel model,
+        IApplicationResourceDescriptor descriptor)
+    {
+        for (int index = 0; index < model.Descriptors.Count; index++)
+        {
+            if (model.Descriptors[index].Resource.Id == descriptor.Resource.Id)
+            {
+                ResourceManifest manifest = model.Manifests[index];
+                return manifest.Application == model.Name &&
+                    string.Equals(manifest.Kind, "SecretStore", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return false;
     }
 
     private bool TryGetOwnSecretStoreEndpoint(
@@ -1990,20 +2181,23 @@ public abstract class ApplicationGateway :
 
     private string GetOrIssueBootstrapToken(IApplicationModel model, ResourceName audience)
     {
-        var key = new BootstrapCredentialKey(model.Name, audience);
-        if (_bootstrapCredentials.TryGetValue(key, out string? existing))
+        lock (_credentialGate)
         {
-            return existing;
-        }
+            var key = new BootstrapCredentialKey(model.Name, audience);
+            if (_bootstrapCredentials.TryGetValue(key, out string? existing))
+            {
+                return existing;
+            }
 
-        ApplicationTrustState trust = GetTrustState(model.Name);
-        string issued = trust.Issue(
-            audience.ToString(),
-            Name.ToString(),
-            _options.BootstrapCredentialLifetime,
-            _options.TimeProvider.GetUtcNow());
-        _bootstrapCredentials.Add(key, issued);
-        return issued;
+            ApplicationTrustState trust = GetTrustState(model.Name);
+            string issued = trust.Issue(
+                audience.ToString(),
+                Name.ToString(),
+                _options.BootstrapCredentialLifetime,
+                _options.TimeProvider.GetUtcNow());
+            _bootstrapCredentials.Add(key, issued);
+            return issued;
+        }
     }
 
     private async Task<GatewayTrustKey> LoadOrCreateTrustKeyAsync(
@@ -2063,20 +2257,44 @@ public abstract class ApplicationGateway :
         return false;
     }
 
-    private void RemoveBootstrapCredentials(ApplicationName application)
+    private IControlPlaneClient? CreateControlPlaneClient(IApplicationModel model)
     {
-        var keys = new List<BootstrapCredentialKey>();
-        foreach (BootstrapCredentialKey key in _bootstrapCredentials.Keys)
+        IControlPlaneClient? client = _options.ControlPlaneClient;
+        if (client is not IAuthenticatedControlPlaneClient authenticated)
         {
-            if (key.Application == application)
-            {
-                keys.Add(key);
-            }
+            return client;
         }
 
-        for (int index = 0; index < keys.Count; index++)
+        ApplicationTrustState trust = GetTrustState(model.Name);
+        string credential = trust.Issue(
+            "cohesion-export",
+            Name.ToString(),
+            _options.DeveloperTokenLifetime,
+            _options.TimeProvider.GetUtcNow(),
+            allowControlPlaneCommands: true);
+        return new AuthenticatedControlPlaneClient(
+            authenticated,
+            credential,
+            GetTrustedIssuers(model.Name));
+    }
+
+    private void RemoveBootstrapCredentials(ApplicationName application)
+    {
+        lock (_credentialGate)
         {
-            _bootstrapCredentials.Remove(keys[index]);
+            var keys = new List<BootstrapCredentialKey>();
+            foreach (BootstrapCredentialKey key in _bootstrapCredentials.Keys)
+            {
+                if (key.Application == application)
+                {
+                    keys.Add(key);
+                }
+            }
+
+            for (int index = 0; index < keys.Count; index++)
+            {
+                _bootstrapCredentials.Remove(keys[index]);
+            }
         }
     }
 
@@ -2159,7 +2377,11 @@ public abstract class ApplicationGateway :
             _applicationStates[index].OwnedState?.Dispose();
         }
 
-        _bootstrapCredentials.Clear();
+        lock (_credentialGate)
+        {
+            _bootstrapCredentials.Clear();
+        }
+        _controlPlanes.Clear();
         _parameters.Clear();
         _artifacts.Clear();
         _admitted.Clear();
@@ -2200,7 +2422,7 @@ public abstract class ApplicationGateway :
                 }
 
                 IReadOnlyList<IApplicationResourceDescriptor> modelOrder =
-                    OrderTopologically(model.Descriptors);
+                    OrderTopologically(model);
                 foreach (IApplicationResourceDescriptor descriptor in modelOrder)
                 {
                     order.Add(new ModelResource(model, descriptor));
@@ -2321,10 +2543,23 @@ public abstract class ApplicationGateway :
     }
 
     private static IReadOnlyList<IApplicationResourceDescriptor> OrderTopologically(
-        IReadOnlyList<IApplicationResourceDescriptor> descriptors)
+        IApplicationModel model)
     {
+        IReadOnlyList<IApplicationResourceDescriptor> descriptors = model.Descriptors;
         var ordered = new List<IApplicationResourceDescriptor>(descriptors.Count);
         var seen = new HashSet<IApplicationResourceDescriptor>();
+
+        // A production gateway learns peer keys from its own SecretStore. Prefer that
+        // resource among otherwise independent roots so a first-pass remote resolution
+        // never observes the self-only trust snapshot. Visit still honors every explicit
+        // dependency of the store before admitting it.
+        foreach (IApplicationResourceDescriptor descriptor in descriptors)
+        {
+            if (IsOwnSecretStore(model, descriptor))
+            {
+                Visit(descriptor, seen, ordered);
+            }
+        }
 
         foreach (IApplicationResourceDescriptor descriptor in descriptors)
         {
