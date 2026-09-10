@@ -13,6 +13,9 @@
 	<Folder Name="/sdks/Assimalign.Cohesion.Sdk/Tasks/">
 		<Project Path="Assimalign.Cohesion.Sdk/Tasks/Assimalign.Cohesion.Sdk.Tasks.csproj" />
 	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk/tests/">
+		<Project Path="Assimalign.Cohesion.Sdk/tests/Assimalign.Cohesion.Sdk.Tests.csproj" />
+	</Folder>
 	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.ApiManager/" />
 	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.ApiManager/Tasks/">
 		<Project Path="Assimalign.Cohesion.Sdk.ApiManager/Tasks/Assimalign.Cohesion.Sdk.ApiManager.Tasks.csproj" />
@@ -24,6 +27,9 @@
 	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Database/" />
 	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Database/Tasks/">
 		<Project Path="Assimalign.Cohesion.Sdk.Database/Tasks/Assimalign.Cohesion.Sdk.Database.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.Database/tests/">
+		<Project Path="Assimalign.Cohesion.Sdk.Database/tests/Assimalign.Cohesion.Sdk.Database.Tests.csproj" />
 	</Folder>
 	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.EmailHub/" />
 	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.EmailHub/Tasks/">

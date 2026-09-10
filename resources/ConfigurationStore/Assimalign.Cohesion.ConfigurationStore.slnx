@@ -22,11 +22,23 @@
 	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/docs/Assembly/Assimalign.Cohesion.ConfigurationStore/IConfigurationStoreApplicationBuilder/">
 		<File Path="Assimalign.Cohesion.ConfigurationStore/docs/Assembly/Assimalign.Cohesion.ConfigurationStore/IConfigurationStoreApplicationBuilder/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/docs/Assembly/Assimalign.Cohesion.ConfigurationStore/IConfigurationNamespaceBuilder/">
+		<File Path="Assimalign.Cohesion.ConfigurationStore/docs/Assembly/Assimalign.Cohesion.ConfigurationStore/IConfigurationNamespaceBuilder/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/src/">
 		<Project Path="Assimalign.Cohesion.ConfigurationStore/src/Assimalign.Cohesion.ConfigurationStore.csproj" />
 	</Folder>
 	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/tests/">
 		<Project Path="Assimalign.Cohesion.ConfigurationStore/tests/Assimalign.Cohesion.ConfigurationStore.Tests.csproj" />
+	</Folder>
+	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/">
+		<File Path="Assimalign.Cohesion.ConfigurationStore.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/src/">
+		<Project Path="Assimalign.Cohesion.ConfigurationStore.ApplicationModel/src/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/tests/">
+		<Project Path="Assimalign.Cohesion.ConfigurationStore.ApplicationModel/tests/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Tests.csproj" />
 	</Folder>
 	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/">
 		<File Path="Assimalign.Cohesion.ConfigurationStore.Client/README.md" />
@@ -56,7 +68,9 @@
 	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/tests/">
 		<Project Path="Assimalign.Cohesion.ConfigurationStore.Client/tests/Assimalign.Cohesion.ConfigurationStore.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/" />
+	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/">
+		<File Path="Assimalign.Cohesion.ConfigurationStore.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/docs/">
 		<File Path="Assimalign.Cohesion.ConfigurationStore.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.ConfigurationStore.Hosting/docs/OVERVIEW.md" />

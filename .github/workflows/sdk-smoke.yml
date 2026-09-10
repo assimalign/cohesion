@@ -326,6 +326,28 @@ jobs:
           name: sdk-smoke-packages
           path: _out/packages
 
+      - name: Run base SDK package-boundary tests
+        shell: pwsh
+        run: |
+          dotnet test `
+              ./sdks/Assimalign.Cohesion.Sdk/tests/Assimalign.Cohesion.Sdk.Tests.csproj `
+              --configuration Release `
+              --nologo
+          if ($LASTEXITCODE -ne 0) {
+            throw "Base SDK package-boundary tests failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Run Database SDK tests
+        shell: pwsh
+        run: |
+          dotnet test `
+              ./sdks/Assimalign.Cohesion.Sdk.Database/tests/Assimalign.Cohesion.Sdk.Database.Tests.csproj `
+              --configuration Release `
+              --nologo
+          if ($LASTEXITCODE -ne 0) {
+            throw "Database SDK tests failed with exit code $LASTEXITCODE."
+          }
+
       - name: Run Gateway package-boundary tests
         shell: pwsh
         run: |

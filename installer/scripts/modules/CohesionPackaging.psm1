@@ -182,6 +182,7 @@ $script:CohesionReleaseLibrary = @(
 
     # resources/ConfigurationStore
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore'
+    'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel'
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client'
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting'
 
@@ -221,7 +222,9 @@ $script:CohesionReleaseLibrary = @(
 
     # resources/IdentityHub
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub'
+    'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting'
+    'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models'
 
     # resources/IoTHub
     'resources/IoTHub/Assimalign.Cohesion.IoTHub'
@@ -257,7 +260,10 @@ $script:CohesionReleaseLibrary = @(
 
     # resources/Scheduler
     'resources/Scheduler/Assimalign.Cohesion.Scheduler'
+    'resources/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel'
+    'resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting'
+    'resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer'
 
     # resources/SecretStore
     'resources/SecretStore/Assimalign.Cohesion.SecretStore'
@@ -422,11 +428,8 @@ $script:CohesionCiMatrixExclusion = [ordered]@{
     'resources/Database/Assimalign.Cohesion.Database.Graph/src/Assimalign.Cohesion.Database.Graph.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'resources/Database/Assimalign.Cohesion.Database.Replication/src/Assimalign.Cohesion.Database.Replication.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'resources/Database/Assimalign.Cohesion.Database.Sql.Replication/src/Assimalign.Cohesion.Database.Sql.Replication.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
-    'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/src/Assimalign.Cohesion.IdentityHub.Models.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'resources/MessageHub/Assimalign.Cohesion.MessageHub.Client/src/Assimalign.Cohesion.MessageHub.Client.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/src/Assimalign.Cohesion.NotificationHub.Client.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
-    'resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/src/Assimalign.Cohesion.Scheduler.Cron.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
-    'resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/src/Assimalign.Cohesion.Scheduler.Timer.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'resources/Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/Hosting1.csproj' = 'Example project is not an independently shipped CI matrix entry.'
     'tooling/Cli/src/Assimalign.Cohesion.Cli/Assimalign.Cohesion.Cli.csproj' = 'Legacy tooling has no dedicated CI workflow; onboarding requires a separate release decision.'
     'tooling/scripts/src/Assimalign.Cohesion.DevScripts/Assimalign.Cohesion.DevScripts.csproj' = 'Legacy tooling has no dedicated CI workflow; onboarding requires a separate release decision.'

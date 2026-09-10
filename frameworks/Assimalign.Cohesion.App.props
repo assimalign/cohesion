@@ -328,6 +328,17 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.ConfigurationStore" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ConfigurationStore" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ConfigurationStore.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.EmailHub'">
@@ -346,6 +357,21 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.IdentityHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub.Models" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel" />
+
+        <!-- IdentityHub.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Forms" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.IoTHub'">
@@ -399,7 +425,22 @@
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Scheduler'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Scheduler" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Cron" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Timer" />
+
+        <!-- Scheduler.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.SecretStore'">
