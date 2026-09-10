@@ -4,10 +4,10 @@
     Produces the complete, version-consistent Cohesion NuGet release set.
 
 .DESCRIPTION
-    Strictly packs every shipping library and resource, every SDK pack, and every shared-framework
-    targeting and runtime pack into _out/release/packages, at exactly one version, and validates
-    the result against the authoritative inventory in
-    installer/scripts/modules/CohesionPackaging.psm1.
+    Strictly packs every selected release package into _out/release/packages at exactly one
+    version and validates the result against the authoritative inventory in
+    installer/scripts/modules/CohesionPackaging.psm1. The default selection is every shipping
+    library and resource, every SDK pack, and every shared-framework targeting and runtime pack.
 
     Three things separate this from the local dogfooding packer
     (installer/scripts/Install-Local.ps1):
@@ -42,6 +42,11 @@
     packaging module. Every value must also appear on the SDK's KnownFrameworkReference
     RuntimePackRuntimeIdentifiers, or consumers cannot resolve the pack.
 
+.PARAMETER SkipLibraries
+    Omits standalone library and resource packages while retaining strict inventory, package-set,
+    and metadata validation for every SDK and framework pack. The publish-less SDK smoke workflow
+    uses this mode with the host RID; official releases never use it.
+
 .PARAMETER PackageDirectory
     Overrides the output directory. Defaults to _out/release/packages under the repository root.
 
@@ -61,6 +66,8 @@ param(
     [string] $Configuration = 'Release',
 
     [string[]] $RuntimeIdentifier,
+
+    [switch] $SkipLibraries,
 
     [string] $PackageDirectory,
 
@@ -148,6 +155,13 @@ if (-not $resolvedRepositoryCommit.Equals($checkedOutCommit, [System.StringCompa
 if (-not $RuntimeIdentifier -or $RuntimeIdentifier.Count -eq 0) {
     $RuntimeIdentifier = Get-CohesionReleaseRuntimeIdentifier
 }
+$supportedRuntimeIdentifier = Get-CohesionReleaseRuntimeIdentifier
+$unsupportedRuntimeIdentifier = @(
+    $RuntimeIdentifier | Where-Object { $supportedRuntimeIdentifier -notcontains $_ }
+)
+if ($unsupportedRuntimeIdentifier.Count -gt 0) {
+    throw "Unsupported release runtime identifier(s): $($unsupportedRuntimeIdentifier -join ', ')."
+}
 
 $releaseOutputDirectory = [System.IO.Path]::GetFullPath(
     (Join-Path $repositoryDirectory '_out/release'))
@@ -214,6 +228,7 @@ $buildProperties = @(
 Write-Host "Packing Cohesion $Version from $repositoryCommit" -ForegroundColor Cyan
 Write-Host "  Configuration : $Configuration"
 Write-Host "  RIDs          : $($RuntimeIdentifier -join ', ')"
+Write-Host "  Libraries     : $(if ($SkipLibraries) { 'skipped' } else { 'included' })"
 Write-Host "  Output        : $packageDirectory"
 Write-Host ""
 
@@ -253,7 +268,12 @@ function Invoke-PackageBuild {
     }
 }
 
-$plan = @(Get-CohesionReleaseProject -RepositoryDirectory $repositoryDirectory -RuntimeIdentifier $RuntimeIdentifier)
+$plan = @(
+    Get-CohesionReleaseProject `
+        -RepositoryDirectory $repositoryDirectory `
+        -RuntimeIdentifier $RuntimeIdentifier |
+        Where-Object { -not $SkipLibraries -or $_.Kind -ne 'Library' }
+)
 $planIndex = 0
 
 foreach ($item in $plan) {

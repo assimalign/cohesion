@@ -122,6 +122,8 @@ Describe 'Cohesion local library package pruning' {
 Describe 'Cohesion release policy wiring' {
     BeforeAll {
         $releaseWorkflow = Get-Content -LiteralPath (Join-Path $repositoryDirectory '.github/workflows/release.yml') -Raw
+        $sdkSmokeWorkflow = Get-Content -LiteralPath (Join-Path $repositoryDirectory '.github/workflows/sdk-smoke.yml') -Raw
+        $releasePacker = Get-Content -LiteralPath (Join-Path $repositoryDirectory 'installer/scripts/Pack-Release.ps1') -Raw
         $databaseWorkflow = Get-Content -LiteralPath (Join-Path $repositoryDirectory '.github/workflows/resource-database.yml') -Raw
         $installLocal = Get-Content -LiteralPath (Join-Path $repositoryDirectory 'installer/scripts/Install-Local.ps1') -Raw
     }
@@ -160,9 +162,51 @@ Describe 'Cohesion release policy wiring' {
 
         $stagingJob | Should -Not -Match 'inputs\.promote'
         $stagingJob | Should -Not -Match '(?m)^    if:'
-        $stagingJob | Should -Match '(?m)^    needs: pack-packages\r?$'
+        $stagingJob | Should -Match '(?m)^    needs: \[pack-packages, validate-consumer\]\r?$'
         (Get-WorkflowJobBody -Workflow $releaseWorkflow -Job 'prepare:') |
             Should -Not -Match 'inputs\.promote'
+    }
+
+    It 'strict-packs and exercises package-only SDK consumers without publishing' {
+        $releasePacker | Should -Match '(?m)^\s*\[switch\] \$SkipLibraries,\r?$'
+        $releasePacker | Should -Match "Where-Object \{ -not \`$SkipLibraries -or \`$_.Kind -ne 'Library' \}"
+        $releasePacker | Should -Match '(?m)^\$supportedRuntimeIdentifier = Get-CohesionReleaseRuntimeIdentifier\r?$'
+        $releasePacker | Should -Match 'Unsupported release runtime identifier\(s\)'
+        $sdkSmokeWorkflow | Should -Match '(?m)^  pull_request:\r?$'
+        $sdkSmokeWorkflow | Should -Match '(?m)^        os: \[ubuntu-latest, windows-latest, macos-latest\]\r?$'
+        $sdkSmokeWorkflow | Should -Match '\./installer/scripts/Pack-Release\.ps1'
+        $sdkSmokeWorkflow | Should -Match '(?m)^\s*-SkipLibraries\r?$'
+        $sdkSmokeWorkflow | Should -Match 'Invoke-SdkConsumerSmoke\.ps1'
+        $sdkSmokeWorkflow | Should -Not -Match 'packages:\s*write'
+        $sdkSmokeWorkflow | Should -Not -Match 'dotnet nuget push'
+    }
+
+    It 'gates both release publishers on the three-OS packed-consumer validation' {
+        $consumerJob = Get-WorkflowJobBody -Workflow $releaseWorkflow -Job 'validate-consumer:'
+        $stagingJob = Get-WorkflowJobBody -Workflow $releaseWorkflow -Job 'publish-github-packages:'
+        $promotionJob = Get-WorkflowJobBody -Workflow $releaseWorkflow -Job 'publish-nuget:'
+
+        $consumerJob | Should -Match '(?m)^    needs: \[prepare, pack-packages\]\r?$'
+        $consumerJob | Should -Match '(?m)^        os: \[ubuntu-latest, windows-latest, macos-latest\]\r?$'
+        $consumerJob | Should -Match 'name: Assimalign\.Cohesion\.Packages'
+        $consumerJob | Should -Match 'Invoke-SdkConsumerSmoke\.ps1'
+        $consumerJob | Should -Not -Match 'dotnet nuget push'
+        $stagingJob | Should -Match '(?m)^    needs: \[pack-packages, validate-consumer\]\r?$'
+        $promotionJob | Should -Match '(?m)^    needs: \[pack-packages, validate-consumer, publish-github-packages\]\r?$'
+    }
+
+    It 'retires the replace-on-main package publisher and disabled workflow' {
+        (Test-Path -LiteralPath (Join-Path $repositoryDirectory '.github/scripts/Publish-Nupkg.ps1')) |
+            Should -BeFalse
+        (Test-Path -LiteralPath (Join-Path $repositoryDirectory '.github/workflows-diabled/framework.yml')) |
+            Should -BeFalse
+
+        $activeWorkflow = Get-ChildItem `
+            -LiteralPath (Join-Path $repositoryDirectory '.github/workflows') `
+            -Filter '*.yml' `
+            -File |
+            ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }
+        ($activeWorkflow -join "`n") | Should -Not -Match 'Publish-Nupkg\.ps1'
     }
 
     It 'passes the local version vector to every local pack invocation and prunes library artifacts' {

@@ -25,9 +25,9 @@
 
         <!--
             Full semver. "X.Y.Z" stable, "X.Y.Z-suffix" prerelease.
-            This is the canonical "the version this build produces" string,
-            consumed by Install-Local.ps1, the framework workflow's read-version
-            step, and the .nupkg filenames.
+            This is the canonical "the version this build produces" string used
+            by package generation. Get-CohesionVersion.ps1 mirrors the derivation
+            for local packing, SDK smoke, and release validation.
         -->
         <CohesionVersion Condition="'$(CohesionVersionSuffix)' != ''">$(CohesionVersionPrefix)-$(CohesionVersionSuffix)</CohesionVersion>
         <CohesionVersion Condition="'$(CohesionVersionSuffix)' == ''">$(CohesionVersionPrefix)</CohesionVersion>

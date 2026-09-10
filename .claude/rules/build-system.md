@@ -14,7 +14,7 @@ paths:
 
 # Build System
 
-Cohesion ships as a family of MSBuild SDKs paired with NuGet-distributed shared frameworks, modeled on `Microsoft.NET.Sdk` + `Microsoft.NETCore.App` / `Microsoft.AspNetCore.App`. Understanding this is essential when touching anything under `sdks/`, `frameworks/`, `installer/scripts/`, `.github/workflows/framework.yml`, or any `*.props` / `*.targets` file in `build/`.
+Cohesion ships as a family of MSBuild SDKs paired with NuGet-distributed shared frameworks, modeled on `Microsoft.NET.Sdk` + `Microsoft.NETCore.App` / `Microsoft.AspNetCore.App`. Understanding this is essential when touching anything under `sdks/`, `frameworks/`, `installer/scripts/`, `.github/workflows/sdk-smoke.yml`, `.github/workflows/release.yml`, or any `*.props` / `*.targets` file in `build/`.
 
 ## Centralized MSBuild logic — the most drift-prone area
 
@@ -218,7 +218,7 @@ If a consumer build complains about an `Assimalign.Cohesion.Sdk` it can't resolv
 
 ## CI pipeline summary
 
-Two pipelines, with different jobs. **Continuous integration proves the branch; the release pipeline ships it.** Nothing else publishes.
+Per-area CI and the publish-less SDK consumer smoke prove the branch; **the release pipeline alone ships it.** Nothing else publishes.
 
 ### Per-area CI — `library-*.yml`, `resource-*.yml`
 
@@ -226,13 +226,14 @@ Path-filtered on push, each a thin matrix over project names calling the shared 
 
 ### Release — `.github/workflows/release.yml`
 
-There are two entry paths. A **published GitHub Release** whose tag is `v$(CohesionVersion)`, prerelease suffix included, always validates, packs, and stages. Public promotion is a separate `workflow_dispatch` from the default branch that names the already-published tag and explicitly sets the Boolean `promote` input to `true`; its default is `false`. Both paths run the same five jobs:
+There are two entry paths. A **published GitHub Release** whose tag is `v$(CohesionVersion)`, prerelease suffix included, always validates, packs, and stages. Public promotion is a separate `workflow_dispatch` from the default branch that names the already-published tag and explicitly sets the Boolean `promote` input to `true`; its default is `false`. Both paths run the same six jobs:
 
 1. **prepare** — resolves the tag to a commit, proves it is reachable from `main`, validates the version against `Get-CohesionVersion.ps1`, and emits the validation matrix from `Get-ReleaseMatrix.ps1`. Fails fast, before the large build matrix runs. Every downstream job checks out **that commit**, not the tag, so a tag moved mid-run cannot publish something no job built.
 2. **validate-release** — one leg per shipping package (Linux only; the per-area workflows already carry the three-OS matrix), running the same `.github/actions/build` recipe at the release commit.
 3. **pack-packages** — runs `Pack-Release.ps1`, asserts the inventory-derived package set and its metadata, writes the exact release count to `package-order.txt`, and uploads `_out/release/packages` as the `Assimalign.Cohesion.Packages` artifact.
-4. **publish-github-packages** — stages the artifact in GitHub Packages with `--skip-duplicate`. This is unconditional after a matching published release validates; the manual promotion path safely restages the same immutable version as a no-op.
-5. **publish-nuget** — runs only on `workflow_dispatch` with `promote=true`, promotes the same artifact to nuget.org via OIDC (`NuGet/login`), and is routed through the `nuget-org` environment. That environment must be created with required reviewers; referencing its name does not configure protection. Only `-preview.` and `-rc.` versions are eligible; alpha/beta and stable versions stop at staging.
+4. **validate-consumer** — downloads that exact artifact and, on Ubuntu, Windows, and macOS, builds package-only SDK consumers, publishes them self-contained for the host RID, runs them, and asserts framework-analyzer generated output. It never repacks or publishes.
+5. **publish-github-packages** — stages the consumer-validated artifact in GitHub Packages with `--skip-duplicate`. This is unconditional after a matching published release validates; the manual promotion path safely restages the same immutable version as a no-op.
+6. **publish-nuget** — runs only on `workflow_dispatch` with `promote=true`, promotes the same artifact to nuget.org via OIDC (`NuGet/login`), and is routed through the `nuget-org` environment. That environment must be created with required reviewers; referencing its name does not configure protection. Only `-preview.` and `-rc.` versions are eligible; alpha/beta and stable versions stop at staging.
 
 Both publish jobs re-verify `checksums.sha256` before pushing, so "what we published is what we validated" is checked, not assumed.
 
@@ -250,19 +251,17 @@ Well over a third of the `src` csprojs under `libraries/` and `resources/` are s
 
 `.github/workflows/release-inventory.yml` runs the same guard on every push and pull request that touches a workflow, an installer script, the repository `Directory.Build.props`, or anything under a scanned project root, so a new project or its first source file is checked by the change that creates the drift rather than by a later release. After the pack, `Assert-CohesionPackageMetadata` opens every produced archive and fails unless the central NuGet icon actually landed — the icon is wired through an MSBuild import chain, and a project that falls out of that chain packs cleanly and silently unbranded.
 
-Only per-area release-library matrices participate in the inventory equality check. The exact non-matrix workflow set is `release.yml`, `release-inventory.yml`, `analyzers.yml`, `sdk-smoke.yml`, and `credential-guard.yml`; a listed name may be absent while its later work item has not landed. `framework.yml` is deliberately not exempt. Static project matrices in any workflow, including a non-matrix workflow such as `analyzers.yml`, still count for the repository-wide blind-spot check.
+Only per-area release-library matrices participate in the inventory equality check. The exact non-matrix workflow set is `release.yml`, `release-inventory.yml`, `analyzers.yml`, `sdk-smoke.yml`, and `credential-guard.yml`. Static project matrices in any workflow, including non-matrix workflows such as `analyzers.yml` and `sdk-smoke.yml`, still count for the repository-wide blind-spot check.
 
-Every `uses:` in `release.yml` and in `.github/actions/build/action.yml` is pinned to a commit SHA with a **trailing** version comment, because a mutable tag would run attacker-controlled code with that workflow's `packages: write` and nuget.org OIDC identity. The comment must be trailing: that is the form Dependabot rewrites when it bumps a SHA, and `.github/dependabot.yml` carries an entry for both directories.
+Every external `uses:` in `release.yml`, `sdk-smoke.yml`, and `.github/actions/build/action.yml` is pinned to a commit SHA with a **trailing** version comment, because a mutable tag could run attacker-controlled code with a workflow's package or nuget.org OIDC identity. The comment must be trailing: that is the form Dependabot rewrites when it bumps a SHA, and `.github/dependabot.yml` carries an entry for both directories.
 
-### Framework — `.github/workflows/framework.yml`
+### SDK consumer smoke — `.github/workflows/sdk-smoke.yml`
 
-1. **Pack** (Linux) — runs `Install-Local.ps1` with all declared RIDs, uploads `.nupkg`s as the `cohesion-packages` artifact.
-2. **Smoke-test** (ubuntu/windows/macos matrix) — materializes inline consumer csprojs, builds against targeting packs, publishes self-contained against per-RID runtime packs.
-3. **Publish** (`needs: [pack, smoke-test]`, only on `main`) — pushes every `.nupkg` to GitHub Packages via `Publish-Nupkg.ps1`.
+On pull requests and relevant pushes, a three-OS matrix runs strict `Pack-Release.ps1 -SkipLibraries` for the host RID. The shared `.github/scripts/Invoke-SdkConsumerSmoke.ps1` harness then materializes isolated base, Web, Database, and analyzer-bearing consumers against that feed; builds them against the targeting packs; asserts the analyzer-generated source; publishes each self-contained against the host runtime packs; runs each apphost; and asserts its output.
 
-Its GitHub Packages feed is a QA/UAT staging registry: each push to `main` on the same `$(CohesionVersion)` deletes and replaces the previous publish, so `--skip-duplicate` is deliberately omitted (a failed replacement turns CI red instead of silently leaving the old version on the feed).
+The workflow retains the broader `Sdk.Gateway` package-boundary, in-process, NativeAOT, and container smoke added with that SDK. Its permissions remain `contents: read`; artifact uploads are run-local test inputs, never package-feed publication.
 
-> **Open overlap.** This job and `release.yml`'s `publish-github-packages` both write the SDK and framework packs to the same feed at the same `$(CohesionVersion)`, with opposite policies — replace-on-main versus immutable-on-release. Whichever ran last wins. Resolve it before the first tagged release: either scope the framework job to a distinct prerelease channel, or drop its publish stage and let the release pipeline own the feed.
+`release.yml` repeats the same package-only consumer harness as `validate-consumer`, using the exact full release artifact, before staging or promotion. The former publishing overlap is resolved: GitHub Packages and nuget.org have one writer, `release.yml`, and release versions use immutable `--skip-duplicate` semantics.
 
 ## File layout reference
 
@@ -294,7 +293,7 @@ sdks/Assimalign.Cohesion.Sdk/Targets/      ← base SDK only
 installer/scripts/
 ├── modules/
 │   └── CohesionPackaging.psm1             ← THE release inventory + its drift guards
-├── Pack-Release.ps1                       ← strict release pack → _out/release/packages
+├── Pack-Release.ps1                       ← strict full or -SkipLibraries pack
 ├── Get-ReleaseMatrix.ps1                  ← release validation matrix (JSON) for release.yml
 ├── Install-Local.ps1                      ← dev loop: pack everything locally
 ├── Get-CohesionVersion.ps1                ← resolves $(CohesionVersion) for scripts + CI
@@ -302,7 +301,11 @@ installer/scripts/
 └── Cleanup-PriorRegistrations.ps1         ← one-shot cleanup for old MSI-based registrations
 
 .github/scripts/
-└── Publish-Nupkg.ps1                      ← delete-then-push helper (framework.yml only)
+└── Invoke-SdkConsumerSmoke.ps1            ← package-only build/publish/run harness
+
+.github/workflows/
+├── sdk-smoke.yml                          ← publish-less three-OS SDK validation
+└── release.yml                            ← sole package publisher + consumer gate
 
 build/Targets/
 ├── Build.Branding.props                   ← package metadata + <PackageIcon>

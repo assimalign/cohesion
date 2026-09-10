@@ -15,7 +15,7 @@ The rules in `.claude/rules/` are the canonical coding standard for this repo. T
 - `sdks/` — Cohesion SDK projects; `Sdk` is the base and `Sdk.<Domain>` chain to it
 - `analyzers/` — Roslyn analyzers/codefixes/generators; target `netstandard2.0` with `IsAotCompatible=false` — the one sanctioned exception to the repo-wide TFM/AOT defaults
 - `assets/` — shared repo assets: the `cohesion.config` JSON schemas and `branding/` (NuGet package icon, imported from the branding repo)
-- `installer/` — WiX MSI source plus dev and release scripts (`Install-Local.ps1`, `Get-CohesionVersion.ps1`, `New-CohesionDomainScaffold.ps1`, `Pack-Release.ps1`, `Get-ReleaseMatrix.ps1`, and `modules/CohesionPackaging.psm1` — the authoritative release inventory; the framework workflow's publish helper lives at `.github/scripts/Publish-Nupkg.ps1`)
+- `installer/` — WiX MSI source plus dev and release scripts (`Install-Local.ps1`, `Get-CohesionVersion.ps1`, `New-CohesionDomainScaffold.ps1`, `Pack-Release.ps1`, `Get-ReleaseMatrix.ps1`, and `modules/CohesionPackaging.psm1` — the authoritative release inventory)
 - `extensions/` and `tooling/` — developer tooling and integration surfaces
 - `docs/` — repository-level documentation
 

@@ -26,8 +26,9 @@
 
     Local packages append a final .local prerelease identifier to the canonical
     version (for example, 10.0.1-preview.3.local). They are never release artifacts.
-    The explicit release-validation mode instead uses the canonical identity on a
-    clean runner and is restricted to the SDK/framework bootstrap closure.
+    Release packaging and the three-OS SDK smoke use the strict Pack-Release.ps1
+    path. This script's canonical-identity mode remains only as a clean-runner
+    bootstrap for area tests that need SDK/framework packages before release packing.
 
     SDK-path consumers write <Project Sdk="Assimalign.Cohesion.Sdk"> and the
     SDK auto-includes <FrameworkReference Include="Assimalign.Cohesion.App" />,
@@ -62,8 +63,8 @@
 
 .PARAMETER UseCanonicalVersion
     Packs the SDK/framework bootstrap closure at the exact canonical version, including a stable
-    version. Reserved for clean release-validation runners; requires -SkipLibraries so ordinary
-    local development cannot replace shipping library identities in the global NuGet cache.
+    version. Reserved for clean package-boundary area validation; requires -SkipLibraries so
+    ordinary local development cannot replace shipping identities in the global NuGet cache.
 
 .EXAMPLE
     pwsh installer\scripts\Install-Local.ps1
@@ -105,7 +106,7 @@ $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $feedDir  = Join-Path $repoRoot '_out\packages'
 
 if ($UseCanonicalVersion -and -not $SkipLibraries) {
-    throw '-UseCanonicalVersion is a release-validation bootstrap and requires -SkipLibraries.'
+    throw '-UseCanonicalVersion is a package-boundary validation bootstrap and requires -SkipLibraries.'
 }
 
 # Resolve the canonical version, then derive a local-only prerelease above it. Local packages must

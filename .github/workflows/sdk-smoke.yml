@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - ".github/workflows/sdk-smoke.yml"
+      - ".github/scripts/Invoke-SdkConsumerSmoke.ps1"
+      - "analyzers/**"
       - "build/**"
       - "frameworks/**"
       - "installer/scripts/**"
@@ -12,6 +14,7 @@ on:
       - "libraries/Core/**"
       - "libraries/Hosting/**"
       - "libraries/Http/**"
+      - "libraries/ObjectMapping/**"
       - "libraries/Security/Assimalign.Cohesion.Security.DataProtection/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/**"
       - "resources/Database/Assimalign.Cohesion.Database.ApplicationModel/**"
@@ -21,6 +24,7 @@ on:
       - "resources/Web/Assimalign.Cohesion.Web.Hosting/**"
       - "resources/Web/Assimalign.Cohesion.Web.Routing/**"
       - "resources/Web/Assimalign.Cohesion.Web/**"
+      - "samples/SdkSmoke/**"
       - "sdks/**"
       - "Directory.Build.props"
       - "Directory.Build.targets"
@@ -28,6 +32,8 @@ on:
   pull_request:
     paths:
       - ".github/workflows/sdk-smoke.yml"
+      - ".github/scripts/Invoke-SdkConsumerSmoke.ps1"
+      - "analyzers/**"
       - "build/**"
       - "frameworks/**"
       - "installer/scripts/**"
@@ -36,6 +42,7 @@ on:
       - "libraries/Core/**"
       - "libraries/Hosting/**"
       - "libraries/Http/**"
+      - "libraries/ObjectMapping/**"
       - "libraries/Security/Assimalign.Cohesion.Security.DataProtection/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/**"
       - "resources/Database/Assimalign.Cohesion.Database.ApplicationModel/**"
@@ -45,6 +52,7 @@ on:
       - "resources/Web/Assimalign.Cohesion.Web.Hosting/**"
       - "resources/Web/Assimalign.Cohesion.Web.Routing/**"
       - "resources/Web/Assimalign.Cohesion.Web/**"
+      - "samples/SdkSmoke/**"
       - "sdks/**"
       - "Directory.Build.props"
       - "Directory.Build.targets"
@@ -59,6 +67,74 @@ permissions:
   contents: read
 
 jobs:
+  consumer-smoke:
+    name: "SDK consumer smoke [${{ matrix.os }}]"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+
+      - name: Resolve version and host RID
+        id: identity
+        shell: pwsh
+        run: |
+          $version = (& ./installer/scripts/Get-CohesionVersion.ps1).Trim()
+          if (-not $version) {
+            throw 'Get-CohesionVersion.ps1 produced no version.'
+          }
+
+          $rid = @(
+            & dotnet --info |
+              Select-String -Pattern '^\s*RID:\s*(\S+)' |
+              ForEach-Object { $_.Matches[0].Groups[1].Value }
+          ) | Select-Object -First 1
+          if (-not $rid) {
+            throw "Could not resolve the host RID from 'dotnet --info'."
+          }
+
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "rid=$rid" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "SDK consumer identity: $version / $rid"
+
+      - name: Strict-pack SDK and framework closure for host RID
+        shell: pwsh
+        env:
+          COHESION_VERSION: ${{ steps.identity.outputs.version }}
+          COHESION_HOST_RID: ${{ steps.identity.outputs.rid }}
+        run: |
+          $commit = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $commit) {
+            throw 'Resolving the checked-out commit failed.'
+          }
+
+          ./installer/scripts/Pack-Release.ps1 `
+              -Version $env:COHESION_VERSION `
+              -RepositoryCommit $commit `
+              -RuntimeIdentifier $env:COHESION_HOST_RID `
+              -SkipLibraries
+
+      - name: Build, publish, run, and assert package-only consumers
+        shell: pwsh
+        env:
+          COHESION_VERSION: ${{ steps.identity.outputs.version }}
+          COHESION_HOST_RID: ${{ steps.identity.outputs.rid }}
+        run: |
+          ./.github/scripts/Invoke-SdkConsumerSmoke.ps1 `
+              -PackageDirectory ./_out/release/packages `
+              -Version $env:COHESION_VERSION `
+              -RuntimeIdentifier $env:COHESION_HOST_RID
+
   sdk-tasks:
     name: "${{ matrix.projects }} [${{ matrix.os }}]"
     runs-on: ${{ matrix.os }}
@@ -111,21 +187,27 @@ jobs:
           Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force
           Assert-CohesionReleaseInventory -RepositoryDirectory (Get-Location).Path
 
-      - name: Pack canonical SDK and framework closure
+      - name: Strict-pack canonical SDK and framework closure
         shell: pwsh
         run: |
-          ./installer/scripts/Install-Local.ps1 `
-              -Configuration Release `
-              -Rids linux-x64,win-x64,osx-arm64 `
-              -SkipLibraries `
-              -UseCanonicalVersion
+          $version = (& ./installer/scripts/Get-CohesionVersion.ps1).Trim()
+          $commit = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $commit) {
+            throw 'Resolving the checked-out commit failed.'
+          }
+
+          ./installer/scripts/Pack-Release.ps1 `
+              -Version $version `
+              -RepositoryCommit $commit `
+              -RuntimeIdentifier linux-x64,win-x64,osx-arm64 `
+              -SkipLibraries
 
       - name: Pack Gateway package dependency closure
         shell: pwsh
         run: |
           Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force
           $repository = (Get-Location).Path
-          $packageDirectory = Join-Path $repository "_out/packages"
+          $packageDirectory = Join-Path $repository "_out/release/packages"
           $packageIds = @(
             "Assimalign.Cohesion.Core"
             "Assimalign.Cohesion.ApplicationModel"
@@ -201,7 +283,7 @@ jobs:
             "Assimalign.Cohesion.ConfigurationStore.Client"
           )
           $missing = @($required | Where-Object {
-            -not (Test-Path -LiteralPath "_out/packages/$($_).$version.nupkg" -PathType Leaf)
+            -not (Test-Path -LiteralPath "_out/release/packages/$($_).$version.nupkg" -PathType Leaf)
           })
           if ($missing.Count -gt 0) {
             throw "Package-boundary feed is incomplete: $($missing -join ', ')."
@@ -211,7 +293,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sdk-smoke-packages
-          path: _out/packages/*.nupkg
+          path: _out/release/packages/*.nupkg
           if-no-files-found: error
           retention-days: 1
 
