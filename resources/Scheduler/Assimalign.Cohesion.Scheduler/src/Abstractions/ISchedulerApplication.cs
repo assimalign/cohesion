@@ -11,6 +11,11 @@ namespace Assimalign.Cohesion.Scheduler;
 public interface ISchedulerApplication : IHost
 {
     /// <summary>
+    /// Gets the scheduler-specific application context.
+    /// </summary>
+    new ISchedulerApplicationContext Context { get; }
+
+    /// <summary>
     /// Runs the application until shutdown is requested.
     /// </summary>
     /// <param name="cancellationToken">The token that requests application shutdown.</param>

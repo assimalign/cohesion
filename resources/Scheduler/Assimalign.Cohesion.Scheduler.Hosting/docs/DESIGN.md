@@ -1,9 +1,9 @@
 # Scheduler Hosting Design
 
-The public API is limited to the static `SchedulerApplication` factory. Builder, host, context, and options implementations remain internal, while their contracts live in `Assimalign.Cohesion.Scheduler`.
+SchedulerApplication discovers an enabled resource registration from the entry assembly and builds an internal SchedulerApplicationHost. The builder materializes user host services, validates every provider binding against the declared job registry, adds the resource control-plane listener when an ambient http endpoint exists, and finally adds the schedule execution service.
 
-The application host delegates lifecycle execution to the shared Cohesion host. Routing through the planned ambient `ResourceRuntime` seam remains tracked in the source TODO for design item 12.
+The execution service snapshots schedules from every registered IScheduleProvider and runs their evaluation loops concurrently. It does not execute unbound jobs. On stop it cancels trigger waits, prevents new occurrences, and joins any occurrence already underway within the shared host shutdown budget.
 
-Each build creates a new context, invokes every registered service factory exactly once against that context, and exposes the materialized services as an ordered, read-only hosted-service snapshot. The shared host starts services in registration order and stops them in reverse; an unconfigured builder still produces an empty collection and a production host environment.
+The private http listener serves public /healthz, /readyz, and /livez probes and their authenticated /cohesion/v1 equivalents. It also serves authenticated endpoint and command discovery and accepts /cohesion/v1/stop. Readiness stays unavailable until the outer Scheduler host reaches Started.
 
-Scheduler domain execution remains deliberately outside this composition-only host, and no scheduler service is registered by default.
+Builder, context, host, execution service, and listener are internal. The only public creation surface is SchedulerApplication; contracts live in the root package.

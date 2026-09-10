@@ -6,13 +6,19 @@
 		The resource's domain composition remains in its Program.cs.
 	-->
 	<PropertyGroup>
+		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.Scheduler.ApplicationModel</CohesionResourceApplicationModel>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.Scheduler.ApplicationModel.SchedulerResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">Scheduler</CohesionResourceKind>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">http</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
 		<CohesionWorkloadKind Condition="'$(CohesionWorkloadKind)' == ''">Deployment</CohesionWorkloadKind>
+		<CohesionReplicas Condition="'$(CohesionReplicas)' == ''">1</CohesionReplicas>
+		<CohesionMaxReplicas Condition="'$(CohesionMaxReplicas)' == ''">1</CohesionMaxReplicas>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<CohesionEndpoint Include="http" Scheme="http" ContainerPort="8080" Public="false" />
+		<CohesionProbe Include="readiness" Endpoint="http" Http="/readyz" />
+		<CohesionProbe Include="liveness" Endpoint="http" Http="/livez" />
 	</ItemGroup>
 </Project>

@@ -2,5 +2,15 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Scheduler" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel.Token" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 	</ItemGroup>
 </Project>

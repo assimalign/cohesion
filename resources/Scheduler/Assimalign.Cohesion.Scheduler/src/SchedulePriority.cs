@@ -1,25 +1,31 @@
 ﻿namespace Assimalign.Cohesion.Scheduler;
 
+/// <summary>
+/// Identifies a schedule's compatibility priority classification.
+/// </summary>
+/// <remarks>
+/// Scheduler providers own independent asynchronous loops, so this value does not guarantee
+/// occurrence ordering or OS-thread affinity. A synchronous blocking workload that truly needs
+/// a dedicated thread should be hosted as a
+/// <see cref="Assimalign.Cohesion.Hosting.DedicatedThreadService"/> rather
+/// than implemented as an asynchronous schedule job.
+/// </remarks>
 public enum SchedulePriority
 {
     /// <summary>
-    /// Long running schedules are executed in a separate thread.
-    /// Using Default TaskScheduler.
+    /// Classifies a schedule as long-running without promising a dedicated execution thread.
     /// </summary>
     LongRunning,
     /// <summary>
-    /// High Priority schedules are executed first.
-    /// Using TickerTaskScheduler
+    /// Classifies a schedule as high priority for providers that interpret priority metadata.
     /// </summary>
     High,
     /// <summary>
-    /// Normal Priority Tasks are executed after high priority tasks.
-    /// Using TickerTaskScheduler
+    /// Classifies a schedule as normal priority.
     /// </summary>
     Normal,
     /// <summary>
-    /// Low Priority Tasks are executed last.
-    /// Using TickerTaskScheduler
+    /// Classifies a schedule as low priority for providers that interpret priority metadata.
     /// </summary>
     Low
 }

@@ -1,5 +1,5 @@
 # Assimalign.Cohesion.Scheduler.Hosting
 
-Provides the host factory and lifecycle adapter for scheduler applications.
+Concrete Scheduler host, provider execution lifecycle, and enabled-resource http control plane.
 
-See the [overview](docs/OVERVIEW.md) and [design notes](docs/DESIGN.md) for the current filler-host boundary.
+See the [overview](docs/OVERVIEW.md) and [design](docs/DESIGN.md).

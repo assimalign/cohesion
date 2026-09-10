@@ -1,30 +1,14 @@
 # ISchedulerApplicationBuilder
 
-Namespace: `Assimalign.Cohesion.Scheduler`
-Assembly: `Assimalign.Cohesion.Scheduler`
+Namespace: Assimalign.Cohesion.Scheduler
 
-## Purpose
+Assembly: Assimalign.Cohesion.Scheduler
 
-`ISchedulerApplicationBuilder` is the public composition seam for a Scheduler application. It extends `IHostBuilder` while refining `Build()` to return `ISchedulerApplication`.
+The builder separates job declaration from trigger binding:
 
-## Surface and behavior
+- AddJob registers an IScheduleJob without executing it.
+- AddScheduleProvider contributes schedules for Hosting to run.
+- AddService contributes ordinary host services.
+- Build returns the typed ISchedulerApplication.
 
-- `AddService(IHostService service)` registers an existing service instance.
-- `AddService(Func<IHostContext, IHostService> factory)` registers a factory that is invoked once per build against the new Scheduler context.
-- `Build()` creates a configured Scheduler application.
-
-Registrations retain insertion order. The shared host starts the materialized services in that order and stops them in reverse; a builder with no registrations still produces an empty collection. The concrete builder remains internal to `Assimalign.Cohesion.Scheduler.Hosting`.
-
-## Exceptions
-
-`AddService` throws `ArgumentNullException` for a null service or factory. `Build()` throws `InvalidOperationException` when a factory returns null, and otherwise propagates factory failures.
-
-## Usage
-
-```csharp
-using Assimalign.Cohesion.Scheduler;
-using Assimalign.Cohesion.Scheduler.Hosting;
-
-ISchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder(args);
-await using ISchedulerApplication application = builder.Build();
-```
+Feature packages expose convenient AddCronSchedule and AddTimerSchedule verbs over AddScheduleProvider. Hosting rejects providers whose schedules bind a job that was not declared through AddJob.

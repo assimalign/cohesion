@@ -20,16 +20,8 @@ internal sealed class SchedulerApplicationHost : Host<SchedulerApplicationContex
 
     public override SchedulerApplicationContext Context => _context;
 
-    async Task ISchedulerApplication.RunAsync(CancellationToken cancellationToken)
-    {
-        // TODO(design item 12): Route RunAsync through ResourceRuntime once the ambient runtime seam exists.
-        if (cancellationToken.IsCancellationRequested)
-        {
-            await ((IHost)this).StartAsync(CancellationToken.None).ConfigureAwait(false);
-            await ((IHost)this).StopAsync(CancellationToken.None).ConfigureAwait(false);
-            return;
-        }
+    ISchedulerApplicationContext ISchedulerApplication.Context => _context;
 
-        await base.RunAsync(cancellationToken).ConfigureAwait(false);
-    }
+    Task ISchedulerApplication.RunAsync(CancellationToken cancellationToken) =>
+        RunAsync(cancellationToken);
 }

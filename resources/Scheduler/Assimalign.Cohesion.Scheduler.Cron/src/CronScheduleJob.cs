@@ -2,13 +2,12 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Scheduler;
+using Assimalign.Cohesion.Scheduler;
+
+namespace Assimalign.Cohesion.Scheduler.Cron;
 
 /// <summary>
-/// Base class for jobs triggered by a cron schedule. The Scheduler area is not started yet
-/// (design item 31 scaffolds only its filler application); this type keeps the dormant Cron
-/// package aligned with the area root's <see cref="IScheduleJob"/> contract until the
-/// Scheduler program defines its job model.
+/// Base class for jobs triggered by a cron schedule.
 /// </summary>
 public abstract class CronScheduleJob : IScheduleJob
 {
@@ -23,7 +22,7 @@ public abstract class CronScheduleJob : IScheduleJob
     {
         Id = id;
         Name = name;
-        _state = default;
+        _state = JobState.Enabled;
     }
 
     /// <inheritdoc/>

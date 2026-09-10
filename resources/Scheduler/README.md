@@ -1,23 +1,27 @@
 # Scheduler
 
-Scheduler is the L3 operational service platform intended to coordinate schedules, jobs, triggers, durable execution, retries, misfire handling, and distributed worker ownership.
+Scheduler is the L3 Cohesion resource for declaring jobs and binding them to trigger providers. The executable host runs every declared schedule, reports health through the resource control plane, and drains an active occurrence during graceful shutdown.
 
-The application and builder are fillers pending the area's program.
+Jobs are declarations, not one-shot work: AddJob creates a dormant job. AddCronSchedule and AddTimerSchedule bind that job to a provider. An unbound job never executes.
 
 ## Projects
 
-- `Assimalign.Cohesion.Scheduler` contains the existing scheduler domain contracts and the public area-root application and builder contracts.
-- `Assimalign.Cohesion.Scheduler.Hosting` provides the concrete creation entry point and the caller-configurable host-service lifecycle.
-- `Assimalign.Cohesion.Scheduler.Cron` provides the existing cron schedule and crontab model.
-- `Assimalign.Cohesion.Scheduler.Timer` reserves the timer-based scheduling implementation and is currently project scaffolding.
+- Assimalign.Cohesion.Scheduler contains the public application, job, schedule, provider, and context contracts.
+- Assimalign.Cohesion.Scheduler.Hosting contains the internal runtime host, execution service, and http control-plane listener.
+- Assimalign.Cohesion.Scheduler.Cron implements exact five-field cron parsing and occurrence evaluation.
+- Assimalign.Cohesion.Scheduler.Timer implements fixed-delay timer occurrences.
+- Assimalign.Cohesion.Scheduler.ApplicationModel provides the opt-in typed resource and singleton stateless planner.
 
-## Layering and dependencies
+## Runtime shape
 
-As an L3 service platform, Scheduler composes the L2 `Assimalign.Cohesion.Hosting` runtime and also references the L1 `Assimalign.Cohesion.Core` foundation directly. Cron depends on the area root, while the Hosting project depends only on the area root and shared Hosting runtime.
+The root is the cross-package composition seam. Feature packages depend on the root and register internal providers through ISchedulerApplicationBuilder. Hosting consumes only root contracts. Enabled resources expose health, readiness, liveness, endpoint discovery, command discovery, and graceful stop routes on the SDK-declared http endpoint.
 
-## Project documentation
+Scheduler is deliberately singleton until leader election or distributed occurrence coordination is designed. Persistence, retry policy execution, misfire handling, and distributed ownership remain future work.
 
-- [Root overview](./Assimalign.Cohesion.Scheduler/docs/OVERVIEW.md)
+## Documentation
+
 - [Root design](./Assimalign.Cohesion.Scheduler/docs/DESIGN.md)
-- [Hosting overview](./Assimalign.Cohesion.Scheduler.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.Scheduler.Hosting/docs/DESIGN.md)
+- [Cron design](./Assimalign.Cohesion.Scheduler.Cron/docs/DESIGN.md)
+- [Timer design](./Assimalign.Cohesion.Scheduler.Timer/docs/DESIGN.md)
+- [Application-model design](./Assimalign.Cohesion.Scheduler.ApplicationModel/docs/DESIGN.md)

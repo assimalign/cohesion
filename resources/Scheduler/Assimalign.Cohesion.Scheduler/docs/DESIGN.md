@@ -1,21 +1,21 @@
 # Assimalign.Cohesion.Scheduler Design
 
-## Design intent
+## Contract seam
 
-The area root owns the scheduler contracts that feature packages compose against. `ISchedulerApplicationBuilder` is the contract-only application seam, while `ISchedulerApplication` supplies the host lifecycle expected by an executable resource. Existing schedule, job, and provider abstractions remain separate from application construction.
+ISchedulerApplicationBuilder owns two independent registries: declared jobs and schedule providers. AddJob only declares work and is intentionally dormant. Cron and Timer builder verbs create their internal IScheduleProvider implementations and bind an already-declared job. Hosting validates those bindings during Build so a schedule cannot silently capture an undeclared job instance.
 
-## Hosting isolation
+ISchedulerApplicationContext exposes immutable job and provider snapshots. Hosting depends on those root contracts and never needs a feature-package reference.
 
-The root references only shared foundation libraries. The concrete application builder, host, context, and options remain internal to `Assimalign.Cohesion.Scheduler.Hosting`; feature libraries must not reference that runtime module.
+## Occurrences and shutdown
 
-## Composition lifecycle
+Schedule<TContext> owns schedule identity, observable status, last and next occurrence timestamps, per-provider enablement checks, and sequential execution of the jobs bound to one occurrence. A provider cancellation token stops future waits and prevents another occurrence. Once a job begins, its occurrence is drained without that scheduling token; the host shutdown grace bounds how long StopAsync waits.
 
-The builder accepts existing `IHostService` instances and factories that receive the newly created area `IHostContext`. Each factory is invoked once per `Build()`, and the resulting services are retained in registration order so the shared host starts them in that order and stops them in reverse. The collection is empty when callers register nothing, and the host environment remains production.
+Provider implementations are internal to trigger packages. IScheduleProvider is the public behavior seam for schedule discovery and per-schedule job enablement.
 
-No scheduled work or scheduler service is registered by default. The seam remains composition-only without claiming that scheduling behavior is ready.
+## Deferred behavior
 
-The two incomplete legacy runtime sources remain preserved on disk but are excluded from the filler assembly because they still depend on the absent `TickerOptionsBuilder` implementation and obsolete thread-abort behavior. Checked-in generated value-type bodies are likewise preserved but excluded from compilation because current source generation supplies those bodies. The scheduler program must replace those legacy internals before runtime scheduling behavior is enabled.
+Retries, misfire policies, durable history, leader election, and distributed worker ownership are not implemented. The application model therefore enforces a singleton workload.
 
 ## AOT posture
 
-The application contracts require no reflection, dynamic code generation, runtime assembly scanning, or container-based activation and remain safe for trimming and NativeAOT.
+Runtime composition uses explicit registrations and immutable snapshots. It does not scan for jobs or activate them through reflection.

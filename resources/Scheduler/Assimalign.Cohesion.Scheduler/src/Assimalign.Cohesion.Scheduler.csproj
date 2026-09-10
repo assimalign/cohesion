@@ -1,7 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<Compile Remove="Delegates\**" />
-		<Compile Remove="Extensions\**" />
 		<Compile Remove="Internal\ScheduleTaskScheduler.cs" />
 		<Compile Remove="Internal\SoftSchedulerNotifyDebounce.cs" />
 		<Compile Remove="ValueObjects\JobId.generated.cs" />
@@ -9,7 +8,6 @@
 		<EmbeddedResource Remove="Delegates\**" />
 		<EmbeddedResource Remove="Extensions\**" />
 		<None Remove="Delegates\**" />
-		<None Remove="Extensions\**" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />

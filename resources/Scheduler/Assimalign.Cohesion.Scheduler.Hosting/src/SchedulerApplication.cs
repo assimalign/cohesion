@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.Scheduler;
 
@@ -19,6 +20,15 @@ public static class SchedulerApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new SchedulerApplicationBuilder(args);
+        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(SchedulerApplication).Assembly;
+        return new SchedulerApplicationBuilder(args, resourceAssembly);
+    }
+
+    internal static ISchedulerApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+
+        return new SchedulerApplicationBuilder(args, resourceAssembly);
     }
 }

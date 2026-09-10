@@ -1,12 +1,7 @@
 # Assimalign.Cohesion.Scheduler
 
-## Summary
+The root package defines Scheduler application, context, job, schedule, and provider contracts. SchedulerApplication.CreateBuilder lives in the Hosting package.
 
-This project contains scheduler contracts and defines the public, contract-only builder and application lifecycle seam for the Scheduler area. The application implementation and creation entry point live in `Assimalign.Cohesion.Scheduler.Hosting`.
+Declare delegate-backed work with AddJob. The returned IScheduleJob remains dormant until AddCronSchedule or AddTimerSchedule binds it. Build validates that every scheduled job is the same instance present in the declaration registry.
 
-## Application surface
-
-- `ISchedulerApplicationBuilder` extends the shared host-builder contract, registers host-service instances or context-aware factories, and builds an `ISchedulerApplication`.
-- `ISchedulerApplication` exposes the shared host lifecycle plus `RunAsync`.
-
-The current application is a composition-only filler that is empty by default. Caller-registered services participate in the shared ordered lifecycle; scheduling behavior remains outside this slice.
+ISchedulerApplicationContext exposes read-only job and provider snapshots for observation and hosting. ISchedule exposes next and last scheduled timestamps, status, priority, retry metadata, bound jobs, and its asynchronous evaluation loop.
