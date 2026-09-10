@@ -4,23 +4,12 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
+using Assimalign.Cohesion.Sdk.Tasks.Internal;
+
 namespace Assimalign.Cohesion.Sdk.Gateway.Tasks;
 
 internal static class GatewaySourceWriter
 {
-    private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
-    {
-        "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
-        "class", "const", "continue", "decimal", "default", "delegate", "do", "double", "else",
-        "enum", "event", "explicit", "extern", "false", "finally", "fixed", "float", "for",
-        "foreach", "goto", "if", "implicit", "in", "int", "interface", "internal", "is", "lock",
-        "long", "namespace", "new", "null", "object", "operator", "out", "override", "params",
-        "private", "protected", "public", "readonly", "ref", "return", "sbyte", "sealed", "short",
-        "sizeof", "stackalloc", "static", "string", "struct", "switch", "this", "throw", "true",
-        "try", "typeof", "uint", "ulong", "unchecked", "unsafe", "ushort", "using", "virtual",
-        "void", "volatile", "while"
-    };
-
     public static void Write(
         string outputPath,
         string applicationName,
@@ -55,38 +44,7 @@ internal static class GatewaySourceWriter
         WriteIfChanged(outputPath, source.ToString());
     }
 
-    public static string Identifier(string value)
-    {
-        var result = new StringBuilder(value.Length);
-        bool capitalize = true;
-        foreach (char character in value)
-        {
-            if (char.IsAsciiLetterOrDigit(character) || character == '_')
-            {
-                char next = capitalize ? char.ToUpperInvariant(character) : character;
-                result.Append(next);
-                capitalize = false;
-            }
-            else
-            {
-                capitalize = true;
-            }
-        }
-
-        if (result.Length == 0)
-        {
-            return "Value";
-        }
-        if (char.IsAsciiDigit(result[0]))
-        {
-            result.Insert(0, '_');
-        }
-        if (Keywords.Contains(result.ToString()))
-        {
-            result.Insert(0, '_');
-        }
-        return result.ToString();
-    }
+    public static string Identifier(string value) => CohesionIdentifier.ToPascalCase(value);
 
     public static string FriendlyManifestName(GatewayManifest manifest)
     {

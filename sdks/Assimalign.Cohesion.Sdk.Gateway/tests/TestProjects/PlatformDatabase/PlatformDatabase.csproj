@@ -7,7 +7,7 @@
     <IsAotCompatible>true</IsAotCompatible>
     <CohesionApplicationModel>enabled</CohesionApplicationModel>
     <CohesionApplication>platform</CohesionApplication>
-    <CohesionResourceName>platform-database</CohesionResourceName>
+    <CohesionResourceName>platform-configuration-store</CohesionResourceName>
   </PropertyGroup>
 
 </Project>

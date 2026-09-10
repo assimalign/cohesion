@@ -10,6 +10,15 @@ on .NET 10 and generated source must remain trim- and NativeAOT-safe.
 The authoritative developer-experience decisions for this area are T21 and T24
 in [`docs/DEVELOPER_EXPERIENCE_DESIGN.md`](../../../docs/DEVELOPER_EXPERIENCE_DESIGN.md).
 
+## Generated identifier contract
+
+Every generated C# accessor uses the same identifier transformation. Hyphen, underscore, dot,
+colon, and other non-alphanumeric separators delimit segments; the first character of each segment
+is upper-cased and the remaining characters are preserved. Four-character application segments
+retain the established application spelling (`appa` becomes `AppA`). Empty results become `Value`,
+and a leading digit is prefixed with `_`. Consequently `platform-configuration-store` always emits
+`PlatformConfigurationStore` in resource and gateway generated surfaces.
+
 ## StronglyTypedSettings contract
 
 `CohesionAppSettingsClass` is the sole opt-in switch and supplies the generated

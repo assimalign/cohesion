@@ -14,6 +14,6 @@ Assimalign.Cohesion.Hosting.Resources.ResourceMount dataMount = Resource.Mounts.
 string dataPath = dataMount.Path ?? string.Empty;
 int poolSize = Resource.Settings.DatabasePoolSize.Get<int>();
 Assimalign.Cohesion.Connections.IConnectionFactory dependencyFactory =
-    Resource.References.InventoryStorage.Db.ConnectionFactory();
+    Resource.References.PlatformConfigurationStore.Db.ConnectionFactory();
 _ = (adminEndpoint, databaseEndpoint, dataMount, dataPath, poolSize, dependencyFactory);
 _ = Resource.Manifest;

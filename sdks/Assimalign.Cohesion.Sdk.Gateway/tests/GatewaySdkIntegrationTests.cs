@@ -31,17 +31,17 @@ public sealed class GatewaySdkIntegrationTests
         string appASource = File.ReadAllText(GeneratedOutput(
             workspace.ProjectDirectory("AppAGateway"),
             "Gateway.g.cs"));
-        appASource.ShouldContain("ExternalResourceDeclaration PlatformDatabase");
+        appASource.ShouldContain("ExternalResourceDeclaration PlatformConfigurationStore");
         appASource.ShouldContain("ApplicationName.Parse(\"platform\")");
         appASource.ShouldContain("closure: new global::Assimalign.Cohesion.ApplicationModel.ResourceManifest[]");
-        appASource.ShouldContain("Manifests.PlatformDatabase");
-        appASource.ShouldNotContain("AddPlatformDatabase(");
+        appASource.ShouldContain("Manifests.PlatformConfigurationStore");
+        appASource.ShouldNotContain("AddPlatformConfigurationStore(");
 
         string rootDirectory = workspace.ProjectDirectory("RootGateway");
         string rootSource = File.ReadAllText(GeneratedOutput(rootDirectory, "Gateway.g.cs"));
-        rootSource.ShouldContain("ApplicationDeclaration Appa");
+        rootSource.ShouldContain("ApplicationDeclaration AppA");
         rootSource.ShouldContain("ApplicationModelResolvers.ControlPlane(");
-        rootSource.ShouldContain("public static class Appa");
+        rootSource.ShouldContain("public static class AppA");
         rootSource.ShouldContain("public const string");
         rootSource.ShouldContain("public const string WebHttp = \"web-http\"");
 

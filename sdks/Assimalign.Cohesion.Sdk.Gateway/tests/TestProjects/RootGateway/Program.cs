@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.ApplicationModel;
 
 IApplicationBuilder builder = Gateway.CreateBuilder(args);
-_ = Applications.Appa;
-_ = References.Appa.WebHttp;
+_ = Applications.AppA;
+_ = References.AppA.WebHttp;
 builder.UseGateway(args);

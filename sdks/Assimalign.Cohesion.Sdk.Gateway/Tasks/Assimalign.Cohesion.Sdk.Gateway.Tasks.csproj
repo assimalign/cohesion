@@ -10,4 +10,8 @@
 		<CohesionPackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" />
 		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" ExcludeAssets="runtime" />
 	</ItemGroup>
+	<ItemGroup>
+		<Compile Include="..\..\Assimalign.Cohesion.Sdk\Tasks\Internal\Utilities\CohesionIdentifier.cs"
+			Link="Tasks\Internal\CohesionIdentifier.cs" />
+	</ItemGroup>
 </Project>

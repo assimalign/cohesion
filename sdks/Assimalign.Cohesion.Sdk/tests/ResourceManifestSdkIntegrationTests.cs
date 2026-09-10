@@ -80,6 +80,7 @@ public sealed class ResourceManifestSdkIntegrationTests
         string databaseResourceSource = File.ReadAllText(GeneratedOutput(databaseProject, "Resource.g.cs"));
         databaseResourceSource.ShouldContain("public static global::System.Uri Admin =>");
         databaseResourceSource.ShouldContain("public static global::System.Uri Db =>");
+        databaseResourceSource.ShouldContain("public static class PlatformConfigurationStore");
         databaseResourceSource.ShouldContain(
             "global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current.GetConnectionFactory");
         databaseResourceSource.ShouldNotContain("global::Assimalign.Cohesion.Core.Endpoint" + "Address");
@@ -150,6 +151,8 @@ public sealed class ResourceManifestSdkIntegrationTests
         database.GetProperty("kind").GetString().ShouldBe("Database");
         database.GetProperty("applicationModel").GetString().ShouldBe("Assimalign.Cohesion.Database.ApplicationModel");
         database.GetProperty("artifact").GetProperty("composable").GetBoolean().ShouldBeTrue();
+        database.GetProperty("references").EnumerateArray().Single()
+            .GetProperty("resource").GetString().ShouldBe("platform-configuration-store");
 
         JsonElement databaseEndpoint = database
             .GetProperty("endpoints")

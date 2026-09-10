@@ -70,6 +70,11 @@ The task consumes JSON manifests, not referenced compilations. It validates iden
 application boundaries, duplicate providers, provider metadata, and protected
 mount-source mappings before emitting source.
 
+Gateway members use the base SDK's shared generated-identifier contract: non-alphanumeric
+separators delimit Pascal-cased segments, `appa` becomes `AppA`, and
+`platform-configuration-store` becomes `PlatformConfigurationStore`. The rule applies uniformly to
+`Applications`, `Externals`, `References`, manifest members, resource verbs, and provider members.
+
 The generated application name is used in two ways:
 
 - `[assembly: CohesionApplicationAttribute("appa")]` is metadata for build and tooling

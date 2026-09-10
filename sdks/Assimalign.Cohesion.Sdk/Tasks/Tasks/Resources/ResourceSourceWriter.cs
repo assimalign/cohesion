@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
+using Assimalign.Cohesion.Sdk.Tasks.Internal;
+
 namespace Assimalign.Cohesion.Sdk.Tasks;
 
 internal static class ResourceSourceWriter
@@ -115,53 +117,7 @@ internal static class ResourceSourceWriter
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(builder.ToString()));
     }
 
-    public static string Identifier(string value)
-    {
-        var builder = new StringBuilder(value.Length);
-        bool capitalize = true;
-        int tokenStart = 0;
-
-        for (int index = 0; index <= value.Length; index++)
-        {
-            bool boundary = index == value.Length || !char.IsLetterOrDigit(value[index]);
-            if (!boundary)
-            {
-                continue;
-            }
-
-            if (index > tokenStart)
-            {
-                string token = value.Substring(tokenStart, index - tokenStart);
-                if (token.Length == 4 && token.StartsWith("app", StringComparison.OrdinalIgnoreCase))
-                {
-                    builder.Append("App");
-                    builder.Append(char.ToUpperInvariant(token[3]));
-                }
-                else
-                {
-                    foreach (char character in token)
-                    {
-                        builder.Append(capitalize ? char.ToUpperInvariant(character) : character);
-                        capitalize = false;
-                    }
-                }
-                capitalize = true;
-            }
-
-            tokenStart = index + 1;
-        }
-
-        if (builder.Length == 0)
-        {
-            return "Value";
-        }
-        if (char.IsDigit(builder[0]))
-        {
-            builder.Insert(0, '_');
-        }
-
-        return builder.ToString();
-    }
+    public static string Identifier(string value) => CohesionIdentifier.ToPascalCase(value);
 
     private static string EntryAnchorType(string assemblyName) =>
         "CohesionResourceEntry" + Convert.ToHexString(Encoding.UTF8.GetBytes(assemblyName));

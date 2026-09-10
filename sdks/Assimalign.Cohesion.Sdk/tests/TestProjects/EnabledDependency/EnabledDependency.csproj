@@ -8,7 +8,7 @@
     <RootNamespace>EnabledDependency</RootNamespace>
     <CohesionApplicationModel>enabled</CohesionApplicationModel>
     <CohesionApplication>inventory</CohesionApplication>
-    <CohesionResourceName>inventory-storage</CohesionResourceName>
+    <CohesionResourceName>platform-configuration-store</CohesionResourceName>
   </PropertyGroup>
 
   <ItemGroup>
