@@ -25,6 +25,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// </remarks>
 public abstract class ApplicationGateway :
     IMultiModelApplicationGateway,
+    IApplicationSetExternalResourceResolver,
     IApplicationGatewayCommandHandler,
     IApplicationTrustGateway,
     IResourceCommandCredentialProvider
@@ -1031,6 +1032,60 @@ public abstract class ApplicationGateway :
         {
             _lifecycle.Release();
         }
+    }
+
+    /// <inheritdoc/>
+    public ValueTask<ExternalResourceResolution> ResolveInSetAsync(
+        IReadOnlyList<IApplicationModel> models,
+        ExternalResourceResolutionContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(models);
+        ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        ExternalResourceDeclaration declaration = context.Declaration;
+        for (int modelIndex = 0; modelIndex < models.Count; modelIndex++)
+        {
+            IApplicationModel model = models[modelIndex];
+            if (model.Name != declaration.Application)
+            {
+                continue;
+            }
+
+            for (int resourceIndex = 0; resourceIndex < model.Resources.Count; resourceIndex++)
+            {
+                IApplicationResource resource = model.Resources[resourceIndex];
+                if (resource.Name != declaration.Name
+                    || IsExternalPlan(model.Plans[resourceIndex]))
+                {
+                    continue;
+                }
+
+                IReadOnlyList<ResourceEndpoint> endpoints =
+                    GetApplicationState(model).GetObservedEndpoints(resource.Id);
+                if (endpoints.Count == 0)
+                {
+                    return ValueTask.FromResult(ExternalResourceResolution.Unresolved(
+                        $"Sibling application '{model.Name}' has not observed endpoints for " +
+                        $"resource '{resource.Name}' yet."));
+                }
+
+                return ValueTask.FromResult(new ExternalResourceResolution(
+                    true,
+                    endpoints,
+                    ResourceManifestCanonicalizer.ComputeHash(model.Manifests[resourceIndex]),
+                    ApplicationExportDocument.CurrentSchemaVersion,
+                    $"Resolved directly from sibling application '{model.Name}'."));
+            }
+
+            return ValueTask.FromResult(ExternalResourceResolution.Unresolved(
+                $"Sibling application '{model.Name}' does not contain resource " +
+                $"'{declaration.Name}'."));
+        }
+
+        return ValueTask.FromResult(ExternalResourceResolution.Unresolved(
+            $"Application '{declaration.Application}' is not a sibling in this application set."));
     }
 
     private void ValidateCore(IReadOnlyList<IApplicationModel> models)

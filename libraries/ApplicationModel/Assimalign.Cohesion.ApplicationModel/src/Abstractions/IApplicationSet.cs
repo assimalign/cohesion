@@ -26,7 +26,10 @@ public interface IApplicationSet
     /// </exception>
     IApplicationSet AddApplication(ApplicationDeclaration application);
 
-    /// <summary>Resolves all member models at start and dispatches them through one gateway.</summary>
+    /// <summary>
+    /// Resolves all member models at start, composes Describe output, or dispatches the
+    /// collection through one gateway for lifecycle and Render operations.
+    /// </summary>
     /// <param name="cancellationToken">Signals shutdown or cancellation.</param>
     /// <returns>A task representing the application-set lifetime.</returns>
     /// <exception cref="InvalidOperationException">

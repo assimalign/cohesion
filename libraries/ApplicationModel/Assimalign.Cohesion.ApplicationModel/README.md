@@ -127,14 +127,22 @@ then sends the ordered models to one `IMultiModelApplicationGateway`. `ControlPl
 the member executable with `--mode describe` in Development and reads its exported model in other
 environments. `Executable`, `File`, and `Gateway` resolvers are also available directly.
 
+When an imported external targets another member of the same set, an
+`IApplicationSetExternalResourceResolver` resolves it directly from the shared gateway session's
+observed state. The external falls back to its configured resolver only while that sibling is not
+observable, avoiding a round trip through the sibling gateway's control plane.
+
 For Development `--realize`, executable resolution first describes each member, then re-describes
 only members that declare the requested external. File/control-plane imports accept the request
 only when their exported model already records that external as realized; the set validates every
 requested name once across all members.
 
-The set supports `Run`, `Apply`, and `Teardown`. The shared gateway owns one lifecycle session and
-must isolate state by `(application, resource)` so equal resource names/identifiers in different
-models cannot collide. This package defines that composition seam; SDK-generated
+The set supports `Run`, `Apply`, `Teardown`, `Describe`, and `Render`. Describe writes one JSON
+array containing every member model in declaration order without invoking the shared gateway.
+Render dispatches the complete collection through `IApplicationGatewayRenderer` and never contacts
+the target platform. The shared gateway owns one lifecycle session and must isolate state by
+`(application, resource)` so equal resource names/identifiers in different models cannot collide.
+This package defines that composition seam; SDK-generated
 `Applications.<Name>` and HTTP control-plane composition are supplied by the Gateway SDK and
 `...Gateway.ControlPlane`; Kubernetes export/import remains a platform integration.
 

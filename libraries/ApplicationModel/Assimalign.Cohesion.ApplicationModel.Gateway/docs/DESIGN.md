@@ -326,7 +326,11 @@ until the active collection has stopped.
 
 `IApplicationSet` itself lives in the Core-only contract package. It resolves each
 `ApplicationDeclaration` at run start (local `--mode describe`, file export, or a supplied
-control-plane client), then invokes this batch seam for `Run`, `Apply`, or `Teardown`. No
+control-plane client), then invokes this batch seam for `Run`, `Apply`, or `Teardown`; Describe
+composes the member documents and Render uses the gateway renderer capability. `ApplicationGateway`
+also implements `IApplicationSetExternalResourceResolver`: when an external names a sibling model,
+the resolver reads that sibling's application-scoped observed endpoints directly and only falls
+back to the external's configured resolver if no direct observation is available. No
 `Gateway.CreateModel` reflection or runtime assembly scan is involved. SDK-generated
 `Applications.<Name>` declarations and ControlPlane composition are supplied by the Gateway SDK;
 Kubernetes ConfigMap import/export remains outside this package's implementation.

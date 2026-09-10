@@ -71,23 +71,40 @@ internal sealed class CohesionApplicationSet : IApplicationSet
                     $"Application declaration '{_applications[index].Name}' resolved model " +
                     $"'{models[index].Name}'. The control plane returned the wrong application.");
             }
-
-            BindExternalResources(models[index]);
         }
+
+        BindExternalResources(models);
 
         ValidateRequestedRealizations(models);
 
-        _gateway.Validate(models);
         switch (RunMode)
         {
             case GatewayRunMode.Run:
+                _gateway.Validate(models);
                 await RunLifetimeAsync(models, cancellationToken).ConfigureAwait(false);
                 break;
             case GatewayRunMode.Apply:
+                _gateway.Validate(models);
                 await _gateway.ReconcileAsync(models, cancellationToken).ConfigureAwait(false);
                 break;
             case GatewayRunMode.Teardown:
+                _gateway.Validate(models);
                 await _gateway.UninstallAsync(models, cancellationToken).ConfigureAwait(false);
+                break;
+            case GatewayRunMode.Describe:
+                await ApplicationModelDocumentWriter.WriteAsync(models, cancellationToken)
+                    .ConfigureAwait(false);
+                break;
+            case GatewayRunMode.Render:
+                _gateway.Validate(models);
+                if (_gateway is not IApplicationGatewayRenderer renderer)
+                {
+                    throw new NotSupportedException(
+                        $"Gateway '{_gateway.Name}' does not implement render mode.");
+                }
+
+                await renderer.RenderAsync(models, Console.Out, cancellationToken)
+                    .ConfigureAwait(false);
                 break;
             default:
                 throw new NotSupportedException(
@@ -147,25 +164,51 @@ internal sealed class CohesionApplicationSet : IApplicationSet
         }
     }
 
-    private void BindExternalResources(IApplicationModel model)
+    private void BindExternalResources(IReadOnlyList<IApplicationModel> models)
     {
-        for (int index = 0; index < model.Resources.Count; index++)
+        for (int modelIndex = 0; modelIndex < models.Count; modelIndex++)
         {
-            if (model.Resources[index] is not ExternalResource external)
+            IApplicationModel model = models[modelIndex];
+            for (int resourceIndex = 0; resourceIndex < model.Resources.Count; resourceIndex++)
             {
-                continue;
-            }
+                if (model.Resources[resourceIndex] is not ExternalResource external)
+                {
+                    continue;
+                }
 
-            IExternalResourceResolver? configured = ExternalBindingOverrides.FromEnvironment(
-                external.Declaration);
-            IExternalResourceResolver? commandLine = ExternalBindingOverrides.FromCommandLine(
-                external.Declaration,
-                _externalBindings);
-            if (commandLine is not null || configured is not null)
-            {
-                external.Bind(commandLine ?? configured!);
+                IExternalResourceResolver? configured = ExternalBindingOverrides.FromEnvironment(
+                    external.Declaration);
+                IExternalResourceResolver? commandLine = ExternalBindingOverrides.FromCommandLine(
+                    external.Declaration,
+                    _externalBindings);
+                IExternalResourceResolver fallback = commandLine ?? configured ?? external.Resolver;
+
+                if (_gateway is IApplicationSetExternalResourceResolver direct
+                    && ContainsApplication(models, external.Declaration.Application))
+                {
+                    external.Bind(new InSetExternalResourceResolver(direct, models, fallback));
+                }
+                else if (commandLine is not null || configured is not null)
+                {
+                    external.Bind(fallback);
+                }
             }
         }
+    }
+
+    private static bool ContainsApplication(
+        IReadOnlyList<IApplicationModel> models,
+        ApplicationName application)
+    {
+        for (int index = 0; index < models.Count; index++)
+        {
+            if (models[index].Name == application)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task RunLifetimeAsync(

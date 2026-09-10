@@ -194,8 +194,13 @@ identity with an `IApplicationModelResolver`. The supplied resolvers cover:
 
 Member models are resolved at `RunAsync` start in declaration order. The set rejects duplicate
 declarations and a resolver returning the wrong application identity, applies invocation-level
-external overrides to each imported model, validates one ordered batch, and dispatches `Run`,
-`Apply`, or `Teardown` through the shared gateway. The base multi-model contract preserves model
+external overrides to each imported model, and binds an external targeting a sibling member through
+`IApplicationSetExternalResourceResolver`. That direct observed-state lookup runs before the
+external's configured control-plane/file/static resolver and falls back only when the sibling is
+not observable. The set dispatches `Run`, `Apply`, or `Teardown` through the shared gateway;
+`Describe` writes a JSON array of every member model without gateway contact; and `Render` validates
+the ordered collection and dispatches it through `IApplicationGatewayRenderer`. The base
+multi-model contract preserves model
 order and requires state to be scoped by `(application, resource)`; equal resource identifiers in
 different applications must not collide. SDK generation of `Applications.<Name>` is a consumer
 convenience over this seam and is not required by the contract itself.
@@ -234,7 +239,8 @@ external as realized, and the set rejects any requested name that no member real
   It `StartAsync`es the gateway, awaits cancellation, then `StopAsync`es supervision
   using the gateway's own resource-aware stop bounds. Stop retains persistent platform objects;
   Apply performs a reconcile pass and Teardown dispatches `UninstallAsync(model)`. Describe emits the model document
-  and never contacts the selected gateway.
+  (or the declaration-ordered document array for an application set) and never contacts the selected
+  gateway. Set Render uses the optional renderer capability and remains platform-contact-free.
 
 ## AOT posture
 

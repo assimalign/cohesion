@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,8 +12,135 @@ using Assimalign.Cohesion.ApplicationModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Tests;
 
+[Collection(ConsoleOutputCollection.Name)]
 public class ApplicationSetTests
 {
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Application set describe composes every member model in declaration order")]
+    public async Task RunAsync_DescribeWithTwoMembers_ShouldWriteComposedModelArray()
+    {
+        // Arrange
+        IApplicationModel first = CreateModel(ApplicationName.Parse("platform"));
+        IApplicationModel second = CreateModel(ApplicationName.Parse("appa"));
+        var gateway = new RecordingMultiModelGateway("set-gateway");
+        IApplicationSet set = Application.CreateSet(
+                gateway,
+                ["--mode=describe", "--gateway=set-gateway", "--environment=Development"])
+            .AddApplication(new ApplicationDeclaration(
+                first.Name,
+                new RecordingResolver(first.Name, first, new List<ApplicationName>())))
+            .AddApplication(new ApplicationDeclaration(
+                second.Name,
+                new RecordingResolver(second.Name, second, new List<ApplicationName>())));
+        TextWriter original = Console.Out;
+        using var output = new StringWriter();
+
+        try
+        {
+            Console.SetOut(output);
+
+            // Act
+            await set.RunAsync();
+
+            // Assert
+            using JsonDocument document = JsonDocument.Parse(output.ToString());
+            JsonElement root = document.RootElement;
+            root.ValueKind.ShouldBe(JsonValueKind.Array);
+            root.GetArrayLength().ShouldBe(2);
+            root[0].GetProperty("application").GetString().ShouldBe("platform");
+            root[1].GetProperty("application").GetString().ShouldBe("appa");
+            gateway.Calls.ShouldBeEmpty();
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Application set render dispatches the complete model collection to the gateway")]
+    public async Task RunAsync_RenderWithTwoMembers_ShouldDispatchOneOrderedRender()
+    {
+        // Arrange
+        IApplicationModel first = CreateModel(ApplicationName.Parse("platform"));
+        IApplicationModel second = CreateModel(ApplicationName.Parse("appa"));
+        var gateway = new RecordingMultiModelGateway("set-gateway");
+        IApplicationSet set = Application.CreateSet(
+                gateway,
+                ["--mode=render", "--gateway=set-gateway", "--environment=Development"])
+            .AddApplication(new ApplicationDeclaration(
+                first.Name,
+                new RecordingResolver(first.Name, first, new List<ApplicationName>())))
+            .AddApplication(new ApplicationDeclaration(
+                second.Name,
+                new RecordingResolver(second.Name, second, new List<ApplicationName>())));
+        TextWriter original = Console.Out;
+        using var output = new StringWriter();
+
+        try
+        {
+            Console.SetOut(output);
+
+            // Act
+            await set.RunAsync();
+
+            // Assert
+            gateway.Calls.ShouldBe(["validate-batch", "render-batch"]);
+            gateway.RenderedModels.ShouldNotBeNull();
+            gateway.RenderedModels![0].ShouldBeSameAs(first);
+            gateway.RenderedModels[1].ShouldBeSameAs(second);
+            output.ToString().ShouldBe("rendered" + Environment.NewLine);
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Application set external binds directly to an in-memory sibling before fallback")]
+    public async Task RunAsync_ExternalTargetsSibling_ShouldPreferDirectSetResolution()
+    {
+        // Arrange
+        IApplicationModel provider = CreateModel(ApplicationName.Parse("platform"));
+        ResourceManifest manifest = provider.Manifests[0];
+        var fallback = new RecordingExternalResolver(
+            ExternalResourceResolution.Unresolved("Remote control plane should not be used."));
+        IApplicationModel consumer = CreateExternalModel(
+            ApplicationName.Parse("appa"),
+            provider.Name,
+            manifest,
+            fallback);
+        var gateway = new RecordingMultiModelGateway("set-gateway")
+        {
+            DirectResolution = new ExternalResourceResolution(
+                true,
+                [new ResourceEndpoint("control", "http", 5042, Host: "127.0.0.1")],
+                ResourceManifestCanonicalizer.ComputeHash(manifest),
+                ApplicationExportDocument.CurrentSchemaVersion,
+                "in-set: direct"),
+        };
+        IApplicationSet set = Application.CreateSet(
+                gateway,
+                ["--mode=apply", "--gateway=set-gateway", "--environment=Development"])
+            .AddApplication(new ApplicationDeclaration(
+                provider.Name,
+                new RecordingResolver(provider.Name, provider, new List<ApplicationName>())))
+            .AddApplication(new ApplicationDeclaration(
+                consumer.Name,
+                new RecordingResolver(consumer.Name, consumer, new List<ApplicationName>())));
+
+        // Act
+        await set.RunAsync();
+        IExternalResource external = gateway.ReconciledModels![1].Resources[0]
+            .ShouldBeAssignableTo<IExternalResource>();
+        ExternalResourceResolution resolution = await external.Resolver.ResolveAsync(
+            new ExternalResourceResolutionContext(external.Declaration));
+
+        // Assert
+        resolution.Resolved.ShouldBeTrue();
+        resolution.Endpoints[0].Port.ShouldBe(5042);
+        gateway.DirectResolutionCount.ShouldBe(1);
+        fallback.CallCount.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Application set realize accepts the owning exported model and ignores unrelated members")]
     public async Task RunAsync_RealizedExternalAcrossExportedMembers_ShouldValidateOnceAcrossSet()
     {
@@ -151,7 +279,7 @@ public class ApplicationSetTests
                 name,
                 ["--mode=apply", "--gateway=fake", "--environment=Development"])
             .UseGateway(new FakeGateway());
-        builder.AddResource(new FakeResource("worker"));
+        builder.AddResource(new FakeResource("consumer-worker"));
         return builder.Build().Model;
     }
 
@@ -174,6 +302,28 @@ public class ApplicationSetTests
                 ])
             .UseGateway(new FakeGateway("local"));
         builder.AddExternal(declaration);
+        return builder.Build().Model;
+    }
+
+    private static IApplicationModel CreateExternalModel(
+        ApplicationName name,
+        ApplicationName targetApplication,
+        ResourceManifest manifest,
+        IExternalResourceResolver resolver)
+    {
+        var declaration = new ExternalResourceDeclaration(
+            manifest.Name,
+            targetApplication,
+            ["control"],
+            optional: false,
+            manifest,
+            [manifest]);
+        IApplicationBuilder builder = Application.CreateBuilder(
+                name,
+                ["--mode=apply", "--gateway=fake", "--environment=Development"])
+            .UseGateway(new FakeGateway());
+        builder.AddExternal(declaration, resolver);
+        builder.AddResource(new FakeResource("worker"));
         return builder.Build().Model;
     }
 
@@ -208,7 +358,10 @@ public class ApplicationSetTests
         }
     }
 
-    private sealed class RecordingMultiModelGateway : IMultiModelApplicationGateway
+    private sealed class RecordingMultiModelGateway :
+        IMultiModelApplicationGateway,
+        IApplicationGatewayRenderer,
+        IApplicationSetExternalResourceResolver
     {
         public RecordingMultiModelGateway(string name)
         {
@@ -228,6 +381,13 @@ public class ApplicationSetTests
         public IReadOnlyList<IApplicationModel>? ValidatedModels { get; private set; }
 
         public IReadOnlyList<IApplicationModel>? ReconciledModels { get; private set; }
+
+        public IReadOnlyList<IApplicationModel>? RenderedModels { get; private set; }
+
+        public ExternalResourceResolution DirectResolution { get; init; } =
+            ExternalResourceResolution.Unresolved("No direct resolution configured.");
+
+        public int DirectResolutionCount { get; private set; }
 
         public void Validate(IApplicationModel model)
         {
@@ -295,6 +455,45 @@ public class ApplicationSetTests
         {
             Calls.Add("uninstall-batch");
             return Task.CompletedTask;
+        }
+
+        public async Task RenderAsync(
+            IReadOnlyList<IApplicationModel> models,
+            TextWriter output,
+            CancellationToken cancellationToken = default)
+        {
+            Calls.Add("render-batch");
+            RenderedModels = models;
+            await output.WriteLineAsync("rendered");
+        }
+
+        public ValueTask<ExternalResourceResolution> ResolveInSetAsync(
+            IReadOnlyList<IApplicationModel> models,
+            ExternalResourceResolutionContext context,
+            CancellationToken cancellationToken = default)
+        {
+            DirectResolutionCount++;
+            return ValueTask.FromResult(DirectResolution);
+        }
+    }
+
+    private sealed class RecordingExternalResolver : IExternalResourceResolver
+    {
+        private readonly ExternalResourceResolution _resolution;
+
+        public RecordingExternalResolver(ExternalResourceResolution resolution)
+        {
+            _resolution = resolution;
+        }
+
+        public int CallCount { get; private set; }
+
+        public ValueTask<ExternalResourceResolution> ResolveAsync(
+            ExternalResourceResolutionContext context,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return ValueTask.FromResult(_resolution);
         }
     }
 }

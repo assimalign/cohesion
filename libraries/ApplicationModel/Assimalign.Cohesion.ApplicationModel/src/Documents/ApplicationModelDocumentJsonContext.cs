@@ -12,5 +12,6 @@ namespace Assimalign.Cohesion.ApplicationModel;
     WriteIndented = true,
     UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
 [JsonSerializable(typeof(ApplicationModelDocument))]
+[JsonSerializable(typeof(ApplicationModelDocument[]))]
 [JsonSerializable(typeof(ApplicationExportDocument))]
 internal sealed partial class ApplicationModelDocumentJsonContext : JsonSerializerContext;

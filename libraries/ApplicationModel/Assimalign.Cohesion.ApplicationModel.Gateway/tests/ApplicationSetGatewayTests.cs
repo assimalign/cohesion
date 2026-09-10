@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,6 +15,47 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 [Collection(LocalGatewayConsoleCollection.Name)]
 public class ApplicationSetGatewayTests
 {
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Application set resolves a sibling external from observed state without control-plane fallback")]
+    public async Task ApplicationSet_SiblingExternal_ShouldResolveDirectlyFromSharedGatewayState()
+    {
+        // Arrange
+        var state = new InMemoryResourceStateManager();
+        var controller = new MultiModelRecordingController();
+        var gateway = new MultiModelTestGateway(state, controller);
+        IApplicationModel provider = BuildEndpointModel("platform", gateway, "configuration-store");
+        var fallback = new RecordingExternalResolver();
+        IApplicationModel consumer = BuildExternalModel("appa", gateway, provider.Manifests[0], fallback);
+        IApplicationSet set = Application.CreateSet(
+                gateway,
+                ["--mode=apply", "--gateway=multi-test", "--environment=Development"])
+            .AddApplication(new ApplicationDeclaration(
+                provider.Name,
+                new InMemoryModelResolver(provider)))
+            .AddApplication(new ApplicationDeclaration(
+                consumer.Name,
+                new InMemoryModelResolver(consumer)));
+
+        try
+        {
+            // Act
+            await set.RunAsync();
+
+            // Assert
+            IApplicationResource external = consumer.Resources[0];
+            gateway.StateFor(consumer).GetState(external.Id).ShouldBe(ResourceLifecycle.Running);
+            IReadOnlyList<ResourceEndpoint> endpoints =
+                gateway.StateFor(consumer).GetObservedEndpoints(external.Id);
+            endpoints.Count.ShouldBe(1);
+            endpoints[0].Name.ShouldBe("api");
+            endpoints[0].Port.ShouldBe(5101);
+            fallback.CallCount.ShouldBe(0);
+        }
+        finally
+        {
+            await ((IMultiModelApplicationGateway)gateway).StopAsync();
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Application set: Should resolve two model documents into one ordered gateway start")]
     public async Task ApplicationSet_FileModelDocuments_ShouldStartOneOrderedGatewayBatch()
     {
@@ -255,6 +297,41 @@ public class ApplicationSetGatewayTests
         return builder.Build().Model;
     }
 
+    private static IApplicationModel BuildEndpointModel(
+        string application,
+        IApplicationGateway gateway,
+        string resource)
+    {
+        IApplicationBuilder builder = Application.CreateBuilder(
+                ApplicationName.Parse(application),
+                [])
+            .UseGateway(gateway);
+        builder.AddResource(new EndpointTestResource(resource));
+        return builder.Build().Model;
+    }
+
+    private static IApplicationModel BuildExternalModel(
+        string application,
+        IApplicationGateway gateway,
+        ResourceManifest target,
+        IExternalResourceResolver fallback)
+    {
+        var declaration = new ExternalResourceDeclaration(
+            target.Name,
+            target.Application,
+            ["api"],
+            optional: false,
+            target,
+            [target]);
+        IApplicationBuilder builder = Application.CreateBuilder(
+                ApplicationName.Parse(application),
+                [])
+            .UseGateway(gateway);
+        builder.AddExternal(declaration, fallback);
+        builder.AddResource(new TestResource("worker"));
+        return builder.Build().Model;
+    }
+
     private static string TestHostPath => Path.Combine(
         AppContext.BaseDirectory,
         "Assimalign.Cohesion.ApplicationModel.Gateway.TestHost"
@@ -280,6 +357,10 @@ public class ApplicationSetGatewayTests
         public MultiModelTestGateway(
             IApplicationResourceStateManager state,
             IApplicationResourceController controller)
+            : base(new ApplicationGatewayOptions
+            {
+                TrustKeyRepository = new EphemeralTrustKeyRepository(),
+            })
         {
             _state = state;
             _controllers = new[] { controller };
@@ -329,6 +410,9 @@ public class ApplicationSetGatewayTests
         protected override Task RemoveApplicationExportAsync(
             ApplicationName application,
             CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public IApplicationResourceStateManager StateFor(IApplicationModel model) =>
+            GetApplicationState(model);
     }
 
     private sealed class MultiModelRecordingController : IApplicationResourceController
@@ -349,6 +433,13 @@ public class ApplicationSetGatewayTests
 
         public bool CanRealize(ResourcePlan plan, out string? reason)
         {
+            if (plan.Hints.TryGetValue("cohesion.external", out string? external)
+                && string.Equals(external, bool.TrueString, StringComparison.OrdinalIgnoreCase))
+            {
+                reason = "External resources use the built-in resolver controller.";
+                return false;
+            }
+
             reason = null;
             return true;
         }
@@ -366,13 +457,16 @@ public class ApplicationSetGatewayTests
 
             StateByApplication[application] = context.State;
 
-            int port = application == "appb" ? 5101 : 5102;
+            int port = application is "appb" or "platform" ? 5101 : 5102;
+            string endpoint = context.Resource.Name == (ResourceName)"configuration-store"
+                ? "api"
+                : "http";
             context.State.SetState(
                 context.Resource.Id,
                 ResourceLifecycle.Running,
                 observedEndpoints:
                 [
-                    new ResourceEndpoint("http", "http", port, Host: "localhost"),
+                    new ResourceEndpoint(endpoint, "http", port, Host: "localhost"),
                 ]);
             return Task.CompletedTask;
         }
@@ -434,5 +528,67 @@ public class ApplicationSetGatewayTests
         public IReadOnlyList<ResourceManifest> Manifests => Array.Empty<ResourceManifest>();
 
         public IReadOnlyList<ResourcePlan> Plans => _inner.Plans;
+    }
+
+    private sealed class InMemoryModelResolver : IApplicationModelResolver
+    {
+        private readonly IApplicationModel _model;
+
+        public InMemoryModelResolver(IApplicationModel model)
+        {
+            _model = model;
+        }
+
+        public ValueTask<IApplicationModel> ResolveAsync(
+            ApplicationModelResolutionContext context,
+            CancellationToken cancellationToken = default) => ValueTask.FromResult(_model);
+    }
+
+    private sealed class RecordingExternalResolver : IExternalResourceResolver
+    {
+        public int CallCount { get; private set; }
+
+        public ValueTask<ExternalResourceResolution> ResolveAsync(
+            ExternalResourceResolutionContext context,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return ValueTask.FromResult(
+                ExternalResourceResolution.Unresolved("Control-plane fallback was used."));
+        }
+    }
+
+    private sealed class EndpointTestResource : IEndpointResource
+    {
+        public EndpointTestResource(ResourceName name)
+        {
+            Name = name;
+        }
+
+        public ResourceName Name { get; }
+
+        public IReadOnlyList<ResourceEndpoint> Endpoints { get; } =
+            [new ResourceEndpoint("api", "http", 0)];
+    }
+
+    private sealed class EphemeralTrustKeyRepository : IGatewayTrustKeyRepository
+    {
+        public Task<ECDsa> LoadOrCreateAsync(
+            ApplicationName application,
+            ResourceName gateway,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+        }
+
+        public Task<ECDsa> RotateAsync(
+            ApplicationName application,
+            ResourceName gateway,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+        }
     }
 }
