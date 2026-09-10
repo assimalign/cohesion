@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -9,20 +10,23 @@ namespace Assimalign.Cohesion.SecretStore.Hosting;
 internal sealed class SecretStoreApplicationHost : Host<SecretStoreApplicationContext>, ISecretStoreApplication
 {
     private readonly SecretStoreApplicationContext _context;
+    private readonly SecretsEndpointService _endpointService;
+    private bool _endpointServiceDisposed;
 
     internal SecretStoreApplicationHost(
         SecretStoreApplicationOptions options,
-        SecretStoreApplicationContext context)
+        SecretStoreApplicationContext context,
+        SecretsEndpointService endpointService)
         : base(options)
     {
         _context = context;
+        _endpointService = endpointService;
     }
 
     public override SecretStoreApplicationContext Context => _context;
 
     async Task ISecretStoreApplication.RunAsync(CancellationToken cancellationToken)
     {
-        // TODO(design item 12): Route RunAsync through ResourceRuntime once the ambient runtime seam exists.
         if (cancellationToken.IsCancellationRequested)
         {
             await ((IHost)this).StartAsync(CancellationToken.None).ConfigureAwait(false);
@@ -31,5 +35,21 @@ internal sealed class SecretStoreApplicationHost : Host<SecretStoreApplicationCo
         }
 
         await base.RunAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    protected override async ValueTask DisposeAsync(bool disposing)
+    {
+        try
+        {
+            await base.DisposeAsync(disposing).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (disposing && !_endpointServiceDisposed)
+            {
+                _endpointServiceDisposed = true;
+                _endpointService.Dispose();
+            }
+        }
     }
 }

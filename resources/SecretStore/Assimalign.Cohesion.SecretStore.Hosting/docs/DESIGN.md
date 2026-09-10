@@ -2,16 +2,143 @@
 
 ## Design intent
 
-The hosting module implements the area root's contract-only application seam. Public construction is limited to `SecretStoreApplication.CreateBuilder(args)`; the builder, `Host<TContext>` implementation, context, and options are internal.
+The hosting module is the SecretStore runtime and protocol boundary. Public construction remains
+`SecretStoreApplication.CreateBuilder(args)` through the area-root
+`ISecretStoreApplicationBuilder`; the builder, context, host, persistence implementation,
+certificate-authority manager, issuer store, and endpoint service remain internal.
 
-## Composition execution model
+The builder captures the current `ResourceRuntime.Current` context when it is created. Tests and
+in-process callers therefore install a per-invocation context with
+`ResourceRuntime.CreateScope(...)` before calling `CreateBuilder`. When a control-plane factory is
+registered for the resource assembly, the builder creates it, publishes the built host through
+`ResourceRuntime.HostBuilt`, and serves its health, observed-endpoint, stop, and command surface.
+A disabled/plain executable has no registered control plane and still gets the SecretStore data
+protocol.
 
-Each build creates a new context, invokes every registered service factory exactly once against that context, and exposes the materialized services as an ordered, read-only `HostedServices` snapshot. The shared host starts services in registration order and stops them in reverse; an unconfigured builder still produces an empty collection and a production `HostEnvironment`.
+## Composition and endpoint selection
 
-`SecretsEndpointService` remains as a dormant future service stub and is not registered by default.
+Every build materializes caller-added `IHostService` factories once, in registration order, then
+appends one `SecretsEndpointService`. The shared host starts in that order and stops in reverse,
+so the data endpoint starts last and drains first. A builder may be built only once.
 
-## Boundaries
+The `api` endpoint is selected in this order:
 
-The module references only the SecretStore area root and the shared Hosting foundation, preserving the resource hosting-isolation rule. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
+1. an already observed `api` endpoint from the registered control plane;
+2. the ambient resource context's `api` endpoint;
+3. `--endpoint <uri>` or `--endpoint=<uri>`;
+4. `https://127.0.0.1:8443`.
 
-Command-line arguments are accepted at the canonical entry point. Integration with the ambient `ResourceRuntime` is deferred to design item 12; the explicit `ISecretStoreApplication.RunAsync` wrapper records that handoff.
+Only absolute `http` and `https` endpoint URIs are accepted. Hosts must be `localhost` or a
+bindable IP address. Plaintext HTTP is restricted to loopback in the `Development` environment;
+HTTPS is otherwise required. An unauthenticated standalone store is loopback-only for either
+scheme. A non-root path on the endpoint URI becomes a prefix for every route below.
+
+The durable data directory is selected from the ambient `data` mount, then `--data`, then
+`<content-root>/data`. The mount must expose a file-system path. Command-line values are snapshots
+owned by the builder and malformed or missing values fail during build.
+
+## HTTP protocol
+
+The host implements these routes over a real HTTP/1 listener:
+
+| Route | Methods | Behavior |
+| --- | --- | --- |
+| `/healthz`, `/readyz`, `/livez` | `GET`, `HEAD` | Compatibility health routes. Readiness additionally requires a started host and an enrolled CA. |
+| `/cohesion/v1/healthz`, `/readyz`, `/livez` | `GET`, `HEAD` | Authenticated namespaced health reports. |
+| `/cohesion/v1/endpoints` | `GET`, `HEAD` | Returns observed endpoint strings. |
+| `/cohesion/v1/stop` | `POST` | Requests control-plane stop, or returns `404` without a registered control plane. |
+| `/cohesion/v1/secrets?path=<path>` | `GET`, `HEAD` | Reads protected secret bytes. `trusted-issuers.json` exports the current issuer document. |
+| `/cohesion/v1/certificates?name=<name>` | `GET`, `HEAD` | Returns the root (`ca/root`) or a durable leaf bundle (`certs/<one-segment-name>`). |
+| `/cohesion/v1/commands` | `GET`, `HEAD`, `POST` | Lists accepted kinds or applies `cohesion.trust.add`. |
+| `/cohesion/v1/certificates/enrollment-request` | `GET`, `HEAD` | Returns the pending CSR for `application` and `resource`. |
+| `/cohesion/v1/certificates/enroll` | `POST` | An enrolled authority signs a matching intermediate-CA CSR. |
+| `/cohesion/v1/certificates/enrollment` | `POST` | Completes a pending enrollment with the issued certificate and issuer chain. |
+
+Unsupported methods return `405` with `Allow`; malformed input returns `400`; unknown namespaced
+routes return `404`. Secret and certificate responses are marked `no-store, no-cache`. `HEAD`
+follows `GET` validation and headers without writing a body.
+
+`SecretStore.Client` interoperates directly with the secret, certificate, and command routes.
+The command JSON contains `id`, `kind`, `owner`, `key`, and base64 `payload`. The implemented
+`cohesion.trust.add` command upserts an ES256/P-256 public JWK by issuer. Replacing the ambient
+application issuer is rejected, and replacing an issuer owned by another authenticated principal
+returns `409`.
+
+## Bootstrap authentication
+
+Authentication is enabled when the ambient context names a gateway. At startup the host requires
+an application name, resource name, and public application trust JWK, and durably installs that
+application as a trusted issuer. Every `/cohesion/v1/*` request then requires a bearer JWT signed
+by a trusted ES256/P-256 key. The token requires `iss`, `sub`, `aud`, `exp`, `nbf`, `iat`, and
+`jti`, has a maximum 24-hour lifetime, and must name the current resource as an audience.
+Secret, certificate, trust-command, lifecycle, and child-enrollment operations additionally
+require the ambient application's issuer. Only the Platform intermediate-signing route accepts a
+trusted peer issuer, and its request application must equal that authenticated issuer.
+
+Missing, malformed, expired, untrusted, or incorrectly signed credentials return `401` and a
+`WWW-Authenticate: Bearer` challenge. A valid token for the wrong audience returns `403`.
+Authenticated commands must set `owner` to `<iss>@<sub>`. Standalone hosts (no gateway name) do
+not require bearer authentication and therefore may bind only to loopback. Plaintext HTTP is
+allowed only on loopback in `Development`, regardless of hosting mode. This is bootstrap
+credential authentication, not a general user authorization or secret-policy engine.
+
+## Protected persistence and certificate authority
+
+Secrets, trusted issuers, CA state, pending enrollment private keys, and leaf bundles are written
+through `Assimalign.Cohesion.Security.DataProtection`. The key ring is durable below the data
+directory and is discriminated by application and resource identity. Builder-declared secrets
+seed only absent paths; existing durable values win on restart. Trust upserts are persisted before
+the live issuer map changes.
+
+The file-system ACL on the `data` volume remains the confidentiality boundary for the key ring;
+this item does not add an external KMS or hardware-backed wrapping key. Files and directories are
+restricted to their owner on POSIX. Keys rotate lazily on a 90-day lifetime. Until durable records
+gain a rewrap migration, the store retains a long unprotect grace period so ordinary key rotation
+cannot make an existing protected record unreadable.
+
+CA initialization precedence is durable authority state, explicitly supplied certificate/private
+key material, configured Platform enrollment, then standalone self-seeding. A self-seeded root is
+an ECDSA P-256 CA. Leaf requests are issued on first resolution and persisted as PEM containing the
+leaf private key and full issuer chain. Named leaves renew lazily on resolution within seven days
+of expiration. A transport leaf is checked and renewed when the HTTPS listener starts; until the
+shared TLS listener supports asynchronous per-handshake certificate selection, a continuously
+running store must restart before that leaf expires. `ca/root` returns the terminal root.
+`certs/public` is deliberately
+`501 Not Implemented`: ACME/public-CA issuance is outside the current runtime.
+
+The private HTTPS endpoint certificate covers its bind host, resource name, generic-planner API
+Service name, and both short and cluster-local Kubernetes Service DNS forms. The Platform/public
+root still must be distributed to clients by the gateway trust bootstrap described below.
+
+Platform enrollment is a safe explicit three-step protocol: the child creates and persists a CSR
+and private key; an enrolled parent validates the requested application/resource subject and signs
+an intermediate CA; the child verifies the returned certificate, chain, and optional pinned
+Platform root before committing it and deleting pending state. A configured enrollment failure
+never falls back to a new self-signed root.
+
+## Explicit bootstrap gap
+
+`PlatformEnrollmentEndpoint` currently selects pending-enrollment mode but the runtime does not
+call that URI. No gateway component yet drives the three HTTP enrollment operations, delivers the
+corresponding trust grant automatically, or installs a trust anchor into `SecretStore.Client` for
+the first HTTPS connection. Consequently, automatic per-application enrollment and TLS bootstrap
+described by the developer-experience direction are not end-to-end today. An operator or gateway
+must perform request, parent signing, and completion explicitly (or supply initial authority
+material), and HTTPS clients must be given an out-of-band trusted root. A pending child also has
+no enrolled authority from which to issue its HTTPS server certificate, so its HTTPS listener
+cannot start until the gateway provides a provisional transport identity or completes enrollment
+through a separate bootstrap channel. The Development-only loopback HTTP route is sufficient for
+the explicit in-process enrollment test, but not a production bootstrap. Readiness remains
+unhealthy while a configured child authority is awaiting completion.
+
+Likewise, `parameter:` certificate mount resolution and `Certificate="public"` are gateway-side
+or future behaviors, not features interpreted by this host.
+
+## Boundaries and AOT posture
+
+The host references the SecretStore root plus cross-area hosting, HTTP, identity-token,
+data-protection, and Web runtime infrastructure. Those cross-area runtime dependencies are private
+implementation details. It does not reference SecretStore.ApplicationModel; the generated enabled
+resource registers that package's control plane through Hosting.Resources. JSON used by the
+endpoint is written explicitly, persistence uses fixed internal formats, and construction uses no
+dynamic activation. The implementation remains trimming- and NativeAOT-oriented.

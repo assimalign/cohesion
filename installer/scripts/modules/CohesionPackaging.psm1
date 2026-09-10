@@ -261,6 +261,7 @@ $script:CohesionReleaseLibrary = @(
 
     # resources/SecretStore
     'resources/SecretStore/Assimalign.Cohesion.SecretStore'
+    'resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel'
     'resources/SecretStore/Assimalign.Cohesion.SecretStore.Client'
     'resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting'
 

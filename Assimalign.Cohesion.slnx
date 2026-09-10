@@ -2160,6 +2160,37 @@
 		<File Path="resources/SecretStore/Directory.Build.props" />
 		<File Path="resources/SecretStore/Directory.Build.targets" />
 	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/">
+		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/">
+		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/DESIGN.md" />
+		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/">
+		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/ISecretStoreResourceDescriptor/">
+		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/ISecretStoreResourceDescriptor/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResource/">
+		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResource/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceControlPlane/">
+		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceControlPlane/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceExtensions/">
+		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceExtensions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceOptions/">
+		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceOptions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/src/">
+		<Project Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/src/Assimalign.Cohesion.SecretStore.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/tests/">
+		<Project Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/tests/Assimalign.Cohesion.SecretStore.ApplicationModel.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/" />
 	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/src/">
 		<Project Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/src/Assimalign.Cohesion.SecretStore.Hosting.csproj" />
@@ -2170,6 +2201,15 @@
 	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore/" />
 	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore/src/">
 		<Project Path="resources/SecretStore/Assimalign.Cohesion.SecretStore/src/Assimalign.Cohesion.SecretStore.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore/docs/Assembly/Assimalign.Cohesion.SecretStore/CertificateAuthorityOptions/">
+		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore/docs/Assembly/Assimalign.Cohesion.SecretStore/CertificateAuthorityOptions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore/docs/Assembly/Assimalign.Cohesion.SecretStore/ISecretStore/">
+		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore/docs/Assembly/Assimalign.Cohesion.SecretStore/ISecretStore/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore/tests/">
+		<Project Path="resources/SecretStore/Assimalign.Cohesion.SecretStore/tests/Assimalign.Cohesion.SecretStore.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/">
 		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/README.md" />

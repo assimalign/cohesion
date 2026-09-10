@@ -406,6 +406,24 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.SecretStore" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.SecretStore" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.SecretStore.Hosting" />
+
+        <!-- SecretStore.ApplicationModel is NuGet-only and is injected by Sdk.SecretStore
+             for orchestration-enabled executables, matching the signed section 2 contract. -->
+
+        <!-- SecretStore.Hosting serves its private HTTP/TLS control plane and verifies
+             bootstrap JWTs without exposing those implementation types in the area ref pack. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Security.DataProtection" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.VpnGateway'">

@@ -27,6 +27,10 @@ ReadOnlyMemory<byte> value = await client.GetSecretAsync("apps/api/password", ca
 string certificate = await client.GetCertificateAsync("certs/appa-api", cancellationToken);
 ```
 
+The certificate response is a PEM bundle containing the persistent first-issued leaf, its PKCS#8
+private key, and the issuer chain. A `parameter:` source bypasses this client and is mounted by the
+gateway unchanged. `certs/public`/`Certificate="public"` is reserved for a later public-CA item.
+
 The factory accepts only HTTP or HTTPS Cohesion endpoint URIs: absolute, host-bearing values with a
 valid port and no user information, query, or fragment. Each request presents the credential as a
 bearer token; the package treats the token as opaque and does not acquire, parse, refresh, or persist

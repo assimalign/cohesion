@@ -28,9 +28,11 @@ Every request carries `Authorization: Bearer <opaque-token>`. Redirects and cook
 a credential is never forwarded to a different authority or mixed with ambient cookie state. Non-success status codes surface as
 `HttpRequestException`; cancellation propagates unchanged.
 
-The current SecretStore Hosting endpoint is a dormant filler and does not serve this protocol.
-Implementing that server surface, mount-source resolution, typed commands, and command handlers is
-outside item 25a. Item 31c fills the typed command layer over the generic command transport.
+`Assimalign.Cohesion.SecretStore.Hosting` serves this protocol. A gateway-managed store validates
+the ES256 bearer token against its persistent trusted-issuer set and distinguishes an invalid or
+unknown credential (`401`) from a valid credential with the wrong resource audience (`403`). Secret
+and certificate responses are marked `no-store`. Item 31c remains responsible for typed mutation
+commands beyond the `cohesion.trust.add` bootstrap command.
 
 ## Credential and command contracts
 

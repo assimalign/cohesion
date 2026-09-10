@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.SecretStore;
 
@@ -19,6 +20,17 @@ public static class SecretStoreApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new SecretStoreApplicationBuilder(args);
+        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(SecretStoreApplication).Assembly;
+        return new SecretStoreApplicationBuilder(args, resourceAssembly);
+    }
+
+    internal static ISecretStoreApplicationBuilder CreateBuilder(
+        string[] args,
+        Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+
+        return new SecretStoreApplicationBuilder(args, resourceAssembly);
     }
 }
