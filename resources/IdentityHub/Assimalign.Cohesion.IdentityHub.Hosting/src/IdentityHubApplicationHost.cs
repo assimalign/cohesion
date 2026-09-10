@@ -22,7 +22,6 @@ internal sealed class IdentityHubApplicationHost : Host<IdentityHubApplicationCo
 
     async Task IIdentityHubApplication.RunAsync(CancellationToken cancellationToken)
     {
-        // TODO(design item 12): Route RunAsync through ResourceRuntime once the ambient runtime seam exists.
         if (cancellationToken.IsCancellationRequested)
         {
             await ((IHost)this).StartAsync(CancellationToken.None).ConfigureAwait(false);

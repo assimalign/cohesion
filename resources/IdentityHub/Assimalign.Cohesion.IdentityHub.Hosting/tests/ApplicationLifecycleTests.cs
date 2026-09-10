@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -20,9 +21,10 @@ public class ApplicationLifecycleTests
         var events = new List<string>();
         var firstService = new RecordingHostService("first", events);
         var secondService = new RecordingHostService("second", events);
+        using var data = new TemporaryDirectory();
         IHostContext? factoryContext = null;
         int factoryCalls = 0;
-        IIdentityHubApplicationBuilder builder = IdentityHubApplication.CreateBuilder([]);
+        IIdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(data.Path);
 
         IIdentityHubApplicationBuilder returnedBuilder = builder
             .AddService(firstService)
@@ -43,7 +45,7 @@ public class ApplicationLifecycleTests
         returnedBuilder.ShouldBeSameAs(builder);
         factoryCalls.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
-        application.Context.HostedServices.ShouldBe(
+        application.Context.HostedServices.Take(2).ShouldBe(
             new IHostService[] { firstService, secondService });
         events.ShouldBe(new[]
         {
@@ -80,7 +82,8 @@ public class ApplicationLifecycleTests
     public async Task RunAsync_WhenCancellationIsRequested_ShouldStopCleanly()
     {
         // Arrange
-        await using IIdentityHubApplication application = IdentityHubApplication.CreateBuilder([]).Build();
+        using var data = new TemporaryDirectory();
+        await using IIdentityHubApplication application = IdentityHubTestHost.CreateBuilder(data.Path).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
         cancellationTokenSource.Cancel();
 

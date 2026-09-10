@@ -6,14 +6,20 @@
 		The resource's domain composition remains in its Program.cs.
 	-->
 	<PropertyGroup>
+		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.IdentityHub.ApplicationModel</CohesionResourceApplicationModel>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.IdentityHub.ApplicationModel.IdentityHubResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">IdentityHub</CohesionResourceKind>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">https</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
 		<CohesionWorkloadKind Condition="'$(CohesionWorkloadKind)' == ''">StatefulSet</CohesionWorkloadKind>
+		<CohesionReplicas Condition="'$(CohesionReplicas)' == ''">1</CohesionReplicas>
+		<CohesionMaxReplicas Condition="'$(CohesionMaxReplicas)' == ''">1</CohesionMaxReplicas>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<CohesionEndpoint Include="https" Scheme="https" ContainerPort="8443" Public="false" />
+		<CohesionProbe Include="readiness" Endpoint="https" Http="/readyz" />
+		<CohesionProbe Include="liveness" Endpoint="https" Http="/livez" />
 		<CohesionMount Include="data" Kind="Volume" ContainerPath="/data" Size="10Gi" />
 	</ItemGroup>
 </Project>

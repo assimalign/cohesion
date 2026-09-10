@@ -1,29 +1,9 @@
 # IdentityHubApplication
 
 Namespace: `Assimalign.Cohesion.IdentityHub.Hosting`
+
 Assembly: `Assimalign.Cohesion.IdentityHub.Hosting`
 
-## Purpose
+`IdentityHubApplication.CreateBuilder(args)` creates the code-first IdentityHub builder for the executable resource assembly. Build validates registrations, captures ambient resource inputs, resolves the `https` endpoint and `data` mount, materializes additional services in registration order, and appends the built-in issuer service.
 
-`IdentityHubApplication` is the public factory for the identity hub hosting module. The runtime builder, host, context, and options types are internal.
-
-## Factory behavior
-
-- `CreateBuilder(string[] args)` validates the argument array and returns an `IIdentityHubApplicationBuilder`.
-- The arguments are reserved for later runtime-context integration; the current filler does not interpret them.
-- Building the returned builder materializes its explicitly registered host services in registration order; no services are registered automatically.
-
-## Exceptions
-
-`CreateBuilder` throws `ArgumentNullException` when `args` is `null`. Building throws `InvalidOperationException` when a registered service factory returns null.
-
-## Usage
-
-```csharp
-using Assimalign.Cohesion.IdentityHub;
-using Assimalign.Cohesion.IdentityHub.Hosting;
-
-IIdentityHubApplicationBuilder builder = IdentityHubApplication.CreateBuilder(args);
-await using IIdentityHubApplication application = builder.Build();
-await application.RunAsync(cancellationToken);
-```
+The issuer is registered with ResourceRuntime when a generated default control plane exists. `--endpoint` and `--data` provide standalone overrides when no corresponding ambient input is present. A materialized `tls` mount supplies production PEM certificate material; the built-in self-signed fallback and device-approval page are restricted to loopback Development.

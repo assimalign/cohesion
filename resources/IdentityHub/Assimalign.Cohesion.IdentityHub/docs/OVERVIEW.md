@@ -2,11 +2,13 @@
 
 ## Summary
 
-This project defines the public, contract-only builder and application lifecycle seam for the IdentityHub area alongside its existing identity domain contracts. The implementation and creation entry point live in `Assimalign.Cohesion.IdentityHub.Hosting`.
+Defines the public code-first composition and lifecycle contracts for an IdentityHub resource. The concrete issuer is supplied by `Assimalign.Cohesion.IdentityHub.Hosting`.
 
-## Public application surface
+## Public surface
 
-- `IIdentityHubApplicationBuilder` extends the shared build-only host-builder contract, registers `IHostService` instances or context factories, and builds an `IIdentityHubApplication`.
-- `IIdentityHubApplication` exposes the shared host lifecycle plus `RunAsync`.
+- `AddAudience(string)` declares an exact access-token audience.
+- `AddClient(string, Action<IdentityHubClientOptions>)` registers client credentials, device authorization, token lifetime, and allowed audiences.
+- `AddService(...)` composes additional host lifecycle services.
+- `Build()` produces an `IIdentityHubApplication`, which exposes the standard host lifecycle and `RunAsync`.
 
-The current application remains a filler with no area behavior or hosted services registered by default. Consumers can add explicit lifecycle services through the area builder; identity-provider behavior is outside this slice.
+At least one grant and one declared audience are required for every registered client. Gateway command descriptors for these verbs are intentionally deferred to item 31c; the runtime code-first verbs ship here.

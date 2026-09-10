@@ -1,30 +1,22 @@
 # IIdentityHubApplicationBuilder
 
 Namespace: `Assimalign.Cohesion.IdentityHub`
+
 Assembly: `Assimalign.Cohesion.IdentityHub`
 
-## Purpose
-
-`IIdentityHubApplicationBuilder` is the public composition seam for an identity hub application. It extends `IHostBuilder` while refining `Build()` to return `IIdentityHubApplication`.
-
-## Surface and behavior
-
-- `AddService(IHostService service)` registers an existing lifecycle service.
-- `AddService(Func<IHostContext, IHostService> factory)` creates a lifecycle service once per `Build()` from that application's context.
-- `Build()` creates a configured identity hub application.
-
-The current filler builder has no area feature or service registrations by default. Explicit services are exposed in registration order, start in that order, and stop in reverse order. The concrete builder remains internal to `Assimalign.Cohesion.IdentityHub.Hosting`.
-
-## Exceptions
-
-`AddService` throws `ArgumentNullException` for a null service or factory. `Build()` throws `InvalidOperationException` when a service factory returns null.
-
-## Usage
+`IIdentityHubApplicationBuilder` is the public code-first composition seam. `AddAudience` declares issuable audiences. `AddClient` registers a client whose options may enable a confidential client-credentials grant, the device grant, or both. `AddService` composes extra lifecycle services, and `Build` returns `IIdentityHubApplication`.
 
 ```csharp
-using Assimalign.Cohesion.IdentityHub;
-using Assimalign.Cohesion.IdentityHub.Hosting;
+IIdentityHubApplicationBuilder builder = IdentityHubApplication.CreateBuilder(args)
+    .AddAudience("urn:example:api")
+    .AddClient("worker", client =>
+    {
+        client.ClientSecret = configuration.ClientSecret;
+        client.Audiences.Add("urn:example:api");
+    });
 
-IIdentityHubApplicationBuilder builder = IdentityHubApplication.CreateBuilder(args);
 await using IIdentityHubApplication application = builder.Build();
+await application.RunAsync(cancellationToken);
 ```
+
+Duplicate clients or audiences are rejected. Build also rejects an undeclared client audience, an empty grant set, or an invalid token lifetime. The concrete builder hashes client secrets before retaining registrations.

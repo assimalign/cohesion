@@ -8,7 +8,13 @@ namespace Assimalign.Cohesion.IdentityHub.Hosting;
 internal sealed class IdentityHubApplicationContext : HostContext
 {
     private IReadOnlyList<IHostService> _hostedServices = Array.Empty<IHostService>();
-    private readonly IHostEnvironment _environment = new HostEnvironment("production");
+    private readonly IHostEnvironment _environment;
+
+    internal IdentityHubApplicationContext(string environmentName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(environmentName);
+        _environment = new HostEnvironment(environmentName);
+    }
 
     public override IHostEnvironment Environment => _environment;
 

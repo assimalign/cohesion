@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.IdentityHub;
 
@@ -19,6 +20,17 @@ public static class IdentityHubApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new IdentityHubApplicationBuilder(args);
+        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(IdentityHubApplication).Assembly;
+        return new IdentityHubApplicationBuilder(args, resourceAssembly);
+    }
+
+    internal static IIdentityHubApplicationBuilder CreateBuilder(
+        string[] args,
+        Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+
+        return new IdentityHubApplicationBuilder(args, resourceAssembly);
     }
 }

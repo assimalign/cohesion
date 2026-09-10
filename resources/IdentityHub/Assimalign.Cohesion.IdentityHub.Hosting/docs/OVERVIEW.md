@@ -2,21 +2,10 @@
 
 ## Summary
 
-Provides the public `IdentityHubApplication.CreateBuilder(args)` entry point and the internal filler implementation of the IdentityHub application contracts.
+Provides `IdentityHubApplication.CreateBuilder(args)` and the internal, AOT-safe OpenID Connect issuer runtime.
 
-## Current Evaluation
+The host serves discovery, persisted ES256 JWKS, client-credentials tokens, public health probes, and the bootstrap-authenticated Cohesion resource control plane. Configuration is code-first through `AddAudience` and `AddClient`; the generated resource manifest supplies the `https` endpoint and `data` volume. Only `openid` and an empty scope are accepted.
 
-- Status: contract-only filler with an explicit host-service lifecycle seam
-- Project references: Assimalign.Cohesion.IdentityHub and Assimalign.Cohesion.Hosting
+Device authorization and its fixed-subject browser approval page are exposed only by a loopback Development endpoint. Applications needing account login, subject selection, consent, recovery, or federation compose an authenticated user-facing flow separately.
 
-## Primary Responsibilities
-
-- Validate application arguments and return the area-root builder interface.
-- Build an internal `Host<IdentityHubApplicationContext>` with a production environment and the ordered services explicitly registered on the area builder.
-- Preserve the hosting-isolation boundary and an AOT-safe construction path.
-
-The old `IdentityEndpointService` future-service stub remains in the project but is not registered. Ambient `ResourceRuntime` integration is deferred to design item 12.
-
-## Public type
-
-- `IdentityHubApplication` — static creation facade; all runtime implementation types are internal.
+HTTPS reads a PEM certificate, private key, and optional chain from a materialized `tls` mount. Without that mount, self-signed TLS is limited to loopback Development; non-development HTTPS fails closed rather than generating production TLS material.
