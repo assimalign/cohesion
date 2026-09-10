@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -81,7 +82,29 @@ internal sealed class TestGateway : ApplicationGateway
     {
         options ??= new ApplicationGatewayOptions();
         options.ReadinessBudget = readinessBudget ?? TimeSpan.FromSeconds(30);
+        options.TrustKeyRepository ??= new EphemeralTrustKeyRepository();
         return options;
+    }
+
+    private sealed class EphemeralTrustKeyRepository : IGatewayTrustKeyRepository
+    {
+        public Task<ECDsa> LoadOrCreateAsync(
+            ApplicationName application,
+            ResourceName gateway,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+        }
+
+        public Task<ECDsa> RotateAsync(
+            ApplicationName application,
+            ResourceName gateway,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+        }
     }
 
     private sealed class TestArtifact : IResourceArtifact

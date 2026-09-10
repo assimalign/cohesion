@@ -149,6 +149,108 @@ public class LocalGatewayTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: cancellation during startup stops without uninstalling persistent state")]
+    public async Task RunAsync_CanceledBeforeReadiness_StopsAndRetainsPortsAndVolume()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        string observed = Path.Combine(root, "stop-observed.txt");
+        string bound = Path.Combine(root, "bound.txt");
+        string markerGate = Path.Combine(root, "ready-marker-gate");
+        string status = Path.Combine(root, "exec.status");
+        File.WriteAllText(status, "0", Encoding.UTF8);
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["TEST_STOP_OBSERVED_PATH"] = observed,
+            ["TEST_BOUND_PATH"] = bound,
+            ["TEST_READY_MARKER_GATE_PATH"] = markerGate,
+        };
+        ResourceManifest manifest = CreateManifest(
+            "svc",
+            environment,
+            readiness: new ResourceManifestProbe
+            {
+                Exec = [TestHostPath, "exec-probe", status],
+            },
+            startup: NoneProbe(),
+            liveness: NoneProbe(),
+            mounts:
+            [
+                new ResourceManifestMount
+                {
+                    Name = "cache",
+                    Kind = ResourceMountKind.Volume,
+                    ContainerPath = "/cache",
+                    Size = "1Gi",
+                },
+            ],
+            stopGraceSeconds: 5) with
+        {
+            Lifecycle = new ResourceManifestLifecycle
+            {
+                Workload = WorkloadKind.StatefulSet,
+                RestartPolicy = "Never",
+                StopGraceSeconds = 5,
+            },
+        };
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, manifest);
+        using var cancellation = new CancellationTokenSource();
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForFileAsync(bound);
+            string pidPath = ProcessPath(root, manifest.Name);
+            int processId = ReadProcessId(pidPath);
+            gateway.ResourceStates.GetState(ResourceIdOf(manifest.Name))
+                .ShouldBe(ResourceLifecycle.Starting);
+
+            // Act
+            cancellation.Cancel();
+            await run.WaitAsync(TestTimeout);
+
+            // Assert
+            await WaitForTextAsync(observed, "observed");
+            gateway.ResourceStates.GetState(ResourceIdOf(manifest.Name))
+                .ShouldBe(ResourceLifecycle.Stopped);
+            File.Exists(pidPath).ShouldBeFalse();
+            ProcessExists(processId).ShouldBeFalse();
+            Directory.Exists(Path.Combine(
+                root,
+                ".cohesion",
+                ApplicationNameValue,
+                manifest.Name.ToString(),
+                "cache")).ShouldBeTrue();
+            using JsonDocument ports = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(
+                root,
+                ".cohesion",
+                ApplicationNameValue,
+                ".state",
+                "ports.json")));
+            ports.RootElement
+                .GetProperty("resources")
+                .TryGetProperty(manifest.Name.ToString(), out _)
+                .ShouldBeTrue();
+            using LocalFileLease releasedLease = await new LocalProcessStateStore(
+                    Path.Combine(root, ".cohesion"))
+                .AcquireApplicationLeaseAsync(
+                    ApplicationName.Parse(ApplicationNameValue),
+                    $"{ApplicationNameValue}@local",
+                    adopt: false,
+                    CancellationToken.None);
+        }
+        finally
+        {
+            if (!cancellation.IsCancellationRequested)
+            {
+                await StopApplicationAsync(cancellation, run);
+            }
+
+            DeleteTestDirectory(root);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: ignored graceful stop is force-killed and classified")]
     public async Task RunAsync_IgnoredGracefulStop_IsForcedAfterResourceGrace()
     {
@@ -221,8 +323,8 @@ public class LocalGatewayTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: second gateway re-attaches to verified pid")]
-    public async Task RunAsync_SecondGateway_DefaultRecovery_ReattachesToChild()
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: live application lease excludes a second supervisor")]
+    public async Task RunAsync_SecondGatewayWhileLeaseIsHeld_RefusesWithoutTouchingChild()
     {
         string root = CreateTestDirectory();
         string launchCount = Path.Combine(root, "launch-count.txt");
@@ -244,7 +346,6 @@ public class LocalGatewayTests
         using var firstCancellation = new CancellationTokenSource();
         using var secondCancellation = new CancellationTokenSource();
         Task firstRun = firstApplication.RunAsync(firstCancellation.Token);
-        Task? secondRun = null;
 
         try
         {
@@ -252,31 +353,25 @@ public class LocalGatewayTests
             string pidPath = ProcessPath(root, manifest.Name);
             int originalProcessId = ReadProcessId(pidPath);
 
-            secondRun = secondApplication.RunAsync(secondCancellation.Token);
-            await WaitForStateAsync(secondGateway, ResourceIdOf(manifest.Name), ResourceLifecycle.Running);
+            InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+                async () => await secondApplication
+                    .RunAsync(secondCancellation.Token)
+                    .WaitAsync(TestTimeout));
 
+            exception.Message.ShouldContain("already supervised", Case.Sensitive);
             ReadProcessId(pidPath).ShouldBe(originalProcessId);
             File.ReadAllText(launchCount).Trim().ShouldBe("1");
+            ProcessExists(originalProcessId).ShouldBeTrue();
         }
         finally
         {
-            try
-            {
-                if (secondRun is not null)
-                {
-                    await StopApplicationAsync(secondCancellation, secondRun);
-                }
-            }
-            finally
-            {
-                await StopApplicationAsync(firstCancellation, firstRun);
-                DeleteTestDirectory(root);
-            }
+            await StopApplicationAsync(firstCancellation, firstRun);
+            DeleteTestDirectory(root);
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: restart-orphans replaces verified child")]
-    public async Task RunAsync_SecondGatewayWithRestartOrphans_ReplacesChild()
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: released application lease permits verified orphan recovery")]
+    public async Task RunAsync_VerifiedOrphanWithoutLease_ReattachesToChild()
     {
         string root = CreateTestDirectory();
         string launchCount = Path.Combine(root, "launch-count.txt");
@@ -291,41 +386,249 @@ public class LocalGatewayTests
             startup: NoneProbe(),
             liveness: NoneProbe(),
             stopGraceSeconds: 5);
-        LocalGateway firstGateway = CreateGateway(root);
-        LocalGateway secondGateway = CreateGateway(root);
-        IApplication firstApplication = BuildApplication(firstGateway, manifest);
-        IApplication secondApplication = BuildApplication(secondGateway, manifest, ["--restart-orphans"]);
-        using var firstCancellation = new CancellationTokenSource();
-        using var secondCancellation = new CancellationTokenSource();
-        Task firstRun = firstApplication.RunAsync(firstCancellation.Token);
-        Task? secondRun = null;
+        OrphanProcess orphan = await StartOrphanAsync(root, manifest);
+        await WaitForTextAsync(launchCount, "1");
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, manifest);
+        using var cancellation = new CancellationTokenSource();
+        Task run = application.RunAsync(cancellation.Token);
 
         try
         {
-            await WaitForStateAsync(firstGateway, ResourceIdOf(manifest.Name), ResourceLifecycle.Running);
-            string pidPath = ProcessPath(root, manifest.Name);
-            int originalProcessId = ReadProcessId(pidPath);
+            await WaitForStateAsync(gateway, ResourceIdOf(manifest.Name), ResourceLifecycle.Running);
 
-            secondRun = secondApplication.RunAsync(secondCancellation.Token);
-            await WaitForStateAsync(secondGateway, ResourceIdOf(manifest.Name), ResourceLifecycle.Running);
-            await WaitForTextAsync(launchCount, "2");
-
-            ReadProcessId(pidPath).ShouldNotBe(originalProcessId);
+            ReadProcessId(ProcessPath(root, manifest.Name)).ShouldBe(orphan.Process.Id);
+            File.ReadAllText(launchCount).Trim().ShouldBe("1");
         }
         finally
         {
             try
             {
-                if (secondRun is not null)
+                await StopApplicationAsync(cancellation, run);
+            }
+            finally
+            {
+                await DisposeOrphanAsync(orphan);
+                DeleteTestDirectory(root);
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: restart-orphans replaces verified child")]
+    public async Task RunAsync_VerifiedOrphanWithRestartOrphans_ReplacesChild()
+    {
+        string root = CreateTestDirectory();
+        string launchCount = Path.Combine(root, "launch-count.txt");
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["TEST_LAUNCH_COUNT_PATH"] = launchCount,
+        };
+        ResourceManifest manifest = CreateManifest(
+            "svc",
+            environment,
+            readiness: TcpProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe(),
+            stopGraceSeconds: 5);
+        OrphanProcess orphan = await StartOrphanAsync(root, manifest);
+        await WaitForTextAsync(launchCount, "1");
+        int originalProcessId = orphan.Process.Id;
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, manifest, ["--restart-orphans"]);
+        using var cancellation = new CancellationTokenSource();
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForStateAsync(gateway, ResourceIdOf(manifest.Name), ResourceLifecycle.Running);
+            await WaitForTextAsync(launchCount, "2");
+
+            ReadProcessId(ProcessPath(root, manifest.Name)).ShouldNotBe(originalProcessId);
+            ProcessExists(originalProcessId).ShouldBeFalse();
+        }
+        finally
+        {
+            try
+            {
+                await StopApplicationAsync(cancellation, run);
+            }
+            finally
+            {
+                await DisposeOrphanAsync(orphan);
+                DeleteTestDirectory(root);
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: cancellation while replacing an orphan does not launch a successor")]
+    public async Task RunAsync_CanceledWhileStoppingRestartOrphan_DoesNotLaunchReplacement()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        string launchCount = Path.Combine(root, "launch-count.txt");
+        string stopObserved = Path.Combine(root, "stop-observed.txt");
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["TEST_LAUNCH_COUNT_PATH"] = launchCount,
+            ["TEST_STOP_OBSERVED_PATH"] = stopObserved,
+            ["TEST_IGNORE_STOP"] = "true",
+        };
+        ResourceManifest manifest = CreateManifest(
+            "svc",
+            environment,
+            readiness: TcpProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe(),
+            stopGraceSeconds: 1);
+        OrphanProcess orphan = await StartOrphanAsync(root, manifest);
+        await WaitForTextAsync(launchCount, "1");
+        LocalGateway gateway = CreateGateway(root);
+        IApplication application = BuildApplication(gateway, manifest, ["--restart-orphans"]);
+        using var cancellation = new CancellationTokenSource();
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            await WaitForTextAsync(stopObserved, "observed");
+
+            // Act
+            cancellation.Cancel();
+            await run.WaitAsync(TestTimeout);
+
+            // Assert
+            File.ReadAllText(launchCount).Trim().ShouldBe("1");
+            ProcessExists(orphan.Process.Id).ShouldBeFalse();
+            File.Exists(ProcessPath(root, manifest.Name)).ShouldBeFalse();
+            HasPortAllocation(root, manifest.Name).ShouldBeTrue();
+        }
+        finally
+        {
+            try
+            {
+                if (!cancellation.IsCancellationRequested)
                 {
-                    await StopApplicationAsync(secondCancellation, secondRun);
+                    await StopApplicationAsync(cancellation, run);
                 }
             }
             finally
             {
-                await StopApplicationAsync(firstCancellation, firstRun);
+                await DisposeOrphanAsync(orphan);
                 DeleteTestDirectory(root);
             }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: concurrent stop and delete share teardown")]
+    public async Task StopAsync_DeleteWhileStopIsInProgress_WaitsForSharedTeardown()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        string exitGate = Path.Combine(root, "exit-gate");
+        ResourceManifest manifest = CreateManifest(
+            "svc",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["TEST_EXIT_GATE_PATH"] = exitGate,
+            },
+            readiness: TcpProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe(),
+            stopGraceSeconds: 5);
+        IApplication application = BuildApplication(CreateGateway(root), manifest);
+        IApplicationModel model = application.Model;
+        IApplicationResourceDescriptor descriptor = model.Descriptors[0];
+        string stateDirectory = Path.Combine(root, ".cohesion");
+        var options = new LocalGatewayOptions
+        {
+            BaseDirectory = AppContext.BaseDirectory,
+            StateDirectory = stateDirectory,
+            ProbeInterval = TimeSpan.FromMilliseconds(50),
+            ProbeTimeout = TimeSpan.FromSeconds(2),
+            ReadinessBudget = TimeSpan.FromSeconds(10),
+            InitialRestartBackoff = TimeSpan.FromMilliseconds(100),
+            MaximumRestartBackoff = TimeSpan.FromSeconds(1),
+            StopGrace = TimeSpan.FromSeconds(5),
+        };
+        var state = new InMemoryResourceStateManager();
+        var ports = new LocalPortStore(stateDirectory);
+        var processState = new LocalProcessStateStore(stateDirectory);
+        var supervisor = new LocalGatewayProcessSupervisor(options, processState);
+        var preparer = new LocalResourcePreparer(
+            ports,
+            new LocalMountMaterializer(stateDirectory),
+            options);
+        var controller = new LocalPlanController(options, preparer, supervisor);
+        var context = new ResourceControlContext(
+            descriptor,
+            model,
+            state,
+            Array.Empty<IApplicationResource>(),
+            new ExecutableArtifact(descriptor.Resource.Id, TestHostPath),
+            Array.Empty<ResourceDependencyObservation>());
+        using var stopEntered = new ManualResetEventSlim();
+        using var releaseStop = new ManualResetEventSlim();
+        int blockStop = 0;
+        state.StateChanged += (_, args) =>
+        {
+            if (args.Current == ResourceLifecycle.Stopping
+                && Interlocked.Exchange(ref blockStop, 1) == 0)
+            {
+                stopEntered.Set();
+                if (!releaseStop.Wait(TestTimeout))
+                {
+                    throw new TimeoutException("The test did not release the blocked stop transition.");
+                }
+            }
+        };
+        bool initialized = false;
+
+        try
+        {
+            await supervisor.InitializeAsync([model], CancellationToken.None);
+            initialized = true;
+            await controller.ReconcileAsync(context, CancellationToken.None);
+            ResourceLifecycle running = await state.WaitForStateAsync(
+                descriptor.Resource.Id,
+                new HashSet<ResourceLifecycle> { ResourceLifecycle.Running },
+                TestTimeout);
+            running.ShouldBe(ResourceLifecycle.Running);
+            File.WriteAllText(exitGate, string.Empty);
+            ResourceLifecycle stopped = await state.WaitForStateAsync(
+                descriptor.Resource.Id,
+                new HashSet<ResourceLifecycle> { ResourceLifecycle.Stopped },
+                TestTimeout);
+            stopped.ShouldBe(ResourceLifecycle.Stopped);
+            HasPortAllocation(root, manifest.Name).ShouldBeTrue();
+
+            Task stop = Task.Run(() => controller.StopAsync(context, CancellationToken.None));
+            stopEntered.Wait(TestTimeout).ShouldBeTrue();
+
+            // Act
+            Task delete = controller.DeleteAsync(context, CancellationToken.None);
+
+            // Assert
+            delete.IsCompleted.ShouldBeFalse();
+            HasPortAllocation(root, manifest.Name).ShouldBeTrue();
+            releaseStop.Set();
+            await Task.WhenAll(stop, delete).WaitAsync(TestTimeout);
+            HasPortAllocation(root, manifest.Name).ShouldBeFalse();
+        }
+        finally
+        {
+            releaseStop.Set();
+            if (initialized)
+            {
+                try
+                {
+                    await controller.StopAsync(context, CancellationToken.None);
+                }
+                finally
+                {
+                    await supervisor.ShutdownAsync(CancellationToken.None);
+                }
+            }
+
+            DeleteTestDirectory(root);
         }
     }
 
@@ -1464,6 +1767,132 @@ public class LocalGatewayTests
         return values;
     }
 
+    private static async Task<OrphanProcess> StartOrphanAsync(
+        string root,
+        ResourceManifest manifest)
+    {
+        string stateDirectory = Path.Combine(root, ".cohesion");
+        ApplicationName application = ApplicationName.Parse(ApplicationNameValue);
+        var environment = new Dictionary<string, string>(
+            manifest.EnvironmentVariables,
+            StringComparer.Ordinal)
+        {
+            [ResourceEnvironment.Application] = ApplicationNameValue,
+            [ResourceEnvironment.Resource] = manifest.Name.ToString(),
+            [ResourceEnvironment.Gateway] = "local",
+            [ResourceEnvironment.ContentRoot] = Path.GetDirectoryName(TestHostPath)!,
+        };
+        var ports = new LocalPortStore(stateDirectory);
+        var endpoints = new ResourceEndpoint[manifest.Endpoints.Count];
+        for (int index = 0; index < endpoints.Length; index++)
+        {
+            ResourceManifestEndpoint endpoint = manifest.Endpoints[index];
+            endpoints[index] = new ResourceEndpoint(
+                endpoint.Name,
+                endpoint.Scheme,
+                endpoint.ContainerPort,
+                endpoint.Public);
+        }
+
+        await ports.ResolveAsync(
+            application,
+            manifest.Name,
+            endpoints,
+            environment,
+            CancellationToken.None);
+
+        EventWaitHandle? stopEvent = null;
+        string? stopEventName = null;
+        if (OperatingSystem.IsWindows())
+        {
+            stopEventName = $"Global\\cohesion-orphan-{Guid.NewGuid():N}-stop";
+            stopEvent = new EventWaitHandle(
+                initialState: false,
+                EventResetMode.ManualReset,
+                stopEventName,
+                out _);
+            environment[ResourceEnvironment.StopEvent] = stopEventName;
+        }
+
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = TestHostPath,
+                WorkingDirectory = Path.GetDirectoryName(TestHostPath)!,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            },
+        };
+        if (OperatingSystem.IsWindows())
+        {
+            process.StartInfo.CreateNewProcessGroup = true;
+        }
+
+        foreach ((string name, string value) in environment)
+        {
+            process.StartInfo.Environment[name] = value;
+        }
+
+        bool started = false;
+        try
+        {
+            process.Start().ShouldBeTrue();
+            started = true;
+            var registration = new LocalProcessRegistration
+            {
+                RegistrationId = Guid.NewGuid(),
+                ProcessId = process.Id,
+                StartTimeUtcTicks = process.StartTime.ToUniversalTime().Ticks,
+                ExecutablePath = CanonicalizePath(TestHostPath),
+                HasProcessGroup = OperatingSystem.IsWindows(),
+                StopEventName = stopEventName,
+            };
+            await new LocalProcessStateStore(stateDirectory).SaveAsync(
+                application,
+                manifest.Name,
+                registration,
+                CancellationToken.None);
+            return new OrphanProcess(process, stopEvent);
+        }
+        catch
+        {
+            stopEvent?.Dispose();
+            if (started && !process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync().WaitAsync(TestTimeout);
+            }
+
+            process.Dispose();
+            throw;
+        }
+    }
+
+    private static async Task DisposeOrphanAsync(OrphanProcess orphan)
+    {
+        try
+        {
+            if (!orphan.Process.HasExited)
+            {
+                orphan.Process.Kill(entireProcessTree: true);
+                await orphan.Process.WaitForExitAsync().WaitAsync(TestTimeout);
+            }
+        }
+        finally
+        {
+            orphan.Process.Dispose();
+            orphan.StopEvent?.Dispose();
+        }
+    }
+
+    private static string CanonicalizePath(string path)
+    {
+        string fullPath = Path.GetFullPath(path);
+        FileSystemInfo? target = File.ResolveLinkTarget(fullPath, returnFinalTarget: true);
+        return target?.FullName ?? fullPath;
+    }
+
     private static string ProcessPath(string root, ResourceName resource)
         => Path.Combine(root, ".cohesion", ApplicationNameValue, ".state", resource.ToString(), "pid");
 
@@ -1471,6 +1900,25 @@ public class LocalGatewayTests
     {
         using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(path));
         return document.RootElement.GetProperty("processId").GetInt32();
+    }
+
+    private static bool HasPortAllocation(string root, ResourceName resource)
+    {
+        string path = Path.Combine(
+            root,
+            ".cohesion",
+            ApplicationNameValue,
+            ".state",
+            "ports.json");
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(path));
+        return document.RootElement
+            .GetProperty("resources")
+            .TryGetProperty(resource.ToString(), out _);
     }
 
     private static bool ProcessExists(int processId)
@@ -1539,4 +1987,6 @@ public class LocalGatewayTests
         ResourceLifecycle State,
         string? Detail,
         long Timestamp);
+
+    private sealed record OrphanProcess(Process Process, EventWaitHandle? StopEvent);
 }

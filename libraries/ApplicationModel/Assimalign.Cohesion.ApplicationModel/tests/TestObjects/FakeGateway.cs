@@ -28,6 +28,8 @@ internal class FakeGateway : IApplicationGateway
 
     public bool? StopTokenCanBeCanceled { get; private set; }
 
+    public Func<CancellationToken, Task>? StartBehavior { get; init; }
+
     public void Validate(IApplicationModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
@@ -38,7 +40,7 @@ internal class FakeGateway : IApplicationGateway
     {
         Calls.Add("start");
         StartedModel = model;
-        return Task.CompletedTask;
+        return StartBehavior?.Invoke(cancellationToken) ?? Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken = default)

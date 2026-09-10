@@ -184,19 +184,23 @@ public class ApplicationGatewayTests
         // Arrange
         var reconciled = new List<string>();
         var deleted = new List<string>();
+        var stopped = new List<string>();
+        var reconciledSignal = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         var state = new InMemoryResourceStateManager();
-        var controller = new RecordingController(reconciled, deleted, leaveStarting: true);
+        var controller = new RecordingController(
+            reconciled,
+            deleted,
+            leaveStarting: true,
+            stopped: stopped,
+            reconciledSignal: reconciledSignal);
         var gateway = new TestGateway(state, new[] { controller });
         IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        IApplicationResourceDescriptor resource = builder.AddResource(new TestResource("a"));
+        builder.AddResource(new TestResource("a"));
         IApplicationModel model = builder.Build().Model;
         using var cancellation = new CancellationTokenSource();
         Task start = ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
-        ResourceLifecycle reached = await state.WaitForStateAsync(
-            resource.Resource.Id,
-            new HashSet<ResourceLifecycle> { ResourceLifecycle.Starting },
-            TimeSpan.FromSeconds(1));
-        reached.ShouldBe(ResourceLifecycle.Starting);
+        await reconciledSignal.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         // Act
         cancellation.Cancel();
@@ -205,6 +209,9 @@ public class ApplicationGatewayTests
         OperationCanceledException exception = await Should.ThrowAsync<OperationCanceledException>(
             async () => await start.WaitAsync(TimeSpan.FromSeconds(2)));
         exception.CancellationToken.ShouldBe(cancellation.Token);
+        reconciled.ShouldBe(new[] { "a" });
+        stopped.ShouldBe(new[] { "a" });
+        deleted.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Cancellation: Should propagate caller tokens to every controller lifecycle hook")]

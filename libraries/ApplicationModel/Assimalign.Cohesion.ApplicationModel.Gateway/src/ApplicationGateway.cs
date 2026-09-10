@@ -983,6 +983,11 @@ public abstract class ApplicationGateway :
                 // subsequent StopAsync call withdraws it.
                 await PublishApplicationExportsAsync(CancellationToken.None).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                await StopCoreAsync(CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
             catch
             {
                 await RollBackAsync(CancellationToken.None).ConfigureAwait(false);

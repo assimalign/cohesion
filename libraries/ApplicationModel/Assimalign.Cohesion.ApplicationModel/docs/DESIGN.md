@@ -224,6 +224,9 @@ external as realized, and the set rejects any requested name that no member real
 - After run cancellation, `CohesionApplication` lets the selected gateway apply its own
   per-resource stop budgets. It does not impose one 30-second outer timeout across a
   reverse-ordered resource set, which would truncate later resources' declared grace periods.
+  Cancellation that arrives while gateway startup is still blocked is handled identically: the
+  partially started session is stopped without uninstalling persistent resources, and Run
+  completes after that stop rather than surfacing lifetime cancellation as startup failure.
 - `Build()` validates: unique resource names (enforced eagerly on `AddResource`),
   at least one realized resource, all explicit dependencies and required manifest references
   present, no dependency cycles

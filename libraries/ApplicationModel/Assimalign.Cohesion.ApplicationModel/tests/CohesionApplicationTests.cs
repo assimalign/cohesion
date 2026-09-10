@@ -32,6 +32,35 @@ public class CohesionApplicationTests
         gateway.StopTokenCanBeCanceled.ShouldBe(false);
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Run cancellation during startup stops gracefully")]
+    public async Task RunAsync_CanceledWhileGatewayStartIsBlocked_StopsAndCompletes()
+    {
+        // Arrange
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gateway = new FakeGateway
+        {
+            StartBehavior = async cancellationToken =>
+            {
+                entered.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            },
+        };
+        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
+        builder.AddResource(new FakeResource("a"));
+        IApplication app = builder.Build();
+        using var cancellation = new CancellationTokenSource();
+        Task run = app.RunAsync(cancellation.Token);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        // Act
+        cancellation.Cancel();
+        await run.WaitAsync(TimeSpan.FromSeconds(2));
+
+        // Assert
+        gateway.Calls.ShouldBe(new[] { "start", "stop" });
+        gateway.StopTokenCanBeCanceled.ShouldBe(false);
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Describe emits the model document without gateway contact")]
     public async Task RunAsync_Describe_WritesModelDocumentWithoutContactingGateway()
     {

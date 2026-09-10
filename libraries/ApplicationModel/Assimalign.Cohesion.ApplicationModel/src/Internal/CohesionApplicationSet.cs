@@ -221,7 +221,16 @@ internal sealed class CohesionApplicationSet : IApplicationSet
             static state => ((TaskCompletionSource)state!).TrySetResult(),
             stopped);
 
-        await _gateway.StartAsync(models, cancellation.Token).ConfigureAwait(false);
+        try
+        {
+            await _gateway.StartAsync(models, cancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            await _gateway.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            return;
+        }
+
         await stopped.Task.ConfigureAwait(false);
         await _gateway.StopAsync(CancellationToken.None).ConfigureAwait(false);
     }

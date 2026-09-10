@@ -68,7 +68,9 @@ Kubernetes — is the *same* algorithm with different hooks, so it is written on
    satisfies on `Stopped`. `Degraded` is observational and never re-gates an admitted dependent.
 7. **Stop or uninstall in reverse order**: `StopAsync` calls each controller's non-destructive
    runtime stop hook and retains persistent objects; `UninstallAsync(model)` calls `DeleteAsync`.
-   A failure during initial realization still rolls back whatever was partially applied.
+   Caller cancellation during Run startup follows the same non-destructive stop path and the Run
+   lifetime completes normally; a non-cancellation failure during initial realization still
+   deletes whatever was partially applied.
 
 This is why a `Failed`, cleanly `Stopped`, or never-ready dependency can never deadlock the
 graph: readiness is a **plan-owned terminal-set** membership wait with a budget, not an ordinal
@@ -144,16 +146,25 @@ the registration under the same lock.
   during grace becomes `Stopped`; one that requires escalation becomes `Failed(forced)`.
 - **Known POSIX limitation**: process grouping depends on the host-provided `setsid` command with
   a best-effort `setpgid` fallback; no RID-native launch helper is shipped.
-- **Recovery**: `.cohesion/<application>/.state/owner` records the gateway identity and
-  `.cohesion/<application>/.state/<resource>/pid` records PID, process start time, executable path,
-  process-group ownership, and the Windows stop-event name. A new gateway independently verifies
-  PID + start time + executable before adopting a live child and rebuilds readiness from probes.
+- **Recovery and exclusive supervision**: `.cohesion/<application>/.state/owner` records the
+  gateway identity, while a stable `gateway.lock` sidecar is held for the complete observer
+  session. Application leases are acquired in ordinal path order, so only one local gateway may
+  supervise or uninstall an application at a time, including across processes. The sidecar is
+  retained after release; process exit releases the operating-system lock. Each
+  `.cohesion/<application>/.state/<resource>/pid` records a registration generation, PID, process
+  start time, executable path, process-group ownership, and the Windows stop-event name. A new
+  gateway independently verifies PID + start time + executable before adopting a live child and
+  rebuilds readiness from probes. PID reads, replacements, and conditional deletes use a stable
+  per-resource lock sidecar, and cleanup removes only the exact registration generation it
+  observed, so stale recovery cannot delete a newer child registration.
   A foreign owner is refused before process realization unless this invocation carries
   `--adopt`. Observed state is rebuilt on every gateway start; the PID file is verified recovery
   metadata, never persisted lifecycle truth. `UninstallAsync` also verifies an orphan before
   stopping it and removes the resource's persisted mounts and port allocation.
   `--restart-orphans` (or `LocalGatewayOptions.RestartOrphans`) instead gracefully stops each
-  verified child and launches a fresh attempt.
+  verified child and launches a fresh attempt. Concurrent stop and uninstall callers await one
+  shared teardown task; persisted ports and mounts are not removed until process exit and PID
+  cleanup complete.
 
 ## Item #968 — late-bound inputs, application trust, and opaque workloads
 

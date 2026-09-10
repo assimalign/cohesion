@@ -19,6 +19,7 @@ internal sealed class LocalGatewayProcessSupervisor
     private readonly LocalProcessStateStore _processState;
     private readonly LocalProbeRunner _probes;
     private readonly ConcurrentDictionary<LocalResourceKey, SupervisedResource> _resources = new();
+    private LocalFileLease[] _applicationLeases = Array.Empty<LocalFileLease>();
     private IReadOnlyDictionary<ApplicationName, bool> _restartOrphansByApplication =
         new Dictionary<ApplicationName, bool>();
 
@@ -36,11 +37,16 @@ internal sealed class LocalGatewayProcessSupervisor
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(models);
-        var restartOrphans = new Dictionary<ApplicationName, bool>();
+        if (_applicationLeases.Length != 0)
+        {
+            throw new InvalidOperationException("The local process supervisor is already initialized.");
+        }
+
+        var applications = new Dictionary<ApplicationName, ApplicationSession>();
 
         foreach (IApplicationModel model in models)
         {
-            var applications = new HashSet<ApplicationName>
+            var modelApplications = new HashSet<ApplicationName>
             {
                 model.Name,
             };
@@ -49,24 +55,91 @@ internal sealed class LocalGatewayProcessSupervisor
             {
                 if (resource is IManifestResource manifestResource)
                 {
-                    applications.Add(manifestResource.Manifest.Application);
+                    modelApplications.Add(manifestResource.Manifest.Application);
                 }
             }
 
-            foreach (ApplicationName application in applications)
+            foreach (ApplicationName application in modelApplications)
             {
                 string owner = $"{application}@{model.GatewayIdentity}";
-                await _processState.InitializeAsync(
-                    application,
-                    owner,
-                    model.Adopt,
-                    cancellationToken).ConfigureAwait(false);
-                restartOrphans[application] =
-                    _options.RestartOrphans || model.RestartOrphans;
+                bool restartOrphans = _options.RestartOrphans || model.RestartOrphans;
+                if (applications.TryGetValue(application, out ApplicationSession existing))
+                {
+                    if (!string.Equals(existing.Owner, owner, StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            $"Application '{application}' has conflicting local gateway owners " +
+                            $"'{existing.Owner}' and '{owner}'.");
+                    }
+
+                    applications[application] = existing with
+                    {
+                        Adopt = existing.Adopt || model.Adopt,
+                        RestartOrphans = existing.RestartOrphans || restartOrphans,
+                    };
+                }
+                else
+                {
+                    applications.Add(
+                        application,
+                        new ApplicationSession(
+                            application,
+                            owner,
+                            model.Adopt,
+                            restartOrphans));
+                }
             }
         }
 
-        _restartOrphansByApplication = restartOrphans;
+        var ordered = new List<ApplicationSession>(applications.Values);
+        ordered.Sort(static (left, right) => StringComparer.Ordinal.Compare(
+            left.Application.ToString(),
+            right.Application.ToString()));
+        var acquired = new List<LocalFileLease>(ordered.Count);
+        var restartOrphansByApplication = new Dictionary<ApplicationName, bool>();
+        try
+        {
+            foreach (ApplicationSession application in ordered)
+            {
+                LocalFileLease lease = await _processState.AcquireApplicationLeaseAsync(
+                        application.Application,
+                        application.Owner,
+                        application.Adopt,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                acquired.Add(lease);
+                restartOrphansByApplication.Add(
+                    application.Application,
+                    application.RestartOrphans);
+            }
+
+            _applicationLeases = acquired.ToArray();
+            _restartOrphansByApplication = restartOrphansByApplication;
+        }
+        catch
+        {
+            for (int index = acquired.Count - 1; index >= 0; index--)
+            {
+                acquired[index].Dispose();
+            }
+
+            throw;
+        }
+    }
+
+    public Task ShutdownAsync(CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        LocalFileLease[] leases = Interlocked.Exchange(
+            ref _applicationLeases,
+            Array.Empty<LocalFileLease>());
+        _restartOrphansByApplication = new Dictionary<ApplicationName, bool>();
+        for (int index = leases.Length - 1; index >= 0; index--)
+        {
+            leases[index].Dispose();
+        }
+
+        return Task.CompletedTask;
     }
 
     public async Task StartAsync(
@@ -102,7 +175,13 @@ internal sealed class LocalGatewayProcessSupervisor
 
         try
         {
-            ProcessAttempt? recovered = await TryRecoverAsync(configuration, cancellationToken).ConfigureAwait(false);
+            ProcessAttempt? recovered = await TryRecoverAsync(configuration, CancellationToken.None)
+                .ConfigureAwait(false);
+            if (recovered is not null)
+            {
+                supervised.SetAttempt(recovered);
+            }
+
             if (recovered is not null && (restartOrphans || recovered.RequiresRelaunch))
             {
                 configuration.State.SetState(
@@ -114,7 +193,7 @@ internal sealed class LocalGatewayProcessSupervisor
                 ProcessStopResult result = await StopAttemptAsync(
                     supervised,
                     recovered,
-                    cancellationToken).ConfigureAwait(false);
+                    CancellationToken.None).ConfigureAwait(false);
                 await DrainAndDisposeAsync(supervised, recovered).ConfigureAwait(false);
                 if (result == ProcessStopResult.Forced)
                 {
@@ -126,6 +205,20 @@ internal sealed class LocalGatewayProcessSupervisor
 
                 recovered = null;
             }
+
+            if (cancellationToken.IsCancellationRequested && recovered is not null)
+            {
+                configuration.State.SetState(
+                    configuration.Resource.Id,
+                    ResourceLifecycle.Stopping,
+                    "Startup was canceled after recovering a verified child process.");
+                await StopAttemptAsync(supervised, recovered, CancellationToken.None)
+                    .ConfigureAwait(false);
+                await DrainAndDisposeAsync(supervised, recovered).ConfigureAwait(false);
+                recovered = null;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             supervised.Completion = SuperviseAsync(supervised, recovered);
         }
@@ -144,20 +237,36 @@ internal sealed class LocalGatewayProcessSupervisor
     {
         ApplicationName application = GetApplication(context);
         var key = new LocalResourceKey(application, context.Resource.Id);
-        if (!_resources.TryRemove(key, out SupervisedResource? supervised))
+        if (!_resources.TryGetValue(key, out SupervisedResource? supervised))
         {
             return;
         }
 
+        await StopAsync(key, supervised, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task StopAsync(
+        LocalResourceKey key,
+        SupervisedResource supervised,
+        CancellationToken cancellationToken)
+    {
+        using CancellationTokenRegistration cancellationRegistration = cancellationToken.Register(
+            static state => RequestForceStop((CancellationTokenSource)state!),
+            supervised.ForceStop);
+        await supervised.GetOrStartTeardown(
+                () => StopSupervisedAsync(key, supervised))
+            .ConfigureAwait(false);
+    }
+
+    private async Task StopSupervisedAsync(
+        LocalResourceKey key,
+        SupervisedResource supervised)
+    {
         supervised.StopRequested = true;
         supervised.Configuration.State.SetState(
             supervised.Configuration.Resource.Id,
             ResourceLifecycle.Stopping);
         supervised.Lifetime.Cancel();
-
-        using CancellationTokenRegistration cancellationRegistration = cancellationToken.Register(
-            static state => ((CancellationTokenSource)state!).Cancel(),
-            supervised.ForceStop);
 
         try
         {
@@ -165,23 +274,37 @@ internal sealed class LocalGatewayProcessSupervisor
         }
         finally
         {
-            if (supervised.StopResult == ProcessStopResult.Forced)
+            try
             {
-                supervised.Configuration.State.SetState(
-                    supervised.Configuration.Resource.Id,
-                    ResourceLifecycle.Failed,
-                    $"Failed(forced): resource ignored its graceful-stop signal for "
-                    + $"{supervised.Configuration.StopGrace.TotalSeconds:0.###} seconds and was killed.");
+                if (supervised.StopResult == ProcessStopResult.Forced)
+                {
+                    supervised.Configuration.State.SetState(
+                        supervised.Configuration.Resource.Id,
+                        ResourceLifecycle.Failed,
+                        $"Failed(forced): resource ignored its graceful-stop signal for "
+                        + $"{supervised.Configuration.StopGrace.TotalSeconds:0.###} seconds and was killed.");
+                }
+                else
+                {
+                    supervised.Configuration.State.SetState(
+                        supervised.Configuration.Resource.Id,
+                        ResourceLifecycle.Stopped);
+                }
             }
-            else
+            finally
             {
-                supervised.Configuration.State.SetState(
-                    supervised.Configuration.Resource.Id,
-                    ResourceLifecycle.Stopped);
+                try
+                {
+                    _resources.TryRemove(new KeyValuePair<LocalResourceKey, SupervisedResource>(
+                        key,
+                        supervised));
+                }
+                finally
+                {
+                    supervised.Lifetime.Dispose();
+                    supervised.ForceStop.Dispose();
+                }
             }
-
-            supervised.Lifetime.Dispose();
-            supervised.ForceStop.Dispose();
         }
     }
 
@@ -193,9 +316,9 @@ internal sealed class LocalGatewayProcessSupervisor
         IApplicationResource resource = context.Resource;
         ApplicationName application = GetApplication(context);
         var key = new LocalResourceKey(application, resource.Id);
-        if (_resources.ContainsKey(key))
+        if (_resources.TryGetValue(key, out SupervisedResource? supervised))
         {
-            await StopAsync(context, cancellationToken).ConfigureAwait(false);
+            await StopAsync(key, supervised, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -215,7 +338,11 @@ internal sealed class LocalGatewayProcessSupervisor
             if (process.HasExited
                 || process.StartTime.ToUniversalTime().Ticks != registration.StartTimeUtcTicks)
             {
-                _processState.DeleteStale(application, resource.Name);
+                await _processState.DeleteIfMatchesAsync(
+                    application,
+                    resource.Name,
+                    registration,
+                    cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -225,7 +352,11 @@ internal sealed class LocalGatewayProcessSupervisor
             if (executablePath is null
                 || !PathEquals(executablePath, registration.ExecutablePath))
             {
-                _processState.DeleteStale(application, resource.Name);
+                await _processState.DeleteIfMatchesAsync(
+                    application,
+                    resource.Name,
+                    registration,
+                    cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -241,7 +372,8 @@ internal sealed class LocalGatewayProcessSupervisor
             await _processState.DeleteIfMatchesAsync(
                 application,
                 resource.Name,
-                registration).ConfigureAwait(false);
+                registration,
+                cancellationToken).ConfigureAwait(false);
             context.State.SetState(
                 resource.Id,
                 result == ProcessStopResult.Clean
@@ -253,11 +385,19 @@ internal sealed class LocalGatewayProcessSupervisor
         }
         catch (ArgumentException) when (!verified)
         {
-            _processState.DeleteStale(application, resource.Name);
+            await _processState.DeleteIfMatchesAsync(
+                application,
+                resource.Name,
+                registration,
+                cancellationToken).ConfigureAwait(false);
         }
         catch (InvalidOperationException) when (!verified)
         {
-            _processState.DeleteStale(application, resource.Name);
+            await _processState.DeleteIfMatchesAsync(
+                application,
+                resource.Name,
+                registration,
+                cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -269,6 +409,18 @@ internal sealed class LocalGatewayProcessSupervisor
         => context.Resource is IManifestResource manifestResource
             ? manifestResource.Manifest.Application
             : context.Model.Name;
+
+    private static void RequestForceStop(CancellationTokenSource forceStop)
+    {
+        try
+        {
+            forceStop.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The shared teardown won the race and has already released its cancellation sources.
+        }
+    }
 
     private async Task SuperviseAsync(
         SupervisedResource supervised,
@@ -458,9 +610,11 @@ internal sealed class LocalGatewayProcessSupervisor
                 || process.StartTime.ToUniversalTime().Ticks != registration.StartTimeUtcTicks)
             {
                 process.Dispose();
-                _processState.DeleteStale(
+                await _processState.DeleteIfMatchesAsync(
                     configuration.Application,
-                    configuration.Resource.Name);
+                    configuration.Resource.Name,
+                    registration,
+                    cancellationToken).ConfigureAwait(false);
                 return null;
             }
 
@@ -471,9 +625,11 @@ internal sealed class LocalGatewayProcessSupervisor
                 || !PathEquals(executablePath, registration.ExecutablePath))
             {
                 process.Dispose();
-                _processState.DeleteStale(
+                await _processState.DeleteIfMatchesAsync(
                     configuration.Application,
-                    configuration.Resource.Name);
+                    configuration.Resource.Name,
+                    registration,
+                    cancellationToken).ConfigureAwait(false);
                 return null;
             }
 
@@ -490,17 +646,21 @@ internal sealed class LocalGatewayProcessSupervisor
         catch (ArgumentException)
         {
             process?.Dispose();
-            _processState.DeleteStale(
+            await _processState.DeleteIfMatchesAsync(
                 configuration.Application,
-                configuration.Resource.Name);
+                configuration.Resource.Name,
+                registration,
+                cancellationToken).ConfigureAwait(false);
             return null;
         }
         catch (InvalidOperationException)
         {
             process?.Dispose();
-            _processState.DeleteStale(
+            await _processState.DeleteIfMatchesAsync(
                 configuration.Application,
-                configuration.Resource.Name);
+                configuration.Resource.Name,
+                registration,
+                cancellationToken).ConfigureAwait(false);
             return null;
         }
     }
@@ -565,6 +725,7 @@ internal sealed class LocalGatewayProcessSupervisor
                 || LocalProcessSignal.TryCreateProcessGroup(process.Id);
             var registration = new LocalProcessRegistration
             {
+                RegistrationId = Guid.NewGuid(),
                 ProcessId = process.Id,
                 StartTimeUtcTicks = process.StartTime.ToUniversalTime().Ticks,
                 ExecutablePath = CanonicalizePath(executablePath),
@@ -968,7 +1129,8 @@ internal sealed class LocalGatewayProcessSupervisor
             await _processState.DeleteIfMatchesAsync(
                 supervised.Configuration.Application,
                 supervised.Configuration.Resource.Name,
-                attempt.Registration).ConfigureAwait(false);
+                attempt.Registration,
+                CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
@@ -1164,6 +1326,12 @@ internal sealed class LocalGatewayProcessSupervisor
         ApplicationName Application,
         ResourceId Resource);
 
+    private readonly record struct ApplicationSession(
+        ApplicationName Application,
+        string Owner,
+        bool Adopt,
+        bool RestartOrphans);
+
     private readonly record struct AttemptOutcome(
         AttemptOutcomeKind Kind,
         int ExitCode,
@@ -1185,6 +1353,7 @@ internal sealed class LocalGatewayProcessSupervisor
     {
         private readonly object _gate = new();
         private ProcessAttempt? _attempt;
+        private Task? _teardown;
 
         public SupervisedResource(LocalResourceConfiguration configuration)
         {
@@ -1227,6 +1396,40 @@ internal sealed class LocalGatewayProcessSupervisor
                 {
                     _attempt = null;
                 }
+            }
+        }
+
+        public Task GetOrStartTeardown(Func<Task> start)
+        {
+            TaskCompletionSource completion;
+            lock (_gate)
+            {
+                if (_teardown is not null)
+                {
+                    return _teardown;
+                }
+
+                completion = new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                _teardown = completion.Task;
+            }
+
+            _ = CompleteTeardownAsync(start, completion);
+            return completion.Task;
+        }
+
+        private static async Task CompleteTeardownAsync(
+            Func<Task> start,
+            TaskCompletionSource completion)
+        {
+            try
+            {
+                await start().ConfigureAwait(false);
+                completion.TrySetResult();
+            }
+            catch (Exception exception)
+            {
+                completion.TrySetException(exception);
             }
         }
     }

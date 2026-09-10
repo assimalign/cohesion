@@ -21,6 +21,7 @@ internal sealed class RecordingController : IApplicationResourceController
     private readonly ISet<string> _failing;
     private readonly bool _leaveStarting;
     private readonly IReadOnlyDictionary<string, ResourceLifecycle> _observedStates;
+    private readonly TaskCompletionSource? _reconciledSignal;
 
     public RecordingController(
         List<string> reconciled,
@@ -28,7 +29,8 @@ internal sealed class RecordingController : IApplicationResourceController
         ISet<string>? failing = null,
         bool leaveStarting = false,
         IReadOnlyDictionary<string, ResourceLifecycle>? observedStates = null,
-        List<string>? stopped = null)
+        List<string>? stopped = null,
+        TaskCompletionSource? reconciledSignal = null)
     {
         _reconciled = reconciled;
         _deleted = deleted;
@@ -36,6 +38,7 @@ internal sealed class RecordingController : IApplicationResourceController
         _failing = failing ?? new HashSet<string>();
         _leaveStarting = leaveStarting;
         _observedStates = observedStates ?? new Dictionary<string, ResourceLifecycle>();
+        _reconciledSignal = reconciledSignal;
     }
 
     public bool CanRealize(ResourcePlan plan, out string? reason)
@@ -60,6 +63,7 @@ internal sealed class RecordingController : IApplicationResourceController
         }
 
         context.State.SetState(context.Resource.Id, state);
+        _reconciledSignal?.TrySetResult();
         return Task.CompletedTask;
     }
 

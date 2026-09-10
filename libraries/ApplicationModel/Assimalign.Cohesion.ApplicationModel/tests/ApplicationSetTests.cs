@@ -95,6 +95,39 @@ public class ApplicationSetTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Application set cancellation during startup stops gracefully")]
+    public async Task RunAsync_CanceledWhileBatchStartIsBlocked_StopsAndCompletes()
+    {
+        // Arrange
+        IApplicationModel model = CreateModel(ApplicationName.Parse("appa"));
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gateway = new RecordingMultiModelGateway("set-gateway")
+        {
+            StartBehavior = async cancellationToken =>
+            {
+                entered.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            },
+        };
+        IApplicationSet set = Application.CreateSet(
+                gateway,
+                ["--mode=run", "--gateway=set-gateway", "--environment=Development"])
+            .AddApplication(new ApplicationDeclaration(
+                model.Name,
+                new RecordingResolver(model.Name, model, new List<ApplicationName>())));
+        using var cancellation = new CancellationTokenSource();
+        Task run = set.RunAsync(cancellation.Token);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        // Act
+        cancellation.Cancel();
+        await run.WaitAsync(TimeSpan.FromSeconds(2));
+
+        // Assert
+        gateway.Calls.ShouldBe(["validate-batch", "start-batch", "stop"]);
+        gateway.StopTokenCanBeCanceled.ShouldBe(false);
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Application set external binds directly to an in-memory sibling before fallback")]
     public async Task RunAsync_ExternalTargetsSibling_ShouldPreferDirectSetResolution()
     {
@@ -384,6 +417,10 @@ public class ApplicationSetTests
 
         public IReadOnlyList<IApplicationModel>? RenderedModels { get; private set; }
 
+        public Func<CancellationToken, Task>? StartBehavior { get; init; }
+
+        public bool? StopTokenCanBeCanceled { get; private set; }
+
         public ExternalResourceResolution DirectResolution { get; init; } =
             ExternalResourceResolution.Unresolved("No direct resolution configured.");
 
@@ -414,7 +451,7 @@ public class ApplicationSetTests
             CancellationToken cancellationToken = default)
         {
             Calls.Add("start-batch");
-            return Task.CompletedTask;
+            return StartBehavior?.Invoke(cancellationToken) ?? Task.CompletedTask;
         }
 
         public Task ReconcileAsync(
@@ -438,6 +475,7 @@ public class ApplicationSetTests
         public Task StopAsync(CancellationToken cancellationToken = default)
         {
             Calls.Add("stop");
+            StopTokenCanBeCanceled = cancellationToken.CanBeCanceled;
             return Task.CompletedTask;
         }
 

@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -11,9 +10,6 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 internal sealed class LocalProcessStateStore
 {
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> PathGates =
-        new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-
     private readonly string _stateDirectory;
 
     public LocalProcessStateStore(string stateDirectory)
@@ -21,14 +17,7 @@ internal sealed class LocalProcessStateStore
         _stateDirectory = Path.GetFullPath(stateDirectory);
     }
 
-    public async Task InitializeAsync(IApplicationModel model, CancellationToken cancellationToken)
-        => await InitializeAsync(
-            model.Name,
-            model.Owner,
-            model.Adopt,
-            cancellationToken).ConfigureAwait(false);
-
-    public async Task InitializeAsync(
+    public async Task<LocalFileLease> AcquireApplicationLeaseAsync(
         ApplicationName application,
         string owner,
         bool adopt,
@@ -36,6 +25,39 @@ internal sealed class LocalProcessStateStore
     {
         string applicationDirectory = GetApplicationDirectory(application);
         Directory.CreateDirectory(applicationDirectory);
+        LocalFileLease lease = await LocalFileLease.AcquireAsync(
+                Path.Combine(applicationDirectory, "gateway.lock"),
+                waitForAvailability: false,
+                $"Application '{application}' is already supervised by another local gateway. " +
+                "Stop that gateway before starting or uninstalling this application.",
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        try
+        {
+            await InitializeOwnerAsync(
+                    application,
+                    applicationDirectory,
+                    owner,
+                    adopt,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return lease;
+        }
+        catch
+        {
+            lease.Dispose();
+            throw;
+        }
+    }
+
+    private static async Task InitializeOwnerAsync(
+        ApplicationName application,
+        string applicationDirectory,
+        string owner,
+        bool adopt,
+        CancellationToken cancellationToken)
+    {
         string ownerPath = Path.Combine(applicationDirectory, "owner");
         string? observedOwner = File.Exists(ownerPath)
             ? (await File.ReadAllTextAsync(ownerPath, cancellationToken).ConfigureAwait(false)).Trim()
@@ -62,8 +84,8 @@ internal sealed class LocalProcessStateStore
         CancellationToken cancellationToken)
     {
         string path = GetProcessPath(application, resource);
-        SemaphoreSlim gate = GetPathGate(path);
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using LocalFileLease lease = await AcquireProcessLeaseAsync(path, cancellationToken)
+            .ConfigureAwait(false);
         try
         {
             if (!File.Exists(path))
@@ -79,9 +101,9 @@ internal sealed class LocalProcessStateStore
 
             return registration ?? throw new InvalidDataException($"Process identity file '{path}' is empty.");
         }
-        finally
+        catch (FileNotFoundException)
         {
-            gate.Release();
+            return null;
         }
     }
 
@@ -92,8 +114,8 @@ internal sealed class LocalProcessStateStore
         CancellationToken cancellationToken)
     {
         string path = GetProcessPath(application, resource);
-        SemaphoreSlim gate = GetPathGate(path);
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using LocalFileLease lease = await AcquireProcessLeaseAsync(path, cancellationToken)
+            .ConfigureAwait(false);
         string temporaryPath = path + "." + Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture) + ".tmp";
 
         try
@@ -123,19 +145,18 @@ internal sealed class LocalProcessStateStore
             {
                 File.Delete(temporaryPath);
             }
-
-            gate.Release();
         }
     }
 
     public async Task DeleteIfMatchesAsync(
         ApplicationName application,
         ResourceName resource,
-        LocalProcessRegistration registration)
+        LocalProcessRegistration registration,
+        CancellationToken cancellationToken)
     {
         string path = GetProcessPath(application, resource);
-        SemaphoreSlim gate = GetPathGate(path);
-        await gate.WaitAsync().ConfigureAwait(false);
+        using LocalFileLease lease = await AcquireProcessLeaseAsync(path, cancellationToken)
+            .ConfigureAwait(false);
         try
         {
             if (!File.Exists(path))
@@ -158,35 +179,31 @@ internal sealed class LocalProcessStateStore
                 return;
             }
 
-            if (current is not null
-                && current.ProcessId == registration.ProcessId
-                && current.StartTimeUtcTicks == registration.StartTimeUtcTicks)
+            if (current is not null && RegistrationsMatch(current, registration))
             {
                 File.Delete(path);
             }
         }
-        finally
+        catch (FileNotFoundException)
         {
-            gate.Release();
         }
     }
 
-    public void DeleteStale(ApplicationName application, ResourceName resource)
+    private static bool RegistrationsMatch(
+        LocalProcessRegistration current,
+        LocalProcessRegistration expected)
     {
-        string path = GetProcessPath(application, resource);
-        SemaphoreSlim gate = GetPathGate(path);
-        gate.Wait();
-        try
+        if (current.RegistrationId != Guid.Empty || expected.RegistrationId != Guid.Empty)
         {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
+            return current.RegistrationId != Guid.Empty
+                && current.RegistrationId == expected.RegistrationId;
         }
-        finally
-        {
-            gate.Release();
-        }
+
+        return current.ProcessId == expected.ProcessId
+            && current.StartTimeUtcTicks == expected.StartTimeUtcTicks
+            && string.Equals(current.ExecutablePath, expected.ExecutablePath, StringComparison.Ordinal)
+            && current.HasProcessGroup == expected.HasProcessGroup
+            && string.Equals(current.StopEventName, expected.StopEventName, StringComparison.Ordinal);
     }
 
     private string GetApplicationDirectory(ApplicationName application)
@@ -204,6 +221,15 @@ internal sealed class LocalProcessStateStore
         string resourceDirectory = GetChildDirectory(applicationDirectory, resource.ToString(), "Resource");
         return Path.Combine(resourceDirectory, "pid");
     }
+
+    private static Task<LocalFileLease> AcquireProcessLeaseAsync(
+        string processPath,
+        CancellationToken cancellationToken) =>
+        LocalFileLease.AcquireAsync(
+            processPath + ".lock",
+            waitForAvailability: true,
+            $"Process registration '{processPath}' is currently locked.",
+            cancellationToken);
 
     private static string GetChildDirectory(string parent, string child, string kind)
     {
@@ -247,12 +273,12 @@ internal sealed class LocalProcessStateStore
         }
     }
 
-    private static SemaphoreSlim GetPathGate(string path)
-        => PathGates.GetOrAdd(Path.GetFullPath(path), static _ => new SemaphoreSlim(1, 1));
 }
 
 internal sealed class LocalProcessRegistration
 {
+    public Guid RegistrationId { get; init; }
+
     public int ProcessId { get; init; }
 
     public long StartTimeUtcTicks { get; init; }

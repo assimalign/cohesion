@@ -104,6 +104,10 @@ public sealed class LocalGateway : ApplicationGateway
         _supervisor.InitializeAsync(models, cancellationToken);
 
     /// <inheritdoc/>
+    protected override Task StopObserverAsync(CancellationToken cancellationToken) =>
+        _supervisor.ShutdownAsync(cancellationToken);
+
+    /// <inheritdoc/>
     protected override Task<IResourceArtifact> GatherAsync(IApplicationResource resource, CancellationToken cancellationToken)
     {
         string path;

@@ -27,6 +27,12 @@ internal static class Program
             return RunExecProbe(args);
         }
 
+        if (args.Length > 0
+            && string.Equals(args[0], "hold-file-lock", StringComparison.OrdinalIgnoreCase))
+        {
+            return await HoldFileLockAsync(args).ConfigureAwait(false);
+        }
+
         using var stopping = new CancellationTokenSource();
         using var stopSignals = new StopSignalSubscription(stopping);
         ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
@@ -107,6 +113,13 @@ internal static class Program
                 Environment.GetEnvironmentVariable("TEST_STARTED_PATH"),
                 launchCount.ToString(CultureInfo.InvariantCulture));
 
+            string? exitGatePath = Environment.GetEnvironmentVariable("TEST_EXIT_GATE_PATH");
+            if (!string.IsNullOrWhiteSpace(exitGatePath))
+            {
+                await WaitForFileAsync(exitGatePath, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 using TcpClient client = await listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
@@ -117,6 +130,37 @@ internal static class Program
         {
             listener.Stop();
         }
+    }
+
+    private static async Task<int> HoldFileLockAsync(string[] args)
+    {
+        if (args.Length != 4)
+        {
+            return 64;
+        }
+
+        string lockPath = Path.GetFullPath(args[1]);
+        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+        using var stream = new FileStream(
+            lockPath,
+            FileMode.OpenOrCreate,
+            FileAccess.ReadWrite,
+            OperatingSystem.IsMacOS() ? FileShare.None : FileShare.ReadWrite,
+            bufferSize: 1,
+            FileOptions.None);
+        if (!OperatingSystem.IsMacOS())
+        {
+            stream.Lock(0, 1);
+        }
+
+        if (stream.Length == 0)
+        {
+            stream.SetLength(1);
+        }
+
+        WriteOptionalText(args[2], "locked");
+        await WaitForFileAsync(args[3], CancellationToken.None).ConfigureAwait(false);
+        return 0;
     }
 
     private static async Task HandleRequestAsync(TcpClient client, CancellationToken cancellationToken)

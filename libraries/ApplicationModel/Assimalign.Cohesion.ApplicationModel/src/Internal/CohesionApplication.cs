@@ -69,10 +69,22 @@ internal sealed class CohesionApplication : IApplication
             static state => ((TaskCompletionSource)state!).TrySetResult(),
             stopped);
 
-        await _gateway.StartAsync(Model, cancellation.Token).ConfigureAwait(false);
+        try
+        {
+            await _gateway.StartAsync(Model, cancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            await StopGatewayAsync().ConfigureAwait(false);
+            return;
+        }
 
         await stopped.Task.ConfigureAwait(false);
+        await StopGatewayAsync().ConfigureAwait(false);
+    }
 
+    private async Task StopGatewayAsync()
+    {
         if (_shutdownTimeout is TimeSpan shutdownTimeout)
         {
             using var shutdown = new CancellationTokenSource(shutdownTimeout);
