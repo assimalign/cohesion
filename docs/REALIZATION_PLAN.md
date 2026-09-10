@@ -117,9 +117,10 @@ dependent already admitted by `Running`.
 `Building`, `Provisioning`, `Starting`, `Running`, `Degraded`, `Stopping`, `Stopped`, `Failed`,
 `Blocked`, and `Skipped`; the validator permits only the exact gate sets above in a plan.
 
-The plan contract and `GenericPlanner` define the `Job` shape now. Until orchestration item 26
-lands the current `ResourcePlanValidator` deliberately rejects a `Job` during application
-`Build()`, so a gateway cannot realize one prematurely.
+The plan contract and `GenericPlanner` define the `Job` shape, and `ResourcePlanValidator` accepts
+it like any other workload kind: `job.json` is a pinned golden fixture, the gate set for a `Job`
+terminates at `Stopped` rather than `Running`, and a compiler that cannot realize a run-once
+workload must refuse the plan by name in `CanRealize`.
 
 ### `ContainerSpec`
 
