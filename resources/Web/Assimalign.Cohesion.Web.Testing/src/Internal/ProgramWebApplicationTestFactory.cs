@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -239,6 +240,10 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
         }
     }
 
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "FromProgram<TProgram> roots all public and non-public methods on the validated entry-point type.")]
     private async Task StartCoreAsync(CancellationToken cancellationToken)
     {
         IResourceEntryInvocation invocation;

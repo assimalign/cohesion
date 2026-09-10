@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
 using System.Text.Json;
 
 using Microsoft.Build.Framework;
@@ -42,6 +45,9 @@ public sealed class CohesionCreateResourceVerbs : Task
     [Required]
     public string Gateways { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets whether project-referenced composable resources run in process.</summary>
+    public bool InProcessEnabled { get; set; }
+
     /// <summary>Gets or sets mount-source target-kind to client-package mappings.</summary>
     public ITaskItem[] ClientKinds { get; set; } = [];
 
@@ -52,6 +58,13 @@ public sealed class CohesionCreateResourceVerbs : Task
     /// <summary>Gets the client packages required by protected mount sources.</summary>
     [Output]
     public ITaskItem[] RequiredClientPackages { get; private set; } = [];
+
+    /// <summary>
+    /// Gets the enabled, composable project resources whose content is required by generated
+    /// in-process bindings.
+    /// </summary>
+    [Output]
+    public ITaskItem[] InProcessProjectReferences { get; private set; } = [];
 
     /// <inheritdoc />
     public override bool Execute()
@@ -82,6 +95,7 @@ public sealed class CohesionCreateResourceVerbs : Task
                     manifest.Application,
                     application,
                     StringComparison.OrdinalIgnoreCase)).ToList());
+            ResolveInProcessBindings(resources);
             List<GatewayExternal> externals = CreateExternals(manifests, resources, application);
             List<GatewayManifest> applications = manifests
                 .Where(manifest => manifest.IsDirect &&
@@ -108,6 +122,10 @@ public sealed class CohesionCreateResourceVerbs : Task
                 .ToArray();
             RequiredClientPackages = ResolveClientPackages(manifests, clientKinds)
                 .Select(value => (ITaskItem)new TaskItem(value))
+                .ToArray();
+            InProcessProjectReferences = resources
+                .Where(manifest => manifest.InProcessBinding is not null)
+                .Select(CreateInProcessProjectReference)
                 .ToArray();
 
             GatewaySourceWriter.Write(
@@ -210,13 +228,16 @@ public sealed class CohesionCreateResourceVerbs : Task
                 ?? OptionalString(artifact, "project", path)
                 ?? string.Empty,
             ProjectName = Value(item.GetMetadata("ProjectName")) ?? string.Empty,
+            RootNamespace = Value(item.GetMetadata("RootNamespace")) ?? string.Empty,
+            TargetPath = Value(item.GetMetadata("TargetPath")) ?? string.Empty,
             AppHostPath = Value(item.GetMetadata("AppHostPath"))
                 ?? OptionalString(artifact, "apphost", path)
                 ?? string.Empty,
             ReferenceIdentity = Value(item.GetMetadata("ReferenceIdentity"))
                 ?? Value(item.GetMetadata("PackageId"))
                 ?? item.ItemSpec,
-            IsDirect = false
+            IsDirect = false,
+            IsDirectProjectReference = false
         };
 
         foreach (JsonElement endpoint in RequiredArray(root, "endpoints", path).EnumerateArray())
@@ -280,10 +301,110 @@ public sealed class CohesionCreateResourceVerbs : Task
 
         foreach (GatewayManifest manifest in manifests)
         {
-            manifest.IsDirect = (!string.IsNullOrWhiteSpace(manifest.ProjectPath) &&
-                    projects.Contains(Path.GetFullPath(manifest.ProjectPath))) ||
+            manifest.IsDirectProjectReference = !string.IsNullOrWhiteSpace(manifest.ProjectPath) &&
+                projects.Contains(Path.GetFullPath(manifest.ProjectPath));
+            manifest.IsDirect = manifest.IsDirectProjectReference ||
                 packages.Contains(manifest.ReferenceIdentity);
         }
+    }
+
+    private void ResolveInProcessBindings(IEnumerable<GatewayManifest> manifests)
+    {
+        if (!InProcessEnabled)
+        {
+            return;
+        }
+
+        foreach (GatewayManifest manifest in manifests.Where(candidate =>
+            !string.IsNullOrWhiteSpace(candidate.ProjectPath) && candidate.Composable))
+        {
+            if (string.IsNullOrWhiteSpace(manifest.RootNamespace))
+            {
+                throw new InvalidDataException(
+                    $"In-process resource '{manifest.Application}/{manifest.Name}' did not report its RootNamespace.");
+            }
+            if (string.IsNullOrWhiteSpace(manifest.TargetPath))
+            {
+                throw new InvalidDataException(
+                    $"In-process resource '{manifest.Application}/{manifest.Name}' did not report its TargetPath.");
+            }
+
+            string projectPath = Path.GetFullPath(manifest.ProjectPath);
+            string projectDirectory = Path.GetDirectoryName(projectPath)
+                ?? throw new InvalidDataException(
+                    $"In-process resource '{manifest.Application}/{manifest.Name}' has an invalid project path '{manifest.ProjectPath}'.");
+            string targetPath = Path.IsPathFullyQualified(manifest.TargetPath)
+                ? Path.GetFullPath(manifest.TargetPath)
+                : Path.GetFullPath(manifest.TargetPath, projectDirectory);
+            if (!File.Exists(targetPath))
+            {
+                throw new InvalidDataException(
+                    $"In-process resource '{manifest.Application}/{manifest.Name}' target assembly '{targetPath}' does not exist.");
+            }
+
+            (string entryPointType, string entryAssemblyName) = ReadEntryPoint(targetPath, manifest);
+            manifest.InProcessBinding = new GatewayInProcessBinding(
+                manifest.RootNamespace,
+                entryPointType,
+                entryAssemblyName,
+                manifest.Name,
+                targetPath,
+                projectPath);
+        }
+    }
+
+    private static ITaskItem CreateInProcessProjectReference(GatewayManifest manifest)
+    {
+        GatewayInProcessBinding binding = manifest.InProcessBinding
+            ?? throw new InvalidOperationException(
+                $"Resource '{manifest.Application}/{manifest.Name}' has no in-process binding.");
+        var item = new TaskItem(binding.ProjectPath);
+        item.SetMetadata("TargetPath", binding.TargetPath);
+        item.SetMetadata("ResourceName", binding.ResourceName);
+        return item;
+    }
+
+    private static (string EntryPointType, string AssemblyName) ReadEntryPoint(
+        string targetPath,
+        GatewayManifest manifest)
+    {
+        using FileStream stream = File.OpenRead(targetPath);
+        using var peReader = new PEReader(stream);
+        CorHeader? corHeader = peReader.PEHeaders.CorHeader;
+        if (!peReader.HasMetadata || corHeader is null ||
+            (corHeader.Flags & CorFlags.NativeEntryPoint) != 0 ||
+            corHeader.EntryPointTokenOrRelativeVirtualAddress == 0)
+        {
+            throw new InvalidDataException(
+                $"In-process resource '{manifest.Application}/{manifest.Name}' target assembly '{targetPath}' has no managed entry point.");
+        }
+
+        MetadataReader reader = peReader.GetMetadataReader();
+        EntityHandle entryPoint = MetadataTokens.EntityHandle(corHeader.EntryPointTokenOrRelativeVirtualAddress);
+        if (entryPoint.Kind != HandleKind.MethodDefinition)
+        {
+            throw new InvalidDataException(
+                $"In-process resource '{manifest.Application}/{manifest.Name}' target assembly '{targetPath}' has an invalid managed entry point token.");
+        }
+
+        MethodDefinition method = reader.GetMethodDefinition((MethodDefinitionHandle)entryPoint);
+        string entryPointType = FullTypeName(reader, method.GetDeclaringType());
+        string assemblyName = reader.GetString(reader.GetAssemblyDefinition().Name);
+        return (entryPointType, assemblyName);
+    }
+
+    private static string FullTypeName(MetadataReader reader, TypeDefinitionHandle handle)
+    {
+        TypeDefinition type = reader.GetTypeDefinition(handle);
+        string name = reader.GetString(type.Name);
+        TypeDefinitionHandle declaringType = type.GetDeclaringType();
+        if (!declaringType.IsNil)
+        {
+            return FullTypeName(reader, declaringType) + "+" + name;
+        }
+
+        string typeNamespace = reader.GetString(type.Namespace);
+        return typeNamespace.Length == 0 ? name : typeNamespace + "." + name;
     }
 
     private void AssignMemberNames(IReadOnlyList<GatewayManifest> manifests, string application)

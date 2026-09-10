@@ -72,7 +72,8 @@ public sealed class WebApplicationConfigurationTests
             [
                 "--Settings:Arguments=arguments",
                 "--Settings:Winner=arguments",
-            ]);
+            ],
+            typeof(WebApplicationConfigurationTests).Assembly);
 
             try
             {

@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -124,12 +123,11 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
     /// <param name="args">The application command-line arguments.</param>
     /// <returns>A new database application builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="args"/> is null.</exception>
-    [MethodImpl(MethodImplOptions.NoInlining)]
     public static DatabaseApplicationBuilder CreateBuilder(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        Assembly resourceAssembly = Assembly.GetCallingAssembly();
+        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(DatabaseApplication).Assembly;
         return new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), resourceAssembly);
     }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -131,6 +132,10 @@ public sealed class WebApplicationProgramTestFactoryTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Testing] - FromProgram: requires an explicit resource scope")]
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "The test host's generated Program entry point is compiler-rooted.")]
     public void ResourceRuntime_AfterReadingCurrent_ShouldStillRejectUnscopedProgramInvocation()
     {
         _ = ResourceRuntime.Current;

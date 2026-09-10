@@ -39,7 +39,8 @@ internal sealed class ResourceHostOptions
         Func<Exception, ResourceHostFailureKind?>? exceptionClassifier = null,
         Action<int>? exitCodeHandler = null,
         IResourceHostSignalSource? signalSource = null,
-        ResourceHostRunMode runMode = ResourceHostRunMode.Process)
+        ResourceHostRunMode runMode = ResourceHostRunMode.Process,
+        Action? runInvoked = null)
     {
         StopGraceSeconds = ValidateStopGraceSeconds(stopGraceSeconds);
         ContentRootPath = ResolveContentRootPath(contentRootPath);
@@ -49,6 +50,7 @@ internal sealed class ResourceHostOptions
         ExitCodeHandler = exitCodeHandler ?? SetProcessExitCode;
         SignalSource = signalSource ?? ResourceHostSignalSource.Instance;
         RunMode = runMode;
+        RunInvoked = runInvoked;
     }
 
     internal int StopGraceSeconds { get; }
@@ -66,6 +68,8 @@ internal sealed class ResourceHostOptions
     internal IResourceHostSignalSource SignalSource { get; }
 
     internal ResourceHostRunMode RunMode { get; }
+
+    internal Action? RunInvoked { get; }
 
     internal ResourceHostFailureKind? ClassifyException(Exception exception)
     {

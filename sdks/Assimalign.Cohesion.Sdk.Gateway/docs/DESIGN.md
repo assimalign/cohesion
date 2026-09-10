@@ -154,16 +154,23 @@ mode may turn enabled, composable project references into real assembly referenc
 adds their area frameworks explicitly. Manifest-package resources cannot be nested
 because they have no local executable binding.
 
-This exception must remain guarded by `COHGW001`, content-root isolation, and an ambient
-`ResourceContext` per invocation. It does not authorize an `App.Gateway` framework or
-allow Hosting references in an ordinary out-of-process gateway.
+This exception remains guarded by explicit `CohesionGatewayInProcess=true`, `COHGW001`,
+content-root isolation, and an ambient `ResourceContext` per invocation. Generated bindings use
+`AppContext.BaseDirectory/cohesion/resources/<resource-name>`. The SDK disables ordinary
+transitive content copying and remaps each composable project resource's declared output/publish
+content beneath that root. It also collects the selected closure's managed, native, satellite,
+and RID-specific runtime files without admitting assets from disabled or non-composable projects.
+Because that selection occurs after restore, those child package identities do not become entries
+in the gateway lock file, cannot participate in gateway-wide NuGet version solving, and cannot
+contribute child-only `buildTransitive` behavior. Completing those semantics requires the
+restore-visible producer descriptor described above. This exception does not authorize an
+`App.Gateway` framework or allow Hosting references in an ordinary out-of-process gateway.
 
 ## Current guarded gaps
 
 The following are explicit integration gates, not behavior the SDK may emulate with
 stubs:
 
-- The InProcess package and entry-point binding contract have not landed.
 - The Gateway.ControlPlane package and server have not landed.
 - The provider contribution contract has no Docker or Kubernetes implementation in this
   repository.
@@ -186,5 +193,7 @@ duplicate/unknown providers, AOT propagation, `COHSDK001`, `COHGW001`, and the f
 restore with no pre-existing assets file or global-packages cache entry.
 
 CI must also publish and execute a self-contained Gateway smoke application on Windows,
-Linux, and macOS. Release publication must consume the exact package artifact from
-`Pack-Release.ps1`, build and run the consumer, and only then permit package publication.
+Linux, and macOS, including the in-process host lifecycle path and isolated content roots. A
+Linux NativeAOT publish runs the same bounded in-process smoke. Release publication must consume
+the exact package artifact from `Pack-Release.ps1`, build and run the consumer, and only then
+permit package publication.

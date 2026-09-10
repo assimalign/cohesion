@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Text;
 using System.Threading;
 
 using Assimalign.Cohesion.Core;
@@ -12,7 +13,7 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
 /// Carries one resource invocation's identity, endpoints, mounts, settings, references,
-/// environment, and bootstrap credential.
+/// environment, application trust key, and bootstrap credential.
 /// </summary>
 /// <remarks>
 /// Out-of-process resources create this context from the frozen
@@ -86,6 +87,62 @@ public sealed class ResourceContext
         : this(
             applicationName,
             resourceName,
+            environmentName,
+            gatewayName,
+            contentRootPath,
+            endpoints,
+            mounts,
+            settings,
+            references,
+            bootstrapCredential,
+            applicationTrustKey: default,
+            ambientValues: null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes an in-process resource context with all frozen runtime-contract values.
+    /// </summary>
+    /// <param name="applicationName">The application name.</param>
+    /// <param name="resourceName">The resource name.</param>
+    /// <param name="environmentName">The application environment name.</param>
+    /// <param name="gatewayName">The gateway topology name, or null for standalone execution.</param>
+    /// <param name="contentRootPath">The absolute content root, or null for the application base directory.</param>
+    /// <param name="endpoints">Realized resource endpoints keyed by endpoint name.</param>
+    /// <param name="mounts">Materialized resource mounts keyed by mount name.</param>
+    /// <param name="settings">Configuration settings keyed by colon-separated setting name.</param>
+    /// <param name="references">
+    /// Observed dependency endpoints keyed as <c>&lt;resource&gt;:&lt;endpoint&gt;</c>.
+    /// </param>
+    /// <param name="bootstrapCredential">The bootstrap credential bytes for this invocation.</param>
+    /// <param name="applicationTrustKey">The application's public trust-key document.</param>
+    /// <param name="ambientValues">
+    /// Additional frozen runtime-contract values carried for this invocation.
+    /// </param>
+    /// <exception cref="ArgumentNullException">
+    /// A value in <paramref name="endpoints"/> or <paramref name="references"/> is <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="environmentName"/> is empty, <paramref name="contentRootPath"/> is not absolute,
+    /// a supplied dictionary contains an empty or duplicate key, or a value in <paramref name="endpoints"/>
+    /// or <paramref name="references"/> is not an endpoint URI.
+    /// </exception>
+    public ResourceContext(
+        string? applicationName,
+        string? resourceName,
+        string? environmentName,
+        string? gatewayName,
+        string? contentRootPath,
+        IReadOnlyDictionary<string, Uri>? endpoints,
+        IReadOnlyDictionary<string, ResourceMount>? mounts,
+        IReadOnlyDictionary<string, string>? settings,
+        IReadOnlyDictionary<string, Uri>? references,
+        ReadOnlyMemory<byte> bootstrapCredential,
+        ReadOnlyMemory<byte> applicationTrustKey,
+        IReadOnlyDictionary<string, string?>? ambientValues)
+        : this(
+            applicationName,
+            resourceName,
             environmentName ?? Assimalign.Cohesion.AppEnvironment.GetEnvironmentName(),
             gatewayName,
             contentRootPath,
@@ -94,7 +151,8 @@ public sealed class ResourceContext
             settings,
             references,
             bootstrapCredential,
-            new Dictionary<string, string?>(StringComparer.Ordinal))
+            applicationTrustKey,
+            Copy(ambientValues, StringComparer.Ordinal))
     {
     }
 
@@ -109,6 +167,7 @@ public sealed class ResourceContext
         IReadOnlyDictionary<string, string>? settings,
         IReadOnlyDictionary<string, Uri>? references,
         ReadOnlyMemory<byte> bootstrapCredential,
+        ReadOnlyMemory<byte> applicationTrustKey,
         Dictionary<string, string?> environmentVariables)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(environmentName);
@@ -129,6 +188,7 @@ public sealed class ResourceContext
         GatewayName = NullIfWhiteSpace(gatewayName);
         ContentRootPath = Path.GetFullPath(resolvedContentRoot);
         BootstrapCredential = bootstrapCredential.ToArray();
+        ApplicationTrustKey = applicationTrustKey.ToArray();
         _environmentVariables = environmentVariables;
         _endpoints = CopyEndpoints(endpoints, nameof(endpoints));
         _mounts = Copy(mounts, StringComparer.OrdinalIgnoreCase);
@@ -153,6 +213,9 @@ public sealed class ResourceContext
 
     /// <summary>Gets this resource invocation's bootstrap credential bytes.</summary>
     public ReadOnlyMemory<byte> BootstrapCredential { get; }
+
+    /// <summary>Gets the application's public trust-key document.</summary>
+    public ReadOnlyMemory<byte> ApplicationTrustKey { get; }
 
     /// <summary>Gets the endpoints supplied directly or discovered from the environment.</summary>
     public IReadOnlyDictionary<string, Uri> Endpoints =>
@@ -203,6 +266,7 @@ public sealed class ResourceContext
         Dictionary<string, ResourceMount> mounts = ReadMounts(snapshot);
         Dictionary<string, string> settings = ReadSettings(snapshot);
         ReadOnlyMemory<byte> bootstrapCredential = ReadBootstrapCredential(snapshot);
+        ReadOnlyMemory<byte> applicationTrustKey = ReadApplicationTrustKey(snapshot);
 
         return new ResourceContext(
             ResourceEnvironment.GetValue(snapshot, ResourceEnvironment.Application),
@@ -215,6 +279,7 @@ public sealed class ResourceContext
             settings,
             references: null,
             bootstrapCredential,
+            applicationTrustKey,
             snapshot);
     }
 
@@ -493,6 +558,17 @@ public sealed class ResourceContext
         return string.IsNullOrWhiteSpace(path)
             ? ReadOnlyMemory<byte>.Empty
             : new ResourceMount(path).ReadAllBytes();
+    }
+
+    private static ReadOnlyMemory<byte> ReadApplicationTrustKey(
+        IDictionary<string, string?> environment)
+    {
+        string? value = ResourceEnvironment.GetValue(
+            environment,
+            ResourceEnvironment.ApplicationTrustKey);
+        return string.IsNullOrWhiteSpace(value)
+            ? ReadOnlyMemory<byte>.Empty
+            : Encoding.UTF8.GetBytes(value);
     }
 
     private static Dictionary<string, TValue> Copy<TValue>(

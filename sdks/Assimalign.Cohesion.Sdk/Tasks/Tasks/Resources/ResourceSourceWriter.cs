@@ -42,6 +42,11 @@ internal static class ResourceSourceWriter
         WriteSettings(builder, manifest.Settings);
         WriteReferences(builder, manifest.References);
         builder.AppendLine("}");
+        builder.AppendLine();
+        builder.AppendLine("/// <summary>Provides a compiler-rooted assembly anchor for generated gateway bindings.</summary>");
+        builder.Append("public static class ").AppendLine(EntryAnchorType(manifest.Artifact.Assembly));
+        builder.AppendLine("{");
+        builder.AppendLine("}");
 
         ResourceFileWriter.WriteIfChanged(
             path,
@@ -157,6 +162,9 @@ internal static class ResourceSourceWriter
 
         return builder.ToString();
     }
+
+    private static string EntryAnchorType(string assemblyName) =>
+        "CohesionResourceEntry" + Convert.ToHexString(Encoding.UTF8.GetBytes(assemblyName));
 
     private static void WriteManifestDefaults(
         StringBuilder builder,

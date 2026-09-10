@@ -1,0 +1,18 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnablePreviewFeatures>true</EnablePreviewFeatures>
+    <IsAotCompatible>true</IsAotCompatible>
+    <RootNamespace>GatewaySmokeWeb</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>gateway-smoke</CohesionApplication>
+    <CohesionResourceName>inprocess-named-entry</CohesionResourceName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="content\named-entry.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

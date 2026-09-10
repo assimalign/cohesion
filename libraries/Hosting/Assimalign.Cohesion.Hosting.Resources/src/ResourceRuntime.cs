@@ -102,14 +102,31 @@ public static class ResourceRuntime
     }
 
     /// <summary>
+    /// Determines whether an enabled resource assembly registered its executable entry point.
+    /// </summary>
+    /// <param name="assembly">The resource executable assembly.</param>
+    /// <returns>
+    /// <see langword="true"/> when <paramref name="assembly"/> has an entry registration;
+    /// otherwise, <see langword="false"/>.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="assembly"/> is null.</exception>
+    public static bool IsEntryRegistered(Assembly assembly)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+
+        return Entries.ContainsKey(assembly);
+    }
+
+    /// <summary>
     /// Invokes an enabled resource assembly's registered entry point in the current ambient
     /// resource scope.
     /// </summary>
     /// <param name="assembly">The resource executable assembly.</param>
     /// <param name="args">The command-line arguments passed to the executable.</param>
     /// <returns>
-    /// An invocation whose host-ready task completes when the area builder surrenders its host and
-    /// whose completion task represents the executable's full lifetime.
+    /// An invocation whose host-ready task completes after the area builder surrenders its host and
+    /// invokes its run pipeline, or exits successfully with the host still idle. The completion task
+    /// represents the executable's full lifetime.
     /// </returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="assembly"/> or <paramref name="args"/> is null.
@@ -118,6 +135,8 @@ public static class ResourceRuntime
     /// The assembly is not an enabled resource or the current ambient scope already owns an entry
     /// invocation.
     /// </exception>
+    [RequiresUnreferencedCode(
+        "Invoking Assembly.EntryPoint requires the executable entry point to be rooted by generated metadata.")]
     public static IResourceEntryInvocation InvokeEntry(Assembly assembly, string[] args)
     {
         ArgumentNullException.ThrowIfNull(assembly);
@@ -129,6 +148,50 @@ public static class ResourceRuntime
                 $"Resource assembly '{assembly.GetName().Name}' did not register an enabled resource entry point.");
         }
 
+        return InvokeEntryPointCore(assembly, args);
+    }
+
+    /// <summary>
+    /// Invokes a compiler-rooted executable entry point directly in the current ambient resource
+    /// scope without requiring an entry registration.
+    /// </summary>
+    /// <param name="assembly">The resource executable assembly.</param>
+    /// <param name="args">The command-line arguments passed to the executable.</param>
+    /// <returns>
+    /// An invocation whose host-ready task completes after the area builder surrenders its host and
+    /// invokes its run pipeline, or exits successfully with the host still idle. The completion task
+    /// represents the executable's full lifetime.
+    /// </returns>
+    /// <remarks>
+    /// This fallback is for callers that already hold a compiler-rooted reference to the executable
+    /// assembly and establish its resource eligibility independently. Generated registration remains
+    /// the normal enabled-resource path exposed by <see cref="InvokeEntry(Assembly, string[])"/>.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="assembly"/> or <paramref name="args"/> is null.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The assembly has no executable entry point, the current ambient scope is not an explicit
+    /// invocation scope, or that scope already owns an entry invocation.
+    /// </exception>
+    [RequiresUnreferencedCode(
+        "Invoking Assembly.EntryPoint requires the executable entry point to be rooted by the caller.")]
+    public static IResourceEntryInvocation InvokeEntryPoint(Assembly assembly, string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+        ArgumentNullException.ThrowIfNull(args);
+
+        if (assembly.EntryPoint is null)
+        {
+            throw new InvalidOperationException(
+                $"Resource assembly '{assembly.GetName().Name}' does not have an executable entry point.");
+        }
+
+        return InvokeEntryPointCore(assembly, args);
+    }
+
+    private static IResourceEntryInvocation InvokeEntryPointCore(Assembly assembly, string[] args)
+    {
         ResourceContextFrame? frame = AmbientContext.Value;
         if (frame is null || !frame.IsExplicitInvocationScope)
         {
@@ -144,7 +207,7 @@ public static class ResourceRuntime
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default).Unwrap();
 
-        _ = ObserveEntryCompletionAsync(assembly, completion, hostReady);
+        _ = ObserveEntryCompletionAsync(assembly, completion, hostReady, frame);
         return new ResourceEntryInvocation(hostReady.Task, completion);
     }
 
@@ -184,7 +247,10 @@ public static class ResourceRuntime
     /// <summary>
     /// Attempts to create the default control plane registered by a resource assembly.
     /// </summary>
-    /// <param name="assembly">The calling resource executable assembly.</param>
+    /// <param name="assembly">
+    /// The process entry assembly used for standalone execution. An active entry invocation's
+    /// logical resource assembly takes precedence.
+    /// </param>
     /// <param name="controlPlane">The new isolated control plane when registered.</param>
     /// <returns>True when the assembly registered a control plane; otherwise, false.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="assembly"/> is null.</exception>
@@ -194,7 +260,14 @@ public static class ResourceRuntime
     {
         ArgumentNullException.ThrowIfNull(assembly);
 
-        if (!ControlPlanes.TryGetValue(assembly, out ControlPlaneRegistration? registration))
+        // An in-process member executes beneath the gateway's process entry assembly. The
+        // invocation frame is the logical resource caller and must win over that process-wide
+        // identity so concurrent members resolve only their own registered control plane.
+        Assembly registrationAssembly = AmbientContext.Value?.EntryAssembly ?? assembly;
+
+        if (!ControlPlanes.TryGetValue(
+            registrationAssembly,
+            out ControlPlaneRegistration? registration))
         {
             controlPlane = null;
             return false;
@@ -202,7 +275,7 @@ public static class ResourceRuntime
 
         IResourceControlPlane inner = registration.Factory.Invoke()
             ?? throw new InvalidOperationException(
-                $"Resource assembly '{assembly.GetName().Name}' returned a null default control plane.");
+                $"Resource assembly '{registrationAssembly.GetName().Name}' returned a null default control plane.");
         controlPlane = new RegisteredResourceControlPlane(inner, registration.StopGraceSeconds);
         return true;
     }
@@ -213,6 +286,11 @@ public static class ResourceRuntime
     /// </summary>
     /// <param name="host">The built area host.</param>
     /// <param name="controlPlane">The invocation's control plane.</param>
+    /// <remarks>
+    /// During an explicit entry invocation this records the surrendered host. Host readiness is
+    /// published only when the host's run pipeline is subsequently invoked, or when the entry point
+    /// exits successfully while the host remains idle for parent-owned startup.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="host"/> or <paramref name="controlPlane"/> is null.</exception>
     /// <exception cref="InvalidOperationException"><paramref name="host"/> does not use a Cohesion <see cref="HostContext"/>.</exception>
     public static void HostBuilt(IHost host, IResourceControlPlane controlPlane)
@@ -226,6 +304,8 @@ public static class ResourceRuntime
         }
 
         ResourceContext context = Current;
+        ResourceContextFrame? frame = AmbientContext.Value;
+        bool isEntryInvocationHost = frame?.HostBuilt(host) is true;
         foreach ((string name, Uri endpoint) in context.Endpoints)
         {
             controlPlane.ObserveEndpoint(name, endpoint);
@@ -235,15 +315,16 @@ public static class ResourceRuntime
         int stopGraceSeconds = controlPlane is RegisteredResourceControlPlane registered
             ? registered.StopGraceSeconds
             : ResourceHostOptions.DefaultStopGraceSeconds;
-        ResourceContextFrame? frame = AmbientContext.Value;
         hostContext.Runner = new ResourceHostRunner(new ResourceHostOptions(
             stopGraceSeconds,
             contentRootPath: context.ContentRootPath,
             stopEventName: context.GetEnvironmentValue(ResourceEnvironment.StopEvent),
-            runMode: frame?.HasEntryInvocation is true
+            runMode: isEntryInvocationHost
                 ? ResourceHostRunMode.InProcess
-                : ResourceHostRunMode.Process));
-        frame?.HostBuilt(host);
+                : ResourceHostRunMode.Process,
+            runInvoked: isEntryInvocationHost
+                ? () => frame!.RunInvoked(host)
+                : null));
     }
 
     private sealed class ResourceContextScope : IDisposable
@@ -279,6 +360,7 @@ public static class ResourceRuntime
     {
         private TaskCompletionSource<IHost>? _entryHostReady;
         private Assembly? _entryAssembly;
+        private IHost? _entryHost;
 
         internal ResourceContextFrame(
             ResourceContext context,
@@ -292,13 +374,13 @@ public static class ResourceRuntime
 
         internal bool IsExplicitInvocationScope { get; }
 
-        internal bool HasEntryInvocation
+        internal Assembly? EntryAssembly
         {
             get
             {
                 lock (this)
                 {
-                    return _entryHostReady is not null;
+                    return _entryAssembly;
                 }
             }
         }
@@ -320,11 +402,66 @@ public static class ResourceRuntime
             }
         }
 
-        internal void HostBuilt(IHost host)
+        internal bool HostBuilt(IHost host)
         {
             lock (this)
             {
-                _entryHostReady?.TrySetResult(host);
+                if (_entryHostReady is null)
+                {
+                    return false;
+                }
+                if (_entryHost is null)
+                {
+                    _entryHost = host;
+                    return true;
+                }
+                if (!ReferenceEquals(_entryHost, host))
+                {
+                    throw new InvalidOperationException(
+                        $"Resource entry invocation '{_entryAssembly!.GetName().Name}' surrendered more than one host.");
+                }
+
+                return true;
+            }
+        }
+
+        internal void RunInvoked(IHost host)
+        {
+            lock (this)
+            {
+                if (ReferenceEquals(_entryHost, host))
+                {
+                    _entryHostReady?.TrySetResult(host);
+                }
+            }
+        }
+
+        internal bool EntryPointCompleted()
+        {
+            lock (this)
+            {
+                if (_entryHost is not null && _entryHost.Context.State is HostState.Idle)
+                {
+                    _entryHostReady?.TrySetResult(_entryHost);
+                }
+                return _entryHostReady?.Task.IsCompleted is true;
+            }
+        }
+
+        internal void EntryPointFailed(Exception exception)
+        {
+            lock (this)
+            {
+                if (_entryHost is not null)
+                {
+                    // A surrendered host remains caller-owned even when composition fails
+                    // before RunAsync. Completion retains the original failure while HostReady
+                    // gives ProcessHost the exact instance it must dispose.
+                    _entryHostReady?.TrySetResult(_entryHost);
+                    return;
+                }
+
+                _entryHostReady?.TrySetException(exception);
             }
         }
     }
@@ -332,17 +469,21 @@ public static class ResourceRuntime
     private static async Task ObserveEntryCompletionAsync(
         Assembly assembly,
         Task completion,
-        TaskCompletionSource<IHost> hostReady)
+        TaskCompletionSource<IHost> hostReady,
+        ResourceContextFrame frame)
     {
         try
         {
             await completion.ConfigureAwait(false);
-            hostReady.TrySetException(new InvalidOperationException(
-                $"Resource entry point '{assembly.GetName().Name}' exited before building a host."));
+            if (!frame.EntryPointCompleted())
+            {
+                hostReady.TrySetException(new InvalidOperationException(
+                    $"Resource entry point '{assembly.GetName().Name}' exited before surrendering a runnable host."));
+            }
         }
         catch (Exception exception)
         {
-            hostReady.TrySetException(exception);
+            frame.EntryPointFailed(exception);
         }
     }
 
@@ -385,8 +526,7 @@ public static class ResourceRuntime
 
         if (exitCode != 0)
         {
-            throw new InvalidOperationException(
-                $"Resource entry point '{assembly.GetName().Name}' exited with code {exitCode}.");
+            throw new ResourceEntryExitException(exitCode);
         }
     }
 

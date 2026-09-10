@@ -12,7 +12,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <CohesionProjectReference Include="GatewaySmokeSupport" ProjectPath="..\GatewaySmokeSupport\GatewaySmokeSupport.csproj" />
     <CohesionResourceReference Include="..\GatewaySmokeDatabase\GatewaySmokeDatabase.csproj" Endpoints="db" />
+    <None Update="content\web.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

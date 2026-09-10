@@ -27,11 +27,19 @@ internal sealed class GatewayManifest
 
     public required string ProjectName { get; init; }
 
+    public required string RootNamespace { get; init; }
+
+    public required string TargetPath { get; init; }
+
     public required string AppHostPath { get; init; }
 
     public required string ReferenceIdentity { get; init; }
 
     public required bool IsDirect { get; set; }
+
+    public required bool IsDirectProjectReference { get; set; }
+
+    public GatewayInProcessBinding? InProcessBinding { get; set; }
 
     public List<GatewayManifestEndpoint> Endpoints { get; } = [];
 
@@ -41,6 +49,14 @@ internal sealed class GatewayManifest
 
     public string MemberName { get; set; } = string.Empty;
 }
+
+internal sealed record GatewayInProcessBinding(
+    string RootNamespace,
+    string EntryPointType,
+    string EntryAssemblyName,
+    string ResourceName,
+    string TargetPath,
+    string ProjectPath);
 
 internal sealed record GatewayManifestEndpoint(string Name);
 

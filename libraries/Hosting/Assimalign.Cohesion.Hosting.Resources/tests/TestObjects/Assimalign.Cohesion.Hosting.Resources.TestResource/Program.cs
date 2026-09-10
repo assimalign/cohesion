@@ -15,6 +15,12 @@ namespace Assimalign.Cohesion.Hosting.Resources.TestResource;
 public sealed class Program
 {
     /// <summary>
+    /// Gets or sets a test-only host-lifetime override invoked synchronously after the fixture host
+    /// is built. A null value runs the normal host lifetime.
+    /// </summary>
+    public static Func<IHost, Task>? InvocationOverride { get; set; }
+
+    /// <summary>
     /// Runs the fixture until its ambient resource context requests shutdown.
     /// </summary>
     /// <param name="args">The resource arguments.</param>
@@ -31,12 +37,26 @@ public sealed class Program
             throw new InvalidOperationException("The fixture control plane was not registered.");
         }
 
+        Func<IHost, Task>? invocationOverride = InvocationOverride;
         var options = new FixtureHostOptions();
-        options.HostedServices.Add(new StopFailureService());
+        if (invocationOverride is null)
+        {
+            options.HostedServices.Add(new StopFailureService());
+        }
 
-        await using var host = new FixtureHost(options);
-        ResourceRuntime.HostBuilt(host, controlPlane);
-        await host.RunAsync().ConfigureAwait(false);
+        var host = new FixtureHost(options);
+        if (invocationOverride is not null)
+        {
+            ResourceRuntime.HostBuilt(host, controlPlane);
+            await invocationOverride(host).ConfigureAwait(false);
+            return;
+        }
+
+        await using (host.ConfigureAwait(false))
+        {
+            ResourceRuntime.HostBuilt(host, controlPlane);
+            await host.RunAsync().ConfigureAwait(false);
+        }
     }
 }
 

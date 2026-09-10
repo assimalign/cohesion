@@ -40,7 +40,9 @@ public sealed class ResourceControlPlaneHealthSerializationTests
             ["cost"] = 3.75M,
             ["marker"] = new DiagnosticMarker(),
         };
-        WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            [],
+            typeof(ResourceControlPlaneHealthSerializationTests).Assembly);
         builder.AddHealthCheck(
             "database",
             _ => ValueTask.FromResult(HealthContribution.Healthy("connected", data)));

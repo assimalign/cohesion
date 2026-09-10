@@ -60,6 +60,7 @@ public sealed class GatewaySdkIntegrationTests
         using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
             "GatewaySmokeDatabase",
+            "GatewaySmokeSupport",
             "GatewaySmokeWeb",
             "GatewaySmoke");
 
@@ -98,7 +99,11 @@ public sealed class GatewaySdkIntegrationTests
         source.ShouldNotContain("ApplicationModel.Gateway.InProcess");
 
         string aotCapture = Path.Combine(gatewayDirectory, "obj", "gateway-aot.txt");
-        File.ReadAllText(aotCapture).Trim().ShouldBe("true|false");
+        string[] aotState = File.ReadAllText(aotCapture).Trim().Split('|');
+        aotState.Length.ShouldBe(3);
+        aotState[0].ShouldBe("true");
+        aotState[1].ShouldBe("false");
+        aotState[2].ShouldNotBe("true");
 
         string manifestPath = GeneratedOutput(gatewayDirectory, "resource.json");
         using (JsonDocument manifestDocument = JsonDocument.Parse(File.ReadAllText(manifestPath)))
@@ -228,12 +233,245 @@ public sealed class GatewaySdkIntegrationTests
         result.Output.ShouldContain("CohesionGatewayInProcess=true");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - in-process opt-in fails clearly until design item 24 lands")]
-    public async Task Build_InProcessGatewayBeforeItem24_FailsWithGuardedDiagnostic()
+    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - packed InProcess provider binds the composable project closure")]
+    public async Task Build_InProcessGateway_BindsComposableProjectClosure()
+    {
+        // Arrange
+        using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
+            "GatewaySmokeDatabase",
+            "GatewaySmokeSupport",
+            "GatewaySmokeWeb",
+            "InProcessNamedEntry",
+            "InProcessNonComposable",
+            "InProcessGateway");
+
+        // Act
+        DotNetBuildResult result = await workspace.BuildAsync(
+            "InProcessGateway",
+            cancellationSource.Token);
+
+        // Assert
+        result.ExitCode.ShouldBe(0, result.Output);
+        result.Output.ShouldNotContain("COHGW001");
+
+        string source = File.ReadAllText(GeneratedOutput(
+            workspace.ProjectDirectory("InProcessGateway"),
+            "Gateway.g.cs"));
+        source.ShouldContain(
+            "using Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;");
+        source.ShouldContain(
+            "new global::Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.InProcessGateway(options)");
+        source.ShouldContain("AddGatewaySmokeWeb(");
+        source.ShouldContain("AddGatewaySmokeDatabase(");
+        source.ShouldContain("AddInprocessNamedEntry(");
+        source.ShouldContain("AddInprocessNoncomposable(");
+        source.ShouldContain(
+            "global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicMethods |");
+        source.ShouldContain(
+            "global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.NonPublicMethods,");
+        source.ShouldContain("\"Program\",");
+        source.ShouldContain("\"GatewaySmokeWeb\")]");
+        source.ShouldContain("\"GatewaySmokeDatabase\")]");
+        source.ShouldContain("\"InProcessNamedEntry.CustomEntry\",");
+        source.ShouldContain("\"InProcessNamedEntry\")]");
+        source.ShouldContain(EntryAnchor("GatewaySmokeWeb", "GatewaySmokeWeb"));
+        source.ShouldContain(EntryAnchor("GatewaySmokeDatabase", "GatewaySmokeDatabase"));
+        source.ShouldContain(EntryAnchor("GatewaySmokeWeb", "InProcessNamedEntry"));
+        source.ShouldContain("global::System.AppContext.BaseDirectory");
+        source.ShouldContain("\"cohesion\",");
+        source.ShouldContain("\"resources\",");
+        source.ShouldContain("\"gateway-smoke-web\"));");
+        source.ShouldContain("\"gateway-smoke-database\"));");
+        source.ShouldContain("\"inprocess-named-entry\"));");
+        source.ShouldNotContain(EntryAnchor("InProcessNonComposable", "InProcessNonComposable"));
+        source.Split(".InProcess(", StringSplitOptions.None).Length.ShouldBe(4);
+        source.Split("[global::System.Diagnostics.CodeAnalysis.DynamicDependency(", StringSplitOptions.None)
+            .Length.ShouldBe(4);
+        source.Split("[global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(", StringSplitOptions.None)
+            .Length.ShouldBe(4);
+        source.ShouldContain(
+            "Justification = \"The generated DynamicDependency roots the resource entry point used by the in-process binding.\"");
+
+        string outputDirectory = workspace.BuildOutputDirectory("InProcessGateway");
+        File.Exists(Path.Combine(
+            outputDirectory,
+            "cohesion",
+            "resources",
+            "gateway-smoke-web",
+            "content",
+            "web.txt")).ShouldBeTrue();
+        File.Exists(Path.Combine(
+            outputDirectory,
+            "cohesion",
+            "resources",
+            "inprocess-named-entry",
+            "content",
+            "named-entry.txt")).ShouldBeTrue();
+        File.Exists(Path.Combine(
+            outputDirectory,
+            "cohesion",
+            "resources",
+            "gateway-smoke-database",
+            "content",
+            "database.txt")).ShouldBeTrue();
+        Directory.Exists(Path.Combine(
+            outputDirectory,
+            "cohesion",
+            "resources",
+            "inprocess-noncomposable")).ShouldBeFalse();
+        File.Exists(Path.Combine(outputDirectory, "InProcessNonComposable.dll")).ShouldBeFalse();
+        File.Exists(Path.Combine(outputDirectory, "InProcessNonComposable.pdb")).ShouldBeFalse();
+        File.Exists(Path.Combine(outputDirectory, "NUlid.dll")).ShouldBeFalse();
+        File.ReadAllText(Path.Combine(outputDirectory, "InProcessGateway.deps.json"))
+            .ShouldNotContain("InProcessNonComposable");
+        File.Exists(Path.Combine(outputDirectory, "content", "database.txt")).ShouldBeFalse();
+        File.Exists(Path.Combine(outputDirectory, "content", "noncomposable.txt")).ShouldBeFalse();
+        FindNativeSqliteLibrary(outputDirectory).ShouldNotBeNull();
+
+        DotNetBuildResult publish = await workspace.PublishAsync(
+            "InProcessGateway",
+            cancellationSource.Token);
+        publish.ExitCode.ShouldBe(0, publish.Output);
+        string publishDirectory = workspace.PublishOutputDirectory("InProcessGateway");
+        File.Exists(Path.Combine(
+            publishDirectory,
+            "cohesion",
+            "resources",
+            "gateway-smoke-web",
+            "content",
+            "web.txt")).ShouldBeTrue();
+        File.Exists(Path.Combine(
+            publishDirectory,
+            "cohesion",
+            "resources",
+            "inprocess-named-entry",
+            "content",
+            "named-entry.txt")).ShouldBeTrue();
+        File.Exists(Path.Combine(
+            publishDirectory,
+            "cohesion",
+            "resources",
+            "gateway-smoke-database",
+            "content",
+            "database.txt")).ShouldBeTrue();
+        File.Exists(Path.Combine(publishDirectory, "InProcessNonComposable.dll")).ShouldBeFalse();
+        File.Exists(Path.Combine(publishDirectory, "NUlid.dll")).ShouldBeFalse();
+        File.ReadAllText(Path.Combine(publishDirectory, "InProcessGateway.deps.json"))
+            .ShouldNotContain("InProcessNonComposable");
+        FindNativeSqliteLibrary(publishDirectory).ShouldNotBeNull();
+
+        // A referenced entry assembly is a generator input even when its manifest is unchanged.
+        string entryPointPath = Path.Combine(
+            workspace.ProjectDirectory("InProcessNamedEntry"),
+            "Program.cs");
+        string entryPointSource = File.ReadAllText(entryPointPath);
+        File.WriteAllText(
+            entryPointPath,
+            entryPointSource.Replace("CustomEntry", "RenamedEntry", StringComparison.Ordinal));
+
+        DotNetBuildResult incrementalBuild = await workspace.BuildAsync(
+            "InProcessGateway",
+            cancellationSource.Token);
+        incrementalBuild.ExitCode.ShouldBe(0, incrementalBuild.Output);
+        string regeneratedSource = File.ReadAllText(GeneratedOutput(
+            workspace.ProjectDirectory("InProcessGateway"),
+            "Gateway.g.cs"));
+        regeneratedSource.ShouldContain("\"InProcessNamedEntry.RenamedEntry\",");
+        regeneratedSource.ShouldNotContain("\"InProcessNamedEntry.CustomEntry\",");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - RID publish binds the transitive composable project closure")]
+    public async Task Publish_RidInProcessGateway_BindsTransitiveComposableProjectClosure()
+    {
+        // Arrange
+        using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
+            "GatewaySmokeDatabase",
+            "GatewaySmokeSupport",
+            "GatewaySmokeWeb",
+            "InProcessTransitiveGateway");
+        const string runtimeIdentifier = "win-x64";
+
+        // Act
+        DotNetBuildResult result = await workspace.PublishSelfContainedAsync(
+            "InProcessTransitiveGateway",
+            runtimeIdentifier,
+            cancellationSource.Token);
+
+        // Assert
+        result.ExitCode.ShouldBe(0, result.Output);
+        string source = File.ReadAllText(GeneratedOutput(
+            workspace.ProjectDirectory("InProcessTransitiveGateway"),
+            "Gateway.g.cs",
+            runtimeIdentifier));
+        source.ShouldContain("AddGatewaySmokeWeb(");
+        source.ShouldContain("AddGatewaySmokeDatabase(");
+        source.ShouldContain(EntryAnchor("GatewaySmokeWeb", "GatewaySmokeWeb"));
+        source.ShouldContain(EntryAnchor("GatewaySmokeDatabase", "GatewaySmokeDatabase"));
+        source.Split(".InProcess(", StringSplitOptions.None).Length.ShouldBe(3);
+        source.Split("[global::System.Diagnostics.CodeAnalysis.DynamicDependency(", StringSplitOptions.None)
+            .Length.ShouldBe(3);
+
+        string publishDirectory = workspace.PublishOutputDirectory(
+            "InProcessTransitiveGateway",
+            runtimeIdentifier);
+        File.Exists(Path.Combine(publishDirectory, "GatewaySmokeWeb.dll")).ShouldBeTrue(
+            $"Expected the transitive Web entry assembly in '{publishDirectory}'.");
+        File.Exists(Path.Combine(publishDirectory, "GatewaySmokeDatabase.dll")).ShouldBeTrue(
+            $"Expected the transitive Database entry assembly in '{publishDirectory}'.");
+        File.Exists(Path.Combine(publishDirectory, "GatewaySmokeSupport.dll")).ShouldBeTrue(
+            $"Expected the Web resource's project-produced dependency in '{publishDirectory}'.");
+        FindNativeSqliteLibrary(publishDirectory, runtimeIdentifier).ShouldNotBeNull();
+
+        foreach ((string resource, string contentFile) in new[]
+        {
+            ("gateway-smoke-web", "web.txt"),
+            ("gateway-smoke-database", "database.txt"),
+        })
+        {
+            string contentRoot = Path.Combine(
+                publishDirectory,
+                "cohesion",
+                "resources",
+                resource);
+            File.Exists(Path.Combine(contentRoot, "content", contentFile)).ShouldBeTrue(
+                $"Expected isolated content for '{resource}' in '{contentRoot}'.");
+
+            string manifestPath = Path.Combine(contentRoot, ".cohesion-resource.json");
+            using JsonDocument manifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            string? appHost = manifest.RootElement
+                .GetProperty("artifact")
+                .GetProperty("apphost")
+                .GetString();
+            appHost.ShouldNotBeNull();
+            appHost.ShouldContain(runtimeIdentifier);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - InProcess project resources require explicit opt-in")]
+    public async Task Build_InProcessProviderWithoutOptIn_ReportsCOHGW002()
     {
         // Arrange
         using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(3));
-        using ConsumerWorkspace workspace = ConsumerWorkspace.Create("InProcessGateway");
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
+            "GatewaySmokeDatabase",
+            "GatewaySmokeSupport",
+            "GatewaySmokeWeb",
+            "InProcessNamedEntry",
+            "InProcessNonComposable",
+            "InProcessGateway");
+        string projectPath = workspace.ProjectFile("InProcessGateway");
+        string project = File.ReadAllText(projectPath);
+        File.WriteAllText(
+            projectPath,
+            project.Replace(
+                "    <CohesionGatewayInProcess>true</CohesionGatewayInProcess>\r\n",
+                string.Empty,
+                StringComparison.Ordinal).Replace(
+                "    <CohesionGatewayInProcess>true</CohesionGatewayInProcess>\n",
+                string.Empty,
+                StringComparison.Ordinal));
 
         // Act
         DotNetBuildResult result = await workspace.BuildAsync(
@@ -242,11 +480,50 @@ public sealed class GatewaySdkIntegrationTests
 
         // Assert
         result.ExitCode.ShouldNotBe(0, result.Output);
-        result.Output.ShouldContain(
-            "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess is not present in this checkout");
-        result.Output.ShouldContain("design item 24");
-        result.Output.ShouldContain("Remove InProcess or land item 24 before enabling it");
-        result.Output.ShouldNotContain("COHGW001");
+        result.Output.ShouldContain("COHGW002");
+        result.Output.ShouldContain("Set CohesionGatewayInProcess=true");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - InProcess opt-in without provider keeps resources build-only")]
+    public async Task Build_InProcessOptInWithoutProvider_DoesNotActivateRuntimeClosure()
+    {
+        // Arrange
+        using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
+            "GatewaySmokeDatabase",
+            "GatewaySmokeSupport",
+            "GatewaySmokeWeb",
+            "InProcessNamedEntry",
+            "InProcessNonComposable",
+            "InProcessGateway");
+        string projectPath = workspace.ProjectFile("InProcessGateway");
+        string project = File.ReadAllText(projectPath);
+        File.WriteAllText(
+            projectPath,
+            project.Replace(
+                "<CohesionGateways>InProcess</CohesionGateways>",
+                "<CohesionGateways>Local</CohesionGateways>",
+                StringComparison.Ordinal));
+
+        // Act
+        DotNetBuildResult result = await workspace.BuildAsync(
+            "InProcessGateway",
+            cancellationSource.Token);
+
+        // Assert
+        result.ExitCode.ShouldBe(0, result.Output);
+        string source = File.ReadAllText(GeneratedOutput(
+            workspace.ProjectDirectory("InProcessGateway"),
+            "Gateway.g.cs"));
+        source.ShouldNotContain("Gateway.InProcess");
+        source.ShouldNotContain("CohesionResourceEntry");
+
+        string outputDirectory = workspace.BuildOutputDirectory("InProcessGateway");
+        File.Exists(Path.Combine(outputDirectory, "GatewaySmokeWeb.dll")).ShouldBeFalse();
+        File.Exists(Path.Combine(outputDirectory, "GatewaySmokeDatabase.dll")).ShouldBeFalse();
+        File.Exists(Path.Combine(outputDirectory, "InProcessNamedEntry.dll")).ShouldBeFalse();
+        File.Exists(Path.Combine(outputDirectory, "NUlid.dll")).ShouldBeFalse();
+        FindNativeSqliteLibrary(outputDirectory).ShouldBeNull();
     }
 
     private static string GeneratedOutput(string projectDirectory, string fileName)
@@ -262,8 +539,47 @@ public sealed class GatewaySdkIntegrationTests
         return path;
     }
 
+    private static string GeneratedOutput(
+        string projectDirectory,
+        string fileName,
+        string runtimeIdentifier)
+    {
+        string path = Path.Combine(
+            projectDirectory,
+            "obj",
+            "Debug",
+            ConsumerWorkspace.TargetFramework,
+            runtimeIdentifier,
+            "cohesion",
+            fileName);
+        File.Exists(path).ShouldBeTrue($"Expected generated output '{path}'.");
+        return path;
+    }
+
+    private static string EntryAnchor(string rootNamespace, string assemblyName) =>
+        $"typeof(global::{rootNamespace}.CohesionResourceEntry{Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(assemblyName))}).Assembly";
+
+    private static string? FindNativeSqliteLibrary(
+        string directory,
+        string? runtimeIdentifier = null)
+    {
+        string fileName = runtimeIdentifier?.StartsWith("win-", StringComparison.OrdinalIgnoreCase) is true
+            ? "e_sqlite3.dll"
+            : runtimeIdentifier?.StartsWith("osx-", StringComparison.OrdinalIgnoreCase) is true
+                ? "libe_sqlite3.dylib"
+                : runtimeIdentifier is not null
+                    ? "libe_sqlite3.so"
+                    : OperatingSystem.IsWindows()
+                        ? "e_sqlite3.dll"
+                        : OperatingSystem.IsMacOS()
+                            ? "libe_sqlite3.dylib"
+                            : "libe_sqlite3.so";
+        return Directory.EnumerateFiles(directory, fileName, SearchOption.AllDirectories).FirstOrDefault();
+    }
+
     private static bool ContainsOrdinalIgnoreCase(string[] values, string expected)
     {
         return values.Any(value => string.Equals(value, expected, StringComparison.OrdinalIgnoreCase));
     }
+
 }

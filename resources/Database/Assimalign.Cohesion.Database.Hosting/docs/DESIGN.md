@@ -185,9 +185,11 @@ model's server verb, then builds and runs the host.
 
 ## Enabled-resource control plane
 
-`DatabaseApplication.CreateBuilder(args)` captures the calling resource
-assembly and asks the `Hosting.Resources` `ResourceRuntime` for its generated registration. When
-one is present, `Build()` adds builder health checks and registered
+`DatabaseApplication.CreateBuilder(args)` uses the process entry assembly for standalone
+execution and asks the `Hosting.Resources` `ResourceRuntime` for its generated registration.
+During an in-process resource invocation, the ambient invocation's logical member assembly
+takes precedence; no caller-stack reflection is required. When one is present, `Build()` adds
+builder health checks and registered
 `Hosting.Health` `IHealthContributor`s to the isolated plane, including
 `DatabaseApplicationContext`. The context de-duplicates registered and
 server-fronted engines by identity: `Running` is healthy, `Faulted` is degraded,

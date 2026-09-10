@@ -37,7 +37,9 @@ public sealed class ResourceControlPlaneHostingTests
                 ["db"] = databaseEndpoint,
             }));
 
-        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder([]);
+        DatabaseApplicationBuilder builder = new(
+            new DatabaseApplicationOptions(),
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         builder.AddHealthCheck("builder", _ => ValueTask.FromResult(HealthContribution.Healthy()));
         builder.Options.Services.Add(new HealthyHostService("services"));
 
@@ -129,7 +131,9 @@ public sealed class ResourceControlPlaneHostingTests
             endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint }));
         var bindStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var accepting = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder([]);
+        DatabaseApplicationBuilder builder = new(
+            new DatabaseApplicationOptions(),
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         builder.AddServer(new ControlledStartServer(bindStarted, accepting));
         await using DatabaseApplication application = builder.Build();
         using var client = new HttpClient { BaseAddress = endpoint };
@@ -161,7 +165,9 @@ public sealed class ResourceControlPlaneHostingTests
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint },
             bootstrapCredential: Encoding.UTF8.GetBytes("database-bootstrap")));
-        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder([]);
+        DatabaseApplicationBuilder builder = new(
+            new DatabaseApplicationOptions(),
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         await using DatabaseApplication application = builder.Build();
         using var client = new HttpClient { BaseAddress = endpoint };
 
@@ -206,7 +212,9 @@ public sealed class ResourceControlPlaneHostingTests
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             gatewayName: "local",
             endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint }));
-        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder([]);
+        DatabaseApplicationBuilder builder = new(
+            new DatabaseApplicationOptions(),
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         await using DatabaseApplication application = builder.Build();
         using var client = new HttpClient { BaseAddress = endpoint };
 
@@ -288,7 +296,9 @@ public sealed class ResourceControlPlaneHostingTests
         Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint }));
-        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder([]);
+        DatabaseApplicationBuilder builder = new(
+            new DatabaseApplicationOptions(),
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         await using DatabaseApplication application = builder.Build();
         using var client = new HttpClient { BaseAddress = endpoint };
 

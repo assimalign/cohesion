@@ -40,29 +40,48 @@ internal sealed class ResourceHostRunner : IHostRunner
                     Options.StopEventName)
                 : null;
 
-            await run.RunAsync(runState, cancellationToken).ConfigureAwait(false);
+            Task runTask = run.RunAsync(runState, cancellationToken);
+            Options.RunInvoked?.Invoke();
+            await runTask.ConfigureAwait(false);
 
             runState.ThrowIfProtocolLineFailed();
             exitCode = runState.IsDrainAborted
                 ? ResourceHost.GetDrainAbortExitCode(runState.StopSignal)
                 : ResourceHost.SuccessExitCode;
         }
-        catch (Exception exception) when (isProcessRun)
+        catch (Exception exception)
         {
             // ResourceHost is the executable boundary: every host failure is converted
             // to the frozen sysexits/v1 contract instead of escaping as a platform-
             // dependent unhandled-exception exit code.
-            exitCode = ResourceHost.ClassifyExitCode(
-                exception,
-                Options,
-                runState.HasReachedReady,
-                runState.IsDrainAborted,
-                runState.StopSignal);
+            exitCode = exception is ResourceEntryExitException entryExit
+                ? entryExit.ExitCode
+                : ResourceHost.ClassifyExitCode(
+                    exception,
+                    Options,
+                    runState.HasReachedReady,
+                    runState.IsDrainAborted,
+                    runState.StopSignal);
+
+            if (!isProcessRun)
+            {
+                if (exception is ResourceEntryExitException)
+                {
+                    throw;
+                }
+                throw new ResourceEntryExitException(exitCode, exception);
+            }
         }
 
         if (isProcessRun)
         {
             Options.ExitCodeHandler(exitCode);
+            return;
+        }
+
+        if (exitCode != ResourceHost.SuccessExitCode)
+        {
+            throw new ResourceEntryExitException(exitCode);
         }
     }
 }

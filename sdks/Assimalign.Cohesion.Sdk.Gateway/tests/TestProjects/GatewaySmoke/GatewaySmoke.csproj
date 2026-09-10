@@ -33,7 +33,7 @@
       Overwrite="true" />
     <WriteLinesToFile
       File="$(BaseIntermediateOutputPath)gateway-aot.txt"
-      Lines="$(CohesionGatewayRequiresJit)|$(PublishAot)"
+      Lines="$(CohesionGatewayRequiresJit)|$(PublishAot)|$(PublishTrimmed)"
       Overwrite="true" />
   </Target>
 

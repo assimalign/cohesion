@@ -28,10 +28,11 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.Core",
         "Assimalign.Cohesion.ApplicationModel",
         "Assimalign.Cohesion.ApplicationModel.Gateway",
+        "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess",
+        "Assimalign.Cohesion.Connections",
         "Assimalign.Cohesion.IdentityModel",
         "Assimalign.Cohesion.IdentityModel.Token",
         "Assimalign.Cohesion.IdentityModel.Token.JsonWebToken",
-        "Assimalign.Cohesion.Connections",
         "Assimalign.Cohesion.Hosting",
         "Assimalign.Cohesion.Hosting.Health",
         "Assimalign.Cohesion.Hosting.Resources",
@@ -77,7 +78,7 @@ internal sealed class ConsumerWorkspace : IDisposable
         string workspaceId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
         string rootDirectory = Path.Combine(
             Path.GetTempPath(),
-            "cohesion-gateway-sdk-integration",
+            "cohesion-gw-sdk",
             workspaceId);
         Directory.CreateDirectory(rootDirectory);
 
@@ -90,6 +91,7 @@ internal sealed class ConsumerWorkspace : IDisposable
             }
 
             workspace.WriteNuGetConfig(feedDirectory);
+            workspace.WriteCentralPackageReferences();
             workspace.WriteGlobalJson();
             return workspace;
         }
@@ -115,6 +117,22 @@ internal sealed class ConsumerWorkspace : IDisposable
         return Path.Combine(ProjectDirectory(fixtureName), "bin", "Debug", TargetFramework);
     }
 
+    public string PublishOutputDirectory(string fixtureName)
+    {
+        return Path.Combine(BuildOutputDirectory(fixtureName), "publish");
+    }
+
+    public string PublishOutputDirectory(string fixtureName, string runtimeIdentifier)
+    {
+        return Path.Combine(
+            ProjectDirectory(fixtureName),
+            "bin",
+            "Debug",
+            TargetFramework,
+            runtimeIdentifier,
+            "publish");
+    }
+
     public Task<DotNetBuildResult> BuildAsync(
         string fixtureName,
         CancellationToken cancellationToken = default)
@@ -127,6 +145,48 @@ internal sealed class ConsumerWorkspace : IDisposable
             "Debug",
             "--nologo",
             "--verbosity:minimal"
+        };
+        return RunDotNetAsync(RootDirectory, arguments, cancellationToken);
+    }
+
+    public Task<DotNetBuildResult> PublishAsync(
+        string fixtureName,
+        CancellationToken cancellationToken = default)
+    {
+        var arguments = new List<string>
+        {
+            "publish",
+            ProjectFile(fixtureName),
+            "--configuration",
+            "Debug",
+            "--no-restore",
+            "--nologo",
+            "--verbosity:minimal",
+            "-p:CohesionGatewayAot=false"
+        };
+        return RunDotNetAsync(RootDirectory, arguments, cancellationToken);
+    }
+
+    public Task<DotNetBuildResult> PublishSelfContainedAsync(
+        string fixtureName,
+        string runtimeIdentifier,
+        CancellationToken cancellationToken = default)
+    {
+        var arguments = new List<string>
+        {
+            "publish",
+            ProjectFile(fixtureName),
+            "--configuration",
+            "Debug",
+            "--runtime",
+            runtimeIdentifier,
+            "--self-contained",
+            "true",
+            "-maxcpucount:1",
+            "-nodeReuse:false",
+            "--nologo",
+            "--verbosity:minimal",
+            "-p:CohesionGatewayAot=false"
         };
         return RunDotNetAsync(RootDirectory, arguments, cancellationToken);
     }
@@ -193,6 +253,7 @@ internal sealed class ConsumerWorkspace : IDisposable
         startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         startInfo.Environment["DOTNET_NOLOGO"] = "1";
         startInfo.Environment["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1";
+        startInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
         startInfo.Environment["NUGET_PACKAGES"] = Path.Combine(workingDirectory, ".nuget", "packages");
 
         using Process process = Process.Start(startInfo)
@@ -283,6 +344,16 @@ internal sealed class ConsumerWorkspace : IDisposable
         foreach (string sourceFile in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
         {
             string relativePath = Path.GetRelativePath(sourceDirectory, sourceFile);
+            if (relativePath
+                .Split(
+                    [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                    StringSplitOptions.RemoveEmptyEntries)
+                .Any(segment => string.Equals(segment, "bin", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(segment, "obj", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
             string destinationFile = Path.Combine(destinationDirectory, relativePath);
             Directory.CreateDirectory(Path.GetDirectoryName(destinationFile)!);
             File.Copy(sourceFile, destinationFile);
@@ -316,6 +387,13 @@ internal sealed class ConsumerWorkspace : IDisposable
         File.WriteAllText(
             Path.Combine(RootDirectory, "global.json"),
             document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private void WriteCentralPackageReferences()
+    {
+        File.Copy(
+            Path.Combine(RepositoryRoot, "build", "Targets", "Build.References.Packages.targets"),
+            Path.Combine(RootDirectory, "Directory.Build.targets"));
     }
 
     private void WriteNuGetConfig(string feedDirectory)

@@ -31,6 +31,7 @@ public class ResourceContextTests
             [ResourceEnvironment.Mount("settings")] = Path.GetFullPath("settings.json"),
             [ResourceEnvironment.Configuration("Orders", "PageSize")] = "50",
             [ResourceEnvironment.Dependency("database", "db", "URL")] = "tcp://database.internal:5432",
+            [ResourceEnvironment.ApplicationTrustKey] = "{\"kty\":\"EC\"}",
         };
 
         // Act
@@ -47,6 +48,7 @@ public class ResourceContextTests
         context.GetSetting("Orders:PageSize", fallback: null).ShouldBe("50");
         context.GetReference("database", "db").ShouldBe(
             new Uri("tcp://database.internal:5432"));
+        Encoding.UTF8.GetString(context.ApplicationTrustKey.Span).ShouldBe("{\"kty\":\"EC\"}");
         context.Endpoints.Count.ShouldBe(1);
         context.Mounts.Count.ShouldBe(1);
         context.Settings.Count.ShouldBe(1);

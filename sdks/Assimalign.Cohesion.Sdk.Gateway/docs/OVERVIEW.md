@@ -67,18 +67,27 @@ those identities at the same version as well.
 `GatewayType`, `OptionsType`, and `RequiresJit` metadata. Generated code dispatches only
 across those contributed items; the Cohesion SDK does not contain platform-type names.
 
-`Local` is contributed by `Assimalign.Cohesion.ApplicationModel.Gateway`. External
-platform packages are restored only when their names appear in `CohesionGateways`, at
+`Local` is contributed by `Assimalign.Cohesion.ApplicationModel.Gateway`; `InProcess` is
+contributed by `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess`. External platform
+packages are restored only when their names appear in `CohesionGateways`, at
 `CohesionPlatformsVersion`. A provider with `RequiresJit=true` makes
 `CohesionGatewayAot=auto` select `PublishAot=false` for the whole gateway executable.
+
+Selecting `InProcess` does not by itself authorize resource assembly loading. A gateway with
+project resources must also set `CohesionGatewayInProcess=true`. The two-factor gate promotes
+only enabled, composable, same-application project resources into compiler/runtime references
+and generated in-process bindings. Each binding uses
+`AppContext.BaseDirectory/cohesion/resources/<resource-name>`; build and publish copy that
+resource's declared content into the isolated root and disable ordinary transitive content
+flattening. Selected managed, native, satellite, and RID-specific runtime files are also carried
+into build and publish output. Their package identities remain outside the gateway lock file until
+the restore-visible resource dependency descriptor described in the design is available.
 
 ## Current implementation gates
 
 The SDK must not be presented as a complete production gateway until these dependency
 contracts are available and covered by package-boundary CI:
 
-- `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` is not present; selecting
-  InProcess is rejected.
 - `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` is not present; the
   generated Composite manifest records its control-plane contract, but no gateway
   control-plane host can serve it yet.
@@ -93,9 +102,9 @@ contracts are available and covered by package-boundary CI:
   SecretStore client, and ConfigurationStore client dependencies available up front;
   it must not expand that fallback to every future area package.
 - The NuGet-only boundary requires the Gateway SDK to suppress the base SDK's implicit
-  `Assimalign.Cohesion.App` reference before the base props import. The guarded
-  in-process bridge currently names the shipped Web and Database frameworks; selective
-  per-manifest framework injection belongs with the missing in-process package contract.
+  `Assimalign.Cohesion.App` reference before the base props import. The in-process bridge
+  currently names the shipped Web and Database frameworks; selective per-manifest framework
+  injection remains future work as more typed areas ship.
 
 See [Design](./DESIGN.md) for the build ordering, dependency boundary, and recommended
 first-restore contract.

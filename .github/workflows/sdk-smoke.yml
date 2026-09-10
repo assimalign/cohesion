@@ -14,8 +14,10 @@ on:
       - "libraries/Security/Assimalign.Cohesion.Security.DataProtection/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/**"
       - "resources/Database/Assimalign.Cohesion.Database.ApplicationModel/**"
+      - "resources/Database/Assimalign.Cohesion.Database.Hosting/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/**"
       - "resources/Web/Assimalign.Cohesion.Web.ApplicationModel/**"
+      - "resources/Web/Assimalign.Cohesion.Web.Hosting/**"
       - "sdks/**"
       - "Directory.Build.props"
       - "Directory.Build.targets"
@@ -33,8 +35,10 @@ on:
       - "libraries/Security/Assimalign.Cohesion.Security.DataProtection/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/**"
       - "resources/Database/Assimalign.Cohesion.Database.ApplicationModel/**"
+      - "resources/Database/Assimalign.Cohesion.Database.Hosting/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/**"
       - "resources/Web/Assimalign.Cohesion.Web.ApplicationModel/**"
+      - "resources/Web/Assimalign.Cohesion.Web.Hosting/**"
       - "sdks/**"
       - "Directory.Build.props"
       - "Directory.Build.targets"
@@ -124,6 +128,7 @@ jobs:
             "Assimalign.Cohesion.IdentityModel.Token.JsonWebToken"
             "Assimalign.Cohesion.Security.DataProtection"
             "Assimalign.Cohesion.ApplicationModel.Gateway"
+            "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
             "Assimalign.Cohesion.Connections"
             "Assimalign.Cohesion.Hosting"
             "Assimalign.Cohesion.Hosting.Health"
@@ -166,6 +171,7 @@ jobs:
             "Assimalign.Cohesion.Sdk.Gateway"
             "Assimalign.Cohesion.ApplicationModel"
             "Assimalign.Cohesion.ApplicationModel.Gateway"
+            "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
             "Assimalign.Cohesion.IdentityModel"
             "Assimalign.Cohesion.IdentityModel.Token"
             "Assimalign.Cohesion.IdentityModel.Token.JsonWebToken"
@@ -308,4 +314,72 @@ jobs:
           $web = @($model.resources) | Where-Object { $_.name -eq "gateway-smoke-web" }
           if ($null -eq $web -or @($web.dependencies) -notcontains "gateway-smoke-database") {
             throw "Published Gateway sample omitted the inferred Web-to-Database dependency."
+          }
+
+          foreach ($resource in @("gateway-smoke-web", "gateway-smoke-database")) {
+            $contentManifest = Join-Path $publishDirectory "cohesion/resources/$resource/.cohesion-resource.json"
+            if (-not (Test-Path -LiteralPath $contentManifest -PathType Leaf)) {
+              throw "Published Gateway sample omitted the isolated '$resource' content root."
+            }
+          }
+
+          & $appHost --gateway inprocess --smoke
+          if ($LASTEXITCODE -ne 0) {
+            throw "Published Gateway in-process smoke exited with code $LASTEXITCODE."
+          }
+
+      - name: Publish NativeAOT in-process Gateway sample
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: |
+          $workspace = Join-Path $env:RUNNER_TEMP "cohesion-gateway-smoke"
+          $publishDirectory = Join-Path $env:RUNNER_TEMP "cohesion-gateway-publish-aot-linux-x64"
+          dotnet publish `
+              (Join-Path $workspace "Gateway/Gateway.csproj") `
+              --configuration Release `
+              --runtime linux-x64 `
+              --self-contained true `
+              --output $publishDirectory `
+              --nologo `
+              -p:CohesionGatewayAot=true
+          if ($LASTEXITCODE -ne 0) {
+            throw "NativeAOT Gateway sample publish failed with exit code $LASTEXITCODE."
+          }
+
+          $appHost = Join-Path $publishDirectory "Gateway"
+          if (-not (Test-Path -LiteralPath $appHost -PathType Leaf)) {
+            throw "NativeAOT Gateway apphost was not found at '$appHost'."
+          }
+
+          & $appHost --gateway inprocess --smoke
+          if ($LASTEXITCODE -ne 0) {
+            throw "NativeAOT Gateway in-process smoke exited with code $LASTEXITCODE."
+          }
+
+      - name: Publish NativeAOT in-process Gateway container
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: |
+          $workspace = Join-Path $env:RUNNER_TEMP "cohesion-gateway-smoke"
+          $archive = Join-Path $env:RUNNER_TEMP "gateway-smoke-linux-x64.oci.tar.gz"
+          dotnet publish `
+              (Join-Path $workspace "Gateway/Gateway.csproj") `
+              --configuration Release `
+              --runtime linux-x64 `
+              --self-contained true `
+              --nologo `
+              -t:PublishContainer `
+              -p:EnableSdkContainerSupport=true `
+              -p:CohesionGatewayAot=true `
+              -p:ContainerImageFormat=OCI `
+              "-p:ContainerArchiveOutputPath=$archive" `
+              -p:ContainerRepository=gateway-smoke `
+              -p:ContainerImageTag=ci
+          if ($LASTEXITCODE -ne 0) {
+            throw "NativeAOT Gateway container publish failed with exit code $LASTEXITCODE."
+          }
+
+          $containerArchive = Get-Item -LiteralPath $archive -ErrorAction Stop
+          if ($containerArchive.Length -eq 0) {
+            throw "NativeAOT Gateway container archive '$archive' is empty."
           }

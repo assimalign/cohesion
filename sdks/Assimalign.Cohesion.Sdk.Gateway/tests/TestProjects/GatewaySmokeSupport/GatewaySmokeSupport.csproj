@@ -1,0 +1,9 @@
+<Project Sdk="Assimalign.Cohesion.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <CohesionApplicationModel>disabled</CohesionApplicationModel>
+  </PropertyGroup>
+
+</Project>

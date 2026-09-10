@@ -12,6 +12,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<InternalsVisibleTo Include="Assimalign.Cohesion.ApplicationModel.Gateway.Tests" />
+		<InternalsVisibleTo Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" />
 	</ItemGroup>
 	<ItemGroup>
 		<None

@@ -11,4 +11,9 @@
     <CohesionResourceName>gateway-smoke-database</CohesionResourceName>
   </PropertyGroup>
 
+  <ItemGroup>
+    <CohesionPackageReference Include="SQLitePCLRaw.lib.e_sqlite3" />
+    <None Update="content\database.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

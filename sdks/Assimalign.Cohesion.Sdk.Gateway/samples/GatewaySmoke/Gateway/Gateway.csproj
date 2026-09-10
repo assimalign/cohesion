@@ -8,10 +8,10 @@
     <AppSettingsNamespace>GatewaySmoke.Gateway</AppSettingsNamespace>
     <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
     <CohesionResourceName>gateway-smoke-gateway</CohesionResourceName>
-    <CohesionGateways>Local</CohesionGateways>
+    <CohesionGateways>Local;InProcess</CohesionGateways>
+    <CohesionGatewayInProcess>true</CohesionGatewayInProcess>
   </PropertyGroup>
   <ItemGroup>
     <CohesionResourceReference Include="..\Web\Web.csproj" />
-    <CohesionResourceReference Include="..\Database\Database.csproj" />
   </ItemGroup>
 </Project>

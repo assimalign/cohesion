@@ -27,4 +27,6 @@ begins with `stopping`; a late `ready` is never emitted after the stop transitio
 
 It converts the executable boundary to the frozen `cohesion/sysexits/v1` mapping: `0` success,
 `64` configuration, `69` dependency, `70` other pre-ready failure, `75` other post-ready failure,
-`130` interrupted drain, and `143` other requested-stop drain cancellation.
+`130` interrupted drain, and `143` other requested-stop drain cancellation. A process writes the
+result to `Environment.ExitCode`; an in-process invocation faults with
+`ResourceEntryExitException` for a nonzero result so its supervisor keeps the same policy.

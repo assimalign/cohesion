@@ -189,13 +189,38 @@ public class ResourceHostTests
             runMode: ResourceHostRunMode.InProcess));
 
         // Act
-        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+        ResourceEntryExitException exception = await Should.ThrowAsync<ResourceEntryExitException>(
             () => host.RunAsync());
 
         // Assert
-        exception.Message.ShouldBe(
+        exception.ExitCode.ShouldBe(70);
+        exception.InnerException.ShouldBeOfType<InvalidOperationException>().Message.ShouldBe(
             "The host content root must match the ambient resource content root.");
         host.Context.State.ShouldBe(HostState.Idle);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Exit codes: In-process typed startup failure preserves configuration classification")]
+    public async Task RunAsync_WithInProcessTypedStartupFailure_ThrowsClassifiedExitException()
+    {
+        // Arrange
+        var hostOptions = new TestHostOptions();
+        hostOptions.HostedServices.Add(new DelegateHostService(
+            static _ => throw new TestResourceConfigurationException()));
+        var host = new TestHost(hostOptions);
+        host.Context.Runner = new ResourceHostRunner(new ResourceHostOptions(
+            exceptionClassifier: ResourceHostOptions.CreateExceptionClassifier<
+                TestResourceConfigurationException,
+                TestResourceDependencyException>(),
+            runMode: ResourceHostRunMode.InProcess));
+
+        // Act
+        ResourceEntryExitException exception = await Should.ThrowAsync<ResourceEntryExitException>(
+            () => host.RunAsync());
+
+        // Assert
+        exception.ExitCode.ShouldBe(64);
+        exception.InnerException.ShouldBeOfType<TestResourceConfigurationException>();
+        host.Context.State.ShouldBe(HostState.Failed);
     }
 
     [Fact(DisplayName = DisplayPrefix + "Exit codes: Converts a typed startup failure at the run boundary")]

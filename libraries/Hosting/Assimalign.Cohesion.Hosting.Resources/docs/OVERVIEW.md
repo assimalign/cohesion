@@ -24,7 +24,8 @@ they need.
 ## Primary responsibilities
 
 - `ResourceContext` snapshots identity, environment, content root, endpoints, mounts, settings,
-  references, and the bootstrap credential for one invocation.
+  references, the application trust key, bootstrap credential, and additional frozen contract
+  values for one invocation.
 - `ResourceRuntime` supplies AsyncLocal scope, assembly-keyed generated registrations, entry
   invocation, and host surrender.
 - `IResourceControlPlane` owns host-local contributors, endpoint observations, accepted command
@@ -36,7 +37,7 @@ they need.
 
 ## Key types
 
-- `ResourceContext`, `ResourceMount`, `ResourceRuntime`
+- `ResourceContext`, `ResourceMount`, `ResourceRuntime`, `ResourceEntryExitException`
 - `IResourceEntryInvocation`
 - `IResourceControlPlane`, `ResourceControlPlane`
 - `ResourceCommand`
@@ -56,6 +57,12 @@ installs the resource runner, and completes `IResourceEntryInvocation.HostReady`
 `Completion` tasks. This is the one sanctioned reflection operation; there is no assembly scan or
 runtime entry-type lookup.
 
+A caller with an independently validated, compiler-rooted executable assembly can query
+`ResourceRuntime.IsEntryRegistered` and use `ResourceRuntime.InvokeEntryPoint` as a direct fallback
+when generated entry registration is unavailable. The fallback does not weaken `InvokeEntry`'s
+registration guard and retains the same explicit-scope, single-invocation, dedicated-thread, and
+completion semantics.
+
 ## Process protocol
 
 For an ordinary resource process whose started hook completes before a stop is accepted, stdout
@@ -72,7 +79,8 @@ A failed `ready` write requests shutdown so the host still drains. A failure wri
 line is retained and classified at the executable boundary; `stopping` and `stopped` failures do not
 request a shutdown already in progress. In-process entry invocation suppresses stdout protocol,
 process-signal subscriptions, named-event waits, and `Environment.ExitCode`; failures instead fault
-`IResourceEntryInvocation.Completion`.
+`IResourceEntryInvocation.Completion` with `ResourceEntryExitException` carrying the classified
+exit code.
 
 ## Exit mapping
 

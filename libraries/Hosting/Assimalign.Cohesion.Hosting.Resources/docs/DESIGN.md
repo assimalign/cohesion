@@ -28,6 +28,11 @@ Without an explicit scope it lazily snapshots the frozen `COHESION_*` process en
 `CreateScope` installs an in-process context and restores the previous frame on ordered disposal,
 so parallel invocations do not overwrite process-global state.
 
+The direct constructor carries application trust and bootstrap credential bytes plus additional
+frozen runtime-contract values. This is how an in-process gateway supplies `COHESION_*` values
+without mutating the shared process environment; `FromEnvironment` creates the equivalent snapshot
+for an out-of-process resource.
+
 Endpoints and references are `System.Uri` values. A declared development port is used only for
 standalone execution when no gateway is present. The content root must be absolute and must match
 the host environment before the resource run begins.
@@ -52,6 +57,15 @@ endpoints, attaches the host, and installs a `ResourceHostRunner` for that host 
 registered `Assembly.EntryPoint` is invoked on a dedicated thread, and callers receive independent
 host-ready and executable-completion tasks. The builder, not the entry-point name, surrenders the
 actual built host; generated code therefore need not assume a type named `Program`.
+Both public invocation methods are annotated with `RequiresUnreferencedCode`: generated gateways
+root executable entry points, while a direct fallback caller must establish the same rooting.
+
+`IsEntryRegistered` exposes whether the generated module initializer registered that assembly.
+When a gateway already has a compiler-rooted assembly reference and has independently established
+that the executable is an eligible resource, `InvokeEntryPoint` provides the corresponding direct
+fallback without changing the registration-backed `InvokeEntry` contract. The fallback still
+requires an explicit `CreateScope`, permits one invocation per scope frame, clones arguments, and
+uses the same dedicated-thread, host-ready, completion, and in-process runner behavior.
 
 ## Control plane
 
@@ -71,7 +85,8 @@ commands over HTTP or another protocol.
 - **Process:** emit supervisor protocol lines, subscribe to process signals and the Windows named
   stop event, and set `Environment.ExitCode` from the frozen mapping.
 - **In process:** selected only for a host surrendered to an active `InvokeEntry`; suppress process
-  side effects and let failures fault `IResourceEntryInvocation.Completion`.
+  side effects and let failures fault `IResourceEntryInvocation.Completion` with a public
+  `ResourceEntryExitException` carrying the same frozen exit code.
 
 Merely creating a resource scope does not select in-process mode. A directly built host continues
 to use process behavior.
@@ -112,7 +127,9 @@ timeout beyond their declared grace. Plain Hosting retains its own default and i
 
 ## Frozen exit mapping
 
-The process runner converts every boundary result to `cohesion/sysexits/v1`:
+The runner converts every boundary result to `cohesion/sysexits/v1`. A process writes the code to
+`Environment.ExitCode`; an in-process invocation carries a nonzero code in
+`ResourceEntryExitException` so its supervisor applies the identical disposition:
 
 | Code | Classification | Supervisor disposition |
 | ---: | --- | --- |

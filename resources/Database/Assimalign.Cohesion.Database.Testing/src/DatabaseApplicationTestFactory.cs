@@ -287,6 +287,10 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
         }
     }
 
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "FromProgram<TProgram> roots all public and non-public methods on the validated entry-point type.")]
     private async Task StartCoreAsync(CancellationToken cancellationToken)
     {
         IResourceEntryInvocation invocation;

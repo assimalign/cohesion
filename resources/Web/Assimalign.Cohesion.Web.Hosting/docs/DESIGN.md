@@ -340,8 +340,10 @@ currently captures only the design decisions that are settled.
 
 ## Enabled-resource control plane
 
-`WebApplication.CreateBuilder(args)` captures the calling resource assembly and honors its
-generated `Hosting.Resources` `ResourceRuntime` registration. When enabled, the builder
+`WebApplication.CreateBuilder(args)` uses the process entry assembly for standalone execution
+and honors its generated `Hosting.Resources` `ResourceRuntime` registration. During an
+in-process resource invocation, the ambient invocation's logical member assembly takes
+precedence; no caller-stack reflection is required. When enabled, the builder
 binds the ambient `http` endpoint, aggregates `AddHealthCheck` registrations and
 DI-registered `Hosting.Health` `IHealthContributor`s, observes ambient endpoints, and attaches
 the built host for graceful stop. A fixed terminal layer wraps the final resolved

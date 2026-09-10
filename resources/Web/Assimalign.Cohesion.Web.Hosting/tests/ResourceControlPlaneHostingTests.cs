@@ -33,7 +33,9 @@ public sealed class ResourceControlPlaneHostingTests
             contentRootPath: contentRootPath,
             endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
 
-        WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            [],
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         builder.Environment.ContentRootPath.ShouldBe(FileSystemPath.Parse(contentRootPath));
         builder.AddHealthCheck("self", _ => ValueTask.FromResult(HealthContribution.Healthy()));
         await using WebApplication application = builder.Build();
@@ -85,7 +87,9 @@ public sealed class ResourceControlPlaneHostingTests
             endpoints: new Dictionary<string, Uri> { ["http"] = endpoint },
             bootstrapCredential: "pipeline-token"u8.ToArray()));
         RecordingPipeline pipeline = new();
-        WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            [],
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         ((IWebApplicationBuilder)builder).AddPipeline(pipeline);
         await using WebApplication application = builder.Build();
 
@@ -135,7 +139,9 @@ public sealed class ResourceControlPlaneHostingTests
         Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
-        WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            [],
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         builder.AddHealthCheck(
             "database",
             _ => ValueTask.FromResult(HealthContribution.Unhealthy("not connected")));
@@ -169,7 +175,9 @@ public sealed class ResourceControlPlaneHostingTests
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
         BlockingApplicationServer additionalServer = new();
-        WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            [],
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         ((IWebApplicationBuilder)builder).AddServer(additionalServer);
         await using WebApplication application = builder.Build();
         Task start = ((IHost)application).StartAsync(cancellation.Token);
@@ -213,7 +221,9 @@ public sealed class ResourceControlPlaneHostingTests
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             endpoints: new Dictionary<string, Uri> { ["http"] = endpoint },
             bootstrapCredential: "secret-token"u8.ToArray()));
-        WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            [],
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         await using WebApplication application = builder.Build();
 
         await ((IHost)application).StartAsync(CancellationToken.None);
@@ -257,7 +267,9 @@ public sealed class ResourceControlPlaneHostingTests
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             gatewayName: "inprocess",
             endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
-        WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            [],
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         await using WebApplication application = builder.Build();
 
         await ((IHost)application).StartAsync(CancellationToken.None);
@@ -289,7 +301,9 @@ public sealed class ResourceControlPlaneHostingTests
         Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
-        WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            [],
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         await using WebApplication application = builder.Build();
 
         Task run = application.RunAsync(cancellation.Token);
@@ -392,7 +406,9 @@ public sealed class ResourceControlPlaneHostingTests
             environmentName: "ControlPlaneTest",
             endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
 
-        WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            [],
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         builder.AddHealthCheck("builder", _ => ValueTask.FromResult(HealthContribution.Healthy()));
         builder.Services.AddSingleton<IHealthContributor>(new HealthyContributor("services"));
 
@@ -516,7 +532,9 @@ public sealed class ResourceControlPlaneHostingTests
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             environmentName: environmentName,
             endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
-        WebApplicationBuilder builder = WebApplication.CreateBuilder([]);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            [],
+            typeof(ResourceControlPlaneHostingTests).Assembly);
         builder.AddHealthCheck(
             healthName,
             _ => ValueTask.FromResult(HealthContribution.Healthy()));
