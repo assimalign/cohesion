@@ -4,8 +4,4 @@
 		AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.Tasks.dll"
 		Runtime="NET" />
 
-	<PropertyGroup>
-        <AppSettingsClass Condition="'$(AppSettingsClass)' == ''">AppSettings</AppSettingsClass>
-        <AppSettingsNamespace Condition="'$(AppSettingsNamespace)' == ''">$(RootNamespace)</AppSettingsNamespace>
-    </PropertyGroup>
 </Project>

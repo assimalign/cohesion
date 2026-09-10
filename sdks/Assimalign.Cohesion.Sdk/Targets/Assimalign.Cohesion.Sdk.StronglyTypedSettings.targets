@@ -1,35 +1,56 @@
 <Project>
-    <PropertyGroup>
-        <_StronglyTypedSettingsOutput>$(_CohesionIntermediateOutputPath)\$(AppSettingsClass).generated.cs</_StronglyTypedSettingsOutput>
-        <_StronglyTypedSettingsInputsCache>$(_CohesionIntermediateOutputPath)\$(AppSettingsClass).generated.txt</_StronglyTypedSettingsInputsCache>
+    <PropertyGroup Condition="'$(CohesionAppSettingsClass)' != ''">
+        <CohesionAppSettingsNamespace Condition="'$(CohesionAppSettingsNamespace)' == ''">$(RootNamespace)</CohesionAppSettingsNamespace>
+        <_StronglyTypedSettingsIntermediateOutputPath>$(IntermediateOutputPath)Cohesion</_StronglyTypedSettingsIntermediateOutputPath>
+        <_StronglyTypedSettingsOutput>$(_StronglyTypedSettingsIntermediateOutputPath)\$(CohesionAppSettingsClass).generated.cs</_StronglyTypedSettingsOutput>
+        <_StronglyTypedSettingsInputsCache>$(_StronglyTypedSettingsIntermediateOutputPath)\$(CohesionAppSettingsClass).generated.inputs</_StronglyTypedSettingsInputsCache>
+        <_StronglyTypedSettingsTaskAssembly>$(MSBuildThisFileDirectory)..\Tasks\Assimalign.Cohesion.Sdk.Tasks.dll</_StronglyTypedSettingsTaskAssembly>
     </PropertyGroup>
-    <ItemGroup>
+
+    <ItemGroup Condition="'$(CohesionAppSettingsClass)' != ''">
         <_AppSettings Include="$(MSBuildProjectDirectory)\appsettings*.json" />
+        <Compile Include="$(_StronglyTypedSettingsOutput)">
+            <AutoGen>true</AutoGen>
+            <DesignTime>true</DesignTime>
+            <Visible>false</Visible>
+        </Compile>
     </ItemGroup>
-    <!-- Gather all the appsettings.{}.json files in the current project directory  -->
-    <Target Name="_CollectStronglyTypedSettingsInputs">
-        <MakeDir Directories="$(_CohesionIntermediateOutputPath)" />
+
+    <ItemGroup>
+        <_StronglyTypedSettingsGeneratedArtifact Include="$(IntermediateOutputPath)Cohesion\*.generated.cs" />
+        <_StronglyTypedSettingsGeneratedArtifact Include="$(IntermediateOutputPath)Cohesion\*.generated.inputs" />
+    </ItemGroup>
+
+    <Target Name="_CollectStronglyTypedSettingsInputs"
+            Condition="'$(CohesionAppSettingsClass)' != ''">
+        <MakeDir Directories="$(_StronglyTypedSettingsIntermediateOutputPath)" />
+        <ItemGroup>
+            <_StronglyTypedSettingsInputLine Include="Class=$(CohesionAppSettingsClass)" />
+            <_StronglyTypedSettingsInputLine Include="Namespace=$(CohesionAppSettingsNamespace)" />
+            <_StronglyTypedSettingsInputLine Include="@(_AppSettings->'File=%(FullPath)')" />
+        </ItemGroup>
         <WriteLinesToFile
             File="$(_StronglyTypedSettingsInputsCache)"
-            Lines="@(_AppSettings)"
-            Overwrite="true" />
+            Lines="@(_StronglyTypedSettingsInputLine)"
+            Overwrite="true"
+            WriteOnlyWhenDifferent="true" />
     </Target>
+
     <Target Name="_GeneratedStronglyTypedAppSettings"
             BeforeTargets="CoreCompile"
+            Condition="'$(CohesionAppSettingsClass)' != ''"
             DependsOnTargets="_CollectStronglyTypedSettingsInputs"
-            Inputs="$(_StronglyTypedSettingsInputsCache)"
+            Inputs="$(_StronglyTypedSettingsInputsCache);@(_AppSettings);$(_StronglyTypedSettingsTaskAssembly)"
             Outputs="$(_StronglyTypedSettingsOutput)">
-        <Message Text="File Gen Running" Importance="high" />
         <CreateStronglyTypedSettingsTask
-            AppSettingsClass="$(AppSettingsClass)"
-            AppSettingsNamespace="$(AppSettingsNamespace)"
+            AppSettingsClass="$(CohesionAppSettingsClass)"
+            AppSettingsNamespace="$(CohesionAppSettingsNamespace)"
             AppSettingsFiles="@(_AppSettings)"
             AppSettingsOutputPath="$(_StronglyTypedSettingsOutput)" />
-        <ItemGroup>
-            <Compile Include="$(_StronglyTypedSettingsOutput)" />
-        </ItemGroup>
     </Target>
-    <Target Name="AfterClean">
-        <Delete Files="$(_StronglyTypedSettingsOutput)" />
+
+    <Target Name="_CleanStronglyTypedAppSettings"
+            AfterTargets="Clean">
+        <Delete Files="@(_StronglyTypedSettingsGeneratedArtifact)" />
     </Target>
 </Project>

@@ -52,6 +52,31 @@ that handles `Microsoft.NET.Sdk.Web`, `Microsoft.NET.Sdk.Worker`, etc. Works in
 Visual Studio, Rider, the dotnet CLI, and any other MSBuild client with no
 installer, no admin rights, and no custom resolver.
 
+The base SDK validates the nearest `global.json` during restore and build. Every
+present Cohesion SDK pin must use one exact version string and the pinned .NET
+SDK must be `10.0.300` or newer; disagreement reports COHSDK002. This is exact
+agreement among the pins, so the local identity `10.0.1-preview.3.local` is valid
+when used consistently. Consumers without a `global.json` are unaffected. The
+`CohesionSkipSdkPinCheck=true` escape is reserved for tooling that must inspect a
+temporarily inconsistent tree.
+
+## Strongly typed settings
+
+The base SDK generates strongly typed settings only when a project opts in:
+
+```xml
+<PropertyGroup>
+    <CohesionAppSettingsClass>AppSettings</CohesionAppSettingsClass>
+</PropertyGroup>
+```
+
+The generated root and nested types are public. The root type includes an
+AOT-safe `Bind(Assimalign.Cohesion.Configuration.IConfiguration)` method made of
+explicit per-member reads; it does not use the reflection binder. When the
+property is unset, no settings source is generated or compiled. See the base
+SDK [overview](./Assimalign.Cohesion.Sdk/docs/OVERVIEW.md) and
+[design](./Assimalign.Cohesion.Sdk/docs/DESIGN.md).
+
 ## Gateway SDK boundary
 
 `Assimalign.Cohesion.Sdk.Gateway` always enables `CohesionApplicationModel` and

@@ -78,6 +78,21 @@ It also removes only the current local-version extract for each package being re
 global packages cache, preserving cached published versions. `-SkipSdks`, `-SkipFramework`, and
 `-SkipLibraries` also skip the corresponding cache and feed pruning.
 
+## Consumer SDK pin agreement
+
+A repository `global.json` pins the .NET SDK and its Cohesion MSBuild SDKs. Templates write all 20
+Cohesion identities: `Assimalign.Cohesion.Sdk`, the 18 resource-area SDKs (including `Sdk.Web`),
+and `Sdk.Gateway`. Every Cohesion pin present in the block must use exactly the same version string,
+and the pinned .NET SDK version must be `10.0.300` or newer. The base SDK enforces those rules during
+restore and build with COHSDK002 after finding the nearest `global.json` above the consumer project.
+A consumer without `global.json` is unaffected.
+
+Pin agreement uses ordinal string equality among the Cohesion entries; it does not require equality
+with the canonical version in this repository. Consequently, an inner-loop consumer legitimately
+uses `10.0.1-preview.3.local` for every entry after `Install-Local.ps1` packs that local identity.
+`CohesionSkipSdkPinCheck=true` exists only for tooling that must load an intentionally inconsistent
+tree and should not be set in normal builds.
+
 ## Release sequence and post-tag bump
 
 1. Enumerate versions on GitHub Packages and nuget.org. Choose a canonical version that does not
