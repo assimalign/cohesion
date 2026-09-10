@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,12 +18,13 @@ public class ApplicationLifecycleTests
     public async Task AddService_WithInstanceAndFactory_ShouldMaterializeOnceAndRunInRegistrationOrder()
     {
         // Arrange
+        using var testScope = new PlainConfigurationStoreScope();
         var events = new List<string>();
         var firstService = new RecordingHostService("first", events);
         var secondService = new RecordingHostService("second", events);
         IHostContext? factoryContext = null;
         int factoryCalls = 0;
-        IConfigurationStoreApplicationBuilder builder = ConfigurationStoreApplication.CreateBuilder([]);
+        IConfigurationStoreApplicationBuilder builder = testScope.Builder;
 
         IConfigurationStoreApplicationBuilder returnedBuilder = builder
             .AddService(firstService)
@@ -43,8 +45,10 @@ public class ApplicationLifecycleTests
         returnedBuilder.ShouldBeSameAs(builder);
         factoryCalls.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
-        application.Context.HostedServices.ShouldBe(
+        application.Context.HostedServices.Take(2).ShouldBe(
             new IHostService[] { firstService, secondService });
+        application.Context.HostedServices.Count().ShouldBe(3);
+        ((HostContext)application.Context).Runner.ShouldBeNull();
         events.ShouldBe(new[]
         {
             "first:start",
@@ -57,7 +61,8 @@ public class ApplicationLifecycleTests
     [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - AddService: Null registrations should fail explicitly")]
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
-        IConfigurationStoreApplicationBuilder builder = ConfigurationStoreApplication.CreateBuilder([]);
+        using var testScope = new PlainConfigurationStoreScope();
+        IConfigurationStoreApplicationBuilder builder = testScope.Builder;
 
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
@@ -67,7 +72,8 @@ public class ApplicationLifecycleTests
     [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - AddService: Null factory result should fail at build")]
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
-        IConfigurationStoreApplicationBuilder builder = ConfigurationStoreApplication.CreateBuilder([]);
+        using var testScope = new PlainConfigurationStoreScope();
+        IConfigurationStoreApplicationBuilder builder = testScope.Builder;
         builder.AddService(_ => null!);
 
         InvalidOperationException exception = Should.Throw<InvalidOperationException>(
@@ -80,7 +86,8 @@ public class ApplicationLifecycleTests
     public async Task RunAsync_WhenCancellationIsRequested_ShouldStopCleanly()
     {
         // Arrange
-        await using IConfigurationStoreApplication application = ConfigurationStoreApplication.CreateBuilder([]).Build();
+        using var testScope = new PlainConfigurationStoreScope();
+        await using IConfigurationStoreApplication application = testScope.Builder.Build();
         using var cancellationTokenSource = new CancellationTokenSource();
         cancellationTokenSource.Cancel();
 

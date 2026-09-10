@@ -8,6 +8,14 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="Shouldly" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
 	</ItemGroup>
 </Project>

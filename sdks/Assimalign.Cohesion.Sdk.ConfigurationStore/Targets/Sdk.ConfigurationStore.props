@@ -6,10 +6,13 @@
 		The resource's domain composition remains in its Program.cs.
 	-->
 	<PropertyGroup>
+		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.ConfigurationStore.ApplicationModel</CohesionResourceApplicationModel>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.ConfigurationStore.ApplicationModel.ConfigurationStoreResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">ConfigurationStore</CohesionResourceKind>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">api</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
 		<CohesionWorkloadKind Condition="'$(CohesionWorkloadKind)' == ''">StatefulSet</CohesionWorkloadKind>
+		<CohesionMaxReplicas Condition="'$(CohesionMaxReplicas)' == ''">1</CohesionMaxReplicas>
 	</PropertyGroup>
 
 	<ItemGroup>

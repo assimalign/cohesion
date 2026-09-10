@@ -1,0 +1,89 @@
+{
+  "schema": "cohesion/plan/v1",
+  "resource": "appa-configuration",
+  "kind": "ConfigurationStore",
+  "workload": {
+    "kind": "StatefulSet",
+    "replicas": 1,
+    "stableIdentity": true,
+    "gate": {
+      "terminals": [
+        "Running",
+        "Failed",
+        "Stopped"
+      ],
+      "satisfying": [
+        "Running"
+      ]
+    },
+    "stopGraceSeconds": 30
+  },
+  "container": {
+    "name": "appa-configuration",
+    "artifact": "self",
+    "ports": [
+      {
+        "endpoint": "api",
+        "containerPort": 8443,
+        "protocol": "tcp"
+      }
+    ],
+    "mounts": [
+      {
+        "mount": "data",
+        "containerPath": "/data",
+        "kind": "Volume",
+        "source": null
+      }
+    ],
+    "environment": {
+      "COHESION_APPLICATION": "appa",
+      "COHESION_RESOURCE": "appa-configuration",
+      "COHESION_ENVIRONMENT": "Development"
+    },
+    "probes": [
+      {
+        "role": "readiness",
+        "endpoint": "api",
+        "kind": "Http",
+        "value": "/readyz",
+        "command": []
+      },
+      {
+        "role": "liveness",
+        "endpoint": "api",
+        "kind": "Http",
+        "value": "/livez",
+        "command": []
+      }
+    ]
+  },
+  "volumes": [
+    {
+      "name": "data",
+      "kind": "Volume",
+      "size": "10Gi",
+      "perReplicaClaim": true
+    }
+  ],
+  "services": [
+    {
+      "name": "appa-configuration-api",
+      "endpoint": "api",
+      "port": 8443,
+      "protocol": "tcp",
+      "headless": false,
+      "governing": false
+    },
+    {
+      "name": "appa-configuration-headless",
+      "endpoint": null,
+      "port": null,
+      "protocol": "tcp",
+      "headless": true,
+      "governing": true
+    }
+  ],
+  "exposures": [],
+  "hints": {}
+}

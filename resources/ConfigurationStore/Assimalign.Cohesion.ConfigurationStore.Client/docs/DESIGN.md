@@ -20,9 +20,9 @@ protocol while avoiding a dependency on a runtime assembly merely to send a requ
 
 ## Public surface
 
-`IConfigurationStoreClient` is the consumer contract. `ConfigurationStoreClient.Create` validates
-that its endpoint uses HTTP or HTTPS and returns an internal implementation. Client creation performs
-no network I/O.
+`IConfigurationStoreClient` is the consumer contract. It lists namespace names, reads a named
+namespace, and submits commands. `ConfigurationStoreClient.Create` validates that its endpoint uses
+HTTP or HTTPS and returns an internal implementation. Client creation performs no network I/O.
 
 The caller supplies an opaque `ClientCredential`. The client does not inspect JWT claims, load token
 files, refresh credentials, or expose the token through formatting. It attaches the value as a Bearer
@@ -30,16 +30,18 @@ credential for every request.
 
 ## Wire protocol
 
-The first protocol version has two operations:
+The first protocol version has three operations:
 
 | Operation | Request | Successful response |
 | --- | --- | --- |
+| List namespaces | `GET /cohesion/v1/namespaces` | A direct JSON array of namespace-name strings |
 | Read namespace | `GET /cohesion/v1/namespaces?name=<escaped-name>` | A direct JSON object with string or `null` values |
 | Submit command | `POST /cohesion/v1/commands` | Any success status with no required response body |
 
-The endpoint's existing base path is prepended to both routes. Namespace names and command IDs are
-query-escaped and otherwise treated as opaque values. Command bodies use camel-case JSON and include
-the id, kind, owner, key, and base64-encoded payload properties.
+The endpoint's existing base path is prepended to every route. Namespace lookup names are
+query-escaped and otherwise treated as opaque values. Listing preserves the server's array order and
+duplicates. Command bodies use camel-case JSON and include the id, kind, owner, key, and
+base64-encoded payload properties.
 
 ## Transport and ownership
 
@@ -53,15 +55,15 @@ own or dispose that shared transport. An internal overload accepts a caller-owne
 
 Blank namespace names and invalid endpoint schemes fail before transport use. HTTP failures retain
 the BCL `HttpRequestException` shape through `EnsureSuccessStatusCode`. Invalid, empty, or JSON `null`
-namespace documents fail with `JsonException`. Cancellation tokens flow unchanged through send and
-content-read operations.
+namespace-list and namespace-value documents fail with `JsonException`. Cancellation tokens flow
+unchanged through send and content-read operations.
 
 ## AOT posture
 
-All command serialization and namespace deserialization use `ConfigurationStoreClientJsonContext`,
-an internal `JsonSerializerContext`. No reflection-based serializer overload, runtime assembly scan,
-or dynamic code generation is used. The project inherits the repository's `net10.0`, trimming, and
-NativeAOT settings.
+All command serialization, namespace-list deserialization, and namespace-value deserialization use
+`ConfigurationStoreClientJsonContext`, an internal `JsonSerializerContext`. No reflection-based
+serializer overload, runtime assembly scan, or dynamic code generation is used. The project inherits
+the repository's `net10.0`, trimming, and NativeAOT settings.
 
 ## Non-goals
 

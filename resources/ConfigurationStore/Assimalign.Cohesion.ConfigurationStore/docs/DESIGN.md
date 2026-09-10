@@ -2,15 +2,20 @@
 
 ## Design intent
 
-The area root owns only the contracts that feature packages compose against. `IConfigurationStoreApplicationBuilder` is the contract-only builder seam, while `IConfigurationStoreApplication` supplies the host lifecycle expected by an executable resource.
+The area root owns only the contracts that executable composition and feature packages target.
+`IConfigurationStoreApplicationBuilder` declares first-start namespaces and optional host services;
+`IConfigurationStoreApplication` supplies the executable lifecycle.
 
 ## Hosting isolation
 
 The root references only the shared Hosting foundation. The concrete builder, host, context, and options remain internal to `Assimalign.Cohesion.ConfigurationStore.Hosting`; feature libraries must not reference that runtime module.
 
-## Filler lifecycle
+## Code-first namespaces
 
-The current implementation registers no area services by default and always uses the production host environment. The builder accepts `IHostService` instances and `Func<IHostContext, IHostService>` factories; each factory is materialized once per `Build()` against that application's context. Services start in registration order and stop in reverse registration order. The filler exists only to complete the SDK/framework path until configuration-store behavior is implemented.
+`AddNamespace(name, configure)` uses `IConfigurationNamespaceBuilder.Set` to capture string or null
+values. These are declarative seeds, not an in-memory source of truth: Hosting writes them only when
+the corresponding namespace has no durable document. Explicit `IHostService` instances and factories
+remain supported and start before the protocol listener, then stop after it.
 
 ## AOT posture
 

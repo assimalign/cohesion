@@ -16,6 +16,72 @@ namespace Assimalign.Cohesion.ConfigurationStore.Client.Tests;
 
 public class ConfigurationStoreClientTests
 {
+    [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - ListNamespacesAsync: Should send an authenticated request and return names")]
+    public async Task ListNamespacesAsync_WhenEndpointReturnsArray_ShouldReturnNames()
+    {
+        // Arrange
+        string? observedAccept = null;
+        string? observedAuthorization = null;
+        string? observedMethod = null;
+        string? observedUri = null;
+        var handler = new FakeHttpMessageHandler((request, _) =>
+        {
+            observedAccept = request.Headers.Accept.ToString();
+            observedAuthorization = request.Headers.Authorization?.ToString();
+            observedMethod = request.Method.Method;
+            observedUri = request.RequestUri?.AbsoluteUri;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "[\"apps/api\",\"platform/shared\"]",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        });
+        using var transport = new HttpMessageInvoker(handler);
+        IConfigurationStoreClient client = ConfigurationStoreClient.Create(
+            new Uri("https://configuration.test:8443/api"),
+            new ClientCredential("bootstrap-token"),
+            transport);
+
+        // Act
+        IReadOnlyList<string> result = await client.ListNamespacesAsync(CancellationToken.None);
+
+        // Assert
+        result.Count.ShouldBe(2);
+        result[0].ShouldBe("apps/api");
+        result[1].ShouldBe("platform/shared");
+        Action mutation = () => ((IList<string>)result).Add("late");
+        Should.Throw<NotSupportedException>(mutation);
+        observedAccept.ShouldBe("application/json");
+        observedAuthorization.ShouldBe("Bearer bootstrap-token");
+        observedMethod.ShouldBe("GET");
+        observedUri.ShouldBe(
+            "https://configuration.test:8443/api/cohesion/v1/namespaces");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - ListNamespacesAsync: Should reject a null namespace list")]
+    public async Task ListNamespacesAsync_WhenEndpointReturnsNull_ShouldThrowJsonException()
+    {
+        // Arrange
+        var handler = new FakeHttpMessageHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("null", Encoding.UTF8, "application/json")
+            }));
+        using var transport = new HttpMessageInvoker(handler);
+        IConfigurationStoreClient client = ConfigurationStoreClient.Create(
+            new Uri("https://configuration.test:8443"),
+            new ClientCredential("bootstrap-token"),
+            transport);
+
+        // Act
+        Func<Task> action = () => client.ListNamespacesAsync(CancellationToken.None);
+
+        // Assert
+        await Should.ThrowAsync<JsonException>(action);
+    }
+
     [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - GetNamespaceAsync: Should send an authenticated request and return values")]
     public async Task GetNamespaceAsync_WhenEndpointReturnsObject_ShouldReturnValues()
     {

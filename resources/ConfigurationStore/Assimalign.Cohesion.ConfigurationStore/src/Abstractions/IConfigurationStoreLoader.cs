@@ -1,11 +1,10 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ConfigurationStore;
 
+/// <summary>
+/// Marks a configuration-store loader supplied by a storage feature package.
+/// </summary>
 public interface IConfigurationStoreLoader
 {
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.ConfigurationStore;
 
@@ -19,6 +20,17 @@ public static class ConfigurationStoreApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new ConfigurationStoreApplicationBuilder(args);
+        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(ConfigurationStoreApplication).Assembly;
+        return new ConfigurationStoreApplicationBuilder(args, resourceAssembly);
+    }
+
+    internal static IConfigurationStoreApplicationBuilder CreateBuilder(
+        string[] args,
+        Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+
+        return new ConfigurationStoreApplicationBuilder(args, resourceAssembly);
     }
 }

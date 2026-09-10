@@ -2,5 +2,9 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 	</ItemGroup>
 </Project>

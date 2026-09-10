@@ -13,6 +13,9 @@ IConfigurationStoreClient client = ConfigurationStoreClient.Create(
     new Uri("https://configuration.internal:8443"),
     new ClientCredential(bootstrapToken));
 
+IReadOnlyList<string> namespaces =
+    await client.ListNamespacesAsync(cancellationToken);
+
 IReadOnlyDictionary<string, string?> values =
     await client.GetNamespaceAsync("apps/api", cancellationToken);
 ```
@@ -23,13 +26,14 @@ are not forwarded to a different authority.
 
 ## Protocol
 
+- `GET /cohesion/v1/namespaces` returns a direct JSON array of namespace-name strings.
 - `GET /cohesion/v1/namespaces?name=<escaped-name>` returns a direct JSON object whose property
   values are strings or `null`.
 - `POST /cohesion/v1/commands` sends a camel-case JSON `ResourceCommand` envelope whose payload
   bytes are base64 encoded.
 
-An endpoint base path is preserved and prepended to both routes. Non-success HTTP responses raise
-`HttpRequestException`; malformed namespace JSON raises `JsonException`.
+An endpoint base path is preserved and prepended to every route. Non-success HTTP responses raise
+`HttpRequestException`; malformed namespace-list or namespace-value JSON raises `JsonException`.
 
 ## Dependencies
 

@@ -10,8 +10,10 @@ Assembly: `Assimalign.Cohesion.ConfigurationStore.Hosting`
 ## Factory behavior
 
 - `CreateBuilder(string[] args)` validates the argument array and returns an `IConfigurationStoreApplicationBuilder`.
-- The arguments are reserved for later runtime-context integration; the current filler does not interpret them.
-- Building the returned builder materializes its explicitly registered host services in registration order; no services are registered automatically.
+- When generated resource registration is present, the builder consumes the ambient endpoint,
+  volume, environment, trust key, and credential through `ResourceRuntime`.
+- A plain application accepts `--endpoint <http-uri>` and `--data <directory>`.
+- Building materializes explicit host services, durable declarations, and the protocol listener.
 
 ## Exceptions
 
@@ -24,6 +26,7 @@ using Assimalign.Cohesion.ConfigurationStore;
 using Assimalign.Cohesion.ConfigurationStore.Hosting;
 
 IConfigurationStoreApplicationBuilder builder = ConfigurationStoreApplication.CreateBuilder(args);
+builder.AddNamespace("app", ns => ns.Set("Mode", "production"));
 await using IConfigurationStoreApplication application = builder.Build();
 await application.RunAsync(cancellationToken);
 ```

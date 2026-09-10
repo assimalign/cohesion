@@ -9,7 +9,7 @@ access. Its public types use the exact `Assimalign.Cohesion.ConfigurationStore.C
 
 | Type | Role |
 | --- | --- |
-| `IConfigurationStoreClient` | Reads a named namespace and submits resource commands asynchronously. |
+| `IConfigurationStoreClient` | Lists and reads namespaces and submits resource commands asynchronously. |
 | `ConfigurationStoreClient` | Creates clients bound to an HTTP or HTTPS endpoint `Uri`. |
 | `ClientCredential` | Carries an opaque Bearer token and returns only a redacted formatted value. |
 | `ResourceCommand` | Immutable command envelope containing id, kind, owner, key, and payload bytes. |
@@ -23,12 +23,16 @@ IConfigurationStoreClient client = ConfigurationStoreClient.Create(
     new Uri("https://configuration.internal:8443/api"),
     new ClientCredential(bootstrapToken));
 
+IReadOnlyList<string> namespaces =
+    await client.ListNamespacesAsync(cancellationToken);
+
 IReadOnlyDictionary<string, string?> values =
     await client.GetNamespaceAsync("apps/api", cancellationToken);
 ```
 
-The namespace endpoint returns a direct JSON object. A JSON `null` value is preserved as a null
-dictionary value; a null document or malformed JSON raises `JsonException`.
+The list operation returns a direct JSON string array, while the named namespace operation returns a
+direct JSON object. A JSON `null` property value is preserved as a null dictionary value; a null
+document or malformed JSON raises `JsonException`.
 
 ## Links
 

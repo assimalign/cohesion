@@ -28,6 +28,32 @@ internal sealed class HttpConfigurationStoreClient : IConfigurationStoreClient
         _transport = transport;
     }
 
+    public async Task<IReadOnlyList<string>> ListNamespacesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        using HttpRequestMessage request = CreateRequest(
+            HttpMethod.Get,
+            namespaceRoute,
+            "application/json");
+        using HttpResponseMessage response = await _transport
+            .SendAsync(request, cancellationToken)
+            .ConfigureAwait(false);
+
+        response.EnsureSuccessStatusCode();
+
+        byte[] document = await response.Content
+            .ReadAsByteArrayAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        List<string>? names = JsonSerializer.Deserialize(
+            document,
+            ConfigurationStoreClientJsonContext.Default.NamespaceNames);
+
+        return names is null
+            ? throw new JsonException("The configuration-store endpoint returned a null namespace list.")
+            : new ReadOnlyCollection<string>(names);
+    }
+
     public async Task<IReadOnlyDictionary<string, string?>> GetNamespaceAsync(
         string name,
         CancellationToken cancellationToken = default)

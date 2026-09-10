@@ -2,23 +2,26 @@
 
 ## Summary
 
-This project provides the small client surface used to read nullable string values from a named
-ConfigurationStore namespace and to submit declarative command envelopes. It is independent of the
-ConfigurationStore hosting runtime and is delivered as a standalone NuGet package.
+This project provides the small client surface used to list ConfigurationStore namespaces, read
+nullable string values from a named namespace, and submit declarative command envelopes. It is
+independent of the ConfigurationStore hosting runtime and is delivered as a standalone NuGet package.
 
 ## Public surface
 
-- `IConfigurationStoreClient` exposes asynchronous namespace reads and command submission.
+- `IConfigurationStoreClient` exposes asynchronous namespace listing, namespace reads, and command
+  submission.
 - `ConfigurationStoreClient` creates a client for an endpoint `Uri` and credential.
 - `ClientCredential` carries an opaque Bearer token and redacts it when formatted.
 - `ResourceCommand` carries the id, kind, owner, key, and payload bytes sent to the control plane.
 
 ## Behavior
 
-`GetNamespaceAsync` issues an authenticated GET request and deserializes the response as a direct
-JSON object into `IReadOnlyDictionary<string, string?>`. `SendCommandAsync` issues an authenticated
-POST request with a camel-case JSON command envelope. Both operations preserve an endpoint base path,
-escape their query values, propagate cancellation, and reject non-success status codes.
+`ListNamespacesAsync` issues an authenticated GET request and deserializes the direct JSON string
+array into `IReadOnlyList<string>`. `GetNamespaceAsync` issues an authenticated GET request and
+deserializes the direct JSON object into `IReadOnlyDictionary<string, string?>`. `SendCommandAsync`
+issues an authenticated POST request with a camel-case JSON command envelope. All operations preserve
+an endpoint base path, propagate cancellation, and reject non-success status codes; the named read
+also query-escapes its namespace name.
 
 `ConfigurationStoreClient.Create` accepts a Cohesion endpoint `Uri`: an absolute URI with a host and
 valid port, without user information, a query, or a fragment. It additionally restricts the scheme

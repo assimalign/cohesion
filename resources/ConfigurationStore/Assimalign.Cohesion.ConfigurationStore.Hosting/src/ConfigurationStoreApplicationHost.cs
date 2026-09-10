@@ -22,7 +22,6 @@ internal sealed class ConfigurationStoreApplicationHost : Host<ConfigurationStor
 
     async Task IConfigurationStoreApplication.RunAsync(CancellationToken cancellationToken)
     {
-        // TODO(design item 12): Route RunAsync through ResourceRuntime once the ambient runtime seam exists.
         if (cancellationToken.IsCancellationRequested)
         {
             await ((IHost)this).StartAsync(CancellationToken.None).ConfigureAwait(false);
