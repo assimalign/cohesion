@@ -5,7 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <EnablePreviewFeatures>true</EnablePreviewFeatures>
     <IsAotCompatible>true</IsAotCompatible>
-    <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL3050</WarningsAsErrors>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <RootNamespace>StronglyTypedSettingsOptIn</RootNamespace>
     <CohesionAppSettingsClass>CatalogSettings</CohesionAppSettingsClass>
   </PropertyGroup>

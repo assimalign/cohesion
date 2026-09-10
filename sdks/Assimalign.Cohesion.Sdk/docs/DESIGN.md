@@ -33,8 +33,10 @@ compile-time shape. Null values do not erase a known type, integer/floating-poin
 overlays widen to `double`, and incompatible scalar/object/array shapes fail the
 build instead of producing order-dependent source. It emits:
 
+- `#nullable enable` before all generated declarations;
 - a public root class and public nested classes;
-- nullable properties for the discovered JSON leaves;
+- nullable annotations on scalar, object, collection, and collection-element
+  members discovered from JSON;
 - the required `System`, collection, globalization, and Cohesion configuration
   `using` directives; and
 - a public instance `Bind(IConfiguration)` method on the root type.

@@ -48,6 +48,8 @@ public sealed class StronglyTypedSettingsSdkIntegrationTests
 
         // Assert
         result.ExitCode.ShouldBe(0, result.Output);
+        result.Output.ShouldNotContain("warning CS");
+        result.Output.ShouldNotContain("warning IL");
         string projectDirectory = workspace.ProjectDirectory("StronglyTypedSettingsOptIn");
         string generatedPath = Directory
             .EnumerateFiles(projectDirectory, "CatalogSettings.generated.cs", SearchOption.AllDirectories)
@@ -64,8 +66,11 @@ public sealed class StronglyTypedSettingsSdkIntegrationTests
         source.ShouldContain("public class CatalogSettings");
         source.ShouldContain("public class CatalogSettingsService");
         source.ShouldContain("public class CatalogSettingsReplicas");
+        source.ShouldContain("public string? Name { get; set; }");
+        source.ShouldContain("public CatalogSettingsService? Service { get; set; }");
         source.ShouldContain("public double? MaxItems { get; set; }");
         source.ShouldContain("public IEnumerable<double?>? Thresholds { get; set; }");
+        source.ShouldContain("public IEnumerable<CatalogSettingsReplicas?>? Replicas { get; set; }");
         source.ShouldContain("public void Bind(IConfiguration configuration)");
         source.ShouldContain("configuration.GetEntry(\"Service:Host\")");
         source.ShouldContain("configuration.GetEntry(\"Tags:0\")");
@@ -92,6 +97,8 @@ public sealed class StronglyTypedSettingsSdkIntegrationTests
 
         // Assert
         rebuiltResult.ExitCode.ShouldBe(0, rebuiltResult.Output);
+        rebuiltResult.Output.ShouldNotContain("warning CS");
+        rebuiltResult.Output.ShouldNotContain("warning IL");
         File.ReadAllText(generatedPath)
             .ShouldContain("public string? AddedAfterBuild { get; set; }");
     }
