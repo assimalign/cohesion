@@ -13,6 +13,8 @@
 		<_CohesionGatewayKubernetesSelected>$([System.Text.RegularExpressions.Regex]::IsMatch('$(CohesionGateways)', '(^|;)\s*Kubernetes\s*(;|$)', System.Text.RegularExpressions.RegexOptions.IgnoreCase))</_CohesionGatewayKubernetesSelected>
 		<_CohesionGatewayInProcessActive Condition="'$(_CohesionGatewayInProcessSelected)' == 'True' and '$(CohesionGatewayInProcess)' == 'true'">true</_CohesionGatewayInProcessActive>
 		<_CohesionGatewayInProcessActive Condition="'$(_CohesionGatewayInProcessActive)' == ''">false</_CohesionGatewayInProcessActive>
+		<CohesionResourceReferencesAreRuntime>$(_CohesionGatewayInProcessActive)</CohesionResourceReferencesAreRuntime>
+		<ValidateExecutableReferencesMatchSelfContained Condition="'$(_CohesionGatewayInProcessActive)' == 'true'">false</ValidateExecutableReferencesMatchSelfContained>
 
 		<_CohesionGatewayInProcessProject>$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway.InProcess\src\Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.csproj</_CohesionGatewayInProcessProject>
 		<_CohesionGatewayControlPlaneProject>$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane\src\Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.csproj</_CohesionGatewayControlPlaneProject>

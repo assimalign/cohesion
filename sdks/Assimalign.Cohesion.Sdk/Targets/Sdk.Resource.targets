@@ -93,10 +93,16 @@
 			Private="false"
 			OutputItemType="CohesionResourceManifest"
 			Condition="'$(CohesionResourceReferencesAreRuntime)' != 'true'" />
+		<!--
+			Keep the build-order and compile edge real, but let Sdk.Gateway's
+			manifest-selected closure own runtime asset flow.
+		-->
 		<ProjectReference
 			Include="@(_CohesionResourceProjectReference)"
 			ReferenceOutputAssembly="true"
 			Private="false"
+			PrivateAssets="all"
+			ExcludeAssets="all"
 			Condition="'$(CohesionResourceReferencesAreRuntime)' == 'true'" />
 		<PackageReference
 			Include="@(_CohesionResourcePackageReference)"

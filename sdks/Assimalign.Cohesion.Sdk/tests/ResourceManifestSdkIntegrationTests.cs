@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading.Tasks;
 
@@ -324,7 +325,14 @@ public sealed class ResourceManifestSdkIntegrationTests
 
     private static string GeneratedOutput(string projectDirectory, string fileName)
     {
-        string path = Path.Combine(projectDirectory, "obj", "Debug", "net10.0", "cohesion", fileName);
+        string path = Path.Combine(
+            projectDirectory,
+            "obj",
+            "Debug",
+            "net10.0",
+            RuntimeInformation.RuntimeIdentifier,
+            "cohesion",
+            fileName);
         File.Exists(path).ShouldBeTrue($"Expected generated output '{path}'.");
         return path;
     }

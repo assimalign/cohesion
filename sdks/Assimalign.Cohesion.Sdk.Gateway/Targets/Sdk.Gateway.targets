@@ -1,7 +1,6 @@
 <Project>
 	<PropertyGroup>
 		<CohesionGatewaySourcePath Condition="'$(CohesionGatewaySourcePath)' == ''">$(IntermediateOutputPath)cohesion/Gateway.g.cs</CohesionGatewaySourcePath>
-		<ValidateExecutableReferencesMatchSelfContained Condition="'$(_CohesionGatewayInProcessActive)' == 'true'">false</ValidateExecutableReferencesMatchSelfContained>
 	</PropertyGroup>
 
 	<ItemGroup>

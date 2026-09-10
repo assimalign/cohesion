@@ -391,6 +391,65 @@ public sealed class GatewaySdkIntegrationTests
         regeneratedSource.ShouldNotContain("\"InProcessNamedEntry.CustomEntry\",");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - clean parallel InProcess builds use evaluation-time runtime references")]
+    public async Task Build_InProcessGateway_FromCleanInParallelTwice_UsesRuntimeReferences()
+    {
+        // Arrange
+        using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
+            "GatewaySmokeDatabase",
+            "GatewaySmokeSupport",
+            "GatewaySmokeWeb",
+            "InProcessNamedEntry",
+            "InProcessNonComposable",
+            "InProcessGateway");
+
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            // Act
+            DotNetBuildResult clean = await workspace.CleanAsync(
+                "InProcessGateway",
+                cancellationSource.Token);
+            DotNetBuildResult build = await workspace.BuildInParallelAsync(
+                "InProcessGateway",
+                cancellationSource.Token);
+
+            // Assert
+            clean.ExitCode.ShouldBe(0, clean.Output);
+            build.ExitCode.ShouldBe(0, build.Output);
+            build.Output.ShouldNotContain("CS0234");
+
+            string captureDirectory = Path.Combine(
+                workspace.ProjectDirectory("InProcessGateway"),
+                "obj");
+            string[] projectReferences = File.ReadAllLines(Path.Combine(
+                captureDirectory,
+                "inprocess-project-references.txt"));
+            projectReferences.ShouldContain("GatewaySmokeWeb|true||false|all|all");
+            projectReferences.ShouldContain("InProcessNamedEntry|true||false|all|all");
+            projectReferences.ShouldContain("InProcessNonComposable|true||false|all|all");
+
+            string[] frameworkReferences = File.ReadAllLines(Path.Combine(
+                captureDirectory,
+                "inprocess-framework-references.txt"));
+            frameworkReferences.ShouldContain("Assimalign.Cohesion.App");
+            frameworkReferences.ShouldContain("Assimalign.Cohesion.App.Web");
+            frameworkReferences.ShouldContain("Assimalign.Cohesion.App.Database");
+
+            string[] properties = File.ReadAllText(Path.Combine(
+                    captureDirectory,
+                    "inprocess-properties.txt"))
+                .Trim()
+                .Split('|');
+            properties.Length.ShouldBe(5);
+            properties[0].ShouldBe("true");
+            properties[1].ShouldBe("false");
+            properties[2].ShouldBe("true");
+            properties[3].ShouldNotBeNullOrWhiteSpace();
+            properties[3].ShouldBe(properties[4]);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - RID publish binds the transitive composable project closure")]
     public async Task Publish_RidInProcessGateway_BindsTransitiveComposableProjectClosure()
     {
@@ -543,6 +602,7 @@ public sealed class GatewaySdkIntegrationTests
             "obj",
             "Debug",
             ConsumerWorkspace.TargetFramework,
+            ConsumerWorkspace.HostRuntimeIdentifier,
             "cohesion",
             fileName);
         File.Exists(path).ShouldBeTrue($"Expected generated output '{path}'.");

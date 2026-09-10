@@ -1,4 +1,14 @@
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" >
+	<!--
+		Enabled resource executables use one Development runtime posture on every
+		host. Set these defaults after the consumer project has been evaluated but
+		before Microsoft.NET.Sdk imports its target-time RID and apphost logic.
+	-->
+	<PropertyGroup Condition="'$(Configuration)' == 'Debug' and '$(CohesionApplicationModel)' == 'enabled'">
+		<SelfContained Condition="'$(SelfContained)' == ''">true</SelfContained>
+		<RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>
+	</PropertyGroup>
+
     <!-- <Import Project="..\Targets\Assimalign.Cohesion.Sdk.Common.targets"/> -->
     <Import Sdk="Microsoft.NET.Sdk" Project="Sdk.targets" />
     <Import Project="..\Targets\Assimalign.Cohesion.Sdk.PinValidation.targets" />

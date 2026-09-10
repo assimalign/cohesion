@@ -158,9 +158,20 @@ a deliberate consumer override and should produce a visible build diagnostic.
 
 Outside in-process mode, every resource project reference remains manifest-only:
 `ReferenceOutputAssembly=false` and `OutputItemType=CohesionResourceManifest`. In-process
-mode may turn enabled, composable project references into real assembly references and
-adds their area frameworks explicitly. Manifest-package resources cannot be nested
-because they have no local executable binding.
+mode turns resource project references into real assembly references during evaluation,
+before `ResolveProjectReferences`, and adds the App, Web, and Database frameworks during
+that same evaluation. It also sets
+`ValidateExecutableReferencesMatchSelfContained=false`; the base SDK supplies enabled
+Debug resource executables with the design's self-contained host-RID defaults. Manifest-package
+resources cannot be nested because they have no local executable binding.
+
+These SDK-owned defaults make the examples' temporary consumer bridge removable. Delete
+`<CohesionResourceReferencesAreRuntime>true</CohesionResourceReferencesAreRuntime>` from
+`examples/single-app/Acme.Gateway/Acme.Gateway.csproj` and from the Identity, Platform, and
+Zones/AppA, AppB, and AppC gateway projects under both `examples/k8s` and
+`examples/k8s-federated`. The root `Directory.Build.targets` is also removable in full:
+its Debug `SelfContained`, `RuntimeIdentifier`, and
+`ValidateExecutableReferencesMatchSelfContained` properties are now SDK defaults.
 
 This exception remains guarded by explicit `CohesionGatewayInProcess=true`, `COHGW001`,
 content-root isolation, and an ambient `ResourceContext` per invocation. Generated bindings use

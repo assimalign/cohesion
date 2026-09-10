@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
@@ -51,6 +52,7 @@ internal sealed class ConsumerWorkspace : IDisposable
 
     private static readonly string RepositoryRoot = FindRepositoryRoot();
     public static string TargetFramework { get; } = ResolveTargetFramework();
+    public static string HostRuntimeIdentifier { get; } = RuntimeInformation.RuntimeIdentifier;
     private static readonly string PackageVersion =
         Environment.GetEnvironmentVariable("COHESION_GATEWAY_TEST_PACKAGE_VERSION")
         ?? ResolvePackageVersion();
@@ -126,7 +128,12 @@ internal sealed class ConsumerWorkspace : IDisposable
 
     public string BuildOutputDirectory(string fixtureName)
     {
-        return Path.Combine(ProjectDirectory(fixtureName), "bin", "Debug", TargetFramework);
+        return Path.Combine(
+            ProjectDirectory(fixtureName),
+            "bin",
+            "Debug",
+            TargetFramework,
+            HostRuntimeIdentifier);
     }
 
     public string PublishOutputDirectory(string fixtureName)
@@ -152,6 +159,39 @@ internal sealed class ConsumerWorkspace : IDisposable
         var arguments = new List<string>
         {
             "build",
+            ProjectFile(fixtureName),
+            "--configuration",
+            "Debug",
+            "--nologo",
+            "--verbosity:minimal"
+        };
+        return RunDotNetAsync(RootDirectory, arguments, cancellationToken);
+    }
+
+    public Task<DotNetBuildResult> BuildInParallelAsync(
+        string fixtureName,
+        CancellationToken cancellationToken = default)
+    {
+        var arguments = new List<string>
+        {
+            "build",
+            ProjectFile(fixtureName),
+            "--configuration",
+            "Debug",
+            "-m",
+            "--nologo",
+            "--verbosity:minimal"
+        };
+        return RunDotNetAsync(RootDirectory, arguments, cancellationToken);
+    }
+
+    public Task<DotNetBuildResult> CleanAsync(
+        string fixtureName,
+        CancellationToken cancellationToken = default)
+    {
+        var arguments = new List<string>
+        {
+            "clean",
             ProjectFile(fixtureName),
             "--configuration",
             "Debug",
