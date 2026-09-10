@@ -61,6 +61,48 @@ public class SqlCatalogTests
 
     // NonClosingStream lives in TestObjects/ (shared with the index metadata suite).
 
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Schema state: a fresh catalog has no applied schema")]
+    public void Open_EmptyCatalog_ShouldHaveNoSchemaState()
+    {
+        // Arrange / Act
+        var (catalog, _) = OpenFresh();
+
+        // Assert
+        catalog.SchemaState.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Schema state: large documents and replacements survive reopen")]
+    public async Task SaveSchemaState_AcrossReopen_ShouldReplaceCompleteDocument()
+    {
+        // Arrange
+        var (catalog, harness) = OpenFresh();
+        string largeDocument = "{\"schema\":\"" + new string('x', 20_000) + "\"}";
+        var first = new SqlCatalogSchemaState("sha256:first", largeDocument);
+
+        // Act / Assert: the canonical document spans catalog records and reassembles on open.
+        await catalog.SaveSchemaStateAsync(first);
+        var firstReopen = Reopen(harness);
+        firstReopen.SchemaState.ShouldNotBeNull();
+        firstReopen.SchemaState.ContentHash.ShouldBe("sha256:first");
+        firstReopen.SchemaState.CanonicalDocument.ShouldBe(largeDocument);
+
+        // Act / Assert: replacement removes every old chunk and persists hash + document together.
+        const string replacementDocument = "{\"schema\":\"replacement\"}";
+        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("sha256:replacement", replacementDocument));
+        var replacementReopen = Reopen(harness);
+        replacementReopen.SchemaState.ShouldNotBeNull();
+        replacementReopen.SchemaState.ContentHash.ShouldBe("sha256:replacement");
+        replacementReopen.SchemaState.CanonicalDocument.ShouldBe(replacementDocument);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Schema state: invalid values are rejected")]
+    public void CreateSchemaState_InvalidValues_ShouldThrow()
+    {
+        // Act / Assert
+        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("", "{}"));
+        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("sha256:value", ""));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - CreateTable: assigns object ids and exposes the table")]
     public async Task CreateTable_NewTable_ShouldAssignIdentityAndExpose()
     {

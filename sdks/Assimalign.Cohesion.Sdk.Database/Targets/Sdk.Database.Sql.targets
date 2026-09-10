@@ -1,12 +1,28 @@
 <Project>
-    <!--
-        SQL-model build tooling: declarative schema sources are .sql files under
-        the schema root (SSDT/DacFx-style database projects). The schema compile
-        validates and models them; migration generation diffs schema models.
-    -->
-    <ItemGroup Condition="'$(CohesionDatabaseProject)' == 'true'">
-        <CohesionDatabaseSchema Include="$(CohesionDatabaseSchemaRoot)**\*.sql" />
-        <!-- Schema sources are build inputs, not content to copy. -->
-        <None Include="@(CohesionDatabaseSchema)" CopyToOutputDirectory="Never" />
-    </ItemGroup>
+	<PropertyGroup>
+		<_CohesionDatabaseModelTargetsLoaded>true</_CohesionDatabaseModelTargetsLoaded>
+		<_CohesionDatabaseModelCompileTarget>_CohesionCompileSqlDatabaseSchema</_CohesionDatabaseModelCompileTarget>
+	</PropertyGroup>
+
+	<Target
+		Name="_CohesionCompileSqlDatabaseSchema"
+		Condition="'$(CohesionDatabaseProject)' == 'true'"
+		Inputs="@(Compile);@(ReferencePath);$(_CohesionDatabaseTaskAssembly)"
+		Outputs="$(CohesionDatabaseSchemaOutputPath);$(CohesionDatabaseSchemaHashOutputPath)">
+		<CompileDatabaseSchemaTask
+			SourceFiles="@(Compile)"
+			ReferencePaths="@(ReferencePath)"
+			DefineConstants="$(DefineConstants)"
+			LanguageVersion="$(LangVersion)"
+			AssemblyName="$(AssemblyName)"
+			Model="Sql"
+			ProjectDirectory="$(MSBuildProjectDirectory)"
+			OutputPath="$(CohesionDatabaseSchemaOutputPath)"
+			HashOutputPath="$(CohesionDatabaseSchemaHashOutputPath)">
+			<Output TaskParameter="SchemaHash" PropertyName="CohesionDatabaseSchemaHash" />
+		</CompileDatabaseSchemaTask>
+		<ItemGroup>
+			<FileWrites Include="$(CohesionDatabaseSchemaOutputPath);$(CohesionDatabaseSchemaHashOutputPath)" />
+		</ItemGroup>
+	</Target>
 </Project>

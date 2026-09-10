@@ -34,7 +34,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
     private readonly List<IHealthContributor> _healthContributors = new();
-    private readonly List<IDatabaseSchema> _schemas = new();
+    private readonly List<CompiledSchema> _schemas = new();
 
     // Server registrations resolve in registration order at Build: instances are
     // wrapped as trivial factories so an instance registered after a deferred
@@ -84,9 +84,9 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     internal IResourceControlPlane? ControlPlane => _controlPlane;
 
     /// <summary>
-    /// Gets the schema declarations retained for later compilation and migration planning.
+    /// Gets the immutable compiled schemas registered for provisioning.
     /// </summary>
-    public IReadOnlyList<IDatabaseSchema> Schemas => _schemas.AsReadOnly();
+    public IReadOnlyList<CompiledSchema> Schemas => _schemas.AsReadOnly();
 
     /// <inheritdoc />
     public IReadOnlyList<IDatabaseEngine> Engines => _options.Engines as IReadOnlyList<IDatabaseEngine> ?? [.. _options.Engines];
@@ -108,46 +108,51 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     }
 
     /// <summary>
-    /// Registers before-accept provisioning for a database declared by the application.
+    /// Registers before-accept provisioning for a compiled database schema.
     /// </summary>
     /// <param name="engine">The engine that owns the database.</param>
-    /// <param name="databaseName">The logical database name to open or create.</param>
+    /// <param name="schema">The validated schema to open, create, and reconcile.</param>
     /// <returns>The same builder for chaining.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="engine"/> is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="databaseName"/> is empty or whitespace.</exception>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="engine"/> or <paramref name="schema"/> is null.
+    /// </exception>
+    /// <exception cref="ArgumentException">The compiled schema targets a different engine model.</exception>
     /// <remarks>
     /// Provisioning is registered as an additional host service. The built application always
     /// starts all additional services before its server wrappers, so provisioning completes
     /// before any server accepts connections regardless of the order in which composition verbs
     /// were called.
     /// </remarks>
-    public DatabaseApplicationBuilder Provision(IDatabaseEngine engine, string databaseName)
+    public DatabaseApplicationBuilder Provision(IDatabaseEngine engine, CompiledSchema schema)
     {
         ArgumentNullException.ThrowIfNull(engine);
-        ArgumentException.ThrowIfNullOrWhiteSpace(databaseName);
+        ArgumentNullException.ThrowIfNull(schema);
+        if (engine.Model != schema.Model)
+        {
+            throw new ArgumentException(
+                $"Compiled schema '{schema.Name}' targets {schema.Model}, but engine '{engine.Name}' uses {engine.Model}.",
+                nameof(schema));
+        }
 
-        AddService(new DefaultDatabaseProvisioner(engine, databaseName));
+        _schemas.Add(schema);
+        AddService(new DefaultDatabaseProvisioner(engine, schema));
         return this;
     }
 
     /// <summary>
-    /// Declares a logical database in C#, retains its schema for later compilation, and registers
-    /// the database for before-accept provisioning.
+    /// Declares a logical database in C#, compiles and validates its schema, and registers the
+    /// compiled schema for before-accept provisioning.
     /// </summary>
     /// <param name="engine">The engine that owns the database.</param>
     /// <param name="name">The logical database name.</param>
     /// <param name="configure">The callback that declares the database schema.</param>
-    /// <returns>The completed schema declaration.</returns>
+    /// <returns>The immutable compiled schema.</returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="engine"/> or <paramref name="configure"/> is null.
     /// </exception>
     /// <exception cref="ArgumentException"><paramref name="name"/> is empty or whitespace.</exception>
-    /// <remarks>
-    /// Schema compilation and migrations consume the retained declaration in their owning work
-    /// items. This registration already enforces the durable code-first boundary: the database
-    /// is opened or created before any registered server starts accepting connections.
-    /// </remarks>
-    public IDatabaseSchema AddDatabase(
+    /// <exception cref="DatabaseSchemaValidationException">The declaration is not valid for the engine's model.</exception>
+    public CompiledSchema AddDatabase(
         IDatabaseEngine engine,
         string name,
         Action<IDatabaseSchemaBuilder> configure)
@@ -156,9 +161,9 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(configure);
 
-        IDatabaseSchema schema = DatabaseSchema.Create(name, configure);
-        _schemas.Add(schema);
-        Provision(engine, name);
+        IDatabaseSchema declaration = DatabaseSchema.Create(name, configure);
+        CompiledSchema schema = DatabaseSchemaCompiler.Compile(declaration, engine.Model);
+        Provision(engine, schema);
         return schema;
     }
 

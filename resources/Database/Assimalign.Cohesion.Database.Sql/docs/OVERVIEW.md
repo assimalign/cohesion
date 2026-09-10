@@ -14,6 +14,10 @@ shared storage, with DDL flowing through the relational catalog
 - **Sessions and transactions** — explicit transactions map to storage
   transactions (durable commit, page-image rollback); statements outside a
   transaction auto-commit.
+- **Compiled-schema provisioning** — `ISqlDatabase` diffs a validated
+  `CompiledSchema`, renders deterministic table/column/index DDL into parsed
+  `SqlQueryRequest`s, compensates completed reversible steps on failure, and
+  records the canonical document/hash only after live-catalog convergence.
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned rule-based and executed against table scans: `SELECT` with `WHERE`,
   projection, `ORDER BY`, `LIMIT/OFFSET`, `DISTINCT`, lone `COUNT(*)`;

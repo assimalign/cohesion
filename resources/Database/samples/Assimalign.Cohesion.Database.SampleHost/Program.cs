@@ -19,29 +19,12 @@ await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
 
 builder.AddDatabase(engine, "sample", database =>
 {
-    database.Type<Money>(type => type.Decimal(18, 2));
-    database.Table<Order>(table =>
+    database.Table<Order>("orders", table =>
     {
         table.Key(order => order.Id);
-        table.Index(order => order.CustomerId);
+        table.Column(order => order.Item);
+        table.Index(order => order.Item);
     });
-    database.Table<OrderLine>(table =>
-    {
-        table.Key(line => line.Id);
-        table.References<Order>(line => line.OrderId);
-    });
-    database.Function(
-        "order_total",
-        (long orderId) => Sql.Sum<OrderLine>(
-            line => line.Quantity * line.UnitPrice,
-            line => line.OrderId == orderId));
-    database.Trigger<Order>(
-        TriggerEvent.AfterInsert,
-        (transaction, order) => transaction.Audit("order.placed", order.Id));
-    database.Principal("sample-client", principal => principal.Grant(
-        Permission.ReadWrite,
-        "Orders",
-        "OrderLines"));
 });
 
 builder.AddSqlServer(engine, options => options.Listen(Resource.Endpoints.Db));
@@ -54,12 +37,4 @@ await application.RunAsync();
 /// </summary>
 public partial class Program;
 
-internal sealed record Order(long Id, long CustomerId, Money Total);
-
-internal sealed record OrderLine(long Id, long OrderId, int Quantity, Money UnitPrice);
-
-internal readonly record struct Money(decimal Amount)
-{
-    public static Money operator *(int quantity, Money value)
-        => new(quantity * value.Amount);
-}
+internal sealed record Order(long Id, string Item);

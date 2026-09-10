@@ -165,16 +165,18 @@ the `WebApplication.CreateBuilder()` idiom. The split of responsibilities:
   `DatabaseApplication` (the guided richer signature; the interface member
   forwards), which implements the root's `IDatabaseApplication` — `Context` +
   start/stop, the Web shape.
-- **Database declarations stay on the concrete builder.** `Provision(engine,
-  name)` registers `DefaultDatabaseProvisioner` as an additional service.
-  `AddDatabase(engine, name, configure)` builds and retains an `IDatabaseSchema`
-  and registers the same provisioning operation. Schema compilation and migration
-  apply are later work; the declaration is retained now so they do not need a
-  second composition model. Because every additional service is materialized
-  before every server wrapper, provisioning precedes accept even when a server
+- **Database declarations stay on the concrete builder.**
+  `AddDatabase(engine, name, configure)` compiles the retained C# declaration
+  immediately and returns/stores its immutable `CompiledSchema` before
+  registering `Provision(engine, schema)`. `DefaultDatabaseProvisioner` opens or
+  creates the logical database, requires its `IDatabaseSchemaProvisioner` model
+  seam, and reconciles that compiled schema before startup can advance. The raw
+  DSL never reaches an engine. Because every additional service is materialized
+  before every server wrapper, schema apply precedes accept even when a server
   verb appears earlier in `Program.cs`. The provisioner creates the database only
-  when open reports the root's exact `DatabaseNotFoundException`; any other
-  `DatabaseException` propagates and fails application startup.
+  when open reports the root's exact `DatabaseNotFoundException`; validation,
+  migration, and unrelated database failures propagate and fail application
+  startup.
 - Direct construction (`new DatabaseApplication(options)`) remains supported for
   fully manual hosts; the builder is sugar over the same options object, never a
   second composition model.

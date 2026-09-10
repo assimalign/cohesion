@@ -4,6 +4,7 @@
 		<TargetFramework>net10.0</TargetFramework>
 		<IsPackable>false</IsPackable>
 		<CohesionApplicationModel>enabled</CohesionApplicationModel>
+		<CohesionDatabaseProject>true</CohesionDatabaseProject>
 		<CohesionApplication>database-tests</CohesionApplication>
 		<CohesionResourceName>sample-database</CohesionResourceName>
 		<!-- The E2E launches this apphost directly on clean runners, where Cohesion's

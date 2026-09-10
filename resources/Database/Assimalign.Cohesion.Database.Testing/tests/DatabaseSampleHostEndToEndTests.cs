@@ -64,9 +64,13 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
     {
         // Arrange
         string manifestPath = GetSampleGeneratedPath("resource.json");
+        string schemaPath = GetSampleGeneratedPath("database.schema.json");
+        string schemaHashPath = GetSampleGeneratedPath("database.schema.sha256");
 
         // Act
         ResourceManifest manifest = ResourceManifest.Load(manifestPath);
+        string compiledSchema = File.ReadAllText(schemaPath);
+        string compiledSchemaHash = File.ReadAllText(schemaHashPath).Trim();
 
         // Assert
         manifest.Schema.ShouldBe(ResourceManifest.SchemaV1);
@@ -75,6 +79,9 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         manifest.Kind.ShouldBe("Database");
         manifest.ApplicationModel.ShouldBe("Assimalign.Cohesion.Database.ApplicationModel");
         manifest.Artifact.Composable.ShouldBeTrue();
+        compiledSchema.ShouldContain("\"name\":\"sample\"");
+        compiledSchema.ShouldContain("\"name\":\"orders\"");
+        compiledSchemaHash.Length.ShouldBe(64);
         manifest.Artifact.AppHost.ShouldNotBeNullOrWhiteSpace();
         string appHost = ResolveSampleAppHost(manifest.Artifact.AppHost!);
         File.Exists(appHost).ShouldBeTrue(
@@ -373,17 +380,14 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         await using ISqlConnection connection = await client.ConnectAsync(cancellationToken);
 
         await connection.ExecuteAsync(
-            "CREATE TABLE orders (id INT NOT NULL, item VARCHAR(100))",
-            cancellationToken: cancellationToken);
-        await connection.ExecuteAsync(
-            "INSERT INTO orders (id, item) VALUES (1, 'widget'), (2, 'gadget')",
+            "INSERT INTO orders (Id, Item) VALUES (1, 'widget'), (2, 'gadget')",
             cancellationToken: cancellationToken);
 
         SqlResultSet rows = await connection.QueryAsync(
-            "SELECT id, item FROM orders ORDER BY id",
+            "SELECT Id, Item FROM orders ORDER BY Id",
             cancellationToken: cancellationToken);
         rows.Count.ShouldBe(2);
-        rows[0].GetString("item").ShouldBe("widget");
+        rows[0].GetString("Item").ShouldBe("widget");
     }
 
     private static async Task AssertRecoveredDatabaseAsync(
@@ -394,10 +398,10 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         await using ISqlConnection connection = await client.ConnectAsync(cancellationToken);
 
         SqlResultSet rows = await connection.QueryAsync(
-            "SELECT id, item FROM orders ORDER BY id",
+            "SELECT Id, Item FROM orders ORDER BY Id",
             cancellationToken: cancellationToken);
         rows.Count.ShouldBe(2);
-        rows[1].GetString("item").ShouldBe("gadget");
+        rows[1].GetString("Item").ShouldBe("gadget");
     }
 
     private static ISqlClient CreateSqlClient(Uri endpoint)

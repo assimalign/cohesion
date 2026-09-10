@@ -4,6 +4,29 @@ The SQL engine (area architecture: [resources/Database/DESIGN.md](../../DESIGN.m
 §3.3): parse (`Sql.Language`) → plan (`SqlPlanner`) → execute (`SqlPlanExecutor`)
 against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
 
+## Compiled-schema provisioning
+
+`ISqlDatabase` implements the root `IDatabaseSchemaProvisioner` seam. Before a
+schema is applied, the provisioner requires `EngineModel.Sql`, the same logical
+database name, and a shape the shipped SQL DDL surface can represent. It then
+reconstructs or reads the last canonical catalog state, uses
+`SchemaMigrationPlanner` for deterministic ordering/destructive gating, and
+`SqlMigrationScriptGenerator` for parser-validated engine requests. Supported
+steps are table, column, and secondary-index add/drop; alter/rebuild operations
+and advanced objects (custom types, foreign/check constraints, functions,
+triggers, principals/grants, extensions) fail before execution rather than
+recording a false applied hash.
+
+Each DDL request remains self-committing under the catalog's established rule.
+On a later failure, completed reversible steps run their compensating requests
+in reverse order and the applied-schema marker remains unchanged. The marker is
+written only after all steps succeed, and a repeated apply is a no-op only when
+the stored canonical document/hash and live catalog all agree. Full atomicity
+for a destructive multi-statement migration is deliberately not claimed: the
+current catalog has no transaction spanning DDL statements, and irreversible
+data loss cannot be compensated. That kernel seam is recorded as the remaining
+gap rather than hidden behind the content hash.
+
 ## Execution model
 
 - **Rule-based planning, plan/execute split.** `SqlPlanner` binds the AST against

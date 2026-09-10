@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<EnablePreviewFeatures>true</EnablePreviewFeatures>
+		<GenerateDependencyFile>true</GenerateDependencyFile>
+		<IncludeBuildOutput>true</IncludeBuildOutput>
+		<IsAotCompatible>true</IsAotCompatible>
+		<IsPackable>false</IsPackable>
+		<IsTestProject>true</IsTestProject>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference
+			Include="Assimalign.Cohesion.Sdk.Database.Tasks"
+			ProjectPath="..\Tasks\Assimalign.Cohesion.Sdk.Database.Tasks.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.Build" />
+		<CohesionPackageReference Include="Microsoft.Build.Framework" />
+		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" />
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+	</ItemGroup>
+</Project>

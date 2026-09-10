@@ -14,6 +14,11 @@ public interface IDatabaseSchema
     string Name { get; }
 
     /// <summary>
+    /// Gets a value indicating whether migration planning may include destructive operations.
+    /// </summary>
+    bool AllowsDestructiveChanges { get; }
+
+    /// <summary>
     /// Gets the declared custom types.
     /// </summary>
     IReadOnlyList<IDatabaseSchemaType> Types { get; }
@@ -22,6 +27,11 @@ public interface IDatabaseSchema
     /// Gets the declared tables.
     /// </summary>
     IReadOnlyList<IDatabaseSchemaTable> Tables { get; }
+
+    /// <summary>
+    /// Gets the declared key-value collections.
+    /// </summary>
+    IReadOnlyList<IDatabaseSchemaCollection> Collections { get; }
 
     /// <summary>
     /// Gets the declared functions.
@@ -37,4 +47,9 @@ public interface IDatabaseSchema
     /// Gets the declared database principals.
     /// </summary>
     IReadOnlyList<IDatabaseSchemaPrincipal> Principals { get; }
+
+    /// <summary>
+    /// Gets model-specific extension values.
+    /// </summary>
+    IReadOnlyList<IDatabaseSchemaExtension> Extensions { get; }
 }

@@ -8,6 +8,9 @@ namespace Assimalign.Cohesion.Database;
 /// </summary>
 public interface IDatabaseSchemaBuilder
 {
+    /// <summary>Allows migrations that remove or rewrite existing data.</summary>
+    void AllowDestructiveChanges();
+
     /// <summary>Declares a custom database type.</summary>
     /// <typeparam name="T">The CLR type represented by the declaration.</typeparam>
     /// <param name="configure">Configures the type.</param>
@@ -19,6 +22,29 @@ public interface IDatabaseSchemaBuilder
     /// <param name="configure">Configures the table.</param>
     /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
     void Table<T>(Action<IDatabaseTableBuilder<T>> configure);
+
+    /// <summary>Declares a named table whose row shape is <typeparamref name="T"/>.</summary>
+    /// <typeparam name="T">The table row type.</typeparam>
+    /// <param name="name">The stable database table name.</param>
+    /// <param name="configure">Configures the table.</param>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or whitespace.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
+    void Table<T>(string name, Action<IDatabaseTableBuilder<T>> configure);
+
+    /// <summary>Declares a named key-value collection.</summary>
+    /// <typeparam name="T">The collection entry type.</typeparam>
+    /// <param name="name">The stable collection name.</param>
+    /// <param name="configure">Configures the collection fields and key.</param>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or whitespace.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
+    void Collection<T>(string name, Action<IDatabaseTableBuilder<T>> configure);
+
+    /// <summary>Declares a model-specific schema extension.</summary>
+    /// <param name="name">The extension name.</param>
+    /// <param name="value">The canonical extension value.</param>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or whitespace.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="value"/> is null.</exception>
+    void Extension(string name, string value);
 
     /// <summary>Declares a parameterless database function.</summary>
     /// <typeparam name="TResult">The function result type.</typeparam>

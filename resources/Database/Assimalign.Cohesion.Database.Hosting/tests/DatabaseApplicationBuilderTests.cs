@@ -180,7 +180,8 @@ public class DatabaseApplicationBuilderTests
         var server = new RecordingServer(log, "server", engine);
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
         builder.AddServer(server);
-        builder.Provision(engine, "app");
+        CompiledSchema schema = CompileSchema("app");
+        builder.Provision(engine, schema);
 
         // Act
         await using DatabaseApplication application = builder.Build();
@@ -189,7 +190,8 @@ public class DatabaseApplicationBuilderTests
 
         // Assert: a first launch attempts open, creates the missing database, and only then
         // starts the server. The server still drains before the provisioner stops.
-        log.ShouldBe(["engine:open", "engine:create", "server:start", "server:stop"]);
+        builder.Schemas.ShouldHaveSingleItem().ShouldBeSameAs(schema);
+        log.ShouldBe(["engine:open", "engine:create", "engine:apply", "server:start", "server:stop"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Provision: unrelated database failures propagate without creating")]
@@ -200,7 +202,7 @@ public class DatabaseApplicationBuilderTests
         var failure = new DatabaseException("The database storage could not be opened.");
         var engine = new ProvisioningEngine(log, openException: failure);
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.Provision(engine, "app");
+        builder.Provision(engine, CompileSchema("app"));
 
         // Act
         await using DatabaseApplication application = builder.Build();
@@ -223,17 +225,18 @@ public class DatabaseApplicationBuilderTests
         builder.AddServer(server);
 
         // Act
-        IDatabaseSchema schema = builder.AddDatabase(engine, "orders", database =>
-            database.Table<Order>(table => table.Key(order => order.Id)));
+        CompiledSchema schema = builder.AddDatabase(engine, "orders", database =>
+            database.Table<Order>("orders", table => table.Key(order => order.Id)));
         await using DatabaseApplication application = builder.Build();
         await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
         await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
 
         // Assert
         schema.Name.ShouldBe("orders");
-        schema.Tables.ShouldHaveSingleItem().RowType.ShouldBe(typeof(Order));
+        schema.Tables.ShouldHaveSingleItem().RowType.ShouldBe(
+            $"{typeof(Order).Assembly.GetName().Name}:{typeof(Order).FullName}");
         builder.Schemas.ShouldHaveSingleItem().ShouldBeSameAs(schema);
-        log.ShouldBe(["engine:open", "engine:create", "server:start", "server:stop"]);
+        log.ShouldBe(["engine:open", "engine:create", "engine:apply", "server:start", "server:stop"]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Building twice is rejected")]
@@ -260,4 +263,8 @@ public class DatabaseApplicationBuilderTests
     }
 
     private sealed record Order(int Id);
+
+    private static CompiledSchema CompileSchema(string name)
+        => DatabaseSchemaCompiler.Compile(DatabaseSchema.Create(name, database =>
+            database.Table<Order>("orders", table => table.Key(order => order.Id))), EngineModel.Sql);
 }

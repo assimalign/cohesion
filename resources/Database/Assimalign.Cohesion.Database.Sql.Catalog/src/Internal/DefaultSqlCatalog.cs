@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -24,6 +25,12 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     private const int indexRegistrationsKind = 3;
     private const int recordSpaceFormatKind = 4;
     private const int indexRecordKind = 5;
+    private const int schemaStateRecordKind = 6;
+    private const int schemaStateChunkSize = 3 * 1024;
+
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
 
     private readonly SqlStorage _storage;
     private readonly Dictionary<(string Schema, string Name), TableSlot> _tables = new(TableNameComparer.Instance);
@@ -34,7 +41,9 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     private (PageId PageId, int SlotIndex)? _counterLocation;
     private (PageId PageId, int SlotIndex)? _registrationsLocation;
     private (PageId PageId, int SlotIndex)? _formatLocation;
+    private List<(PageId PageId, int SlotIndex)> _schemaStateLocations = [];
     private IReadOnlyList<BTreeIndexRegistration> _registrations = Array.Empty<BTreeIndexRegistration>();
+    private SqlCatalogSchemaState? _schemaState;
 
     private DefaultSqlCatalog(SqlStorage storage)
     {
@@ -46,6 +55,18 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         var catalog = new DefaultSqlCatalog(storage);
         catalog.Load();
         return catalog;
+    }
+
+    /// <inheritdoc />
+    public SqlCatalogSchemaState? SchemaState
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _schemaState;
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -406,10 +427,59 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         }
     }
 
+    /// <inheritdoc />
+    public ValueTask SaveSchemaStateAsync(SqlCatalogSchemaState state, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        byte[] document = StrictUtf8.GetBytes(state.CanonicalDocument);
+        int chunkCount = document.Length == 0
+            ? 1
+            : ((document.Length - 1) / schemaStateChunkSize) + 1;
+        var records = new List<byte[]>(chunkCount);
+
+        for (int index = 0; index < chunkCount; index++)
+        {
+            int offset = index * schemaStateChunkSize;
+            int length = Math.Min(schemaStateChunkSize, document.Length - offset);
+            records.Add(EncodeSchemaStateChunk(
+                state.ContentHash,
+                index,
+                chunkCount,
+                document.AsSpan(offset, length)));
+        }
+
+        lock (_sync)
+        {
+            var locations = new List<(PageId PageId, int SlotIndex)>(records.Count);
+
+            using (var transaction = _storage.BeginTransaction())
+            {
+                foreach (var location in _schemaStateLocations)
+                {
+                    _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
+                }
+
+                foreach (byte[] record in records)
+                {
+                    locations.Add(_storage.InsertRow(transaction, record));
+                }
+
+                transaction.Commit();
+            }
+
+            _schemaStateLocations = locations;
+            _schemaState = state;
+            return default;
+        }
+    }
+
     // ── Persistence ────────────────────────────────────────────────────
 
     private void Load()
     {
+        var schemaStateChunks = new List<SchemaStateChunk>();
         using var iterator = _storage.GetUnitIterator();
 
         while (iterator.MoveNext())
@@ -457,9 +527,25 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                     _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, (unit.PageId, unit.SlotIndex));
                     break;
 
+                case schemaStateRecordKind:
+                    var chunk = DecodeSchemaStateChunk(ref reader);
+                    schemaStateChunks.Add(new SchemaStateChunk(
+                        chunk.ContentHash,
+                        chunk.Index,
+                        chunk.Count,
+                        chunk.Document,
+                        (unit.PageId, unit.SlotIndex)));
+                    break;
+
                 default:
                     throw new SqlCatalogException($"Malformed catalog record of kind {kind}.");
             }
+        }
+
+        if (schemaStateChunks.Count > 0)
+        {
+            _schemaState = AssembleSchemaState(schemaStateChunks);
+            _schemaStateLocations = schemaStateChunks.Select(chunk => chunk.Location).ToList();
         }
     }
 
@@ -716,9 +802,88 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         return registrations;
     }
 
+    private static byte[] EncodeSchemaStateChunk(
+        string contentHash,
+        int index,
+        int count,
+        ReadOnlySpan<byte> document)
+    {
+        var writer = new DatabaseKeyWriter();
+        writer.AppendInt32(schemaStateRecordKind)
+              .AppendString(contentHash, Collation.Binary)
+              .AppendInt32(index)
+              .AppendInt32(count)
+              .AppendBinary(document);
+        return writer.ToArray();
+    }
+
+    private static SchemaStateChunk DecodeSchemaStateChunk(ref DatabaseKeyReader reader)
+        => new(
+            reader.ReadString(out _),
+            reader.ReadInt32(),
+            reader.ReadInt32(),
+            reader.ReadBinary(),
+            default);
+
+    private static SqlCatalogSchemaState AssembleSchemaState(IReadOnlyList<SchemaStateChunk> chunks)
+    {
+        SchemaStateChunk first = chunks[0];
+        if (first.Count <= 0 || first.Count != chunks.Count)
+        {
+            throw new SqlCatalogException("Malformed applied-schema state: its chunk count is inconsistent.");
+        }
+
+        var ordered = new byte[first.Count][];
+        int documentLength = 0;
+
+        foreach (SchemaStateChunk chunk in chunks)
+        {
+            if (chunk.Count != first.Count ||
+                !string.Equals(chunk.ContentHash, first.ContentHash, StringComparison.Ordinal) ||
+                chunk.Index < 0 ||
+                chunk.Index >= ordered.Length ||
+                ordered[chunk.Index] is not null)
+            {
+                throw new SqlCatalogException("Malformed applied-schema state: its chunks do not describe one complete document.");
+            }
+
+            ordered[chunk.Index] = chunk.Document;
+            documentLength = checked(documentLength + chunk.Document.Length);
+        }
+
+        var document = new byte[documentLength];
+        int offset = 0;
+        foreach (byte[] chunk in ordered)
+        {
+            if (chunk is null)
+            {
+                throw new SqlCatalogException("Malformed applied-schema state: a document chunk is missing.");
+            }
+
+            chunk.CopyTo(document, offset);
+            offset += chunk.Length;
+        }
+
+        try
+        {
+            return new SqlCatalogSchemaState(first.ContentHash, StrictUtf8.GetString(document));
+        }
+        catch (DecoderFallbackException)
+        {
+            throw new SqlCatalogException("Malformed applied-schema state: its canonical document is not valid UTF-8.");
+        }
+    }
+
     private sealed record TableSlot(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location);
 
     private sealed record IndexSlot(SqlCatalogIndex Index, (PageId PageId, int SlotIndex) Location);
+
+    private sealed record SchemaStateChunk(
+        string ContentHash,
+        int Index,
+        int Count,
+        byte[] Document,
+        (PageId PageId, int SlotIndex) Location);
 
     private sealed class IndexNameComparer : IEqualityComparer<(ulong TableObjectId, string Name)>
     {

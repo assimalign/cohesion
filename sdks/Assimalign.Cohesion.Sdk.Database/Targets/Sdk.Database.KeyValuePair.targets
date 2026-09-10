@@ -1,0 +1,28 @@
+<Project>
+	<PropertyGroup>
+		<_CohesionDatabaseModelTargetsLoaded>true</_CohesionDatabaseModelTargetsLoaded>
+		<_CohesionDatabaseModelCompileTarget>_CohesionCompileKeyValuePairDatabaseSchema</_CohesionDatabaseModelCompileTarget>
+	</PropertyGroup>
+
+	<Target
+		Name="_CohesionCompileKeyValuePairDatabaseSchema"
+		Condition="'$(CohesionDatabaseProject)' == 'true'"
+		Inputs="@(Compile);@(ReferencePath);$(_CohesionDatabaseTaskAssembly)"
+		Outputs="$(CohesionDatabaseSchemaOutputPath);$(CohesionDatabaseSchemaHashOutputPath)">
+		<CompileDatabaseSchemaTask
+			SourceFiles="@(Compile)"
+			ReferencePaths="@(ReferencePath)"
+			DefineConstants="$(DefineConstants)"
+			LanguageVersion="$(LangVersion)"
+			AssemblyName="$(AssemblyName)"
+			Model="KeyValuePair"
+			ProjectDirectory="$(MSBuildProjectDirectory)"
+			OutputPath="$(CohesionDatabaseSchemaOutputPath)"
+			HashOutputPath="$(CohesionDatabaseSchemaHashOutputPath)">
+			<Output TaskParameter="SchemaHash" PropertyName="CohesionDatabaseSchemaHash" />
+		</CompileDatabaseSchemaTask>
+		<ItemGroup>
+			<FileWrites Include="$(CohesionDatabaseSchemaOutputPath);$(CohesionDatabaseSchemaHashOutputPath)" />
+		</ItemGroup>
+	</Target>
+</Project>

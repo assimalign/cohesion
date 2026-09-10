@@ -9,9 +9,15 @@ internal sealed class DatabaseSchemaBuilder(string name) : IDatabaseSchemaBuilde
 {
     private readonly List<IDatabaseSchemaType> _types = [];
     private readonly List<IDatabaseSchemaTable> _tables = [];
+    private readonly List<IDatabaseSchemaCollection> _collections = [];
     private readonly List<IDatabaseSchemaFunction> _functions = [];
     private readonly List<IDatabaseSchemaTrigger> _triggers = [];
     private readonly List<IDatabaseSchemaPrincipal> _principals = [];
+    private readonly List<IDatabaseSchemaExtension> _extensions = [];
+
+    public bool AllowsDestructiveChanges { get; private set; }
+
+    public void AllowDestructiveChanges() => AllowsDestructiveChanges = true;
 
     public void Type<T>(Action<IDatabaseTypeBuilder> configure)
     {
@@ -22,11 +28,38 @@ internal sealed class DatabaseSchemaBuilder(string name) : IDatabaseSchemaBuilde
     }
 
     public void Table<T>(Action<IDatabaseTableBuilder<T>> configure)
+        => Table(typeof(T).Name, configure);
+
+    public void Table<T>(string tableName, Action<IDatabaseTableBuilder<T>> configure)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
         ArgumentNullException.ThrowIfNull(configure);
-        var builder = new DatabaseSchemaTableBuilder<T>();
+        var builder = new DatabaseSchemaTableBuilder<T>(tableName);
         configure(builder);
         _tables.Add(builder.Build());
+    }
+
+    public void Collection<T>(string collectionName, Action<IDatabaseTableBuilder<T>> configure)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(collectionName);
+        ArgumentNullException.ThrowIfNull(configure);
+        var builder = new DatabaseSchemaTableBuilder<T>(collectionName);
+        configure(builder);
+        IDatabaseSchemaTable table = builder.Build();
+        _collections.Add(new DatabaseSchemaCollection(
+            table.Name,
+            table.RowType,
+            table.ColumnDefinitions,
+            table.PrimaryKey,
+            table.Indexes,
+            table.References));
+    }
+
+    public void Extension(string extensionName, string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(extensionName);
+        ArgumentNullException.ThrowIfNull(value);
+        _extensions.Add(new DatabaseSchemaExtension(extensionName, value));
     }
 
     public void Function<TResult>(string name, Expression<Func<TResult>> body)
@@ -54,11 +87,14 @@ internal sealed class DatabaseSchemaBuilder(string name) : IDatabaseSchemaBuilde
 
     public IDatabaseSchema Build()
         => new DatabaseSchemaModel(
+            AllowsDestructiveChanges,
             Snapshot(_types),
             Snapshot(_tables),
+            Snapshot(_collections),
             Snapshot(_functions),
             Snapshot(_triggers),
             Snapshot(_principals),
+            Snapshot(_extensions),
             name);
 
     private void AddFunction(string name, LambdaExpression body)
@@ -73,11 +109,14 @@ internal sealed class DatabaseSchemaBuilder(string name) : IDatabaseSchemaBuilde
 }
 
 internal sealed record DatabaseSchemaModel(
+    bool AllowsDestructiveChanges,
     IReadOnlyList<IDatabaseSchemaType> Types,
     IReadOnlyList<IDatabaseSchemaTable> Tables,
+    IReadOnlyList<IDatabaseSchemaCollection> Collections,
     IReadOnlyList<IDatabaseSchemaFunction> Functions,
     IReadOnlyList<IDatabaseSchemaTrigger> Triggers,
     IReadOnlyList<IDatabaseSchemaPrincipal> Principals,
+    IReadOnlyList<IDatabaseSchemaExtension> Extensions,
     string Name) : IDatabaseSchema;
 
 internal sealed class DatabaseSchemaTypeBuilder(Type clrType) : IDatabaseTypeBuilder
@@ -111,9 +150,10 @@ internal sealed record DatabaseSchemaType(
     int? Precision,
     int? Scale) : IDatabaseSchemaType;
 
-internal sealed class DatabaseSchemaTableBuilder<TRow> : IDatabaseTableBuilder<TRow>
+internal sealed class DatabaseSchemaTableBuilder<TRow>(string name) : IDatabaseTableBuilder<TRow>
 {
     private readonly List<string> _columns = [];
+    private readonly List<IDatabaseSchemaColumn> _columnDefinitions = [];
     private readonly List<string> _indexes = [];
     private readonly List<IDatabaseSchemaReference> _references = [];
 
@@ -136,8 +176,10 @@ internal sealed class DatabaseSchemaTableBuilder<TRow> : IDatabaseTableBuilder<T
 
     internal IDatabaseSchemaTable Build()
         => new DatabaseSchemaTable(
+            name,
             typeof(TRow),
             Array.AsReadOnly(_columns.ToArray()),
+            Array.AsReadOnly(_columnDefinitions.ToArray()),
             PrimaryKey,
             Array.AsReadOnly(_indexes.ToArray()),
             Array.AsReadOnly(_references.ToArray()));
@@ -162,6 +204,11 @@ internal sealed class DatabaseSchemaTableBuilder<TRow> : IDatabaseTableBuilder<T
         if (!_columns.Contains(name))
         {
             _columns.Add(name);
+            Type clrType = member.Type;
+            _columnDefinitions.Add(new DatabaseSchemaColumn(
+                name,
+                clrType,
+                !clrType.IsValueType || Nullable.GetUnderlyingType(clrType) is not null));
         }
 
         return name;
@@ -169,13 +216,27 @@ internal sealed class DatabaseSchemaTableBuilder<TRow> : IDatabaseTableBuilder<T
 }
 
 internal sealed record DatabaseSchemaTable(
+    string Name,
     Type RowType,
     IReadOnlyList<string> Columns,
+    IReadOnlyList<IDatabaseSchemaColumn> ColumnDefinitions,
     string? PrimaryKey,
     IReadOnlyList<string> Indexes,
     IReadOnlyList<IDatabaseSchemaReference> References) : IDatabaseSchemaTable;
 
 internal sealed record DatabaseSchemaReference(string Member, Type TargetType) : IDatabaseSchemaReference;
+
+internal sealed record DatabaseSchemaColumn(string Name, Type ClrType, bool IsNullable) : IDatabaseSchemaColumn;
+
+internal sealed record DatabaseSchemaCollection(
+    string Name,
+    Type EntryType,
+    IReadOnlyList<IDatabaseSchemaColumn> Fields,
+    string? Key,
+    IReadOnlyList<string> Indexes,
+    IReadOnlyList<IDatabaseSchemaReference> References) : IDatabaseSchemaCollection;
+
+internal sealed record DatabaseSchemaExtension(string Name, string Value) : IDatabaseSchemaExtension;
 
 internal sealed record DatabaseSchemaFunction(string Name, LambdaExpression Body) : IDatabaseSchemaFunction;
 

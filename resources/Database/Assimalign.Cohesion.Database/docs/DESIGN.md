@@ -191,17 +191,24 @@ surface. Child roots never reference the root.
   package that wants a registration verb to reference the composition surface,
   which is precisely what the hosting-isolation rule forbids.
 - **The C# schema is one retained root model, not a second build-only language**
-  (#973). `IDatabaseSchema` and `IDatabaseSchemaBuilder` describe custom types,
-  tables (columns, keys, indexes, and references), functions, triggers, and
-  database-scoped principals. `DatabaseSchema.Create(name, configure)` produces
-  the immutable declaration; the concrete Hosting builder's
-  `AddDatabase(engine, name, configure)` retains it and registers the same
-  database for before-accept provisioning. Schema compile and migrations
-  (#857–#859) consume this model later. Keeping the vocabulary in the root lets
-  customer `Program.cs`, hosting, and build tooling share the declaration
-  without making a model package reference `Database.Hosting`; the rejected
-  alternatives were administrative wire verbs and a parallel declarative source
-  format, both of which would violate the area's code-first principle.
+  (#973, compiled by #859). `IDatabaseSchema` and `IDatabaseSchemaBuilder`
+  describe custom types, tables and key-value collections (columns/fields,
+  keys, indexes, and relational references), functions, triggers,
+  database-scoped principals, model extensions, and the explicit destructive
+  migration opt-in. `DatabaseSchemaCompiler.Compile` validates and lowers that
+  declaration into the immutable, dialect-bound `CompiledSchema` contract.
+  Its source-generated canonical JSON and SHA-256 `Hash` are shared by runtime
+  provisioning and `Sdk.Database` build tooling; malformed documents surface
+  typed, declaration-naming validation errors. `SchemaMigrationPlanner` diffs
+  supported table/collection shapes in deterministic dependency order and
+  refuses destructive operations unless the desired declaration opted in.
+  Metadata dimensions without a shipped statement surface fail explicitly
+  instead of producing an empty, falsely converged plan. Keeping the vocabulary
+  in the root lets customer `Program.cs`, hosting, model engines, and build
+  tooling share the declaration without making a model package reference
+  `Database.Hosting`; the rejected alternatives were administrative wire verbs
+  and a parallel declarative source format, both of which would violate the
+  area's code-first principle.
 - **`ProtocolVersion` lives in `Database.Protocol`, and the root consumes it.**
   The struct is wire vocabulary, so it lives with the wire implementation —
   `ProtocolVersion.Current` ("the version this assembly implements") is a plain
@@ -270,10 +277,10 @@ as `DatabaseException`, so the inversion changed no live wire mapping.
 ## AOT posture
 
 Contracts, enums, value objects, and statically constructed schema declarations only. The schema
-builder reads the member named by a caller-provided selector expression but never compiles the
-expression, scans an assembly, dynamically loads code, or performs reflection-based
-serialization. Function and trigger delegates are retained as declarations for the build-time
-compiler; the root does not discover or activate them dynamically.
+builder and compiler inspect the typed expression-tree nodes supplied directly by the caller but
+never compile an expression, scan an assembly, or dynamically load code. Compiled-schema JSON uses
+a source-generated context; function and trigger expressions are lowered to a deterministic,
+allowlisted syntax tree and are never activated by the compiler.
 
 ## Non-goals
 

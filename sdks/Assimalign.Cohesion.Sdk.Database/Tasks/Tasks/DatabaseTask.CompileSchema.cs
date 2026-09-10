@@ -1,27 +1,42 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text;
+
+using Assimalign.Cohesion.Database;
+using Assimalign.Cohesion.Sdk.Database.Tasks.Compilation;
 
 using Microsoft.Build.Framework;
 
 namespace Assimalign.Cohesion.Sdk.Database.Tasks;
 
 /// <summary>
-/// Compiles a database project's declarative schema sources into a schema model
-/// artifact: a JSON manifest listing every schema source with a content hash.
-/// The migration tooling diffs schema model artifacts to generate migrations.
+/// Statically compiles a database application's retained C# schema declaration
+/// into the Database root's canonical semantic document and content hash.
 /// </summary>
 public sealed class CompileDatabaseSchemaTask : DatabaseTask
 {
     /// <summary>
-    /// The declarative schema source files to compile.
+    /// The consumer C# source files to analyze.
     /// </summary>
     [Required]
-    public ITaskItem[] SchemaFiles { get; set; } = Array.Empty<ITaskItem>();
+    public ITaskItem[] SourceFiles { get; set; } = Array.Empty<ITaskItem>();
+
+    /// <summary>The compiler reference assemblies used to bind the schema DSL.</summary>
+    public ITaskItem[] ReferencePaths { get; set; } = Array.Empty<ITaskItem>();
+
+    /// <summary>The consumer project's preprocessor constants.</summary>
+    public string? DefineConstants { get; set; }
+
+    /// <summary>The consumer project's C# language version.</summary>
+    public string? LanguageVersion { get; set; }
+
+    /// <summary>The consumer assembly's simple name, used in portable CLR type identities.</summary>
+    [Required]
+    public string AssemblyName { get; set; } = string.Empty;
 
     /// <summary>
-    /// The database model the project targets (Sql, Documents, Graph, ...).
+    /// The database model the project targets (<c>Sql</c> or <c>KeyValuePair</c>).
     /// </summary>
     [Required]
     public string Model { get; set; } = string.Empty;
@@ -32,46 +47,123 @@ public sealed class CompileDatabaseSchemaTask : DatabaseTask
     [Required]
     public string OutputPath { get; set; } = string.Empty;
 
+    /// <summary>The path the lowercase SHA-256 sidecar is written to.</summary>
+    [Required]
+    public string HashOutputPath { get; set; } = string.Empty;
+
+    /// <summary>The consumer project directory used to resolve relative item paths.</summary>
+    [Required]
+    public string ProjectDirectory { get; set; } = string.Empty;
+
+    /// <summary>The lowercase SHA-256 of the canonical semantic document.</summary>
+    [Output]
+    public string SchemaHash { get; private set; } = string.Empty;
+
     /// <inheritdoc />
     public override bool Execute()
     {
-        // Scaffold scope: model the sources (path + content hash) so migration
-        // diffing has a stable input. Statement-level schema parsing/validation
-        // is the L03.02.06 tooling work; it slots in here.
-        var builder = new StringBuilder();
-        builder.AppendLine("{");
-        builder.AppendLine($"  \"model\": \"{Model}\",");
-        builder.AppendLine("  \"sources\": [");
-
-        for (var i = 0; i < SchemaFiles.Length; i++)
+        try
         {
-            var path = SchemaFiles[i].ItemSpec;
-            if (!File.Exists(path))
+            string projectDirectory = Path.GetFullPath(ProjectDirectory);
+            string[] sourcePaths = ResolvePaths(SourceFiles, projectDirectory);
+            string[] referencePaths = ResolvePaths(ReferencePaths, projectDirectory);
+            var extractor = new CSharpSchemaExtractor(LogDiagnostic);
+            SchemaSourceModel? source = extractor.Extract(
+                sourcePaths,
+                referencePaths,
+                AssemblyName,
+                LanguageVersion,
+                DefineConstants);
+            if (source is null || Log.HasLoggedErrors)
             {
-                Log.LogError($"Database schema source '{path}' does not exist.");
-                continue;
+                return false;
             }
-            string hash;
-            using (var sha = SHA256.Create())
-            using (var stream = File.OpenRead(path))
+
+            CompiledSchema schema;
+            try
             {
-                hash = Convert.ToBase64String(sha.ComputeHash(stream));
+                schema = CompiledSchemaSourceWriter.Create(source, Model);
             }
-            var separator = i < SchemaFiles.Length - 1 ? "," : string.Empty;
-            builder.AppendLine($"    {{ \"path\": \"{path.Replace("\\", "\\\\")}\", \"sha256\": \"{hash}\" }}{separator}");
+            catch (DatabaseSchemaValidationException exception)
+            {
+                foreach (DatabaseSchemaValidationError error in exception.Errors)
+                {
+                    Log.LogError(
+                        null,
+                        "COHDBSDK106",
+                        null,
+                        null,
+                        0,
+                        0,
+                        0,
+                        0,
+                        $"{error.Code}: {error.Declaration}: {error.Message}");
+                }
+                return false;
+            }
+            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+            {
+                Log.LogError(null, "COHDBSDK106", null, null, 0, 0, 0, 0, exception.Message);
+                return false;
+            }
+
+            string outputPath = ResolvePath(OutputPath, projectDirectory);
+            string hashOutputPath = ResolvePath(HashOutputPath, projectDirectory);
+            string document = CompiledSchemaSerializer.Serialize(schema);
+            SchemaHash = CompiledSchemaSerializer.ComputeHash(schema);
+            WriteIfChanged(outputPath, document);
+            WriteIfChanged(hashOutputPath, SchemaHash + "\n");
+            Log.LogMessage(
+                MessageImportance.High,
+                $"Compiled C# database schema '{schema.Name}' for model '{Model}' to '{outputPath}' ({SchemaHash}).");
+            return true;
         }
-
-        builder.AppendLine("  ]");
-        builder.AppendLine("}");
-
-        if (Log.HasLoggedErrors)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            Log.LogError(null, "COHDBSDK100", null, null, 0, 0, 0, 0, exception.Message);
             return false;
         }
+    }
 
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(OutputPath))!);
-        File.WriteAllText(OutputPath, builder.ToString());
-        Log.LogMessage(MessageImportance.Normal, $"Compiled {SchemaFiles.Length} schema source(s) into '{OutputPath}'.");
-        return true;
+    private static string[] ResolvePaths(IEnumerable<ITaskItem> items, string projectDirectory)
+    {
+        var paths = new List<string>();
+        foreach (ITaskItem item in items)
+        {
+            string path = item.ItemSpec;
+            paths.Add(Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(projectDirectory, path)));
+        }
+        return [.. paths];
+    }
+
+    private static string ResolvePath(string path, string projectDirectory)
+        => Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(projectDirectory, path));
+
+    private void LogDiagnostic(SchemaSourceDiagnostic diagnostic)
+    {
+        Log.LogError(
+            null,
+            diagnostic.Code,
+            null,
+            diagnostic.File,
+            diagnostic.Line,
+            diagnostic.Column,
+            diagnostic.Line,
+            diagnostic.Column,
+            diagnostic.Message);
+    }
+
+    private static void WriteIfChanged(string path, string content)
+    {
+        string fullPath = Path.GetFullPath(path);
+        if (File.Exists(fullPath) && string.Equals(File.ReadAllText(fullPath, Encoding.UTF8), content, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        string temporaryPath = fullPath + ".tmp";
+        File.WriteAllText(temporaryPath, content, new UTF8Encoding(false));
+        File.Move(temporaryPath, fullPath, overwrite: true);
     }
 }

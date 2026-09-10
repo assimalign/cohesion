@@ -45,7 +45,9 @@ machines this module never drives (see `docs/DESIGN.md`).
   retain registration order, start before all servers, and stop after them in
   reverse order.
 - `DatabaseApplicationBuilder.Provision` and `AddDatabase` register code-first
-  before-accept provisioning; `AddDatabase` retains the completed C# schema.
+  before-accept provisioning; `AddDatabase` compiles the C# declaration and
+  retains/returns the validated `CompiledSchema`. The model database applies only
+  that compiled contract and records its content hash.
   Provisioning creates only after `OpenDatabaseAsync` reports
   `DatabaseNotFoundException`; other database failures propagate from startup.
 - Enabled resources host their registered `Hosting.Resources` `IResourceControlPlane` on the ambient
@@ -69,7 +71,7 @@ e.g. `AddSqlDatabase` / `AddSqlServer` in `Database.Sql`):
 var builder = DatabaseApplication.CreateBuilder();
 
 SqlDatabaseEngine engine = builder.AddSqlDatabase(options => options.RootPath = dataPath);
-IDatabaseSchema schema = builder.AddDatabase(engine, "orders", database =>
+CompiledSchema schema = builder.AddDatabase(engine, "orders", database =>
     database.Table<Order>(table => table.Key(order => order.Id)));
 SqlDatabaseServer server = builder.AddSqlServer(engine, options => options.Listener = listener);
 

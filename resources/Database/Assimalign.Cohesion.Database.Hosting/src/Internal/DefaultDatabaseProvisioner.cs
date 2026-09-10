@@ -12,15 +12,15 @@ namespace Assimalign.Cohesion.Database.Hosting;
 internal sealed class DefaultDatabaseProvisioner : IHostService
 {
     private readonly IDatabaseEngine _engine;
-    private readonly string _databaseName;
+    private readonly CompiledSchema _schema;
 
-    internal DefaultDatabaseProvisioner(IDatabaseEngine engine, string databaseName)
+    internal DefaultDatabaseProvisioner(IDatabaseEngine engine, CompiledSchema schema)
     {
         ArgumentNullException.ThrowIfNull(engine);
-        ArgumentException.ThrowIfNullOrWhiteSpace(databaseName);
+        ArgumentNullException.ThrowIfNull(schema);
 
         _engine = engine;
-        _databaseName = databaseName;
+        _schema = schema;
         Id = ServiceId.New();
     }
 
@@ -32,20 +32,27 @@ internal sealed class DefaultDatabaseProvisioner : IHostService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_engine.TryGetDatabase(_databaseName, out _))
+        IDatabase database;
+        if (!_engine.TryGetDatabase(_schema.Name, out database!))
         {
-            return;
+            try
+            {
+                database = await _engine.OpenDatabaseAsync(_schema.Name, cancellationToken).ConfigureAwait(false);
+            }
+            catch (DatabaseNotFoundException)
+            {
+                // Opening a database that has not been materialized is the first-launch path.
+                database = await _engine.CreateDatabaseAsync(_schema.Name, cancellationToken).ConfigureAwait(false);
+            }
         }
 
-        try
+        if (database is not IDatabaseSchemaProvisioner provisioner)
         {
-            await _engine.OpenDatabaseAsync(_databaseName, cancellationToken).ConfigureAwait(false);
+            throw new NotSupportedException(
+                $"Database engine '{_engine.Name}' ({_engine.Model}) does not support compiled schema provisioning.");
         }
-        catch (DatabaseNotFoundException)
-        {
-            // Opening a database that has not been materialized is the first-launch path.
-            await _engine.CreateDatabaseAsync(_databaseName, cancellationToken).ConfigureAwait(false);
-        }
+
+        await provisioner.ApplySchemaAsync(_schema, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

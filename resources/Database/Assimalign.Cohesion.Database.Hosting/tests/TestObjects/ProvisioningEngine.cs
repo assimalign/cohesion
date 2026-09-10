@@ -9,6 +9,7 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
 {
     private readonly List<string> _log;
     private readonly DatabaseException? _openException;
+    private ProvisioningDatabase? _database;
     private bool _databaseIsOpen;
     private bool _databaseExists;
 
@@ -38,7 +39,8 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
         _log.Add("engine:create");
         _databaseExists = true;
         _databaseIsOpen = true;
-        return ValueTask.FromResult<IDatabase>(null!);
+        _database = new ProvisioningDatabase(name, this, _log);
+        return ValueTask.FromResult<IDatabase>(_database);
     }
 
     public ValueTask<IDatabase> OpenDatabaseAsync(
@@ -59,7 +61,8 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
         }
 
         _databaseIsOpen = true;
-        return ValueTask.FromResult<IDatabase>(null!);
+        _database ??= new ProvisioningDatabase(name, this, _log);
+        return ValueTask.FromResult<IDatabase>(_database);
     }
 
     public ValueTask DropDatabaseAsync(
@@ -77,8 +80,8 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
 
     public bool TryGetDatabase(string name, out IDatabase database)
     {
-        database = null!;
-        return _databaseIsOpen;
+        database = _database!;
+        return _databaseIsOpen && _database is not null;
     }
 
     public void Dispose()
@@ -91,4 +94,35 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
         Dispose();
         return ValueTask.CompletedTask;
     }
+}
+
+internal sealed class ProvisioningDatabase(
+    string name,
+    IDatabaseEngine engine,
+    List<string> log) : IDatabase, IDatabaseSchemaProvisioner
+{
+    public DatabaseName Name { get; } = name;
+
+    public IDatabaseEngine Engine { get; } = engine;
+
+    public CompiledSchema? AppliedSchema { get; private set; }
+
+    public ValueTask<SchemaMigrationResult> ApplySchemaAsync(
+        CompiledSchema schema,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        log.Add("engine:apply");
+        AppliedSchema = schema;
+        return ValueTask.FromResult(new SchemaMigrationResult(null, schema.Hash, 1, false));
+    }
+
+    public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+
+    public void Dispose()
+    {
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
