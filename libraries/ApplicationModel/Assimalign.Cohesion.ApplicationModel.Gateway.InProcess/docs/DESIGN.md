@@ -129,6 +129,15 @@ process-wide health-contributor collection. Serving the Composite's exported mod
 health from that view belongs to `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane`
 (design item 23a), not to this platform package.
 
+## Offline render
+
+`--mode render` uses the base gateway's `cohesion/local-plan-set/v1` document with
+`kind: inProcessHost`. It folds each `ResourcePlan` into an ambient host unit, carries the generated
+binding's declared assembly identity and content root, and leaves endpoint allocation and mount
+handles visibly deferred. The renderer never invokes the entry point, creates the state directory,
+allocates a port, resolves a mount or credential, or starts `ProcessHost`. Content-root existence is
+therefore checked during artifact gathering, not during validation or rendering.
+
 ## Restart and shutdown
 
 A failing liveness check moves a running member to `Degraded`. After three consecutive failures,

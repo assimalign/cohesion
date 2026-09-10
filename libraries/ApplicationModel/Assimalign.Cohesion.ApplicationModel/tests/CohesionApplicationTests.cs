@@ -204,12 +204,12 @@ public class CohesionApplicationTests
         gateway.Calls.ShouldBeEmpty();
     }
 
-    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Unimplemented modes refuse before gateway contact")]
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Optional output modes name gateways without the requested capability")]
     [InlineData(GatewayRunMode.Bootstrap)]
     [InlineData(GatewayRunMode.Render)]
-    public async Task RunAsync_UnimplementedMode_ThrowsWithoutContactingGateway(GatewayRunMode mode)
+    public async Task RunAsync_OutputModeWithoutCapability_ThrowsNamedNotSupported(GatewayRunMode mode)
     {
-        var gateway = new FakeGateway();
+        var gateway = new FakeGateway("lifecycle-only");
         IApplicationBuilder builder = Application.CreateBuilder(
                 ApplicationName.Parse("appa"),
                 ["--mode", mode.ToString().ToLowerInvariant()])
@@ -220,8 +220,50 @@ public class CohesionApplicationTests
         NotSupportedException error = await Should.ThrowAsync<NotSupportedException>(
             () => app.RunAsync());
 
-        error.Message.ShouldContain(mode.ToString());
-        error.Message.ShouldContain("No gateway operation was attempted");
+        error.Message.ShouldContain("lifecycle-only", Case.Sensitive);
+        error.Message.ShouldContain(mode.ToString().ToLowerInvariant(), Case.Sensitive);
         gateway.Calls.ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Optional output modes dispatch one model, standard output, and caller cancellation")]
+    [InlineData(GatewayRunMode.Render, "render")]
+    [InlineData(GatewayRunMode.Bootstrap, "bootstrap")]
+    public async Task RunAsync_OutputModeWithCapability_DispatchesSelectedGateway(
+        GatewayRunMode mode,
+        string expectedOutput)
+    {
+        // Arrange
+        var gateway = new FakeOutputGateway();
+        IApplicationBuilder builder = Application.CreateBuilder(
+                ApplicationName.Parse("appa"),
+                ["--mode", mode.ToString().ToLowerInvariant()])
+            .UseGateway(gateway);
+        builder.AddResource(new FakeResource("worker"));
+        IApplication app = builder.Build();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+        TextWriter original = Console.Out;
+        using var output = new StringWriter();
+
+        try
+        {
+            Console.SetOut(output);
+
+            // Act
+            await app.RunAsync(cancellation.Token);
+
+            // Assert
+            gateway.OutputMode.ShouldBe(expectedOutput);
+            gateway.OutputModels.ShouldNotBeNull();
+            gateway.OutputModels!.Count.ShouldBe(1);
+            gateway.OutputModels[0].ShouldBeSameAs(app.Model);
+            gateway.OutputWriter.ShouldBeSameAs(Console.Out);
+            gateway.OutputCancellationToken.ShouldBe(cancellation.Token);
+            output.ToString().ShouldBe(expectedOutput + Environment.NewLine);
+            gateway.Calls.ShouldBeEmpty();
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
     }
 }

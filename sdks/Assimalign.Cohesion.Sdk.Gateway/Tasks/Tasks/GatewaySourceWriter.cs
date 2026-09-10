@@ -343,6 +343,7 @@ internal static class GatewaySourceWriter
             source.Append("        var options = new ").Append(provider.OptionsType).AppendLine("();");
             source.AppendLine("        configure?.Invoke(options);");
             source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ApplicationGatewayCommandLine.Apply(options, args);");
+            WriteProviderCommandLine(source, provider, "        ");
             source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.GatewayControlPlane.Configure(options, runMode);");
             source.Append("        gateway = new ").Append(provider.GatewayType).AppendLine("(options);");
             source.AppendLine("    }");
@@ -373,6 +374,7 @@ internal static class GatewaySourceWriter
             source.AppendLine("    {");
             source.Append("        var options = new ").Append(provider.OptionsType).AppendLine("();");
             source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ApplicationGatewayCommandLine.Apply(options, args);");
+            WriteProviderCommandLine(source, provider, "        ");
             source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.GatewayControlPlane.Configure(options, runMode);");
             source.Append("        return new ").Append(provider.GatewayType).AppendLine("(options);");
             source.AppendLine("    }");
@@ -381,6 +383,21 @@ internal static class GatewaySourceWriter
         WriteUnknownGateway(source, providers, 4);
         source.AppendLine("}");
         source.AppendLine();
+    }
+
+    private static void WriteProviderCommandLine(
+        StringBuilder source,
+        GatewayProvider provider,
+        string indent)
+    {
+        if (provider.CommandLineApplyMethod is null)
+        {
+            return;
+        }
+
+        source.Append(indent)
+            .Append(provider.CommandLineApplyMethod)
+            .AppendLine("(options, args);");
     }
 
     private static void WriteGatewayExtensions(StringBuilder source, IReadOnlyList<GatewayProvider> providers)

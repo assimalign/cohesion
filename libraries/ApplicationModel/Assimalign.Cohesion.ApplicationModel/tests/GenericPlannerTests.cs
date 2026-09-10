@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 using Shouldly;
 using Xunit;
@@ -34,9 +35,14 @@ public class GenericPlannerTests
             ResourceLifecycle.Failed,
             ResourceLifecycle.Stopped]);
         plan.Workload.Gate.Satisfying.ShouldBe([ResourceLifecycle.Running]);
+        plan.Workload.RestartPolicy.ShouldBe(manifest.Lifecycle.RestartPolicy);
         plan.Container.Artifact.ShouldBe(ArtifactRef.Self);
         plan.Container.Ports.Count.ShouldBe(2);
+        plan.Container.Ports[0].Scheme.ShouldBe("http");
+        plan.Container.Ports[1].Scheme.ShouldBe("https");
         plan.Container.Probes.Count.ShouldBe(2);
+        plan.ControlPlane.Endpoint.ShouldBe(manifest.ControlPlane.Endpoint);
+        plan.ControlPlane.Path.ShouldBe(manifest.ControlPlane.Path);
         plan.Services.Count.ShouldBe(2);
         plan.Exposures.Count.ShouldBe(1);
         plan.Exposures[0].Protocol.ShouldBe("tcp");
@@ -114,6 +120,231 @@ public class GenericPlannerTests
         Should.NotThrow(() => ResourcePlanValidator.Validate(roundTrip, context));
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - JSON context: Should accept legacy v1 plans that omit additive realization facts")]
+    public void JsonContext_WithLegacyOmissions_ShouldUseCompatibilityDefaults()
+    {
+        // Arrange
+        ResourceManifest manifest = CreateWebManifest() with
+        {
+            Lifecycle = CreateWebManifest().Lifecycle with { RestartPolicy = "Always" }
+        };
+        PlanContext context = CreateContext(manifest);
+        ResourcePlan plan = GenericPlanner.CreatePlan(context);
+        string json = JsonSerializer.Serialize(plan, ResourcePlanJsonContext.Default.ResourcePlan);
+        JsonObject document = JsonNode.Parse(json)?.AsObject()
+            ?? throw new InvalidOperationException("The serialized plan did not contain a JSON object.");
+        document.Remove("controlPlane");
+        document["workload"]?.AsObject().Remove("restartPolicy");
+        foreach (JsonNode? port in document["container"]?["ports"]?.AsArray() ?? [])
+        {
+            port?.AsObject().Remove("scheme");
+        }
+
+        // Act
+        ResourcePlan legacy = JsonSerializer.Deserialize(
+            document.ToJsonString(),
+            ResourcePlanJsonContext.Default.ResourcePlan)
+            ?? throw new InvalidOperationException("The legacy plan was null.");
+
+        // Assert
+        legacy.ControlPlane.Endpoint.ShouldBeEmpty();
+        legacy.ControlPlane.Path.ShouldBeEmpty();
+        legacy.Workload.RestartPolicy.ShouldBeEmpty();
+        legacy.Container.Ports.ShouldAllBe(binding => binding.Scheme.Length == 0);
+        Should.NotThrow(() => ResourcePlanValidator.Validate(legacy, context));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - JSON context: Should reject an explicitly null control plane")]
+    public void JsonContext_WithNullControlPlane_ShouldThrow()
+    {
+        // Arrange
+        ResourcePlan plan = GenericPlanner.CreatePlan(CreateContext(CreateWebManifest()));
+        string json = JsonSerializer.Serialize(plan, ResourcePlanJsonContext.Default.ResourcePlan);
+        JsonObject document = JsonNode.Parse(json)?.AsObject()
+            ?? throw new InvalidOperationException("The serialized plan did not contain a JSON object.");
+        document["controlPlane"] = null;
+        JsonObject nullEndpoint = JsonNode.Parse(json)?.AsObject()
+            ?? throw new InvalidOperationException("The serialized plan did not contain a JSON object.");
+        nullEndpoint["controlPlane"]!.AsObject()["endpoint"] = null;
+
+        // Act
+        JsonException error = Should.Throw<JsonException>(() => JsonSerializer.Deserialize(
+            document.ToJsonString(),
+            ResourcePlanJsonContext.Default.ResourcePlan));
+        JsonException endpointError = Should.Throw<JsonException>(() => JsonSerializer.Deserialize(
+            nullEndpoint.ToJsonString(),
+            ResourcePlanJsonContext.Default.ResourcePlan));
+
+        // Assert
+        error.Message.ShouldContain("controlPlane must not be null", Case.Sensitive);
+        endpointError.Message.ShouldContain("property 'endpoint' must be a string", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should reject explicitly null additive string facts")]
+    public void Validate_WithNullAdditiveStringFacts_ShouldThrow()
+    {
+        // Arrange
+        ResourceManifest manifest = CreateWebManifest();
+        PlanContext context = CreateContext(manifest);
+        ResourcePlan original = GenericPlanner.CreatePlan(context);
+        ResourcePlan nullRestartPolicy = CopyPlan(
+            original,
+            original.Workload with { RestartPolicy = null! },
+            original.Container);
+        var ports = new List<PortBinding>(original.Container.Ports)
+        {
+            [0] = original.Container.Ports[0] with { Scheme = null! }
+        };
+        var nullSchemeContainer = new ContainerSpec(
+            original.Container.Name,
+            original.Container.Artifact,
+            ports,
+            original.Container.Mounts,
+            original.Container.Environment,
+            original.Container.Probes);
+        ResourcePlan nullScheme = CopyPlan(original, original.Workload, nullSchemeContainer);
+        ResourcePlan nullControlPlaneField = CopyPlan(
+            original,
+            original.Workload,
+            original.Container,
+            new ControlPlaneSpec(null!, original.ControlPlane.Path));
+
+        // Act
+        InvalidOperationException restartError = Should.Throw<InvalidOperationException>(
+            () => ResourcePlanValidator.Validate(nullRestartPolicy, context));
+        InvalidOperationException schemeError = Should.Throw<InvalidOperationException>(
+            () => ResourcePlanValidator.Validate(nullScheme, context));
+        InvalidOperationException controlPlaneError = Should.Throw<InvalidOperationException>(
+            () => ResourcePlanValidator.Validate(nullControlPlaneField, context));
+
+        // Assert
+        restartError.Message.ShouldContain("restart policy must not be null", Case.Sensitive);
+        schemeError.Message.ShouldContain("scheme must not be null", Case.Sensitive);
+        controlPlaneError.Message.ShouldContain("endpoint must not be null", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Plan records: Should preserve legacy constructors and deconstruction")]
+    public void PlanRecords_WithLegacyShape_ShouldPreserveSourceCompatibility()
+    {
+        // Arrange
+        var binding = new PortBinding("http", 8080, "tcp");
+        var workload = new WorkloadSpec(
+            WorkloadKind.Deployment,
+            1,
+            StableIdentity: false,
+            ReadinessGate.For(WorkloadKind.Deployment),
+            StopGraceSeconds: 30);
+
+        // Act
+        (string endpoint, int port, string protocol) = binding;
+        (WorkloadKind kind, int replicas, bool stableIdentity, ReadinessGate gate, int stopGrace) = workload;
+
+        // Assert
+        endpoint.ShouldBe("http");
+        port.ShouldBe(8080);
+        protocol.ShouldBe("tcp");
+        kind.ShouldBe(WorkloadKind.Deployment);
+        replicas.ShouldBe(1);
+        stableIdentity.ShouldBeFalse();
+        gate.ShouldBeSameAs(workload.Gate);
+        stopGrace.ShouldBe(30);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should reject partially populated control-plane facts")]
+    public void Validate_WithPartialControlPlane_ShouldThrow()
+    {
+        // Arrange
+        ResourceManifest manifest = CreateWebManifest();
+        PlanContext context = CreateContext(manifest);
+        ResourcePlan original = GenericPlanner.CreatePlan(context);
+        ResourcePlan invalid = CopyPlan(
+            original,
+            original.Workload,
+            original.Container,
+            new ControlPlaneSpec(original.ControlPlane.Endpoint));
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(
+            () => ResourcePlanValidator.Validate(invalid, context));
+
+        // Assert
+        error.Message.ShouldContain("must either both be declared or both be omitted", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should reject endpoint schemes that differ from the manifest")]
+    public void Validate_WithMismatchedEndpointScheme_ShouldThrow()
+    {
+        // Arrange
+        ResourceManifest manifest = CreateWebManifest();
+        PlanContext context = CreateContext(manifest);
+        ResourcePlan original = GenericPlanner.CreatePlan(context);
+        var ports = new List<PortBinding>(original.Container.Ports)
+        {
+            [0] = original.Container.Ports[0] with { Scheme = "https" }
+        };
+        var container = new ContainerSpec(
+            original.Container.Name,
+            original.Container.Artifact,
+            ports,
+            original.Container.Mounts,
+            original.Container.Environment,
+            original.Container.Probes);
+        ResourcePlan invalid = CopyPlan(original, original.Workload, container);
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(
+            () => ResourcePlanValidator.Validate(invalid, context));
+
+        // Assert
+        error.Message.ShouldContain("does not match manifest scheme", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should reject partially omitted endpoint schemes")]
+    public void Validate_WithPartiallyOmittedEndpointSchemes_ShouldThrow()
+    {
+        // Arrange
+        ResourceManifest manifest = CreateWebManifest();
+        PlanContext context = CreateContext(manifest);
+        ResourcePlan original = GenericPlanner.CreatePlan(context);
+        var ports = new List<PortBinding>(original.Container.Ports)
+        {
+            [0] = original.Container.Ports[0] with { Scheme = string.Empty }
+        };
+        var container = new ContainerSpec(
+            original.Container.Name,
+            original.Container.Artifact,
+            ports,
+            original.Container.Mounts,
+            original.Container.Environment,
+            original.Container.Probes);
+        ResourcePlan invalid = CopyPlan(original, original.Workload, container);
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(
+            () => ResourcePlanValidator.Validate(invalid, context));
+
+        // Assert
+        error.Message.ShouldContain("must either all be declared or all be omitted", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should reject restart policies that differ from the manifest")]
+    public void Validate_WithMismatchedRestartPolicy_ShouldThrow()
+    {
+        // Arrange
+        ResourceManifest manifest = CreateWebManifest();
+        PlanContext context = CreateContext(manifest);
+        ResourcePlan original = GenericPlanner.CreatePlan(context);
+        WorkloadSpec workload = original.Workload with { RestartPolicy = "Never" };
+        ResourcePlan invalid = CopyPlan(original, workload, original.Container);
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(
+            () => ResourcePlanValidator.Validate(invalid, context));
+
+        // Assert
+        error.Message.ShouldContain("does not match manifest restart policy", Case.Sensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - CreatePlan: Should prefer a typed storage override to the manifest mount size")]
     public void CreatePlan_WithStorageOverride_ShouldPreferOverrideToManifestSize()
     {
@@ -143,7 +374,8 @@ public class GenericPlannerTests
             original.Workload.Replicas,
             StableIdentity: false,
             ReadinessGate.For(WorkloadKind.DaemonSet),
-            original.Workload.StopGraceSeconds);
+            original.Workload.StopGraceSeconds,
+            original.Workload.RestartPolicy);
         ResourcePlan invalid = CopyPlan(original, workload, original.Container);
 
         // Act
@@ -190,7 +422,8 @@ public class GenericPlannerTests
     private static ResourcePlan CopyPlan(
         ResourcePlan source,
         WorkloadSpec workload,
-        ContainerSpec container)
+        ContainerSpec container,
+        ControlPlaneSpec? controlPlane = null)
         => new(
             source.Schema,
             source.Resource,
@@ -200,7 +433,8 @@ public class GenericPlannerTests
             source.Volumes,
             source.Services,
             source.Exposures,
-            source.Hints);
+            source.Hints,
+            controlPlane ?? source.ControlPlane);
 
     private static ResourceManifest CreateWebManifest() => new()
     {

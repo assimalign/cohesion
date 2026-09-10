@@ -15,6 +15,10 @@ same-application closure of enabled, composable project resources. Each member r
 persisted loopback endpoints, resolved mounts and credentials, and observed dependency addresses
 through its ambient `ResourceContext`.
 
+`--mode render` emits the same versioned local plan-set envelope as the Local gateway, with each
+resource compiled to an `inProcessHost` unit. It is offline: generated entry points are not invoked,
+runtime inputs are not resolved, and the state directory is not created.
+
 See [DESIGN.md](DESIGN.md) for lifecycle, restart, remapping, and NativeAOT decisions and
 [Assembly](Assembly/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/OVERVIEW.md) for the
 public API map.

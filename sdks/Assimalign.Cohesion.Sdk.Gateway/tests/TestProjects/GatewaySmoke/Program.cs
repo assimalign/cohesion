@@ -18,7 +18,7 @@ else
 
 if (Array.Exists(args, static argument => argument == "--configure-provider"))
 {
-    builder.UseGateway(args, static gateways => gateways.Local());
+    builder.UseGateway(args, static gateways => gateways.JitTest());
 }
 else
 {

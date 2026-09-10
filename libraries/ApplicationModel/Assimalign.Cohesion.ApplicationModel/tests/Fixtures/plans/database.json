@@ -16,7 +16,8 @@
         "Running"
       ]
     },
-    "stopGraceSeconds": 30
+    "stopGraceSeconds": 30,
+    "restartPolicy": "OnFailure"
   },
   "container": {
     "name": "appa-database",
@@ -25,12 +26,14 @@
       {
         "endpoint": "db",
         "containerPort": 5432,
-        "protocol": "tcp"
+        "protocol": "tcp",
+        "scheme": "tcp"
       },
       {
         "endpoint": "admin",
         "containerPort": 8080,
-        "protocol": "tcp"
+        "protocol": "tcp",
+        "scheme": "http"
       }
     ],
     "mounts": [
@@ -55,6 +58,10 @@
         "command": []
       }
     ]
+  },
+  "controlPlane": {
+    "endpoint": "admin",
+    "path": "/cohesion/v1"
   },
   "volumes": [
     {

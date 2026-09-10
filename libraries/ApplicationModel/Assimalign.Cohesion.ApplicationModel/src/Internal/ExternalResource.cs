@@ -84,7 +84,8 @@ internal sealed class ExternalResource : PlannedResource, IExternalResource
             plan.Volumes,
             plan.Services,
             plan.Exposures,
-            hints);
+            hints,
+            plan.ControlPlane);
     }
 
     private static ResourceManifest CreateManifest(ExternalResourceDeclaration declaration)

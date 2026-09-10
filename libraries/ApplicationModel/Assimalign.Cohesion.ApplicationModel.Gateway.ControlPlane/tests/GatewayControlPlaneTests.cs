@@ -130,20 +130,24 @@ public sealed class GatewayControlPlaneTests
     {
         var run = new ApplicationGatewayOptions();
         var apply = new ApplicationGatewayOptions();
+        var bootstrap = new ApplicationGatewayOptions();
         var describe = new ApplicationGatewayOptions();
         var render = new ApplicationGatewayOptions();
 
         GatewayControlPlane.Configure(run, GatewayRunMode.Run);
         GatewayControlPlane.Configure(apply, GatewayRunMode.Apply);
+        GatewayControlPlane.Configure(bootstrap, GatewayRunMode.Bootstrap);
         GatewayControlPlane.Configure(describe, GatewayRunMode.Describe);
         GatewayControlPlane.Configure(render, GatewayRunMode.Render);
 
         run.ControlPlane.ShouldNotBeNull();
         apply.ControlPlane.ShouldNotBeNull();
+        bootstrap.ControlPlane.ShouldBeNull();
         describe.ControlPlane.ShouldBeNull();
         render.ControlPlane.ShouldBeNull();
         run.ControlPlaneClient.ShouldNotBeNull();
         apply.ControlPlaneClient.ShouldNotBeNull();
+        bootstrap.ControlPlaneClient.ShouldNotBeNull();
         describe.ControlPlaneClient.ShouldNotBeNull();
         render.ControlPlaneClient.ShouldNotBeNull();
     }

@@ -16,7 +16,8 @@
         "Running"
       ]
     },
-    "stopGraceSeconds": 30
+    "stopGraceSeconds": 30,
+    "restartPolicy": "OnFailure"
   },
   "container": {
     "name": "appa-api",
@@ -25,12 +26,14 @@
       {
         "endpoint": "http",
         "containerPort": 8080,
-        "protocol": "tcp"
+        "protocol": "tcp",
+        "scheme": "http"
       },
       {
         "endpoint": "https",
         "containerPort": 8443,
-        "protocol": "tcp"
+        "protocol": "tcp",
+        "scheme": "https"
       }
     ],
     "mounts": [],
@@ -56,6 +59,10 @@
         "command": []
       }
     ]
+  },
+  "controlPlane": {
+    "endpoint": "http",
+    "path": "/cohesion/v1"
   },
   "volumes": [],
   "services": [

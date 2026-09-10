@@ -95,6 +95,73 @@ public class ApplicationSetTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Application set bootstrap dispatches the complete model collection to the gateway")]
+    public async Task RunAsync_BootstrapWithTwoMembers_ShouldDispatchOneOrderedBootstrap()
+    {
+        // Arrange
+        IApplicationModel first = CreateModel(ApplicationName.Parse("platform"));
+        IApplicationModel second = CreateModel(ApplicationName.Parse("appa"));
+        var gateway = new RecordingMultiModelGateway("set-gateway");
+        IApplicationSet set = Application.CreateSet(
+                gateway,
+                ["--mode=bootstrap", "--gateway=set-gateway", "--environment=Development"])
+            .AddApplication(new ApplicationDeclaration(
+                first.Name,
+                new RecordingResolver(first.Name, first, new List<ApplicationName>())))
+            .AddApplication(new ApplicationDeclaration(
+                second.Name,
+                new RecordingResolver(second.Name, second, new List<ApplicationName>())));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+        TextWriter original = Console.Out;
+        using var output = new StringWriter();
+
+        try
+        {
+            Console.SetOut(output);
+
+            // Act
+            await set.RunAsync(cancellation.Token);
+
+            // Assert
+            gateway.Calls.ShouldBe(["validate-batch", "bootstrap-batch"]);
+            gateway.BootstrappedModels.ShouldNotBeNull();
+            gateway.BootstrappedModels![0].ShouldBeSameAs(first);
+            gateway.BootstrappedModels[1].ShouldBeSameAs(second);
+            gateway.OutputWriter.ShouldBeSameAs(Console.Out);
+            gateway.OutputCancellationToken.ShouldBe(cancellation.Token);
+            output.ToString().ShouldBe("bootstrapped" + Environment.NewLine);
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Application set output modes name gateways without the requested capability")]
+    [InlineData(GatewayRunMode.Render)]
+    [InlineData(GatewayRunMode.Bootstrap)]
+    public async Task RunAsync_OutputModeWithoutCapability_ThrowsBeforeValidation(GatewayRunMode mode)
+    {
+        // Arrange
+        IApplicationModel model = CreateModel(ApplicationName.Parse("appa"));
+        var gateway = new LifecycleOnlyMultiModelGateway("lifecycle-only");
+        IApplicationSet set = Application.CreateSet(
+                gateway,
+                ["--mode", mode.ToString().ToLowerInvariant(), "--environment=Development"])
+            .AddApplication(new ApplicationDeclaration(
+                model.Name,
+                new RecordingResolver(model.Name, model, new List<ApplicationName>())));
+
+        // Act
+        NotSupportedException error = await Should.ThrowAsync<NotSupportedException>(
+            () => set.RunAsync());
+
+        // Assert
+        error.Message.ShouldContain("lifecycle-only", Case.Sensitive);
+        error.Message.ShouldContain(mode.ToString().ToLowerInvariant(), Case.Sensitive);
+        gateway.ValidationCalled.ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Application set cancellation during startup stops gracefully")]
     public async Task RunAsync_CanceledWhileBatchStartIsBlocked_StopsAndCompletes()
     {
@@ -394,6 +461,7 @@ public class ApplicationSetTests
     private sealed class RecordingMultiModelGateway :
         IMultiModelApplicationGateway,
         IApplicationGatewayRenderer,
+        IApplicationGatewayBootstrapper,
         IApplicationSetExternalResourceResolver
     {
         public RecordingMultiModelGateway(string name)
@@ -416,6 +484,12 @@ public class ApplicationSetTests
         public IReadOnlyList<IApplicationModel>? ReconciledModels { get; private set; }
 
         public IReadOnlyList<IApplicationModel>? RenderedModels { get; private set; }
+
+        public IReadOnlyList<IApplicationModel>? BootstrappedModels { get; private set; }
+
+        public TextWriter? OutputWriter { get; private set; }
+
+        public CancellationToken OutputCancellationToken { get; private set; }
 
         public Func<CancellationToken, Task>? StartBehavior { get; init; }
 
@@ -502,7 +576,21 @@ public class ApplicationSetTests
         {
             Calls.Add("render-batch");
             RenderedModels = models;
+            OutputWriter = output;
+            OutputCancellationToken = cancellationToken;
             await output.WriteLineAsync("rendered");
+        }
+
+        public async Task BootstrapAsync(
+            IReadOnlyList<IApplicationModel> models,
+            TextWriter output,
+            CancellationToken cancellationToken = default)
+        {
+            Calls.Add("bootstrap-batch");
+            BootstrappedModels = models;
+            OutputWriter = output;
+            OutputCancellationToken = cancellationToken;
+            await output.WriteLineAsync("bootstrapped");
         }
 
         public ValueTask<ExternalResourceResolution> ResolveInSetAsync(
@@ -513,6 +601,54 @@ public class ApplicationSetTests
             DirectResolutionCount++;
             return ValueTask.FromResult(DirectResolution);
         }
+    }
+
+    private sealed class LifecycleOnlyMultiModelGateway : IMultiModelApplicationGateway
+    {
+        public LifecycleOnlyMultiModelGateway(string name)
+        {
+            Name = name;
+        }
+
+        public ResourceName Name { get; }
+
+        public bool ValidationCalled { get; private set; }
+
+        public void Validate(IApplicationModel model)
+        {
+            ValidationCalled = true;
+        }
+
+        public void Validate(IReadOnlyList<IApplicationModel> models)
+        {
+            ValidationCalled = true;
+        }
+
+        public Task StartAsync(
+            IApplicationModel model,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StartAsync(
+            IReadOnlyList<IApplicationModel> models,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task ReconcileAsync(
+            IApplicationModel model,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task ReconcileAsync(
+            IReadOnlyList<IApplicationModel> models,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task UninstallAsync(
+            IApplicationModel model,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task UninstallAsync(
+            IReadOnlyList<IApplicationModel> models,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class RecordingExternalResolver : IExternalResourceResolver

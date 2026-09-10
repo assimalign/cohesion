@@ -96,14 +96,25 @@ internal sealed class CohesionApplicationSet : IApplicationSet
                     .ConfigureAwait(false);
                 break;
             case GatewayRunMode.Render:
-                _gateway.Validate(models);
                 if (_gateway is not IApplicationGatewayRenderer renderer)
                 {
                     throw new NotSupportedException(
                         $"Gateway '{_gateway.Name}' does not implement render mode.");
                 }
 
+                _gateway.Validate(models);
                 await renderer.RenderAsync(models, Console.Out, cancellationToken)
+                    .ConfigureAwait(false);
+                break;
+            case GatewayRunMode.Bootstrap:
+                if (_gateway is not IApplicationGatewayBootstrapper bootstrapper)
+                {
+                    throw new NotSupportedException(
+                        $"Gateway '{_gateway.Name}' does not implement bootstrap mode.");
+                }
+
+                _gateway.Validate(models);
+                await bootstrapper.BootstrapAsync(models, Console.Out, cancellationToken)
                     .ConfigureAwait(false);
                 break;
             default:

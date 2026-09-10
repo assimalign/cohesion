@@ -471,6 +471,7 @@ public sealed class CohesionCreateResourceVerbs : Task
             }
             string gatewayType = item.GetMetadata("GatewayType").Trim();
             string optionsType = item.GetMetadata("OptionsType").Trim();
+            string? commandLineApplyMethod = Value(item.GetMetadata("CommandLineApplyMethod"));
             if (name.Length == 0 || gatewayType.Length == 0 || optionsType.Length == 0)
             {
                 Log.LogError($"CohesionGatewayProvider '{item.ItemSpec}' requires Name, GatewayType, and OptionsType metadata.");
@@ -494,7 +495,13 @@ public sealed class CohesionCreateResourceVerbs : Task
                 continue;
             }
 
-            result.Add(new GatewayProvider(member, name, gatewayType, optionsType, requiresJit));
+            result.Add(new GatewayProvider(
+                member,
+                name,
+                gatewayType,
+                optionsType,
+                commandLineApplyMethod,
+                requiresJit));
         }
 
         if (result.Count == 0)

@@ -26,12 +26,14 @@ public interface IApplication
     /// <see cref="GatewayRunMode.Run"/> realizes and supervises through the selected
     /// gateway until cancellation, then releases supervision gracefully without
     /// interpreting cancellation as teardown. <see cref="GatewayRunMode.Describe"/>
-    /// writes the model document without contacting the platform.
+    /// writes the model document without contacting the platform. <see cref="GatewayRunMode.Render"/>
+    /// and <see cref="GatewayRunMode.Bootstrap"/> dispatch through optional capabilities on the
+    /// selected gateway and write their platform representation to standard output.
     /// </summary>
     /// <param name="cancellationToken">Signals that the selected operation should stop.</param>
     /// <returns>A task that completes once the selected operation has completed.</returns>
     /// <exception cref="System.NotSupportedException">
-    /// The selected platform operation is not implemented by the current orchestration layer.
+    /// The selected gateway does not implement the requested optional operation.
     /// </exception>
     Task RunAsync(CancellationToken cancellationToken = default);
 }

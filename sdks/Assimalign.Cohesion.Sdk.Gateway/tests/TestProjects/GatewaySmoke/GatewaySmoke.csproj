@@ -17,8 +17,9 @@
     <CohesionResourceReference Include="..\GatewaySmokeDatabase\GatewaySmokeDatabase.csproj" />
     <CohesionGatewayProvider Include="JitTest"
       Name="jit-test"
-      GatewayType="global::Assimalign.Cohesion.ApplicationModel.Gateway.LocalGateway"
+      GatewayType="global::GatewaySmoke.JitTestGateway"
       OptionsType="global::Assimalign.Cohesion.ApplicationModel.Gateway.LocalGatewayOptions"
+      CommandLineApplyMethod="global::GatewaySmoke.JitTestGatewayCommandLine.Apply"
       RequiresJit="true" />
   </ItemGroup>
 

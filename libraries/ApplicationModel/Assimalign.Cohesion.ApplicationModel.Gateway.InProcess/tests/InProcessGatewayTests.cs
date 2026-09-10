@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -37,6 +38,54 @@ public sealed class InProcessGatewayTests
 
         exception.Message.ShouldContain("plain-exe");
         exception.Message.ShouldContain("plain executables are never nested");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "render emits an in-process host unit without state or entry invocation")]
+    public async Task RenderAsync_WithBoundModel_ShouldRemainOffline()
+    {
+        // Arrange
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "cohesion-inprocess-render-" + Guid.NewGuid().ToString("N"));
+        string stateDirectory = Path.Combine(root, "state");
+        string contentRoot = Path.Combine(root, "content-that-does-not-exist");
+        ResourceManifest manifest = TestManifest("rendered-member", mount: true, publicEndpoint: true);
+        var resource = new ManifestResource(manifest);
+        ResourcePlan plan = TestPlan("rendered-member", mount: true, exposure: true);
+        var descriptor = new TestDescriptor(resource, plan);
+        InProcessResourceBindings.Register(
+            resource,
+            new InProcessResourceBinding(Assembly.GetExecutingAssembly(), contentRoot));
+        var model = new TestApplicationModel(descriptor, manifest);
+        using var gateway = new DisposableGateway(new InProcessGateway(
+            new InProcessGatewayOptions { StateDirectory = stateDirectory }));
+        using var output = new StringWriter();
+
+        // Act
+        await ((IApplicationGatewayRenderer)gateway.Value).RenderAsync([model], output);
+
+        // Assert
+        using JsonDocument document = JsonDocument.Parse(output.ToString());
+        JsonElement rootElement = document.RootElement;
+        rootElement.GetProperty("schema").GetString().ShouldBe("cohesion/local-plan-set/v1");
+        rootElement.GetProperty("gateway").GetString().ShouldBe("inprocess");
+        JsonElement resourceElement = rootElement
+            .GetProperty("applications")[0]
+            .GetProperty("resources")[0];
+        resourceElement.TryGetProperty("plan", out _).ShouldBeFalse();
+        JsonElement unit = resourceElement.GetProperty("unit");
+        unit.GetProperty("kind").GetString().ShouldBe("inProcessHost");
+        unit.GetProperty("artifact").GetProperty("identity").GetString()
+            .ShouldBe(manifest.Artifact.Assembly);
+        unit.GetProperty("artifact").GetProperty("contentRoot").GetString()
+            .ShouldBe(contentRoot);
+        unit.GetProperty("endpoints")[0].GetProperty("allocation").GetString()
+            .ShouldBe("ambient");
+        unit.GetProperty("endpoints")[0].GetProperty("public").GetBoolean().ShouldBeTrue();
+        unit.GetProperty("mounts")[0].GetProperty("materialization").GetString()
+            .ShouldBe("ambientHandle");
+        output.ToString().ShouldNotContain("credential", Case.Insensitive);
+        Directory.Exists(root).ShouldBeFalse();
     }
 
     [Fact(DisplayName = DisplayPrefix + "unregistered executable is refused by resource name before startup")]
@@ -1310,11 +1359,12 @@ public sealed class InProcessGatewayTests
                 1,
                 StableIdentity: false,
                 ReadinessGate.For(workload),
-                StopGraceSeconds: 5),
+                StopGraceSeconds: 5,
+                RestartPolicy: "OnFailure"),
             new ContainerSpec(
                 resource,
                 ArtifactRef.Self,
-                [new PortBinding("http", 8080, "tcp")],
+                [new PortBinding("http", 8080, "tcp", "http")],
                 mounts,
                 environment ?? new Dictionary<string, string>(),
                 probes ?? [new ProbeMapping("readiness", null, ProbeKind.None, null, [])]),
@@ -1323,7 +1373,8 @@ public sealed class InProcessGatewayTests
             exposure
                 ? [new ExposureSpec("public-http", "http", "http", "http", exposureProtocol, 8080)]
                 : [],
-            new Dictionary<string, string>());
+            new Dictionary<string, string>(),
+            new ControlPlaneSpec("http", "/cohesion/v1"));
     }
 
     private static ResourceManifest TestManifest(

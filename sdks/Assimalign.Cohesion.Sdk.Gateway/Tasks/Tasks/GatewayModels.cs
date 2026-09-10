@@ -79,6 +79,7 @@ internal sealed record GatewayProvider(
     string Name,
     string GatewayType,
     string OptionsType,
+    string? CommandLineApplyMethod,
     bool RequiresJit);
 
 internal sealed record GatewayClientKind(string Kind, string PackageId);

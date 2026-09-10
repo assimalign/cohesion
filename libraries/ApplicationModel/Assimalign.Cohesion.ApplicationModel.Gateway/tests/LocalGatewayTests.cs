@@ -30,6 +30,93 @@ public class LocalGatewayTests
         new LocalGateway().Name.ShouldBe((ResourceName)"local");
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: render emits a deterministic process unit without runtime state")]
+    public async Task RunAsync_RenderMode_EmitsCompiledProcessWithoutStartingOrPersisting()
+    {
+        // Arrange
+        string root = Directory.CreateTempSubdirectory("cohesion-local-render-").FullName;
+        string launchMarker = Path.Combine(root, "launched");
+        try
+        {
+            var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["Z_LAST"] = "last",
+                ["A_FIRST"] = "first",
+                ["TEST_STARTED_PATH"] = launchMarker,
+            };
+            ResourceManifest manifest = CreateManifest(
+                "rendered-service",
+                environment,
+                readiness: HttpProbe("/readyz"),
+                startup: NoneProbe(),
+                liveness: TcpProbe(),
+                restartPolicy: "Always",
+                stopGraceSeconds: 17);
+            LocalGateway gateway = CreateGateway(root);
+            IApplication application = BuildApplication(gateway, manifest, ["--mode=render"]);
+            TextWriter original = Console.Out;
+            using var output = new StringWriter(CultureInfo.InvariantCulture);
+
+            try
+            {
+                Console.SetOut(output);
+
+                // Act
+                await application.RunAsync();
+
+                // Assert
+                using JsonDocument document = JsonDocument.Parse(output.ToString());
+                JsonElement rootElement = document.RootElement;
+                rootElement.GetProperty("schema").GetString().ShouldBe("cohesion/local-plan-set/v1");
+                rootElement.GetProperty("gateway").GetString().ShouldBe("local");
+                JsonElement unit = rootElement
+                    .GetProperty("applications")[0]
+                    .GetProperty("resources")[0]
+                    .GetProperty("unit");
+                unit.GetProperty("kind").GetString().ShouldBe("process");
+                unit.GetProperty("artifact").GetProperty("identity").GetString().ShouldBe(TestHostPath);
+                unit.GetProperty("restartPolicy").GetString().ShouldBe("Always");
+                unit.GetProperty("stopGraceSeconds").GetInt32().ShouldBe(17);
+                JsonElement endpoint = unit.GetProperty("endpoints")[0];
+                endpoint.GetProperty("scheme").GetString().ShouldBe("http");
+                endpoint.GetProperty("port").GetInt32().ShouldBe(0);
+                endpoint.GetProperty("allocation").GetString().ShouldBe("persistent");
+                endpoint.GetProperty("public").GetBoolean().ShouldBeTrue();
+                unit.GetProperty("controlPlane").GetProperty("path").GetString()
+                    .ShouldBe("/cohesion/v1");
+                string rendered = output.ToString();
+                rendered.IndexOf("A_FIRST", StringComparison.Ordinal)
+                    .ShouldBeLessThan(rendered.IndexOf("Z_LAST", StringComparison.Ordinal));
+
+                using var repeatedOutput = new StringWriter(CultureInfo.InvariantCulture);
+                await ((IApplicationGatewayRenderer)gateway).RenderAsync(
+                    [application.Model],
+                    repeatedOutput);
+                repeatedOutput.ToString().ShouldBe(rendered);
+
+                using var cancellation = new CancellationTokenSource();
+                cancellation.Cancel();
+                using var canceledOutput = new StringWriter(CultureInfo.InvariantCulture);
+                await Should.ThrowAsync<OperationCanceledException>(() =>
+                    ((IApplicationGatewayRenderer)gateway).RenderAsync(
+                        [application.Model],
+                        canceledOutput,
+                        cancellation.Token));
+                canceledOutput.ToString().ShouldBeEmpty();
+                File.Exists(launchMarker).ShouldBeFalse();
+                Directory.Exists(Path.Combine(root, ".cohesion")).ShouldBeFalse();
+            }
+            finally
+            {
+                Console.SetOut(original);
+            }
+        }
+        finally
+        {
+            DeleteTestDirectory(root);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - ProbeSpec: Http retains the validated URI and escaped endpoint path")]
     public void Http_EndpointUri_RetainsAddressAndEscapedPath()
     {

@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// as a supervised child process, starting them in dependency order, gating each on readiness,
 /// and stopping them in reverse order. It requires no platform tooling.
 /// </summary>
-public sealed class LocalGateway : ApplicationGateway
+public sealed class LocalGateway : ApplicationGateway, IApplicationGatewayRenderer
 {
     private readonly LocalGatewayOptions _options;
     private readonly InMemoryResourceStateManager _state = new();
@@ -61,6 +61,20 @@ public sealed class LocalGateway : ApplicationGateway
 
     /// <inheritdoc/>
     public override ResourceName Name => "local";
+
+    /// <inheritdoc/>
+    public Task RenderAsync(
+        IReadOnlyList<IApplicationModel> models,
+        TextWriter output,
+        CancellationToken cancellationToken = default) =>
+        LocalPlanSetWriter.WriteAsync(
+            Name,
+            "process",
+            "persistent",
+            models,
+            ResolveRenderArtifact,
+            output,
+            cancellationToken);
 
     /// <inheritdoc/>
     protected override IReadOnlyList<IApplicationResourceController> Controllers => _controllers;
@@ -141,5 +155,48 @@ public sealed class LocalGateway : ApplicationGateway
         }
 
         return Task.FromResult<IResourceArtifact>(new ExecutableArtifact(resource.Id, path));
+    }
+
+    private LocalRenderArtifact ResolveRenderArtifact(IApplicationResource resource)
+    {
+        string path;
+        if (resource is LocalExecutableResource localExecutable)
+        {
+            path = ResolveRenderPath(localExecutable.Path);
+        }
+        else if (resource is IManifestResource manifestResource
+                 && resource is IExecutableResource)
+        {
+            string? appHost = manifestResource.Manifest.Artifact.AppHost;
+            if (string.IsNullOrWhiteSpace(appHost))
+            {
+                throw new FileNotFoundException(
+                    $"Resource '{resource.Name}' has no apphost in its manifest artifact. "
+                    + "The local gateway does not launch the managed assembly DLL.");
+            }
+
+            path = ResolveRenderPath(appHost);
+        }
+        else if (resource is IExecutableResource)
+        {
+            throw new InvalidOperationException(
+                $"Executable resource '{resource.Name}' has no resource manifest. "
+                + "Add a plain or disabled executable with AddExecutable(name, path, options).");
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                $"The local gateway can only realize executable resources; '{resource.Name}' does not implement IExecutableResource.");
+        }
+
+        return new LocalRenderArtifact(path, Path.GetDirectoryName(path) ?? ".");
+    }
+
+    private string ResolveRenderPath(string path)
+    {
+        string baseDirectory = _options.BaseDirectory ?? AppContext.BaseDirectory;
+        return Path.IsPathFullyQualified(path)
+            ? Path.GetFullPath(path)
+            : Path.GetFullPath(Path.Combine(baseDirectory, path));
     }
 }

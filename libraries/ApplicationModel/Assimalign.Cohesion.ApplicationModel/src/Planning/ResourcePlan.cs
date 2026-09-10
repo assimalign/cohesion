@@ -36,6 +36,47 @@ public sealed record ResourcePlan
         IReadOnlyList<ServiceSpec> services,
         IReadOnlyList<ExposureSpec> exposures,
         IReadOnlyDictionary<string, string> hints)
+        : this(
+            schema,
+            resource,
+            kind,
+            workload,
+            container,
+            volumes,
+            services,
+            exposures,
+            hints,
+            controlPlane: null)
+    {
+    }
+
+    /// <summary>Initializes a resource realization plan with control-plane facts.</summary>
+    /// <param name="schema">The plan schema identifier.</param>
+    /// <param name="resource">The manifest resource name.</param>
+    /// <param name="kind">The manifest resource kind.</param>
+    /// <param name="workload">The workload controller and lifecycle specification.</param>
+    /// <param name="container">The resource container specification.</param>
+    /// <param name="volumes">Storage to materialize for the container.</param>
+    /// <param name="services">Stable services to create for the workload.</param>
+    /// <param name="exposures">Public endpoint exposures to create.</param>
+    /// <param name="hints">Optional advisory compiler hints.</param>
+    /// <param name="controlPlane">
+    /// The resource's default control-plane location. A missing value represents a legacy plan
+    /// that omitted control-plane facts.
+    /// </param>
+    /// <exception cref="ArgumentNullException">Any specification or collection is <see langword="null"/>.</exception>
+    [JsonConstructor]
+    public ResourcePlan(
+        string schema,
+        ResourceName resource,
+        string kind,
+        WorkloadSpec workload,
+        ContainerSpec container,
+        IReadOnlyList<VolumeSpec> volumes,
+        IReadOnlyList<ServiceSpec> services,
+        IReadOnlyList<ExposureSpec> exposures,
+        IReadOnlyDictionary<string, string> hints,
+        ControlPlaneSpec? controlPlane)
     {
         ArgumentNullException.ThrowIfNull(workload);
         ArgumentNullException.ThrowIfNull(container);
@@ -49,6 +90,7 @@ public sealed record ResourcePlan
         Kind = kind;
         Workload = workload;
         Container = container;
+        ControlPlane = controlPlane ?? new ControlPlaneSpec();
         Volumes = Copy(volumes);
         Services = Copy(services);
         Exposures = Copy(exposures);
@@ -77,6 +119,9 @@ public sealed record ResourcePlan
 
     /// <summary>Gets the resource container specification.</summary>
     public ContainerSpec Container { get; }
+
+    /// <summary>Gets the resource's default control-plane location.</summary>
+    public ControlPlaneSpec ControlPlane { get; }
 
     /// <summary>Gets the immutable volume specifications.</summary>
     public IReadOnlyList<VolumeSpec> Volumes { get; }

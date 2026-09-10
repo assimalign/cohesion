@@ -98,14 +98,20 @@ is:
 | `Name` | Stable command-line and environment selection name. |
 | `GatewayType` | Concrete `IApplicationGateway` implementation constructed by generated code. |
 | `OptionsType` | Provider-specific options accepted by the configuration overload. |
+| `CommandLineApplyMethod` | Optional fully-qualified static `void Apply(OptionsType, string[])` hook. |
 | `RequiresJit` | Whether including the provider makes the gateway executable ineligible for NativeAOT. |
 
 `UseGateway(args)` honors the builder's parsed request, then `COHESION_GATEWAY`, then the
 Development-only Local default. Unknown or unavailable providers fail with the generated
 set of valid names. The overload taking `Action<CohesionGatewayProviders>` executes only
-the callback for the selected provider. Both construction paths install the ControlPlane
-resolver client in every mode and the server factory only for `Run` and `Apply`; `Describe` and
-`Render` never bind a listener.
+the callback for the selected provider. After common arguments are applied, generated code
+calls the selected provider's optional `CommandLineApplyMethod` with the original, unfiltered
+`args`; provider packages use that AOT-safe hook for switches such as Kubernetes
+`--context` and `--kubeconfig`. The method must be public and static with the exact signature
+`void Apply(OptionsType options, string[] args)`. Providers without the metadata retain their
+existing constructor path. Both construction paths install the ControlPlane
+resolver client in every mode and the server factory only for `Run` and `Apply`; `Describe`,
+`Render`, and `Bootstrap` never bind a listener.
 
 ## Restore-time dependency contract
 

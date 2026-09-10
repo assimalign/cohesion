@@ -28,7 +28,7 @@ public interface IApplicationSet
 
     /// <summary>
     /// Resolves all member models at start, composes Describe output, or dispatches the
-    /// collection through one gateway for lifecycle and Render operations.
+    /// collection through one gateway for lifecycle, Render, and Bootstrap operations.
     /// </summary>
     /// <param name="cancellationToken">Signals shutdown or cancellation.</param>
     /// <returns>A task representing the application-set lifetime.</returns>
@@ -36,7 +36,10 @@ public interface IApplicationSet
     /// No applications were declared, a resolved model has the wrong identity, or the
     /// requested external realization cannot be honored.
     /// </exception>
-    /// <exception cref="NotSupportedException">The selected run mode is not supported.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The selected gateway does not implement the requested optional operation, or the run mode
+    /// cannot be composed by an application set.
+    /// </exception>
     /// <exception cref="OperationCanceledException">
     /// <paramref name="cancellationToken"/> is canceled.
     /// </exception>

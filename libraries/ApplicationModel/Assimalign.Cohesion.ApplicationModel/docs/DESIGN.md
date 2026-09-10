@@ -198,8 +198,11 @@ external overrides to each imported model, and binds an external targeting a sib
 `IApplicationSetExternalResourceResolver`. That direct observed-state lookup runs before the
 external's configured control-plane/file/static resolver and falls back only when the sibling is
 not observable. The set dispatches `Run`, `Apply`, or `Teardown` through the shared gateway;
-`Describe` writes a JSON array of every member model without gateway contact; and `Render` validates
-the ordered collection and dispatches it through `IApplicationGatewayRenderer`. The base
+`Describe` writes a JSON array of every member model without gateway contact; `Render` validates
+the ordered collection and dispatches it through `IApplicationGatewayRenderer`; and `Bootstrap`
+does the same through `IApplicationGatewayBootstrapper`. A single application dispatches those
+optional capabilities with a one-model collection. An unsupported capability names the selected
+gateway before any application-set gateway validation. The base
 multi-model contract preserves model
 order and requires state to be scoped by `(application, resource)`; equal resource identifiers in
 different applications must not collide. SDK generation of `Applications.<Name>` is a consumer
@@ -243,7 +246,8 @@ external as realized, and the set rejects any requested name that no member real
   using the gateway's own resource-aware stop bounds. Stop retains persistent platform objects;
   Apply performs a reconcile pass and Teardown dispatches `UninstallAsync(model)`. Describe emits the model document
   (or the declaration-ordered document array for an application set) and never contacts the selected
-  gateway. Set Render uses the optional renderer capability and remains platform-contact-free.
+  gateway. Render and Bootstrap use optional gateway capabilities, receive the original cancellation
+  token, write to standard output, and remain platform-contact-free.
 
 ## AOT posture
 

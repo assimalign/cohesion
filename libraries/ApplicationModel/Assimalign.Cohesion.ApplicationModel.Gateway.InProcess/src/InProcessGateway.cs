@@ -12,11 +12,12 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 /// Realizes enabled, composable project resources by invoking their entry points under
 /// isolated ambient contexts in the gateway process.
 /// </summary>
-public sealed class InProcessGateway : ApplicationGateway
+public sealed class InProcessGateway : ApplicationGateway, IApplicationGatewayRenderer
 {
     private readonly InMemoryResourceStateManager _state = new();
     private readonly IReadOnlyList<IApplicationResourceController> _controllers;
     private readonly ProcessHost _host;
+    private readonly string _stateDirectory;
 
     /// <summary>Initializes an in-process gateway with default options.</summary>
     public InProcessGateway()
@@ -39,15 +40,14 @@ public sealed class InProcessGateway : ApplicationGateway
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
 
-        string stateDirectory = Path.GetFullPath(
+        _stateDirectory = Path.GetFullPath(
             options.StateDirectory
             ?? Path.Combine(Environment.CurrentDirectory, ".cohesion"));
-        Directory.CreateDirectory(stateDirectory);
-        options.ExportDirectory ??= stateDirectory;
+        options.ExportDirectory ??= _stateDirectory;
 
         ResourceContext outerContext = ResourceRuntime.Current;
-        _host = new ProcessHost(outerContext.EnvironmentName, stateDirectory);
-        var contexts = new InProcessContextFactory(stateDirectory);
+        _host = new ProcessHost(outerContext.EnvironmentName, _stateDirectory);
+        var contexts = new InProcessContextFactory(_stateDirectory);
         var probes = new InProcessProbeRunner(options);
         var supervisor = new InProcessMemberSupervisor(
             _host,
@@ -62,6 +62,20 @@ public sealed class InProcessGateway : ApplicationGateway
 
     /// <inheritdoc/>
     public override ResourceName Name => "inprocess";
+
+    /// <inheritdoc/>
+    public Task RenderAsync(
+        IReadOnlyList<IApplicationModel> models,
+        TextWriter output,
+        CancellationToken cancellationToken = default) =>
+        LocalPlanSetWriter.WriteAsync(
+            Name,
+            "inProcessHost",
+            "ambient",
+            models,
+            ResolveRenderArtifact,
+            output,
+            cancellationToken);
 
     /// <inheritdoc/>
     protected override IReadOnlyList<IApplicationResourceController> Controllers => _controllers;
@@ -82,6 +96,13 @@ public sealed class InProcessGateway : ApplicationGateway
         if (!InProcessResourceBindings.TryGet(resource, out InProcessResourceBinding? binding))
         {
             throw MissingBinding(resource);
+        }
+
+        if (!Directory.Exists(binding.ContentRootPath))
+        {
+            throw new DirectoryNotFoundException(
+                $"Resource '{resource.Name}' in-process content root "
+                + $"'{binding.ContentRootPath}' does not exist.");
         }
 
         return Task.FromResult<IResourceArtifact>(new InProcessResourceArtifact(
@@ -135,19 +156,18 @@ public sealed class InProcessGateway : ApplicationGateway
                 $"Resource '{descriptor.Resource.Name}' cannot be colocated by gateway '{Name}' because "
                 + $"assembly '{binding.EntryAssembly.GetName().Name}' has no Program.Main entry point.");
         }
-        if (!Directory.Exists(binding.ContentRootPath))
-        {
-            throw new DirectoryNotFoundException(
-                $"Resource '{descriptor.Resource.Name}' in-process content root "
-                + $"'{binding.ContentRootPath}' does not exist.");
-        }
     }
 
     /// <inheritdoc/>
-    protected override Task StartObserverAsync(
+    protected override async Task StartObserverAsync(
         IReadOnlyList<IApplicationModel> models,
-        CancellationToken cancellationToken) =>
-        ((Assimalign.Cohesion.Hosting.IHost)_host).StartAsync(cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(_stateDirectory);
+        await ((Assimalign.Cohesion.Hosting.IHost)_host)
+            .StartAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
 
     /// <inheritdoc/>
     protected override Task StopObserverAsync(CancellationToken cancellationToken) =>
@@ -158,4 +178,17 @@ public sealed class InProcessGateway : ApplicationGateway
             $"Resource '{resource.Name}' cannot be colocated by gateway '{Name}' because it has no "
             + "generated in-process entry binding. Use an enabled, composable Cohesion project reference; "
             + "plain executables, package-only manifests, and image-only resources are never nested.");
+
+    private LocalRenderArtifact ResolveRenderArtifact(IApplicationResource resource)
+    {
+        if (resource is not IManifestResource manifestResource
+            || !InProcessResourceBindings.TryGet(resource, out InProcessResourceBinding? binding))
+        {
+            throw MissingBinding(resource);
+        }
+
+        return new LocalRenderArtifact(
+            manifestResource.Manifest.Artifact.Assembly,
+            binding.ContentRootPath);
+    }
 }

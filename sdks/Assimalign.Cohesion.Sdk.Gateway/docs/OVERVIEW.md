@@ -64,8 +64,13 @@ those identities at the same version as well.
 
 `CohesionGateways` is a semicolon-delimited allow-list. Provider packages contribute a
 `CohesionGatewayProvider` item through `buildTransitive` props with `Name`,
-`GatewayType`, `OptionsType`, and `RequiresJit` metadata. Generated code dispatches only
-across those contributed items; the Cohesion SDK does not contain platform-type names.
+`GatewayType`, `OptionsType`, and `RequiresJit` metadata. A provider may also contribute
+`CommandLineApplyMethod`, a fully-qualified public static
+`void Apply(OptionsType, string[])` method. Generated `UseGateway(args)` calls that hook only
+for the selected provider and passes the original argument array after applying common options,
+so platform switches such as `--context` and `--kubeconfig` remain provider-owned. Generated code
+dispatches only across those contributed items; the Cohesion SDK does not contain platform-type
+names.
 
 `Local` is contributed by `Assimalign.Cohesion.ApplicationModel.Gateway`; `InProcess` is
 contributed by `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess`. External platform
@@ -76,7 +81,7 @@ packages are restored only when their names appear in `CohesionGateways`, at
 `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` is a fixed gateway dependency rather
 than a selectable provider. Generated `UseGateway(args)` composition installs its authenticated
 resolver client in every mode and serves its listener for the realizing `Run` and `Apply` modes;
-`Describe` and `Render` stay listener-free.
+`Describe`, `Render`, and `Bootstrap` stay listener-free.
 
 Selecting `InProcess` does not by itself authorize resource assembly loading. A gateway with
 project resources must also set `CohesionGatewayInProcess=true`. The two-factor gate promotes

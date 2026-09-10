@@ -37,10 +37,34 @@ internal sealed class CohesionApplication : IApplication
             GatewayRunMode.Apply => _gateway.ReconcileAsync(Model, cancellationToken),
             GatewayRunMode.Teardown => _gateway.UninstallAsync(Model, cancellationToken),
             GatewayRunMode.Describe => ApplicationModelDocumentWriter.WriteAsync(Model, cancellationToken),
+            GatewayRunMode.Render => RenderAsync(cancellationToken),
+            GatewayRunMode.Bootstrap => BootstrapAsync(cancellationToken),
             GatewayRunMode.TrustIssue or GatewayRunMode.TrustAdd => RunCommandAsync(cancellationToken),
             _ => throw new NotSupportedException(
                 $"Gateway run mode '{Model.RunMode}' is not implemented until its platform execution/compiler support is available. No gateway operation was attempted."),
         };
+    }
+
+    private Task RenderAsync(CancellationToken cancellationToken)
+    {
+        if (_gateway is not IApplicationGatewayRenderer renderer)
+        {
+            throw new NotSupportedException(
+                $"Gateway '{_gateway.Name}' does not implement render mode.");
+        }
+
+        return renderer.RenderAsync([Model], Console.Out, cancellationToken);
+    }
+
+    private Task BootstrapAsync(CancellationToken cancellationToken)
+    {
+        if (_gateway is not IApplicationGatewayBootstrapper bootstrapper)
+        {
+            throw new NotSupportedException(
+                $"Gateway '{_gateway.Name}' does not implement bootstrap mode.");
+        }
+
+        return bootstrapper.BootstrapAsync([Model], Console.Out, cancellationToken);
     }
 
     private Task RunCommandAsync(CancellationToken cancellationToken)

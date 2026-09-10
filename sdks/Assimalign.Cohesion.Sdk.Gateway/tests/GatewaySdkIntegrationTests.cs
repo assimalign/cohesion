@@ -94,6 +94,14 @@ public sealed class GatewaySdkIntegrationTests
         source.ShouldContain("UseGateway(string[] args)");
         source.ShouldContain("global::System.Action<CohesionGatewayProviders> configure");
         source.ShouldContain("ApplicationGatewayCommandLine.Apply(options, args)");
+        source.ShouldContain("global::GatewaySmoke.JitTestGatewayCommandLine.Apply(options, args)");
+        source.Split(
+            "global::GatewaySmoke.JitTestGatewayCommandLine.Apply(options, args);",
+            StringSplitOptions.None).Length.ShouldBe(3);
+        source.ReplaceLineEndings("\n").ShouldContain(
+            "global::Assimalign.Cohesion.ApplicationModel.Gateway.ApplicationGatewayCommandLine.Apply(options, args);\n" +
+            "        global::GatewaySmoke.JitTestGatewayCommandLine.Apply(options, args);\n" +
+            "        global::Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.GatewayControlPlane.Configure(options, runMode);");
         source.ShouldContain("Gateway.ControlPlane.GatewayControlPlane.Configure(options, runMode)");
         source.ShouldContain("new CohesionGatewayProviders(selected, args, builder.RunMode)");
         source.ShouldContain("new global::Assimalign.Cohesion.ApplicationModel.Gateway.LocalGateway(options)");
@@ -199,6 +207,37 @@ public sealed class GatewaySdkIntegrationTests
             .ShouldBe("gateway-smoke-database");
         web.GetProperty("manifest").GetProperty("kind").GetString().ShouldBe("Web");
         web.GetProperty("plan").GetProperty("schema").GetString().ShouldBe("cohesion/plan/v1");
+
+        // Act: select the contributed provider and pass an option understood only by it.
+        DotNetBuildResult providerDescribe = await workspace.RunBuiltProjectAsync(
+            "GatewaySmoke",
+            [
+                "--mode=describe",
+                "--gateway=jit-test",
+                "--environment=Development",
+                "--jit-provider-token=received",
+            ],
+            cancellationSource.Token);
+
+        // Assert: UseGateway forwards the full argument array to the selected provider hook.
+        providerDescribe.ExitCode.ShouldBe(0, providerDescribe.Output);
+        using JsonDocument providerDocument = JsonDocument.Parse(providerDescribe.StandardOutput);
+        providerDocument.RootElement.GetProperty("gateway").GetString().ShouldBe("jit-test");
+
+        DotNetBuildResult configuredProviderDescribe = await workspace.RunBuiltProjectAsync(
+            "GatewaySmoke",
+            [
+                "--mode=describe",
+                "--gateway=jit-test",
+                "--environment=Development",
+                "--jit-provider-token=received",
+                "--configure-provider",
+            ],
+            cancellationSource.Token);
+        configuredProviderDescribe.ExitCode.ShouldBe(0, configuredProviderDescribe.Output);
+        using JsonDocument configuredProviderDocument = JsonDocument.Parse(
+            configuredProviderDescribe.StandardOutput);
+        configuredProviderDocument.RootElement.GetProperty("gateway").GetString().ShouldBe("jit-test");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - disabled resource references report COHSDK001")]

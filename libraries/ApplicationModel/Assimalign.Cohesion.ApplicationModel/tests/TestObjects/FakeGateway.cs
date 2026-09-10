@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,5 +63,52 @@ internal class FakeGateway : IApplicationGateway
         Calls.Add("uninstall");
         StartedModel = model;
         return Task.CompletedTask;
+    }
+}
+
+internal sealed class FakeOutputGateway :
+    FakeGateway,
+    IApplicationGatewayRenderer,
+    IApplicationGatewayBootstrapper
+{
+    public FakeOutputGateway(string name = "output")
+        : base(name)
+    {
+    }
+
+    public string? OutputMode { get; private set; }
+
+    public IReadOnlyList<IApplicationModel>? OutputModels { get; private set; }
+
+    public TextWriter? OutputWriter { get; private set; }
+
+    public CancellationToken OutputCancellationToken { get; private set; }
+
+    public Task RenderAsync(
+        IReadOnlyList<IApplicationModel> models,
+        TextWriter output,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync("render", models, output, cancellationToken);
+
+    public Task BootstrapAsync(
+        IReadOnlyList<IApplicationModel> models,
+        TextWriter output,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync("bootstrap", models, output, cancellationToken);
+
+    private async Task WriteAsync(
+        string mode,
+        IReadOnlyList<IApplicationModel> models,
+        TextWriter output,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(models);
+        ArgumentNullException.ThrowIfNull(output);
+        cancellationToken.ThrowIfCancellationRequested();
+        OutputMode = mode;
+        OutputModels = models;
+        OutputWriter = output;
+        OutputCancellationToken = cancellationToken;
+        await output.WriteLineAsync(mode);
     }
 }

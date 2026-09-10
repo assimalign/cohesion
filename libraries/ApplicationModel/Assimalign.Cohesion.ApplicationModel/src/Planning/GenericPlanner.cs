@@ -50,7 +50,8 @@ public static class GenericPlanner
             ports[index] = new PortBinding(
                 endpoint.Name,
                 endpoint.ContainerPort,
-                endpoint.Protocol);
+                endpoint.Protocol,
+                endpoint.Scheme);
 
             services.Add(new ServiceSpec(
                 serviceName,
@@ -137,7 +138,8 @@ public static class GenericPlanner
             replicas,
             StableIdentity: workloadKind is WorkloadKind.StatefulSet,
             ReadinessGate.For(workloadKind),
-            manifest.Lifecycle.StopGraceSeconds);
+            manifest.Lifecycle.StopGraceSeconds,
+            manifest.Lifecycle.RestartPolicy);
 
         return new ResourcePlan(
             ResourcePlan.CurrentSchema,
@@ -148,7 +150,10 @@ public static class GenericPlanner
             volumes,
             services,
             exposures,
-            new Dictionary<string, string>(StringComparer.Ordinal));
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            new ControlPlaneSpec(
+                manifest.ControlPlane.Endpoint,
+                manifest.ControlPlane.Path));
     }
 
     private static bool HasVolumeMount(IReadOnlyList<ResourceManifestMount> mounts)

@@ -87,6 +87,7 @@ public static class ResourcePlanValidator
             $"Plan stop grace '{plan.Workload.StopGraceSeconds}' does not match manifest stop grace " +
             $"'{manifest.Lifecycle.StopGraceSeconds}'.");
         Require(plan.Workload.StopGraceSeconds > 0, "Plan stop grace must be greater than zero.");
+        ValidateRestartPolicy(plan.Workload, manifest.Lifecycle);
 
         ValidateGate(plan.Workload);
 
@@ -98,6 +99,7 @@ public static class ResourcePlanValidator
             string.Equals(plan.Container.Name, manifest.Name.ToString(), StringComparison.Ordinal),
             $"Plan container '{plan.Container.Name}' does not match resource '{manifest.Name}'.");
 
+        ValidateControlPlane(plan.ControlPlane, manifest.ControlPlane);
         ValidateEndpointBindings(plan, manifest);
         ValidateMountBindings(plan, manifest);
         ValidateVolumes(plan, manifest);
@@ -114,6 +116,69 @@ public static class ResourcePlanValidator
         Require(
             SetEquals(workload.Gate.Satisfying, expected.Satisfying),
             $"Workload '{workload.Kind}' has an invalid readiness satisfying set.");
+    }
+
+    private static void ValidateRestartPolicy(
+        WorkloadSpec workload,
+        ResourceManifestLifecycle lifecycle)
+    {
+        string restartPolicy = RequireNotNull(
+            workload.RestartPolicy,
+            "Plan restart policy must not be null.");
+        if (IsLegacyOmitted(restartPolicy))
+        {
+            return;
+        }
+
+        Require(
+            !string.IsNullOrWhiteSpace(restartPolicy),
+            "Plan restart policy must not be whitespace.");
+        Require(
+            IsSupportedRestartPolicy(restartPolicy),
+            $"Plan restart policy '{restartPolicy}' is not supported; expected 'OnFailure', " +
+            "'Always', or 'Never'.");
+        Require(
+            string.Equals(restartPolicy, lifecycle.RestartPolicy, StringComparison.Ordinal),
+            $"Plan restart policy '{restartPolicy}' does not match manifest restart policy " +
+            $"'{lifecycle.RestartPolicy}'.");
+    }
+
+    private static void ValidateControlPlane(
+        ControlPlaneSpec controlPlane,
+        ResourceManifestControlPlane manifestControlPlane)
+    {
+        string endpoint = RequireNotNull(
+            controlPlane.Endpoint,
+            "Plan control-plane endpoint must not be null.");
+        string path = RequireNotNull(
+            controlPlane.Path,
+            "Plan control-plane path must not be null.");
+        bool endpointOmitted = IsLegacyOmitted(endpoint);
+        bool pathOmitted = IsLegacyOmitted(path);
+
+        Require(
+            endpointOmitted == pathOmitted,
+            "Plan control-plane endpoint and path must either both be declared or both be omitted by a legacy plan.");
+
+        if (endpointOmitted)
+        {
+            return;
+        }
+
+        Require(
+            !string.IsNullOrWhiteSpace(endpoint),
+            "Plan control-plane endpoint must not be whitespace.");
+        Require(
+            !string.IsNullOrWhiteSpace(path),
+            "Plan control-plane path must not be whitespace.");
+        Require(
+            string.Equals(endpoint, manifestControlPlane.Endpoint, StringComparison.Ordinal),
+            $"Plan control-plane endpoint '{endpoint}' does not match manifest control-plane " +
+            $"endpoint '{manifestControlPlane.Endpoint}'.");
+        Require(
+            string.Equals(path, manifestControlPlane.Path, StringComparison.Ordinal),
+            $"Plan control-plane path '{path}' does not match manifest control-plane path " +
+            $"'{manifestControlPlane.Path}'.");
     }
 
     private static void ValidateEnvironment(ResourcePlan plan, PlanContext context)
@@ -163,6 +228,7 @@ public static class ResourcePlanValidator
             $"'{manifest.Endpoints.Count}'.");
 
         var endpointNames = new HashSet<string>(StringComparer.Ordinal);
+        bool? legacySchemesOmitted = null;
         for (int index = 0; index < manifest.Endpoints.Count; index++)
         {
             ResourceManifestEndpoint endpoint = manifest.Endpoints[index];
@@ -179,6 +245,29 @@ public static class ResourcePlanValidator
                 string.Equals(binding.Protocol, endpoint.Protocol, StringComparison.Ordinal),
                 $"Endpoint '{endpoint.Name}' protocol '{binding.Protocol}' does not match manifest protocol " +
                 $"'{endpoint.Protocol}'.");
+
+            string scheme = RequireNotNull(
+                binding.Scheme,
+                $"Endpoint '{endpoint.Name}' scheme must not be null.");
+            bool schemeOmitted = IsLegacyOmitted(scheme);
+            legacySchemesOmitted ??= schemeOmitted;
+            Require(
+                legacySchemesOmitted == schemeOmitted,
+                "Plan endpoint schemes must either all be declared or all be omitted by a legacy plan.");
+
+            if (!schemeOmitted)
+            {
+                Require(
+                    !string.IsNullOrWhiteSpace(scheme),
+                    $"Endpoint '{endpoint.Name}' scheme must not be whitespace.");
+                Require(
+                    Uri.CheckSchemeName(scheme),
+                    $"Endpoint '{endpoint.Name}' scheme '{scheme}' is not a valid URI scheme.");
+                Require(
+                    string.Equals(scheme, endpoint.Scheme, StringComparison.Ordinal),
+                    $"Endpoint '{endpoint.Name}' scheme '{scheme}' does not match manifest scheme " +
+                    $"'{endpoint.Scheme}'.");
+            }
         }
     }
 
@@ -592,6 +681,23 @@ public static class ResourcePlanValidator
         }
 
         return true;
+    }
+
+    private static bool IsLegacyOmitted(string value) => value.Length is 0;
+
+    private static bool IsSupportedRestartPolicy(string value) =>
+        string.Equals(value, "OnFailure", StringComparison.Ordinal) ||
+        string.Equals(value, "Always", StringComparison.Ordinal) ||
+        string.Equals(value, "Never", StringComparison.Ordinal);
+
+    private static string RequireNotNull(string? value, string message)
+    {
+        if (value is null)
+        {
+            throw new InvalidOperationException(message);
+        }
+
+        return value;
     }
 
     private static void Require(bool condition, string message)

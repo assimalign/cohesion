@@ -104,6 +104,12 @@ the registration under the same lock.
   gateway never falls back to the managed assembly DLL. A plain or orchestration-disabled
   executable can launch only through `AddExecutable(name, path, options)`, with an explicit
   readiness probe or per-resource stdout marker.
+- **Render**: `--mode render` compiles the declaration-ordered models into
+  `cohesion/local-plan-set/v1` process units. The document resolves artifact paths syntactically,
+  folds plan services, exposures, and volumes into deferred loopback endpoint and mount requests,
+  and carries workload, restart, gate, probe, environment, and control-plane facts. Port zero means
+  runtime allocation. Rendering never gathers an artifact, allocates a port, materializes a mount,
+  resolves an input, starts a child, or creates Local gateway state.
 - **Endpoints**: each endpoint gets a loopback port persisted in
   `.cohesion/<application>/.state/ports.json`. The gateway injects the frozen `ResourceEnvironment`
   endpoint contract (caller values win), publishes the allocated endpoints atomically with the

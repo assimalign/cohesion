@@ -6,6 +6,10 @@ workload and resource shapes whose platform-neutral semantics must not drift.
 `ResourcePlanJsonContext`, preserving the NativeAOT-safe serialization boundary,
 then compares the complete JSON tree with the checked-in document.
 
+Every current fixture carries the default control-plane endpoint and path, each endpoint's URI
+scheme (including private endpoints), and the manifest lifecycle restart policy. Empty values for
+those fields are reserved for deserializing legacy version 1 documents and are never golden output.
+
 This directory is the `KindMatrixTests` fixture set vendored by `cohesion-platforms`
 items 33/34 so each platform compiler can be conformance-tested without resource-area
 code present. Each `Sdk.<Area>` default manifest shape belongs in this set as that area

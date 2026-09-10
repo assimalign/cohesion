@@ -36,6 +36,7 @@ internal sealed class InvalidEnvironmentPlannedResource : PlannedResource
             plan.Volumes,
             plan.Services,
             plan.Exposures,
-            plan.Hints);
+            plan.Hints,
+            plan.ControlPlane);
     }
 }

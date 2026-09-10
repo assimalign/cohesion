@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -110,6 +111,7 @@ public sealed class ResourceManifestPackIntegrationTests
             "obj",
             "Debug",
             "net10.0",
+            RuntimeInformation.RuntimeIdentifier,
             "cohesion",
             "resource.json");
         using (JsonDocument sourceManifest = JsonDocument.Parse(File.ReadAllText(sourceManifestPath)))
@@ -147,6 +149,7 @@ public sealed class ResourceManifestPackIntegrationTests
             "obj",
             "Debug",
             "net10.0",
+            RuntimeInformation.RuntimeIdentifier,
             "cohesion",
             "resource.json");
         using JsonDocument consumerManifest = JsonDocument.Parse(File.ReadAllText(consumerManifestPath));
