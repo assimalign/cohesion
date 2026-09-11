@@ -23,12 +23,21 @@ The base SDK can be pinned inline:
 
 ```xml
 <Project Sdk="Assimalign.Cohesion.Sdk/10.0.1-preview.3">
-    <PropertyGroup>
-        <OutputType>Exe</OutputType>
-        <TargetFramework>net10.0</TargetFramework>
-    </PropertyGroup>
 </Project>
 ```
+
+Add a `Program.cs` entry point. The base SDK and every layered SDK supply
+`OutputType=Exe`, `TargetFramework=net10.0`, `LangVersion=Preview`,
+`EnablePreviewFeatures=true`, `ImplicitUsings=disable`, `Nullable=enable`, and
+`IsAotCompatible=true`. Base defaults are conditional on empty values; `-p:`
+properties are honored, and later consumer `Directory.Build.props` or csproj
+assignments override them. An ordinary `Directory.Build.props` carries identity
+only. Library-style base-SDK consumers explicitly set `OutputType=Library`.
+Resource executables do not multi-target, and a language-version override also
+requires overriding `EnablePreviewFeatures`. Gateway retains unconditional
+`IsAotCompatible=true` in its props and `OutputType=Exe` in its targets. See the
+base SDK's [project defaults](./Assimalign.Cohesion.Sdk/docs/DESIGN.md#project-defaults)
+for import ordering and override constraints.
 
 Layered Cohesion SDKs import the base SDK without an inline version. Pin both the
 selected SDK and `Assimalign.Cohesion.Sdk` in `global.json`; a Gateway consumer's
@@ -95,10 +104,10 @@ The orchestration plane is delivered through PackageReferences, never an
 `App.Gateway` framework. In-process composition is the narrow exception that adds
 the explicit resource-area frameworks needed by nested project references.
 
-The current implementation remains guarded while Gateway.InProcess,
-Gateway.ControlPlane, external Docker/Kubernetes provider contributions, and a
-first-restore manifest dependency channel are incomplete. Web and Database are the
-only typed ApplicationModel mappings today. The transitional SDK dependency set
+The current implementation remains guarded while external Docker/Kubernetes provider
+contributions and a first-restore manifest dependency channel are incomplete. Web,
+Database, and ConfigurationStore are the typed ApplicationModel mappings today.
+The transitional SDK dependency set
 must not be expanded to every area merely to hide the restore-order gap; see
 [`Sdk.Gateway` design](./Assimalign.Cohesion.Sdk.Gateway/docs/DESIGN.md) for the
 required restore-visible producer contract and release gates.

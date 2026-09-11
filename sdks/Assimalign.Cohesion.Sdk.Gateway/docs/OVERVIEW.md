@@ -45,6 +45,13 @@ ConfigurationStore descriptors expose `SetValue` and `RemoveValue`. Their manife
 advertise accepted kinds as bare strings in `commands`. A command-bearing target also
 requires its narrow client package, even when it is not used as a mount source.
 
+Gateway inherits the base SDK's [project defaults](../../Assimalign.Cohesion.Sdk/docs/OVERVIEW.md#project-defaults):
+`Exe`, `net10.0`, preview language/features, disabled implicit usings, enabled
+nullable analysis, and AOT compatibility. It retains unconditional
+`IsAotCompatible=true` in its props (after consumer `Directory.Build.props`) and
+`OutputType=Exe` in its targets (after the csproj body). The other base defaults
+follow the normal consumer override rules and documented language/TFM constraints.
+
 ## SDK pins
 
 The Gateway SDK imports the base Cohesion SDK. NuGet's nested MSBuild SDK import does

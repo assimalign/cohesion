@@ -2,9 +2,6 @@
 
   <PropertyGroup>
     <OutputType>Library</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
-    <EnablePreviewFeatures>true</EnablePreviewFeatures>
-    <IsAotCompatible>true</IsAotCompatible>
     <RootNamespace>InvalidOutputType</RootNamespace>
     <CohesionApplicationModel>enabled</CohesionApplicationModel>
     <CohesionApplication>inventory</CohesionApplication>

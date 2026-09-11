@@ -72,6 +72,8 @@ public sealed class GatewaySdkIntegrationTests
         // Assert: generated/compiled build surface
         build.ExitCode.ShouldBe(0, build.Output);
         string gatewayDirectory = workspace.ProjectDirectory("GatewaySmoke");
+        File.ReadAllText(Path.Combine(gatewayDirectory, "obj", "sdk-defaults.txt")).Trim()
+            .ShouldBe("Exe|net10.0|Preview|true|disable|enable|true");
         string sourcePath = GeneratedOutput(gatewayDirectory, "Gateway.g.cs");
         string source = File.ReadAllText(sourcePath);
         source.ShouldContain(

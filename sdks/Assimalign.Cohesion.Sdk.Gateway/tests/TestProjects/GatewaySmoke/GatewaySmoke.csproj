@@ -1,9 +1,6 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <EnablePreviewFeatures>true</EnablePreviewFeatures>
-    <IsAotCompatible>true</IsAotCompatible>
     <RootNamespace>GatewaySmoke</RootNamespace>
     <CohesionApplicationModel>disabled</CohesionApplicationModel>
     <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
@@ -24,6 +21,10 @@
   </ItemGroup>
 
   <Target Name="CaptureGatewayReferenceItems" AfterTargets="Build">
+    <WriteLinesToFile
+      File="$(BaseIntermediateOutputPath)sdk-defaults.txt"
+      Lines="$(OutputType)|$(TargetFramework)|$(LangVersion)|$(EnablePreviewFeatures)|$(ImplicitUsings)|$(Nullable)|$(IsAotCompatible)"
+      Overwrite="true" />
     <WriteLinesToFile
       File="$(BaseIntermediateOutputPath)gateway-project-references.txt"
       Lines="@(ProjectReference->'%(Filename)|%(ReferenceOutputAssembly)|%(OutputItemType)')"

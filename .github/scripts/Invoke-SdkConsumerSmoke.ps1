@@ -193,12 +193,6 @@ $profiles = @(
 $projectTemplate = @'
 <Project Sdk="{0}">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>disable</ImplicitUsings>
-    <EnablePreviewFeatures>true</EnablePreviewFeatures>
-    <IsAotCompatible>true</IsAotCompatible>
     <IsPackable>false</IsPackable>
     {1}
   </PropertyGroup>

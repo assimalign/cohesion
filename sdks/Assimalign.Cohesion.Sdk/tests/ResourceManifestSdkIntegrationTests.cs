@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
@@ -12,6 +13,36 @@ namespace Assimalign.Cohesion.Sdk.Tests;
 
 public sealed class ResourceManifestSdkIntegrationTests
 {
+    /// <summary>
+    /// Verifies an enabled resource needs only its SDK, opt-in, and entry point.
+    /// </summary>
+    /// <returns>A task representing the restore and build verification.</returns>
+    [Fact(DisplayName = "Cohesion Test [Sdk] - minimal resource inherits project defaults and generates warning-free source")]
+    public async Task Build_MinimalResource_ShouldRestoreAndGenerateWithoutWarningsAsync()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create("MinimalResource");
+
+        // Act
+        DotNetBuildResult restore = await workspace.RestoreAsync("MinimalResource", timeout.Token);
+        DotNetBuildResult build = await workspace.BuildAsync("MinimalResource", timeout.Token);
+
+        // Assert
+        restore.ExitCode.ShouldBe(0, restore.Output);
+        build.ExitCode.ShouldBe(0, build.Output);
+        restore.Output.ShouldNotContain("warning CS");
+        restore.Output.ShouldNotContain("warning IL");
+        build.Output.ShouldNotContain("warning CS");
+        build.Output.ShouldNotContain("warning IL");
+        string projectDirectory = workspace.ProjectDirectory("MinimalResource");
+        File.Exists(GeneratedOutput(projectDirectory, "Resource.g.cs")).ShouldBeTrue(build.Output);
+        using JsonDocument manifest = JsonDocument.Parse(File.ReadAllText(
+            GeneratedOutput(projectDirectory, "resource.json")));
+        manifest.RootElement.GetProperty("name").GetString().ShouldBe("minimalresource");
+        manifest.RootElement.GetProperty("application").GetString().ShouldBe("minimalresource");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sdk] - enabled resources generate schema-valid manifests and typed accessors")]
     public async Task Build_EnabledWebReferencesEnabledDatabase_GeneratesValidManifestsAndTypedAccessors()
     {
@@ -213,6 +244,8 @@ public sealed class ResourceManifestSdkIntegrationTests
         // Assert
         result.ExitCode.ShouldBe(0, result.Output);
         string project = workspace.ProjectDirectory("EnabledWebExplicitMain");
+        File.ReadAllText(Path.Combine(project, "obj", "sdk-defaults.txt")).Trim()
+            .ShouldBe("Exe|net10.0|Preview|true|disable|enable|true");
         string controlPlaneSource = File.ReadAllText(GeneratedOutput(project, "ResourceControlPlane.g.cs"));
         controlPlaneSource.ShouldContain(
             "global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.RegisterEntry(typeof(Resource).Assembly)");
@@ -236,6 +269,8 @@ public sealed class ResourceManifestSdkIntegrationTests
         // Assert
         result.ExitCode.ShouldBe(0, result.Output);
         string projectDirectory = workspace.ProjectDirectory("EnabledGeneric");
+        File.ReadAllText(Path.Combine(projectDirectory, "obj", "sdk-defaults.txt")).Trim()
+            .ShouldBe("Exe|net10.0|Preview|true|disable|enable|true");
         File.Exists(GeneratedOutput(projectDirectory, "resource.json")).ShouldBeTrue(result.Output);
         File.Exists(GeneratedOutput(projectDirectory, "Resource.g.cs")).ShouldBeTrue(result.Output);
 
@@ -258,6 +293,8 @@ public sealed class ResourceManifestSdkIntegrationTests
         // Assert
         result.ExitCode.ShouldBe(0, result.Output);
         string projectDirectory = workspace.ProjectDirectory("DisabledResource");
+        File.ReadAllText(Path.Combine(projectDirectory, "obj", "sdk-defaults.txt")).Trim()
+            .ShouldBe("Exe|net10.0|Preview|true|disable|disable|true");
         Directory.EnumerateFiles(projectDirectory, "resource.json", SearchOption.AllDirectories).ShouldBeEmpty();
         Directory.EnumerateFiles(projectDirectory, "Resource.g.cs", SearchOption.AllDirectories).ShouldBeEmpty();
         Directory.EnumerateFiles(projectDirectory, "ResourceControlPlane.g.cs", SearchOption.AllDirectories).ShouldBeEmpty();

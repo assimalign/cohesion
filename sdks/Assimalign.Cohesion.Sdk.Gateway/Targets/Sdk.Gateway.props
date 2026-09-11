@@ -5,7 +5,7 @@
 		Runtime="NET" />
 
 	<PropertyGroup>
-		<OutputType>Exe</OutputType>
+		<!-- The base SDK defaults OutputType to Exe. -->
 		<IsAotCompatible>true</IsAotCompatible>
 		<CohesionApplicationModel>enabled</CohesionApplicationModel>
 		<CohesionResourceKind>Composite</CohesionResourceKind>

@@ -1,9 +1,5 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.ConfigurationStore">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
-    <EnablePreviewFeatures>true</EnablePreviewFeatures>
-    <IsAotCompatible>true</IsAotCompatible>
     <RootNamespace>CommandConfigurationStore</RootNamespace>
     <CohesionApplicationModel>enabled</CohesionApplicationModel>
     <CohesionApplication>gateway-smoke</CohesionApplication>

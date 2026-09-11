@@ -5,6 +5,58 @@ the base imported by every resource-area SDK. It chains to `Microsoft.NET.Sdk`,
 adds the Cohesion application framework reference, and owns common source
 generation and validation.
 
+## Project defaults
+
+The base SDK supplies the following defaults to every `Assimalign.Cohesion.Sdk`
+and `Sdk.<Area>` consumer, including Gateway:
+
+| Property | Default |
+| --- | --- |
+| `OutputType` | `Exe` |
+| `TargetFramework` | `net10.0` |
+| `LangVersion` | `Preview` |
+| `EnablePreviewFeatures` | `true` |
+| `ImplicitUsings` | `disable` |
+| `Nullable` | `enable` |
+| `IsAotCompatible` | `true` |
+
+Each base default uses `Condition="'$(PropertyName)' == ''"` and is overridable.
+The conditions honor command-line `-p:` global properties. A consumer's
+`Directory.Build.props` and csproj body are evaluated later and override the
+defaults through MSBuild's last-assignment-wins rule; those consumer values are
+not visible when the conditions run.
+
+`Targets/Assimalign.Cohesion.Sdk.Defaults.props` is the first import in the base
+`Sdk.props`, before `Microsoft.NET.Sdk`'s `Sdk.props`. Microsoft's props already
+default `OutputType` to `Library`, so an emptiness condition after that import
+would never select `Exe`. The shipped TFM is a literal because the repository's
+`build/Targets/Build.TargetFramework.props` is not shipped. That repository-side
+source, this literal, and the SDK's `KnownFrameworkReference` TFMs must move together.
+
+This implements developer-experience design §4.1: `Directory.Build.props` carries
+identity only (`CohesionOrganization`, `CohesionContainerRegistry`, `VersionPrefix`).
+A resource needs its SDK declaration, Cohesion items/properties, and `Program.cs`.
+Library-style base-SDK consumers pulled in through `CohesionProjectReference`
+declare `<OutputType>Library</OutputType>` explicitly; the
+`Sdk.Gateway/tests/TestProjects/GatewaySmokeSupport` fixture is an in-repo example.
+
+Two constraints apply:
+
+- A consumer's `TargetFrameworks` (plural) is invisible at props time. Setting it
+  leaves both `TargetFramework` and `TargetFrameworks` populated, so Microsoft's
+  `Sdk.targets` does not set `IsCrossTargetingBuild=true`. Resource executables
+  never multi-target (design R3).
+- On the latest TFM, `Microsoft.NET.Sdk.Common.targets` forces
+  `LangVersion=Preview` whenever `EnablePreviewFeatures=true`. The base SDK's
+  language default is therefore effectively redundant: override `LangVersion`
+  together with `EnablePreviewFeatures` (for example, `14.0` and `false`).
+
+Gateway preserves two stricter assignments: `Targets/Sdk.Gateway.props` sets
+`IsAotCompatible=true` unconditionally after the consumer's
+`Directory.Build.props`, and `Sdk/Sdk.targets` forces `OutputType=Exe` after
+the csproj body. These Gateway assignments are not conditional base defaults;
+in particular, a csproj `OutputType=Library` cannot turn a gateway into a library.
+
 ## Strongly typed settings
 
 Settings generation is opt-in. Set the generated root type name in the consumer

@@ -42,6 +42,15 @@ reject resolved `*.Hosting` assemblies with `COHGW001`.
 ## Evaluation and target ordering
 
 MSBuild imports `Sdk.props` before the consumer project body and `Sdk.targets` after it.
+
+The base SDK first supplies the seven [project defaults](../../Assimalign.Cohesion.Sdk/docs/DESIGN.md#project-defaults)
+before importing Microsoft's SDK props. Gateway inherits these defaults and preserves
+its stricter behavior: `Targets/Sdk.Gateway.props` unconditionally sets
+`IsAotCompatible=true` after the consumer's `Directory.Build.props`, and its targets
+force `OutputType=Exe` after the consumer body. The base default supplies the initial
+`OutputType` value. Library-style base-SDK dependencies such as `GatewaySmokeSupport`
+explicitly declare `OutputType=Library`.
+
 That ordering is load-bearing:
 
 1. Gateway props register the task, defaults, resource-kind metadata, known typed area

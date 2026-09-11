@@ -1,9 +1,6 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <EnablePreviewFeatures>true</EnablePreviewFeatures>
-    <IsAotCompatible>true</IsAotCompatible>
     <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
     <CohesionResourceName>inprocess-gateway</CohesionResourceName>
     <CohesionGateways>InProcess</CohesionGateways>
