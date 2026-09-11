@@ -29,6 +29,7 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
     private readonly string _audience;
     private readonly string _basePath;
     private readonly IResourceControlPlane? _controlPlane;
+    private readonly IResourceControlPlane _commands;
     private readonly Uri _endpoint;
     private readonly WebApplication _host;
     private readonly bool _requireAuthentication;
@@ -56,6 +57,14 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
         _endpoint = endpoint;
         _repository = repository;
         _controlPlane = controlPlane;
+        _commands = controlPlane ?? ResourceControlPlane.Create(new[] { SetValueCommand, RemoveValueCommand });
+        foreach (string kind in _commands.AcceptedCommandKinds)
+        {
+            if (kind is SetValueCommand or RemoveValueCommand)
+            {
+                _commands.RegisterCommandHandler(new ConfigurationResourceCommandHandler(kind, repository));
+            }
+        }
         _resourceContext = resourceContext;
         _applicationContext = applicationContext;
         _requireAuthentication = resourceContext?.GatewayName is not null;
@@ -128,6 +137,10 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
             if (authorization.Status is not BootstrapTokenValidationStatus.Authorized)
             {
                 SetAuthorizationFailure(context, authorization.Status);
+                if (path == Route("/cohesion/v1/commands"))
+                {
+                    await WriteCommandStatusAsync(context, "Rejected", "The configuration command credential is missing, invalid, or not authorized for this resource.").ConfigureAwait(false);
+                }
                 return;
             }
         }
@@ -293,18 +306,31 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
                 writer.WriteStringValue(SetValueCommand);
                 writer.WriteStringValue(RemoveValueCommand);
                 writer.WriteEndArray();
+                writer.WritePropertyName("commands");
+                writer.WriteStartArray();
+                foreach (ResourceCommand command in _commands.Commands)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("id", command.Id);
+                    writer.WriteString("kind", command.Kind);
+                    writer.WriteString("owner", command.Owner);
+                    writer.WriteString("key", command.Key);
+                    writer.WriteString("status", "Applied");
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
                 writer.WriteEndObject();
             }).ConfigureAwait(false);
             return;
         }
 
-        if (context.Request.Method != HttpMethod.Post)
+        if (context.Request.Method != HttpMethod.Post && context.Request.Method != HttpMethod.Delete)
         {
-            SetMethodNotAllowed(context, "GET, HEAD, POST");
+            SetMethodNotAllowed(context, "GET, HEAD, POST, DELETE");
             return;
         }
 
-        ConfigurationCommand command;
+        ResourceCommand command;
         try
         {
             command = await ReadCommandAsync(context).ConfigureAwait(false);
@@ -312,6 +338,7 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
         catch (Exception exception) when (exception is JsonException or FormatException)
         {
             context.Response.StatusCode = HttpStatusCode.BadRequest;
+            await WriteCommandStatusAsync(context, "Rejected", exception.Message).ConfigureAwait(false);
             return;
         }
 
@@ -319,47 +346,53 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
             !string.Equals(command.Owner, authenticatedIssuer, StringComparison.Ordinal))
         {
             context.Response.StatusCode = HttpStatusCode.Forbidden;
+            await WriteCommandStatusAsync(context, "Rejected", $"Command owner '{command.Owner}' must match authenticated issuer '{authenticatedIssuer}'.").ConfigureAwait(false);
             return;
         }
 
-        if (!TrySplitKey(command.Key, out string? namespaceName, out string? key))
+        try
         {
-            context.Response.StatusCode = HttpStatusCode.BadRequest;
-            return;
-        }
-
-        bool found;
-        if (string.Equals(command.Kind, SetValueCommand, StringComparison.Ordinal))
-        {
-            string? value;
-            try
+            if (context.Request.Method == HttpMethod.Delete)
             {
-                value = ReadSetValue(command.Payload);
+                await _commands.DeleteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false);
             }
-            catch (JsonException)
+            else
             {
-                context.Response.StatusCode = HttpStatusCode.BadRequest;
-                return;
+                await _commands.ExecuteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false);
             }
-
-            found = await _repository
-                .SetAsync(namespaceName!, key!, value, context.RequestCancelled)
-                .ConfigureAwait(false);
+            context.Response.StatusCode = HttpStatusCode.Ok;
+            await WriteCommandStatusAsync(context, context.Request.Method == HttpMethod.Delete ? "Deleted" : "Applied", null).ConfigureAwait(false);
         }
-        else if (string.Equals(command.Kind, RemoveValueCommand, StringComparison.Ordinal))
+        catch (ConfigurationNamespaceNotFoundException exception)
         {
-            found = await _repository
-                .RemoveAsync(namespaceName!, key!, context.RequestCancelled)
-                .ConfigureAwait(false);
+            context.Response.StatusCode = HttpStatusCode.NotFound;
+            await WriteCommandStatusAsync(context, "Rejected", exception.Detail).ConfigureAwait(false);
         }
-        else
+        catch (ResourceCommandRejectedException exception)
+        {
+            context.Response.StatusCode = HttpStatusCode.Conflict;
+            await WriteCommandStatusAsync(context, "Rejected", exception.Detail).ConfigureAwait(false);
+        }
+        catch (NotSupportedException exception)
         {
             context.Response.StatusCode = HttpStatusCode.NotImplemented;
-            return;
+            await WriteCommandStatusAsync(context, "Rejected", exception.Message).ConfigureAwait(false);
         }
-
-        context.Response.StatusCode = found ? HttpStatusCode.Ok : HttpStatusCode.NotFound;
+        catch (Exception exception) when (exception is JsonException or ArgumentException)
+        {
+            context.Response.StatusCode = HttpStatusCode.BadRequest;
+            await WriteCommandStatusAsync(context, "Rejected", exception.Message).ConfigureAwait(false);
+        }
     }
+
+    private static Task WriteCommandStatusAsync(IHttpContext context, string status, string? detail) =>
+        WriteJsonAsync(context, writer =>
+        {
+            writer.WriteStartObject();
+            writer.WriteString("status", status);
+            writer.WriteString("detail", detail);
+            writer.WriteEndObject();
+        });
 
     private async Task HandleHealthAsync(IHttpContext context, HealthReportKind kind)
     {
@@ -519,7 +552,7 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
         context.Response.Headers[HttpHeaderKey.Allow] = allow;
     }
 
-    private static async Task<ConfigurationCommand> ReadCommandAsync(IHttpContext context)
+    private static async Task<ResourceCommand> ReadCommandAsync(IHttpContext context)
     {
         using JsonDocument document = await JsonDocument.ParseAsync(
                 context.Request.Body,
@@ -531,10 +564,15 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
             throw new JsonException("A configuration command must be a JSON object.");
         }
 
+        if (root.TryGetProperty("payload", out JsonElement rawPayload) && rawPayload.ValueKind is not JsonValueKind.String)
+        {
+            throw new JsonException("The configuration command payload must be a base64 string.");
+        }
+
         byte[] payload = root.TryGetProperty("payload", out JsonElement payloadProperty)
             ? payloadProperty.GetBytesFromBase64()
             : Array.Empty<byte>();
-        return new ConfigurationCommand(
+        return new ResourceCommand(
             GetRequiredString(root, "id"),
             GetRequiredString(root, "kind"),
             GetRequiredString(root, "owner"),
@@ -552,38 +590,6 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
         }
 
         return property.GetString()!;
-    }
-
-    private static string? ReadSetValue(ReadOnlyMemory<byte> payload)
-    {
-        using JsonDocument document = JsonDocument.Parse(payload);
-        if (document.RootElement.ValueKind is not JsonValueKind.Object ||
-            !document.RootElement.TryGetProperty("value", out JsonElement value) ||
-            value.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
-        {
-            throw new JsonException(
-                "A configurationstore.set-value payload requires a string or null 'value'.");
-        }
-
-        return value.ValueKind is JsonValueKind.Null ? null : value.GetString();
-    }
-
-    private static bool TrySplitKey(
-        string commandKey,
-        out string? namespaceName,
-        out string? key)
-    {
-        int separator = commandKey.LastIndexOf('/');
-        if (separator <= 0 || separator == commandKey.Length - 1)
-        {
-            namespaceName = null;
-            key = null;
-            return false;
-        }
-
-        namespaceName = commandKey[..separator];
-        key = commandKey[(separator + 1)..];
-        return !string.IsNullOrWhiteSpace(namespaceName) && !string.IsNullOrWhiteSpace(key);
     }
 
     private static async Task WriteJsonAsync(
@@ -618,13 +624,6 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
             : throw new InvalidOperationException(
                 $"The ConfigurationStore endpoint host '{host}' is not a bindable IP address.");
     }
-
-    private readonly record struct ConfigurationCommand(
-        string Id,
-        string Kind,
-        string Owner,
-        string Key,
-        ReadOnlyMemory<byte> Payload);
 
     private enum HealthReportKind
     {

@@ -23,7 +23,7 @@
 	<!--
 		The resolved-manifest dependency descriptor required for selective first restore
 		does not exist yet. Keep the finite set of shipped typed planners and protected
-		mount clients restore-visible; CohesionCreateResourceVerbs still reports the
+		mount and command clients restore-visible; CohesionCreateResourceVerbs still reports the
 		exact manifest-derived sets for validation.
 	-->
 	<ItemGroup>
@@ -39,17 +39,23 @@
 
 		<_CohesionGatewayWebApplicationModelProject Include="$(CohesionRepositoryDirectory)resources\Web\Assimalign.Cohesion.Web.ApplicationModel\src\Assimalign.Cohesion.Web.ApplicationModel.csproj" Condition="Exists('$(CohesionRepositoryDirectory)resources\Web\Assimalign.Cohesion.Web.ApplicationModel\src\Assimalign.Cohesion.Web.ApplicationModel.csproj')" />
 		<_CohesionGatewayDatabaseApplicationModelProject Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.ApplicationModel\src\Assimalign.Cohesion.Database.ApplicationModel.csproj" Condition="Exists('$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.ApplicationModel\src\Assimalign.Cohesion.Database.ApplicationModel.csproj')" />
+		<_CohesionGatewayConfigurationStoreApplicationModelProject Include="$(CohesionRepositoryDirectory)resources\ConfigurationStore\Assimalign.Cohesion.ConfigurationStore.ApplicationModel\src\Assimalign.Cohesion.ConfigurationStore.ApplicationModel.csproj" Condition="Exists('$(CohesionRepositoryDirectory)resources\ConfigurationStore\Assimalign.Cohesion.ConfigurationStore.ApplicationModel\src\Assimalign.Cohesion.ConfigurationStore.ApplicationModel.csproj')" />
 		<_CohesionGatewaySecretStoreClientProject Include="$(CohesionRepositoryDirectory)resources\SecretStore\Assimalign.Cohesion.SecretStore.Client\src\Assimalign.Cohesion.SecretStore.Client.csproj" Condition="Exists('$(CohesionRepositoryDirectory)resources\SecretStore\Assimalign.Cohesion.SecretStore.Client\src\Assimalign.Cohesion.SecretStore.Client.csproj')" />
 		<_CohesionGatewayConfigurationStoreClientProject Include="$(CohesionRepositoryDirectory)resources\ConfigurationStore\Assimalign.Cohesion.ConfigurationStore.Client\src\Assimalign.Cohesion.ConfigurationStore.Client.csproj" Condition="Exists('$(CohesionRepositoryDirectory)resources\ConfigurationStore\Assimalign.Cohesion.ConfigurationStore.Client\src\Assimalign.Cohesion.ConfigurationStore.Client.csproj')" />
+		<_CohesionGatewayDatabaseClientProject Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Client\src\Assimalign.Cohesion.Database.Client.csproj" Condition="Exists('$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Client\src\Assimalign.Cohesion.Database.Client.csproj')" />
 
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ApplicationModel" ProjectPath="@(_CohesionGatewayWebApplicationModelProject)" Condition="'@(_CohesionGatewayWebApplicationModelProject)' != ''" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.ApplicationModel" ProjectPath="@(_CohesionGatewayDatabaseApplicationModelProject)" Condition="'@(_CohesionGatewayDatabaseApplicationModelProject)' != ''" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore.ApplicationModel" ProjectPath="@(_CohesionGatewayConfigurationStoreApplicationModelProject)" Condition="'@(_CohesionGatewayConfigurationStoreApplicationModelProject)' != ''" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.SecretStore.Client" ProjectPath="@(_CohesionGatewaySecretStoreClientProject)" Condition="'@(_CohesionGatewaySecretStoreClientProject)' != ''" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore.Client" ProjectPath="@(_CohesionGatewayConfigurationStoreClientProject)" Condition="'@(_CohesionGatewayConfigurationStoreClientProject)' != ''" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" ProjectPath="@(_CohesionGatewayDatabaseClientProject)" Condition="'@(_CohesionGatewayDatabaseClientProject)' != ''" />
 		<CohesionPackageReference Include="Assimalign.Cohesion.Web.ApplicationModel" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayWebApplicationModelProject)' == ''" />
 		<CohesionPackageReference Include="Assimalign.Cohesion.Database.ApplicationModel" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayDatabaseApplicationModelProject)' == ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.ConfigurationStore.ApplicationModel" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayConfigurationStoreApplicationModelProject)' == ''" />
 		<CohesionPackageReference Include="Assimalign.Cohesion.SecretStore.Client" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewaySecretStoreClientProject)' == ''" />
 		<CohesionPackageReference Include="Assimalign.Cohesion.ConfigurationStore.Client" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayConfigurationStoreClientProject)' == ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.Database.Client" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayDatabaseClientProject)' == ''" />
 
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane" ProjectPath="$(_CohesionGatewayControlPlaneProject)" Condition="'$(CohesionRepositoryDirectory)' != ''" />
 		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane" Version="$(CohesionVersion)" Condition="'$(CohesionRepositoryDirectory)' == ''" />

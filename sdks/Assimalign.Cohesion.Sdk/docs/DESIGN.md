@@ -61,6 +61,23 @@ paths plus MSBuild timestamp tracking for each settings file and the task
 assembly. Outputs live beneath the target-framework-specific intermediate path,
 and Clean removes generated settings source and fingerprints even after opt-out.
 
+## Resource command advertisements
+
+For an orchestration-enabled executable, `CohesionCreateResourceManifest` consumes
+`@(CohesionCommand)` and writes the item identities as the manifest's `commands` string
+array. These are the kinds accepted by the area's default control plane; declarations,
+owners, keys, and payloads remain runtime application-model data. Command items accept
+no custom metadata. Names are trimmed, deduplicated with ordinal comparison, and sorted
+ordinally so equivalent declarations produce identical manifests. Empty names fail the
+build. No items produces the existing empty array; disabled executables produce no
+manifest or command output.
+
+Area SDK props supply defaults before the consumer body, preserving ordinary MSBuild
+`Include`/`Remove` behavior. Database advertises `database.add-database` and
+`database.add-principal`; ConfigurationStore advertises `configurationstore.set-value`
+and `configurationstore.remove-value`. The manifest remains `cohesion/resource/v1` with
+bare strings, as required by developer-experience design §7.
+
 ## SDK pin agreement contract
 
 Before package-reference collection and before build preparation, the base SDK

@@ -25,6 +25,8 @@ internal sealed class ResourceManifestModel
 
     public List<ResourceSettingModel> Settings { get; } = [];
 
+    public List<string> Commands { get; } = [];
+
     public List<ResourceReferenceModel> References { get; } = [];
 
     public required ResourceLifecycleModel Lifecycle { get; init; }

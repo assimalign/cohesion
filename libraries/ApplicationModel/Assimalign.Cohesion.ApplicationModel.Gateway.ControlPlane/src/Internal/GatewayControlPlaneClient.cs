@@ -7,10 +7,78 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
+using ResourceCommand = Assimalign.Cohesion.Hosting.Resources.ResourceCommand;
+
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane;
 
 internal sealed class GatewayControlPlaneClient : IAuthenticatedControlPlaneClient
 {
+    public ValueTask<ResourceCommandResult> ApplyCommandAsync(
+        Uri address, ResourceName resource, string bearerToken, ResourceCommand command,
+        CancellationToken cancellationToken = default) =>
+        SendCommandAsync(address, resource, bearerToken, command, HttpMethod.Put, cancellationToken);
+
+    public ValueTask<ResourceCommandResult> DeleteCommandAsync(
+        Uri address, ResourceName resource, string bearerToken, ResourceCommand command,
+        CancellationToken cancellationToken = default) =>
+        SendCommandAsync(address, resource, bearerToken, command, HttpMethod.Delete, cancellationToken);
+
+    private static async ValueTask<ResourceCommandResult> SendCommandAsync(
+        Uri address, ResourceName resource, string bearerToken, ResourceCommand command,
+        HttpMethod method, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ArgumentException.ThrowIfNullOrWhiteSpace(bearerToken);
+        ValidateTransport(address);
+        string path = "/cohesion/v1/resources/" + Uri.EscapeDataString(resource.ToString()) +
+            "/commands/" + Uri.EscapeDataString(command.Id);
+        Uri endpoint = new UriBuilder(address.Scheme, address.Host, address.Port, path).Uri;
+        using var request = new HttpRequestMessage(method, endpoint);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+        if (method == HttpMethod.Put)
+        {
+            request.Content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(
+                new ControlPlaneCommandRequest
+                {
+                    Id = command.Id, Kind = command.Kind, Owner = command.Owner,
+                    Key = command.Key, Payload = command.Payload.ToArray(),
+                }, ControlPlaneJsonContext.Default.ControlPlaneCommandRequest));
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        }
+        using HttpResponseMessage response = await Client.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        await response.Content.LoadIntoBufferAsync(MaximumApplicationExportBytes, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+        {
+            return new(ResourceCommandStatus.Applied, "Owned command removed by the peer gateway.");
+        }
+        byte[] body = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+        if (body.Length == 0)
+        {
+            return new(ResourceCommandStatus.Rejected, $"Peer returned HTTP {(int)response.StatusCode} without command detail.");
+        }
+        using JsonDocument document = JsonDocument.Parse(body);
+        JsonElement root = document.RootElement;
+        string detail = root.TryGetProperty("detail", out JsonElement value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()!
+            : root.TryGetProperty("error", out value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()! : $"Peer returned HTTP {(int)response.StatusCode}.";
+        bool applied = response.IsSuccessStatusCode && root.TryGetProperty("status", out value) &&
+            value.GetString() == "Applied";
+        if (applied &&
+            (!root.TryGetProperty("id", out value) || value.GetString() != command.Id ||
+             !root.TryGetProperty("owner", out value) || value.GetString() != command.Owner ||
+             !root.TryGetProperty("kind", out value) || value.GetString() != command.Kind ||
+             !root.TryGetProperty("key", out value) || value.GetString() != command.Key))
+        {
+            return new(ResourceCommandStatus.Rejected, "Peer command observation does not match the submitted declaration.");
+        }
+        byte[]? result = applied && root.TryGetProperty("result", out value) && value.ValueKind == JsonValueKind.String
+            ? value.GetBytesFromBase64() : null;
+        return new(applied ? ResourceCommandStatus.Applied : ResourceCommandStatus.Rejected,
+            detail, result ?? ReadOnlyMemory<byte>.Empty);
+    }
+
     private const string ApplicationPath = "/cohesion/v1/application";
     private const long MaximumApplicationExportBytes = 16 * 1024 * 1024;
 

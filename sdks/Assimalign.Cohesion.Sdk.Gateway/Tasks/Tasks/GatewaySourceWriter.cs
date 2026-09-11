@@ -228,10 +228,11 @@ internal static class GatewaySourceWriter
             GatewayResourceKind? kind = resourceKinds.FirstOrDefault(
                 candidate => string.Equals(candidate.ApplicationModel, manifest.ApplicationModel, StringComparison.OrdinalIgnoreCase));
             string optionsType = kind?.OptionsType ?? "global::Assimalign.Cohesion.ApplicationModel.ResourceOptions";
+            string descriptorType = kind?.DescriptorType ?? "global::Assimalign.Cohesion.ApplicationModel.IApplicationResourceDescriptor";
             source.Append("        /// <summary>Adds ").Append(Xml(manifest.Application)).Append('/')
                 .Append(Xml(manifest.Name)).AppendLine(" to the application model.</summary>");
             source.AppendLine("        /// <param name=\"configure\">Optional platform-neutral planning overrides.</param>");
-            source.AppendLine("        /// <returns>The resource descriptor, for adding explicit dependency edges.</returns>");
+            source.AppendLine("        /// <returns>The resource descriptor, for adding dependency edges and resource commands.</returns>");
             if (manifest.InProcessBinding is GatewayInProcessBinding binding)
             {
                 source.AppendLine("        [global::System.Diagnostics.CodeAnalysis.DynamicDependency(");
@@ -244,7 +245,7 @@ internal static class GatewaySourceWriter
                 source.AppendLine("            \"IL2026\",");
                 source.AppendLine("            Justification = \"The generated DynamicDependency roots the resource entry point used by the in-process binding.\")]");
             }
-            source.Append("        public global::Assimalign.Cohesion.ApplicationModel.IApplicationResourceDescriptor Add")
+            source.Append("        public ").Append(descriptorType).Append(" Add")
                 .Append(manifest.MemberName).Append("(global::System.Action<").Append(optionsType)
                 .AppendLine(">? configure = null)");
             source.AppendLine("        {");
@@ -252,15 +253,17 @@ internal static class GatewaySourceWriter
             source.AppendLine("            configure?.Invoke(options);");
             if (kind is null || string.IsNullOrWhiteSpace(kind.AddMethod))
             {
-                source.Append("            return builder.AddResource(Manifests.").Append(manifest.MemberName)
+                source.Append("            var descriptor = builder.AddResource(Manifests.").Append(manifest.MemberName)
                     .Append(", options)");
             }
             else
             {
-                source.Append("            return ").Append(kind.AddMethod).Append("(builder, Manifests.")
+                source.Append("            var descriptor = ").Append(kind.AddMethod).Append("(builder, Manifests.")
                     .Append(manifest.MemberName).Append(", options)");
             }
+            source.AppendLine(";");
             WriteInProcessBinding(source, manifest.InProcessBinding);
+            source.AppendLine("            return descriptor;");
             source.AppendLine("        }");
             source.AppendLine();
         }
@@ -290,12 +293,11 @@ internal static class GatewaySourceWriter
     {
         if (binding is null)
         {
-            source.AppendLine(";");
             return;
         }
 
         source.AppendLine();
-        source.Append("                .InProcess(typeof(global::")
+        source.Append("            descriptor.InProcess(typeof(global::")
             .Append(binding.RootNamespace)
             .Append('.')
             .Append(EntryAnchorType(binding.EntryAssemblyName))

@@ -32,6 +32,17 @@ public class ApplicationGatewayOptions
     /// </summary>
     public IGatewayStoreClient StoreClient { get; set; } = GatewayStoreClient.Instance;
 
+    /// <summary>
+    /// Gets per-kind command clients. Database and ConfigurationStore use their area clients
+    /// by default; replace a registration to customize delivery without referencing Hosting.
+    /// </summary>
+    public IList<IGatewayResourceCommandClient> CommandClients { get; } =
+        new List<IGatewayResourceCommandClient>
+        {
+            new DatabaseGatewayCommandClient(),
+            new ConfigurationStoreGatewayCommandClient(),
+        };
+
     /// <summary>Gets or sets the time source used to issue credentials.</summary>
     public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
 

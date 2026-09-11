@@ -72,3 +72,13 @@ the repository's `net10.0`, trimming, and NativeAOT settings.
 - Parsing, validating, or refreshing the opaque Bearer credential.
 - Following redirects or retrying failed requests.
 - Providing dependency-injection registration or shared-framework delivery.
+
+
+## Declarative command delivery
+
+ObserveCommandAsync and DeleteCommandAsync return ResourceCommandObservation (Status and Detail),
+including structured provider refusals from non-success HTTP statuses. Existing SendCommandAsync
+retains its Task and EnsureSuccessStatusCode behavior. CreateForControlPlane accepts the full manifest
+control-plane URI and makes those observation methods append only /commands, including custom paths.
+The ordinary Create factory continues appending the existing /cohesion/v1 routes to its resource
+endpoint base path. JSON parsing is explicit and transport cancellation remains caller-controlled.

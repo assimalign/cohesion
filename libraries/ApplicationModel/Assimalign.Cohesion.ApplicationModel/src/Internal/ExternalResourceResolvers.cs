@@ -90,7 +90,7 @@ internal sealed class FileExternalResourceResolver : IExternalResourceResolver
     }
 }
 
-internal sealed class GatewayExternalResourceResolver : IExternalResourceResolver
+internal sealed class GatewayExternalResourceResolver : IControlPlaneExternalResourceResolver
 {
     private readonly Uri _address;
 
@@ -100,6 +100,8 @@ internal sealed class GatewayExternalResourceResolver : IExternalResourceResolve
     }
 
     internal Uri Address => _address;
+
+    public Uri? ControlPlaneAddress => _address;
 
     public async ValueTask<ExternalResourceResolution> ResolveAsync(
         ExternalResourceResolutionContext context,

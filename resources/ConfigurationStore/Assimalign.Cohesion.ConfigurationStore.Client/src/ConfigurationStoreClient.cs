@@ -8,6 +8,19 @@ namespace Assimalign.Cohesion.ConfigurationStore.Client;
 /// </summary>
 public static class ConfigurationStoreClient
 {
+    /// <summary>Creates a client whose command observation methods use the manifest's exact control-plane path.</summary>
+    /// <param name="controlPlaneAddress">The full HTTP(S) control-plane address, including its manifest path.</param>
+    /// <param name="credential">The opaque bootstrap credential.</param>
+    /// <returns>A command client bound to the supplied control-plane address.</returns>
+    /// <exception cref="ArgumentException">The address is not a valid HTTP(S) endpoint.</exception>
+    /// <exception cref="ArgumentNullException">The address or credential is null.</exception>
+    public static IConfigurationStoreClient CreateForControlPlane(Uri controlPlaneAddress, ClientCredential credential)
+    {
+        // Reuse the ordinary factory's validation before enabling the explicit path mode.
+        _ = Create(controlPlaneAddress, credential, _sharedTransport);
+        return new HttpConfigurationStoreClient(controlPlaneAddress, credential, _sharedTransport, commandControlPlanePath: true);
+    }
+
     private static readonly HttpMessageInvoker _sharedTransport = new(
         new SocketsHttpHandler
         {

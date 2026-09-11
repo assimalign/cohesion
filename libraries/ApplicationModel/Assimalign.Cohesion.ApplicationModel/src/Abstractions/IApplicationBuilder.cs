@@ -94,6 +94,12 @@ public interface IApplicationBuilder
         ExternalResourceDeclaration declaration,
         IExternalResourceResolver? resolver = null);
 
+    /// <summary>Registers a command whose graph membership and manifest support are validated at Build.</summary>
+    /// <param name="command">The declaration owned by this application.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="command"/> is null.</exception>
+    IApplicationBuilder AddCommand(IResourceCommand command);
+
     /// <summary>
     /// Selects the gateway that will realize the model. Required: <see cref="Build"/>
     /// throws when no gateway has been selected. Returns the builder for chaining.
@@ -105,12 +111,13 @@ public interface IApplicationBuilder
 
     /// <summary>
     /// Validates the graph, application identity, resource manifests, typed overrides,
-    /// planner diagnostics, and realization plans, then returns the runnable application.
+    /// planner diagnostics, realization plans, and resource commands, then returns the runnable application.
     /// </summary>
     /// <returns>The built application.</returns>
     /// <exception cref="InvalidOperationException">
     /// No gateway was selected; no resources are realized; or the application name, resource
-    /// graph, manifest, typed override, planner diagnostic, or realization plan is invalid.
+    /// graph, manifest, typed override, planner diagnostic, realization plan, or command is invalid.
+    /// Commands must have unique identities and one declaration per target ownership key.
     /// </exception>
     /// <remarks>
     /// After each resource plan validates, this method writes one informational

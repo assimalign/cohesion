@@ -15,6 +15,9 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
     private readonly IReadOnlyList<string> _acceptedCommandKinds;
     private readonly Dictionary<string, IHealthContributor> _contributors = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Uri> _observedEndpoints = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IResourceCommandHandler> _handlers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (ResourceCommand Command, ReadOnlyMemory<byte> Response)> _commands = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim _commandGate = new(1, 1);
     private IHost? _host;
 
     internal DefaultResourceControlPlane(IEnumerable<string> acceptedCommandKinds)
@@ -32,6 +35,35 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
     }
 
     public IReadOnlyList<string> AcceptedCommandKinds => _acceptedCommandKinds;
+
+    public IReadOnlyList<ResourceCommand> Commands
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _commands.Values.Select(static entry => entry.Command with { Payload = entry.Command.Payload.ToArray() }).ToArray();
+            }
+        }
+    }
+
+    public void RegisterCommandHandler(IResourceCommandHandler handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        ArgumentException.ThrowIfNullOrWhiteSpace(handler.Kind);
+        if (!_acceptedCommandKinds.Contains(handler.Kind, StringComparer.Ordinal))
+        {
+            throw new ArgumentException($"Resource command kind '{handler.Kind}' is not advertised by this control plane.", nameof(handler));
+        }
+
+        lock (_sync)
+        {
+            if (!_handlers.TryAdd(handler.Kind, handler))
+            {
+                throw new InvalidOperationException($"Resource command handler '{handler.Kind}' is already registered.");
+            }
+        }
+    }
 
     public IReadOnlyDictionary<string, Uri> ObservedEndpoints
     {
@@ -113,12 +145,90 @@ internal sealed class DefaultResourceControlPlane : IResourceControlPlane
     public ValueTask<ReadOnlyMemory<byte>> ExecuteCommandAsync(
         ResourceCommand command,
         CancellationToken cancellationToken = default)
+        => DispatchCommandAsync(command, delete: false, cancellationToken);
+
+    public ValueTask<ReadOnlyMemory<byte>> DeleteCommandAsync(
+        ResourceCommand command,
+        CancellationToken cancellationToken = default)
+        => DispatchCommandAsync(command, delete: true, cancellationToken);
+
+    private async ValueTask<ReadOnlyMemory<byte>> DispatchCommandAsync(
+        ResourceCommand command,
+        bool delete,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(command);
-        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentException.ThrowIfNullOrWhiteSpace(command.Id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(command.Kind);
+        ArgumentException.ThrowIfNullOrWhiteSpace(command.Owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(command.Key);
+        command = command with { Payload = command.Payload.ToArray() };
 
-        throw new NotSupportedException(
-            $"Resource command kind '{command.Kind}' is not implemented by this control plane.");
+        await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            IResourceCommandHandler handler;
+            (ResourceCommand Command, ReadOnlyMemory<byte> Response) existing;
+            bool found;
+            lock (_sync)
+            {
+                if (!_handlers.TryGetValue(command.Kind, out handler!))
+                {
+                    throw new NotSupportedException($"Resource command kind '{command.Kind}' is not implemented by this control plane.");
+                }
+                found = _commands.TryGetValue(command.Key, out existing);
+                if (found && !string.Equals(existing.Command.Owner, command.Owner, StringComparison.Ordinal))
+                {
+                    throw new ResourceCommandRejectedException(
+                        $"Command '{command.Kind}' key '{command.Key}' belongs to owner '{existing.Command.Owner}'; owner '{command.Owner}' cannot overwrite or delete it.");
+                }
+                if (found && delete && (existing.Command.Id != command.Id || existing.Command.Kind != command.Kind))
+                {
+                    throw new ResourceCommandRejectedException($"Command '{command.Id}' cannot delete the newer declaration '{existing.Command.Id}' for key '{command.Key}'.");
+                }
+                foreach (var entry in _commands.Values)
+                {
+                    if (entry.Command.Id == command.Id && entry.Command.Owner != command.Owner)
+                    {
+                        throw new ResourceCommandRejectedException($"Command id '{command.Id}' belongs to owner '{entry.Command.Owner}'; owner '{command.Owner}' must use a different identity.");
+                    }
+                    if (entry.Command.Owner == command.Owner && entry.Command.Id == command.Id &&
+                        (entry.Command.Kind != command.Kind || entry.Command.Key != command.Key ||
+                         (!delete && !entry.Command.Payload.Span.SequenceEqual(command.Payload.Span))))
+                    {
+                        throw new ResourceCommandRejectedException($"Command id '{command.Id}' for owner '{command.Owner}' was already used for a different declaration.");
+                    }
+                }
+                if (!delete && found && existing.Command.Id == command.Id)
+                {
+                    return existing.Response.ToArray();
+                }
+            }
+
+            if (delete && !found)
+            {
+                return ReadOnlyMemory<byte>.Empty;
+            }
+            ReadOnlyMemory<byte> response = delete
+                ? await handler.DeleteAsync(existing.Command, cancellationToken).ConfigureAwait(false)
+                : await handler.ExecuteAsync(command, cancellationToken).ConfigureAwait(false);
+            lock (_sync)
+            {
+                if (delete)
+                {
+                    _commands.Remove(command.Key);
+                }
+                else
+                {
+                    _commands[command.Key] = (command, response.ToArray());
+                }
+            }
+            return response;
+        }
+        finally
+        {
+            _commandGate.Release();
+        }
     }
 
     private async ValueTask<ResourceHealthReport> CheckContributorsAsync(CancellationToken cancellationToken)

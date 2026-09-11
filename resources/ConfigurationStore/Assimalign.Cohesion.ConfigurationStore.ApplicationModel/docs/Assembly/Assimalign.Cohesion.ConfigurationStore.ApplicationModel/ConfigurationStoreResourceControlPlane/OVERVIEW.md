@@ -22,8 +22,8 @@ Generated `ResourceControlPlane.g.cs` registers the factory with
 `ResourceRuntime` and observes the invocation's endpoints before
 `ConfigurationStore.Hosting` serves the standard control-plane routes on `api`.
 
-Typed `AddNamespace` and `SetValue` descriptor verbs are intentionally deferred to
-developer-experience item 31c; this item supplies the underlying wire handlers.
+Typed `SetValue` and `RemoveValue` descriptor verbs declare the two landed wire kinds.
+`AddNamespace` remains deferred until a namespace-ownership wire kind and handler land.
 
 ## Links
 

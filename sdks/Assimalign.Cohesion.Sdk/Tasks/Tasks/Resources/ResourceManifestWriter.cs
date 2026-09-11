@@ -143,6 +143,10 @@ internal static class ResourceManifestWriter
         writer.WriteEndArray();
 
         writer.WriteStartArray("commands");
+        foreach (string command in manifest.Commands)
+        {
+            writer.WriteStringValue(command);
+        }
         writer.WriteEndArray();
 
         // Keep empty environment metadata explicit: ResourceManifest treats every collection

@@ -20,7 +20,7 @@ using NetHttpStatusCode = System.Net.HttpStatusCode;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Tests;
 
-public sealed class GatewayControlPlaneTests
+public sealed partial class GatewayControlPlaneTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
 

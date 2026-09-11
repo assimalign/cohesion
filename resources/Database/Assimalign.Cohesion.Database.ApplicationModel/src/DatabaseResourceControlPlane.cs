@@ -13,6 +13,6 @@ public static class DatabaseResourceControlPlane
     /// <returns>The Database area's default resource control plane.</returns>
     public static IResourceControlPlane Create()
     {
-        return ResourceControlPlane.Create();
+        return ResourceControlPlane.Create(["database.add-database", "database.add-principal"]);
     }
 }

@@ -92,3 +92,15 @@ the other end of the wire.
 The `string[] args` builder overload is the enabled-resource entry point. It honors
 `Hosting.Resources` `ResourceRuntime.Current` and an assembly-keyed generated control-plane
 registration; the no-argument and options overloads stay plain hosts and bind no admin listener.
+
+
+## Declarative commands
+
+Enabled hosts register database.add-database and database.add-principal handlers when advertised by
+their generated control plane. The database payload is UTF-8 JSON with database and optional engine;
+the key is `engine/database` when an engine is supplied, otherwise the database name. Database names
+cannot contain `/`; engine names may contain it, keeping the ownership identity unique.
+An omitted engine requires exactly one registered or server-fronted
+engine. Creation calls IDatabaseEngine.CreateDatabaseAsync and teardown calls DropDatabaseAsync,
+with the shared control-plane ownership ledger gating both. Existing databases are refused rather
+than adopted into a declaration that could later delete them.

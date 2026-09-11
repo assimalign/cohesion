@@ -75,6 +75,10 @@ public static class GatewayControlPlane
         {
             controlPlane.MetadataDirectory = metadataDirectory;
             controlPlane.TimeProvider = options.TimeProvider;
+            foreach (IGatewayResourceCommandClient client in options.CommandClients)
+            {
+                controlPlane.CommandDispatchers.Add(new GatewayCommandDispatcher(client));
+            }
         });
     }
 }

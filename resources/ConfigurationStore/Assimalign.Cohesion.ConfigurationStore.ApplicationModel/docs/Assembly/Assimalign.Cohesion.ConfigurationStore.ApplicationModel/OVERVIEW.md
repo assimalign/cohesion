@@ -18,7 +18,7 @@ service.
 - [`ConfigurationStoreResourceOptions`](ConfigurationStoreResourceOptions/OVERVIEW.md)
   — deployer-owned storage override and the singleton constraint.
 - [`ConfigurationStoreResourceExtensions`](ConfigurationStoreResourceExtensions/OVERVIEW.md)
-  — `AddConfigurationStore(...)` composition.
+  — typed `AddConfigurationStore(...)` and `RemoteReferenceConfigurationStore(...)` composition.
 - [`ConfigurationStoreResourceControlPlane`](ConfigurationStoreResourceControlPlane/OVERVIEW.md)
   — the area's default control-plane factory.
 
@@ -26,3 +26,6 @@ service.
 
 - [Project overview](../../OVERVIEW.md)
 - [Project design](../../DESIGN.md)
+
+`IConfigurationStoreResourceDescriptor` retains typed dependency chaining and declarative commands.
+`ConfigurationStoreResourceCommandExtensions` contributes `SetValue` and `RemoveValue`; both use the shared `IResourceCommandDescriptor` seam and source-generated payload metadata.

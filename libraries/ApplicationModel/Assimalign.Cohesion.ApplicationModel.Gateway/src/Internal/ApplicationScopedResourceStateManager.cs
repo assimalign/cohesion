@@ -40,6 +40,15 @@ internal sealed class ApplicationScopedResourceStateManager :
 
     public ResourceLifecycle GetState(ResourceId id) => _inner.GetState(GetScopedId(id));
 
+    public IReadOnlyList<ResourceCommandObservation> GetCommandObservations(ResourceId id) =>
+        _inner.GetCommandObservations(GetScopedId(id));
+
+    public void SetCommandObservation(ResourceId id, ResourceCommandObservation observation) =>
+        _inner.SetCommandObservation(GetScopedId(id), observation);
+
+    public void RemoveCommandObservation(ResourceId id, string owner, string commandId) =>
+        _inner.RemoveCommandObservation(GetScopedId(id), owner, commandId);
+
     public void SetState(
         ResourceId id,
         ResourceLifecycle state,

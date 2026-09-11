@@ -22,13 +22,32 @@ public static class DatabaseResourceExtensions
         /// <exception cref="ArgumentNullException">
         /// <paramref name="manifest"/> is <see langword="null"/>.
         /// </exception>
-        public IApplicationResourceDescriptor AddDatabase(
+        public IDatabaseResourceDescriptor AddDatabase(
             ResourceManifest manifest,
             DatabaseResourceOptions? options = null)
         {
             ArgumentNullException.ThrowIfNull(manifest);
 
-            return builder.AddResource(new DatabaseResource(manifest, options));
+            return new DatabaseResourceDescriptor(builder.AddResource(new DatabaseResource(manifest, options)));
+        }
+
+        /// <summary>Binds a manifest-backed remote Database resource with its typed command surface.</summary>
+        /// <param name="declaration">The build-produced external declaration.</param>
+        /// <param name="configure">The peer gateway, file, endpoint, or contributed binding.</param>
+        /// <returns>The typed external graph descriptor.</returns>
+        /// <exception cref="ArgumentNullException">The builder, declaration, or configuration callback is null.</exception>
+        /// <exception cref="ArgumentException">The declaration has no Database manifest.</exception>
+        /// <exception cref="InvalidOperationException">The external conflicts with an existing declaration.</exception>
+        public IDatabaseResourceDescriptor RemoteReferenceDatabase(
+            ExternalResourceDeclaration declaration,
+            Action<RemoteReferenceOptions> configure)
+        {
+            ArgumentNullException.ThrowIfNull(declaration);
+            if (!string.Equals(declaration.Manifest?.Kind, "Database", StringComparison.Ordinal))
+            {
+                throw new ArgumentException("A typed Database reference requires an Database manifest.", nameof(declaration));
+            }
+            return new DatabaseResourceDescriptor(builder.RemoteReference(declaration, configure));
         }
     }
 }

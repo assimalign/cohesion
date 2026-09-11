@@ -15,6 +15,18 @@ public interface IResourceControlPlane
     /// <summary>Gets the area-defined command kinds accepted by this control plane.</summary>
     IReadOnlyList<string> AcceptedCommandKinds { get; }
 
+    /// <summary>Gets accepted declarations, including their owners, without transport state.</summary>
+    IReadOnlyList<ResourceCommand> Commands => Array.Empty<ResourceCommand>();
+
+    /// <summary>Registers the runtime implementation of an advertised command kind.</summary>
+    /// <param name="handler">The area-owned mutation handler.</param>
+    /// <exception cref="ArgumentNullException">The handler is null.</exception>
+    /// <exception cref="ArgumentException">The handler kind is not advertised.</exception>
+    /// <exception cref="InvalidOperationException">A handler already exists for the kind.</exception>
+    /// <exception cref="NotSupportedException">This control plane does not support registration.</exception>
+    void RegisterCommandHandler(IResourceCommandHandler handler) =>
+        throw new NotSupportedException("This resource control plane does not support command handlers.");
+
     /// <summary>Gets the latest observed endpoint snapshot keyed by endpoint name.</summary>
     IReadOnlyDictionary<string, Uri> ObservedEndpoints { get; }
 
@@ -61,7 +73,22 @@ public interface IResourceControlPlane
     /// <param name="command">The command envelope.</param>
     /// <param name="cancellationToken">Cancels command execution.</param>
     /// <returns>The area-defined response payload.</returns>
+    /// <exception cref="ArgumentNullException">The command is null.</exception>
+    /// <exception cref="ArgumentException">An envelope identity field is blank.</exception>
+    /// <exception cref="NotSupportedException">The command kind has no registered runtime handler.</exception>
+    /// <exception cref="ResourceCommandRejectedException">Ownership or the runtime refuses the command.</exception>
     ValueTask<ReadOnlyMemory<byte>> ExecuteCommandAsync(
         ResourceCommand command,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Deletes a previously applied declaration belonging to the supplied owner.</summary>
+    /// <param name="command">The declaration identity to delete.</param>
+    /// <param name="cancellationToken">Cancels deletion.</param>
+    /// <returns>The area-defined response bytes.</returns>
+    /// <exception cref="ArgumentNullException">The command is null.</exception>
+    /// <exception cref="ArgumentException">An envelope identity field is blank.</exception>
+    /// <exception cref="NotSupportedException">The command kind or deletion is unsupported.</exception>
+    /// <exception cref="ResourceCommandRejectedException">Ownership or the runtime refuses deletion.</exception>
+    ValueTask<ReadOnlyMemory<byte>> DeleteCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException($"Resource command kind '{command.Kind}' does not support deletion.");
 }

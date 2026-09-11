@@ -27,9 +27,11 @@ public sealed class ApplicationModelDocument
     /// <param name="adopt">Whether foreign-owned resources may be adopted.</param>
     /// <param name="restartOrphans">Whether orphaned local resources may be restarted.</param>
     /// <param name="resources">The model resources in declaration order.</param>
+    /// <param name="commands">Optional declarative commands; absent documents retain an empty collection.</param>
     /// <exception cref="ArgumentNullException">
     /// A required string or <paramref name="resources"/> is <see langword="null"/>.
     /// </exception>
+    /// <exception cref="InvalidDataException"><paramref name="commands"/> contains a null entry.</exception>
     [JsonConstructor]
     public ApplicationModelDocument(
         string schema,
@@ -40,7 +42,8 @@ public sealed class ApplicationModelDocument
         string mode,
         bool adopt,
         bool restartOrphans,
-        IReadOnlyList<ApplicationModelResourceDocument> resources)
+        IReadOnlyList<ApplicationModelResourceDocument> resources,
+        IReadOnlyList<ApplicationModelCommandDocument>? commands = null)
     {
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(application);
@@ -65,6 +68,17 @@ public sealed class ApplicationModelDocument
         Adopt = adopt;
         RestartOrphans = restartOrphans;
         Resources = new ReadOnlyCollection<ApplicationModelResourceDocument>(resourceCopy);
+        var commandCopy = new ApplicationModelCommandDocument[commands?.Count ?? 0];
+        for (int index = 0; index < commandCopy.Length; index++)
+        {
+            ApplicationModelCommandDocument command = commands![index];
+            if (command is null)
+            {
+                throw new InvalidDataException("Application-model commands must not contain null entries.");
+            }
+            commandCopy[index] = command with { Payload = command.Payload.ToArray() };
+        }
+        Commands = Array.AsReadOnly(commandCopy);
     }
 
     /// <summary>Gets the application-model schema.</summary>
@@ -93,6 +107,9 @@ public sealed class ApplicationModelDocument
 
     /// <summary>Gets the model resources in declaration order.</summary>
     public IReadOnlyList<ApplicationModelResourceDocument> Resources { get; }
+
+    /// <summary>Gets portable desired commands; command payloads must contain no secrets.</summary>
+    public IReadOnlyList<ApplicationModelCommandDocument> Commands { get; }
 
     /// <summary>
     /// Creates a portable document from a built application model.
@@ -136,6 +153,14 @@ public sealed class ApplicationModelDocument
                     : null);
         }
 
+        var commands = new ApplicationModelCommandDocument[model.Commands.Count];
+        for (int index = 0; index < commands.Length; index++)
+        {
+            IResourceCommand command = model.Commands[index];
+            commands[index] = new ApplicationModelCommandDocument(command.Id, command.Kind,
+                command.Key, command.Target.Name.ToString(), command.Owner.ToString(), command.Payload, command.Optional);
+        }
+
         return new ApplicationModelDocument(
             CurrentSchema,
             model.Name.ToString(),
@@ -145,7 +170,7 @@ public sealed class ApplicationModelDocument
             model.RunMode.ToString().ToLowerInvariant(),
             model.Adopt,
             model.RestartOrphans,
-            new ReadOnlyCollection<ApplicationModelResourceDocument>(resources));
+            new ReadOnlyCollection<ApplicationModelResourceDocument>(resources), commands);
     }
 
     /// <summary>
@@ -330,6 +355,26 @@ public sealed class ApplicationModelDocument
         }
 
         ValidateDependencyGraph(descriptors);
+        var commands = new IResourceCommand[Commands.Count];
+        for (int index = 0; index < commands.Length; index++)
+        {
+            ApplicationModelCommandDocument command = Commands[index];
+            if (!descriptorByName.TryGetValue(command.Target, out BuiltApplicationResourceDescriptor? target))
+            {
+                throw new InvalidDataException($"Command '{command.Id}' targets unknown resource '{command.Target}'.");
+            }
+
+            byte[] canonical = DeclarativeResourceCommand.Canonicalize(command.Payload);
+            if (!canonical.AsSpan().SequenceEqual(command.Payload.Span)
+                || command.Id != DeclarativeResourceCommand.CreateId(command.Kind, target.Resource, canonical))
+            {
+                throw new InvalidDataException($"Command '{command.Id}' has a noncanonical payload or mismatched deterministic identity.");
+            }
+
+            commands[index] = new DeclarativeResourceCommand(command.Id, command.Kind, command.Key,
+                target.Resource, ApplicationName.Parse(command.Owner), canonical, command.Optional);
+        }
+        ResourceCommandValidator.Validate(commands, ApplicationName.Parse(Application), descriptors, manifests);
 
         GatewayRunMode documentRunMode = Enum.Parse<GatewayRunMode>(Mode, ignoreCase: true);
         GatewayRunMode effectiveRunMode = runMode ?? documentRunMode;
@@ -358,7 +403,7 @@ public sealed class ApplicationModelDocument
             effectiveRunMode,
             effectiveGatewayIdentity,
             Adopt,
-            RestartOrphans);
+            RestartOrphans, commands);
     }
 
     private static ApplicationModelDocument ValidateDeserialized(ApplicationModelDocument? document)

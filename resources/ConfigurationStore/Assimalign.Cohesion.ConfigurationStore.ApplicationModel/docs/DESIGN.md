@@ -63,7 +63,7 @@ it to the application graph. Planning remains deferred until
 the final referenced-manifest map.
 
 ```csharp
-IApplicationResourceDescriptor configuration = builder.AddConfigurationStore(
+IConfigurationStoreResourceDescriptor configuration = builder.AddConfigurationStore(
     manifest,
     new ConfigurationStoreResourceOptions
     {
@@ -90,9 +90,8 @@ are also available. Namespaced routes use the ambient bootstrap Bearer credentia
 when one is present and fail closed for managed contexts without a credential.
 
 The accepted command-kind set contains `configurationstore.set-value` and
-`configurationstore.remove-value`, whose wire handlers live in Hosting. Typed
-descriptor verbs such as `AddNamespace` and `SetValue` remain developer-experience
-item 31c work.
+`configurationstore.remove-value`, whose wire handlers live in Hosting. Typed `SetValue` and `RemoveValue` descriptor verbs now declare those two wire kinds.
+`AddNamespace` remains deferred until a distinct namespace-ownership handler and command kind land.
 
 ## Dependency and AOT posture
 
@@ -111,4 +110,20 @@ ConfigurationStore runtime dependency, or platform SDK dependency.
 - Carrying platform-specific scheduling, storage-class, service, or claim types.
 - Client factories or remote protocol calls; those belong to
   `ConfigurationStore.Client`.
-- Typed configuration-store descriptor command verbs before item 31c.
+- AddNamespace and a separate namespace-ownership wire command; the two landed value kinds are the current scope.
+
+## Typed descriptor commands
+
+`AddConfigurationStore` returns `IConfigurationStoreResourceDescriptor`.
+`RemoteReferenceConfigurationStore(declaration, configure)` binds a manifest-backed external
+with the same surface. The internal wrapper retains the registered graph resource identity.
+
+`SetValue(namespaceName, key, JsonElement|string value, optional: false)` records
+`configurationstore.set-value` with `{ "namespace", "key", "value" }`; values must be strings or null, matching the landed store contract.
+`RemoveValue(namespaceName, key, optional: false)` records `configurationstore.remove-value`
+with `{ "namespace", "key" }`. Both use `namespace/key` as the ownership conflict key and
+source-generated payload metadata; JSON properties are canonicalized by ApplicationModel.
+Value keys cannot contain `/`; namespace names may, so different values cannot alias the same
+ownership key. A model may declare one set or remove command per target/key.
+These declarations carry ordinary configuration, never secrets, because model export retains them.
+`Build()` checks the manifest's accepted kinds; delivery and mutation remain gateway/Hosting work.

@@ -50,3 +50,20 @@ JSON is parsed and written explicitly, with no reflection-based serialization.
 The inherited SDK default still declares HTTPS without a certificate mount, while this host currently
 has only an HTTP binder. Until the endpoint/TLS contract is completed, development manifests must
 override `api` to loopback HTTP; the unresolved contract is called out in the implementation report.
+
+
+## Declarative command delivery
+
+Configuration commands now register runtime handlers on the same IResourceControlPlane used by direct
+in-process delivery. The HTTP adapter authenticates first, preserving issuer/owner equality (403),
+missing namespaces (404), and unsupported kinds (501), with status/detail JSON on command refusals.
+Other ownership refusals return 409. POST continues to accept the existing envelope and set payload
+{value}; typed declarations can additionally include namespace/key, which must match the envelope key.
+Configuration keys cannot contain `/`; namespaces may contain it. This keeps the final-slash
+ownership identity unambiguous for typed, direct, and HTTP declarations.
+DELETE commands uses the same envelope: removing a set declaration removes its value; removing a
+remove-value declaration releases ownership without restoring an undeclared historical value.
+
+The shared command ledger is invocation-local and does not persist ownership across resource restarts.
+The repository still durably stores values. Cross-application delegation is not inferred from a
+local issuer's bootstrap credential; the existing issuer/owner guard remains enforced.

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
@@ -21,6 +22,22 @@ internal sealed class TestGateway : ApplicationGateway
     private readonly ResourceName _name;
 
     public List<string> Gathered { get; } = new();
+
+    public ApplicationExportDocument? LastExport { get; private set; }
+
+    public Func<IApplicationModel, IApplicationResource, IResourceControlPlane?>? DirectControlPlane { get; set; }
+
+    public Func<ResourcePlan, TimeSpan>? ResourceReadinessBudget { get; set; }
+
+    protected override TimeSpan GetReadinessBudget(ResourcePlan plan) =>
+        ResourceReadinessBudget?.Invoke(plan) ?? base.GetReadinessBudget(plan);
+
+    protected override bool TryGetResourceControlPlane(
+        IApplicationModel model, IApplicationResource resource, out IResourceControlPlane? controlPlane)
+    {
+        controlPlane = DirectControlPlane?.Invoke(model, resource);
+        return controlPlane is not null;
+    }
 
     public TestGateway(
         IApplicationResourceStateManager state,
@@ -70,7 +87,11 @@ internal sealed class TestGateway : ApplicationGateway
 
     protected override Task PublishApplicationExportAsync(
         ApplicationExportDocument document,
-        CancellationToken cancellationToken) => Task.CompletedTask;
+        CancellationToken cancellationToken)
+    {
+        LastExport = document;
+        return Task.CompletedTask;
+    }
 
     protected override Task RemoveApplicationExportAsync(
         ApplicationName application,

@@ -282,7 +282,7 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
         commandsResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
         using JsonDocument commands = JsonDocument.Parse(
             await commandsResponse.Content.ReadAsStringAsync(cancellationToken));
-        commands.RootElement.GetProperty("acceptedCommandKinds").GetArrayLength().ShouldBe(0);
+        commands.RootElement.GetProperty("acceptedCommandKinds").GetArrayLength().ShouldBe(2);
     }
 
     private string ReadBootstrapCredential(ResourceManifest manifest)

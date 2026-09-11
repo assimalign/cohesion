@@ -8,4 +8,8 @@
     <CohesionApplicationModel>disabled</CohesionApplicationModel>
   </PropertyGroup>
 
+  <ItemGroup>
+    <CohesionCommand Include="web.custom" />
+  </ItemGroup>
+
 </Project>

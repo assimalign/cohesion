@@ -376,6 +376,24 @@ internal sealed class ProcessHostContext : HostContext
         }
     }
 
+    internal bool TryGetControlPlane(string application, string resource, out IResourceControlPlane? controlPlane)
+    {
+        lock (_lock)
+        {
+            foreach (ProcessHostLease lease in _leases)
+            {
+                if (lease.ResourceContext.ApplicationName == application &&
+                    lease.ResourceContext.ResourceName == resource &&
+                    ResourceRuntime.TryGetControlPlane(lease.Host, out controlPlane))
+                {
+                    return true;
+                }
+            }
+        }
+        controlPlane = null;
+        return false;
+    }
+
     internal void Remove(ProcessHostLease lease)
     {
         lock (_lock)

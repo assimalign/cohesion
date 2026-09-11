@@ -93,7 +93,7 @@
 			<Output TaskParameter="TargetOutputs" ItemName="_CohesionGatewayInProcessRuntimeAsset" />
 		</MSBuild>
 		<Message Importance="Low" Text="Sdk.Gateway manifest application models: @(_CohesionGatewayRequiredApplicationModel)." />
-		<Message Importance="Low" Text="Sdk.Gateway manifest mount clients: @(_CohesionGatewayRequiredClientPackage)." />
+		<Message Importance="Low" Text="Sdk.Gateway manifest mount and command clients: @(_CohesionGatewayRequiredClientPackage)." />
 		<ItemGroup>
 			<_CohesionGatewayInProcessRuntimeAsset
 				Update="@(_CohesionGatewayInProcessRuntimeAsset)"

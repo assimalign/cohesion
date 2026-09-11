@@ -22,3 +22,7 @@ runtime inputs are not resolved, and the state directory is not created.
 See [DESIGN.md](DESIGN.md) for lifecycle, restart, remapping, and NativeAOT decisions and
 [Assembly](Assembly/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/OVERVIEW.md) for the
 public API map.
+
+Declared resource commands use the adopted host's registered control plane directly after
+Running. This retains the generic gateway's ownership, observation, and teardown behavior while
+avoiding a second control-plane instance for an in-process member.

@@ -71,6 +71,10 @@ module initializer registers the Database default control plane. A
 top-level program adds `public partial class Program { }` so another assembly can use it as
 the statically rooted generic marker.
 
+The real-process acceptance harness verifies discovery of the two Database command kinds,
+`database.add-database` and `database.add-principal`, alongside the existing readiness and
+graceful-stop routes. Principal mutation currently returns an explicit provider refusal.
+
 ## Relationships
 
 - `Assimalign.Cohesion.Hosting` owns the plain host lifecycle.

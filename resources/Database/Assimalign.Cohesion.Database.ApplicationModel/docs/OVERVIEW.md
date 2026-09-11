@@ -8,7 +8,7 @@ platform-neutral `ResourcePlan` for the selected gateway compiler.
 ```csharp
 ResourceManifest manifest = ResourceManifest.Load("resource.json");
 
-IApplicationResourceDescriptor database = builder.AddDatabase(
+IDatabaseResourceDescriptor database = builder.AddDatabase(
     manifest,
     new DatabaseResourceOptions
     {
@@ -29,8 +29,8 @@ to application authors.
   service per endpoint, and a headless governing service.
 - `DatabaseResourceControlPlane` — the Database default control-plane factory.
 
-The control plane currently accepts no command kinds. Database commands are deferred
-to developer-experience item 31c.
+The control plane accepts `database.add-database` and `database.add-principal`. Typed descriptor verbs `AddDatabase(name, engine)` and `AddPrincipal(database, name)` record those declarations; an explicit engine gives the database an `engine/database` ownership key. `RemoteReferenceDatabase` supplies the same typed surface for manifest-backed externals. Principal creation receives a named rejection until the runtime supports principal mutation.
+Database names cannot contain `/`, which keeps ownership keys unambiguous.
 
 ## Dependencies
 

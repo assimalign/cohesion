@@ -154,3 +154,21 @@ unclassified requested stop use 143 when their drain budget is cancelled.
 - Resources does not define the health value types.
 - Resources does not choose an HTTP or other control-plane transport.
 - Resources performs no assembly scanning, dynamic loading, or runtime code generation.
+
+
+## Declarative command delivery
+
+Runtime packages register an IResourceCommandHandler for each implemented advertised kind through
+IResourceControlPlane.RegisterCommandHandler. Dispatch rejects blank identity fields and unsupported
+kinds before invoking runtime mutations. A serialized per-plane ledger caches identical owner/id
+replays, refuses another owner's claim to the same key, and prevents stale declarations from deleting
+a newer declaration. Successful deletion releases the key. Commands exposes an owner-bearing snapshot;
+the HTTP adapter deliberately excludes payloads from listings.
+
+ResourceCommandRejectedException carries the provider's Detail through direct and HTTP dispatch.
+ResourceRuntime.TryGetControlPlane resolves a surrendered host through a ConditionalWeakTable;
+neither host nor its plane is kept alive by the lookup. Generated registration code is unchanged.
+
+The command ledger is invocation-local, not durable. A host restart loses declaration ownership.
+Area handlers must refuse to adopt pre-existing unmanaged resources when later deletion could destroy
+them; Database applies that rule. Durable command ownership remains a follow-up.

@@ -24,3 +24,15 @@ ambient `api` endpoint; plain applications use `--endpoint` or the loopback defa
 ## Public type
 
 - `ConfigurationStoreApplication` — static creation facade; all runtime implementation types are internal.
+
+
+## Declarative commands
+
+Configuration commands now register runtime handlers on the same IResourceControlPlane used by direct
+in-process delivery. The HTTP adapter authenticates first, preserving issuer/owner equality (403),
+missing namespaces (404), and unsupported kinds (501), with status/detail JSON on command refusals.
+Other ownership refusals return 409. POST continues to accept the existing envelope and set payload
+{value}; typed declarations can additionally include namespace/key, which must match the envelope key.
+Configuration keys cannot contain `/`; namespaces may contain it, preserving one ownership identity.
+DELETE commands uses the same envelope: removing a set declaration removes its value; removing a
+remove-value declaration releases ownership without restoring an undeclared historical value.

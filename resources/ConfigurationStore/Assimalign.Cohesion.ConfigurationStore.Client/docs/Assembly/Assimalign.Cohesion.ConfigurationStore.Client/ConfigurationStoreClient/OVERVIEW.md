@@ -19,6 +19,10 @@ The returned client uses a process-shared BCL `HttpMessageInvoker`. Redirects an
 disabled so its Bearer credential is not forwarded to another authority or mixed with ambient
 cookie state. Callers do not own or dispose the shared transport.
 
+`CreateForControlPlane(Uri controlPlaneAddress, ClientCredential)` accepts the full manifest control-plane
+URI, including custom paths. Its `ObserveCommandAsync` and `DeleteCommandAsync` append `/commands`
+directly. The original factory and read/submission methods retain their existing route composition.
+
 ## Links
 
 - [Assembly overview](../OVERVIEW.md)

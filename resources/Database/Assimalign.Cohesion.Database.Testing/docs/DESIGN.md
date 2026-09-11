@@ -111,6 +111,8 @@ it does not depend on an application-export API. Coverage asserts:
 - Database manifest defaults and generated `Resource`/control-plane source;
 - real-process readiness, liveness, health, endpoint discovery, command discovery, and
   graceful stop on the `admin` endpoint;
+- the advertised `database.add-database` and `database.add-principal` command kinds; the latter
+  returns a named runtime refusal until a principal mutation seam exists;
 - typed SQL client round-trips on the realized `db` endpoint; and
 - recovery of committed rows after a graceful gateway stop and relaunch over the same
   materialized volume.

@@ -98,3 +98,13 @@ Typed area classification checks the currently inspected exception first, so a d
 exception wins. When that exception is unclassified, classification recurses through its inner
 exception or aggregate members; configuration wins over dependency among recursively inspected
 aggregate members. Any typed result takes precedence over generic phase/drain classification.
+
+
+## Declarative commands
+
+Runtime packages register an IResourceCommandHandler for each implemented advertised kind through
+IResourceControlPlane.RegisterCommandHandler. Dispatch rejects blank identity fields and unsupported
+kinds before invoking runtime mutations. A serialized per-plane ledger caches identical owner/id
+replays, refuses another owner's claim to the same key, and prevents stale declarations from deleting
+a newer declaration. Successful deletion releases the key. Commands exposes an owner-bearing snapshot;
+the HTTP adapter deliberately excludes payloads from listings.

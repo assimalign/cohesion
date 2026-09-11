@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Assimalign.Cohesion.ApplicationModel;
 
@@ -9,18 +10,42 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// descriptor returned by <see cref="IApplicationBuilder.AddResource(IApplicationResource)"/>
 /// is the same instance referenced by <c>DependsOn</c>.
 /// </summary>
-internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescriptor
+internal sealed class ApplicationResourceDescriptor : IResourceCommandDescriptor
 {
     private readonly List<IApplicationResourceDescriptor> _dependencies = new();
 
-    public ApplicationResourceDescriptor(IApplicationResource resource)
+    private readonly Func<ApplicationName>? _owner;
+    private readonly Action<IResourceCommand>? _register;
+    private readonly List<IResourceCommand> _commands = new();
+
+    public ApplicationResourceDescriptor(IApplicationResource resource,
+        Func<ApplicationName>? owner = null, Action<IResourceCommand>? register = null)
     {
         Resource = resource ?? throw new ArgumentNullException(nameof(resource));
+        _owner = owner;
+        _register = register;
     }
 
     public IApplicationResource Resource { get; }
 
     public ResourcePlan? Plan => null;
+
+    public IReadOnlyList<IResourceCommand> Commands => _commands.AsReadOnly();
+
+    public IResourceCommand AddCommand<TPayload>(string kind, string key, TPayload payload,
+        JsonTypeInfo<TPayload> typeInfo, bool optional = false)
+    {
+        if (_owner is null || _register is null)
+        {
+            throw new InvalidOperationException("Declare commands on an authoring descriptor before Build().");
+        }
+
+        IResourceCommand command = ResourceCommands.Create(kind, key, Resource, _owner(), payload, typeInfo, optional);
+        _register(command);
+        return command;
+    }
+
+    internal void RecordCommand(IResourceCommand command) => _commands.Add(command);
 
     public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _dependencies;
 
@@ -28,7 +53,7 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
     {
         ArgumentNullException.ThrowIfNull(resource);
 
-        if (ReferenceEquals(resource, this))
+        if (ReferenceEquals(resource.Resource, Resource))
         {
             throw new InvalidOperationException($"Resource '{Resource.Name}' cannot depend on itself.");
         }

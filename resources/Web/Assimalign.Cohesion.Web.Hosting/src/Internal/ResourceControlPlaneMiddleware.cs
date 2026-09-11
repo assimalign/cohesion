@@ -202,14 +202,27 @@ internal static class ResourceControlPlaneMiddleware
                         writer.WriteStringValue(kind);
                     }
                     writer.WriteEndArray();
+                    writer.WritePropertyName("commands");
+                    writer.WriteStartArray();
+                    foreach (ResourceCommand command in controlPlane.Commands)
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("id", command.Id);
+                        writer.WriteString("kind", command.Kind);
+                        writer.WriteString("owner", command.Owner);
+                        writer.WriteString("key", command.Key);
+                        writer.WriteString("status", "Applied");
+                        writer.WriteEndObject();
+                    }
+                    writer.WriteEndArray();
                     writer.WriteEndObject();
                 }).ConfigureAwait(false);
                 return;
             }
 
-            if (context.Request.Method != HttpMethod.Post)
+            if (context.Request.Method != HttpMethod.Post && context.Request.Method != HttpMethod.Delete)
             {
-                SetMethodNotAllowed(context, "GET, HEAD, POST");
+                SetMethodNotAllowed(context, "GET, HEAD, POST, DELETE");
                 return;
             }
 
@@ -326,6 +339,14 @@ internal static class ResourceControlPlaneMiddleware
                 context.Request.Body,
                 cancellationToken: context.RequestCancelled).ConfigureAwait(false);
             JsonElement root = document.RootElement;
+            if (root.ValueKind is not JsonValueKind.Object)
+            {
+                throw new JsonException("A resource command must be a JSON object.");
+            }
+            if (root.TryGetProperty("payload", out JsonElement rawPayload) && rawPayload.ValueKind is not JsonValueKind.String)
+            {
+                throw new JsonException("The command payload must be a base64 string.");
+            }
             byte[] payload = root.TryGetProperty("payload", out JsonElement payloadElement)
                 ? payloadElement.GetBytesFromBase64()
                 : Array.Empty<byte>();
@@ -336,9 +357,9 @@ internal static class ResourceControlPlaneMiddleware
                 GetRequiredString(root, "key"),
                 payload);
 
-            ReadOnlyMemory<byte> response = await controlPlane.ExecuteCommandAsync(
-                command,
-                context.RequestCancelled).ConfigureAwait(false);
+            ReadOnlyMemory<byte> response = context.Request.Method == HttpMethod.Delete
+                ? await controlPlane.DeleteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false)
+                : await controlPlane.ExecuteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false);
             context.Response.StatusCode = HttpStatusCode.Ok;
             context.Response.Headers[HttpHeaderKey.ContentType] = "application/octet-stream";
             await context.Response.Body.WriteAsync(response, context.RequestCancelled).ConfigureAwait(false);
@@ -351,16 +372,35 @@ internal static class ResourceControlPlaneMiddleware
         {
             context.Response.StatusCode = HttpStatusCode.BadRequest;
         }
-        catch (NotSupportedException)
+        catch (ArgumentException)
+        {
+            context.Response.StatusCode = HttpStatusCode.BadRequest;
+        }
+        catch (NotSupportedException exception)
         {
             context.Response.StatusCode = HttpStatusCode.NotImplemented;
+            await WriteCommandRefusalAsync(context, exception.Message).ConfigureAwait(false);
+        }
+        catch (ResourceCommandRejectedException exception)
+        {
+            context.Response.StatusCode = HttpStatusCode.Conflict;
+            await WriteCommandRefusalAsync(context, exception.Detail).ConfigureAwait(false);
         }
     }
+
+    private static Task WriteCommandRefusalAsync(IHttpContext context, string detail) =>
+        WriteJsonAsync(context, writer =>
+        {
+            writer.WriteStartObject();
+            writer.WriteString("status", "Rejected");
+            writer.WriteString("detail", detail);
+            writer.WriteEndObject();
+        });
 
     private static string GetRequiredString(JsonElement element, string name)
     {
         if (!element.TryGetProperty(name, out JsonElement property) ||
-            property.ValueKind is not JsonValueKind.String)
+            property.ValueKind is not JsonValueKind.String || string.IsNullOrWhiteSpace(property.GetString()))
         {
             throw new JsonException($"The command property '{name}' is required.");
         }

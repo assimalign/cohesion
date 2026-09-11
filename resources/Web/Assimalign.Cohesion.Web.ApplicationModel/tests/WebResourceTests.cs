@@ -38,7 +38,7 @@ public sealed class WebResourceTests
         var options = new WebResourceOptions { Replicas = 3 };
 
         // Act
-        IApplicationResourceDescriptor descriptor = builder.AddWeb(manifest, options);
+        IWebResourceDescriptor descriptor = builder.AddWeb(manifest, options);
 
         // Assert
         WebResource resource = descriptor.Resource.ShouldBeOfType<WebResource>();

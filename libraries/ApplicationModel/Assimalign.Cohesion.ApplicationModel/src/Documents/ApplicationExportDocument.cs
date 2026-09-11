@@ -27,6 +27,7 @@ public sealed class ApplicationExportDocument
     /// <param name="trustKey">The application's public JSON Web Key, when available.</param>
     /// <param name="resources">The exported resources.</param>
     /// <param name="model">The portable application model.</param>
+    /// <param name="commands">Payload-free observed command outcomes, when available.</param>
     /// <exception cref="ArgumentNullException">
     /// A required string, <paramref name="resources"/>, or <paramref name="model"/> is
     /// <see langword="null"/>.
@@ -39,7 +40,8 @@ public sealed class ApplicationExportDocument
         string version,
         JsonElement? trustKey,
         IReadOnlyList<ApplicationExportResource> resources,
-        ApplicationModelDocument model)
+        ApplicationModelDocument model,
+        IReadOnlyList<ResourceCommandObservation>? commands = null)
     {
         ArgumentNullException.ThrowIfNull(application);
         ArgumentNullException.ThrowIfNull(environment);
@@ -60,6 +62,9 @@ public sealed class ApplicationExportDocument
         TrustKey = trustKey?.Clone();
         Resources = new ReadOnlyCollection<ApplicationExportResource>(resourceCopy);
         Model = model;
+        Commands = commands is null
+            ? Array.Empty<ResourceCommandObservation>()
+            : new List<ResourceCommandObservation>(commands).AsReadOnly();
     }
 
     /// <summary>Gets the monotonic application-export schema version.</summary>
@@ -83,6 +88,9 @@ public sealed class ApplicationExportDocument
     /// <summary>Gets the portable application model.</summary>
     public ApplicationModelDocument Model { get; }
 
+    /// <summary>Gets command outcomes without command payloads or area result bytes.</summary>
+    public IReadOnlyList<ResourceCommandObservation> Commands { get; }
+
     /// <summary>
     /// Creates an export from a built model and its observed endpoint addresses.
     /// </summary>
@@ -92,6 +100,7 @@ public sealed class ApplicationExportDocument
     /// Observed endpoint addresses keyed by resource name. Omitted resources are exported with no endpoints.
     /// </param>
     /// <param name="trustKey">The application's public JSON Web Key, when available.</param>
+    /// <param name="commands">Payload-free command observations from the active state manager.</param>
     /// <returns>The corresponding application export.</returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="model"/> or <paramref name="version"/> is <see langword="null"/>.
@@ -110,7 +119,8 @@ public sealed class ApplicationExportDocument
         IApplicationModel model,
         string version,
         IReadOnlyDictionary<ResourceName, IReadOnlyList<ApplicationExportEndpoint>>? endpoints = null,
-        JsonElement? trustKey = null)
+        JsonElement? trustKey = null,
+        IReadOnlyList<ResourceCommandObservation>? commands = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
@@ -173,7 +183,8 @@ public sealed class ApplicationExportDocument
             version,
             trustKey,
             new ReadOnlyCollection<ApplicationExportResource>(resources),
-            ApplicationModelDocument.Create(model)).Validate();
+            ApplicationModelDocument.Create(model),
+            commands).Validate();
     }
 
     /// <summary>
@@ -507,6 +518,32 @@ public sealed class ApplicationExportDocument
         {
             throw new InvalidDataException(
                 "Application-export resources must contain every locally realized resource in the model payload exactly once.");
+        }
+
+        var commandIdentities = new HashSet<(string Target, string Owner, string Id)>();
+        foreach (ResourceCommandObservation command in Commands)
+        {
+            if (command is null || string.IsNullOrWhiteSpace(command.Target)
+                || string.IsNullOrWhiteSpace(command.Id) || string.IsNullOrWhiteSpace(command.Kind)
+                || string.IsNullOrWhiteSpace(command.Owner) || string.IsNullOrWhiteSpace(command.Key))
+            {
+                throw new InvalidDataException("Application-export command observations require a target, id, kind, owner, and nonblank key.");
+            }
+
+            if (!modelResources.ContainsKey(command.Target))
+            {
+                throw new InvalidDataException($"Application-export command '{command.Id}' targets unknown resource '{command.Target}'.");
+            }
+
+            if (!Enum.IsDefined(command.Status))
+            {
+                throw new InvalidDataException($"Application-export command '{command.Id}' has an unsupported observed status.");
+            }
+
+            if (!commandIdentities.Add((command.Target, command.Owner, command.Id)))
+            {
+                throw new InvalidDataException($"Application-export contains duplicate observation for command '{command.Id}' owned by '{command.Owner}'.");
+            }
         }
 
         Model.ToModel();

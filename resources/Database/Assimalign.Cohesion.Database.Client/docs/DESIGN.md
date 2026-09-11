@@ -69,3 +69,15 @@ statically.
   protocol's transaction payload schema).
 - No TLS logic — security layers compose in the connection factory
   (`Connections.Security`).
+
+
+## Declarative command delivery
+
+IDatabaseCommandClient is the separate HTTP admin command contract. DatabaseCommandClient.Create
+accepts the full manifest control-plane URI (including its path) and an opaque bootstrap bearer.
+SendCommandAsync posts the camel-case id/kind/owner/key/payload envelope to commands; payload is
+base64. DeleteCommandAsync sends DELETE to the same route and envelope. Both return package-local
+ResourceCommandObservation with Status and Detail, retaining actionable provider refusal text.
+Transport failures propagate; HTTP refusals become Rejected observations. Serialization uses explicit
+Utf8JsonWriter/JsonDocument access. The caller disposes the client; redirect following and cookies
+are disabled. No runtime Hosting or ApplicationModel dependency was added.

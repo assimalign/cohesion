@@ -21,6 +21,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
         ApplicationResourceDescriptor Descriptor,
         IExternalResourceResolver? CodeResolver)>
         _externals = new();
+    private readonly List<IResourceCommand> _commands = new();
     private ApplicationName? _name;
     private IApplicationGateway? _gateway;
 
@@ -64,7 +65,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
         // Enforces resource-name uniqueness; throws before the descriptor is created.
         _resources.Add(resource);
 
-        var descriptor = new ApplicationResourceDescriptor(resource);
+        var descriptor = new ApplicationResourceDescriptor(resource, () => ResolveName(_environment), command => AddCommand(command));
         _descriptors.Add(descriptor);
         return descriptor;
     }
@@ -117,6 +118,21 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
         var descriptor = (ApplicationResourceDescriptor)AddResource(resource);
         _externals.Add(declaration.Name, (resource, descriptor, resolver));
         return descriptor;
+    }
+
+    public IApplicationBuilder AddCommand(IResourceCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        _commands.Add(command);
+        foreach (ApplicationResourceDescriptor descriptor in _descriptors)
+        {
+            if (ReferenceEquals(descriptor.Resource, command.Target))
+            {
+                descriptor.RecordCommand(command);
+                break;
+            }
+        }
+        return this;
     }
 
     public IApplicationBuilder UseGateway(IApplicationGateway gateway)
@@ -472,6 +488,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
             ValidateManifests(authoringDescriptors, manifests);
             descriptors = MergeManifestDependencies(authoringDescriptors, manifests);
             ValidateGraph(descriptors);
+            ResourceCommandValidator.Validate(_commands, name, descriptors, manifests);
         }
 
         ResourceName gatewayIdentity = _gateway is not null
@@ -492,7 +509,8 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
             _options.RunMode,
             gatewayIdentity,
             _options.Adopt,
-            _options.RestartOrphans);
+            _options.RestartOrphans,
+            _commands);
     }
 
     private static void ValidateManifests(
@@ -529,6 +547,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
         var copies = new Dictionary<IApplicationResourceDescriptor, ApplicationResourceDescriptor>(
             descriptors.Count,
             ReferenceEqualityComparer.Instance);
+        var byResource = new Dictionary<IApplicationResource, ApplicationResourceDescriptor>(ReferenceEqualityComparer.Instance);
         var merged = new ApplicationResourceDescriptor[descriptors.Count];
         var byManifestIdentity = new Dictionary<(ApplicationName Application, ResourceName Resource), ApplicationResourceDescriptor>();
 
@@ -536,6 +555,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
         {
             var copy = new ApplicationResourceDescriptor(descriptors[index].Resource);
             copies.Add(descriptors[index], copy);
+            byResource.Add(descriptors[index].Resource, copy);
             merged[index] = copy;
 
             ResourceManifest manifest = manifests[index];
@@ -554,8 +574,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
             foreach (IApplicationResourceDescriptor dependency in source.Dependencies)
             {
                 target.DependsOn(copies.TryGetValue(dependency, out ApplicationResourceDescriptor? copy)
-                    ? copy
-                    : dependency);
+                    || byResource.TryGetValue(dependency.Resource, out copy) ? copy : dependency);
             }
 
             if (source.Resource is ExternalResource external && !external.IsRealized)

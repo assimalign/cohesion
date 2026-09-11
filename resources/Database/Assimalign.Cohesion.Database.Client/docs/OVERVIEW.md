@@ -57,3 +57,15 @@ no user information, query, or fragment—and maps its `IdnHost` and `Port` dire
 endpoint without formatting and reparsing a string.
 
 See [DESIGN.md](DESIGN.md) for the pooling and settings decisions.
+
+
+## Declarative commands
+
+IDatabaseCommandClient is the separate HTTP admin command contract. DatabaseCommandClient.Create
+accepts the full manifest control-plane URI (including its path) and an opaque bootstrap bearer.
+SendCommandAsync posts the camel-case id/kind/owner/key/payload envelope to commands; payload is
+base64. DeleteCommandAsync sends DELETE to the same route and envelope. Both return package-local
+ResourceCommandObservation with Status and Detail, retaining actionable provider refusal text.
+Transport failures propagate; HTTP refusals become Rejected observations. Serialization uses explicit
+Utf8JsonWriter/JsonDocument access. The caller disposes the client; redirect following and cookies
+are disabled. No runtime Hosting or ApplicationModel dependency was added.

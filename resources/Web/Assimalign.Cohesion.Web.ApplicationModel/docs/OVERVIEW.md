@@ -8,7 +8,7 @@ enabled Web executables.
 
 - `WebResource` snapshots a build-produced `ResourceManifest`.
 - `WebResourceOptions` provides the typed `Replicas` override.
-- `AddWeb(manifest, options)` composes the typed resource into an application graph.
+- `AddWeb(manifest, options)` returns `IWebResourceDescriptor` with typed dependency chaining. `RemoteReferenceWeb` returns that surface for a manifest-backed external; both retain the canonical graph resource identity.
 - The Web planner emits `cohesion/plan/v1` IR: a stateless `Deployment`, no
   persistent volumes, one service per endpoint, and one exposure per public endpoint.
 - `WebResourceControlPlane.Create()` returns a fresh `IResourceControlPlane`.

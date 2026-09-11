@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// readiness is admitted once per start and later <see cref="ResourceLifecycle.Degraded"/>
 /// observations never re-gate dependents.
 /// </remarks>
-public abstract class ApplicationGateway :
+public abstract partial class ApplicationGateway :
     IMultiModelApplicationGateway,
     IApplicationSetExternalResourceResolver,
     IApplicationGatewayCommandHandler,
@@ -1140,7 +1140,8 @@ public abstract class ApplicationGateway :
     {
         if (_activeModels.Count != 0)
         {
-            if (!SessionMatches(models))
+            if (!SessionMatches(models) &&
+                !await TryReplaceCommandDeclarationsAsync(models, cancellationToken).ConfigureAwait(false))
             {
                 throw new InvalidOperationException(
                     $"Gateway '{Name}' is already supervising a different model collection. " +
@@ -1237,6 +1238,7 @@ public abstract class ApplicationGateway :
 
             if (wasAdmitted)
             {
+                await ApplyResourceCommandsAsync(item, cancellationToken).ConfigureAwait(false);
                 continue;
             }
 
@@ -1266,6 +1268,7 @@ public abstract class ApplicationGateway :
 
             if (Contains(plan.Workload.Gate.Satisfying, reached))
             {
+                await ApplyResourceCommandsAsync(item, cancellationToken).ConfigureAwait(false);
                 _admitted.Add(item.Key);
                 if (IsOwnSecretStore(model, descriptor))
                 {
@@ -1304,10 +1307,12 @@ public abstract class ApplicationGateway :
             IApplicationModel model = _activeModels[modelIndex];
             IApplicationResourceStateManager state = GetApplicationState(model);
             var endpoints = new Dictionary<ResourceName, IReadOnlyList<ApplicationExportEndpoint>>();
+            var commands = new List<ResourceCommandObservation>();
 
             for (int resourceIndex = 0; resourceIndex < model.Descriptors.Count; resourceIndex++)
             {
                 IApplicationResource resource = model.Descriptors[resourceIndex].Resource;
+                commands.AddRange(state.GetCommandObservations(resource.Id));
                 if (IsExternalPlan(model.Plans[resourceIndex]))
                 {
                     continue;
@@ -1326,7 +1331,8 @@ public abstract class ApplicationGateway :
                 model,
                 _options.ApplicationVersion,
                 endpoints,
-                GetTrustState(model.Name).PublicJwk);
+                GetTrustState(model.Name).PublicJwk,
+                commands);
             await PublishApplicationExportAsync(document, cancellationToken).ConfigureAwait(false);
 
             if (_options.ControlPlane is not null)
@@ -1563,6 +1569,13 @@ public abstract class ApplicationGateway :
             if (_activeModels.Count == 0)
             {
                 InitializeSession(models);
+                foreach (IApplicationModel model in models)
+                {
+                    if (model.Commands.Count != 0)
+                    {
+                        await EnsureTrustStateAsync(model, cancellationToken).ConfigureAwait(false);
+                    }
+                }
                 await StartObserverAsync(_activeModels, cancellationToken).ConfigureAwait(false);
                 _observerStarted = true;
             }
@@ -1579,6 +1592,7 @@ public abstract class ApplicationGateway :
 
                 try
                 {
+                    await DeleteResourceCommandsAsync(item, cancellationToken).ConfigureAwait(false);
                     state.SetState(descriptor.Resource.Id, ResourceLifecycle.Stopping);
                     await controller.DeleteAsync(context, cancellationToken).ConfigureAwait(false);
                 }
@@ -1699,6 +1713,7 @@ public abstract class ApplicationGateway :
             RealizedResource realized = _realized[index];
             try
             {
+                await RollBackResourceCommandsAsync(realized.Item, cancellationToken).ConfigureAwait(false);
                 realized.Context.State.SetState(
                     realized.Item.Descriptor.Resource.Id,
                     ResourceLifecycle.Stopping);
@@ -2445,6 +2460,7 @@ public abstract class ApplicationGateway :
         _parameters.Clear();
         _artifacts.Clear();
         _admitted.Clear();
+        _appliedCommands.Clear();
         _realized.Clear();
         _order = Array.Empty<ModelResource>();
         _activeModels = Array.Empty<IApplicationModel>();

@@ -19,6 +19,7 @@ internal sealed class ConsumerWorkspace : IDisposable
     [
         "Assimalign.Cohesion.Sdk",
         "Assimalign.Cohesion.Sdk.Web",
+        "Assimalign.Cohesion.Sdk.ConfigurationStore",
         "Assimalign.Cohesion.Sdk.Database",
         "Assimalign.Cohesion.Sdk.Gateway"
     ];
@@ -46,6 +47,18 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.Web.Routing",
         "Assimalign.Cohesion.Web.ApplicationModel",
         "Assimalign.Cohesion.Database.ApplicationModel",
+        "Assimalign.Cohesion.ConfigurationStore.ApplicationModel",
+        "Assimalign.Cohesion.Database",
+        "Assimalign.Cohesion.Database.Client",
+        "Assimalign.Cohesion.Database.Execution",
+        "Assimalign.Cohesion.Database.Governance",
+        "Assimalign.Cohesion.Database.Indexing",
+        "Assimalign.Cohesion.Database.Language",
+        "Assimalign.Cohesion.Database.Protocol",
+        "Assimalign.Cohesion.Database.Security",
+        "Assimalign.Cohesion.Database.Storage",
+        "Assimalign.Cohesion.Database.Transactions",
+        "Assimalign.Cohesion.Database.Types",
         "Assimalign.Cohesion.SecretStore.Client",
         "Assimalign.Cohesion.ConfigurationStore.Client"
     ];

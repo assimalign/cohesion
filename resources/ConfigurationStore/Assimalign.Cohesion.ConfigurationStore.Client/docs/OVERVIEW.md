@@ -19,7 +19,7 @@ independent of the ConfigurationStore hosting runtime and is delivered as a stan
 `ListNamespacesAsync` issues an authenticated GET request and deserializes the direct JSON string
 array into `IReadOnlyList<string>`. `GetNamespaceAsync` issues an authenticated GET request and
 deserializes the direct JSON object into `IReadOnlyDictionary<string, string?>`. `SendCommandAsync`
-issues an authenticated POST request with a camel-case JSON command envelope. All operations preserve
+issues an authenticated POST request with a camel-case JSON command envelope. These existing operations preserve
 an endpoint base path, propagate cancellation, and reject non-success status codes; the named read
 also query-escapes its namespace name.
 
@@ -32,3 +32,13 @@ to HTTP or HTTPS before creating the internal transport client.
 - [Package README](../README.md)
 - [Design](./DESIGN.md)
 - [Assembly reference](./Assembly/Assimalign.Cohesion.ConfigurationStore.Client/OVERVIEW.md)
+
+
+## Declarative commands
+
+ObserveCommandAsync and DeleteCommandAsync return ResourceCommandObservation (Status and Detail),
+including structured provider refusals from non-success HTTP statuses. Existing SendCommandAsync
+retains its Task and EnsureSuccessStatusCode behavior. CreateForControlPlane accepts the full manifest
+control-plane URI and makes those observation methods append only /commands, including custom paths.
+The ordinary Create factory continues appending the existing /cohesion/v1 routes to its resource
+endpoint base path. JSON parsing is explicit and transport cancellation remains caller-controlled.

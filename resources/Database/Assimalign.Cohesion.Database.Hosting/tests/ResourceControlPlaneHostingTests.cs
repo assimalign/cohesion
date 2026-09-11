@@ -104,7 +104,7 @@ public sealed class ResourceControlPlaneHostingTests
             commands.RootElement
                 .GetProperty("acceptedCommandKinds")
                 .GetArrayLength()
-                .ShouldBe(0);
+                .ShouldBe(2);
 
             using var content = new StringContent(
                 """{"id":"1","kind":"database.add","owner":"test","key":"app","payload":""}""",
@@ -415,6 +415,6 @@ internal static class ResourceControlPlaneTestRegistration
     {
         ResourceRuntime.RegisterControlPlane(
             typeof(ResourceControlPlaneTestRegistration).Assembly,
-            static () => ResourceControlPlane.Create());
+            static () => ResourceControlPlane.Create(["database.add-database", "database.add-principal"]));
     }
 }

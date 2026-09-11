@@ -22,13 +22,32 @@ public static class WebResourceExtensions
         /// <exception cref="ArgumentNullException">
         /// <paramref name="manifest"/> is <see langword="null"/>.
         /// </exception>
-        public IApplicationResourceDescriptor AddWeb(
+        public IWebResourceDescriptor AddWeb(
             ResourceManifest manifest,
             WebResourceOptions? options = null)
         {
             ArgumentNullException.ThrowIfNull(manifest);
 
-            return builder.AddResource(new WebResource(manifest, options));
+            return new WebResourceDescriptor(builder.AddResource(new WebResource(manifest, options)));
+        }
+
+        /// <summary>Binds a manifest-backed remote Web resource with its typed command surface.</summary>
+        /// <param name="declaration">The build-produced external declaration.</param>
+        /// <param name="configure">The peer gateway, file, endpoint, or contributed binding.</param>
+        /// <returns>The typed external graph descriptor.</returns>
+        /// <exception cref="ArgumentNullException">The builder, declaration, or configuration callback is null.</exception>
+        /// <exception cref="ArgumentException">The declaration has no Web manifest.</exception>
+        /// <exception cref="InvalidOperationException">The external conflicts with an existing declaration.</exception>
+        public IWebResourceDescriptor RemoteReferenceWeb(
+            ExternalResourceDeclaration declaration,
+            Action<RemoteReferenceOptions> configure)
+        {
+            ArgumentNullException.ThrowIfNull(declaration);
+            if (!string.Equals(declaration.Manifest?.Kind, "Web", StringComparison.Ordinal))
+            {
+                throw new ArgumentException("A typed Web reference requires an Web manifest.", nameof(declaration));
+            }
+            return new WebResourceDescriptor(builder.RemoteReference(declaration, configure));
         }
     }
 }

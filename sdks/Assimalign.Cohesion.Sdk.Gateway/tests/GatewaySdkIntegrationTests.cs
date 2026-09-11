@@ -86,9 +86,11 @@ public sealed class GatewaySdkIntegrationTests
             "public static readonly global::Assimalign.Cohesion.ApplicationModel.ResourceManifest GatewaySmokeWeb");
         source.ShouldContain("AddGatewaySmokeDatabase(");
         source.ShouldContain("DatabaseResourceOptions");
+        source.ShouldContain("public global::Assimalign.Cohesion.Database.ApplicationModel.IDatabaseResourceDescriptor AddGatewaySmokeDatabase(", Case.Sensitive);
         source.ShouldContain("DatabaseResourceExtensions.AddDatabase(builder, Manifests.GatewaySmokeDatabase");
         source.ShouldContain("AddGatewaySmokeWeb(");
         source.ShouldContain("WebResourceOptions");
+        source.ShouldContain("public global::Assimalign.Cohesion.Web.ApplicationModel.IWebResourceDescriptor AddGatewaySmokeWeb(", Case.Sensitive);
         source.ShouldContain("WebResourceExtensions.AddWeb(builder, Manifests.GatewaySmokeWeb");
         source.ShouldContain("AddAllResources()");
         source.ShouldContain("UseGateway(string[] args)");

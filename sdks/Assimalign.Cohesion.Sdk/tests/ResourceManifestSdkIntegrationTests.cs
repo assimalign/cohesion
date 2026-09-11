@@ -101,6 +101,7 @@ public sealed class ResourceManifestSdkIntegrationTests
         validateDatabaseManifest.ShouldNotThrow();
 
         JsonElement web = webManifest.RootElement;
+        web.GetProperty("commands").GetArrayLength().ShouldBe(0);
         web.GetProperty("schema").GetString().ShouldBe("cohesion/resource/v1");
         web.GetProperty("name").GetString().ShouldBe("inventory-web");
         web.GetProperty("kind").GetString().ShouldBe("Web");
@@ -149,6 +150,8 @@ public sealed class ResourceManifestSdkIntegrationTests
         reference.GetProperty("manifest").GetString().ShouldBe("EnabledDatabase");
 
         JsonElement database = databaseManifest.RootElement;
+        database.GetProperty("commands").EnumerateArray().Select(command => command.GetString())
+            .ShouldBe(new[] { "database.add-database", "database.add-principal" });
         database.GetProperty("kind").GetString().ShouldBe("Database");
         database.GetProperty("applicationModel").GetString().ShouldBe("Assimalign.Cohesion.Database.ApplicationModel");
         database.GetProperty("artifact").GetProperty("composable").GetBoolean().ShouldBeTrue();

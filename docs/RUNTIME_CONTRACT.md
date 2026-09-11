@@ -77,3 +77,42 @@ internationalized domain name to its ASCII-compatible form.
   and do not pull secrets or configuration from an orchestrator.
 - The telemetry variables are reserved now but remain optional. When none are set, logging is
   stdout/stderr only.
+
+## Declarative resource commands
+
+An enabled manifest's `commands` remains a bare string array. The proving kinds are
+`database.add-database`, `database.add-principal`, `configurationstore.set-value`, and
+`configurationstore.remove-value`. Wire kinds use an area prefix and a verb-noun kebab name;
+the C# verbs are `AddDatabase`, `AddPrincipal`, `SetValue`, and `RemoveValue`.
+`configurationstore.add-namespace` is deferred for orchestration to schedule under item 31c.
+
+Resource command requests use the manifest's `controlPlane.endpoint` and `controlPlane.path`.
+The default Database admin and ConfigurationStore API paths are `/cohesion/v1/commands`:
+GET lists accepted kinds, POST applies, and additive DELETE removes an owned declaration using
+the same JSON envelope: `id`, `kind`, `owner`, `key`, and Base64 `payload`. These fields remain
+stable. A blank `key` is invalid at graph build, direct control-plane dispatch, and HTTP ingress;
+HTTP ingress returns 400. Payload JSON is serialized with generated metadata and canonicalized
+before deriving the command id from kind, target identity, and payload.
+
+Refusals carry JSON `{ "status": "Rejected", "detail": "..." }`. Unknown kinds return 501;
+handler refusals return 409. ConfigurationStore retains its existing 403 owner mismatch and
+404 missing-value responses, now with the same detail fields. Database currently rejects
+`database.add-principal` with a named detail because its live engine has no principal mutation
+API; principals remain code-first schema declarations. Existing databases outside the command
+ledger cannot be adopted or deleted by an add-database declaration.
+
+The claiming gateway applies commands after the target is Running and before dependents
+reconcile. Required rejection blocks dependents; optional rejection is observed without blocking.
+Local delivery uses the area's Client package; an in-process host uses its registered control
+plane directly. A remote reference uses PUT and DELETE on
+`/cohesion/v1/resources/{name}/commands/{id}` at the peer gateway. Application-scoped observations
+and exports carry `Applied`/`Rejected` and detail. Command observations omit payload and result
+bytes; the embedded desired-state model carries command payloads for application-set round trips,
+so declarations in this version must not contain secret material.
+
+Ownership is retained until confirmed deletion; refusal never transfers a key to another owner.
+Runtime ledgers are invocation-local and do not establish durable ownership after host restart.
+The existing federation path retains its authorization boundary: ConfigurationStore requires
+`owner` to equal the authenticated issuer. A peer forwarding its provider-issued bootstrap token
+with a foreign owner's envelope receives 403; an owner-preserving delegated credential contract
+is still required for that remote mutation path.

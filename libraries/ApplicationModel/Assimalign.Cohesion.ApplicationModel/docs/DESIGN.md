@@ -285,3 +285,45 @@ Docker or Kubernetes integrations.
 - Platform object formats, Kubernetes types, and process supervision — those live
   in gateway/compiler packages. The platform-neutral resource manifest, realization
   plan, and describe-mode model document are contracts of this package.
+
+## Declarative resource commands (T7a)
+
+`IResourceCommand` records desired state owned by the declaring application. Its target is
+an exact resource instance in that application's graph, including external nodes.
+`ResourceCommands.Create` requires source-generated `JsonTypeInfo<T>` metadata, snapshots
+UTF-8 JSON, sorts object properties ordinally at every nesting level, and derives a lowercase
+SHA-256 id from length-prefixed command kind, target application/resource identity, and canonical
+payload bytes. Changing a payload changes the id; `Owner`, the nonblank provider conflict `Key`,
+and `Optional` remain separate ownership and gating facts. The typed area verbs include their
+logical key fields in the payload. Payloads are copied when created and again when the model is built.
+
+`IResourceCommandDescriptor` is an additive authoring seam. Area-owned descriptor interfaces
+extend it and internal wrappers delegate command accumulation to the original descriptor.
+`IApplicationBuilder.AddCommand` also accepts an explicit declaration. `Build()` checks the
+owner against the declaring model, exact target graph membership, accepted manifest command
+kinds, nonblank keys, duplicate ids, and conflicting declarations for the same target/key,
+regardless of command kind. One desired graph declares one operation per provider ownership
+key; a subsequent model can replace or withdraw that operation. The model and each built command descriptor expose
+read-only command snapshots; built descriptors reject subsequent mutation.
+
+Dependency normalization accepts an older wrapper that exposes the exact registered `Resource`
+instance. This preserves unchanged SecretStore-style wrappers without requiring them to implement
+a new interface. Matching names or value equality never establish graph membership. New typed
+wrappers preserve the same invariant, including when a remote reference is rebound.
+
+`ApplicationModelDocument.Commands` retains declarations through describe/export/application-set
+roundtrips, validates canonical bytes and deterministic ids on import, and maps each imported
+target back to that imported model's resource instance. Old documents without commands import an
+empty list. These portable payloads are desired state and must never contain secret material;
+this slice supplies database names/principal names and nonsecret configuration values only.
+Observed command status is a separate resource state-manager contract.
+
+Command execution belongs to the gateway after Running and before dependent reconciliation.
+Area default-control-plane handlers retain ownership and reject unsupported mutation capabilities.
+The contract package adds no client, hosting, DI, platform, or runtime serialization dependency.
+`IControlPlaneExternalResourceResolver` exposes a peer gateway address without exposing the
+internal resolver implementation. In application sets the direct sibling resolver preserves its
+fallback's peer address, so generic command delivery can select a peer only when no sibling target
+is available. Static and file bindings expose no control-plane address. Exports validate observed
+command target membership, required identity fields, defined statuses and duplicate target/owner/id
+tuples. A rejected unsupported command kind is valid audit data even without a desired declaration.

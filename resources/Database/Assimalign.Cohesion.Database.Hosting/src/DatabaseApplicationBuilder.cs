@@ -253,6 +253,13 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 
         if (_controlPlane is not null)
         {
+            foreach (string kind in _controlPlane.AcceptedCommandKinds)
+            {
+                if (kind is "database.add-database" or "database.add-principal")
+                {
+                    _controlPlane.RegisterCommandHandler(new DatabaseResourceCommandHandler(kind, context));
+                }
+            }
             var controlPlaneContributors = new List<IHealthContributor> { context };
             var registeredContributors = new HashSet<IHealthContributor>(ReferenceEqualityComparer.Instance);
             registeredContributors.Add(context);

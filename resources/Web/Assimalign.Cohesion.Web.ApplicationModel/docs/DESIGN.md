@@ -60,3 +60,11 @@ and management operations below `/cohesion/v1` on the ambient `http` endpoint.
 Construction, planning, and registration are static. Golden plan serialization uses
 the source-generated `ResourcePlanJsonContext`. There is no assembly scanning,
 reflection-based activation, or runtime code generation.
+
+## Typed descriptor seam
+
+`AddWeb` returns `IWebResourceDescriptor`; `RemoteReferenceWeb(declaration, configure)`
+provides that surface for a manifest-backed Web external. The internal wrapper delegates to the
+registered graph descriptor and retains its exact resource identity. Typed `DependsOn` chaining
+retains the Web descriptor type. The shared `IResourceCommandDescriptor` seam is available for
+future Web-owned verbs, but this slice adds no Web command kind or mutation handler.

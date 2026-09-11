@@ -168,6 +168,7 @@
 			Probes="@(CohesionProbe)"
 			Mounts="@(CohesionMount)"
 			Settings="@(CohesionSetting)"
+			Commands="@(CohesionCommand)"
 			ResourceReferences="@(CohesionResourceReference)"
 			ReferencedManifests="@(_CohesionReferencedManifest);@(CohesionResourceManifest)"
 			ResourceProperties="@(CohesionResourceProperty)">

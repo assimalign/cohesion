@@ -161,6 +161,12 @@ validated per-resource state tree, including volume claims, as well as its port 
 
 ## NativeAOT and trimming
 
+T7a command delivery uses the exact adopted host's default control plane. `ProcessHostContext`
+matches the member's application/resource identity and asks `ResourceRuntime.TryGetControlPlane`
+for the weak host registration. The generic gateway applies commands only after Running, before
+dependents, and removes owned declarations before target teardown. The lookup neither creates a
+second control plane nor changes generated consumer registration.
+
 The package is NativeAOT-compatible. Member entry points are rooted by generated metadata and
 bound statically from project references. The only reflective operation is invocation of the
 already-rooted `Assembly.EntryPoint` through `ResourceRuntime`. The implementation performs no

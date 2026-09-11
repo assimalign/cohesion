@@ -48,14 +48,14 @@ public sealed class CohesionCreateResourceVerbs : Task
     /// <summary>Gets or sets whether project-referenced composable resources run in process.</summary>
     public bool InProcessEnabled { get; set; }
 
-    /// <summary>Gets or sets mount-source target-kind to client-package mappings.</summary>
+    /// <summary>Gets or sets mount-source and command target-kind to client-package mappings.</summary>
     public ITaskItem[] ClientKinds { get; set; } = [];
 
     /// <summary>Gets the application-model packages named by referenced manifests.</summary>
     [Output]
     public ITaskItem[] RequiredApplicationModels { get; private set; } = [];
 
-    /// <summary>Gets the client packages required by protected mount sources.</summary>
+    /// <summary>Gets the client packages required by protected mount sources and command targets.</summary>
     [Output]
     public ITaskItem[] RequiredClientPackages { get; private set; } = [];
 
@@ -279,6 +279,16 @@ public sealed class CohesionCreateResourceVerbs : Task
                 OptionalBoolean(reference, "optional", path)));
         }
 
+        foreach (JsonElement command in RequiredArray(root, "commands", path).EnumerateArray())
+        {
+            if (command.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(command.GetString()))
+            {
+                throw new InvalidDataException(
+                    $"Cohesion resource manifest '{path}' commands must be non-empty strings.");
+            }
+            manifest.Commands.Add(command.GetString()!);
+        }
+
         return manifest;
     }
 
@@ -443,13 +453,15 @@ public sealed class CohesionCreateResourceVerbs : Task
         {
             string applicationModel = item.GetMetadata("ApplicationModel").Trim();
             string optionsType = item.GetMetadata("OptionsType").Trim();
+            string descriptorType = Value(item.GetMetadata("DescriptorType"))
+                ?? "global::Assimalign.Cohesion.ApplicationModel.IApplicationResourceDescriptor";
             string addMethod = item.GetMetadata("AddMethod").Trim();
             if (applicationModel.Length == 0 || optionsType.Length == 0 || addMethod.Length == 0)
             {
                 Log.LogError($"CohesionGatewayResourceKind '{item.ItemSpec}' requires ApplicationModel, OptionsType, and AddMethod metadata.");
                 continue;
             }
-            result.Add(new GatewayResourceKind(item.ItemSpec, applicationModel, optionsType, addMethod));
+            result.Add(new GatewayResourceKind(item.ItemSpec, applicationModel, optionsType, descriptorType, addMethod));
         }
         return result;
     }
@@ -667,6 +679,10 @@ public sealed class CohesionCreateResourceVerbs : Task
         var packages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (GatewayManifest manifest in manifests)
         {
+            if (manifest.Commands.Count > 0 && kinds.TryGetValue(manifest.Kind, out string? commandClient))
+            {
+                packages.Add(commandClient);
+            }
             foreach (GatewayManifestMount mount in manifest.Mounts)
             {
                 if (mount.Source is null)

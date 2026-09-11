@@ -45,6 +45,8 @@ internal sealed class GatewayManifest
 
     public List<GatewayManifestMount> Mounts { get; } = [];
 
+    public List<string> Commands { get; } = [];
+
     public List<GatewayManifestReference> References { get; } = [];
 
     public string MemberName { get; set; } = string.Empty;
@@ -72,6 +74,7 @@ internal sealed record GatewayResourceKind(
     string Kind,
     string ApplicationModel,
     string OptionsType,
+    string DescriptorType,
     string AddMethod);
 
 internal sealed record GatewayProvider(

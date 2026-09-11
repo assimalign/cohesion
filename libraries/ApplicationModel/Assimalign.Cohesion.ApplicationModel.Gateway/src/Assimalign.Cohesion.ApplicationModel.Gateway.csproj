@@ -5,6 +5,8 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.SecretStore.Client" />

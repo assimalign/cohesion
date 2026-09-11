@@ -129,6 +129,9 @@ public sealed class CohesionCreateResourceManifest : Task
     /// <summary>Gets or sets the declared settings.</summary>
     public ITaskItem[] Settings { get; set; } = [];
 
+    /// <summary>Gets or sets the command kinds accepted by the resource's default control plane.</summary>
+    public ITaskItem[] Commands { get; set; } = [];
+
     /// <summary>Gets or sets the declared resource references.</summary>
     public ITaskItem[] ResourceReferences { get; set; } = [];
 
@@ -205,6 +208,7 @@ public sealed class CohesionCreateResourceManifest : Task
         ValidateMetadata(Probes, "CohesionProbe", "Endpoint", "Http", "Tcp", "Exec", "Grpc", "None");
         ValidateMetadata(Mounts, "CohesionMount", "Kind", "ContainerPath", "Source", "Size");
         ValidateMetadata(Settings, "CohesionSetting", "Default", "Type");
+        ValidateMetadata(Commands, "CohesionCommand");
         ValidateMetadata(ResourceReferences, "CohesionResourceReference", "Version", "Optional", "Endpoints");
         ValidateMetadata(ResourceProperties, "CohesionResourceProperty", "Value");
 
@@ -214,6 +218,14 @@ public sealed class CohesionCreateResourceManifest : Task
         List<ResourceReferenceModel> references = ParseReferences();
         Dictionary<string, ResourceProbeModel> probes = ParseProbes(endpoints);
         Dictionary<string, string> properties = ParseProperties();
+        string[] commands = Commands.Select(command => command.ItemSpec.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(command => command, StringComparer.Ordinal)
+            .ToArray();
+        if (commands.Any(string.IsNullOrWhiteSpace))
+        {
+            Log.LogError("CohesionCommand requires a non-empty command kind.");
+        }
 
         EnsureUniqueIdentifiers(settings.Select(setting => setting.Key), "CohesionSetting");
         EnsureUniqueIdentifiers(references.Select(reference => reference.Resource), "CohesionResourceReference");
@@ -286,6 +298,7 @@ public sealed class CohesionCreateResourceManifest : Task
         }
         manifest.Mounts.AddRange(mounts);
         manifest.Settings.AddRange(settings);
+        manifest.Commands.AddRange(commands);
         manifest.References.AddRange(references);
         foreach ((string key, string value) in properties)
         {

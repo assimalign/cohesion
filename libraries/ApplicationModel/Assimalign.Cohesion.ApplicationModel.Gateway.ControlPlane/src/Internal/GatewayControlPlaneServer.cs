@@ -33,6 +33,9 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
     private readonly object _commandGate = new();
     private readonly object _connectionGate = new();
     private readonly Dictionary<ResourceName, Dictionary<string, ControlPlaneCommandObservation>> _commands = new();
+    // The latest observation may reject deletion while the provider still holds the owned key.
+    private readonly Dictionary<(ResourceName Resource, string Id), (string Kind, string Key, string Owner)>
+        _commandOwnership = new();
     private readonly HashSet<Task> _connections = new();
     private readonly Router _router;
 
@@ -258,6 +261,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                 lock (_commandGate)
                 {
                     _commands.Clear();
+                    _commandOwnership.Clear();
                 }
 
                 DeleteMetadata();
@@ -660,6 +664,13 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                 return;
             }
 
+            if (!HasCommandOwnership(descriptor.Resource.Name, id!))
+            {
+                RemoveCommand(descriptor.Resource.Name, id!);
+                context.Response.StatusCode = HttpStatusCode.NoContent;
+                return;
+            }
+
             IResourceCommandDispatcher? dispatcher = FindDispatcher(manifest!.Kind);
             Uri? address = null;
             string? reason = null;
@@ -1049,20 +1060,15 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
     {
         lock (_commandGate)
         {
-            if (_commands.TryGetValue(
-                    resource,
-                    out Dictionary<string, ControlPlaneCommandObservation>? commands))
+            foreach (var entry in _commandOwnership)
             {
-                foreach (ControlPlaneCommandObservation observed in commands.Values)
+                if (entry.Key.Resource == resource &&
+                    string.Equals(entry.Value.Kind, command.Kind, StringComparison.Ordinal) &&
+                    string.Equals(entry.Value.Key, command.Key, StringComparison.Ordinal) &&
+                    !string.Equals(entry.Value.Owner, command.Owner, StringComparison.Ordinal))
                 {
-                    if (string.Equals(observed.Status, "Applied", StringComparison.Ordinal) &&
-                        string.Equals(observed.Kind, command.Kind, StringComparison.Ordinal) &&
-                        string.Equals(observed.Key, command.Key, StringComparison.Ordinal) &&
-                        !string.Equals(observed.Owner, command.Owner, StringComparison.Ordinal))
-                    {
-                        conflictingOwner = observed.Owner;
-                        return true;
-                    }
+                    conflictingOwner = entry.Value.Owner;
+                    return true;
                 }
             }
         }
@@ -1082,6 +1088,10 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
             }
 
             commands[command.Id] = command;
+            if (string.Equals(command.Status, "Applied", StringComparison.Ordinal))
+            {
+                _commandOwnership[(resource, command.Id)] = (command.Kind, command.Key, command.Owner);
+            }
         }
     }
 
@@ -1102,6 +1112,14 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
 
         command = null;
         return false;
+    }
+
+    private bool HasCommandOwnership(ResourceName resource, string id)
+    {
+        lock (_commandGate)
+        {
+            return _commandOwnership.ContainsKey((resource, id));
+        }
     }
 
     private ControlPlaneCommandObservation[] SnapshotCommands(
@@ -1139,6 +1157,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
             }
 
             commands.Remove(id);
+            _commandOwnership.Remove((resource, id));
             if (commands.Count == 0)
             {
                 _commands.Remove(resource);

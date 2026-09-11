@@ -12,6 +12,22 @@ namespace Assimalign.Cohesion.ConfigurationStore.Client;
 /// </summary>
 public interface IConfigurationStoreClient
 {
+    /// <summary>Applies a command and returns the provider's status and refusal detail.</summary>
+    /// <param name="command">The declarative command envelope.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The observed command status and detail.</returns>
+    /// <exception cref="ArgumentNullException">The command is null.</exception>
+    /// <exception cref="HttpRequestException">The endpoint cannot be reached.</exception>
+    ValueTask<ResourceCommandObservation> ObserveCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default);
+
+    /// <summary>Deletes an owned command and returns the provider's status and refusal detail.</summary>
+    /// <param name="command">The previously applied command envelope.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The observed command status and detail.</returns>
+    /// <exception cref="ArgumentNullException">The command is null.</exception>
+    /// <exception cref="HttpRequestException">The endpoint cannot be reached.</exception>
+    ValueTask<ResourceCommandObservation> DeleteCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Lists the available configuration namespace names.
     /// </summary>

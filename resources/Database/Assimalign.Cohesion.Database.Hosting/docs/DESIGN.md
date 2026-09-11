@@ -203,7 +203,7 @@ graceful stop, and starts a private Web host on the ambient `admin` address.
 `Web.Health` maps `/healthz`, `/readyz`, and `/livez`. The exact Web.Hosting
 control-plane middleware handles `/cohesion/v1/endpoints`,
 `/cohesion/v1/stop`, and `/cohesion/v1/commands`; the accepted Database command
-kind list remains empty until item 31c. Readiness has a dedicated outer-host gate:
+kinds are registered through runtime-owned handlers. Readiness has a dedicated outer-host gate:
 the admin listener may report startup progress while servers bind, but `/readyz`
 cannot become healthy until every server has confirmed accept and the Database host
 is `Started`; `/livez` remains process-oriented. Every `/cohesion/v1/*` request
@@ -234,3 +234,23 @@ references `Database.ApplicationModel`.
 
 Static composition: the composition root hands the application its servers and
 engines; nothing is discovered at runtime. No reflection.
+
+
+## Declarative command delivery
+
+Enabled hosts register database.add-database and database.add-principal handlers when advertised by
+their generated control plane. The database payload is UTF-8 JSON with database and optional engine;
+the key is `engine/database` when an engine is supplied, otherwise the database name. Database names
+cannot contain `/`; engine names may contain it, keeping the final-slash ownership identity unique.
+An omitted engine requires exactly one registered or server-fronted
+engine. Creation calls IDatabaseEngine.CreateDatabaseAsync and teardown calls DropDatabaseAsync,
+with the shared control-plane ownership ledger gating both. Existing databases are refused rather
+than adopted into a declaration that could later delete them.
+
+The principal payload carries database and name. The existing principal builder describes startup
+schema; the runtime has no principal mutation contract. database.add-principal therefore returns a
+named Rejected detail explaining that boundary. It does not create an ad hoc wire management path.
+
+The existing admin GET and POST paths and envelope remain stable. DELETE /cohesion/v1/commands uses
+the same envelope. Unsupported commands return 501 with status/detail; provider refusals return 409;
+blank keys return 400. Direct in-process delivery uses the same handler and ownership checks.

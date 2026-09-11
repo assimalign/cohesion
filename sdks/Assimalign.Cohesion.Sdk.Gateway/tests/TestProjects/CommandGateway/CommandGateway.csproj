@@ -1,0 +1,20 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnablePreviewFeatures>true</EnablePreviewFeatures>
+    <IsAotCompatible>true</IsAotCompatible>
+    <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
+    <CohesionResourceName>command-gateway</CohesionResourceName>
+    <CohesionGatewayAot>false</CohesionGatewayAot>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionResourceReference Include="..\GatewaySmokeDatabase\GatewaySmokeDatabase.csproj" />
+    <CohesionResourceReference Include="..\CommandConfigurationStore\CommandConfigurationStore.csproj" />
+  </ItemGroup>
+  <Target Name="CaptureCommandClients" AfterTargets="Build">
+    <WriteLinesToFile File="$(BaseIntermediateOutputPath)command-clients.txt"
+      Lines="@(_CohesionGatewayRequiredClientPackage)" Overwrite="true" />
+    <WriteLinesToFile File="$(BaseIntermediateOutputPath)command-reference-paths.txt"
+      Lines="@(ReferencePath->'%(Filename)')" Overwrite="true" />
+  </Target>
+</Project>

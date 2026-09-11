@@ -390,6 +390,40 @@ Item #968 tests additionally cover literal/parameter/store resolution, typed cer
 unavailability, fresh audience-bound ES256 credentials, per-application persisted trust keys,
 bounded developer tokens, digest enforcement for `AddContainer`, and parameter CLI precedence.
 
+## Resource commands (T7a, item 23b)
+
+`IApplicationModel.Commands` is applied by the generic algorithm after target Running and before
+admitting its dependents. Pending commands on an already-admitted resource still require Running;
+readiness admission does not authorize commands while the target is restarting. Each delivery is
+bounded by that target's readiness budget. Required rejection blocks dependents with the provider
+detail; optional rejection remains an observation. Successful identical declarations are cached
+within the active session, while the target's own command ledger enforces idempotence and ownership.
+
+`IGatewayResourceCommandClient` is keyed by manifest kind and lives beside `IGatewayStoreClient`.
+The shipped Database and ConfigurationStore adapters use their Client packages and the exact
+manifest control-plane endpoint/path. The Database.Client reference is the owner-approved O13
+extension; its public package closure additionally includes Database and its nine child roots.
+No area ApplicationModel or Client references a gateway, and no area Hosting package is referenced.
+
+Remote gateway bindings use `IAuthenticatedControlPlaneClient` PUT/DELETE; static/file-only
+bindings cannot authorize mutation. In-set references resolve to the realized sibling and use
+direct registration when available, otherwise its area's client. `TryGetResourceControlPlane`
+lets InProcess obtain the exact adopted host's registered plane through the weak ResourceRuntime
+lookup. There is no process-wide resource-name registry.
+
+`InMemoryResourceStateManager` stores payload-free observations under application-scoped resource
+ids and `(owner, command id)`. The same outcomes appear in `ApplicationExportDocument.Commands`.
+Confirmed teardown removes the declaration before deleting its target. A commands-only model
+replacement removes withdrawn declarations before applying additions; every other graph or plan
+change retains the existing stop-before-replace requirement.
+
+Limitations are explicit: command ledgers are in-memory; a restarted Database host refuses to
+adopt an existing database without a surviving ownership record. Remote ConfigurationStore
+mutation is currently refused when the peer forwards its own resource credential with a foreign
+command owner. Preserving the landed owner/issuer check requires a future delegated credential
+contract. The source-generated desired-state document includes command payloads for set import;
+only nonsecret Database metadata and configuration values are introduced here.
+
 ## Non-goals
 
 - Building container images or talking to Kubernetes — those are the platform gateway packages

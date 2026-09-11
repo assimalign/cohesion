@@ -21,6 +21,7 @@ internal sealed class ConsumerWorkspace : IDisposable
     [
         BaseSdkPackageId,
         "Assimalign.Cohesion.Sdk.Web",
+        "Assimalign.Cohesion.Sdk.ConfigurationStore",
         "Assimalign.Cohesion.Sdk.Database"
     ];
     private static readonly string RepositoryRoot = FindRepositoryRoot();

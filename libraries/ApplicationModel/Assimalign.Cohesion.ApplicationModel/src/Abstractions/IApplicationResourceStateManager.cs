@@ -20,6 +20,22 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// </remarks>
 public interface IApplicationResourceStateManager
 {
+    /// <summary>Returns payload-free command observations for a resource.</summary>
+    /// <param name="id">The target resource identifier.</param>
+    /// <returns>The latest observation for each owner and command id.</returns>
+    IReadOnlyList<ResourceCommandObservation> GetCommandObservations(ResourceId id);
+
+    /// <summary>Records the provider's outcome for a declared command.</summary>
+    /// <param name="id">The target resource identifier.</param>
+    /// <param name="observation">The immutable provider observation.</param>
+    void SetCommandObservation(ResourceId id, ResourceCommandObservation observation);
+
+    /// <summary>Removes an observation after the provider confirms teardown.</summary>
+    /// <param name="id">The target resource identifier.</param>
+    /// <param name="owner">The declaring application.</param>
+    /// <param name="commandId">The command identifier.</param>
+    void RemoveCommandObservation(ResourceId id, string owner, string commandId);
+
     /// <summary>
     /// Returns the current observed state of a resource, or <see cref="ResourceLifecycle.Unknown"/>
     /// if nothing has been observed yet.

@@ -16,6 +16,51 @@ public sealed class InMemoryResourceStateManager : IApplicationResourceStateMana
 {
     private readonly object _gate = new();
     private readonly Dictionary<ResourceId, Entry> _entries = new();
+    private readonly Dictionary<ResourceId, Dictionary<(string Owner, string Id), ResourceCommandObservation>>
+        _commands = new();
+
+    /// <inheritdoc/>
+    public IReadOnlyList<ResourceCommandObservation> GetCommandObservations(ResourceId id)
+    {
+        lock (_gate)
+        {
+            return _commands.TryGetValue(id, out var commands)
+                ? new List<ResourceCommandObservation>(commands.Values).AsReadOnly()
+                : Array.Empty<ResourceCommandObservation>();
+        }
+    }
+
+    /// <inheritdoc/>
+    public void SetCommandObservation(ResourceId id, ResourceCommandObservation observation)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+        lock (_gate)
+        {
+            if (!_commands.TryGetValue(id, out var commands))
+            {
+                commands = new();
+                _commands.Add(id, commands);
+            }
+
+            commands[(observation.Owner, observation.Id)] = observation;
+        }
+    }
+
+    /// <inheritdoc/>
+    public void RemoveCommandObservation(ResourceId id, string owner, string commandId)
+    {
+        lock (_gate)
+        {
+            if (_commands.TryGetValue(id, out var commands))
+            {
+                commands.Remove((owner, commandId));
+                if (commands.Count == 0)
+                {
+                    _commands.Remove(id);
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="InMemoryResourceStateManager"/> class.

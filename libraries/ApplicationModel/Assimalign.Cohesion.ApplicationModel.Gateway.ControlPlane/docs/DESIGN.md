@@ -43,6 +43,11 @@ requires the gateway token-use claim issued to gateway-to-gateway clients. Comma
 only the authenticated issuer's observations, and writes require the command owner to equal that
 issuer.
 
+The inherited item 23a trust record contains an issuer and public key, not a per-kind command
+grant. The `--allow <kind,...>` policy described by developer-experience §7/O25 therefore remains
+a serving-side trust-contract follow-up; item 23b preserves the existing authenticated gateway
+token policy and target-manifest kind validation.
+
 The HTTP resolver client implements `IAuthenticatedControlPlaneClient`. During gateway external
 resolution, the base supplies an application-issued export token and the caller's trusted issuer
 snapshot. A direct resolver instead uses the fixed-token factory. In either case, the client
@@ -60,6 +65,19 @@ PUT retries return the recorded result without redispatch, while id reuse for di
 and an already-applied key owned by another issuer are rejected. A missing dispatcher, unavailable
 endpoint, undeclared command, or dispatcher exception is recorded as `Rejected`. DELETE applies
 through the same dispatcher and removes the observation only after the area confirms deletion.
+An observation whose apply never reserved ownership is removed with `204` without dispatching
+an area deletion; a rejected deletion of an applied command retains its reservation.
 
-Typed `IResourceCommand` authoring and concrete area dispatch clients remain items 23b and 31c;
-this package provides only the transport-neutral dispatch seam they plug into.
+Item 23b supplies the claiming client's PUT/DELETE operations and adapts the gateway's
+`IGatewayResourceCommandClient` registrations into `IResourceCommandDispatcher` in
+`GatewayControlPlane.Configure`. Local and peer-serving delivery therefore share one area-client
+implementation. The existing five routes remain unchanged. Provider refusals preserve their
+detail through the adapter and remote client. Ownership reservations are separate from the
+last-operation observations, so a rejected deletion retains the applied key until the dispatcher
+confirms removal.
+
+The serving gateway continues forwarding its target bootstrap credential. ConfigurationStore's
+landed owner-equals-issuer policy consequently refuses foreign-owned envelopes with that provider
+credential. An owner-preserving delegation contract is required before claiming remote
+ConfigurationStore mutation works against a real authenticated host; the boundary is not weakened
+by the adapter. Other area verbs remain item 31c.

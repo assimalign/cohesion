@@ -77,4 +77,7 @@ public interface IApplicationModel
     /// <see cref="IApplicationBuilder.Build"/>, in declaration order.
     /// </summary>
     IReadOnlyList<ResourcePlan> Plans { get; }
+
+    /// <summary>Gets the immutable commands claimed by this application in declaration order.</summary>
+    IReadOnlyList<IResourceCommand> Commands => System.Array.Empty<IResourceCommand>();
 }

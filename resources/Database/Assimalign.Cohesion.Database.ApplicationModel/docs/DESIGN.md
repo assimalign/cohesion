@@ -68,7 +68,7 @@ and the final referenced-manifest map.
 ```csharp
 ResourceManifest manifest = ResourceManifest.Load("resource.json");
 
-IApplicationResourceDescriptor database = builder.AddDatabase(
+IDatabaseResourceDescriptor database = builder.AddDatabase(
     manifest,
     new DatabaseResourceOptions
     {
@@ -90,9 +90,8 @@ with the invocation's observed endpoints. `Database.Hosting` reads the registrat
 through the shared `Hosting.Resources` contract and serves it on the manifest's `admin` endpoint;
 neither package references the other.
 
-The accepted command-kind set is intentionally empty in this work item. Database
-resource commands (`AddDatabase`, `AddPrincipal`) belong to developer-experience item
-31c and must not be introduced early.
+The accepted kinds are `database.add-database` and `database.add-principal`. The typed
+descriptor verbs record these declarations; Hosting owns their mutation handlers.
 
 ## Dependency and AOT posture
 
@@ -110,4 +109,21 @@ generation, runtime database dependency, or platform SDK dependency.
 - Inventing a manifest from a resource name or an executable-name convention.
 - Carrying platform-specific scheduling, storage-class, service, or claim types.
 - Connection settings or client factories; those belong to `Database.Client`.
-- Database resource command verbs before item 31c.
+- Expanding runtime mutation capabilities or introducing engine dependencies into this package.
+
+## Typed descriptors and commands
+
+`AddDatabase` returns `IDatabaseResourceDescriptor`. `RemoteReferenceDatabase(declaration,
+configure)` returns the same typed surface for a manifest-backed external. Both preserve the
+canonical graph resource identity, dependency edges, and command accumulation across rebinding.
+
+`descriptor.AddDatabase(name, engine: null, optional: false)` records `database.add-database`
+with `{ "database": name, "engine": engine }`; an omitted engine field selects the sole runtime
+engine. `AddPrincipal(database, name, optional: false)` records `database.add-principal` with
+`{ "database": database, "name": name }`. The database conflict key is `engine/database` when an engine is supplied, otherwise the database name; the principal key is
+`database/name`. Database names cannot contain `/`, so engine-prefixed keys remain unambiguous;
+engine names may contain `/`. There are no credential or grant payload fields. A provider
+without a principal-mutation capability returns a named rejection.
+
+Source-generated JSON metadata produces canonical payload bytes through ApplicationModel.
+`Build()` validates accepted kinds and graph ownership; no verb contacts the database.

@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel;
 
-internal sealed class InSetExternalResourceResolver : IExternalResourceResolver
+internal sealed class InSetExternalResourceResolver : IControlPlaneExternalResourceResolver
 {
     private readonly IApplicationSetExternalResourceResolver _direct;
     private readonly IReadOnlyList<IApplicationModel> _models;
@@ -20,6 +20,8 @@ internal sealed class InSetExternalResourceResolver : IExternalResourceResolver
         _models = models ?? throw new ArgumentNullException(nameof(models));
         _fallback = fallback ?? throw new ArgumentNullException(nameof(fallback));
     }
+
+    public Uri? ControlPlaneAddress => (_fallback as IControlPlaneExternalResourceResolver)?.ControlPlaneAddress;
 
     public async ValueTask<ExternalResourceResolution> ResolveAsync(
         ExternalResourceResolutionContext context,

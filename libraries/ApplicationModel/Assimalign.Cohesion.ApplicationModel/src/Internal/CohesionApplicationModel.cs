@@ -19,7 +19,8 @@ internal sealed class CohesionApplicationModel : IApplicationModel
         GatewayRunMode runMode,
         ResourceName gatewayIdentity,
         bool adopt,
-        bool restartOrphans)
+        bool restartOrphans,
+        IReadOnlyList<IResourceCommand>? commands = null)
     {
         Name = name;
         Environment = environment ?? throw new ArgumentNullException(nameof(environment));
@@ -43,7 +44,16 @@ internal sealed class CohesionApplicationModel : IApplicationModel
 
         Manifests = Copy(manifests);
         Plans = Copy(plans);
-        Descriptors = CopyDescriptors(descriptors, Plans);
+        var commandCopies = new IResourceCommand[commands?.Count ?? 0];
+        for (int index = 0; index < commandCopies.Length; index++)
+        {
+            IResourceCommand command = commands![index];
+            commandCopies[index] = new DeclarativeResourceCommand(command.Id, command.Kind, command.Key,
+                command.Target, command.Owner, command.Payload, command.Optional);
+        }
+
+        Commands = Array.AsReadOnly(commandCopies);
+        Descriptors = CopyDescriptors(descriptors, Plans, Commands);
         RunMode = runMode;
         GatewayIdentity = gatewayIdentity;
         Adopt = adopt;
@@ -81,6 +91,8 @@ internal sealed class CohesionApplicationModel : IApplicationModel
 
     public IReadOnlyList<ResourcePlan> Plans { get; }
 
+    public IReadOnlyList<IResourceCommand> Commands { get; }
+
     private static IReadOnlyList<T> Copy<T>(IReadOnlyList<T> source)
     {
         var copy = new T[source.Count];
@@ -94,22 +106,25 @@ internal sealed class CohesionApplicationModel : IApplicationModel
 
     private static IReadOnlyList<IApplicationResourceDescriptor> CopyDescriptors(
         IReadOnlyList<IApplicationResourceDescriptor> source,
-        IReadOnlyList<ResourcePlan> plans)
+        IReadOnlyList<ResourcePlan> plans,
+        IReadOnlyList<IResourceCommand> commands)
     {
         var copies = new Dictionary<IApplicationResourceDescriptor, BuiltApplicationResourceDescriptor>(
             ReferenceEqualityComparer.Instance);
         var descriptorPlans = new Dictionary<IApplicationResourceDescriptor, ResourcePlan?>(
             ReferenceEqualityComparer.Instance);
         var topLevel = new IApplicationResourceDescriptor[source.Count];
+        var canonical = new Dictionary<IApplicationResource, IApplicationResourceDescriptor>(ReferenceEqualityComparer.Instance);
 
         for (int index = 0; index < topLevel.Length; index++)
         {
             descriptorPlans.Add(source[index], plans.Count == 0 ? null : plans[index]);
+            canonical.Add(source[index].Resource, source[index]);
         }
 
         for (int index = 0; index < topLevel.Length; index++)
         {
-            topLevel[index] = CopyDescriptor(source[index], copies, descriptorPlans);
+            topLevel[index] = CopyDescriptor(source[index], copies, descriptorPlans, commands, canonical);
         }
 
         return new ReadOnlyCollection<IApplicationResourceDescriptor>(topLevel);
@@ -118,15 +133,22 @@ internal sealed class CohesionApplicationModel : IApplicationModel
     private static BuiltApplicationResourceDescriptor CopyDescriptor(
         IApplicationResourceDescriptor source,
         IDictionary<IApplicationResourceDescriptor, BuiltApplicationResourceDescriptor> copies,
-        IReadOnlyDictionary<IApplicationResourceDescriptor, ResourcePlan?> descriptorPlans)
+        IReadOnlyDictionary<IApplicationResourceDescriptor, ResourcePlan?> descriptorPlans,
+        IReadOnlyList<IResourceCommand> commands,
+        IReadOnlyDictionary<IApplicationResource, IApplicationResourceDescriptor> canonical)
     {
+        if (canonical.TryGetValue(source.Resource, out IApplicationResourceDescriptor? registered))
+        {
+            source = registered;
+        }
+
         if (copies.TryGetValue(source, out BuiltApplicationResourceDescriptor? existing))
         {
             return existing;
         }
 
         descriptorPlans.TryGetValue(source, out ResourcePlan? plan);
-        var copy = new BuiltApplicationResourceDescriptor(source.Resource, plan);
+        var copy = new BuiltApplicationResourceDescriptor(source.Resource, plan, commands);
         copies.Add(source, copy);
 
         var dependencies = new IApplicationResourceDescriptor[source.Dependencies.Count];
@@ -135,7 +157,7 @@ internal sealed class CohesionApplicationModel : IApplicationModel
             dependencies[index] = CopyDescriptor(
                 source.Dependencies[index],
                 copies,
-                descriptorPlans);
+                descriptorPlans, commands, canonical);
         }
 
         copy.SetDependencies(dependencies);

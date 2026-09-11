@@ -16,7 +16,8 @@
         "Running"
       ]
     },
-    "stopGraceSeconds": 30
+    "stopGraceSeconds": 30,
+    "restartPolicy": "OnFailure"
   },
   "container": {
     "name": "appa-configuration",
@@ -25,7 +26,8 @@
       {
         "endpoint": "api",
         "containerPort": 8443,
-        "protocol": "tcp"
+        "protocol": "tcp",
+        "scheme": "https"
       }
     ],
     "mounts": [
@@ -57,6 +59,10 @@
         "command": []
       }
     ]
+  },
+  "controlPlane": {
+    "endpoint": "api",
+    "path": "/cohesion/v1"
   },
   "volumes": [
     {

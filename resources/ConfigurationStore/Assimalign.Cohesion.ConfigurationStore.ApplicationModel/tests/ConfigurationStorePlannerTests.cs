@@ -249,7 +249,7 @@ public sealed class ConfigurationStorePlannerTests
         JsonElement.DeepEquals(
             actualDocument.RootElement,
             fixtureDocument.RootElement)
-            .ShouldBeTrue($"Plan output did not match golden fixture '{fixtureFileName}'.");
+            .ShouldBeTrue($"Plan output did not match golden fixture '{fixtureFileName}'. Actual: {actualJson}");
     }
 
     private sealed class TestApplicationEnvironment : IApplicationEnvironment

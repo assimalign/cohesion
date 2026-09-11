@@ -31,7 +31,7 @@ It imports `Assimalign.Cohesion.Sdk`, but it does not create or reference an
 `Assimalign.Cohesion.ApplicationModel`,
 `Assimalign.Cohesion.ApplicationModel.Gateway`,
 `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane`, optional provider packages, and the
-narrow client packages required to resolve protected mount sources.
+narrow client packages required to resolve protected mount sources and deliver commands.
 
 The Gateway props must set `CohesionAutoIncludeAppFramework=false` before importing the
 base SDK. Otherwise the base props add `Assimalign.Cohesion.App` during evaluation and
@@ -84,11 +84,23 @@ The generated application name is used in two ways:
   reads the attribute to discover identity.
 
 Same-application manifests produce `Add*` methods. A typed area mapping supplies its
-area-owned options type and `Add<Area>` method; an unimplemented area uses
+area-owned options type, `DescriptorType`, and `Add<Area>` method; an unimplemented area uses
 `ResourceOptions` and `IApplicationBuilder.AddResource`. Boundary-crossing manifests
 produce `ExternalResourceDeclaration` values instead of realization verbs. A referenced
 Composite gateway additionally produces an `Applications.<Name>` declaration resolved
 through that gateway's control plane.
+
+Web, Database, and ConfigurationStore mappings return `IWebResourceDescriptor`,
+`IDatabaseResourceDescriptor`, and `IConfigurationStoreResourceDescriptor`. This retains
+the area's typed command verbs on generated `Add*` results. Custom mappings that omit
+`DescriptorType` keep `IApplicationResourceDescriptor`. In-process binding is applied
+after constructing the descriptor, and the original typed descriptor is returned.
+
+`CohesionGatewayClientKind` maps both mount sources and command targets to narrow
+client packages. A manifest with a non-empty `commands` array requires its kind's
+client even when no mount uses it: Database maps to Database.Client and
+ConfigurationStore maps to ConfigurationStore.Client. The manifest reader accepts
+only non-empty command-kind strings; payloads remain in runtime model declarations.
 
 Provider dispatch is generated only from `@(CohesionGatewayProvider)`. The item contract
 is:
@@ -126,8 +138,8 @@ The minimal honest implementation is therefore:
 
 1. Inject only the fixed ApplicationModel/Gateway packages and explicitly selected
    provider packages during evaluation.
-2. Keep the current finite Web, Database, SecretStore-client, and
-   ConfigurationStore-client bootstrap explicit and documented while they are the only
+2. Keep the current finite Web, Database, ConfigurationStore, SecretStore-client,
+   Database-client, and ConfigurationStore-client bootstrap explicit and documented while they are the only
    shipped typed dependencies.
 3. Validate the manifest-derived requirement set after resolution and fail with an
    actionable diagnostic when a required compile dependency is unavailable.
@@ -200,7 +212,7 @@ stubs:
   repository.
 - `CohesionPlatformsVersion` has no repository-wide version source beyond the SDK's
   temporary Cohesion-version default.
-- Only Web and Database provide typed area ApplicationModel mappings.
+- Web, Database, and ConfigurationStore provide typed area ApplicationModel mappings.
 - First-restore manifest dependency metadata has not landed; the finite dependency
   bootstrap described above is transitional.
 - The Gateway SDK suppresses the base SDK's implicit `Assimalign.Cohesion.App` reference

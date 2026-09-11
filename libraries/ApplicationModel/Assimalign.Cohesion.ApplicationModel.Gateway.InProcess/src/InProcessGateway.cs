@@ -88,6 +88,12 @@ public sealed class InProcessGateway : ApplicationGateway, IApplicationGatewayRe
     internal ProcessHost Host => _host;
 
     /// <inheritdoc/>
+    protected override bool TryGetResourceControlPlane(
+        IApplicationModel model, IApplicationResource resource,
+        out IResourceControlPlane? controlPlane) =>
+        _host.Context.TryGetControlPlane(model.Name.ToString(), resource.Name.ToString(), out controlPlane);
+
+    /// <inheritdoc/>
     protected override Task<IResourceArtifact> GatherAsync(
         IApplicationResource resource,
         CancellationToken cancellationToken)

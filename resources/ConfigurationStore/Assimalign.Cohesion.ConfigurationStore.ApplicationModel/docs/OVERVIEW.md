@@ -9,7 +9,7 @@ the deployer-owned storage override, and emits a platform-neutral
 ```csharp
 ResourceManifest manifest = ResourceManifest.Load("resource.json");
 
-IApplicationResourceDescriptor configuration = builder.AddConfigurationStore(
+IConfigurationStoreResourceDescriptor configuration = builder.AddConfigurationStore(
     manifest,
     new ConfigurationStoreResourceOptions
     {
@@ -33,7 +33,8 @@ options to application authors.
 
 The control plane advertises the `configurationstore.set-value` and
 `configurationstore.remove-value` wire kinds served by ConfigurationStore.Hosting.
-Typed descriptor command verbs remain deferred to developer-experience item 31c.
+Typed `SetValue(namespaceName, key, value)` and `RemoveValue(namespaceName, key)` verbs declare these kinds. Values follow the existing string-or-null store contract. `RemoteReferenceConfigurationStore` supplies the same typed descriptor for a manifest-backed external. `AddNamespace` remains deferred until a namespace-ownership wire kind and handler land.
+Value keys cannot contain `/`; namespaces may. Each target/key permits one desired set or remove command.
 
 ## Dependencies
 

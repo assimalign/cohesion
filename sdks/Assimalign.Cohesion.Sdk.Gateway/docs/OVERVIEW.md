@@ -39,6 +39,12 @@ gateway source. The generated surface includes:
 - `Applications.<Name>` for referenced gateway applications;
 - `UseGateway(args)` and the provider-specific configuration overload.
 
+Generated Database, ConfigurationStore, and Web `Add*` verbs return the area's typed
+descriptor. Database descriptors expose `AddDatabase` and `AddPrincipal`;
+ConfigurationStore descriptors expose `SetValue` and `RemoveValue`. Their manifests
+advertise accepted kinds as bare strings in `commands`. A command-bearing target also
+requires its narrow client package, even when it is not used as a mount source.
+
 ## SDK pins
 
 The Gateway SDK imports the base Cohesion SDK. NuGet's nested MSBuild SDK import does
@@ -101,12 +107,12 @@ contracts are available and covered by package-boundary CI:
 - Docker and Kubernetes provider packages and their `CohesionGatewayProvider`
   contributions live outside this repository and require an agreed
   `CohesionPlatformsVersion`.
-- Web and Database are the only typed area ApplicationModel packages currently shipped.
+- Web, Database, and ConfigurationStore are the typed area ApplicationModel mappings.
   Other manifest kinds use the generic `ResourceOptions`/`AddResource` path until their
   area packages land.
-- Manifest-derived ApplicationModel and mount-client requirements become known after
+- Manifest-derived ApplicationModel and mount/command-client requirements become known after
   restore. The current guarded implementation makes the shipped Web, Database,
-  SecretStore client, and ConfigurationStore client dependencies available up front;
+  ConfigurationStore, SecretStore client, Database client, and ConfigurationStore client dependencies available up front;
   it must not expand that fallback to every future area package.
 - The NuGet-only boundary requires the Gateway SDK to suppress the base SDK's implicit
   `Assimalign.Cohesion.App` reference before the base props import. The in-process bridge

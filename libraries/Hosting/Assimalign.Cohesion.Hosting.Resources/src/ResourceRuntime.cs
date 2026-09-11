@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,6 +22,7 @@ public static class ResourceRuntime
     private static readonly AsyncLocal<ResourceContextFrame?> AmbientContext = new();
     private static readonly ConcurrentDictionary<Assembly, ControlPlaneRegistration> ControlPlanes = new();
     private static readonly ConcurrentDictionary<Assembly, byte> Entries = new();
+    private static readonly ConditionalWeakTable<IHost, IResourceControlPlane> HostControlPlanes = new();
 
     /// <summary>
     /// Gets the current invocation context, lazily snapshotting the process environment in the
@@ -311,6 +313,7 @@ public static class ResourceRuntime
             controlPlane.ObserveEndpoint(name, endpoint);
         }
         controlPlane.AttachHost(host);
+        HostControlPlanes.AddOrUpdate(host, controlPlane);
 
         int stopGraceSeconds = controlPlane is RegisteredResourceControlPlane registered
             ? registered.StopGraceSeconds
@@ -325,6 +328,17 @@ public static class ResourceRuntime
             runInvoked: isEntryInvocationHost
                 ? () => frame!.RunInvoked(host)
                 : null));
+    }
+
+    /// <summary>Finds the invocation-local control plane attached to a built host.</summary>
+    /// <param name="host">The host surrendered by its resource executable.</param>
+    /// <param name="controlPlane">The attached control plane, if present.</param>
+    /// <returns>Whether a resource control plane was attached to the host.</returns>
+    /// <exception cref="ArgumentNullException">The host is null.</exception>
+    public static bool TryGetControlPlane(IHost host, [NotNullWhen(true)] out IResourceControlPlane? controlPlane)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        return HostControlPlanes.TryGetValue(host, out controlPlane);
     }
 
     private sealed class ResourceContextScope : IDisposable
@@ -555,6 +569,13 @@ public static class ResourceRuntime
         }
 
         public IReadOnlyList<string> AcceptedCommandKinds => _inner.AcceptedCommandKinds;
+
+        public IReadOnlyList<ResourceCommand> Commands => _inner.Commands;
+
+        public void RegisterCommandHandler(IResourceCommandHandler handler) => _inner.RegisterCommandHandler(handler);
+
+        public ValueTask<ReadOnlyMemory<byte>> DeleteCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default) =>
+            _inner.DeleteCommandAsync(command, cancellationToken);
 
         public IReadOnlyDictionary<string, Uri> ObservedEndpoints => _inner.ObservedEndpoints;
 

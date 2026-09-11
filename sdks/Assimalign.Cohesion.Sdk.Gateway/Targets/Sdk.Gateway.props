@@ -31,15 +31,25 @@
 		<CohesionGatewayResourceKind Include="Web">
 			<ApplicationModel>Assimalign.Cohesion.Web.ApplicationModel</ApplicationModel>
 			<OptionsType>global::Assimalign.Cohesion.Web.ApplicationModel.WebResourceOptions</OptionsType>
+			<DescriptorType>global::Assimalign.Cohesion.Web.ApplicationModel.IWebResourceDescriptor</DescriptorType>
 			<AddMethod>global::Assimalign.Cohesion.Web.ApplicationModel.WebResourceExtensions.AddWeb</AddMethod>
 		</CohesionGatewayResourceKind>
 		<CohesionGatewayResourceKind Include="Database">
 			<ApplicationModel>Assimalign.Cohesion.Database.ApplicationModel</ApplicationModel>
 			<OptionsType>global::Assimalign.Cohesion.Database.ApplicationModel.DatabaseResourceOptions</OptionsType>
+			<DescriptorType>global::Assimalign.Cohesion.Database.ApplicationModel.IDatabaseResourceDescriptor</DescriptorType>
 			<AddMethod>global::Assimalign.Cohesion.Database.ApplicationModel.DatabaseResourceExtensions.AddDatabase</AddMethod>
 		</CohesionGatewayResourceKind>
 
-		<!-- Mount-source kind to gateway-side client package map. -->
+		<CohesionGatewayResourceKind Include="ConfigurationStore">
+			<ApplicationModel>Assimalign.Cohesion.ConfigurationStore.ApplicationModel</ApplicationModel>
+			<OptionsType>global::Assimalign.Cohesion.ConfigurationStore.ApplicationModel.ConfigurationStoreResourceOptions</OptionsType>
+			<DescriptorType>global::Assimalign.Cohesion.ConfigurationStore.ApplicationModel.IConfigurationStoreResourceDescriptor</DescriptorType>
+			<AddMethod>global::Assimalign.Cohesion.ConfigurationStore.ApplicationModel.ConfigurationStoreResourceExtensions.AddConfigurationStore</AddMethod>
+		</CohesionGatewayResourceKind>
+
+		<!-- Mount-source and command target kind to gateway-side client package map. -->
+		<CohesionGatewayClientKind Include="Database" PackageId="Assimalign.Cohesion.Database.Client" />
 		<CohesionGatewayClientKind Include="SecretStore" PackageId="Assimalign.Cohesion.SecretStore.Client" />
 		<CohesionGatewayClientKind Include="ConfigurationStore" PackageId="Assimalign.Cohesion.ConfigurationStore.Client" />
 

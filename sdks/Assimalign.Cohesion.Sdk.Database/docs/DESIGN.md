@@ -13,6 +13,15 @@ The SDK is a build-time layer. Its tasks may run under the JIT-based MSBuild hos
 the AOT-compatible Database root, but the task and Roslyn assemblies never enter the consumer's
 runtime closure.
 
+## Orchestration commands
+
+When `CohesionApplicationModel=enabled`, the base manifest task writes this SDK's
+`CohesionCommand` defaults, `database.add-database` and `database.add-principal`, as
+bare strings in `commands`. These advertise the Database default control plane's
+bounded command set. Typed declarations ship in Database.ApplicationModel and are
+delivered through Database.Client; the SDK never executes them or places payloads in
+the manifest. The schema compiler and migration path remain independent.
+
 ## Model selection
 
 `CohesionDatabaseModel` is an exact selector. The shared targets file contains explicit,
