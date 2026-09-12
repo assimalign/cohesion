@@ -316,6 +316,9 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.StaticFiles'
     'resources/Web/Assimalign.Cohesion.Web.Testing'
 
+    # tooling/Cli
+    'tooling/Cli/Assimalign.Cohesion.Cli'
+
     # tooling/templates
     'tooling/templates/Assimalign.Cohesion.Templates'
 )
@@ -445,7 +448,6 @@ $script:CohesionCiMatrixExclusion = [ordered]@{
     'resources/MessageHub/Assimalign.Cohesion.MessageHub.Client/src/Assimalign.Cohesion.MessageHub.Client.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/src/Assimalign.Cohesion.NotificationHub.Client.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'resources/Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/Hosting1.csproj' = 'Example project is not an independently shipped CI matrix entry.'
-    'tooling/Cli/src/Assimalign.Cohesion.Cli/Assimalign.Cohesion.Cli.csproj' = 'Legacy tooling has no dedicated CI workflow; onboarding requires a separate release decision.'
     'tooling/scripts/src/Assimalign.Cohesion.DevScripts/Assimalign.Cohesion.DevScripts.csproj' = 'Legacy tooling has no dedicated CI workflow; onboarding requires a separate release decision.'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-app/Acme.Api/Acme.Api.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-app/Acme.Database/Acme.Database.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'

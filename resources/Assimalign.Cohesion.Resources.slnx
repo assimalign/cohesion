@@ -89,7 +89,6 @@
 		<File Path="Database/Directory.Build.props" />
 		<File Path="Database/Directory.Build.targets" />
 		<File Path="Database/README.md" />
-		<File Path="Database/solution.ps1" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database/docs/">

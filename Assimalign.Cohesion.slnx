@@ -1494,7 +1494,6 @@
 	<Folder Name="/cohesion/resources/Database/">
 		<File Path="resources/Database/Directory.Build.props" />
 		<File Path="resources/Database/Directory.Build.targets" />
-		<File Path="resources/Database/solution.ps1" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database/" />
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database/src/">
@@ -2726,14 +2725,18 @@
 	<Folder Name="/cohesion/tooling/">
 		<File Path="tooling/README.md" />
 	</Folder>
-	<Folder Name="/cohesion/tooling/Cli/" />
-	<Folder Name="/cohesion/tooling/Cli/src/" />
-	<Folder Name="/cohesion/tooling/Cli/src/Assimalign.Cohesion.Cli/">
-		<Project Path="tooling/Cli/src/Assimalign.Cohesion.Cli/Assimalign.Cohesion.Cli.csproj" />
+	<Folder Name="/cohesion/tooling/Cli/">
+		<File Path="tooling/Cli/Assimalign.Cohesion.Cli.slnx" />
 	</Folder>
-	<Folder Name="/cohesion/tooling/Cli/tests/" />
-	<Folder Name="/cohesion/tooling/Cli/tests/Assimalign.Cohesion.Cli.Tests/">
-		<Project Path="tooling/Cli/tests/Assimalign.Cohesion.Cli.Tests/Assimalign.Cohesion.Cli.Tests.csproj" />
+	<Folder Name="/cohesion/tooling/Cli/Assimalign.Cohesion.Cli/docs/">
+		<File Path="tooling/Cli/Assimalign.Cohesion.Cli/docs/OVERVIEW.md" />
+		<File Path="tooling/Cli/Assimalign.Cohesion.Cli/docs/DESIGN.md" />
+	</Folder>
+	<Folder Name="/cohesion/tooling/Cli/Assimalign.Cohesion.Cli/src/">
+		<Project Path="tooling/Cli/Assimalign.Cohesion.Cli/src/Assimalign.Cohesion.Cli.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/tooling/Cli/Assimalign.Cohesion.Cli/tests/">
+		<Project Path="tooling/Cli/Assimalign.Cohesion.Cli/tests/Assimalign.Cohesion.Cli.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/tooling/scripts/">
 		<File Path="tooling/scripts/Directory.Build.props" />

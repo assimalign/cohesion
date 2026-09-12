@@ -9,7 +9,6 @@
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
 		<File Path="README.md" />
-		<File Path="solution.ps1" />
 	</Folder>
 	<Folder Name="/Database/Core/Assimalign.Cohesion.Database/" />
 	<Folder Name="/Database/Core/Assimalign.Cohesion.Database/docs/">
