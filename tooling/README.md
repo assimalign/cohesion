@@ -135,7 +135,7 @@ trust keys only. Login stores the token for the later IdentityHub bridge in desi
 
 | Deferred surface | Current behavior / owner |
 | --- | --- |
-| `publish --in-container` | Parsed and rejected until item 15 (`L01.02.01.05`, #955) supplies the container-publish target. It never substitutes raw `PublishContainer`. |
+| `publish --in-container` | Forwards to `CohesionPublishImage` through private SDK state. The SDK probes route availability; the in-container build image, mount layout, and command contract remain pending under item 15 (#955). |
 | `trust add --against/--allow` | Parsed and rejected until item 31's substantive half (`L03.04.01.06`, #982), O25 command-kind scoping. |
 | Additional single-resource templates | ApiManager, EmailHub, EventHub, IoTHub, LoadBalancer, LogSpace, MediaHub, MessageHub, NatGateway, NotificationHub, Scheduler and VpnGateway have no shipped template yet; `new` rejects them by name. Item 39 follow-up owns them. |
 | IdentityHub-token acceptance | Deferred to the §7(6) bridge; login does not substitute gateway trust credentials. |
