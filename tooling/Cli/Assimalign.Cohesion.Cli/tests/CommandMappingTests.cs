@@ -82,6 +82,27 @@ public sealed class CommandMappingTests
         fixture.Runner.Calls.Last().Arguments.ShouldBe(new[] { "publish", Path.Combine(fixture.Root, "Gateway") });
     }
 
+    /// <summary>The container mechanism uses private SDK state and preserves child arguments.</summary>
+    [Fact(DisplayName = "Cohesion Test [Tooling.Cli] - Publish: Should forward the in-container target exactly")]
+    public async Task Publish_InContainer_ShouldForwardPrivateStateAsync()
+    {
+        using var fixture = new CliFixture();
+        string project = fixture.Gateway();
+        fixture.Runner.ExitCode = 19;
+
+        (await fixture.Application().ExecuteAsync(
+            ["publish", "--in-container", "--project", project, "-c", "Release", "--", "-p:CohesionContainerRepository=team/api"],
+            CancellationToken.None)).ShouldBe(19);
+
+        fixture.Runner.Calls.Single().Arguments.ShouldBe(new[]
+        {
+            "publish", project, "-t:CohesionPublishImage", "-p:_CohesionImageInContainer=true",
+            "-c", "Release", "-p:CohesionContainerRepository=team/api"
+        });
+        fixture.Runner.Calls[0].Executable.ShouldBe("dotnet");
+        fixture.Runner.Calls[0].Directory.ShouldBe(fixture.Root);
+    }
+
     /// <summary>Developer token stdout belongs exclusively to the child process.</summary>
     [Fact(DisplayName = "Cohesion Test [Tooling.Cli] - TrustIssue: Should map developer and leave stdout untouched")]
     public async Task TrustIssue_WithDeveloper_ShouldForwardArgumentsAsync()
@@ -176,8 +197,7 @@ public sealed class CommandMappingTests
     {
         foreach ((string[] args, string expected) in new[]
         {
-            (new[] { "publish", "--in-container" }, "#955"),
-            (new[] { "publish", "--in-container=true" }, "#955"),
+            (new[] { "publish", "--in-container=true" }, "does not take a value"),
             (new[] { "trust", "add", "peer", "--against", "provider" }, "#982"),
             (new[] { "trust", "add", "peer", "--allow=secret" }, "O25"),
             (new[] { "new", "unknown" }, string.Join(", ", Templates.Names)),

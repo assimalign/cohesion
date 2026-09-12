@@ -29,6 +29,7 @@
 		<CohesionResourceControlPlaneSourcePath Condition="'$(CohesionResourceControlPlaneSourcePath)' == ''">$(IntermediateOutputPath)cohesion/ResourceControlPlane.g.cs</CohesionResourceControlPlaneSourcePath>
 		<CohesionImageManifestPath Condition="'$(CohesionImageManifestPath)' == ''">$(IntermediateOutputPath)cohesion/image.json</CohesionImageManifestPath>
 		<CohesionPackResourceManifestPath Condition="'$(CohesionPackResourceManifestPath)' == ''">$(IntermediateOutputPath)cohesion/pack/resource.json</CohesionPackResourceManifestPath>
+		<_CohesionPackImageManifestPath>$(IntermediateOutputPath)cohesion/pack/image.json</_CohesionPackImageManifestPath>
 		<_CohesionResourceManifestFullPath>$([System.IO.Path]::GetFullPath('$(CohesionResourceManifestPath)', '$(MSBuildProjectDirectory)'))</_CohesionResourceManifestFullPath>
 
 		<_CohesionPackManifest Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(_CohesionRuntimePack)' != 'true'">true</_CohesionPackManifest>
@@ -207,15 +208,20 @@
 		<CohesionPrepareResourceManifestPackage
 			SourceManifestPath="$(CohesionResourceManifestPath)"
 			PackageManifestPath="$(CohesionPackResourceManifestPath)" />
+		<PropertyGroup>
+			<_CohesionPackImageArchivePath Condition="'$(CohesionPackImageArchive)' == 'true' and Exists('$(CohesionContainerArchiveOutputPath)')">$(CohesionContainerArchiveOutputPath)</_CohesionPackImageArchivePath>
+		</PropertyGroup>
+		<CohesionPrepareImagePackage SourcePath="$(CohesionImageManifestPath)" OutputPath="$(_CohesionPackImageManifestPath)"
+			ArchivePath="$(_CohesionPackImageArchivePath)" Condition="Exists('$(CohesionImageManifestPath)')" />
 
 		<ItemGroup>
 			<CohesionResourcePackAsset
-				Include="$(CohesionImageManifestPath)"
+				Include="$(_CohesionPackImageManifestPath)"
 				PackagePath="cohesion/image.json"
 				Condition="Exists('$(CohesionImageManifestPath)')" />
 			<CohesionResourcePackAsset
 				Include="$(CohesionContainerArchiveOutputPath)"
-				PackagePath="images/$([System.IO.Path]::GetFileName('$(CohesionContainerArchiveOutputPath)'))"
+				PackagePath="cohesion/images/$([System.IO.Path]::GetFileName('$(CohesionContainerArchiveOutputPath)'))"
 				Condition="'$(CohesionPackImageArchive)' == 'true' and '$(CohesionContainerArchiveOutputPath)' != '' and Exists('$(CohesionContainerArchiveOutputPath)')" />
 			<TfmSpecificPackageFile Include="@(CohesionResourcePackAsset)" />
 			<TfmSpecificPackageFile Include="$(MSBuildThisFileDirectory)Assimalign.Cohesion.Sdk.ResourceManifest.props">
@@ -372,6 +378,6 @@
 	</Target>
 
 	<Target Name="CohesionCleanResourceManifest" AfterTargets="Clean">
-		<Delete Files="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath);$(CohesionPackResourceManifestPath)" />
+		<Delete Files="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath);$(CohesionPackResourceManifestPath);$(_CohesionPackImageManifestPath)" />
 	</Target>
 </Project>

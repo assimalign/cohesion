@@ -4,6 +4,7 @@
 		<OutDir>$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Tasks</OutDir>
 		<IsAotCompatible>true</IsAotCompatible>
 		<EnablePreviewFeatures>false</EnablePreviewFeatures>
+		<DefineConstants>$(DefineConstants);COHESION_GATEWAY_TASKS</DefineConstants>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.Build" ExcludeAssets="runtime" />
@@ -13,5 +14,7 @@
 	<ItemGroup>
 		<Compile Include="..\..\Assimalign.Cohesion.Sdk\Tasks\Internal\Utilities\CohesionIdentifier.cs"
 			Link="Tasks\Internal\CohesionIdentifier.cs" />
+		<Compile Include="..\..\Assimalign.Cohesion.Sdk\Tasks\Tasks\Resources\ImageIndexFile.cs" Link="Tasks\ImageIndexFile.cs" />
+		<Compile Include="..\..\Assimalign.Cohesion.Sdk\Tasks\Tasks\Resources\ResourceFileWriter.cs" Link="Tasks\ResourceFileWriter.cs" />
 	</ItemGroup>
 </Project>

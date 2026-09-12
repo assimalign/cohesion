@@ -242,3 +242,29 @@ Linux, and macOS, including the in-process host lifecycle path and isolated cont
 Linux NativeAOT publish runs the same bounded in-process smoke. Release publication must consume
 the exact package artifact from `Pack-Release.ps1`, build and run the consumer, and only then
 permit package publication.
+
+## Application image gather
+
+`CohesionPublishImages` publishes referenced source resources through the base SDK's singular
+`CohesionPublishImage` and reads sources-absent resources from restored manifest packages'
+`cohesion/image.json`. Package resources are provisionally the `Pinned` boundary; source
+projects use incremental `Rebuild`. The design lists freshness among resource-project inputs,
+so final ownership of package freshness remains an open design question.
+
+The output beside the gateway publish directory is `application.images.json`, governed by the
+frozen platforms `IMAGE_INDEX.md`: `schema=cohesion/images/v1`, non-empty `application` from
+`CohesionApplicationName`, and `images` in declaration order. Each entry contains the resource
+image fields without `schema`; duplicate resource ownership is an error and an empty array is valid.
+Archives are digest-verified, copied beneath `images/<ordinal>/`, and their relative paths
+rewritten against the application document. Paths cannot escape that directory. Missing
+archives are not silently ignored; a registry-only entry omits `archive` entirely.
+
+Only an active gateway whose selected provider set is solely `InProcess` uses one composite
+entry owned by the gateway's own `CohesionResourceName`. Selecting InProcess among other
+providers, or merely enabling `CohesionGatewayInProcess`, does not suppress member entries:
+Docker/Kubernetes plans resolve `ArtifactRef.Self` per member at run time. Mixed active
+InProcess sets append the composite after the member entries; indirect project resources follow
+direct declarations in the existing manifest-closure order.
+
+The SDK uses the existing single-RID OCI producer, configuration/capability AOT decisions,
+and release-only push policy documented in the base SDK. It adds no workflow push step.

@@ -1,7 +1,11 @@
 using System;
 using System.IO;
 
+#if COHESION_GATEWAY_TASKS
+namespace Assimalign.Cohesion.Sdk.Gateway.Tasks;
+#else
 namespace Assimalign.Cohesion.Sdk.Tasks;
+#endif
 
 internal static class ResourceFileWriter
 {

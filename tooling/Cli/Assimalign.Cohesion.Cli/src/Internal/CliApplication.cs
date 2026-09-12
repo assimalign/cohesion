@@ -126,11 +126,7 @@ internal sealed class CliApplication(
 
     private Task<int> PublishAsync(Arguments args, CancellationToken cancellationToken = default)
     {
-        if (args.Has("--in-container"))
-        {
-            // TODO(design item 15): forward --in-container to the container-publish target.
-            throw new CliException("publish --in-container is not available until the container-publish target ships (design item 15, L01.02.01.05, #955)");
-        }
+        bool inContainer = args.TakeFlag("--in-container");
         string? selected = args.TakeValue("--project");
         string? positional = args.TakeFirst();
         if (selected is not null && positional is not null)
@@ -140,7 +136,9 @@ internal sealed class CliApplication(
         string project = positional ?? (selected is null
             ? GatewayDiscovery.ResolveProject(workingDirectory, null)
             : Path.GetFullPath(selected, workingDirectory));
-        return DotnetAsync(["publish", project, .. args.Remaining], cancellationToken);
+        return DotnetAsync(inContainer
+            ? ["publish", project, "-t:CohesionPublishImage", "-p:_CohesionImageInContainer=true", .. args.Remaining]
+            : ["publish", project, .. args.Remaining], cancellationToken);
     }
 
     private Task<int> GatewayAsync(string verb, Arguments args, CancellationToken cancellationToken = default)

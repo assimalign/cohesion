@@ -68,15 +68,15 @@ internal sealed class ConsumerWorkspace : IDisposable
 
         string workspaceId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
         string rootDirectory = Path.Combine(
-            Path.GetTempPath(),
-            "cohesion-sdk-integration",
-            workspaceId);
+            RepositoryRoot, "_out", "s15", workspaceId[..8]);
         string localPackageFeedDirectory = Path.Combine(
             RepositoryRoot,
             "_out",
             "sdk-tests",
             workspaceId);
         Directory.CreateDirectory(rootDirectory);
+        File.WriteAllText(Path.Combine(rootDirectory, "Directory.Build.props"), "<Project />");
+        File.WriteAllText(Path.Combine(rootDirectory, "Directory.Build.targets"), "<Project />");
         Directory.CreateDirectory(localPackageFeedDirectory);
 
         var workspace = new ConsumerWorkspace(rootDirectory, localPackageFeedDirectory);
@@ -200,11 +200,23 @@ internal sealed class ConsumerWorkspace : IDisposable
         return RunDotNetAsync("pack", fixtureName, properties ?? [], cancellationToken);
     }
 
+    public Task<DotNetBuildResult> PublishAsync(
+        string fixtureName,
+        IEnumerable<string>? properties = null,
+        string configuration = "Debug",
+        string target = "CohesionPublishImage",
+        CancellationToken cancellationToken = default)
+    {
+        return RunDotNetAsync("msbuild", fixtureName, (properties ?? []).Append("Configuration=" + configuration), cancellationToken, configuration, target);
+    }
+
     private async Task<DotNetBuildResult> RunDotNetAsync(
         string command,
         string fixtureName,
         IEnumerable<string> properties,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string configuration = "Debug",
+        string? target = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -216,10 +228,10 @@ internal sealed class ConsumerWorkspace : IDisposable
         };
         startInfo.ArgumentList.Add(command);
         startInfo.ArgumentList.Add(ProjectFile(fixtureName));
-        if (!string.Equals(command, "restore", StringComparison.Ordinal))
+        if (!string.Equals(command, "restore", StringComparison.Ordinal) && command != "msbuild")
         {
             startInfo.ArgumentList.Add("--configuration");
-            startInfo.ArgumentList.Add("Debug");
+            startInfo.ArgumentList.Add(configuration);
         }
         if (string.Equals(command, "pack", StringComparison.Ordinal))
         {
@@ -228,6 +240,10 @@ internal sealed class ConsumerWorkspace : IDisposable
         }
         startInfo.ArgumentList.Add("--nologo");
         startInfo.ArgumentList.Add("--verbosity:minimal");
+        if (target is not null)
+        {
+            startInfo.ArgumentList.Add("-t:" + target);
+        }
         foreach (string property in properties)
         {
             startInfo.ArgumentList.Add($"-p:{property}");
@@ -236,6 +252,7 @@ internal sealed class ConsumerWorkspace : IDisposable
         startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         startInfo.Environment["DOTNET_NOLOGO"] = "1";
         startInfo.Environment["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1";
+        startInfo.Environment["DOTNET_GENERATE_ASPNET_CERTIFICATE"] = "false";
         startInfo.Environment["NUGET_PACKAGES"] = Path.Combine(RootDirectory, ".nuget", "packages");
 
         using Process process = Process.Start(startInfo)

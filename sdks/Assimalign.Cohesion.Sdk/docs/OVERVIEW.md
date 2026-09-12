@@ -100,10 +100,39 @@ builds should not set the escape property.
 | --- | --- | --- |
 | COHSDK001 | Error | A referenced resource project has `CohesionApplicationModel` disabled. |
 | COHSDK002 | Error | Cohesion SDK pins disagree, the pinned .NET SDK is invalid or below `10.0.300`, or the nearest `global.json` cannot be read. |
+| COHSDK003 | Error | NativeAOT image production has no available host or in-container route. |
 | COHSDK004 | Warning or error | A packed resource lacks a digest-pinned image; `CohesionImageRequired=true` promotes the diagnostic to an error. |
+| COHSDK005 | Error | A framework-dependent container cannot start because its base lacks Cohesion shared frameworks. |
 | COHSDK008 | Error | `CohesionApplicationModel` is enabled for a project whose output is not an executable. |
 | COHSDK009 | Error | A `CohesionResourceProperty` key does not use the current resource kind's prefix. |
 
 See [DESIGN.md](./DESIGN.md) for the implementation contracts and
 [`docs/VERSIONING.md`](../../../docs/VERSIONING.md) for repository-wide package
 and pin versioning rules.
+
+## Publishing images
+
+Set `CohesionOrganization` (or an explicit lowercase `CohesionContainerRepository`) and run
+`dotnet publish -c Debug -t:CohesionPublishImage` for a daemon-free OCI archive. The image
+uses a self-contained Linux x64 apphost and the .NET 10 runtime-deps base. Release requires
+NativeAOT; the SDK probes host capability and the in-container CLI route, and reports COHSDK003
+when unavailable. The in-container build recipe is still awaiting specification.
+
+`CohesionImageAot=auto|true|false` follows the [decision table](./DESIGN.md#container-image-production).
+Release `false` is diagnosed as a deviation. `CohesionImageFreshness=Rebuild` hashes publish
+inputs and verifies cached image artifacts before skipping image creation. `Pinned` applies
+provisionally to package-only resources in the gateway gather and builds nothing.
+
+`CohesionContainerBaseImage=auto`, `CohesionContainerPush=false`, and
+`CohesionContainerArchiveOutputPath=$(IntermediateOutputPath)cohesion/images/$(CohesionResourceName).tar`
+are the defaults. The frozen `cohesion/image/v1` index at
+`$(IntermediateOutputPath)cohesion/image.json` records the repository, verified digest,
+`linux/amd64`, `aot`, base image, and a contained relative archive. Registry is late-bound;
+an actual push pins only the authority. A registry sink omits `archive` entirely.
+`linux-musl-x64` currently uses `linux/amd64` plus an Alpine base identity; the variant decision is open.
+
+`CohesionPackImageArchive=true` ships the archive under `cohesion/images/` to preserve
+index containment. Uncontained archive destinations are errors. Framework-dependent
+`PublishContainer` is COHSDK005. Exactly one SDK image creation selects archive or registry.
+Digest-preserving `CohesionContainerPushTool` transfer is deferred; Cohesion's own images
+push only from `release.yml`.

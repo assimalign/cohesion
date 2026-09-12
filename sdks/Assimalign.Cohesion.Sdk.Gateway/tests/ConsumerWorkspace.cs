@@ -104,10 +104,9 @@ internal sealed class ConsumerWorkspace : IDisposable
 
         string workspaceId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
         string rootDirectory = Path.Combine(
-            Path.GetTempPath(),
-            "cohesion-gw-sdk",
-            workspaceId);
+            RepositoryRoot, "_out", "g15", workspaceId[..8]);
         Directory.CreateDirectory(rootDirectory);
+        File.WriteAllText(Path.Combine(rootDirectory, "Directory.Build.props"), "<Project />");
 
         var workspace = new ConsumerWorkspace(rootDirectory);
         try
@@ -214,9 +213,18 @@ internal sealed class ConsumerWorkspace : IDisposable
         return RunDotNetAsync(RootDirectory, arguments, cancellationToken);
     }
 
+    public Task<DotNetBuildResult> RunTargetAsync(
+        string fixtureName, string target, CancellationToken cancellationToken = default)
+    {
+        return RunDotNetAsync(RootDirectory,
+            ["msbuild", ProjectFile(fixtureName), "-t:" + target, "-p:Configuration=Debug", "--nologo", "-v:minimal"],
+            cancellationToken);
+    }
+
     public Task<DotNetBuildResult> PublishAsync(
         string fixtureName,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? target = null)
     {
         var arguments = new List<string>
         {
@@ -229,6 +237,11 @@ internal sealed class ConsumerWorkspace : IDisposable
             "--verbosity:minimal",
             "-p:CohesionGatewayAot=false"
         };
+        if (target is not null)
+        {
+            arguments.Remove("--no-restore");
+            arguments.Add("-t:" + target);
+        }
         return RunDotNetAsync(RootDirectory, arguments, cancellationToken);
     }
 
@@ -318,6 +331,7 @@ internal sealed class ConsumerWorkspace : IDisposable
         startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         startInfo.Environment["DOTNET_NOLOGO"] = "1";
         startInfo.Environment["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1";
+        startInfo.Environment["DOTNET_GENERATE_ASPNET_CERTIFICATE"] = "false";
         startInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
         startInfo.Environment["NUGET_PACKAGES"] = Path.Combine(workingDirectory, ".nuget", "packages");
 

@@ -83,8 +83,11 @@ CLI usage/deferred-feature errors use internal `CliException` and exit 2. I/O, m
 documents and transport/startup failures exit 1 without echoing potentially secret values.
 Local cancellation exits 130. Child processes return their own exit status.
 
-Item 15 (#955) owns the `publish --in-container` target: the rejection site contains its
-handoff TODO. Item 31's substantive half (#982, O25) owns scoped trust options. Item 39's
+`publish --in-container` forwards to `dotnet publish <project> -t:CohesionPublishImage`
+with private `-p:_CohesionImageInContainer=true`, preserving the remaining argument vector.
+The SDK owns daemon probing and capability errors; the in-container build image/mount/command
+contract still needs specification under item 15 (#955). The public AOT value set stays
+`auto|true|false`. Item 31's substantive half (#982, O25) owns scoped trust options. Item 39's
 follow-up owns unshipped templates. Extensions should replace these gates only when the
 underlying contract exists, retaining process mapping tests.
 

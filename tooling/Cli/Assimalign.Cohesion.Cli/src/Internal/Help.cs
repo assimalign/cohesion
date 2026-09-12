@@ -28,7 +28,7 @@ internal static class Help
         login uses IdentityHub device flow (Development + loopback at HEAD).
         Login tokens are stored for a later IdentityHub bridge; gateways do not accept them yet.
         --print emits only the login token to stdout; approval instructions go to stderr.
-        publish --in-container waits for item 15 (#955).
+        publish --in-container forwards to CohesionPublishImage; the SDK reports route availability.
         trust add --against/--allow waits for item 31's substantive half (#982, O25).
         Resource command dispatch is not available with a developer token.
         --topology single|federated is valid only for cohesion-landing-zone.

@@ -173,4 +173,5 @@
 	<Target Name="CohesionCleanGatewaySource" AfterTargets="Clean">
 		<Delete Files="$(CohesionGatewaySourcePath)" />
 	</Target>
+	<Import Project="Sdk.Gateway.Images.targets" />
 </Project>

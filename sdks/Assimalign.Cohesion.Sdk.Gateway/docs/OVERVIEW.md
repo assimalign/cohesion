@@ -128,3 +128,16 @@ contracts are available and covered by package-boundary CI:
 
 See [Design](./DESIGN.md) for the build ordering, dependency boundary, and recommended
 first-restore contract.
+
+## Publishing the image index
+
+Run `dotnet publish -c Debug -p:CohesionGatewayAot=false -t:CohesionPublishImages` to publish source resources incrementally
+and gather `application.images.json` beside the gateway publish output. Manifest-package
+resources use their pinned `cohesion/image.json` without rebuilding. Release resources require
+NativeAOT under the base SDK's COHSDK003/005 rules.
+
+The frozen `cohesion/images/v1` document keeps declaration order, unique resource names,
+and the application's name. Entries omit `schema`. Referenced archives are copied under the
+index directory and their `archive` fields rewritten to contained relative paths.
+An active, InProcess-only gateway publishes one composite image; mixed provider sets retain
+the per-member images needed by their `ArtifactRef.Self` plans.

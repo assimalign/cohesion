@@ -84,7 +84,7 @@ public sealed class ResourceManifestPackIntegrationTests
             payloadEntries.SequenceEqual(expectedPayloadEntries, StringComparer.Ordinal)
                 .ShouldBeTrue($"Unexpected package entries: {string.Join(", ", entries)}");
             entries.Any(entry => entry.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)).ShouldBeFalse();
-            entries.Any(entry => entry.StartsWith("images/", StringComparison.Ordinal)).ShouldBeFalse();
+            entries.Any(entry => entry.StartsWith("cohesion/images/", StringComparison.Ordinal)).ShouldBeFalse();
 
             using JsonDocument manifest = JsonDocument.Parse(ReadEntry(archive, "cohesion/resource.json"));
             JsonElement artifact = manifest.RootElement.GetProperty("artifact");
@@ -270,8 +270,10 @@ public sealed class ResourceManifestPackIntegrationTests
         using ZipArchive archive = ZipFile.OpenRead(packagePath);
         string[] entries = archive.Entries.Select(entry => entry.FullName.Replace('\\', '/')).ToArray();
         entries.ShouldContain("cohesion/image.json");
-        entries.ShouldContain("images/inventory-web.oci.tar");
-        ReadEntryBytes(archive, "images/inventory-web.oci.tar").ShouldBe(expectedArchive);
+        entries.ShouldContain("cohesion/images/inventory-web.oci.tar");
+        ReadEntryBytes(archive, "cohesion/images/inventory-web.oci.tar").ShouldBe(expectedArchive);
+        using JsonDocument image = JsonDocument.Parse(ReadEntry(archive, "cohesion/image.json"));
+        image.RootElement.GetProperty("archive").GetString().ShouldBe("images/inventory-web.oci.tar");
     }
 
     private static string SinglePackage(ConsumerWorkspace workspace, string packageId)

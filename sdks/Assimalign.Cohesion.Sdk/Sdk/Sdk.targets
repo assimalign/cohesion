@@ -1,4 +1,9 @@
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" >
+	<PropertyGroup>
+		<_CohesionImageSelfContainedInput>$(SelfContained)</_CohesionImageSelfContainedInput>
+		<_CohesionImagePublishSelfContainedInput>$(PublishSelfContained)</_CohesionImagePublishSelfContainedInput>
+		<_CohesionImageRuntimeIdentifierInput>$(RuntimeIdentifier)</_CohesionImageRuntimeIdentifierInput>
+	</PropertyGroup>
 	<!--
 		Enabled resource executables use one Development runtime posture on every
 		host. Set these defaults after the consumer project has been evaluated but

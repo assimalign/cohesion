@@ -175,10 +175,81 @@ trailing commas are accepted to match the .NET SDK's `global.json` format.
 | --- | --- | --- |
 | COHSDK001 | Error | A resource reference cannot target a project with `CohesionApplicationModel` disabled. |
 | COHSDK002 | Error | All present recognized Cohesion SDK pins must agree exactly and the pinned .NET SDK must be valid and at least `10.0.300`. |
+| COHSDK003 | Error | NativeAOT image production is impossible on this host and no usable in-container route is available. Release never silently becomes JIT. |
 | COHSDK004 | Warning or error | Resource packing requires a valid digest-pinned image when `CohesionImageRequired=true`; otherwise a manifest-only package is warned. |
+| COHSDK005 | Error | Framework-dependent `PublishContainer` cannot start because MCR images contain no Cohesion shared frameworks. |
 | COHSDK008 | Error | Enabling the application model requires `OutputType=Exe`. |
 | COHSDK009 | Error | Resource properties must use the current kind's lower-case prefix. |
 
 Package-backed tests under `tests/` are the acceptance boundary. They build
 consumer fixtures from packed SDKs so validation includes NuGet SDK resolution,
 imports, generated source compilation, and incremental MSBuild behavior.
+
+## Container image production
+
+`dotnet publish -c Release -t:CohesionPublishImage` is the per-resource entry point.
+It requires an enabled resource and runs through `CohesionBuildResourceContainersDependsOn`.
+A nested `dotnet publish` uses one global-property vector for its restore and publish of
+`linux-x64`, self-containment, and AOT. A fresh process avoids reusing the outer invocation's
+cached host-RID assets. Global consumer overrides flow through an argument list, without a shell.
+The outer Development build's host RID cannot leak into the image.
+`linux-musl-x64` is opt-in and selects the Alpine runtime-deps base when the base is auto.
+Both currently record `linux/amd64`; whether musl should use a platform variant is unresolved.
+The base-image identity preserves the libc distinction.
+
+| Public property | Default and behavior |
+| --- | --- |
+| `CohesionContainerRepository` | `$(CohesionOrganization)/$(CohesionResourceName)`; organization has no default. Repository validation occurs only on Cohesion image publish. |
+| `CohesionContainerBaseImage` | `auto`: `mcr.microsoft.com/dotnet/runtime-deps:10.0` (Alpine for musl). |
+| `CohesionContainerArchiveOutputPath` | `$(IntermediateOutputPath)cohesion/images/$(CohesionResourceName).tar`. Must stay below the index directory for an archive sink. |
+| `CohesionContainerPush` | `false` (inferred from item 15's release-only rule). `true` selects only the registry sink. |
+| `CohesionImageAot` | `auto`; legal values are `auto`, `true`, `false`. |
+| `CohesionImageFreshness` | `Rebuild` for source projects; restored manifest packages are `Pinned`. |
+
+| Configuration / selection | Result |
+| --- | --- |
+| Debug (Development), auto or false | `SelfContained=true`, `PublishAot=false`, native Linux apphost. |
+| Debug, true | NativeAOT if capable; otherwise the container route or a plain capability error. COHSDK003 retains its Release-only meaning. |
+| Release, auto or true | NativeAOT on a Linux x64 host with clang, otherwise probe a Linux Docker daemon and forward through `cohesion publish --in-container`; unavailable route is COHSDK003. |
+| Release, false | Plain error identifying the T12/O11 deviation; no JIT Release escape. |
+
+The in-container CLI channel uses private MSBuild state, not another `CohesionImageAot`
+value. The build image, mount layout, and command contract remain unspecified. A forwarded
+request reports that exact COHSDK003 blocker rather than inventing a build recipe or recursing.
+T12, D14, and owner answer O11 govern Release; contradiction-ledger deviation (7)'s
+non-Linux/no-daemon JIT language applies only to Development.
+
+After publishing the payload, `Rebuild` hashes its resolved files, the resource manifest,
+imported project files, and evaluated container options. An unchanged hash skips image creation
+only if the full index is unchanged and its archive digest still verifies. This is an image
+build cache, not a substitute for restoring packages or publishing changed application files.
+`Pinned` is provisionally handled at the gateway's sources-absent manifest-package boundary:
+it reads `cohesion/image.json` and never builds that resource. Asking a source project to
+publish with `Pinned` is a clear error. The ownership ambiguity in §4.2 remains open.
+
+The .NET SDK's own `PublishContainer` runs once with `ContainerImageFormat=OCI`, one RID,
+version tags, endpoint ports, and resource/kind/manifest labels. The existing manifest label
+is reused. Exactly one `CreateNewImage` creates the shipped digest: archive **or** registry.
+`CohesionVerifyImageDigest` (the design's informal `VerifyImageDigestTask`) validates
+`GeneratedContainerDigest`, the OCI index descriptor and manifest bytes, or the SDK's
+successful registry-returned digest. No second image is created to obtain another sink.
+
+The frozen sibling `cohesion-platforms` `IMAGE_INDEX.md` contract governs UTF-8 output:
+`schema=cohesion/image/v1`, `resource`, `repository`, nullable `registry` and `tag`, `digest`,
+`platform`, boolean `aot`, `baseImage`, and optional `archive`. No other fields are emitted.
+`archive` is omitted for a registry sink, never JSON null. Registry defaults to late-bound;
+`ghcr.io/example` splits into authority `ghcr.io` and repository prefix `example` only when
+actually pushing. Pull identity is always `repository@digest`, never the tag.
+
+An archive outside the index directory fails before publishing, including with
+`CohesionPackImageArchive=true`; omitting it would leave an unusable late-bound identity.
+The air-gapped package archive slot changes item 14's `images/<file>` to
+`cohesion/images/<file>` so `archive=images/<file>` stays contained beside `cohesion/image.json`.
+Archives remain opt-in for NuGet. A NuGet-only consumer without image bits needs a target registry.
+The staged package index rewrites `archive` to its packaged `images/<file>` location when
+packing an archive and omits it when the archive opt-in is off. The publish index is preserved.
+
+`CohesionContainerPushTool` (digest-preserving skopeo/crane/oras transfer) is deferred.
+Cohesion's own images push only from `release.yml`; no other workflow or installer gains a push step.
+The COHSDK005 guard also protects raw `PublishContainer`, but raw SDK repository options
+do not require `CohesionOrganization` or opt into Cohesion repository validation.

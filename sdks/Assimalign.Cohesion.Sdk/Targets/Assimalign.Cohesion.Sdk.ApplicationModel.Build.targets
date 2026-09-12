@@ -5,4 +5,5 @@
 	<PropertyGroup>
 		<CohesionBuildResourceContainersDependsOn>$(CohesionBuildResourceContainersDependsOn)</CohesionBuildResourceContainersDependsOn>
 	</PropertyGroup>
+	<Import Project="Sdk.Image.targets" />
 </Project>
