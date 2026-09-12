@@ -60,11 +60,11 @@ The service section of the repository follows a two-layer folder approach: `Laye
 
 ## Tooling
 
-Developer tooling lives under `tooling/` — the `cohesion` CLI and repository dev scripts.
+Developer tooling lives under `tooling/` — the `cohesion` CLI, repository dev scripts and [`dotnet new` templates](tooling/templates/).
 
 ## Extensions
 
-IDE and platform integrations live under `extensions/` — the Visual Studio extension and the `dotnet new` project templates.
+IDE and platform integrations live under `extensions/` — the Visual Studio extension. The `dotnet new` project templates live under [`tooling/templates/`](tooling/templates/).
 
 # Repository Structure
 
@@ -76,13 +76,13 @@ Cohesion is a mono repository that contains all the source code, extensions, and
 | `./assets`      | Shared assets such as the `cohesion.config` JSON schemas.                                                   |
 | `./build`       | Custom MSBuild infrastructure: centralized targets, package versions, and build tasks shared by every project. |
 | `./docs`        | Repository-level documentation (delivery roadmap, service design, build system, versioning).               |
-| `./extensions`  | IDE and platform integrations (Visual Studio extension, `dotnet new` templates).                           |
+| `./extensions`  | IDE and platform integrations (Visual Studio extension); `dotnet new` templates moved to `./tooling/templates`. |
 | `./frameworks`  | Shared-framework producer projects (`App[.Domain]` Ref + Runtime packs) and the framework membership manifest. |
 | `./installer`   | WiX MSI source and delivery scripts (`Install-Local.ps1`, domain scaffolding).                              |
 | `./libraries`   | Foundation libraries (L1) — every Cohesion building block.                                                  |
 | `./resources`   | Service/resource implementations (L3), each paired with an `Sdk.<Name>` + `App.<Name>` framework family.   |
 | `./sdks`        | MSBuild SDK projects (`Assimalign.Cohesion.Sdk[.Domain]`).                                                  |
-| `./tooling`     | Developer tooling (`cohesion` CLI, dev scripts).                                                            |
+| `./tooling`     | Developer tooling (`cohesion` CLI, dev scripts, `dotnet new` templates in `templates/`).                    |
 
 The delivery waves below reflect the dependency order of the foundation libraries (see [docs/DELIVERY_ROADMAP.md](docs/DELIVERY_ROADMAP.md) for the full plan):
 

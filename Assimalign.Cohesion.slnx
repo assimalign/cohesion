@@ -116,13 +116,6 @@
 		<File Path="docs/versioning/VERSIONING.md" />
 	</Folder>
 	<Folder Name="/cohesion/extensions/" />
-	<Folder Name="/cohesion/extensions/dotnet/" />
-	<Folder Name="/cohesion/extensions/dotnet/src/">
-		<File Path="extensions/dotnet/src/README.md" />
-	</Folder>
-	<Folder Name="/cohesion/extensions/dotnet/src/Assimalign.Cohesion.ProjectTemplates/">
-		<Project Path="extensions/dotnet/src/Assimalign.Cohesion.ProjectTemplates/Assimalign.Cohesion.ProjectTemplates.csproj" />
-	</Folder>
 	<Folder Name="/cohesion/extensions/VisualStudio/" />
 	<Folder Name="/cohesion/extensions/VisualStudio/src/" />
 	<Folder Name="/cohesion/extensions/VisualStudio/src/Assimalign.Cohesion/">
@@ -2750,6 +2743,20 @@
 	<Folder Name="/cohesion/tooling/scripts/src/" />
 	<Folder Name="/cohesion/tooling/scripts/src/Assimalign.Cohesion.DevScripts/">
 		<Project Path="tooling/scripts/src/Assimalign.Cohesion.DevScripts/Assimalign.Cohesion.DevScripts.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/tooling/templates/">
+		<File Path="tooling/templates/README.md" />
+		<File Path="tooling/templates/Assimalign.Cohesion.Templates.slnx" />
+	</Folder>
+	<Folder Name="/cohesion/tooling/templates/Assimalign.Cohesion.Templates/docs/">
+		<File Path="tooling/templates/Assimalign.Cohesion.Templates/docs/OVERVIEW.md" />
+		<File Path="tooling/templates/Assimalign.Cohesion.Templates/docs/DESIGN.md" />
+	</Folder>
+	<Folder Name="/cohesion/tooling/templates/Assimalign.Cohesion.Templates/src/">
+		<Project Path="tooling/templates/Assimalign.Cohesion.Templates/src/Assimalign.Cohesion.Templates.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/tooling/templates/Assimalign.Cohesion.Templates/tests/">
+		<Project Path="tooling/templates/Assimalign.Cohesion.Templates/tests/Assimalign.Cohesion.Templates.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/OpenApi/Assimalign.Cohesion.OpenApi.Attributes/src/">
 		<Project Path="libraries/OpenApi/Assimalign.Cohesion.OpenApi.Attributes/src/Assimalign.Cohesion.OpenApi.Attributes.csproj" />

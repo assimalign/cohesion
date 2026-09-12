@@ -315,6 +315,9 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.Sessions'
     'resources/Web/Assimalign.Cohesion.Web.StaticFiles'
     'resources/Web/Assimalign.Cohesion.Web.Testing'
+
+    # tooling/templates
+    'tooling/templates/Assimalign.Cohesion.Templates'
 )
 
 # SDK families. The base Sdk comes first because the domain SDKs chain to it. Each entry maps to
@@ -409,8 +412,6 @@ $script:CohesionReleaseUnpublishedDependency = @(
 # than project names so two same-named projects cannot hide behind one matrix entry. Every entry
 # needs a reason; Assert-CohesionReleaseInventory rejects blank and stale entries.
 $script:CohesionCiMatrixExclusion = [ordered]@{
-    'extensions/dotnet/src/Assimalign.Cohesion.ProjectTemplates/Assimalign.Cohesion.ProjectTemplates.csproj' = 'Legacy extension/template tooling has no dedicated CI workflow; onboarding requires a separate release decision.'
-    'extensions/dotnet/src/Assimalign.Cohesion.ProjectTemplates/templates/cohesion-configurationstore/9.2/Cohesion.ConfigurationStore.csproj' = 'Legacy extension/template tooling has no dedicated CI workflow; onboarding requires a separate release decision.'
     'libraries/Connections/Assimalign.Cohesion.Connections.NamedPipes/src/Assimalign.Cohesion.Connections.NamedPipes.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'libraries/Content/Assimalign.Cohesion.Content.Binary/src/Assimalign.Cohesion.Content.Binary.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'libraries/Content/Assimalign.Cohesion.Content.Bmff/src/Assimalign.Cohesion.Content.Bmff.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
@@ -446,6 +447,43 @@ $script:CohesionCiMatrixExclusion = [ordered]@{
     'resources/Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/Hosting1.csproj' = 'Example project is not an independently shipped CI matrix entry.'
     'tooling/Cli/src/Assimalign.Cohesion.Cli/Assimalign.Cohesion.Cli.csproj' = 'Legacy tooling has no dedicated CI workflow; onboarding requires a separate release decision.'
     'tooling/scripts/src/Assimalign.Cohesion.DevScripts/Assimalign.Cohesion.DevScripts.csproj' = 'Legacy tooling has no dedicated CI workflow; onboarding requires a separate release decision.'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-app/Acme.Api/Acme.Api.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-app/Acme.Database/Acme.Database.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-app/Acme.Gateway/Acme.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-composite/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-configurationstore/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-database/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-gateway/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-identityhub/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Gateway/Example.Gateway/Example.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Identity/Example.Identity.Gateway/Example.Identity.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Identity/Example.Identity.IdentityHub/Example.Identity.IdentityHub.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Networking/Example.Networking.Gateway/Example.Networking.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Networking/Example.Networking.Rezolvr/Example.Networking.Rezolvr.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Networking/Example.Networking.VpnGateway/Example.Networking.VpnGateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Platform/Example.Platform.ConfigurationStore/Example.Platform.ConfigurationStore.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Platform/Example.Platform.Gateway/Example.Platform.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Platform/Example.Platform.LogSpace/Example.Platform.LogSpace.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Platform/Example.Platform.SecretStore/Example.Platform.SecretStore.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppA/Example.AppA.Api/Example.AppA.Api.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppA/Example.AppA.Database/Example.AppA.Database.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppA/Example.AppA.Gateway/Example.AppA.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppA/Example.AppA.SecretStore/Example.AppA.SecretStore.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppA/Example.AppA.Spa/Example.AppA.Spa.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppB/Example.AppB.Api/Example.AppB.Api.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppB/Example.AppB.Database/Example.AppB.Database.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppB/Example.AppB.Gateway/Example.AppB.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppB/Example.AppB.SecretStore/Example.AppB.SecretStore.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppB/Example.AppB.Spa/Example.AppB.Spa.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppC/Example.AppC.Api/Example.AppC.Api.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppC/Example.AppC.Database/Example.AppC.Database.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppC/Example.AppC.Gateway/Example.AppC.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppC/Example.AppC.SecretStore/Example.AppC.SecretStore.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppC/Example.AppC.Spa/Example.AppC.Spa.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-rezolvr/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-secretstore/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-spa/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
+    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-web/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
 }
 
 # Workflows under .github/workflows that are not per-area release-library matrices, and so are not
