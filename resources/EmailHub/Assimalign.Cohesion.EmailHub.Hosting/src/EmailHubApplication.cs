@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.EmailHub;
 
@@ -19,6 +20,13 @@ public static class EmailHubApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new EmailHubApplicationBuilder(args);
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(EmailHubApplication).Assembly);
+    }
+
+    internal static IEmailHubApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new EmailHubApplicationBuilder(args, resourceAssembly);
     }
 }

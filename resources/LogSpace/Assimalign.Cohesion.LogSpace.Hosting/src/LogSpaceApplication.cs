@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.LogSpace;
 
@@ -19,6 +20,13 @@ public static class LogSpaceApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new LogSpaceApplicationBuilder(args);
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(LogSpaceApplication).Assembly);
+    }
+
+    internal static ILogSpaceApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new LogSpaceApplicationBuilder(args, resourceAssembly);
     }
 }

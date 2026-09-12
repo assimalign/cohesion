@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.IoTHub;
 
@@ -19,6 +20,13 @@ public static class IoTHubApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new IoTHubApplicationBuilder(args);
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(IoTHubApplication).Assembly);
+    }
+
+    internal static IIoTHubApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new IoTHubApplicationBuilder(args, resourceAssembly);
     }
 }

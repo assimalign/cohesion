@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.Rezolvr;
 
@@ -19,6 +20,13 @@ public static class RezolvrApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new RezolvrApplicationBuilder(args);
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(RezolvrApplication).Assembly);
+    }
+
+    internal static IRezolvrApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new RezolvrApplicationBuilder(args, resourceAssembly);
     }
 }

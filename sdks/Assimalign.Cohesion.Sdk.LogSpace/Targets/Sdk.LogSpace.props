@@ -6,6 +6,8 @@
 		The resource's domain composition remains in its Program.cs.
 	-->
 	<PropertyGroup>
+		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.LogSpace.ApplicationModel</CohesionResourceApplicationModel>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.LogSpace.ApplicationModel.LogSpaceResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">LogSpace</CohesionResourceKind>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">query</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
@@ -16,5 +18,7 @@
 		<CohesionEndpoint Include="otlp" Scheme="grpc" ContainerPort="4317" Public="false" />
 		<CohesionEndpoint Include="query" Scheme="https" ContainerPort="8443" Public="false" />
 		<CohesionMount Include="data" Kind="Volume" ContainerPath="/data" Size="10Gi" />
+		<CohesionProbe Include="readiness" Endpoint="query" Http="/readyz" />
+		<CohesionProbe Include="liveness" Endpoint="query" Http="/livez" />
 	</ItemGroup>
 </Project>

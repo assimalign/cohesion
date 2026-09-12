@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.EventHub;
 
@@ -19,6 +20,13 @@ public static class EventHubApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new EventHubApplicationBuilder(args);
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(EventHubApplication).Assembly);
+    }
+
+    internal static IEventHubApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new EventHubApplicationBuilder(args, resourceAssembly);
     }
 }

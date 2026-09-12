@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.MediaHub.ApplicationModel</RootNamespace>
+    <CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+  </ItemGroup>
+</Project>

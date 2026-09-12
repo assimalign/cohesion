@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.NatGateway;
 
@@ -19,6 +20,13 @@ public static class NatGatewayApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new NatGatewayApplicationBuilder(args);
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(NatGatewayApplication).Assembly);
+    }
+
+    internal static INatGatewayApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new NatGatewayApplicationBuilder(args, resourceAssembly);
     }
 }

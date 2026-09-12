@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.VpnGateway;
 
@@ -19,6 +20,13 @@ public static class VpnGatewayApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new VpnGatewayApplicationBuilder(args);
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(VpnGatewayApplication).Assembly);
+    }
+
+    internal static IVpnGatewayApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new VpnGatewayApplicationBuilder(args, resourceAssembly);
     }
 }

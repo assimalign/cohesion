@@ -20,16 +20,6 @@ internal sealed class LoadBalancerApplicationHost : Host<LoadBalancerApplication
 
     public override LoadBalancerApplicationContext Context => _context;
 
-    async Task ILoadBalancerApplication.RunAsync(CancellationToken cancellationToken)
-    {
-        // TODO(design item 12): Route RunAsync through ResourceRuntime once the ambient runtime seam exists.
-        if (cancellationToken.IsCancellationRequested)
-        {
-            await ((IHost)this).StartAsync(CancellationToken.None).ConfigureAwait(false);
-            await ((IHost)this).StopAsync(CancellationToken.None).ConfigureAwait(false);
-            return;
-        }
-
-        await base.RunAsync(cancellationToken).ConfigureAwait(false);
-    }
+    Task ILoadBalancerApplication.RunAsync(CancellationToken cancellationToken) =>
+        base.RunAsync(cancellationToken);
 }

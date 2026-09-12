@@ -66,6 +66,7 @@ A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these
 | Project | Role |
 | --- | --- |
 | `Assimalign.Cohesion.Web` | The root: pipeline and composition abstractions (`IWebApplication*`, `AddService(IHostService)`, `WebApplicationMiddleware`) every library builds against |
+| `Assimalign.Cohesion.Web.ControlPlane` | Resource control-plane routes for private listeners, ES256 bootstrap verification, and protocol parity with the Web runtime |
 | `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, server, builder-time DI/config/logging composition |
 | `Assimalign.Cohesion.Web.Routing` | Router, route patterns/constraints, endpoint metadata bag, link generation |
 | `Assimalign.Cohesion.Web.Api` | Endpoint mapping over the router: plain `Map`/`MapGet` terminal middleware plus source-generated typed-delegate binding (`(int id, IHttpContext) => ...` — route/query/header/body/form + injections, 400/415 outcomes); the interceptor generator lives in `analyzers/Assimalign.Cohesion.SourceGeneration.Web` |

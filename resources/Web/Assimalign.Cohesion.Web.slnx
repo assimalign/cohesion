@@ -606,4 +606,17 @@
 		<Project Path="../../libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/src/Assimalign.Cohesion.FileSystem.Physical.csproj" />
 		<Project Path="../../libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/src/Assimalign.Cohesion.FileSystem.InMemory.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.ControlPlane/">
+		<File Path="Assimalign.Cohesion.Web.ControlPlane/README.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.ControlPlane/docs/">
+		<File Path="Assimalign.Cohesion.Web.ControlPlane/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.ControlPlane/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.ControlPlane/src/">
+		<Project Path="Assimalign.Cohesion.Web.ControlPlane/src/Assimalign.Cohesion.Web.ControlPlane.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.ControlPlane/tests/">
+		<Project Path="Assimalign.Cohesion.Web.ControlPlane/tests/Assimalign.Cohesion.Web.ControlPlane.Tests.csproj" />
+	</Folder>
 </Solution>

@@ -28,6 +28,7 @@ jobs:
             'Assimalign.Cohesion.Web.Authorization',
             'Assimalign.Cohesion.Web.Caching',
             'Assimalign.Cohesion.Web.Compression',
+            'Assimalign.Cohesion.Web.ControlPlane',
             'Assimalign.Cohesion.Web.CookiePolicy',
             'Assimalign.Cohesion.Web.Cors',
             'Assimalign.Cohesion.Web.Diagnostics',

@@ -23,7 +23,9 @@
 	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway/src/">
 		<Project Path="Assimalign.Cohesion.VpnGateway/src/Assimalign.Cohesion.VpnGateway.csproj" />
 	</Folder>
-	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/" />
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/">
+		<File Path="Assimalign.Cohesion.VpnGateway.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/docs/">
 		<File Path="Assimalign.Cohesion.VpnGateway.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.VpnGateway.Hosting/docs/OVERVIEW.md" />
@@ -40,5 +42,21 @@
 	<Folder Name="/VpnGateway/refs/" >
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/">
+		<File Path="Assimalign.Cohesion.VpnGateway.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/">
+		<File Path="Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/src/">
+		<Project Path="Assimalign.Cohesion.VpnGateway.ApplicationModel/src/Assimalign.Cohesion.VpnGateway.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/tests/">
+		<Project Path="Assimalign.Cohesion.VpnGateway.ApplicationModel/tests/Assimalign.Cohesion.VpnGateway.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/Assembly/Assimalign.Cohesion.VpnGateway.ApplicationModel/">
+		<File Path="Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/Assembly/Assimalign.Cohesion.VpnGateway.ApplicationModel/OVERVIEW.md" />
 	</Folder>
 </Solution>

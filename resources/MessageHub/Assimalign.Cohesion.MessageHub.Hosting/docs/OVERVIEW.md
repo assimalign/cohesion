@@ -1,22 +1,7 @@
 # Assimalign.Cohesion.MessageHub.Hosting
 
-## Summary
+`MessageHubApplication.CreateBuilder(args)` returns the root builder interface. Explicit services preserve registration/start order and reverse stop order. Enabled resources discover their area control plane and serve health, readiness, liveness, endpoint discovery, stop, and command envelopes on the ambient `http` endpoint (http). The plain host opens no listener without registration.
 
-Provides the public `MessageHubApplication.CreateBuilder(args)` entry point and the internal filler implementation of the MessageHub application contracts.
+Managed namespaced routes use ES256 bootstrap verification. The private Web implementation stays out of consumer reference packs. Domain service behavior and command kinds remain deferred.
 
-## Current Evaluation
-
-- Status: composition-capable filler with no default services
-- Project references: Assimalign.Cohesion.MessageHub and Assimalign.Cohesion.Hosting
-
-## Primary Responsibilities
-
-- Validate application arguments and return the area-root builder interface.
-- Materialize caller-registered service instances and context-aware factories into an ordered lifecycle snapshot for an internal `Host<MessageHubApplicationContext>`.
-- Preserve the hosting-isolation boundary and an AOT-safe construction path.
-
-The old `JournalFlushService` and `BrokerEndpointService` future-service stubs remain in the project but are not registered. Ambient `ResourceRuntime` integration is deferred to design item 12.
-
-## Public type
-
-- `MessageHubApplication` — static creation facade; all runtime implementation types are internal.
+See [DESIGN.md](DESIGN.md).

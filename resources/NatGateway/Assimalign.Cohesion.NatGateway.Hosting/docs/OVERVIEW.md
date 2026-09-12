@@ -1,22 +1,7 @@
 # Assimalign.Cohesion.NatGateway.Hosting
 
-## Summary
+`NatGatewayApplication.CreateBuilder(args)` returns the root builder interface. Explicit services preserve registration/start order and reverse stop order. Enabled resources discover their area control plane and serve health, readiness, liveness, endpoint discovery, stop, and command envelopes on the ambient `http` endpoint (http). The plain host opens no listener without registration.
 
-Provides the public `NatGatewayApplication.CreateBuilder(args)` entry point and the internal filler implementation of the NatGateway application contracts.
+Managed namespaced routes use ES256 bootstrap verification. The private Web implementation stays out of consumer reference packs. Domain service behavior and command kinds remain deferred.
 
-## Current Evaluation
-
-- Status: composition-capable filler with no default services
-- Project references: Assimalign.Cohesion.NatGateway and Assimalign.Cohesion.Hosting
-
-## Primary Responsibilities
-
-- Validate application arguments and return the area-root builder interface.
-- Materialize caller-registered service instances and context-aware factories into an ordered lifecycle snapshot for an internal `Host<NatGatewayApplicationContext>`.
-- Preserve the hosting-isolation boundary and an AOT-safe construction path.
-
-The old `TranslationDataPlaneService` future-service stub remains in the project but is not registered. Ambient `ResourceRuntime` integration is deferred to design item 12.
-
-## Public type
-
-- `NatGatewayApplication` — static creation facade; all runtime implementation types are internal.
+See [DESIGN.md](DESIGN.md).

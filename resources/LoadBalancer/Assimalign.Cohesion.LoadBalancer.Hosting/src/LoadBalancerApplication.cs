@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.LoadBalancer;
 
@@ -19,6 +20,13 @@ public static class LoadBalancerApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new LoadBalancerApplicationBuilder(args);
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(LoadBalancerApplication).Assembly);
+    }
+
+    internal static ILoadBalancerApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new LoadBalancerApplicationBuilder(args, resourceAssembly);
     }
 }

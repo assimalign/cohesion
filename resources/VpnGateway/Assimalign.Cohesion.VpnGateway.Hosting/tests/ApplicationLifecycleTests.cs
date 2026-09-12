@@ -78,10 +78,17 @@ public class ApplicationLifecycleTests
         // Arrange
         await using IVpnGatewayApplication application = VpnGatewayApplication.CreateBuilder([]).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
-        cancellationTokenSource.Cancel();
+
 
         // Act
-        await application.RunAsync(cancellationTokenSource.Token);
+        Task run = application.RunAsync(cancellationTokenSource.Token);
+        using var startupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (application.Context.State is not HostState.Started)
+        {
+            await Task.Delay(10, startupTimeout.Token);
+        }
+        cancellationTokenSource.Cancel();
+        await run;
 
         // Assert
         application.Context.State.ShouldBe(HostState.Stopped);

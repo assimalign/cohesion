@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.IoTHub;
 
 namespace Assimalign.Cohesion.IoTHub.Hosting;
@@ -10,9 +12,17 @@ internal sealed class IoTHubApplicationBuilder : IIoTHubApplicationBuilder
 {
     private readonly List<Func<IHostContext, IHostService>> _serviceRegistrations = new();
 
-    internal IoTHubApplicationBuilder(string[] args)
+    private readonly IResourceControlPlane? _controlPlane;
+    private readonly ResourceContext? _resourceContext;
+
+    internal IoTHubApplicationBuilder(string[] args, Assembly resourceAssembly)
     {
         ArgumentNullException.ThrowIfNull(args);
+        if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
+        {
+            _controlPlane = controlPlane ?? throw new InvalidOperationException("The registered IoTHub control-plane factory returned null.");
+            _resourceContext = ResourceRuntime.Current;
+        }
     }
 
     public IIoTHubApplicationBuilder AddService(IHostService service)
@@ -34,8 +44,9 @@ internal sealed class IoTHubApplicationBuilder : IIoTHubApplicationBuilder
     public IIoTHubApplication Build()
     {
         var options = new IoTHubApplicationOptions();
-        var context = new IoTHubApplicationContext();
-        var hostedServices = new IHostService[_serviceRegistrations.Count];
+        var context = new IoTHubApplicationContext(_resourceContext);
+        bool hasEndpoint = _controlPlane is not null && _resourceContext!.Endpoints.ContainsKey("http");
+        var hostedServices = new IHostService[_serviceRegistrations.Count + (hasEndpoint ? 1 : 0)];
 
         for (int index = 0; index < _serviceRegistrations.Count; index++)
         {
@@ -44,9 +55,24 @@ internal sealed class IoTHubApplicationBuilder : IIoTHubApplicationBuilder
                     "The IoT hub application service factory returned null.");
         }
 
+        if (_controlPlane is not null)
+        {
+            _controlPlane.AddHealthContributor(context);
+            if (hasEndpoint)
+            {
+                Uri endpoint = _resourceContext!.Endpoints["http"];
+                _controlPlane.ObserveEndpoint("http", endpoint);
+                hostedServices[^1] = new IoTHubControlPlaneEndpointService(endpoint, _controlPlane, _resourceContext, context);
+            }
+        }
         context.SetHostedServices(hostedServices);
 
-        return new IoTHubApplicationHost(options, context);
+        var application = new IoTHubApplicationHost(options, context);
+        if (_controlPlane is not null)
+        {
+            ResourceRuntime.HostBuilt(application, _controlPlane);
+        }
+        return application;
     }
 
     IHost IHostBuilder.Build() => Build();

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.Web.ControlPlane</RootNamespace>
+    <Description>Reusable authenticated resource control-plane routes for private Cohesion Web listeners, with health, readiness, endpoint discovery, stop, and command envelopes.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+  </ItemGroup>
+</Project>

@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.MessageHub;
 
@@ -19,6 +20,13 @@ public static class MessageHubApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new MessageHubApplicationBuilder(args);
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(MessageHubApplication).Assembly);
+    }
+
+    internal static IMessageHubApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new MessageHubApplicationBuilder(args, resourceAssembly);
     }
 }

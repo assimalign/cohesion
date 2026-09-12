@@ -14,7 +14,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        projects: ["Assimalign.Cohesion.NatGateway", "Assimalign.Cohesion.NatGateway.Hosting"]
+        projects: ["Assimalign.Cohesion.NatGateway", "Assimalign.Cohesion.NatGateway.ApplicationModel", "Assimalign.Cohesion.NatGateway.Hosting"]
     steps:
       - uses: actions/checkout@v4
         name: "Checkout: ${{ matrix.projects }}"

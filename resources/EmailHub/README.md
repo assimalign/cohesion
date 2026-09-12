@@ -2,16 +2,18 @@
 
 EmailHub is the L3 service platform intended to compose email messages and templates, select transports, track delivery, and apply suppression policy.
 
-The application and builder are fillers pending the area's program.
+The host supports enabled-resource control planes; domain services remain fillers pending the area program.
 
 ## Projects
 
 - `Assimalign.Cohesion.EmailHub` defines the public area-root application and builder contracts alongside the existing email-hub abstraction.
 - `Assimalign.Cohesion.EmailHub.Hosting` provides the concrete creation entry point and host lifecycle with explicit `IHostService` registration.
 
+- `Assimalign.Cohesion.EmailHub.ApplicationModel` supplies the typed manifest, planner, descriptor, and default control-plane factory as a NuGet-only package.
+
 ## Layering and dependencies
 
-As an L3 service platform, EmailHub composes the L2 `Assimalign.Cohesion.Hosting` runtime rather than defining its own host lifecycle. Hosting is built on the L1 `Assimalign.Cohesion.Core` foundation; the current area has no additional outside-area runtime dependency.
+As an L3 service platform, EmailHub composes the L2 `Assimalign.Cohesion.Hosting` runtime rather than defining its own host lifecycle. Hosting is built on the L1 `Assimalign.Cohesion.Core` foundation; Hosting privately composes Web.ControlPlane, Web.Hosting, HTTP, and TCP for its resource listener.
 
 ## Project documentation
 

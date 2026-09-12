@@ -1,14 +1,37 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Health;
+using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.EmailHub.Hosting;
 
-internal sealed class EmailHubApplicationContext : HostContext
+internal sealed class EmailHubApplicationContext : HostContext, IHealthContributor
 {
     private IReadOnlyList<IHostService> _hostedServices = Array.Empty<IHostService>();
-    private readonly IHostEnvironment _environment = new HostEnvironment("production");
+    private readonly IHostEnvironment _environment;
+
+    internal EmailHubApplicationContext(ResourceContext? resourceContext = null)
+    {
+        _environment = new HostEnvironment(resourceContext?.EnvironmentName ?? "production")
+        {
+            ContentRootPath = resourceContext is null ? (FileSystemPath?)null : FileSystemPath.Parse(resourceContext.ContentRootPath),
+        };
+    }
+
+    public string Name => "EmailHub";
+
+    public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(State is HostState.Failed
+            ? HealthContribution.Unhealthy("The EmailHub host failed.")
+            : HealthContribution.Healthy());
+    }
 
     public override IHostEnvironment Environment => _environment;
 

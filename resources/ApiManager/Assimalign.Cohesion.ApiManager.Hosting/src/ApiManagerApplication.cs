@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.ApiManager;
 
@@ -19,6 +20,13 @@ public static class ApiManagerApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new ApiManagerApplicationBuilder(args);
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(ApiManagerApplication).Assembly);
+    }
+
+    internal static IApiManagerApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new ApiManagerApplicationBuilder(args, resourceAssembly);
     }
 }

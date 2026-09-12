@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.MessageHub;
 
 namespace Assimalign.Cohesion.MessageHub.Hosting;
@@ -10,9 +12,17 @@ internal sealed class MessageHubApplicationBuilder : IMessageHubApplicationBuild
 {
     private readonly List<Func<IHostContext, IHostService>> _serviceFactories = [];
 
-    internal MessageHubApplicationBuilder(string[] args)
+    private readonly IResourceControlPlane? _controlPlane;
+    private readonly ResourceContext? _resourceContext;
+
+    internal MessageHubApplicationBuilder(string[] args, Assembly resourceAssembly)
     {
         ArgumentNullException.ThrowIfNull(args);
+        if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
+        {
+            _controlPlane = controlPlane ?? throw new InvalidOperationException("The registered MessageHub control-plane factory returned null.");
+            _resourceContext = ResourceRuntime.Current;
+        }
     }
 
     public IMessageHubApplicationBuilder AddService(IHostService service)
@@ -34,18 +44,34 @@ internal sealed class MessageHubApplicationBuilder : IMessageHubApplicationBuild
     public IMessageHubApplication Build()
     {
         var options = new MessageHubApplicationOptions();
-        var context = new MessageHubApplicationContext();
-        var hostedServices = new IHostService[_serviceFactories.Count];
+        var context = new MessageHubApplicationContext(_resourceContext);
+        bool hasEndpoint = _controlPlane is not null && _resourceContext!.Endpoints.ContainsKey("http");
+        var hostedServices = new IHostService[_serviceFactories.Count + (hasEndpoint ? 1 : 0)];
 
-        for (var index = 0; index < hostedServices.Length; index++)
+        for (var index = 0; index < _serviceFactories.Count; index++)
         {
             hostedServices[index] = _serviceFactories[index](context)
                 ?? throw new InvalidOperationException("A message hub service factory returned null.");
         }
 
+        if (_controlPlane is not null)
+        {
+            _controlPlane.AddHealthContributor(context);
+            if (hasEndpoint)
+            {
+                Uri endpoint = _resourceContext!.Endpoints["http"];
+                _controlPlane.ObserveEndpoint("http", endpoint);
+                hostedServices[^1] = new MessageHubControlPlaneEndpointService(endpoint, _controlPlane, _resourceContext, context);
+            }
+        }
         context.SetHostedServices(hostedServices);
 
-        return new MessageHubApplicationHost(options, context);
+        var application = new MessageHubApplicationHost(options, context);
+        if (_controlPlane is not null)
+        {
+            ResourceRuntime.HostBuilt(application, _controlPlane);
+        }
+        return application;
     }
 
     IHost IHostBuilder.Build() => Build();

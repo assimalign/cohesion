@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.NotificationHub;
 
@@ -19,6 +20,13 @@ public static class NotificationHubApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new NotificationHubApplicationBuilder(args);
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(NotificationHubApplication).Assembly);
+    }
+
+    internal static INotificationHubApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new NotificationHubApplicationBuilder(args, resourceAssembly);
     }
 }

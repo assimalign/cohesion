@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 using Assimalign.Cohesion.MediaHub;
 
@@ -19,6 +20,13 @@ public static class MediaHubApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return new MediaHubApplicationBuilder(args);
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(MediaHubApplication).Assembly);
+    }
+
+    internal static IMediaHubApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new MediaHubApplicationBuilder(args, resourceAssembly);
     }
 }

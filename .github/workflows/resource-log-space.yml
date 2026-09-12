@@ -14,7 +14,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        projects: ["Assimalign.Cohesion.LogSpace", "Assimalign.Cohesion.LogSpace.Hosting"]
+        projects: ["Assimalign.Cohesion.LogSpace", "Assimalign.Cohesion.LogSpace.ApplicationModel", "Assimalign.Cohesion.LogSpace.Hosting"]
     steps:
       - uses: actions/checkout@v4
         name: "Checkout: ${{ matrix.projects }}"
