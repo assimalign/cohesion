@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/Cli/Assimalign.Cohesion.Cli/docs/">
+    <File Path="Assimalign.Cohesion.Cli/docs/OVERVIEW.md" />
+    <File Path="Assimalign.Cohesion.Cli/docs/DESIGN.md" />
+  </Folder>
+  <Folder Name="/Cli/Assimalign.Cohesion.Cli/src/">
+    <Project Path="Assimalign.Cohesion.Cli/src/Assimalign.Cohesion.Cli.csproj" />
+  </Folder>
+  <Folder Name="/Cli/Assimalign.Cohesion.Cli/tests/">
+    <Project Path="Assimalign.Cohesion.Cli/tests/Assimalign.Cohesion.Cli.Tests.csproj" />
+  </Folder>
+</Solution>
