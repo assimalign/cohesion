@@ -1,0 +1,8 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.IdentityHub">
+  <PropertyGroup>
+    <!-- Opt-in to orchestration: change the next line to <CohesionApplicationModel>enabled</CohesionApplicationModel>.
+         Generates resource.json, Resource.g.cs and ResourceControlPlane.g.cs; Assimalign.Cohesion.IdentityHub.ApplicationModel
+         owns the generated default control plane. Without it this is a plain executable that a gateway cannot reference. -->
+    <CohesionApplicationModel>disabled</CohesionApplicationModel>
+  </PropertyGroup>
+</Project>

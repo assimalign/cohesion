@@ -1,0 +1,20 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Database">
+  <!--
+    The appc-database resource: an ordinary executable whose Program.cs defines the schema, triggers, functions and
+    custom types in C# through the Database builder and serves the wire protocol on endpoint `db`. Only orchestration-facing
+    facts live here. Sdk.Database defaults: endpoint `db` (cohesion-db 5740), endpoint `admin` (http 8081, private —
+    the Database default control plane: readiness http:/readyz, liveness http:/livez, commands), mount `data` (Volume,
+    /data, 10Gi), workload StatefulSet, replicas 1.
+  -->
+  <PropertyGroup>
+    <CohesionResourceName>appc-database</CohesionResourceName>
+    <!-- Opt-in to orchestration. Enabled: Sdk.Database generates resource.json (the manifest), Resource.g.cs (typed accessors:
+         Resource.Endpoints/Mounts/Settings/References over the ambient ResourceContext) and ResourceControlPlane.g.cs (the
+         Database default control plane — readiness, health, observed endpoints, stop, Database commands — owned by
+         Database.ApplicationModel). Disabled (the default): a plain executable that no gateway can reference. -->
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionSetting Include="Database:Durability" Type="Assimalign.Cohesion.Database.Storage.StorageCommitDurability" Default="synchronous" />
+  </ItemGroup>
+</Project>

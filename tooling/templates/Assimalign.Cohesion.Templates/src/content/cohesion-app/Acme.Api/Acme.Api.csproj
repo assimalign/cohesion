@@ -1,0 +1,14 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
+  <PropertyGroup>
+    <CohesionResourceName>acme-api</CohesionResourceName>
+    <!-- Opt-in to orchestration: generates resource.json, Resource.g.cs and ResourceControlPlane.g.cs (the Web default control plane).
+         Without it this is a plain executable that Acme.Gateway could not reference. -->
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Scale-down: plain http, public; TLS terminates at a cloud LB later, or add an `https` endpoint + a SecretStore when needed. -->
+    <CohesionEndpoint Update="http" Public="true" />
+    <CohesionSetting Include="Customers:PageSize" Type="int" Default="25" />   <!-- the one source of this default (delivered as COHESION_CONFIG__Customers__PageSize) -->
+    <CohesionResourceReference Include="..\Acme.Database\Acme.Database.csproj" />
+  </ItemGroup>
+</Project>

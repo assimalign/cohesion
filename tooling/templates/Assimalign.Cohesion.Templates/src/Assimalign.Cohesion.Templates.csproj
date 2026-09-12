@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageType>Template</PackageType>
+    <PackageVersion>$(CohesionVersion)</PackageVersion>
+    <Description>Executable Cohesion applications, landing zones, gateways, composites and resource templates for dotnet new.</Description>
+    <PackageTags>Cohesion;templates;dotnet-new</PackageTags>
+    <IsPackable>true</IsPackable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+
+  <!-- Package staging leaves the tracked templates untouched, including their version tokens. -->
+  <Target Name="PrepareCohesionTemplates" BeforeTargets="_GetPackageFiles">
+    <Error Condition="$([System.String]::Copy('$(CohesionVersion)').Contains('.local'))"
+           Text="Template SDK pins must use the canonical Cohesion version, never a local-feed version." />
+    <PropertyGroup>
+      <_TemplateStage>$(IntermediateOutputPath)templates/</_TemplateStage>
+      <_RepositoryGlobalJson>$([System.IO.File]::ReadAllText('$(CohesionRepositoryDirectory)global.json'))</_RepositoryGlobalJson>
+      <!-- global.json permits comments; exclude commented version alternatives before matching. -->
+      <_RepositoryGlobalJson>$([System.Text.RegularExpressions.Regex]::Replace('$(_RepositoryGlobalJson)', '(?m)^\s*//[^\r\n]*', ''))</_RepositoryGlobalJson>
+      <_TemplateDotNetVersion>$([System.Text.RegularExpressions.Regex]::Match('$(_RepositoryGlobalJson)', '&quot;version&quot;\s*:\s*&quot;([^&quot;]+)&quot;').Groups[1].Value)</_TemplateDotNetVersion>
+      <_TemplateRollForward>$([System.Text.RegularExpressions.Regex]::Match('$(_RepositoryGlobalJson)', '&quot;rollForward&quot;\s*:\s*&quot;([^&quot;]+)&quot;').Groups[1].Value)</_TemplateRollForward>
+    </PropertyGroup>
+    <ItemGroup>
+      <_TemplateSource Include="content/**/*" Exclude="content/**/bin/**;content/**/obj/**" />
+      <_TemplateGlobal Include="content/**/global.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_TemplateSource)"
+          DestinationFiles="@(_TemplateSource->'$(_TemplateStage)%(RecursiveDir)%(Filename)%(Extension)')" />
+    <WriteLinesToFile File="$(_TemplateStage)%(_TemplateGlobal.RecursiveDir)global.json"
+                      Lines="$([System.IO.File]::ReadAllText('%(_TemplateGlobal.FullPath)').Replace('__COHESION_PACKAGE_VERSION__', '$(CohesionVersion)').Replace('__COHESION_DOTNET_SDK_VERSION__', '$(_TemplateDotNetVersion)').Replace('__COHESION_DOTNET_ROLL_FORWARD__', '$(_TemplateRollForward)'))"
+                      Overwrite="true" Encoding="UTF-8" />
+    <ItemGroup>
+      <Content Include="@(_TemplateSource->'$(_TemplateStage)%(RecursiveDir)%(Filename)%(Extension)')"
+               Pack="true" PackagePath="content/%(_TemplateSource.RecursiveDir)" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -1,0 +1,6 @@
+{
+  "Rezolvr": {
+    "Forwarders": [ "1.1.1.1", "9.9.9.9" ],
+    "NegativeCacheTtl": "00:05:00"
+  }
+}

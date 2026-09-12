@@ -1,0 +1,19 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.VpnGateway">
+  <!-- Site-to-site connectivity into the cluster network (a configured transport; inter-application traffic still uses
+       public endpoints over TLS by default). Peers and policy are C# in Program.cs; keys come from the Platform SecretStore.
+       Sdk.VpnGateway defaults: endpoint `wireguard` (udp 51820), endpoint `admin` (http 8081, private; the control plane),
+       composable=false (a thread-per-core data plane never colocates). -->
+  <PropertyGroup>
+    <CohesionResourceName>networking-vpn-gateway</CohesionResourceName>
+    <!-- Opt-in to orchestration. Enabled: Sdk.VpnGateway generates resource.json (the manifest), Resource.g.cs (typed accessors:
+         Resource.Endpoints/Mounts/Settings/References over the ambient ResourceContext) and ResourceControlPlane.g.cs (the
+         VpnGateway default control plane — readiness, health, observed endpoints, stop, VpnGateway commands — owned by
+         VpnGateway.ApplicationModel). Disabled (the default): a plain executable that no gateway can reference. -->
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionEndpoint Update="wireguard" Public="true" />
+    <CohesionMount Include="keys" Kind="Secret" Source="platform-secretstore:networking/vpn-keys" />
+    <CohesionResourceReference Include="..\..\Platform\Example.Platform.SecretStore\Example.Platform.SecretStore.csproj" />
+  </ItemGroup>
+</Project>

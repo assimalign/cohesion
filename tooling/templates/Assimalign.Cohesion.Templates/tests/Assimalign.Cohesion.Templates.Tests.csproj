@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+    <CohesionPackageReference Include="Shouldly" />
+    <CohesionPackageReference Include="xunit" />
+    <CohesionPackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+</Project>

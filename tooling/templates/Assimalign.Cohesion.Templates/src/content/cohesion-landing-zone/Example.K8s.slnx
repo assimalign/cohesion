@@ -1,0 +1,41 @@
+<Solution>
+  <Folder Name="/Gateway/">
+    <Project Path="Gateway\Example.Gateway\Example.Gateway.csproj" />
+  </Folder>
+  <Folder Name="/Identity/">
+    <Project Path="Identity\Example.Identity.Gateway\Example.Identity.Gateway.csproj" />
+    <Project Path="Identity\Example.Identity.IdentityHub\Example.Identity.IdentityHub.csproj" />
+  </Folder>
+  <Folder Name="/Networking/">
+    <Project Path="Networking\Example.Networking.Gateway\Example.Networking.Gateway.csproj" />
+    <Project Path="Networking\Example.Networking.Rezolvr\Example.Networking.Rezolvr.csproj" />
+    <Project Path="Networking\Example.Networking.VpnGateway\Example.Networking.VpnGateway.csproj" />
+  </Folder>
+  <Folder Name="/Platform/">
+    <Project Path="Platform\Example.Platform.ConfigurationStore\Example.Platform.ConfigurationStore.csproj" />
+    <Project Path="Platform\Example.Platform.Gateway\Example.Platform.Gateway.csproj" />
+    <Project Path="Platform\Example.Platform.LogSpace\Example.Platform.LogSpace.csproj" />
+    <Project Path="Platform\Example.Platform.SecretStore\Example.Platform.SecretStore.csproj" />
+  </Folder>
+  <Folder Name="/Zones/AppA/">
+    <Project Path="Zones\AppA\Example.AppA.Api\Example.AppA.Api.csproj" />
+    <Project Path="Zones\AppA\Example.AppA.Database\Example.AppA.Database.csproj" />
+    <Project Path="Zones\AppA\Example.AppA.Gateway\Example.AppA.Gateway.csproj" />
+    <Project Path="Zones\AppA\Example.AppA.SecretStore\Example.AppA.SecretStore.csproj" />
+    <Project Path="Zones\AppA\Example.AppA.Spa\Example.AppA.Spa.csproj" />
+  </Folder>
+  <Folder Name="/Zones/AppB/">
+    <Project Path="Zones\AppB\Example.AppB.Api\Example.AppB.Api.csproj" />
+    <Project Path="Zones\AppB\Example.AppB.Database\Example.AppB.Database.csproj" />
+    <Project Path="Zones\AppB\Example.AppB.Gateway\Example.AppB.Gateway.csproj" />
+    <Project Path="Zones\AppB\Example.AppB.SecretStore\Example.AppB.SecretStore.csproj" />
+    <Project Path="Zones\AppB\Example.AppB.Spa\Example.AppB.Spa.csproj" />
+  </Folder>
+  <Folder Name="/Zones/AppC/">
+    <Project Path="Zones\AppC\Example.AppC.Api\Example.AppC.Api.csproj" />
+    <Project Path="Zones\AppC\Example.AppC.Database\Example.AppC.Database.csproj" />
+    <Project Path="Zones\AppC\Example.AppC.Gateway\Example.AppC.Gateway.csproj" />
+    <Project Path="Zones\AppC\Example.AppC.SecretStore\Example.AppC.SecretStore.csproj" />
+    <Project Path="Zones\AppC\Example.AppC.Spa\Example.AppC.Spa.csproj" />
+  </Folder>
+</Solution>
