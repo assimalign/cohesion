@@ -26,7 +26,7 @@ public sealed class ResourceCommandSdkIntegrationTests
         result.ExitCode.ShouldBe(0, result.Output);
         using JsonDocument manifest = ReadManifest(workspace, "EnabledConfigurationStore");
         manifest.RootElement.GetProperty("commands").EnumerateArray().Select(command => command.GetString())
-            .ShouldBe(new[] { "configurationstore.remove-value", "configurationstore.set-value" });
+            .ShouldBe(new[] { "configurationstore.add-namespace", "configurationstore.remove-value", "configurationstore.set-value" });
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk] - CohesionCommand items produce deterministic bare manifest strings")]
