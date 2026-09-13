@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 
 using Assimalign.Cohesion.Hosting;
@@ -56,12 +57,26 @@ internal sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
 
         if (_controlPlane is not null)
         {
+            string fallback = Path.GetFullPath(Path.Combine(_resourceContext!.ContentRootPath, "data"));
+            ResourceMount mount = _resourceContext.GetMount("data", fallback);
+            if (string.IsNullOrWhiteSpace(mount.Path))
+            {
+                throw new InvalidOperationException("The Rezolvr data directory must expose a file-system path.");
+            }
+            var repository = new RezolvrRecordRepository(mount.Path);
+            foreach (string kind in _controlPlane.AcceptedCommandKinds)
+            {
+                if (kind is RezolvrResourceCommandHandler.AddARecord or RezolvrResourceCommandHandler.AddCnameRecord)
+                {
+                    _controlPlane.RegisterCommandHandler(new RezolvrResourceCommandHandler(kind, repository));
+                }
+            }
             _controlPlane.AddHealthContributor(context);
             if (hasEndpoint)
             {
                 Uri endpoint = _resourceContext!.Endpoints["admin"];
                 _controlPlane.ObserveEndpoint("admin", endpoint);
-                hostedServices[^1] = new RezolvrControlPlaneEndpointService(endpoint, _controlPlane, _resourceContext, context);
+                hostedServices[^1] = new RezolvrControlPlaneEndpointService(endpoint, _controlPlane, _resourceContext, context, repository);
             }
         }
         context.SetHostedServices(hostedServices);

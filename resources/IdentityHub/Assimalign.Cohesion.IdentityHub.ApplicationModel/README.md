@@ -12,8 +12,9 @@ gateway-materialized `tls` mount. `IdentityHubResourceOptions.Storage.Size` is t
 area-specific planning override in this item.
 
 `IdentityHubResourceControlPlane.Create()` returns a fresh isolated control plane.
-Its accepted command-kind set is empty; `AddAudience` and `AddClient` belong to
-developer-experience item 31c.
+It accepts `identityhub.add-audience` and `identityhub.add-client`. The typed
+`IIdentityHubResourceDescriptor` exposes `AddAudience` and `AddClient`; Hosting
+persists their registrations beside the signing key and uses them during token issuance.
 
 ## Documentation
 

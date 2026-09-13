@@ -1,13 +1,50 @@
 using System;
+using System.Collections.Generic;
 using System.Text.Json;
 
 namespace Assimalign.Cohesion.ConfigurationStore.ApplicationModel;
 
-/// <summary>Declares configuration values for the target's default control plane.</summary>
+/// <summary>Declares configuration namespaces and values for the target's default control plane.</summary>
 public static partial class ConfigurationStoreResourceCommandExtensions
 {
     extension(IConfigurationStoreResourceDescriptor descriptor)
     {
+        /// <summary>Declares a namespace with an optional initial configuration snapshot.</summary>
+        /// <param name="name">The single-segment namespace name and ownership key.</param>
+        /// <param name="seed">Initial string or null values; never secret material.</param>
+        /// <param name="optional">Whether rejection may allow dependents to start.</param>
+        /// <returns>This descriptor for further declarations.</returns>
+        /// <exception cref="ArgumentNullException">The descriptor or name is null.</exception>
+        /// <exception cref="ArgumentException">The namespace or a seed key is blank or contains a slash.</exception>
+        /// <exception cref="InvalidOperationException">The descriptor belongs to a built model.</exception>
+        public IConfigurationStoreResourceDescriptor AddNamespace(string name,
+            IReadOnlyDictionary<string, string?>? seed = null, bool optional = false)
+        {
+            ArgumentNullException.ThrowIfNull(descriptor);
+            ArgumentException.ThrowIfNullOrWhiteSpace(name);
+            if (name.Contains('/'))
+            {
+                throw new ArgumentException("Declared namespace names must not contain '/'.", nameof(name));
+            }
+            var values = new SortedDictionary<string, string?>(StringComparer.Ordinal);
+            if (seed is not null)
+            {
+                foreach ((string key, string? value) in seed)
+                {
+                    ArgumentException.ThrowIfNullOrWhiteSpace(key, nameof(seed));
+                    if (key.Contains('/'))
+                    {
+                        throw new ArgumentException("Seed keys must not contain '/'.", nameof(seed));
+                    }
+                    values.Add(key, value);
+                }
+            }
+            descriptor.AddCommand("configurationstore.add-namespace", name,
+                new AddConfigurationNamespaceCommandPayload(name, values),
+                ConfigurationStoreCommandJsonContext.Default.AddConfigurationNamespaceCommandPayload, optional);
+            return descriptor;
+        }
+
         /// <summary>Declares a string or null JSON configuration value in a namespace.</summary>
         /// <param name="namespaceName">The namespace name.</param>
         /// <param name="key">The configuration key within the namespace, without slash characters.</param>

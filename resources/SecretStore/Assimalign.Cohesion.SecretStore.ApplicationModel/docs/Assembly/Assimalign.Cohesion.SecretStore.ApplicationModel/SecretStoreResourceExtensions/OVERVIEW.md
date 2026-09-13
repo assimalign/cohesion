@@ -23,8 +23,8 @@ for dependency chaining. `descriptor.Resource` is a `SecretStoreResource`. Plann
 remains deferred until the graph is built, where the planner enforces exactly one
 effective replica. A null manifest raises `ArgumentNullException`.
 
-The `AddSecret`, `IssueCertificate`, and `Enroll` command verbs are intentionally
-deferred to developer-experience item 31c.
+The returned descriptor exposes `AddSecret` and `IssueCertificate` through
+SecretStoreResourceCommandExtensions. `Enroll(platformStore)` is deferred to item 31t.
 
 ## Links
 

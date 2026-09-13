@@ -8,6 +8,8 @@
 - `IdentityHubResourceExtensions.AddIdentityHub(...)` — adds the typed resource to an
   application graph.
 - `IdentityHubResourceControlPlane.Create()` — creates an isolated default control plane
-  with no accepted command kinds until item 31c.
+  accepting `identityhub.add-audience` and `identityhub.add-client`.
+- `IIdentityHubResourceDescriptor` retains typed resource and command/dependency surfaces.
+- `IdentityHubResourceCommandExtensions` supplies AddAudience and AddClient declarations.
 
 All types are platform-neutral and NativeAOT-compatible.

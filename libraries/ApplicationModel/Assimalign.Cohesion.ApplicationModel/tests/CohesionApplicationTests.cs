@@ -182,6 +182,23 @@ public class CohesionApplicationTests
         gateway.ExecutedCancellationToken.ShouldBe(cancellation.Token);
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Trust allow kinds accept repeated comma-separated options")]
+    public async Task RunAsync_TrustAllowArguments_DispatchesKinds()
+    {
+        var gateway = new FakeCommandGateway();
+        IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse("appa"),
+            ["--mode", "trust-add", "--peer", "peer-a", "--from", "peer.json",
+             "--allow", "rezolvr.add-a-record,identityhub.add-client", "--allow=rezolvr.add-a-record"])
+            .UseGateway(gateway);
+        builder.AddResource(new FakeResource("worker"));
+        await builder.Build().RunAsync(CancellationToken.None);
+        gateway.ExecutedCommand.ShouldNotBeNull().AllowedCommandKinds
+            .ShouldBe(["identityhub.add-client", "rezolvr.add-a-record"]);
+        Should.Throw<ArgumentException>(() => Application.CreateBuilder(ApplicationName.Parse("appa"),
+            ["--mode", "trust-issue", "--allow", "rezolvr.add-a-record"]))
+            .Message.ShouldContain("--allow");
+    }
+
     [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Trust commands name gateways without command support")]
     [InlineData("--mode=trust-issue", "--developer=developer-a")]
     [InlineData("--mode=trust-add", "--peer=peer-a", "--from=exports/peer-a/export.json")]

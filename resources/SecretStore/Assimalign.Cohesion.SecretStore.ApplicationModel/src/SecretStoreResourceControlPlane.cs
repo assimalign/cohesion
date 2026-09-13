@@ -19,6 +19,6 @@ public static class SecretStoreResourceControlPlane
     /// <returns>The SecretStore area's default resource control plane.</returns>
     public static IResourceControlPlane Create()
     {
-        return ResourceControlPlane.Create([TrustGrantCommandKind]);
+        return ResourceControlPlane.Create([TrustGrantCommandKind, "secretstore.add-secret", "secretstore.issue-certificate"]);
     }
 }

@@ -7,5 +7,6 @@ public static class RezolvrResourceControlPlane
 {
     /// <summary>Creates a new isolated Rezolvr resource control plane.</summary>
     /// <returns>The Rezolvr area's default resource control plane.</returns>
-    public static IResourceControlPlane Create() => ResourceControlPlane.Create();
+    public static IResourceControlPlane Create() =>
+        ResourceControlPlane.Create(["rezolvr.add-a-record", "rezolvr.add-cname-record"]);
 }

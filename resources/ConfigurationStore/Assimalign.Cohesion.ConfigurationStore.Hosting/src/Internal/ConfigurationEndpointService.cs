@@ -22,6 +22,7 @@ namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
 
 internal sealed class ConfigurationEndpointService : IHostService, IDisposable
 {
+    internal const string AddNamespaceCommand = "configurationstore.add-namespace";
     internal const string RemoveValueCommand = "configurationstore.remove-value";
     internal const string SetValueCommand = "configurationstore.set-value";
 
@@ -57,12 +58,16 @@ internal sealed class ConfigurationEndpointService : IHostService, IDisposable
         _endpoint = endpoint;
         _repository = repository;
         _controlPlane = controlPlane;
-        _commands = controlPlane ?? ResourceControlPlane.Create(new[] { SetValueCommand, RemoveValueCommand });
+        _commands = controlPlane ?? ResourceControlPlane.Create(new[] { AddNamespaceCommand, SetValueCommand, RemoveValueCommand });
         foreach (string kind in _commands.AcceptedCommandKinds)
         {
             if (kind is SetValueCommand or RemoveValueCommand)
             {
                 _commands.RegisterCommandHandler(new ConfigurationResourceCommandHandler(kind, repository));
+            }
+            else if (kind is AddNamespaceCommand)
+            {
+                _commands.RegisterCommandHandler(new ConfigurationNamespaceCommandHandler(repository));
             }
         }
         _resourceContext = resourceContext;

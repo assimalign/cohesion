@@ -17,6 +17,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<CohesionCommand Include="identityhub.add-audience;identityhub.add-client" />
 		<CohesionEndpoint Include="https" Scheme="https" ContainerPort="8443" Public="false" />
 		<CohesionProbe Include="readiness" Endpoint="https" Http="/readyz" />
 		<CohesionProbe Include="liveness" Endpoint="https" Http="/livez" />

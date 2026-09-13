@@ -21,3 +21,15 @@ As an L3 service platform, Rezolvr composes the L2 `Assimalign.Cohesion.Hosting`
 - [Root design](./Assimalign.Cohesion.Rezolvr/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.Rezolvr.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.Rezolvr.Hosting/docs/DESIGN.md)
+
+## Declarative control-plane commands
+
+| Wire kind | Descriptor verb | Ownership key |
+|---|---|---|
+| `rezolvr.add-a-record` | `AddARecord` | record name |
+| `rezolvr.add-cname-record` | `AddCnameRecord` | record name |
+
+The [ApplicationModel](Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/OVERVIEW.md) declares
+commands; [Hosting](Assimalign.Cohesion.Rezolvr.Hosting/docs/DESIGN.md) applies them; the Core-only
+[Client](Assimalign.Cohesion.Rezolvr.Client/docs/OVERVIEW.md) delivers them for the gateway.
+ApplicationModel and Client are standalone NuGet packages.

@@ -226,6 +226,7 @@ $script:CohesionReleaseLibrary = @(
     # resources/IdentityHub
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel'
+    'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models'
 
@@ -267,6 +268,7 @@ $script:CohesionReleaseLibrary = @(
     # resources/Rezolvr
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr'
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel'
+    'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Client'
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting'
 
     # resources/Scheduler

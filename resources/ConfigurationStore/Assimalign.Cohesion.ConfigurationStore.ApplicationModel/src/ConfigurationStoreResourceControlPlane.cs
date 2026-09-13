@@ -15,6 +15,7 @@ public static class ConfigurationStoreResourceControlPlane
     {
         return ResourceControlPlane.Create(
         [
+            "configurationstore.add-namespace",
             "configurationstore.set-value",
             "configurationstore.remove-value",
         ]);

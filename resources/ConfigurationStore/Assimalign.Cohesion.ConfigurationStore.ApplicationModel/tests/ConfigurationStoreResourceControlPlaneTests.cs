@@ -18,6 +18,7 @@ public sealed class ConfigurationStoreResourceControlPlaneTests
         first.ShouldNotBeSameAs(second);
         first.AcceptedCommandKinds.ShouldBe(
         [
+            "configurationstore.add-namespace",
             "configurationstore.set-value",
             "configurationstore.remove-value",
         ]);

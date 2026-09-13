@@ -7,4 +7,7 @@
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 	</ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Assimalign.Cohesion.ConfigurationStore.Hosting.Tests" />
+  </ItemGroup>
 </Project>

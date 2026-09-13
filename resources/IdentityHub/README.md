@@ -15,7 +15,7 @@ The application builder configures a minimal code-first OpenID Connect issuer wi
 
 As an L3 service platform, IdentityHub composes the L2 `Assimalign.Cohesion.Hosting` runtime, which is built on the L1 `Assimalign.Cohesion.Core` foundation. The root and Models projects consume the L1 `Assimalign.Cohesion.IdentityModel` contracts; Models also retains Core for its generated ULID identifiers. The Hosting project depends only on the area root and shared Hosting runtime. The AOT-safe ApplicationModel project references only shared ApplicationModel and Hosting.Resources seams and is guarded by COHAM001.
 
-The IdentityHub SDK's orchestration defaults describe one private `https` endpoint with readiness and liveness probes, one `data` Volume, and a single-replica `StatefulSet`. The planner also preserves optional non-persistent inputs such as the Hosting convention's `tls` mount. Runtime `AddAudience` and `AddClient` composition ships now; the generated resource control plane advertises no command kinds until developer-experience item 31c adds their gateway-command counterparts.
+The IdentityHub SDK's orchestration defaults describe one private `https` endpoint with readiness and liveness probes, one `data` Volume, and a single-replica `StatefulSet`. The planner also preserves optional non-persistent inputs such as the Hosting convention's `tls` mount. Runtime `AddAudience` and `AddClient` composition ships now; the generated resource control plane advertises identityhub.add-audience and identityhub.add-client for the corresponding declarative verbs.
 
 ## Project documentation
 
@@ -27,3 +27,15 @@ The IdentityHub SDK's orchestration defaults describe one private `https` endpoi
 - [Hosting design](./Assimalign.Cohesion.IdentityHub.Hosting/docs/DESIGN.md)
 - [Models overview](./Assimalign.Cohesion.IdentityHub.Models/docs/OVERVIEW.md)
 - [Models design](./Assimalign.Cohesion.IdentityHub.Models/docs/DESIGN.md)
+
+## Declarative control-plane commands
+
+| Wire kind | Descriptor verb | Ownership key |
+|---|---|---|
+| `identityhub.add-audience` | `AddAudience` | audience name |
+| `identityhub.add-client` | `AddClient` | client id |
+
+The [ApplicationModel](Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/OVERVIEW.md) declares
+commands; [Hosting](Assimalign.Cohesion.IdentityHub.Hosting/docs/DESIGN.md) applies them; the Core-only
+[Client](Assimalign.Cohesion.IdentityHub.Client/docs/OVERVIEW.md) delivers them for the gateway.
+ApplicationModel and Client are standalone NuGet packages.

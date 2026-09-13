@@ -15,6 +15,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<CohesionCommand Include="rezolvr.add-a-record;rezolvr.add-cname-record" />
 		<CohesionEndpoint Include="dns" Scheme="dns" Protocol="udp" ContainerPort="53" Public="false" />
 		<CohesionEndpoint Include="dns-tcp" Scheme="dns" Protocol="tcp" ContainerPort="53" Public="false" />
 		<CohesionEndpoint Include="admin" Scheme="http" ContainerPort="8081" Public="false" />

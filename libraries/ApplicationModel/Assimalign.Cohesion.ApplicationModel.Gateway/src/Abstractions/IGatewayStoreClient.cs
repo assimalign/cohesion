@@ -69,4 +69,24 @@ public interface IGatewayStoreClient
         string issuer,
         ReadOnlyMemory<byte> publicKey,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Stores a trusted issuer and its optional command-kind restriction.</summary>
+    /// <param name="endpoint">The application's SecretStore endpoint.</param>
+    /// <param name="credential">The store's bootstrap credential.</param>
+    /// <param name="owner">The authenticated trust principal.</param>
+    /// <param name="issuer">The trusted issuer name.</param>
+    /// <param name="publicKey">The issuer's public JWK.</param>
+    /// <param name="allowedCommandKinds">Allowed wire kinds; null or empty permits every kind.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>A task that completes when the store accepts the grant.</returns>
+    /// <exception cref="NotSupportedException">A replacement client does not implement restricted grants.</exception>
+    ValueTask StoreTrustedIssuerAsync(Uri endpoint, string credential, string owner, string issuer,
+        ReadOnlyMemory<byte> publicKey, IReadOnlyList<string>? allowedCommandKinds, CancellationToken cancellationToken = default)
+    {
+        if (allowedCommandKinds is { Count: > 0 })
+        {
+            throw new NotSupportedException("This gateway store client does not implement allowed command kinds.");
+        }
+        return StoreTrustedIssuerAsync(endpoint, credential, owner, issuer, publicKey, cancellationToken);
+    }
 }

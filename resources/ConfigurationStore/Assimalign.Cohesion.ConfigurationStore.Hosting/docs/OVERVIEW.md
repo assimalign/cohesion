@@ -36,3 +36,16 @@ Other ownership refusals return 409. POST continues to accept the existing envel
 Configuration keys cannot contain `/`; namespaces may contain it, preserving one ownership identity.
 DELETE commands uses the same envelope: removing a set declaration removes its value; removing a
 remove-value declaration releases ownership without restoring an undeclared historical value.
+
+## Commands
+
+| Wire kind | Descriptor verb | Ownership key |
+|---|---|---|
+| `configurationstore.add-namespace` | `AddNamespace` | namespace name |
+
+AddNamespace creates a namespace if absent and atomically stores its owner and original seed
+alongside values. An identical declaration succeeds even after separate value commands change its
+contents. A different seed or foreign owner is rejected with a named detail. Resource-seeded namespaces
+are not implicitly adopted. Deletion removes the owned namespace; callers should remove its value
+commands first. Existing SetValue and RemoveValue behavior remains unchanged, including 404 for
+unknown namespaces.

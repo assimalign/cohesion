@@ -11,6 +11,7 @@ internal sealed class GatewayCommandLineOptions
     private string? _developerName;
     private string? _peerName;
     private string? _exportSource;
+    private readonly List<string> _allowedCommandKinds = new();
 
     public GatewayRunMode RunMode { get; private set; } = GatewayRunMode.Run;
 
@@ -96,6 +97,15 @@ internal sealed class GatewayCommandLineOptions
             else if (TrySplit(argument, "--from", out inlineValue))
             {
                 options._exportSource = ReadRequiredValue(args, ref index, "--from", inlineValue);
+            }
+            else if (TrySplit(argument, "--allow", out inlineValue))
+            {
+                string value = ReadRequiredValue(args, ref index, "--allow", inlineValue);
+                foreach (string kind in value.Split(',', StringSplitOptions.TrimEntries))
+                {
+                    ArgumentException.ThrowIfNullOrWhiteSpace(kind, "--allow");
+                    options._allowedCommandKinds.Add(kind);
+                }
             }
         }
 
@@ -220,10 +230,10 @@ internal sealed class GatewayCommandLineOptions
     {
         if (RunMode == GatewayRunMode.TrustIssue)
         {
-            if (_peerName is not null || _exportSource is not null)
+            if (_peerName is not null || _exportSource is not null || _allowedCommandKinds.Count > 0)
             {
                 throw new ArgumentException(
-                    "Options '--peer' and '--from' are not valid with --mode trust-issue.");
+                    "Options '--peer', '--from', and '--allow' are not valid with --mode trust-issue.");
             }
 
             Command = new GatewayCommand(RunMode, developerName: _developerName);
@@ -241,14 +251,15 @@ internal sealed class GatewayCommandLineOptions
             Command = new GatewayCommand(
                 RunMode,
                 peerName: _peerName,
-                exportSource: _exportSource);
+                exportSource: _exportSource,
+                allowedCommandKinds: _allowedCommandKinds);
             return;
         }
 
-        if (_developerName is not null || _peerName is not null || _exportSource is not null)
+        if (_developerName is not null || _peerName is not null || _exportSource is not null || _allowedCommandKinds.Count > 0)
         {
             throw new ArgumentException(
-                "Options '--developer', '--peer', and '--from' require --mode trust-issue or trust-add.");
+                "Options '--developer', '--peer', '--from', and '--allow' require a matching trust mode; '--allow' requires trust-add.");
         }
     }
 

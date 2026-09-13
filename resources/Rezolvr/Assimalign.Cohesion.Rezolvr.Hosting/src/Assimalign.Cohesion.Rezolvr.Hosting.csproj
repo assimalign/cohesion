@@ -11,4 +11,8 @@
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 	</ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Assimalign.Cohesion.Rezolvr.Hosting.Tests" />
+    <InternalsVisibleTo Include="Assimalign.Cohesion.Rezolvr.Client.Tests" />
+  </ItemGroup>
 </Project>

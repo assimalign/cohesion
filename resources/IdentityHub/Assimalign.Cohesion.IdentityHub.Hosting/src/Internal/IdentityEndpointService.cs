@@ -33,7 +33,9 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
     private readonly bool _allowDevelopmentDeviceApproval;
     private readonly IdentityHubApplicationContext _applicationContext;
     private readonly IPAddress _bindAddress;
-    private readonly IReadOnlyDictionary<string, IdentityHubClientRegistration> _clients;
+    private readonly IdentityCommandRegistry _registry;
+    private readonly IResourceControlPlane _commands;
+    private readonly string? _applicationIssuer;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly string _dataPath;
     private readonly DeviceAuthorizationStore _devices = new();
@@ -68,8 +70,17 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
 
         _endpoint = endpoint;
         _dataPath = dataPath;
-        _clients = clients;
+        _registry = new IdentityCommandRegistry(dataPath, resourceContext, audiences, clients);
+        _applicationIssuer = resourceContext.ApplicationName;
         _controlPlane = controlPlane;
+        _commands = controlPlane ?? ResourceControlPlane.Create([IdentityResourceCommandHandler.AddAudience, IdentityResourceCommandHandler.AddClient]);
+        foreach (string kind in _commands.AcceptedCommandKinds)
+        {
+            if (kind is IdentityResourceCommandHandler.AddAudience or IdentityResourceCommandHandler.AddClient)
+            {
+                _commands.RegisterCommandHandler(new IdentityResourceCommandHandler(kind, _registry));
+            }
+        }
         _applicationContext = applicationContext;
         _bindAddress = ResolveBindAddress(endpoint.IdnHost);
         _basePath = endpoint.AbsolutePath == "/" ? string.Empty : endpoint.AbsolutePath.TrimEnd('/');
@@ -118,6 +129,10 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
+        foreach (ResourceCommand command in await _registry.InitializeAsync(cancellationToken).ConfigureAwait(false))
+        {
+            await _commands.ExecuteCommandAsync(command, cancellationToken).ConfigureAwait(false);
+        }
         _signingKey = await IdentitySigningKey.LoadOrCreateAsync(_dataPath, cancellationToken)
             .ConfigureAwait(false);
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
@@ -650,19 +665,94 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
 
     private async Task HandleCommandsAsync(IHttpContext context)
     {
-        if (!RequireRead(context))
+        if (context.Request.Method == HttpMethod.Get || context.Request.Method == HttpMethod.Head)
         {
+            await WriteJsonAsync(context, writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteStartArray("acceptedCommandKinds");
+                foreach (string kind in _commands.AcceptedCommandKinds) { writer.WriteStringValue(kind); }
+                writer.WriteEndArray();
+                writer.WriteStartArray("commands");
+                foreach (ResourceCommand command in _commands.Commands)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("id", command.Id);
+                    writer.WriteString("kind", command.Kind);
+                    writer.WriteString("owner", command.Owner);
+                    writer.WriteString("key", command.Key);
+                    writer.WriteString("status", "Applied");
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }).ConfigureAwait(false);
             return;
         }
+        if (context.Request.Method != HttpMethod.Post && context.Request.Method != HttpMethod.Delete)
+        {
+            context.Response.StatusCode = HttpStatusCode.MethodNotAllowed;
+            context.Response.Headers[HttpHeaderKey.Allow] = "GET, HEAD, POST, DELETE";
+            return;
+        }
+        try
+        {
+            using JsonDocument document = await JsonDocument.ParseAsync(context.Request.Body,
+                cancellationToken: context.RequestCancelled).ConfigureAwait(false);
+            JsonElement root = document.RootElement;
+            var command = new ResourceCommand(
+                RequiredCommandString(root, "id"), RequiredCommandString(root, "kind"),
+                RequiredCommandString(root, "owner"), RequiredCommandString(root, "key"),
+                root.TryGetProperty("payload", out JsonElement payload) && payload.ValueKind == JsonValueKind.String
+                    ? payload.GetBytesFromBase64() : throw new JsonException("The command payload must be a base64 string."));
+            if (_requireAuthentication && command.Owner != _applicationIssuer)
+            {
+                context.Response.StatusCode = HttpStatusCode.Forbidden;
+                await WriteCommandRefusalAsync(context,
+                    $"Command owner '{command.Owner}' must match authenticated issuer '{_applicationIssuer}'.").ConfigureAwait(false);
+                return;
+            }
+            ReadOnlyMemory<byte> response = context.Request.Method == HttpMethod.Delete
+                ? await _commands.DeleteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false)
+                : await _commands.ExecuteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false);
+            context.Response.StatusCode = HttpStatusCode.Ok;
+            context.Response.Headers[HttpHeaderKey.ContentType] = "application/octet-stream";
+            await context.Response.Body.WriteAsync(response, context.RequestCancelled).ConfigureAwait(false);
+        }
+        catch (ResourceCommandRejectedException exception)
+        {
+            context.Response.StatusCode = HttpStatusCode.Conflict;
+            await WriteCommandRefusalAsync(context, exception.Detail).ConfigureAwait(false);
+        }
+        catch (NotSupportedException exception)
+        {
+            context.Response.StatusCode = HttpStatusCode.NotImplemented;
+            await WriteCommandRefusalAsync(context, exception.Message).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is JsonException or FormatException or ArgumentException)
+        {
+            context.Response.StatusCode = HttpStatusCode.BadRequest;
+            await WriteCommandRefusalAsync(context, exception.Message).ConfigureAwait(false);
+        }
+    }
 
-        await WriteJsonAsync(context, writer =>
+    private static Task WriteCommandRefusalAsync(IHttpContext context, string detail) =>
+        WriteJsonAsync(context, writer =>
         {
             writer.WriteStartObject();
-            writer.WritePropertyName("acceptedCommandKinds");
-            writer.WriteStartArray();
-            writer.WriteEndArray();
+            writer.WriteString("status", "Rejected");
+            writer.WriteString("detail", detail);
             writer.WriteEndObject();
-        }).ConfigureAwait(false);
+        });
+
+    private static string RequiredCommandString(JsonElement payload, string property)
+    {
+        if (payload.ValueKind != JsonValueKind.Object || !payload.TryGetProperty(property, out JsonElement value) ||
+            value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
+        {
+            throw new JsonException($"An identity command requires a nonblank '{property}'.");
+        }
+        return value.GetString()!;
     }
 
     private async Task HandleStopAsync(IHttpContext context)
@@ -746,7 +836,7 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
             }
         }
 
-        if (clientId is null || !_clients.TryGetValue(clientId, out client))
+        if (clientId is null || !_registry.TryGetClient(clientId, out client))
         {
             client = null;
             return ClientAuthenticationStatus.Invalid;

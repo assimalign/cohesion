@@ -27,3 +27,8 @@ default-control-plane factory; it does not host or implement the secret store.
 
 - [Project overview](../../OVERVIEW.md)
 - [Project design](../../DESIGN.md)
+
+## Declarative command extensions
+
+[SecretStoreResourceCommandExtensions](SecretStoreResourceCommandExtensions/OVERVIEW.md)
+adds typed command declarations with deterministic ids and source-generated payload metadata.

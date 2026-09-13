@@ -35,3 +35,14 @@ The factory accepts only HTTP or HTTPS Cohesion endpoint URIs: absolute, host-be
 valid port and no user information, query, or fragment. Each request presents the credential as a
 bearer token; the package treats the token as opaque and does not acquire, parse, refresh, or persist
 it.
+
+## Observed command delivery
+
+CreateForControlPlane accepts the full control-plane prefix. ObserveCommandAsync and
+DeleteCommandAsync return ResourceCommandObservation; SendCommandAsync retains its original
+Task-returning behavior. The new secret/certificate commands return 200 application/octet-stream
+on success and JSON {status,detail} on refusal. Legacy cohesion.trust.add keeps empty 204/409/403
+responses. The observation client treats an empty 2xx body as Applied, or Deleted for DELETE,
+and supplies a named HTTP detail when a legacy refusal has no body. DELETE is for the new kinds;
+trust grants remain POST-only. The package still has exactly one Core reference and no Hosting
+or Gateway dependencies. Identity verification and grant policy belong to the endpoint.

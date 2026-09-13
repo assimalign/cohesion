@@ -165,13 +165,31 @@ internal sealed class CliApplication(
                     mapped.AddRange(["--mode", "trust-issue", "--developer", developer]);
                     break;
                 case "add":
-                    if (args.Has("--against") || args.Has("--allow"))
+                    if (args.Has("--against"))
                     {
-                        throw new CliException("command-kind scoping of trust grants (O25) has no gateway mode at HEAD; it lands with design item 31's substantive half (L03.04.01.06, #982 — the design's line-428 clause 'trust grants gain --allow')");
+                        throw new CliException("trust add --against is deferred to #982; select the verifying application's gateway project instead.");
                     }
                     string peer = args.TakeFirst() ?? throw new CliException("trust add requires <peer> --from <export-url|file>.");
                     string source = args.TakeValue("--from") ?? throw new CliException("trust add requires --from <export-url|file>.");
                     mapped.AddRange(["--mode", "trust-add", "--peer", peer, "--from", source]);
+                    while (args.TakeFirst(allowOptionLike: true) is string argument)
+                    {
+                        if (argument == "--allow")
+                        {
+                            string kinds = args.TakeFirst() ?? throw new CliException("--allow requires a value.");
+                            mapped.AddRange(["--allow", kinds]);
+                        }
+                        else if (argument.StartsWith("--allow=", StringComparison.Ordinal))
+                        {
+                            string kinds = argument["--allow=".Length..];
+                            if (string.IsNullOrWhiteSpace(kinds)) { throw new CliException("--allow requires a value."); }
+                            mapped.AddRange(["--allow", kinds]);
+                        }
+                        else
+                        {
+                            mapped.Add(argument);
+                        }
+                    }
                     break;
                 default:
                     throw new CliException("trust requires add or issue.");

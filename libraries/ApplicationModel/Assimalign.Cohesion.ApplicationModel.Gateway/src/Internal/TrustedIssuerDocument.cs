@@ -44,7 +44,23 @@ internal static class TrustedIssuerDocument
 
             try
             {
-                result.Add(new TrustedIssuer(issuer, keyProperty));
+                var allowedKinds = new List<string>();
+                if (item.TryGetProperty("allowedCommandKinds", out JsonElement kinds))
+                {
+                    if (kinds.ValueKind != JsonValueKind.Array)
+                    {
+                        throw new InvalidDataException($"Trusted issuer '{issuer}' allowedCommandKinds must be a string array.");
+                    }
+                    foreach (JsonElement kind in kinds.EnumerateArray())
+                    {
+                        if (kind.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(kind.GetString()))
+                        {
+                            throw new InvalidDataException($"Trusted issuer '{issuer}' allowedCommandKinds requires nonblank strings.");
+                        }
+                        allowedKinds.Add(kind.GetString()!);
+                    }
+                }
+                result.Add(new TrustedIssuer(issuer, keyProperty, allowedKinds));
             }
             catch (ArgumentException exception)
             {
@@ -76,6 +92,12 @@ internal static class TrustedIssuerDocument
                 writer.WriteString("issuer", issuer.Issuer);
                 writer.WritePropertyName("trustKey");
                 issuer.PublicKey.WriteTo(writer);
+                if (issuer.AllowedCommandKinds.Count > 0)
+                {
+                    writer.WriteStartArray("allowedCommandKinds");
+                    foreach (string kind in issuer.AllowedCommandKinds) { writer.WriteStringValue(kind); }
+                    writer.WriteEndArray();
+                }
                 writer.WriteEndObject();
             }
 

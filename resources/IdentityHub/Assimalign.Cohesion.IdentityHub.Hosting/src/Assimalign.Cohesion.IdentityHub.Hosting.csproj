@@ -16,4 +16,8 @@
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 	</ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityHub.Hosting.Tests" />
+    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityHub.Client.Tests" />
+  </ItemGroup>
 </Project>

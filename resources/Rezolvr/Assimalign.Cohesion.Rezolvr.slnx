@@ -64,4 +64,35 @@
 	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/">
+		<File Path="Assimalign.Cohesion.Rezolvr.Client/README.md" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/">
+		<File Path="Assimalign.Cohesion.Rezolvr.Client/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Rezolvr.Client/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/src/">
+		<Project Path="Assimalign.Cohesion.Rezolvr.Client/src/Assimalign.Cohesion.Rezolvr.Client.csproj" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/tests/">
+		<Project Path="Assimalign.Cohesion.Rezolvr.Client/tests/Assimalign.Cohesion.Rezolvr.Client.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/IRezolvrCommandClient/">
+		<File Path="Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/IRezolvrCommandClient/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/">
+		<File Path="Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/ResourceCommand/">
+		<File Path="Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/ResourceCommand/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/ResourceCommandObservation/">
+		<File Path="Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/ResourceCommandObservation/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/RezolvrCommandClient/">
+		<File Path="Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/RezolvrCommandClient/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/RezolvrResourceCommandExtensions/">
+		<File Path="Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/RezolvrResourceCommandExtensions/OVERVIEW.md" />
+	</Folder>
 </Solution>

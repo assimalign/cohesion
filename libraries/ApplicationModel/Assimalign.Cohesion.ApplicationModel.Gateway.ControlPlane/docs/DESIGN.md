@@ -43,10 +43,9 @@ requires the gateway token-use claim issued to gateway-to-gateway clients. Comma
 only the authenticated issuer's observations, and writes require the command owner to equal that
 issuer.
 
-The inherited item 23a trust record contains an issuer and public key, not a per-kind command
-grant. The `--allow <kind,...>` policy described by developer-experience §7/O25 therefore remains
-a serving-side trust-contract follow-up; item 23b preserves the existing authenticated gateway
-token policy and target-manifest kind validation.
+Trust grants now carry an optional allowed-command-kinds list. The serving gateway enforces it
+on apply and delete alongside the existing authenticated gateway-token and manifest validation.
+An absent or empty list preserves unrestricted access; see the O25 contract below.
 
 The HTTP resolver client implements `IAuthenticatedControlPlaneClient`. During gateway external
 resolution, the base supplies an application-issued export token and the caller's trusted issuer
@@ -80,4 +79,24 @@ The serving gateway continues forwarding its target bootstrap credential. Config
 landed owner-equals-issuer policy consequently refuses foreign-owned envelopes with that provider
 credential. An owner-preserving delegation contract is required before claiming remote
 ConfigurationStore mutation works against a real authenticated host; the boundary is not weakened
-by the adapter. Other area verbs remain item 31c.
+by the adapter. IdentityHub and SecretStore desired commands use the same issuer policy; an owner-preserving remote delegation contract remains separate work. Rezolvr uses the existing generic middleware owner policy.
+
+## Command trust grants (O25 / item 31c)
+
+TrustedIssuer.AllowedCommandKinds is an immutable normalized ordinal list. The original
+constructor remains unrestricted. Absent or empty means every kind is allowed; a nonempty list
+permits exactly those case-sensitive wire kinds. `--mode trust-add --peer peer --from peer.json
+--allow rezolvr.add-a-record,identityhub.add-audience` accepts repeated --allow arguments and
+comma-separated values. --allow is rejected for trust-issue and other modes. The CLI forwards
+--allow but still rejects --against, whose endpoint-selection contract remains item #982.
+
+Development trusted-issuers.json and the SecretStore protected trust store both persist optional
+allowedCommandKinds arrays. Old documents remain unrestricted. Restricted SecretStore grants use
+{trustKey,allowedCommandKinds}; unrestricted grants retain the bare JWK protocol. Export returns
+the array to the gateway. AddTrustedIssuerAsync accepts the new collection while preserving the
+existing overload and its unrestricted behavior.
+
+The serving gateway carries the matched issuer's list onto the authenticated principal and checks
+both apply and delete. A forbidden kind returns the existing 409 Rejected observation with a detail
+naming the issuer and kind. It does not dispatch the command or release existing ownership.
+Manifest advertisement, command-token scope and owner-equals-issuer checks remain in force.

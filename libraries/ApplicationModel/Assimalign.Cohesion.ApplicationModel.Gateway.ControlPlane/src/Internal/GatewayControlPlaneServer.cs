@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text.Json;
 using System.Threading;
@@ -592,6 +593,16 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
             request.Owner,
             request.Key,
             request.Payload ?? Array.Empty<byte>());
+        if (principal.AllowedCommandKinds.Count > 0 &&
+            !principal.AllowedCommandKinds.Contains(command.Kind, StringComparer.Ordinal))
+        {
+            ControlPlaneCommandObservation rejected = CreateObservation(command, "Rejected",
+                $"Trusted issuer '{principal.Issuer}' may not send command kind '{command.Kind}'.", result: null);
+            PrepareJsonResponse(context, HttpStatusCode.Conflict);
+            await JsonSerializer.SerializeAsync(context.Response.Body, rejected,
+                ControlPlaneJsonContext.Default.ControlPlaneCommandObservation, cancellationToken).ConfigureAwait(false);
+            return;
+        }
         ControlPlaneCommandObservation observation = await ApplyCommandIdempotentlyAsync(
                 descriptor!,
                 manifest!,
@@ -661,6 +672,17 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                         $"Command owner '{observed.Owner}' does not match authenticated issuer '{principal.Issuer}'.",
                         cancellationToken)
                     .ConfigureAwait(false);
+                return;
+            }
+
+            if (principal.AllowedCommandKinds.Count > 0 &&
+                !principal.AllowedCommandKinds.Contains(observed.Kind, StringComparer.Ordinal))
+            {
+                ControlPlaneCommandObservation rejected = Reject(observed,
+                    $"Trusted issuer '{principal.Issuer}' may not send command kind '{observed.Kind}'.");
+                PrepareJsonResponse(context, HttpStatusCode.Conflict);
+                await JsonSerializer.SerializeAsync(context.Response.Body, rejected,
+                    ControlPlaneJsonContext.Default.ControlPlaneCommandObservation, cancellationToken).ConfigureAwait(false);
                 return;
             }
 

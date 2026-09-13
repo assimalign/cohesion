@@ -1,7 +1,9 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -202,6 +204,9 @@ public abstract partial class ApplicationGateway
         ResourceCommandResult result;
         try
         {
+            ResourceCommand deliveryCommand = !delete && command.Kind == "secretstore.add-secret"
+                ? await ResolveSecretCommandAsync(item, command, cancellationToken).ConfigureAwait(false)
+                : command;
             if (IsExternalPlan(target.Descriptor.Plan!))
             {
                 IExternalResourceResolver? resolver = (target.Descriptor.Resource as IExternalResource)?.Resolver;
@@ -219,19 +224,19 @@ public abstract partial class ApplicationGateway
                     "cohesion-export", Name.ToString(), _options.DeveloperTokenLifetime,
                     _options.TimeProvider.GetUtcNow(), allowControlPlaneCommands: true);
                 result = delete
-                    ? await peer.DeleteCommandAsync(remoteAddress, manifest.Name, token, command, cancellationToken).ConfigureAwait(false)
-                    : await peer.ApplyCommandAsync(remoteAddress, manifest.Name, token, command, cancellationToken).ConfigureAwait(false);
+                    ? await peer.DeleteCommandAsync(remoteAddress, manifest.Name, token, deliveryCommand, cancellationToken).ConfigureAwait(false)
+                    : await peer.ApplyCommandAsync(remoteAddress, manifest.Name, token, deliveryCommand, cancellationToken).ConfigureAwait(false);
             }
             else if (TryGetResourceControlPlane(target.Model, target.Descriptor.Resource, out IResourceControlPlane? direct))
             {
                 if (delete)
                 {
-                    await direct!.DeleteCommandAsync(command, cancellationToken).ConfigureAwait(false);
+                    await direct!.DeleteCommandAsync(deliveryCommand, cancellationToken).ConfigureAwait(false);
                     result = new(ResourceCommandStatus.Applied, "Owned declaration removed through the registered control plane.");
                 }
                 else
                 {
-                    ReadOnlyMemory<byte> response = await direct!.ExecuteCommandAsync(command, cancellationToken).ConfigureAwait(false);
+                    ReadOnlyMemory<byte> response = await direct!.ExecuteCommandAsync(deliveryCommand, cancellationToken).ConfigureAwait(false);
                     result = new(ResourceCommandStatus.Applied, "Applied through the registered control plane.", response);
                 }
             }
@@ -270,8 +275,8 @@ public abstract partial class ApplicationGateway
                 }
                 string token = ((IResourceCommandCredentialProvider)this).GetResourceCommandCredential(target.Model.Name, manifest.Name);
                 result = delete
-                    ? await client.DeleteAsync(address, token, command, cancellationToken).ConfigureAwait(false)
-                    : await client.ApplyAsync(address, token, command, cancellationToken).ConfigureAwait(false);
+                    ? await client.DeleteAsync(address, token, deliveryCommand, cancellationToken).ConfigureAwait(false)
+                    : await client.ApplyAsync(address, token, deliveryCommand, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (ResourceCommandRejectedException exception)
@@ -296,6 +301,73 @@ public abstract partial class ApplicationGateway
             }
         }
         return result;
+    }
+
+    private async ValueTask<ResourceCommand> ResolveSecretCommandAsync(
+        ModelResource item, ResourceCommand command, CancellationToken cancellationToken)
+    {
+        using JsonDocument document = JsonDocument.Parse(command.Payload);
+        string? source = document.RootElement.GetProperty("source").GetString();
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            throw new ResourceCommandRejectedException("secretstore.add-secret requires a nonblank source.");
+        }
+        ReadOnlyMemory<byte> content;
+        if (source.StartsWith(ParameterPrefix, StringComparison.Ordinal))
+        {
+            string name = source[ParameterPrefix.Length..];
+            if (!GetParameters(item.Model.Name).TryGetValue(name, out string? value))
+            {
+                throw new ResourceCommandRejectedException($"secretstore.add-secret parameter '{name}' is not bound for application '{item.Model.Name}'.");
+            }
+            content = Encoding.UTF8.GetBytes(value);
+        }
+        else
+        {
+            if (!TryParseResourceSource(source, out ResourceName resource, out string? sourceKey) ||
+                source.StartsWith(LiteralPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ResourceCommandRejectedException("secretstore.add-secret sources must use parameter:<name> or <resource>:<key>; literal sources are forbidden.");
+            }
+            var state = GetApplicationState(item.Model);
+            var context = new ResourceControlContext(item.Descriptor, item.Model, state,
+                ResolveDependencies(item.Descriptor), _artifacts[item.Key],
+                SnapshotObservedDependencies(item.Model, item.Descriptor, state));
+            if (!TryResolveSourceResource(context, resource, out ResourceManifest? sourceManifest,
+                    out ResourceDependencyObservation? observation, out string? sourceFailure))
+            {
+                throw new ResourceCommandRejectedException($"secretstore.add-secret source '{source}' is unresolved: {sourceFailure}");
+            }
+            if (!TryResolveControlPlaneEndpoint(sourceManifest!, observation!, out Uri? endpoint, out string? endpointFailure))
+            {
+                throw new ResourceCommandRejectedException($"secretstore.add-secret source '{source}' is unresolved: {endpointFailure}");
+            }
+            if (!CanSendCredential(item.Model, endpoint!, out string? securityFailure))
+            {
+                throw new ResourceCommandRejectedException(securityFailure!);
+            }
+            ResourceMountInput input = await ResolveStoreSourceAsync(context, item.Descriptor.Plan!,
+                new MountBinding("command:" + command.Id, "/", ResourceMountKind.Secret, source), source,
+                sourceKey!, sourceManifest!, endpoint!, GetOrIssueBootstrapToken(item.Model, sourceManifest!.Name),
+                cancellationToken).ConfigureAwait(false);
+            if (!input.IsResolved)
+            {
+                throw new ResourceCommandRejectedException($"secretstore.add-secret source '{source}' is unresolved: {input.UnresolvedReason}");
+            }
+            content = input.Content;
+        }
+        // Resolved bytes exist only in the delivery envelope. The model and gateway ledger
+        // retain the original source-only declaration and deterministic id.
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("path", command.Key);
+            writer.WriteString("source", source);
+            writer.WriteBase64String("resolvedValue", content.Span);
+            writer.WriteEndObject();
+        }
+        return command with { Payload = buffer.WrittenMemory.ToArray() };
     }
 
     private ModelResource ResolveCommandTarget(ModelResource item)

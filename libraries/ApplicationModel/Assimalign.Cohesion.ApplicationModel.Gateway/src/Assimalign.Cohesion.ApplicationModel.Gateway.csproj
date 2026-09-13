@@ -7,9 +7,11 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityHub.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.SecretStore.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Rezolvr.Client" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.SecretStore.Client" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />
 		<CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
 	</ItemGroup>
 	<ItemGroup>

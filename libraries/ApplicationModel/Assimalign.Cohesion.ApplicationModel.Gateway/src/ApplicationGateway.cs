@@ -743,6 +743,7 @@ public abstract partial class ApplicationGateway :
                     model,
                     command.PeerName!,
                     export,
+                    command.AllowedCommandKinds,
                     cancellationToken)
                 .ConfigureAwait(false);
             return;
@@ -780,11 +781,16 @@ public abstract partial class ApplicationGateway :
     }
 
     /// <inheritdoc/>
-    public async Task AddTrustedIssuerAsync(
+    public Task AddTrustedIssuerAsync(
         IApplicationModel model,
         string peerName,
         ApplicationExportDocument export,
         CancellationToken cancellationToken = default)
+        => AddTrustedIssuerAsync(model, peerName, export, null, cancellationToken);
+
+    /// <inheritdoc/>
+    public async Task AddTrustedIssuerAsync(IApplicationModel model, string peerName, ApplicationExportDocument export,
+        IReadOnlyList<string>? allowedCommandKinds, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentException.ThrowIfNullOrWhiteSpace(peerName);
@@ -805,7 +811,7 @@ public abstract partial class ApplicationGateway :
 
         JsonElement publicKey = export.TrustKey ?? throw new InvalidDataException(
             $"Application export '{export.Application}' has no trustKey.");
-        var issuer = new TrustedIssuer(export.Application, publicKey);
+        var issuer = new TrustedIssuer(export.Application, publicKey, allowedCommandKinds);
 
         await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -830,6 +836,7 @@ public abstract partial class ApplicationGateway :
                             model.Owner,
                             issuer.Issuer,
                             Encoding.UTF8.GetBytes(issuer.PublicKey.GetRawText()),
+                            issuer.AllowedCommandKinds,
                             cancellationToken)
                         .ConfigureAwait(false);
                     stored = true;

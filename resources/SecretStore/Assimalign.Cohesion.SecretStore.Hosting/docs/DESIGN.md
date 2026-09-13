@@ -49,7 +49,7 @@ The host implements these routes over a real HTTP/1 listener:
 | `/cohesion/v1/stop` | `POST` | Requests control-plane stop, or returns `404` without a registered control plane. |
 | `/cohesion/v1/secrets?path=<path>` | `GET`, `HEAD` | Reads protected secret bytes. `trusted-issuers.json` exports the current issuer document. |
 | `/cohesion/v1/certificates?name=<name>` | `GET`, `HEAD` | Returns the root (`ca/root`) or a durable leaf bundle (`certs/<one-segment-name>`). |
-| `/cohesion/v1/commands` | `GET`, `HEAD`, `POST` | Lists accepted kinds or applies `cohesion.trust.add`. |
+| `/cohesion/v1/commands` | `GET`, `HEAD`, `POST`, `DELETE` | Lists accepted kinds; mutates declared secrets/certificates; trust grants retain POST-only behavior. |
 | `/cohesion/v1/certificates/enrollment-request` | `GET`, `HEAD` | Returns the pending CSR for `application` and `resource`. |
 | `/cohesion/v1/certificates/enroll` | `POST` | An enrolled authority signs a matching intermediate-CA CSR. |
 | `/cohesion/v1/certificates/enrollment` | `POST` | Completes a pending enrollment with the issued certificate and issuer chain. |
@@ -77,7 +77,7 @@ trusted peer issuer, and its request application must equal that authenticated i
 
 Missing, malformed, expired, untrusted, or incorrectly signed credentials return `401` and a
 `WWW-Authenticate: Bearer` challenge. A valid token for the wrong audience returns `403`.
-Authenticated commands must set `owner` to `<iss>@<sub>`. Standalone hosts (no gateway name) do
+Trust commands must set `owner` to `<iss>@<sub>`; declared secret and certificate commands use `<iss>`. Standalone hosts (no gateway name) do
 not require bearer authentication and therefore may bind only to loopback. Plaintext HTTP is
 allowed only on loopback in `Development`, regardless of hosting mode. This is bootstrap
 credential authentication, not a general user authorization or secret-policy engine.
@@ -142,3 +142,44 @@ implementation details. It does not reference SecretStore.ApplicationModel; the 
 resource registers that package's control plane through Hosting.Resources. JSON used by the
 endpoint is written explicitly, persistence uses fixed internal formats, and construction uses no
 dynamic activation. The implementation remains trimming- and NativeAOT-oriented.
+
+## Declarative commands (item 31c)
+
+| Wire kind | Descriptor verb | Ownership key |
+|---|---|---|
+| `secretstore.add-secret` | `AddSecret` | secret path |
+| `secretstore.issue-certificate` | `IssueCertificate` | certificate name |
+
+Kinds use verb-noun kebab under the area prefix. The examples `rezolvr.record` and
+`identityhub.audience` in developer-experience design section 7 are illustrative; item 27's design
+rewrite should reflect the landed convention. Manifest commands remain bare JSON strings.
+Typed verbs validate argument shape and use source-generated JSON metadata. Build validates the
+advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
+The default control plane handles id replay and owner isolation; each area handler also accepts
+an identical reapplication with a different id. Conflicts return named Rejected details.
+
+AddSecret declarations carry only a source reference. `parameter:<name>` resolves through the
+gateway's existing parameter provider before delivery. `<resource>:<key>` uses the existing store
+resolver and requires a declared dependency and an available source endpoint. `literal:<value>`
+is rejected during declaration construction: literal secret material never enters the desired
+model, deterministic id or manifest. Only the transient delivery envelope contains resolved bytes;
+the protected repository stores the value and source together. An unresolved source is a named
+Rejected result. Original source-only commands remain the gateway's declaration ledger.
+
+IssueCertificate honors the supplied subject and SAN set. An existing certificate with different
+identity is rejected until deleted; renewal preserves its identity. Private key and leaf storage
+reuse the existing protected CA repository.
+
+The control plane also accepts `cohesion.trust.add`, which the SDK manifest deliberately does not
+advertise. It is the gateway-owned trust channel through IGatewayStoreClient, never a Build-declared
+application command. Trust keeps owner `issuer@subject`, POST-only behavior, empty 204 success,
+empty 409 conflict and existing 403 authorization refusals. New commands use owner `issuer`, accept
+POST and DELETE, return 200 application/octet-stream on success, and JSON `{status,detail}` refusals.
+Malformed command envelopes return 400 with that JSON refusal shape, including invalid base64 payloads.
+The client accepts empty successful responses as Applied (Deleted for DELETE); legacy SendCommandAsync
+continues to work. This owner split lets local gateway declarations authenticate end to end.
+
+Restricted trust grants accept `{trustKey,allowedCommandKinds}` while unrestricted grants retain
+the bare JWK payload. The protected trust document round-trips the optional string array; absent
+or empty means every command kind is allowed. Enroll(platformStore) is deferred to item 31t:
+automatic Platform enrollment needs a gateway-owned mediator and Platform-audience signer.

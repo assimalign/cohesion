@@ -327,3 +327,10 @@ fallback's peer address, so generic command delivery can select a peer only when
 is available. Static and file bindings expose no control-plane address. Exports validate observed
 command target membership, required identity fields, defined statuses and duplicate target/owner/id
 tuples. A rejected unsupported command kind is valid audit data even without a desired declaration.
+
+## Trust grant command options
+
+GatewayCommand carries an immutable AllowedCommandKinds list. Repeatable, comma-separated
+--allow options are valid only in trust-add mode. Absent or empty grants mean unrestricted kinds;
+trust-issue rejects the option. ApplicationModel parses and carries policy; the serving gateway
+enforces it on apply and delete. The CLI's --against option remains deferred.

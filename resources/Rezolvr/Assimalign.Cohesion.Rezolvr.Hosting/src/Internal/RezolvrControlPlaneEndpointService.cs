@@ -16,18 +16,23 @@ namespace Assimalign.Cohesion.Rezolvr.Hosting;
 internal sealed class RezolvrControlPlaneEndpointService : IHostService, IDisposable
 {
     private readonly WebApplication _application;
+    private readonly IResourceControlPlane _controlPlane;
+    private readonly RezolvrRecordRepository _repository;
 
 
     internal RezolvrControlPlaneEndpointService(
         Uri endpoint,
         IResourceControlPlane controlPlane,
         ResourceContext resourceContext,
-        RezolvrApplicationContext applicationContext)
+        RezolvrApplicationContext applicationContext,
+        RezolvrRecordRepository repository)
     {
         Uri.ThrowIfNotEndpoint(endpoint);
         ArgumentNullException.ThrowIfNull(controlPlane);
         ArgumentNullException.ThrowIfNull(resourceContext);
         ArgumentNullException.ThrowIfNull(applicationContext);
+        _controlPlane = controlPlane;
+        _repository = repository;
         if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("The Rezolvr control-plane endpoint 'admin' requires http.");
@@ -45,8 +50,14 @@ internal sealed class RezolvrControlPlaneEndpointService : IHostService, IDispos
 
     public ServiceId Id { get; } = ServiceId.New();
 
-    public Task StartAsync(CancellationToken cancellationToken = default) =>
-        ((IHost)_application).StartAsync(cancellationToken);
+    public async Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        foreach (ResourceCommand command in await _repository.ReadCommandsAsync(cancellationToken).ConfigureAwait(false))
+        {
+            await _controlPlane.ExecuteCommandAsync(command, cancellationToken).ConfigureAwait(false);
+        }
+        await ((IHost)_application).StartAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     public Task StopAsync(CancellationToken cancellationToken = default) =>
         ((IHost)_application).StopAsync(cancellationToken);

@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Buffers.Text;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -18,6 +19,16 @@ public sealed class TrustedIssuer
     /// EC P-256 signing JWK with an RFC 7638 key identifier.
     /// </exception>
     public TrustedIssuer(string issuer, JsonElement publicKey)
+        : this(issuer, publicKey, null)
+    {
+    }
+
+    /// <summary>Initializes a trusted issuer with an optional command-kind restriction.</summary>
+    /// <param name="issuer">The exact JWT issuer value.</param>
+    /// <param name="publicKey">The public EC P-256 signing JWK.</param>
+    /// <param name="allowedCommandKinds">Allowed wire kinds; null or empty permits every kind.</param>
+    /// <exception cref="ArgumentException">The issuer, key, or a command kind is invalid.</exception>
+    public TrustedIssuer(string issuer, JsonElement publicKey, IReadOnlyList<string>? allowedCommandKinds)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(issuer);
         if (publicKey.ValueKind != JsonValueKind.Object)
@@ -116,6 +127,11 @@ public sealed class TrustedIssuer
 
         Issuer = issuer;
         PublicKey = publicKey.Clone();
+        AllowedCommandKinds = Array.AsReadOnly((allowedCommandKinds ?? []).Select(static kind =>
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(kind);
+            return kind;
+        }).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray());
     }
 
     /// <summary>Gets the exact JWT issuer value.</summary>
@@ -123,6 +139,9 @@ public sealed class TrustedIssuer
 
     /// <summary>Gets the issuer's public JSON Web Key.</summary>
     public JsonElement PublicKey { get; }
+
+    /// <summary>Gets the permitted command kinds. An absent or empty restriction permits every kind.</summary>
+    public IReadOnlyList<string> AllowedCommandKinds { get; }
 
     private static string RequiredString(JsonElement key, string name)
     {

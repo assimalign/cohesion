@@ -32,6 +32,7 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
     private readonly string _audience;
     private readonly CertificateAuthorityManager _certificateAuthority;
     private readonly IResourceControlPlane? _controlPlane;
+    private readonly IResourceControlPlane _commands;
     private readonly Uri _endpoint;
     private readonly bool _requireAuthentication;
     private readonly SecretStoreRepository _repository;
@@ -72,6 +73,15 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         _trustedIssuers = trustedIssuers;
         _certificateAuthority = certificateAuthority;
         _controlPlane = controlPlane;
+        _commands = controlPlane ?? ResourceControlPlane.Create(
+            [TrustAddCommand, SecretStoreResourceCommandHandler.AddSecret, SecretStoreResourceCommandHandler.IssueCertificate]);
+        foreach (string kind in _commands.AcceptedCommandKinds)
+        {
+            if (kind is SecretStoreResourceCommandHandler.AddSecret or SecretStoreResourceCommandHandler.IssueCertificate)
+            {
+                _commands.RegisterCommandHandler(new SecretStoreResourceCommandHandler(kind, repository, certificateAuthority));
+            }
+        }
         _resourceContext = resourceContext;
         _applicationContext = applicationContext;
         _requireAuthentication = resourceContext.GatewayName is not null;
@@ -386,16 +396,28 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
                 writer.WriteStartObject();
                 writer.WritePropertyName("acceptedCommandKinds");
                 writer.WriteStartArray();
-                writer.WriteStringValue(TrustAddCommand);
+                foreach (string kind in _commands.AcceptedCommandKinds) { writer.WriteStringValue(kind); }
+                writer.WriteEndArray();
+                writer.WriteStartArray("commands");
+                foreach (ResourceCommand command in _commands.Commands)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("id", command.Id);
+                    writer.WriteString("kind", command.Kind);
+                    writer.WriteString("owner", command.Owner);
+                    writer.WriteString("key", command.Key);
+                    writer.WriteString("status", "Applied");
+                    writer.WriteEndObject();
+                }
                 writer.WriteEndArray();
                 writer.WriteEndObject();
             }).ConfigureAwait(false);
             return;
         }
 
-        if (context.Request.Method != HttpMethod.Post)
+        if (context.Request.Method != HttpMethod.Post && context.Request.Method != HttpMethod.Delete)
         {
-            SetMethodNotAllowed(context, "GET, HEAD, POST");
+            SetMethodNotAllowed(context, "GET, HEAD, POST, DELETE");
             return;
         }
 
@@ -407,22 +429,36 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         catch (Exception exception) when (exception is JsonException or FormatException)
         {
             context.Response.StatusCode = HttpStatusCode.BadRequest;
+            await WriteCommandRefusalAsync(context, exception.Message).ConfigureAwait(false);
             return;
         }
 
-        string? authenticatedOwner = authorization.Issuer is null || authorization.Subject is null
+        bool trustGrant = string.Equals(command.Kind, TrustAddCommand, StringComparison.Ordinal);
+        string? authenticatedOwner = !trustGrant ? authorization.Issuer :
+            authorization.Issuer is null || authorization.Subject is null
             ? null
             : authorization.Issuer + "@" + authorization.Subject;
         if (_requireAuthentication &&
             !string.Equals(command.Owner, authenticatedOwner, StringComparison.Ordinal))
         {
             context.Response.StatusCode = HttpStatusCode.Forbidden;
+            if (!trustGrant)
+            {
+                await WriteCommandRefusalAsync(context,
+                    $"Command owner '{command.Owner}' must match authenticated issuer '{authorization.Issuer}'.").ConfigureAwait(false);
+            }
             return;
         }
 
-        if (!string.Equals(command.Kind, TrustAddCommand, StringComparison.Ordinal))
+        if (!trustGrant)
         {
-            context.Response.StatusCode = HttpStatusCode.NotImplemented;
+            await DispatchResourceCommandAsync(context, new ResourceCommand(
+                command.Id, command.Kind, command.Owner, command.Key, command.Payload)).ConfigureAwait(false);
+            return;
+        }
+        if (context.Request.Method != HttpMethod.Post)
+        {
+            SetMethodNotAllowed(context, "GET, HEAD, POST");
             return;
         }
 
@@ -761,13 +797,56 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         context.Response.Headers[HttpHeaderKey.Allow] = allow;
     }
 
+    private async Task DispatchResourceCommandAsync(IHttpContext context, ResourceCommand command)
+    {
+        try
+        {
+            ReadOnlyMemory<byte> response = context.Request.Method == HttpMethod.Delete
+                ? await _commands.DeleteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false)
+                : await _commands.ExecuteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false);
+            context.Response.StatusCode = HttpStatusCode.Ok;
+            context.Response.Headers[HttpHeaderKey.ContentType] = "application/octet-stream";
+            await context.Response.Body.WriteAsync(response, context.RequestCancelled).ConfigureAwait(false);
+        }
+        catch (ResourceCommandRejectedException exception)
+        {
+            context.Response.StatusCode = HttpStatusCode.Conflict;
+            await WriteCommandRefusalAsync(context, exception.Detail).ConfigureAwait(false);
+        }
+        catch (NotSupportedException exception)
+        {
+            context.Response.StatusCode = HttpStatusCode.NotImplemented;
+            await WriteCommandRefusalAsync(context, exception.Message).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is JsonException or FormatException or ArgumentException)
+        {
+            context.Response.StatusCode = HttpStatusCode.BadRequest;
+            await WriteCommandRefusalAsync(context, exception.Message).ConfigureAwait(false);
+        }
+    }
+
+    private static Task WriteCommandRefusalAsync(IHttpContext context, string detail) =>
+        WriteJsonAsync(context, writer =>
+        {
+            writer.WriteStartObject();
+            writer.WriteString("status", "Rejected");
+            writer.WriteString("detail", detail);
+            writer.WriteEndObject();
+        });
+
     private static async Task<SecretStoreCommand> ReadCommandAsync(IHttpContext context)
     {
         using JsonDocument document = await ReadJsonAsync(context).ConfigureAwait(false);
         JsonElement root = document.RootElement;
-        byte[] payload = root.TryGetProperty("payload", out JsonElement payloadProperty)
-            ? payloadProperty.GetBytesFromBase64()
-            : [];
+        byte[] payload = [];
+        if (root.TryGetProperty("payload", out JsonElement payloadProperty))
+        {
+            if (payloadProperty.ValueKind != JsonValueKind.String)
+            {
+                throw new JsonException("Command payload must be a base64 string.");
+            }
+            payload = payloadProperty.GetBytesFromBase64();
+        }
         return new SecretStoreCommand(
             GetRequiredString(root, "id"),
             GetRequiredString(root, "kind"),

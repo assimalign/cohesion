@@ -16,7 +16,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<CohesionCommand Include="configurationstore.set-value;configurationstore.remove-value" />
+		<CohesionCommand Include="configurationstore.add-namespace;configurationstore.set-value;configurationstore.remove-value" />
 		<CohesionEndpoint Include="api" Scheme="https" ContainerPort="8443" Public="false" />
 		<CohesionMount Include="data" Kind="Volume" ContainerPath="/data" Size="10Gi" />
 	</ItemGroup>

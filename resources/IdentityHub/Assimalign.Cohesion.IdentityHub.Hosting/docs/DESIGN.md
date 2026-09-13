@@ -20,8 +20,39 @@ Issued access tokens contain `iss`, `sub`, `aud`, `iat`, `nbf`, `exp`, `jti`, `c
 
 The builder captures `ResourceRuntime.Current`, resolves a registered area control plane from the executable assembly, and calls `ResourceRuntime.HostBuilt` exactly once. Public `/healthz`, `/readyz`, and `/livez` routes coexist with `/cohesion/v1/healthz`, `/readyz`, `/livez`, `/endpoints`, `/stop`, and `/commands`.
 
-Every `/cohesion/v1/*` request is authenticated when a gateway is ambient. The verifier parses the application trust JWK, verifies the ES256 signature explicitly, then validates issuer, gateway subject, resource audience, required claims, temporal bounds, token ID, and a maximum 24-hour lifetime. Missing or malformed credentials return 401 with `WWW-Authenticate: Bearer`; a valid token for another resource returns 403. The default command list is empty because declarative `AddAudience`/`AddClient` gateway commands belong to later item 31c.
+Every `/cohesion/v1/*` request is authenticated when a gateway is ambient. The verifier parses the application trust JWK, verifies the ES256 signature explicitly, then validates issuer, gateway subject, resource audience, required claims, temporal bounds, token ID, and a maximum 24-hour lifetime. Missing or malformed credentials return 401 with `WWW-Authenticate: Bearer`; a valid token for another resource returns 403. The default control plane serves the declarative AddAudience and AddClient command kinds.
 
 ## AOT and dependency boundary
 
 Hosting privately composes Cohesion Web/HTTP/connection libraries and the shared IdentityModel JWT implementation. Routes use direct dispatch and `Utf8JsonWriter`; there is no reflection-based routing, serializer metadata discovery, or dynamic activation.
+
+## Declarative commands (item 31c)
+
+| Wire kind | Descriptor verb | Ownership key |
+|---|---|---|
+| `identityhub.add-audience` | `AddAudience` | audience name |
+| `identityhub.add-client` | `AddClient` | client id |
+
+Kinds use verb-noun kebab under the area prefix. The examples `rezolvr.record` and
+`identityhub.audience` in developer-experience design section 7 are illustrative; item 27's design
+rewrite should reflect the landed convention. Manifest commands remain bare JSON strings.
+Typed verbs validate argument shape and use source-generated JSON metadata. Build validates the
+advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
+The default control plane handles id replay and owner isolation; each area handler also accepts
+an identical reapplication with a different id. Conflicts return named Rejected details.
+
+The typed IIdentityHubResourceDescriptor retains its command surface through DependsOn chaining.
+Audience and client commands are registered on the default control plane and served by the existing
+authenticated API endpoint, with POST/DELETE and JSON refusal observations. Owner must equal the
+authenticated application issuer; transport and bootstrap-token verification are unchanged.
+
+The command registry is written atomically to `registry.json` beside IdentitySigningKey under the
+resource data path. Startup restores the registry and control-plane ownership before serving.
+Token issuance reads the live combined registry of builder-declared and command-declared clients;
+discovery and JWKS remain the same issuer surface. Audience removal is rejected while a client uses it.
+
+Client credentialSource names a resource Secret mount, optionally prefixed with `mount:`. The
+declaration stores the mount name, never credential bytes. Hosting reads and hashes the mounted
+credential when initializing or updating the registry, so restart requires the mount again.
+Clients must reference existing audiences; add the audience before the client. Conflicting resource
+seeds or changed client declarations are rejected until the owning declaration is deleted.

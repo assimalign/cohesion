@@ -33,3 +33,15 @@ The client package is the narrow O13 orchestration exception: a gateway may refe
 - [Client design](./Assimalign.Cohesion.SecretStore.Client/docs/DESIGN.md)
 - [ApplicationModel overview](./Assimalign.Cohesion.SecretStore.ApplicationModel/docs/OVERVIEW.md)
 - [ApplicationModel design](./Assimalign.Cohesion.SecretStore.ApplicationModel/docs/DESIGN.md)
+
+## Declarative control-plane commands
+
+| Wire kind | Descriptor verb | Ownership key |
+|---|---|---|
+| `secretstore.add-secret` | `AddSecret` | secret path |
+| `secretstore.issue-certificate` | `IssueCertificate` | certificate name |
+
+The [ApplicationModel](Assimalign.Cohesion.SecretStore.ApplicationModel/docs/OVERVIEW.md) declares
+commands; [Hosting](Assimalign.Cohesion.SecretStore.Hosting/docs/DESIGN.md) applies them; the Core-only
+[Client](Assimalign.Cohesion.SecretStore.Client/docs/OVERVIEW.md) delivers them for the gateway.
+ApplicationModel and Client are standalone NuGet packages.

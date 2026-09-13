@@ -17,6 +17,7 @@ jobs:
         projects: [
             'Assimalign.Cohesion.IdentityHub',
             'Assimalign.Cohesion.IdentityHub.ApplicationModel',
+            'Assimalign.Cohesion.IdentityHub.Client',
             'Assimalign.Cohesion.IdentityHub.Hosting',
             'Assimalign.Cohesion.IdentityHub.Models'
         ]

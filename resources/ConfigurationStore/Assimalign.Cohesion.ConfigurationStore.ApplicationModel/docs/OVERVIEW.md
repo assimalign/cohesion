@@ -52,3 +52,16 @@ variables.
 
 - [Design](DESIGN.md)
 - [Public API](Assembly/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/OVERVIEW.md)
+
+## Commands
+
+| Wire kind | Descriptor verb | Ownership key |
+|---|---|---|
+| `configurationstore.add-namespace` | `AddNamespace` | namespace name |
+
+AddNamespace creates a namespace if absent and atomically stores its owner and original seed
+alongside values. An identical declaration succeeds even after separate value commands change its
+contents. A different seed or foreign owner is rejected with a named detail. Resource-seeded namespaces
+are not implicitly adopted. Deletion removes the owned namespace; callers should remove its value
+commands first. Existing SetValue and RemoveValue behavior remains unchanged, including 404 for
+unknown namespaces.

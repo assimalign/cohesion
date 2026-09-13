@@ -76,7 +76,8 @@ internal static class ControlPlaneTokenVerifier
             string.Equals(
                 token.Claims.GetString(TokenUseClaim),
                 GatewayTokenUse,
-                StringComparison.Ordinal));
+                StringComparison.Ordinal),
+            issuer.AllowedCommandKinds);
         return true;
     }
 
@@ -154,4 +155,5 @@ internal static class ControlPlaneTokenVerifier
 internal readonly record struct ControlPlanePrincipal(
     string Issuer,
     string Subject,
-    bool CanDispatchCommands);
+    bool CanDispatchCommands,
+    IReadOnlyList<string> AllowedCommandKinds);

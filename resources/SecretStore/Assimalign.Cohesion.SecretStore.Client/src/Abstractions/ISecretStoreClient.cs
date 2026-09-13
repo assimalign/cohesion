@@ -12,6 +12,26 @@ namespace Assimalign.Cohesion.SecretStore.Client;
 /// </summary>
 public interface ISecretStoreClient
 {
+    /// <summary>Applies a command and observes success or the provider's refusal.</summary>
+    /// <param name="command">The command envelope.</param>
+    /// <param name="cancellationToken">Cancels delivery and response reading.</param>
+    /// <returns>The observed status and actionable detail; an empty successful response is Applied.</returns>
+    /// <exception cref="ArgumentNullException">The command is null.</exception>
+    /// <exception cref="HttpRequestException">The endpoint cannot be reached.</exception>
+    /// <exception cref="OperationCanceledException">Delivery is canceled.</exception>
+    /// <exception cref="JsonException">The endpoint returns malformed observation JSON.</exception>
+    ValueTask<ResourceCommandObservation> ObserveCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default);
+
+    /// <summary>Deletes an owned declaration and observes the provider's result.</summary>
+    /// <param name="command">The previously applied declaration.</param>
+    /// <param name="cancellationToken">Cancels delivery and response reading.</param>
+    /// <returns>The observed status and actionable detail.</returns>
+    /// <exception cref="ArgumentNullException">The command is null.</exception>
+    /// <exception cref="HttpRequestException">The endpoint cannot be reached.</exception>
+    /// <exception cref="OperationCanceledException">Delivery is canceled.</exception>
+    /// <exception cref="JsonException">The endpoint returns malformed observation JSON.</exception>
+    ValueTask<ResourceCommandObservation> DeleteCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Gets the bytes stored at a secret path.
     /// </summary>

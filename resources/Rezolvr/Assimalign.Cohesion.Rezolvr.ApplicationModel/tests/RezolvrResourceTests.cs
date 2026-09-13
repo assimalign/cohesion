@@ -47,13 +47,13 @@ public sealed class RezolvrResourceTests
         Should.Throw<ArgumentNullException>(() => builder.AddRezolvr(null!));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Rezolvr.ApplicationModel] - Control plane: isolates empty command sets")]
-    public void CreateControlPlane_ShouldReturnIsolatedEmptyPlanes()
+    [Fact(DisplayName = "Cohesion Test [Rezolvr.ApplicationModel] - Control plane: isolates record command sets")]
+    public void CreateControlPlane_ShouldReturnIsolatedRecordPlanes()
     {
         IResourceControlPlane first = RezolvrResourceControlPlane.Create();
         IResourceControlPlane second = RezolvrResourceControlPlane.Create();
         first.ShouldNotBeSameAs(second);
-        first.AcceptedCommandKinds.ShouldBeEmpty();
+        first.AcceptedCommandKinds.ShouldBe(["rezolvr.add-a-record", "rezolvr.add-cname-record"]);
         first.Commands.ShouldBeEmpty();
         first.ObservedEndpoints.ShouldBeEmpty();
     }

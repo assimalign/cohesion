@@ -17,6 +17,7 @@ jobs:
         projects: [
             'Assimalign.Cohesion.Rezolvr',
             'Assimalign.Cohesion.Rezolvr.ApplicationModel',
+            'Assimalign.Cohesion.Rezolvr.Client',
             'Assimalign.Cohesion.Rezolvr.Hosting'
         ]
     steps:

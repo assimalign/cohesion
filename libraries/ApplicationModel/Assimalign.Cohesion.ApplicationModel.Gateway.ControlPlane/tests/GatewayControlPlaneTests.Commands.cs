@@ -195,6 +195,52 @@ public sealed partial class GatewayControlPlaneTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway.ControlPlane] - Trust allow kinds restrict apply and delete while empty grants remain unrestricted")]
+    public async Task Commands_AllowedKinds_ShouldEnforceBothMutations()
+    {
+        string root = CreateTestDirectory();
+        using var cancellation = new CancellationTokenSource(TestTimeout);
+        var areaClient = new RecordingGatewayCommandClient();
+        var options = new ApplicationGatewayOptions { ExportDirectory = root };
+        options.CommandClients.Add(areaClient);
+        GatewayControlPlane.Configure(options, GatewayRunMode.Run);
+        var gateway = new TestGateway(options);
+        IApplicationModel model = BuildModel(gateway, "appa", includeUnsupportedResource: false);
+        IApplicationGateway control = gateway;
+        IAuthenticatedControlPlaneClient client = GatewayControlPlane.CreateClient();
+        (string token, TrustedIssuer issuer) = CreateControlPlaneToken(
+            "caller", DateTimeOffset.UtcNow, TimeSpan.FromHours(1), allowCommands: true);
+        IApplicationModel peer = BuildModel(new TestGateway(new ApplicationGatewayOptions()), "caller", includeUnsupportedResource: false);
+        ApplicationExportDocument export = ApplicationExportDocument.Create(peer, "1", trustKey: issuer.PublicKey);
+        var command = new ResourceCommand("allowed", "test.apply", "caller", "setting", "value"u8.ToArray());
+        try
+        {
+            await control.StartAsync(model, cancellation.Token);
+            (Uri address, _) = ReadMetadata(root, "appa");
+            await ((IApplicationTrustGateway)gateway).AddTrustedIssuerAsync(model, "caller", export, cancellation.Token);
+            (await client.ApplyCommandAsync(address, "api", token, command, cancellation.Token)).Status.ShouldBe(ResourceCommandStatus.Applied);
+            await ((IApplicationTrustGateway)gateway).AddTrustedIssuerAsync(model, "caller", export, ["test.other"], cancellation.Token);
+            ResourceCommandResult apply = await client.ApplyCommandAsync(address, "api", token,
+                command with { Id = "restricted", Key = "second" }, cancellation.Token);
+            ResourceCommandResult delete = await client.DeleteCommandAsync(address, "api", token, command, cancellation.Token);
+            foreach (ResourceCommandResult refused in new[] { apply, delete })
+            {
+                refused.Status.ShouldBe(ResourceCommandStatus.Rejected);
+                refused.Detail.ShouldBe("Trusted issuer 'caller' may not send command kind 'test.apply'.");
+            }
+            areaClient.Applied.ShouldBe(1);
+            areaClient.Deleted.ShouldBe(0);
+            await ((IApplicationTrustGateway)gateway).AddTrustedIssuerAsync(model, "caller", export, [], cancellation.Token);
+            (await client.DeleteCommandAsync(address, "api", token, command, cancellation.Token)).Status.ShouldBe(ResourceCommandStatus.Applied);
+            areaClient.Deleted.ShouldBe(1);
+        }
+        finally
+        {
+            await control.StopAsync(CancellationToken.None);
+            DeleteTestDirectory(root);
+        }
+    }
+
     private static async Task<string> GrantCommandCallerAsync(
         TestGateway gateway,
         IApplicationModel model,

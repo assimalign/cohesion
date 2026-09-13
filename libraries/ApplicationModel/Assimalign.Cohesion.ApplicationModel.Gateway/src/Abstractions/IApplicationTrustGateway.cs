@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -44,6 +45,20 @@ public interface IApplicationTrustGateway : ITrustedIssuerProvider
         string peerName,
         ApplicationExportDocument export,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Adds a peer trust key with an optional command-kind restriction.</summary>
+    /// <param name="model">The application receiving the grant.</param>
+    /// <param name="peerName">The expected peer application name.</param>
+    /// <param name="export">The peer's validated export.</param>
+    /// <param name="allowedCommandKinds">Allowed wire kinds; null or empty permits every kind.</param>
+    /// <param name="cancellationToken">Cancels the durable grant.</param>
+    /// <returns>A task that completes after the grant is durable.</returns>
+    /// <exception cref="System.ArgumentException">An identity or allowed kind is invalid.</exception>
+    /// <exception cref="System.ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="System.IO.InvalidDataException">The export or public key is invalid.</exception>
+    /// <exception cref="System.InvalidOperationException">The application's store cannot persist the grant.</exception>
+    Task AddTrustedIssuerAsync(IApplicationModel model, string peerName, ApplicationExportDocument export,
+        IReadOnlyList<string>? allowedCommandKinds, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Rotates the application's issuing trust key. Tokens signed by the previous key stop

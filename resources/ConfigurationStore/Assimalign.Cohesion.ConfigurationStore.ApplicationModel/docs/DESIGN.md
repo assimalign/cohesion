@@ -89,9 +89,10 @@ command-discovery routes under `/cohesion/v1`, plus `POST /cohesion/v1/stop` and
 are also available. Namespaced routes use the ambient bootstrap Bearer credential
 when one is present and fail closed for managed contexts without a credential.
 
-The accepted command-kind set contains `configurationstore.set-value` and
-`configurationstore.remove-value`, whose wire handlers live in Hosting. Typed `SetValue` and `RemoveValue` descriptor verbs now declare those two wire kinds.
-`AddNamespace` remains deferred until a distinct namespace-ownership handler and command kind land.
+The accepted command-kind set contains `configurationstore.add-namespace`, `configurationstore.set-value`, and
+`configurationstore.remove-value`, whose wire handlers live in Hosting. Typed AddNamespace,
+SetValue, and RemoveValue descriptor verbs declare these kinds. AddNamespace supplies the
+separate namespace-ownership contract described below.
 
 ## Dependency and AOT posture
 
@@ -110,7 +111,7 @@ ConfigurationStore runtime dependency, or platform SDK dependency.
 - Carrying platform-specific scheduling, storage-class, service, or claim types.
 - Client factories or remote protocol calls; those belong to
   `ConfigurationStore.Client`.
-- AddNamespace and a separate namespace-ownership wire command; the two landed value kinds are the current scope.
+- Adopting a resource-declared namespace through a command without an explicit ownership transfer.
 
 ## Typed descriptor commands
 
@@ -127,3 +128,24 @@ Value keys cannot contain `/`; namespace names may, so different values cannot a
 ownership key. A model may declare one set or remove command per target/key.
 These declarations carry ordinary configuration, never secrets, because model export retains them.
 `Build()` checks the manifest's accepted kinds; delivery and mutation remain gateway/Hosting work.
+
+## Declarative commands (item 31c)
+
+| Wire kind | Descriptor verb | Ownership key |
+|---|---|---|
+| `configurationstore.add-namespace` | `AddNamespace` | namespace name |
+
+Kinds use verb-noun kebab under the area prefix. The examples `rezolvr.record` and
+`identityhub.audience` in developer-experience design section 7 are illustrative; item 27's design
+rewrite should reflect the landed convention. Manifest commands remain bare JSON strings.
+Typed verbs validate argument shape and use source-generated JSON metadata. Build validates the
+advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
+The default control plane handles id replay and owner isolation; each area handler also accepts
+an identical reapplication with a different id. Conflicts return named Rejected details.
+
+AddNamespace creates a namespace if absent and atomically stores its owner and original seed
+alongside values. An identical declaration succeeds even after separate value commands change its
+contents. A different seed or foreign owner is rejected with a named detail. Resource-seeded namespaces
+are not implicitly adopted. Deletion removes the owned namespace; callers should remove its value
+commands first. Existing SetValue and RemoveValue behavior remains unchanged, including 404 for
+unknown namespaces.

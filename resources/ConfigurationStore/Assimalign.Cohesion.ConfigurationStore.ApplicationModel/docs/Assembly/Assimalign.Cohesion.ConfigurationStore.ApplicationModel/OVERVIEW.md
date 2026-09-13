@@ -29,3 +29,8 @@ service.
 
 `IConfigurationStoreResourceDescriptor` retains typed dependency chaining and declarative commands.
 `ConfigurationStoreResourceCommandExtensions` contributes `SetValue` and `RemoveValue`; both use the shared `IResourceCommandDescriptor` seam and source-generated payload metadata.
+
+## Declarative command extensions
+
+[ConfigurationStoreResourceCommandExtensions](ConfigurationStoreResourceCommandExtensions/OVERVIEW.md)
+adds typed command declarations with deterministic ids and source-generated payload metadata.

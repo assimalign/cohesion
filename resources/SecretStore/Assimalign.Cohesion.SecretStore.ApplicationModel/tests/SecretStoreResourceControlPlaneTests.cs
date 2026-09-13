@@ -11,8 +11,8 @@ namespace Assimalign.Cohesion.SecretStore.ApplicationModel.Tests;
 
 public sealed class SecretStoreResourceControlPlaneTests
 {
-    [Fact(DisplayName = "Cohesion Test [SecretStore.ApplicationModel] - Default control plane: creates an isolated plane with the trust-grant command")]
-    public void Create_WhenCalled_ShouldReturnIsolatedPlaneWithTrustGrantCommand()
+    [Fact(DisplayName = "Cohesion Test [SecretStore.ApplicationModel] - Default control plane: creates an isolated plane with trust and store commands")]
+    public void Create_WhenCalled_ShouldReturnIsolatedPlaneWithTrustAndStoreCommands()
     {
         // Act
         IResourceControlPlane first = SecretStoreResourceControlPlane.Create();
@@ -20,7 +20,7 @@ public sealed class SecretStoreResourceControlPlaneTests
 
         // Assert
         first.ShouldNotBeSameAs(second);
-        first.AcceptedCommandKinds.ShouldBe(["cohesion.trust.add"]);
+        first.AcceptedCommandKinds.ShouldBe(["cohesion.trust.add", "secretstore.add-secret", "secretstore.issue-certificate"]);
         first.ObservedEndpoints.ShouldBeEmpty();
     }
 

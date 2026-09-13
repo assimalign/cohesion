@@ -44,7 +44,11 @@ internal static class Program
 
         try
         {
-            if (args.Length > 0 && string.Equals(args[0], "wait", StringComparison.OrdinalIgnoreCase))
+            if (Environment.GetEnvironmentVariable("TEST_RESOURCE_AREA") is string area)
+            {
+                await RunResourceAsync(area, stopping.Token).ConfigureAwait(false);
+            }
+            else if (args.Length > 0 && string.Equals(args[0], "wait", StringComparison.OrdinalIgnoreCase))
             {
                 await Task.Delay(Timeout.InfiniteTimeSpan, stopping.Token).ConfigureAwait(false);
             }
@@ -67,6 +71,44 @@ internal static class Program
         finally
         {
             Console.CancelKeyPress -= cancelHandler;
+        }
+    }
+
+    private static async Task RunResourceAsync(string area, CancellationToken cancellationToken)
+    {
+        Assimalign.Cohesion.Hosting.Resources.ResourceContext ambient = Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current;
+        var context = new Assimalign.Cohesion.Hosting.Resources.ResourceContext(
+            ambient.ApplicationName, ambient.ResourceName, ambient.EnvironmentName, ambient.GatewayName,
+            RequiredEnvironment("TEST_COMMAND_DATA"), ambient.Endpoints, ambient.Mounts, ambient.Settings,
+            ambient.References, ambient.BootstrapCredential, ambient.ApplicationTrustKey, ambientValues: null);
+        using IDisposable scope = Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.CreateScope(context);
+        Func<Assimalign.Cohesion.Hosting.Resources.IResourceControlPlane> factory = area switch
+        {
+            "IdentityHub" => Assimalign.Cohesion.IdentityHub.ApplicationModel.IdentityHubResourceControlPlane.Create,
+            "Rezolvr" => Assimalign.Cohesion.Rezolvr.ApplicationModel.RezolvrResourceControlPlane.Create,
+            "SecretStore" => Assimalign.Cohesion.SecretStore.ApplicationModel.SecretStoreResourceControlPlane.Create,
+            _ => throw new ArgumentException("Unknown test resource area.", nameof(area)),
+        };
+        Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.RegisterControlPlane(typeof(Program).Assembly, factory);
+        await using Assimalign.Cohesion.Hosting.IHost host = area switch
+        {
+            "IdentityHub" => Assimalign.Cohesion.IdentityHub.Hosting.IdentityHubApplication.CreateBuilder([]).Build(),
+            "Rezolvr" => Assimalign.Cohesion.Rezolvr.Hosting.RezolvrApplication.CreateBuilder([]).Build(),
+            "SecretStore" => Assimalign.Cohesion.SecretStore.Hosting.SecretStoreApplication.CreateBuilder([]).Build(),
+            _ => throw new ArgumentException("Unknown test resource area.", nameof(area)),
+        };
+        await host.StartAsync(cancellationToken).ConfigureAwait(false);
+        Console.WriteLine(CanonicalReadyMarker);
+        try
+        {
+            while (host.Context.State == Assimalign.Cohesion.Hosting.HostState.Started)
+            {
+                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            await host.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
 

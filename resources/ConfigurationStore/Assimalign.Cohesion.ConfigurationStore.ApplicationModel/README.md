@@ -33,9 +33,9 @@ endpoints; `ConfigurationStore.Hosting` consumes the registration through
 `Hosting.Resources` and exposes the standard health, readiness, liveness, endpoint,
 stop, and command-discovery routes on the manifest's `api` endpoint.
 
-The control plane advertises the `configurationstore.set-value` and
-`configurationstore.remove-value` wire kinds served by ConfigurationStore.Hosting.
-Typed descriptor command verbs remain developer-experience item 31c work.
+The control plane advertises `configurationstore.add-namespace` alongside
+`configurationstore.set-value` and `configurationstore.remove-value`. AddNamespace accepts an
+optional seed and creates an owned namespace; the existing typed value verbs operate inside it.
 
 ## Dependency boundary
 

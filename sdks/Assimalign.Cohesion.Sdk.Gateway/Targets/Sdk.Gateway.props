@@ -49,9 +49,11 @@
 		</CohesionGatewayResourceKind>
 
 		<!-- Mount-source and command target kind to gateway-side client package map. -->
-		<CohesionGatewayClientKind Include="Database" PackageId="Assimalign.Cohesion.Database.Client" />
-		<CohesionGatewayClientKind Include="SecretStore" PackageId="Assimalign.Cohesion.SecretStore.Client" />
 		<CohesionGatewayClientKind Include="ConfigurationStore" PackageId="Assimalign.Cohesion.ConfigurationStore.Client" />
+		<CohesionGatewayClientKind Include="Database" PackageId="Assimalign.Cohesion.Database.Client" />
+		<CohesionGatewayClientKind Include="IdentityHub" PackageId="Assimalign.Cohesion.IdentityHub.Client" />
+		<CohesionGatewayClientKind Include="Rezolvr" PackageId="Assimalign.Cohesion.Rezolvr.Client" />
+		<CohesionGatewayClientKind Include="SecretStore" PackageId="Assimalign.Cohesion.SecretStore.Client" />
 
 		<!-- Provider-name to package-id map. Only the selected names are restored. -->
 		<CohesionGatewayPackage Include="Local" PackageId="Assimalign.Cohesion.ApplicationModel.Gateway" Version="$(CohesionVersion)" />

@@ -4,7 +4,7 @@
 
 The area root owns the public contracts composed by an IdentityHub resource. `IIdentityHubApplicationBuilder` declares token audiences with `AddAudience`, registers OAuth clients with `AddClient`, accepts optional lifecycle services, and builds `IIdentityHubApplication`. Concrete hosting remains internal to `Assimalign.Cohesion.IdentityHub.Hosting`.
 
-Client registration is intentionally code-first. A non-empty `ClientSecret` enables `client_credentials`; `AllowDeviceAuthorization` enables the device grant. Clients explicitly list the audiences they may request, and build fails if a client names an undeclared audience or enables no grant. Corresponding declarative gateway commands remain future item 31c scope.
+Client registration is intentionally code-first. A non-empty `ClientSecret` enables `client_credentials`; `AllowDeviceAuthorization` enables the device grant. Clients explicitly list the audiences they may request, and build fails if a client names an undeclared audience or enables no grant. Corresponding declarative gateway commands now ship in IdentityHub.ApplicationModel; Hosting combines their durable registry with these builder registrations.
 
 ## Security boundary
 

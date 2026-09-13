@@ -35,6 +35,23 @@ public static class SecretStoreClient
         return Create(endpoint, credential, _sharedTransport);
     }
 
+    /// <summary>Creates a client using the manifest's full control-plane base address.</summary>
+    /// <param name="controlPlaneAddress">The HTTP(S) address including the manifest control-plane path.</param>
+    /// <param name="credential">The opaque bootstrap credential.</param>
+    /// <returns>A client whose routes are relative to the supplied control plane.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentException">The address is not an HTTP(S) endpoint.</exception>
+    public static ISecretStoreClient CreateForControlPlane(Uri controlPlaneAddress, ClientCredential credential)
+    {
+        Uri.ThrowIfNotEndpoint(controlPlaneAddress);
+        ArgumentNullException.ThrowIfNull(credential);
+        if (controlPlaneAddress.Scheme != Uri.UriSchemeHttp && controlPlaneAddress.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new ArgumentException("The secret-store control plane must use HTTP or HTTPS.", nameof(controlPlaneAddress));
+        }
+        return new HttpSecretStoreClient(controlPlaneAddress, credential, _sharedTransport, controlPlaneAddress: true);
+    }
+
     internal static ISecretStoreClient Create(
         Uri endpoint,
         ClientCredential credential,

@@ -69,6 +69,13 @@ internal sealed class IdentityHubClientRegistration
         return false;
     }
 
+    internal static IdentityHubClientRegistration CreateCommand(
+        string clientId,
+        IReadOnlyList<string> audiences,
+        ReadOnlySpan<byte> secret)
+        => new(clientId, SHA256.HashData(secret), false, TimeSpan.FromHours(1),
+            new ReadOnlyCollection<string>(new List<string>(audiences)));
+
     internal static IdentityHubClientRegistration Create(
         string clientId,
         IdentityHubClientOptions options)

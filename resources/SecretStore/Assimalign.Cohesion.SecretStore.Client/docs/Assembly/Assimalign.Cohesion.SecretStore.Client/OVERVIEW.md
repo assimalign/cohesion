@@ -13,5 +13,10 @@ The namespace contains the gateway-side SecretStore protocol contract and factor
 - `ResourceCommand` carries an id, kind, owner, key, and payload bytes serialized as base64 JSON.
 
 All asynchronous operations accept an optional `CancellationToken`. Invalid names are rejected
-before transport I/O, non-success HTTP responses surface as `HttpRequestException`, and a missing
+before transport I/O. Reads and SendCommandAsync surface non-success HTTP responses as
+`HttpRequestException`; observed command methods return Rejected instead. A missing
 certificate body surfaces as `InvalidDataException`.
+
+[ResourceCommandObservation](ResourceCommandObservation/OVERVIEW.md) carries the status and
+refusal detail returned by ObserveCommandAsync and DeleteCommandAsync. Empty legacy success
+responses remain successful; SendCommandAsync retains its existing contract.

@@ -50,6 +50,15 @@ public sealed class ResourceAreaDefaultsTests
             probe.Attribute("Endpoint")!.Value.ShouldBe(endpoint);
             probe.Attribute("Http")!.Value.ShouldBe(path);
         }
-        defaults.Descendants("CohesionCommand").ShouldBeEmpty();
+        if (area == "Rezolvr")
+        {
+            XElement command = defaults.Descendants("CohesionCommand").Single();
+            command.Attributes().Select(static attribute => attribute.Name.LocalName).ShouldBe(["Include"]);
+            command.Attribute("Include")!.Value.ShouldBe("rezolvr.add-a-record;rezolvr.add-cname-record");
+        }
+        else
+        {
+            defaults.Descendants("CohesionCommand").ShouldBeEmpty();
+        }
     }
 }

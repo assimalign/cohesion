@@ -199,7 +199,6 @@ public sealed class CommandMappingTests
         {
             (new[] { "publish", "--in-container=true" }, "does not take a value"),
             (new[] { "trust", "add", "peer", "--against", "provider" }, "#982"),
-            (new[] { "trust", "add", "peer", "--allow=secret" }, "O25"),
             (new[] { "new", "unknown" }, string.Join(", ", Templates.Names)),
             (new[] { "new", "cohesion-web", "--topology", "single" }, "cohesion-landing-zone"),
             (new[] { "new", "cohesion-landing-zone", "--topology", "unknown" }, "single or federated")
@@ -210,6 +209,22 @@ public sealed class CommandMappingTests
             fixture.Error.ToString().ShouldContain(expected, Case.Sensitive);
             fixture.Runner.Calls.ShouldBeEmpty();
         }
+    }
+
+    /// <summary>Allowed command kinds retain repeated and comma-separated values in the gateway arguments.</summary>
+    [Fact(DisplayName = "Cohesion Test [Tooling.Cli] - TrustAdd: Should forward allowed command kinds")]
+    public async Task TrustAdd_WithAllowedKinds_ShouldForwardArgumentsAsync()
+    {
+        using var fixture = new CliFixture();
+        string project = fixture.Gateway();
+        (await fixture.Application().ExecuteAsync(
+            ["trust", "add", "peer", "--from", "peer.json", "--allow", "a,b", "--allow=c"],
+            CancellationToken.None)).ShouldBe(0);
+        fixture.Runner.Calls.Single().Arguments.ShouldBe(new[]
+        {
+            "run", "--project", project, "--", "--mode", "trust-add", "--peer", "peer", "--from", "peer.json",
+            "--allow", "a,b", "--allow", "c"
+        });
     }
 
     /// <summary>Deferred single-resource areas are never blindly sent to dotnet.</summary>

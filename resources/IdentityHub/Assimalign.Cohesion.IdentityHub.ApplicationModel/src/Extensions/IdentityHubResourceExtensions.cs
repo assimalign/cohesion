@@ -20,13 +20,13 @@ public static class IdentityHubResourceExtensions
         /// <exception cref="ArgumentNullException">
         /// <paramref name="manifest"/> is <see langword="null"/>.
         /// </exception>
-        public IApplicationResourceDescriptor AddIdentityHub(
+        public IIdentityHubResourceDescriptor AddIdentityHub(
             ResourceManifest manifest,
             IdentityHubResourceOptions? options = null)
         {
             ArgumentNullException.ThrowIfNull(manifest);
 
-            return builder.AddResource(new IdentityHubResource(manifest, options));
+            return new IdentityHubResourceDescriptor(builder.AddResource(new IdentityHubResource(manifest, options)));
         }
     }
 }

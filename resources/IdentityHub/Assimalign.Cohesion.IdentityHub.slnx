@@ -74,4 +74,38 @@
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/README.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/src/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Client/src/Assimalign.Cohesion.IdentityHub.Client.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/tests/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Client/tests/Assimalign.Cohesion.IdentityHub.Client.Tests.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/IdentityHubCommandClient/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/IdentityHubCommandClient/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/IIdentityHubCommandClient/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/IIdentityHubCommandClient/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/ResourceCommand/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/ResourceCommand/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/ResourceCommandObservation/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/ResourceCommandObservation/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IdentityHubResourceCommandExtensions/">
+		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IdentityHubResourceCommandExtensions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IIdentityHubResourceDescriptor/">
+		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IIdentityHubResourceDescriptor/OVERVIEW.md" />
+	</Folder>
 </Solution>

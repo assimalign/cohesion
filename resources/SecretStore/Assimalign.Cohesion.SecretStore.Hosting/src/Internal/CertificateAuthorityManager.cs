@@ -156,8 +156,15 @@ internal sealed class CertificateAuthorityManager : IDisposable
         }
     }
 
+    internal Task<string> GetCertificatePemAsync(
+        string name,
+        CancellationToken cancellationToken)
+        => GetCertificatePemAsync(name, null, null, cancellationToken);
+
     internal async Task<string> GetCertificatePemAsync(
         string name,
+        string? subject,
+        IReadOnlyList<string>? subjectAlternativeNames,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -172,6 +179,9 @@ internal sealed class CertificateAuthorityManager : IDisposable
             }
 
             string leafName = NormalizeLeafName(name);
+            X500DistinguishedName? effectiveSubject = subject is null ? null :
+                subject.Contains('=') ? new X500DistinguishedName(subject) : CreateSubject(subject);
+            X509Extension? effectiveNames = subjectAlternativeNames is null ? null : CreateAlternativeNames(subjectAlternativeNames);
             string leafPath = GetLeafPath(leafName);
             byte[]? durable = await ProtectedFileStore.ReadAsync(
                     leafPath,
@@ -184,6 +194,15 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 {
                     string existingPem = Encoding.UTF8.GetString(durable);
                     using X509Certificate2 existing = LoadLeafBundle(existingPem);
+                    X509Extension? storedNames = existing.Extensions["2.5.29.17"];
+                    if ((effectiveSubject is not null && !effectiveSubject.RawData.AsSpan().SequenceEqual(existing.SubjectName.RawData)) ||
+                        (effectiveNames is not null && (storedNames is null || !effectiveNames.RawData.AsSpan().SequenceEqual(storedNames.RawData))))
+                    {
+                        throw new Assimalign.Cohesion.Hosting.Resources.ResourceCommandRejectedException(
+                            $"secretstore.issue-certificate certificate '{leafName}' already has a different subject or SAN set; delete its declaration before changing its identity.");
+                    }
+                    effectiveSubject ??= existing.SubjectName;
+                    effectiveNames ??= storedNames;
                     if (!RequiresRenewal(existing, DateTimeOffset.UtcNow))
                     {
                         return existingPem;
@@ -195,7 +214,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 }
             }
 
-            using X509Certificate2 leaf = CreateLeaf(leafName, [leafName]);
+            using X509Certificate2 leaf = CreateLeaf(leafName, subjectAlternativeNames ?? [leafName], effectiveSubject, effectiveNames);
             string pem = ExportLeafBundle(leaf);
             byte[] encoded = Encoding.UTF8.GetBytes(pem);
             try
@@ -666,11 +685,13 @@ internal sealed class CertificateAuthorityManager : IDisposable
 
     private X509Certificate2 CreateLeaf(
         string name,
-        IReadOnlyList<string> subjectAlternativeNames)
+        IReadOnlyList<string> subjectAlternativeNames,
+        X500DistinguishedName? subject = null,
+        X509Extension? alternativeNames = null)
     {
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var request = new CertificateRequest(
-            CreateSubject(name),
+            subject ?? CreateSubject(name),
             key,
             HashAlgorithmName.SHA256);
         request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
@@ -680,27 +701,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
         request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
             new OidCollection { new("1.3.6.1.5.5.7.3.1") },
             false));
-        var names = new SubjectAlternativeNameBuilder();
-        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (int index = 0; index < subjectAlternativeNames.Count; index++)
-        {
-            string subjectAlternativeName = subjectAlternativeNames[index];
-            if (!seenNames.Add(subjectAlternativeName))
-            {
-                continue;
-            }
-
-            if (IPAddress.TryParse(subjectAlternativeName, out IPAddress? address))
-            {
-                names.AddIpAddress(address);
-            }
-            else
-            {
-                names.AddDnsName(subjectAlternativeName);
-            }
-        }
-
-        request.CertificateExtensions.Add(names.Build());
+        request.CertificateExtensions.Add(alternativeNames ?? CreateAlternativeNames(subjectAlternativeNames));
         request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
 
         byte[] serial = CreateSerialNumber();
@@ -721,6 +722,33 @@ internal sealed class CertificateAuthorityManager : IDisposable
         {
             CryptographicOperations.ZeroMemory(serial);
         }
+    }
+
+    internal async Task DeleteCertificateAsync(string name, CancellationToken cancellationToken = default)
+    {
+        string leafName = NormalizeLeafName("certs/" + name);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            EnsureReady();
+            File.Delete(GetLeafPath(leafName));
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private static X509Extension CreateAlternativeNames(IReadOnlyList<string> values)
+    {
+        var names = new SubjectAlternativeNameBuilder();
+        foreach (string value in values.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal))
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(value);
+            if (IPAddress.TryParse(value, out IPAddress? address)) { names.AddIpAddress(address); }
+            else { names.AddDnsName(value); }
+        }
+        return names.Build();
     }
 
     private string ExportLeafBundle(X509Certificate2 leaf)

@@ -1,7 +1,9 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -57,21 +59,42 @@ internal sealed class GatewayStoreClient : IGatewayStoreClient
             .ConfigureAwait(false);
     }
 
-    public async ValueTask StoreTrustedIssuerAsync(
+    public ValueTask StoreTrustedIssuerAsync(
         Uri endpoint,
         string credential,
         string owner,
         string issuer,
         ReadOnlyMemory<byte> publicKey,
         CancellationToken cancellationToken = default)
+        => StoreTrustedIssuerAsync(endpoint, credential, owner, issuer, publicKey, null, cancellationToken);
+
+    public async ValueTask StoreTrustedIssuerAsync(Uri endpoint, string credential, string owner, string issuer,
+        ReadOnlyMemory<byte> publicKey, IReadOnlyList<string>? allowedCommandKinds, CancellationToken cancellationToken = default)
     {
+        ReadOnlyMemory<byte> payload = publicKey;
+        if (allowedCommandKinds is { Count: > 0 })
+        {
+            using JsonDocument document = JsonDocument.Parse(publicKey);
+            var buffer = new ArrayBufferWriter<byte>();
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                writer.WriteStartObject();
+                writer.WritePropertyName("trustKey");
+                document.RootElement.WriteTo(writer);
+                writer.WriteStartArray("allowedCommandKinds");
+                foreach (string kind in allowedCommandKinds) { writer.WriteStringValue(kind); }
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+            }
+            payload = buffer.WrittenMemory.ToArray();
+        }
         byte[] identity = Encoding.UTF8.GetBytes(owner + "\n" + issuer + "\n");
         byte[] commandHash;
         try
         {
             using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             hasher.AppendData(identity);
-            hasher.AppendData(publicKey.Span);
+            hasher.AppendData(payload.Span);
             commandHash = hasher.GetHashAndReset();
         }
         finally
@@ -84,7 +107,7 @@ internal sealed class GatewayStoreClient : IGatewayStoreClient
             "cohesion.trust.add",
             owner,
             issuer,
-            publicKey);
+            payload);
         try
         {
             await SecretStoreProtocolClient

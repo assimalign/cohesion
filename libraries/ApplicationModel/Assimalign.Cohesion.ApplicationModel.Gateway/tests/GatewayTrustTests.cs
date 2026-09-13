@@ -18,6 +18,23 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 public sealed class GatewayTrustTests
 {
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Trust allow kinds round-trip with backward-compatible unrestricted documents")]
+    public void TrustedIssuerDocument_ShouldPreserveAllowedKinds()
+    {
+        using var key = new GatewayTrustKey(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+        string[] kinds = ["rezolvr.add-a-record", "identityhub.add-client", "rezolvr.add-a-record"];
+        var restricted = new TrustedIssuer("peer", key.PublicJwk, kinds);
+        kinds[0] = "changed";
+        restricted.AllowedCommandKinds.ShouldBe(["identityhub.add-client", "rezolvr.add-a-record"]);
+        byte[] document = TrustedIssuerDocument.Write([restricted]);
+        TrustedIssuerDocument.Parse(document)[0].AllowedCommandKinds.ShouldBe(restricted.AllowedCommandKinds);
+        byte[] legacy = TrustedIssuerDocument.Write([new TrustedIssuer("peer", key.PublicJwk)]);
+        Encoding.UTF8.GetString(legacy).ShouldNotContain("allowedCommandKinds", Case.Sensitive);
+        TrustedIssuerDocument.Parse(legacy)[0].AllowedCommandKinds.ShouldBeEmpty();
+        var empty = new TrustedIssuer("peer", key.PublicJwk, []);
+        empty.AllowedCommandKinds.ShouldBeEmpty();
+    }
+
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - LoadOrCreateAsync: Should persist a distinct P-256 trust key per application")]

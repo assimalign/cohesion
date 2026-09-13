@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -19,6 +20,49 @@ namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Tests;
 
 public sealed class ResourceCommandHostingTests
 {
+    [Fact(DisplayName = "Cohesion Test [ConfigurationStore.Hosting] - Namespace command: preserves seed ownership replay and deletion across repository restart")]
+    public async Task AddNamespace_ShouldPersistAndRejectConflicts()
+    {
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        string directory = Path.Combine(AppContext.BaseDirectory, "namespace-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            using IDisposable scope = ResourceRuntime.CreateScope(ConfigurationStoreTestHost.CreateContext(
+                ConfigurationStoreTestHost.GetEndpoint(), directory, string.Empty, ReadOnlyMemory<byte>.Empty, gatewayName: null));
+            var repository = new ConfigurationStoreRepository(directory, new Dictionary<string, IReadOnlyDictionary<string, string?>>());
+            await repository.InitializeAsync(cancellation.Token);
+            IResourceControlPlane plane = ResourceControlPlane.Create(["configurationstore.add-namespace"]);
+            plane.RegisterCommandHandler(new ConfigurationNamespaceCommandHandler(repository));
+            var command = new RuntimeCommand("namespace", "configurationstore.add-namespace", "appa", "orders",
+                Encoding.UTF8.GetBytes("""{"name":"orders","seed":{"Mode":"initial"}}"""));
+            await plane.ExecuteCommandAsync(command, cancellation.Token);
+            command = command with { Id = "reapplied" };
+            await plane.ExecuteCommandAsync(command, cancellation.Token);
+            (await repository.ReadAsync("orders", cancellation.Token)).ShouldNotBeNull()["Mode"].ShouldBe("initial");
+            ResourceCommandRejectedException owner = await Should.ThrowAsync<ResourceCommandRejectedException>(
+                () => plane.ExecuteCommandAsync(command with { Id = "foreign", Owner = "other" }, cancellation.Token).AsTask());
+            owner.Detail.ShouldContain("appa", Case.Sensitive);
+            (await repository.SetAsync("orders", "Mode", "changed", cancellation.Token)).ShouldBeTrue();
+            var restarted = new ConfigurationStoreRepository(directory, new Dictionary<string, IReadOnlyDictionary<string, string?>>());
+            await restarted.InitializeAsync(cancellation.Token);
+            var handler = new ConfigurationNamespaceCommandHandler(restarted);
+            await handler.ExecuteAsync(command with { Id = "restart" }, cancellation.Token);
+            (await restarted.ReadAsync("orders", cancellation.Token)).ShouldNotBeNull()["Mode"].ShouldBe("changed");
+            ResourceCommandRejectedException seed = await Should.ThrowAsync<ResourceCommandRejectedException>(
+                () => handler.ExecuteAsync(command with { Id = "changed", Payload = """{"name":"orders","seed":{"Mode":"changed"}}"""u8.ToArray() }, cancellation.Token).AsTask());
+            seed.Detail.ShouldContain("orders", Case.Sensitive);
+            await plane.DeleteCommandAsync(command, cancellation.Token);
+            var deleted = new ConfigurationStoreRepository(directory, new Dictionary<string, IReadOnlyDictionary<string, string?>>());
+            await deleted.InitializeAsync(cancellation.Token);
+            (await deleted.ReadAsync("orders", cancellation.Token)).ShouldBeNull();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [ConfigurationStore.Hosting] - Commands: direct and authenticated HTTP dispatch share ownership, values, and refusal details")]
     public async Task ObserveCommandAsync_WithGatewayScopedHost_ShouldShareDirectMutationAndDeletion()
     {
@@ -42,6 +86,10 @@ public sealed class ResourceCommandHostingTests
             {
                 IConfigurationStoreClient read = ConfigurationStoreClient.Create(endpoint, new ClientCredential(token));
                 IConfigurationStoreClient commands = ConfigurationStoreClient.CreateForControlPlane(new Uri(endpoint, "/cohesion/v1"), new ClientCredential(token));
+                var createNamespace = new ClientCommand("create-orders", "configurationstore.add-namespace", "appa", "orders",
+                    """{"name":"orders","seed":{"Mode":"seeded"}}"""u8.ToArray());
+                (await commands.ObserveCommandAsync(createNamespace, cancellation.Token)).Status.ShouldBe("Applied");
+                (await read.GetNamespaceAsync("orders", cancellation.Token))["Mode"].ShouldBe("seeded");
                 byte[] payload = Encoding.UTF8.GetBytes("""{"namespace":"app","key":"Mode","value":"applied"}""");
                 var runtime = new RuntimeCommand("set-mode", "configurationstore.set-value", "appa", "app/Mode", payload);
                 var command = new ClientCommand(runtime.Id, runtime.Kind, runtime.Owner, runtime.Key, runtime.Payload);
@@ -75,6 +123,7 @@ public sealed class ResourceCommandHostingTests
                 keyObservation.Detail.ShouldBe(keyRefusal.Detail);
                 (await commands.DeleteCommandAsync(command, cancellation.Token)).Status.ShouldBe("Deleted");
                 (await read.GetNamespaceAsync("app", cancellation.Token)).ContainsKey("Mode").ShouldBeFalse();
+                (await commands.DeleteCommandAsync(createNamespace, cancellation.Token)).Status.ShouldBe("Deleted");
                 plane.Commands.ShouldBeEmpty();
             }
             finally

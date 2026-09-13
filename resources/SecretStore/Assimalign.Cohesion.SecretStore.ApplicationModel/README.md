@@ -26,16 +26,18 @@ protocol yet.
 ## Default control plane
 
 `SecretStoreResourceControlPlane.Create()` returns a fresh isolated
-`IResourceControlPlane` that advertises the generic `cohesion.trust.add` trust-grant
-upsert. The enabled resource's generated `ResourceControlPlane.g.cs` registers that
+`IResourceControlPlane` that advertises `secretstore.add-secret`,
+`secretstore.issue-certificate`, and the gateway-owned `cohesion.trust.add` trust-grant
+upsert. The manifest advertises only the two declarative SecretStore kinds.
+The enabled resource's generated `ResourceControlPlane.g.cs` registers that
 factory and seeds it with observed endpoints. `SecretStore.Hosting` consumes the
 registration through `Hosting.Resources` and serves health, readiness, liveness,
 observed endpoints, graceful stop, trust bootstrap, secret reads, certificate reads,
 and enrollment under `/cohesion/v1` on the manifest's `api` endpoint.
 
-The SecretStore-specific `AddSecret`, `IssueCertificate`, and `Enroll` descriptor
-commands belong to developer-experience item 31c and are intentionally not part of
-this package yet.
+The typed descriptor exposes `AddSecret` and `IssueCertificate`. Secret declarations
+carry a parameter or resource source reference; literal secret material is forbidden.
+`Enroll(platformStore)` is deferred to item 31t's certificate contract.
 
 ## Dependency boundary
 

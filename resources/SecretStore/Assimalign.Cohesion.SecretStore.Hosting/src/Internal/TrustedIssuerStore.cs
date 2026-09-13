@@ -170,7 +170,10 @@ internal sealed class TrustedIssuerStore
         try
         {
             using JsonDocument document = JsonDocument.Parse(publicKey);
-            candidate = new TrustedIssuer(owner, issuer, document.RootElement);
+            JsonElement root = document.RootElement;
+            candidate = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("trustKey", out JsonElement key)
+                ? new TrustedIssuer(owner, issuer, key, TrustedIssuer.ReadAllowedCommandKinds(root))
+                : new TrustedIssuer(owner, issuer, root);
         }
         catch (JsonException exception)
         {
@@ -266,7 +269,8 @@ internal sealed class TrustedIssuerStore
                 TrustedIssuer issuer = new(
                     ownerProperty.GetString()!,
                     issuerProperty.GetString()!,
-                    keyProperty);
+                    keyProperty,
+                    TrustedIssuer.ReadAllowedCommandKinds(item));
                 if (!loaded.TryAdd(issuer.Issuer, issuer))
                 {
                     throw new InvalidDataException(
@@ -333,6 +337,12 @@ internal sealed class TrustedIssuerStore
                 writer.WriteString("issuer", snapshot[index].Issuer);
                 writer.WritePropertyName("trustKey");
                 snapshot[index].PublicKey.WriteTo(writer);
+                if (snapshot[index].AllowedCommandKinds.Count > 0)
+                {
+                    writer.WriteStartArray("allowedCommandKinds");
+                    foreach (string kind in snapshot[index].AllowedCommandKinds) { writer.WriteStringValue(kind); }
+                    writer.WriteEndArray();
+                }
                 writer.WriteEndObject();
             }
 

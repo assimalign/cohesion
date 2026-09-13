@@ -15,8 +15,8 @@ enabled secret-store executables.
 IResourceControlPlane controlPlane = SecretStoreResourceControlPlane.Create();
 ```
 
-Every call returns a fresh, isolated plane with no observed endpoints and one accepted
-generic trust command, `cohesion.trust.add`. The plane aggregates health, readiness,
+Every call returns a fresh, isolated plane accepting `cohesion.trust.add`,
+`secretstore.add-secret`, and `secretstore.issue-certificate`. The plane aggregates health, readiness,
 and liveness, records observed endpoints, and carries graceful-stop and command
 operations.
 
@@ -25,8 +25,9 @@ observes the invocation's endpoints before `SecretStore.Hosting` serves the stan
 control-plane and store-protocol routes under `/cohesion/v1` on `api`.
 
 The factory does not host HTTP, persist secrets, verify credentials, or issue
-certificates. Those are runtime responsibilities. SecretStore-specific desired-state
-commands and their typed descriptor verbs remain developer-experience item 31c work.
+certificates. Those are runtime responsibilities. SecretStoreResourceCommandExtensions declares
+the two desired-state kinds. The manifest omits cohesion.trust.add because it is a gateway-owned
+trust channel, not an application declaration. Enroll remains deferred to item 31t.
 
 ## Links
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization.Metadata;
 
 using Assimalign.Cohesion.ApplicationModel;
 
@@ -7,34 +8,39 @@ namespace Assimalign.Cohesion.Rezolvr.ApplicationModel;
 
 internal sealed class RezolvrResourceDescriptor : IRezolvrResourceDescriptor
 {
-    private readonly IApplicationResourceDescriptor _inner;
+    private readonly IResourceCommandDescriptor _inner;
 
     internal RezolvrResourceDescriptor(IApplicationResourceDescriptor inner)
     {
-        _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        ArgumentNullException.ThrowIfNull(inner);
+        _inner = inner as IResourceCommandDescriptor ?? throw new ArgumentException(
+            "The descriptor must support declarative command authoring.", nameof(inner));
         Resource = inner.Resource as RezolvrResource ?? throw new ArgumentException(
-            "The descriptor must wrap a RezolvrResource.",
-            nameof(inner));
+            "The descriptor must wrap a RezolvrResource.", nameof(inner));
     }
 
     public RezolvrResource Resource { get; }
-
     IApplicationResource IApplicationResourceDescriptor.Resource => Resource;
-
     public ResourcePlan? Plan => _inner.Plan;
-
     public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _inner.Dependencies;
+    public IReadOnlyList<IResourceCommand> Commands => _inner.Commands;
 
-    public IApplicationResourceDescriptor DependsOn(IApplicationResourceDescriptor resource)
+    public IResourceCommand AddCommand<TPayload>(string kind, string key, TPayload payload,
+        JsonTypeInfo<TPayload> typeInfo, bool optional = false) =>
+        _inner.AddCommand(kind, key, payload, typeInfo, optional);
+
+    public IRezolvrResourceDescriptor DependsOn(IApplicationResourceDescriptor resource)
     {
         _inner.DependsOn(resource);
         return this;
     }
 
-    public IApplicationResourceDescriptor DependsOn(
-        params IApplicationResourceDescriptor[] resources)
+    public IRezolvrResourceDescriptor DependsOn(params IApplicationResourceDescriptor[] resources)
     {
         _inner.DependsOn(resources);
         return this;
     }
+
+    IApplicationResourceDescriptor IApplicationResourceDescriptor.DependsOn(IApplicationResourceDescriptor resource) => DependsOn(resource);
+    IApplicationResourceDescriptor IApplicationResourceDescriptor.DependsOn(params IApplicationResourceDescriptor[] resources) => DependsOn(resources);
 }

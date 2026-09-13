@@ -31,3 +31,10 @@ Configuration-store verbs carry ordinary configuration values; secret commands a
 
 See [DESIGN.md](DESIGN.md) for identity, validation, ownership, external references, lifecycle,
 and NativeAOT boundaries; see the [package README](../README.md) for model and set composition.
+
+## Trust grant command options
+
+GatewayCommand carries an immutable AllowedCommandKinds list. Repeatable, comma-separated
+--allow options are valid only in trust-add mode. Absent or empty grants mean unrestricted kinds;
+trust-issue rejects the option. ApplicationModel parses and carries policy; the serving gateway
+enforces it on apply and delete. The CLI's --against option remains deferred.

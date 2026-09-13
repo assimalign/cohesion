@@ -9,6 +9,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Hosting.Resources;
+
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
 
 internal sealed class ConfigurationStoreRepository
@@ -17,6 +19,7 @@ internal sealed class ConfigurationStoreRepository
     private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string?>> _seeds;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, Dictionary<string, string?>> _values = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, NamespaceDeclaration> _declarations = new(StringComparer.Ordinal);
     private bool _initialized;
 
     internal ConfigurationStoreRepository(
@@ -48,7 +51,7 @@ internal sealed class ConfigurationStoreRepository
             Array.Sort(paths, StringComparer.Ordinal);
             for (int index = 0; index < paths.Length; index++)
             {
-                (string name, Dictionary<string, string?> values) = await ReadFileAsync(
+                (string name, Dictionary<string, string?> values, NamespaceDeclaration? declaration) = await ReadFileAsync(
                         paths[index],
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -56,6 +59,10 @@ internal sealed class ConfigurationStoreRepository
                 {
                     throw new InvalidDataException(
                         $"Configuration namespace '{name}' occurs in more than one durable document.");
+                }
+                if (declaration is not null)
+                {
+                    _declarations.Add(name, declaration);
                 }
             }
 
@@ -183,7 +190,70 @@ internal sealed class ConfigurationStoreRepository
         }
     }
 
-    private static async Task<(string Name, Dictionary<string, string?> Values)> ReadFileAsync(
+    internal async Task CreateNamespaceAsync(string name, string owner, IReadOnlyDictionary<string, string?> seed,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentNullException.ThrowIfNull(seed);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            EnsureInitialized();
+            if (_values.ContainsKey(name))
+            {
+                if (!_declarations.TryGetValue(name, out NamespaceDeclaration? existing))
+                {
+                    throw new ResourceCommandRejectedException($"configurationstore.add-namespace cannot claim existing namespace '{name}'; it was declared by the resource.");
+                }
+                if (existing.Owner != owner)
+                {
+                    throw new ResourceCommandRejectedException($"configurationstore.add-namespace key '{name}' belongs to owner '{existing.Owner}'; owner '{owner}' cannot overwrite it.");
+                }
+                if (existing.Seed.Count != seed.Count || existing.Seed.Any(pair =>
+                    !seed.TryGetValue(pair.Key, out string? value) || value != pair.Value))
+                {
+                    throw new ResourceCommandRejectedException($"configurationstore.add-namespace namespace '{name}' has a conflicting seed; delete the declaration before changing its seed.");
+                }
+                return;
+            }
+            var values = new Dictionary<string, string?>(seed, StringComparer.Ordinal);
+            var declaration = new NamespaceDeclaration(owner, new Dictionary<string, string?>(values, StringComparer.Ordinal));
+            await WriteFileAsync(name, values, cancellationToken, declaration).ConfigureAwait(false);
+            _values.Add(name, values);
+            _declarations.Add(name, declaration);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    internal async Task DeleteNamespaceAsync(string name, string owner, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            EnsureInitialized();
+            if (!_values.ContainsKey(name))
+            {
+                return;
+            }
+            if (!_declarations.TryGetValue(name, out NamespaceDeclaration? declaration) || declaration.Owner != owner)
+            {
+                throw new ResourceCommandRejectedException($"configurationstore.add-namespace owner '{owner}' cannot delete namespace '{name}' owned by '{declaration?.Owner ?? "the resource"}'.");
+            }
+            File.Delete(Path.Combine(_namespaceDirectory, GetFileName(name)));
+            _values.Remove(name);
+            _declarations.Remove(name);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private static async Task<(string Name, Dictionary<string, string?> Values, NamespaceDeclaration? Declaration)> ReadFileAsync(
         string path,
         CancellationToken cancellationToken)
     {
@@ -217,7 +287,22 @@ internal sealed class ConfigurationStoreRepository
                 }
             }
 
-            return (nameProperty.GetString()!, values);
+            NamespaceDeclaration? declaration = null;
+            if (root.TryGetProperty("declaration", out JsonElement declared))
+            {
+                string? owner = declared.GetProperty("owner").GetString();
+                if (string.IsNullOrWhiteSpace(owner))
+                {
+                    throw new InvalidDataException($"Configuration namespace document '{path}' has an invalid declaration owner.");
+                }
+                var seed = new Dictionary<string, string?>(StringComparer.Ordinal);
+                foreach (JsonProperty property in declared.GetProperty("seed").EnumerateObject())
+                {
+                    seed.Add(property.Name, property.Value.ValueKind == JsonValueKind.Null ? null : property.Value.GetString());
+                }
+                declaration = new NamespaceDeclaration(owner, seed);
+            }
+            return (nameProperty.GetString()!, values, declaration);
         }
         catch (JsonException exception)
         {
@@ -230,9 +315,11 @@ internal sealed class ConfigurationStoreRepository
     private async Task WriteFileAsync(
         string name,
         IReadOnlyDictionary<string, string?> values,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        NamespaceDeclaration? declaration = null)
     {
         string path = Path.Combine(_namespaceDirectory, GetFileName(name));
+        declaration ??= _declarations.GetValueOrDefault(name);
         string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
@@ -263,6 +350,18 @@ internal sealed class ConfigurationStoreRepository
                 }
 
                 writer.WriteEndObject();
+                if (declaration is not null)
+                {
+                    writer.WriteStartObject("declaration");
+                    writer.WriteString("owner", declaration.Owner);
+                    writer.WriteStartObject("seed");
+                    foreach ((string key, string? value) in declaration.Seed.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+                    {
+                        writer.WriteString(key, value);
+                    }
+                    writer.WriteEndObject();
+                    writer.WriteEndObject();
+                }
                 writer.WriteEndObject();
                 await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -285,6 +384,8 @@ internal sealed class ConfigurationStoreRepository
         byte[] hash = SHA256.HashData(encoded);
         return Convert.ToHexStringLower(hash) + ".json";
     }
+
+    private sealed record NamespaceDeclaration(string Owner, Dictionary<string, string?> Seed);
 
     private void EnsureInitialized()
     {

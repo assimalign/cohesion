@@ -111,11 +111,9 @@ secret reads, certificate reads, trust-grant enrollment, and the store's protoco
 under `/cohesion/v1`. Bootstrap Bearer credentials authenticate managed requests;
 credential verification and authorization remain in Hosting.
 
-The plane advertises `cohesion.trust.add`, the generic trust-grant upsert required to
-bootstrap per-application trusted issuers. The SecretStore-specific desired-state
-commands `secretstore.add-secret`, `secretstore.issue-certificate`, and
-`secretstore.enroll`, together with their typed descriptor verbs, remain item 31c work
-and are intentionally not advertised here.
+The plane accepts `cohesion.trust.add` for gateway trust bootstrap and the desired-state
+commands `secretstore.add-secret` and `secretstore.issue-certificate`. Only the two desired-state
+kinds are advertised in the SDK manifest. Enroll(platformStore) is deferred to item 31t.
 
 ## Security ownership
 
@@ -147,4 +145,44 @@ generation, SecretStore runtime dependency, or platform SDK dependency.
 - Client factories or remote protocol calls; those belong to `SecretStore.Client`.
 - Horizontal scaling or high availability before a replication and consensus
   protocol is implemented.
-- The `AddSecret`, `IssueCertificate`, and `Enroll` descriptor verbs before item 31c.
+- Automatic Platform enrollment before the item 31t certificate contract.
+
+## Declarative commands (item 31c)
+
+| Wire kind | Descriptor verb | Ownership key |
+|---|---|---|
+| `secretstore.add-secret` | `AddSecret` | secret path |
+| `secretstore.issue-certificate` | `IssueCertificate` | certificate name |
+
+Kinds use verb-noun kebab under the area prefix. The examples `rezolvr.record` and
+`identityhub.audience` in developer-experience design section 7 are illustrative; item 27's design
+rewrite should reflect the landed convention. Manifest commands remain bare JSON strings.
+Typed verbs validate argument shape and use source-generated JSON metadata. Build validates the
+advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
+The default control plane handles id replay and owner isolation; each area handler also accepts
+an identical reapplication with a different id. Conflicts return named Rejected details.
+
+AddSecret declarations carry only a source reference. `parameter:<name>` resolves through the
+gateway's existing parameter provider before delivery. `<resource>:<key>` uses the existing store
+resolver and requires a declared dependency and an available source endpoint. `literal:<value>`
+is rejected during declaration construction: literal secret material never enters the desired
+model, deterministic id or manifest. Only the transient delivery envelope contains resolved bytes;
+the protected repository stores the value and source together. An unresolved source is a named
+Rejected result. Original source-only commands remain the gateway's declaration ledger.
+
+IssueCertificate honors the supplied subject and SAN set. An existing certificate with different
+identity is rejected until deleted; renewal preserves its identity. Private key and leaf storage
+reuse the existing protected CA repository.
+
+The control plane also accepts `cohesion.trust.add`, which the SDK manifest deliberately does not
+advertise. It is the gateway-owned trust channel through IGatewayStoreClient, never a Build-declared
+application command. Trust keeps owner `issuer@subject`, POST-only behavior, empty 204 success,
+empty 409 conflict and existing 403 authorization refusals. New commands use owner `issuer`, accept
+POST and DELETE, return 200 application/octet-stream on success, and JSON `{status,detail}` refusals.
+The client accepts empty successful responses as Applied (Deleted for DELETE); legacy SendCommandAsync
+continues to work. This owner split lets local gateway declarations authenticate end to end.
+
+Restricted trust grants accept `{trustKey,allowedCommandKinds}` while unrestricted grants retain
+the bare JWK payload. The protected trust document round-trips the optional string array; absent
+or empty means every command kind is allowed. Enroll(platformStore) is deferred to item 31t:
+automatic Platform enrollment needs a gateway-owned mediator and Platform-audience signer.

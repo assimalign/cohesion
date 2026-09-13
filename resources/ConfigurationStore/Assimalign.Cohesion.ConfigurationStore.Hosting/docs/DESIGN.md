@@ -67,3 +67,24 @@ remove-value declaration releases ownership without restoring an undeclared hist
 The shared command ledger is invocation-local and does not persist ownership across resource restarts.
 The repository still durably stores values. Cross-application delegation is not inferred from a
 local issuer's bootstrap credential; the existing issuer/owner guard remains enforced.
+
+## Declarative commands (item 31c)
+
+| Wire kind | Descriptor verb | Ownership key |
+|---|---|---|
+| `configurationstore.add-namespace` | `AddNamespace` | namespace name |
+
+Kinds use verb-noun kebab under the area prefix. The examples `rezolvr.record` and
+`identityhub.audience` in developer-experience design section 7 are illustrative; item 27's design
+rewrite should reflect the landed convention. Manifest commands remain bare JSON strings.
+Typed verbs validate argument shape and use source-generated JSON metadata. Build validates the
+advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
+The default control plane handles id replay and owner isolation; each area handler also accepts
+an identical reapplication with a different id. Conflicts return named Rejected details.
+
+AddNamespace creates a namespace if absent and atomically stores its owner and original seed
+alongside values. An identical declaration succeeds even after separate value commands change its
+contents. A different seed or foreign owner is rejected with a named detail. Resource-seeded namespaces
+are not implicitly adopted. Deletion removes the owned namespace; callers should remove its value
+commands first. Existing SetValue and RemoveValue behavior remains unchanged, including 404 for
+unknown namespaces.

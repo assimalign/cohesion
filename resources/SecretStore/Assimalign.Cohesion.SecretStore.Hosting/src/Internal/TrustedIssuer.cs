@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Buffers.Text;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -12,7 +13,8 @@ internal sealed class TrustedIssuer
     internal TrustedIssuer(
         string owner,
         string issuer,
-        JsonElement publicKey)
+        JsonElement publicKey,
+        IReadOnlyList<string>? allowedCommandKinds = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
         ArgumentException.ThrowIfNullOrWhiteSpace(issuer);
@@ -109,6 +111,11 @@ internal sealed class TrustedIssuer
         Issuer = issuer;
         PublicKey = publicKey.Clone();
         KeyId = keyId;
+        AllowedCommandKinds = Array.AsReadOnly((allowedCommandKinds ?? []).Select(static kind =>
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(kind);
+            return kind;
+        }).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray());
     }
 
     internal string Owner { get; }
@@ -118,6 +125,19 @@ internal sealed class TrustedIssuer
     internal string KeyId { get; }
 
     internal JsonElement PublicKey { get; }
+    internal IReadOnlyList<string> AllowedCommandKinds { get; }
+
+    internal static IReadOnlyList<string> ReadAllowedCommandKinds(JsonElement entry)
+    {
+        if (!entry.TryGetProperty("allowedCommandKinds", out JsonElement kinds)) { return []; }
+        if (kinds.ValueKind != JsonValueKind.Array)
+        {
+            throw new ArgumentException("allowedCommandKinds must be a string array.");
+        }
+        return kinds.EnumerateArray().Select(static value =>
+            value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
+                ? value.GetString()! : throw new ArgumentException("allowedCommandKinds entries must be nonblank strings.")).ToArray();
+    }
 
     private static string RequiredString(JsonElement key, string name)
     {
