@@ -1,6 +1,8 @@
 ﻿using System;
 using static System.Buffers.Binary.BinaryPrimitives;
 
+using Assimalign.IO;
+
 namespace Assimalign.Cohesion.Files.Bmff.Internal;
 
 internal sealed partial class BmffReaderDefault : BmffReader

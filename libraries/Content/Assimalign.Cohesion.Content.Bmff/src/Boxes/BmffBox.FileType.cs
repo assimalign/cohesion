@@ -3,6 +3,8 @@ using System.Diagnostics;
 using static System.Text.Encoding;
 using static System.Buffers.Binary.BinaryPrimitives;
 
+using Assimalign.IO;
+
 namespace Assimalign.Cohesion.Files.Bmff;
 
 
