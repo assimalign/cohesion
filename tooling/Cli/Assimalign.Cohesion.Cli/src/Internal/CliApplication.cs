@@ -145,6 +145,10 @@ internal sealed class CliApplication(
     {
         string? projectOption = args.TakeValue("--project");
         string? gateway = args.TakeValue("--gateway");
+        Func<string, string?> readEnvironment = environment ?? Environment.GetEnvironmentVariable;
+        bool hasEnvironmentVariable =
+            !string.IsNullOrWhiteSpace(readEnvironment("COHESION_ENVIRONMENT"))
+            || !string.IsNullOrWhiteSpace(readEnvironment("DOTNET_ENVIRONMENT"));
         var mapped = new List<string>();
         if (gateway is not null)
         {
@@ -153,6 +157,33 @@ internal sealed class CliApplication(
         if (verb == "deploy")
         {
             mapped.AddRange(["--mode", "apply"]);
+        }
+        if (verb == "run" && !hasEnvironmentVariable)
+        {
+            string[] remaining = args.Remaining;
+            bool hasEnvironmentArgument = Array.Exists(remaining, argument =>
+                string.Equals(argument, "--environment", StringComparison.OrdinalIgnoreCase)
+                || argument.StartsWith("--environment=", StringComparison.OrdinalIgnoreCase));
+            // Passthrough options retain the gateway parser's last-value precedence.
+            string? effectiveGateway = gateway;
+            for (int index = 0; index < remaining.Length; index++)
+            {
+                string argument = remaining[index];
+                if (string.Equals(argument, "--gateway", StringComparison.OrdinalIgnoreCase))
+                {
+                    effectiveGateway = index + 1 < remaining.Length ? remaining[++index] : string.Empty;
+                }
+                else if (argument.StartsWith("--gateway=", StringComparison.OrdinalIgnoreCase))
+                {
+                    effectiveGateway = argument["--gateway=".Length..];
+                }
+            }
+            if (!hasEnvironmentArgument && (effectiveGateway is null
+                || string.Equals(effectiveGateway, "local", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(effectiveGateway, "inprocess", StringComparison.OrdinalIgnoreCase)))
+            {
+                mapped.AddRange(["--environment", "Local"]);
+            }
         }
         if (verb == "trust")
         {
@@ -198,7 +229,9 @@ internal sealed class CliApplication(
         string project = GatewayDiscovery.ResolveProject(workingDirectory, projectOption);
         // SDK 10.0.401 retains the caller's cwd in the verified dotnet-run probe.
         // Set it explicitly so gateway state and relative arguments are project-local.
-        return processes.RunAsync("dotnet", ["run", "--project", project, "--", .. mapped, .. args.Remaining],
+        // dotnet launch profiles override inherited variables; preserve an explicit shell environment.
+        string[] launchOptions = hasEnvironmentVariable ? ["--no-launch-profile"] : [];
+        return processes.RunAsync("dotnet", ["run", "--project", project, .. launchOptions, "--", .. mapped, .. args.Remaining],
             Path.GetDirectoryName(project)!, cancellationToken);
     }
 

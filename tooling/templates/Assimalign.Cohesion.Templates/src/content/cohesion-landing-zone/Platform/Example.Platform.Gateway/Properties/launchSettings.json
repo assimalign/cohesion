@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Example.Platform.Gateway": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "COHESION_ENVIRONMENT": "Local"
+      }
+    }
+  }
+}

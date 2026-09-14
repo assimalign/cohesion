@@ -20,6 +20,47 @@ public class ExecutableApplicationModelResolverTests
     private const string ArgumentsPathVariable = "COHESION_APPLICATION_MODEL_ARGUMENTS_PATH";
     private const string DescendantPidPathVariable = "COHESION_APPLICATION_MODEL_DESCENDANT_PID_PATH";
 
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - ControlPlane resolver selects executable only for Local")]
+    [InlineData(AppEnvironment.Keys.Local, "member")]
+    [InlineData("local", "member")]
+    [InlineData(AppEnvironment.Keys.Development, "deployed")]
+    [InlineData(AppEnvironment.Keys.Staging, "deployed")]
+    [InlineData(AppEnvironment.Keys.Production, "deployed")]
+    public async Task ResolveAsync_ControlPlaneEnvironment_ShouldChooseLocalExecutableOrDeployedExport(string environment, string expected)
+    {
+        // Arrange
+        string root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), $"cohesion-resolver-{Guid.NewGuid():N}")).FullName;
+        string describePath = Path.Combine(root, "describe.json");
+        string exportPath = Path.Combine(root, "export.json");
+        CreateMemberModel(realize: false).Save(describePath);
+        IApplicationBuilder deployed = Application.CreateBuilder("deployed", ["--environment", environment]).UseGateway(new FakeGateway("local"));
+        deployed.AddResource(new FakeResource("worker"));
+        ApplicationExportDocument.Create(deployed.Build().Model, "1").Save(exportPath);
+        string? originalDocument = Environment.GetEnvironmentVariable(DescribeDocumentPathVariable);
+        Environment.SetEnvironmentVariable(DescribeDocumentPathVariable, describePath);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        try
+        {
+            IApplicationModelResolver resolver = ApplicationModelResolvers.ControlPlane(TestHostPath, exportPath);
+            var context = new ApplicationModelResolutionContext(
+                Application.CreateBuilder(["--environment", environment]).Environment,
+                GatewayRunMode.Apply,
+                "local");
+
+            // Act
+            IApplicationModel model = await resolver.ResolveAsync(context, cancellation.Token);
+
+            // Assert
+            model.Name.ToString().ShouldBe(expected);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(DescribeDocumentPathVariable, originalDocument);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Executable resolver re-describes only externals owned by that member")]
     public async Task ResolveAsync_RealizeNamesSpanMembers_ShouldForwardOnlyMatchingExternal()
     {
@@ -43,7 +84,7 @@ public class ExecutableApplicationModelResolverTests
         try
         {
             IApplicationEnvironment environment = Application.CreateBuilder(
-                ["--environment=Development"]).Environment;
+                ["--environment=Local"]).Environment;
             var context = new ApplicationModelResolutionContext(
                 environment,
                 GatewayRunMode.Apply,
@@ -87,7 +128,7 @@ public class ExecutableApplicationModelResolverTests
         try
         {
             IApplicationEnvironment environment = Application.CreateBuilder(
-                ["--environment=Development"]).Environment;
+                ["--environment=Local"]).Environment;
             var context = new ApplicationModelResolutionContext(
                 environment,
                 GatewayRunMode.Apply,
@@ -133,7 +174,7 @@ public class ExecutableApplicationModelResolverTests
         try
         {
             IApplicationEnvironment environment = Application.CreateBuilder(
-                ["--environment=Development"]).Environment;
+                ["--environment=Local"]).Environment;
             var context = new ApplicationModelResolutionContext(
                 environment,
                 GatewayRunMode.Apply,
@@ -188,8 +229,8 @@ public class ExecutableApplicationModelResolverTests
             peer,
             [peer]);
         string[] args = realize
-            ? ["--environment=Development", "--realize=peer-api"]
-            : ["--environment=Development"];
+            ? ["--environment=Local", "--realize=peer-api"]
+            : ["--environment=Local"];
         IApplicationBuilder builder = Application.CreateBuilder(
                 ApplicationName.Parse("member"),
                 args)

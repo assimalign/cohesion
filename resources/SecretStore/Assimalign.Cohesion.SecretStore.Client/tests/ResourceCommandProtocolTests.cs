@@ -39,7 +39,7 @@ public sealed class ResourceCommandProtocolTests
         var endpoint = new Uri($"http://127.0.0.1:{((IPEndPoint)port.LocalEndpoint).Port}");
         port.Stop();
         var address = new Uri(endpoint, "/cohesion/v1");
-        var context = new ResourceContext("appa", "resource", "Development", "local", data,
+        var context = new ResourceContext("appa", "resource", AppEnvironment.Keys.Local, "local", data,
             new Dictionary<string, Uri> { ["api"] = endpoint },
             new Dictionary<string, ResourceMount>
             {

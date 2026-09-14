@@ -19,8 +19,12 @@ namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Tests;
 
 public sealed class ConfigurationStoreGatewayIntegrationTests
 {
-    [Fact(DisplayName = "Cohesion Test [ConfigurationStore.Hosting] - Gateway mount: default store client resolves a namespace from the real host")]
-    public async Task StartAsync_WithConfigurationMount_ShouldResolveNamespaceThroughRealHost()
+    [Theory(DisplayName = "Cohesion Test [ConfigurationStore.Hosting] - Gateway mount: loopback HTTP resolution is Local-only")]
+    [InlineData(AppEnvironment.Keys.Local, true)]
+    [InlineData(AppEnvironment.Keys.Development, false)]
+    public async Task StartAsync_WithLoopbackConfigurationMount_ShouldEnforceLocalTransport(
+        string environmentName,
+        bool expectedResolved)
     {
         // Arrange
         string temporaryRoot = CreateTemporaryDirectory();
@@ -42,7 +46,7 @@ public sealed class ConfigurationStoreGatewayIntegrationTests
 
         IApplicationBuilder builder = Application.CreateBuilder(
                 ApplicationName.Parse("appa"),
-                ["--environment", "Development"])
+                ["--environment", environmentName])
             .UseGateway(gateway);
         IApplicationResourceDescriptor configuration = builder.AddConfigurationStore(
             CreateConfigurationManifest());
@@ -53,7 +57,7 @@ public sealed class ConfigurationStoreGatewayIntegrationTests
         try
         {
             // Act
-            await gatewayControl.StartAsync(model);
+            await gatewayControl.StartAsync(model, CancellationToken.None);
 
             // Assert
             ResourceInputs configurationInputs = controller.ConfigurationInputs.ShouldNotBeNull();
@@ -62,9 +66,20 @@ public sealed class ConfigurationStoreGatewayIntegrationTests
 
             ResourceInputs consumerInputs = controller.ConsumerInputs.ShouldNotBeNull();
             ResourceMountInput mount = consumerInputs.Mounts["features"];
-            mount.IsResolved.ShouldBeTrue();
-            Encoding.UTF8.GetString(mount.Content.Span)
-                .ShouldBe("{\"alpha\":\"on\",\"zeta\":null}");
+            mount.IsResolved.ShouldBe(expectedResolved);
+            if (expectedResolved)
+            {
+                mount.UnresolvedReason.ShouldBeNull();
+                Encoding.UTF8.GetString(mount.Content.Span)
+                    .ShouldBe("{\"alpha\":\"on\",\"zeta\":null}");
+            }
+            else
+            {
+                mount.Content.IsEmpty.ShouldBeTrue();
+                mount.UnresolvedReason.ShouldNotBeNull()
+                    .ShouldContain("refuses to send a bearer credential", Case.Sensitive);
+                mount.UnresolvedReason.ShouldContain("loopback HTTP in Local", Case.Sensitive);
+            }
         }
         finally
         {

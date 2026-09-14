@@ -382,6 +382,11 @@ increasing precedence order:
    removed and double underscores become configuration path separators);
 4. command-line arguments.
 
+The environment file name remains generic: `Local` selects `appsettings.Local.json`,
+and `Development` selects `appsettings.Development.json`. `Local` denotes a developer
+machine; `Development` denotes a deployable environment. Neither file is an alias for
+the other, and the unset environment default remains `Production`.
+
 The JSON files resolve from the ambient `Hosting.Resources`
 `ResourceContext.ContentRootPath` for an
 enabled resource and from `AppContext.BaseDirectory` otherwise. An in-process

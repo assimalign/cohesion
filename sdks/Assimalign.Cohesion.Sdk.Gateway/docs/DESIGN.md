@@ -126,7 +126,7 @@ is:
 | `RequiresJit` | Whether including the provider makes the gateway executable ineligible for NativeAOT. |
 
 `UseGateway(args)` honors the builder's parsed request, then `COHESION_GATEWAY`, then the
-Development-only Local default. Unknown or unavailable providers fail with the generated
+Local-only Local default. Unknown or unavailable providers fail with the generated
 set of valid names. The overload taking `Action<CohesionGatewayProviders>` executes only
 the callback for the selected provider. After common arguments are applied, generated code
 calls the selected provider's optional `CommandLineApplyMethod` with the original, unfiltered

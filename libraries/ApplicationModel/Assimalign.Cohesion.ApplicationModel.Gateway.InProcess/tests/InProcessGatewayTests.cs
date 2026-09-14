@@ -1603,6 +1603,8 @@ public sealed class InProcessGatewayTests
     {
         public EnvironmentName Name => (EnvironmentName)"Testing";
 
+        public bool IsLocal => false;
+
         public bool IsDevelopment => false;
     }
 

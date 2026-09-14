@@ -254,17 +254,17 @@ public sealed partial class ResourceContext
         };
     }
 
-    /// <summary>Creates a temporary self-signed server identity for loopback Development hosting.</summary>
+    /// <summary>Creates a temporary self-signed server identity for loopback Local hosting.</summary>
     /// <param name="host">A loopback IP address or localhost.</param>
     /// <returns>The certificate and private key, owned by the caller.</returns>
-    /// <exception cref="InvalidOperationException">The context is not loopback Development.</exception>
+    /// <exception cref="InvalidOperationException">The context is not loopback Local.</exception>
     public X509Certificate2 CreateDevelopmentEndpointCertificate(string host)
     {
         bool localhost = string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase);
         bool loopback = localhost || (IPAddress.TryParse(host, out IPAddress? address) && IPAddress.IsLoopback(address));
-        if (!loopback || !string.Equals(EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase))
+        if (!loopback || !string.Equals(EnvironmentName, AppEnvironment.Keys.Local, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Development endpoint certificates require a loopback Development resource.");
+            throw new InvalidOperationException("Local endpoint certificates require a loopback Local resource.");
         }
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var request = new CertificateRequest($"CN={host}", key, HashAlgorithmName.SHA256);

@@ -5,6 +5,10 @@ run the resources as supervised processes, or InProcess to run both inside the g
 ordinary executables with a `Program.cs`, and each opts in to orchestration with one csproj line so `Acme.Gateway` can
 reference it.
 
+Each project's `Properties/launchSettings.json` selects environment `Local` for developer-machine
+runs. Development uses strict deployed security. Use `dotnet run --no-launch-profile` when
+selecting an environment through shell variables so launch settings do not override them.
+
 ```bash
 dotnet run --project Acme.Gateway -- --gateway local --mode run      # two supervised processes
 dotnet run --project Acme.Gateway -- --gateway inprocess --mode run  # one process; one ResourceContext per resource

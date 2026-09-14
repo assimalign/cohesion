@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.IdentityHub;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting.Tests;
@@ -16,10 +17,14 @@ namespace Assimalign.Cohesion.IdentityHub.Hosting.Tests;
 public sealed class IdentityHubTransportSecurityTests
 {
     [Theory(DisplayName = "Cohesion Test [IdentityHub.Hosting] - Transport security: unsafe certificate and plaintext fallbacks are rejected")]
-    [InlineData("Production", "https://127.0.0.1:8443", "tls")]
-    [InlineData("Development", "https://0.0.0.0:8443", "tls")]
-    [InlineData("Production", "http://127.0.0.1:8443", "plaintext")]
-    [InlineData("Development", "http://0.0.0.0:8443", "plaintext")]
+    [InlineData(AppEnvironment.Keys.Production, "https://127.0.0.1:8443", "tls")]
+    [InlineData(AppEnvironment.Keys.Development, "https://127.0.0.1:8443", "tls")]
+    [InlineData(AppEnvironment.Keys.Development, "https://0.0.0.0:8443", "tls")]
+    [InlineData(AppEnvironment.Keys.Local, "https://0.0.0.0:8443", "tls")]
+    [InlineData(AppEnvironment.Keys.Production, "http://127.0.0.1:8443", "plaintext")]
+    [InlineData(AppEnvironment.Keys.Development, "http://127.0.0.1:8443", "plaintext")]
+    [InlineData(AppEnvironment.Keys.Development, "http://0.0.0.0:8443", "plaintext")]
+    [InlineData(AppEnvironment.Keys.Local, "http://0.0.0.0:8443", "plaintext")]
     public void Build_WithoutConfiguredTransportSecurity_ShouldRejectUnsafeEndpoint(
         string environmentName,
         string endpointValue,
@@ -40,8 +45,38 @@ public sealed class IdentityHubTransportSecurityTests
         exception.Message.ShouldContain(expectedMessage, Case.Insensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [IdentityHub.Hosting] - TLS mount: production serves the mounted certificate and omits local device approval")]
-    public async Task Start_WithMountedTlsCertificate_ShouldServeCertificateAndDisableDevelopmentApproval()
+    [Theory(DisplayName = "Cohesion Test [IdentityHub.Hosting] - Local TLS: loopback permits the self-signed fallback")]
+    [InlineData(AppEnvironment.Keys.Local)]
+    [InlineData("local")]
+    public async Task StartAsync_WithLocalLoopbackAndNoCertificate_ShouldUseSelfSignedFallback(string environmentName)
+    {
+        // Arrange
+        using var data = new TemporaryDirectory();
+        Uri httpEndpoint = IdentityHubTestHost.GetEndpoint();
+        var endpoint = new Uri($"https://127.0.0.1:{httpEndpoint.Port}", UriKind.Absolute);
+        await using IIdentityHubApplication application = IdentityHubTestHost.CreateBuilder(
+            data.Path,
+            endpoint,
+            environmentName: environmentName).Build();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // Act
+        await application.StartAsync(timeout.Token);
+        try
+        {
+            // Assert
+            application.Context.State.ShouldBe(HostState.Started);
+        }
+        finally
+        {
+            await application.StopAsync(timeout.Token);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [IdentityHub.Hosting] - TLS mount: deployable environments serve the mounted certificate and omit Local device approval")]
+    [InlineData(AppEnvironment.Keys.Development)]
+    [InlineData(AppEnvironment.Keys.Production)]
+    public async Task StartAsync_WithMountedTlsCertificate_ShouldServeCertificateAndDisableLocalApproval(string environmentName)
     {
         // Arrange
         using var data = new TemporaryDirectory();
@@ -51,7 +86,7 @@ public sealed class IdentityHubTransportSecurityTests
         IIdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(
             data.Path,
             endpoint,
-            environmentName: "Production",
+            environmentName: environmentName,
             tlsCertificate: certificate.Mount);
         await using IIdentityHubApplication application = builder.Build();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));

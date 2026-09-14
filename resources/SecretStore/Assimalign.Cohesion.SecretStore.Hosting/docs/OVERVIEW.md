@@ -29,7 +29,7 @@ protocol served on the resource's `api` endpoint.
 Endpoint precedence is registered-control-plane observation, ambient `api`, `--endpoint`, then
 `https://127.0.0.1:8443`. Data-path precedence is ambient `data` mount, `--data`, then
 `<content-root>/data`. Plaintext HTTP is permitted only on loopback in
-`Development`. A standalone host has no bootstrap credential and therefore may bind only to
+`Local`. A standalone host has no bootstrap credential and therefore may bind only to
 loopback, including when it uses HTTPS.
 
 Builder-declared secrets seed missing durable entries. `AddCertificateAuthority` controls the
@@ -45,7 +45,7 @@ external KMS/wrapping-key integration and protected-record rewrap migration rema
 The configured Platform enrollment endpoint is not called automatically. A gateway/operator must
 drive the three enrollment routes, deliver trust grants, and provide an out-of-band root for the
 first HTTPS connection. A pending child also cannot start that HTTPS listener before it owns an
-enrolled or provisional transport identity; the loopback HTTP enrollment path is Development-only.
+enrolled or provisional transport identity; the loopback HTTP enrollment path is Local-only.
 `certs/public`/ACME issuance and gateway `parameter:` certificate mounts are also not implemented
 by this host. See [DESIGN.md](./DESIGN.md) for the exact routes and bootstrap boundary.
 

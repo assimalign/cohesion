@@ -33,7 +33,7 @@ public sealed class ResourceControlPlaneTests
         using var identity = new TestBootstrapIdentity("tests", "gateway");
         string token = identity.Issue("resource");
         var resource = new ResourceContext(
-            applicationName: "tests", resourceName: "resource", environmentName: "Development",
+            applicationName: "tests", resourceName: "resource", environmentName: AppEnvironment.Keys.Local,
             gatewayName: managed ? "gateway" : null, contentRootPath: null, mounts: null, settings: null, references: null, ambientValues: null,
             endpoints: new Dictionary<string, Uri> { ["query"] = endpoint },
             bootstrapCredential: managed ? Encoding.UTF8.GetBytes(token) : ReadOnlyMemory<byte>.Empty,
@@ -88,17 +88,48 @@ public sealed class ResourceControlPlaneTests
         await application.StopAsync(CancellationToken.None);
     }
 
-    [Theory(DisplayName = "Cohesion Test [LogSpace.Hosting] - HTTPS: Missing certificate fails closed outside loopback Development")]
-    [InlineData("Production", "127.0.0.1")]
-    [InlineData("Development", "0.0.0.0")]
-    public void Build_MissingCertificate_ShouldFailClosed(string environment, string host)
+    [Theory(DisplayName = "Cohesion Test [LogSpace.Hosting] - HTTPS: Missing certificate fails closed outside loopback Local")]
+    [InlineData(AppEnvironment.Keys.Production, "127.0.0.1", "query")]
+    [InlineData(AppEnvironment.Keys.Development, "127.0.0.1", "query")]
+    [InlineData(AppEnvironment.Keys.Development, "0.0.0.0", "query")]
+    [InlineData(AppEnvironment.Keys.Local, "0.0.0.0", "query")]
+    [InlineData(AppEnvironment.Keys.Production, "127.0.0.1", "otlp")]
+    [InlineData(AppEnvironment.Keys.Development, "127.0.0.1", "otlp")]
+    [InlineData(AppEnvironment.Keys.Development, "0.0.0.0", "otlp")]
+    [InlineData(AppEnvironment.Keys.Local, "0.0.0.0", "otlp")]
+    public void Build_MissingCertificate_ShouldFailClosed(string environment, string host, string endpointName)
     {
+        // Arrange
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             environmentName: environment,
-            endpoints: new Dictionary<string, Uri> { ["query"] = Uri.CreateEndpoint("https", host, 8443) }));
+            endpoints: new Dictionary<string, Uri> { [endpointName] = Uri.CreateEndpoint("https", host, 8443) }));
         ILogSpaceApplicationBuilder builder = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly);
+
+        // Act
         InvalidOperationException error = Should.Throw<InvalidOperationException>(() => builder.Build());
-        error.Message.ShouldContain("tls");
+
+        // Assert
+        error.Message.ShouldContain("tls", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [LogSpace.Hosting] - Local HTTPS: loopback permits self-signed certificates for query and OTLP")]
+    [InlineData(AppEnvironment.Keys.Local, "query")]
+    [InlineData("local", "query")]
+    [InlineData(AppEnvironment.Keys.Local, "otlp")]
+    [InlineData("local", "otlp")]
+    public async Task Build_WithLocalLoopbackAndNoCertificate_ShouldUseSelfSignedFallback(string environment, string endpointName)
+    {
+        // Arrange
+        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
+            environmentName: environment,
+            endpoints: new Dictionary<string, Uri> { [endpointName] = Uri.CreateEndpoint("https", "127.0.0.1", 8443) }));
+        ILogSpaceApplicationBuilder builder = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly);
+
+        // Act
+        await using ILogSpaceApplication application = builder.Build();
+
+        // Assert
+        application.Context.HostedServices.ShouldNotBeEmpty();
     }
 
     private static ILogSpaceApplicationBuilder CreateBuilder(Assembly assembly)

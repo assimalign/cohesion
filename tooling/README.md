@@ -32,7 +32,17 @@ Unknown child arguments retain their spelling and order. The first `--` separate
 from passthrough and is consumed by the wrapper. Local commands (`parameter`, `status`,
 `login`) reject surplus arguments because they have no child process to receive them.
 Gateway names are never validated here. Omitting `--gateway` preserves the gateway's
-`COHESION_GATEWAY` fallback and its `local` default in Development.
+`COHESION_GATEWAY` fallback and its `local` default in Local.
+
+`run` appends `--environment Local` only when neither an explicit `--environment` argument
+(including passthrough and equals forms) nor a nonblank `COHESION_ENVIRONMENT` or
+`DOTNET_ENVIRONMENT` exists, and the selected gateway is absent, `local` or `inprocess`.
+Explicit provider and environment comparisons are case-insensitive. Docker, Kubernetes,
+custom gateways, `deploy` and `trust` do not receive this convenience argument.
+Gateway commands add `dotnet run --no-launch-profile` when either shell environment variable
+is nonblank, because a launch profile would otherwise override the inherited value.
+Local is the developer-machine environment; Development is an ordinary deployed environment
+with strict security requirements. The framework's unset default remains Production.
 
 The shipped `new` names are:
 
@@ -88,7 +98,7 @@ The CLI opens only the files needed by the selected command.
 | `.state/owner` | Reads the gateway owner identity. |
 | `.state/<resource>/pid` | Checks a running process against both `processId` and `startTimeUtcTicks`; a reused PID does not prove liveness. |
 | `parameters.json` | `parameter` reads/writes a JSON object containing string values only; `list` prints names, never values. |
-| `trust/trusted-issuers.json` | Owned by the gateway: `trust add` may write this **Development-only fallback** through the child command. The CLI does not open it. |
+| `trust/trusted-issuers.json` | Owned by the gateway: `trust add` may write this **Local-only fallback** through the child command. The CLI does not open it. |
 | `.state/gateway.lock` | Owned by the gateway; the CLI does not open it. |
 | `trust/<gateway>/**` | The gateway's private key and key ring are **never read, copied or printed by the CLI**. |
 
@@ -100,8 +110,8 @@ Writers should be serialized by the caller; simultaneous read-modify-write opera
 do not implement a transaction or cross-process merge.
 
 For `trust add`, the gateway stores the grant in the application's **own SecretStore first**.
-The local trusted-issuers file is used only in Development when no own store endpoint is
-reachable, or when the store call fails in Development. Outside Development the gateway
+The local trusted-issuers file is used only in Local when no own store endpoint is
+reachable, or when the store call fails in Local. Outside Local the gateway
 rejects that fallback. The operation registers the peer's public gateway key on the
 application that must verify it.
 
@@ -115,11 +125,11 @@ live-status tokens.
 
 ## IdentityHub login and deferred work
 
-IdentityHub currently advertises device authorization only for a Development hub bound to
+IdentityHub currently advertises device authorization only for a Local hub bound to
 loopback. If discovery omits it, `login` fails with that explanation. Approval instructions
 (the complete verification URL and user code) go to stderr. Polling honors `interval`,
 `authorization_pending`, `slow_down` (+5 seconds), expiration and access denial. Credentials
-require HTTPS except for a loopback Development hub; redirects are not followed.
+require HTTPS except for a loopback Local hub; redirects are not followed.
 
 **Proposed credential contract, for item 27 (`L01.01.02.13`, #972) to pin:** login stores
 `{ access_token, token_type, expires_at, issuer }` in

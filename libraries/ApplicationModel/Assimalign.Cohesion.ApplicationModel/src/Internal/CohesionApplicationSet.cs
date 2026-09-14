@@ -158,10 +158,10 @@ internal sealed class CohesionApplicationSet : IApplicationSet
             return;
         }
 
-        if (!Environment.IsDevelopment)
+        if (!Environment.IsLocal)
         {
             throw new InvalidOperationException(
-                "--realize is Development-only and cannot be used in this application environment.");
+                "--realize is Local-only and cannot be used in this application environment.");
         }
 
         string gateway = _gateway.Name.ToString();
@@ -171,7 +171,7 @@ internal sealed class CohesionApplicationSet : IApplicationSet
         {
             throw new InvalidOperationException(
                 $"Gateway '{gateway}' cannot honor --realize. " +
-                "Use the Local, InProcess, or Docker gateway in Development.");
+                "Use the Local, InProcess, or Docker gateway in Local.");
         }
     }
 

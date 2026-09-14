@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Example.AppA.Spa": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "COHESION_ENVIRONMENT": "Local"
+      }
+    }
+  }
+}

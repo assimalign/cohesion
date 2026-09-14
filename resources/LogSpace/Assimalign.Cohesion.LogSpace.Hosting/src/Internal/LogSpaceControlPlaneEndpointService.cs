@@ -51,14 +51,14 @@ internal sealed class LogSpaceControlPlaneEndpointService : IHostService, IDispo
             chain.CopyTo(_serverCertificateChain, 0);
             certificate = SslStreamCertificateContext.Create(_serverCertificate, chain, offline: true);
         }
-        else if (string.Equals(resourceContext.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) && IPAddress.IsLoopback(address))
+        else if (string.Equals(resourceContext.EnvironmentName, AppEnvironment.Keys.Local, StringComparison.OrdinalIgnoreCase) && IPAddress.IsLoopback(address))
         {
             _serverCertificate = resourceContext.CreateDevelopmentEndpointCertificate(endpoint.IdnHost);
             certificate = SslStreamCertificateContext.Create(_serverCertificate, null, offline: true);
         }
         else
         {
-            throw new InvalidOperationException("LogSpace requires its certificate Secret mount (default 'tls') outside loopback Development.");
+            throw new InvalidOperationException("LogSpace requires its certificate Secret mount (default 'tls') outside loopback Local.");
         }
         builder.Server.UseServer(options => options.UseHttp1s(
             tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port),

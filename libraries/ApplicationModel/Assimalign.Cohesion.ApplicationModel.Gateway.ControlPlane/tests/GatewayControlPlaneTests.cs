@@ -320,7 +320,7 @@ public sealed partial class GatewayControlPlaneTests
         IApplicationBuilder builder = Application
             .CreateBuilder(
                 ApplicationName.Parse(application),
-                ["--environment", "Development"])
+                ["--environment", AppEnvironment.Keys.Local])
             .UseGateway(gateway);
         builder.AddResource(CreateManifest(application, "api", "test", 43110));
         if (includeUnsupportedResource)

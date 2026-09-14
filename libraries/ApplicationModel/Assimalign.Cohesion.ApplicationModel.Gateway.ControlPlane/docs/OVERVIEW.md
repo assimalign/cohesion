@@ -30,7 +30,7 @@ permits exactly those case-sensitive wire kinds. `--mode trust-add --peer peer -
 comma-separated values. --allow is rejected for trust-issue and other modes. The CLI forwards
 --allow but still rejects --against, whose endpoint-selection contract remains item #982.
 
-Development trusted-issuers.json and the SecretStore protected trust store both persist optional
+Local trusted-issuers.json and the SecretStore protected trust store both persist optional
 allowedCommandKinds arrays. Old documents remain unrestricted. Restricted SecretStore grants use
 {trustKey,allowedCommandKinds}; unrestricted grants retain the bare JWK protocol. Export returns
 the array to the gateway. AddTrustedIssuerAsync accepts the new collection while preserving the

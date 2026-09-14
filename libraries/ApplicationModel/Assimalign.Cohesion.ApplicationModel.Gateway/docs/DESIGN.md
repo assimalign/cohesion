@@ -40,6 +40,11 @@ surface needed for resolution, but **never** on an area's `*.Hosting` package. T
 concrete reference state manager is the signed-off, narrowly scoped exception to the repository's
 interface-first default; the interface remains the control-plane contract.
 
+`Local` alone enables developer-machine trust fallback, declared DevPort discovery, and
+loopback HTTP credential transport. `Development` is a strict deployed environment alongside
+Staging and Production. The persisted O32 development certificate issuer remains independent
+of this environment distinction.
+
 ## The generic algorithm (why the base owns it)
 
 `ApplicationGateway` implements `IApplicationGateway` **explicitly** and forwards to
@@ -243,19 +248,19 @@ is:
 
 Peer verification keys are `TrustedIssuer` records exposed through
 `ITrustedIssuerProvider`. The gateway reads `trusted-issuers.json` from **that application's
-own** `SecretStore`, using its observed running endpoint or, only in Development, its declared
+own** `SecretStore`, using its observed running endpoint or, only in Local, its declared
 local port and an audience-bound bootstrap credential. The gateway refreshes that snapshot before a
 reconciliation pass when the store is already observed and immediately after its own store first reaches
 `Running`, so later remote resources in the same pass can use newly loaded peer grants. The topological
 walk prefers the application's own store among otherwise independent roots while preserving its declared
 dependencies, preventing declaration order from placing first-pass remote resolution ahead of trust.
 Loading or storing a peer grant may fall back to the application-local trusted-issuers document
-only in Development. A definite not-found means that no peer grants exist yet outside
-Development; Development keeps its local fallback until the store contains a replacement
-document. Every other malformed or unavailable store read outside Development is fatal.
+only in Local. A definite not-found means that no peer grants exist yet outside
+Local; Local keeps its local fallback until the store contains a replacement
+document. Every other malformed or unavailable store read outside Local is fatal.
 Platform gateways resolve a
 stable native endpoint for one-shot trust commands through `TryResolveOwnSecretStoreEndpoint`;
-`trust-add` outside Development requires that own store. Refreshing peers never removes the
+`trust-add` outside Local requires that own store. Refreshing peers never removes the
 application's self key.
 
 The one-shot gateway command modes are the low-level surface used by later CLI wrappers:
@@ -266,8 +271,8 @@ The one-shot gateway command modes are the low-level surface used by later CLI w
 - `--mode trust-add --peer <peer> --from <file-or-https-uri>` validates that the peer name exactly
   matches the exported application and that the export contains its public JWK, then writes the
   grant to the **verifying application's** own `SecretStore`. A remote source requires an
-  authorization-configured `IControlPlaneClient`; plaintext HTTP is limited to Development
-  loopback. Only Development may use the local fallback document.
+  authorization-configured `IControlPlaneClient`; plaintext HTTP is limited to Local
+  loopback. Only Local may use the local fallback document.
 
 ### Opaque executable and container entry points
 
@@ -296,7 +301,7 @@ platform Kubernetes importer/exposure remains item 37.
 deterministic: application-registered overrides first, then the external controller, then the
 gateway's platform controllers. A plan with the `cohesion.external=true` hint is accepted by the
 external controller and receives an artifact-free `ExternalResourceArtifact`; `GatherAsync` is
-not called while it stays external. A Development `--realize` removes that hint, so the selected
+not called while it stays external. A Local `--realize` removes that hint, so the selected
 platform gathers and reconciles the resource like any other planned workload.
 
 On every reconcile pass the controller invokes the resource's `IExternalResourceResolver` with
@@ -441,7 +446,7 @@ permits exactly those case-sensitive wire kinds. `--mode trust-add --peer peer -
 comma-separated values. --allow is rejected for trust-issue and other modes. The CLI forwards
 --allow but still rejects --against, whose endpoint-selection contract remains item #982.
 
-Development trusted-issuers.json and the SecretStore protected trust store both persist optional
+Local trusted-issuers.json and the SecretStore protected trust store both persist optional
 allowedCommandKinds arrays. Old documents remain unrestricted. Restricted SecretStore grants use
 {trustKey,allowedCommandKinds}; unrestricted grants retain the bare JWK protocol. Export returns
 the array to the gateway. AddTrustedIssuerAsync accepts the new collection while preserving the
@@ -472,6 +477,6 @@ Certificates-only transport anchors are carried in ResourceInputs, materialized 
 
 ## Telemetry injection (31b)
 
-After resolving inputs, the gateway discovers a same-application Running LogSpace and its observed `otlp` HTTPS endpoint (or a Development DevPort once Running). It excludes LogSpace itself and external plans. The internal ResourceControlContext carries the resulting ResourceTelemetryInjection; controllers pass it explicitly into their compilation objects without changing ResourceInputs or the plan schema. Endpoint/protocol values use GatewayEnvironmentVariables and the canonical endpoint writer. Absence removes the variables and calls the generalized protected-file writer with empty content to delete `.state/telemetry.headers`.
+After resolving inputs, the gateway discovers a same-application Running LogSpace and its observed `otlp` HTTPS endpoint (or a Local DevPort once Running). It excludes LogSpace itself and external plans. The internal ResourceControlContext carries the resulting ResourceTelemetryInjection; controllers pass it explicitly into their compilation objects without changing ResourceInputs or the plan schema. Endpoint/protocol values use GatewayEnvironmentVariables and the canonical endpoint writer. Absence removes the variables and calls the generalized protected-file writer with empty content to delete `.state/telemetry.headers`.
 
 Emitter credentials are ES256 tokens with audience=LogSpace, subject=emitter and scope=telemetry. A separate `(application, sink, emitter)` cache prevents reuse of LogSpace's bootstrap credential. LogSpace requires that scope on ingest and rejects it on query and management routes. The headers document contains exactly one Authorization bearer line and uses the bootstrap protected-file carrier in both topologies. No inferred dependency is added: an earlier producer starts without telemetry, and a running process needs restart to consume newly prepared environment/header values. Bootstrap reads headers once; live credential-file reload remains outside this delivery. RemoteReference telemetry awaits a trusted named-OTLP endpoint and credential contract on IControlPlaneExternalResourceResolver.

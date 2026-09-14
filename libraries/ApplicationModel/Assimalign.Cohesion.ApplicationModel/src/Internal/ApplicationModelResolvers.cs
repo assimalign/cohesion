@@ -265,7 +265,7 @@ internal static class ApplicationModelResolverValidation
                 throw new InvalidOperationException(
                     $"--realize names external '{requested[requestIndex]}', but the imported export " +
                     "does not contain that resource as already realized. Use the referenced gateway " +
-                    "executable in Development so it can describe the realized closure.");
+                    "executable in Local so it can describe the realized closure.");
             }
         }
     }
@@ -273,14 +273,14 @@ internal static class ApplicationModelResolverValidation
 
 internal sealed class EnvironmentApplicationModelResolver : IApplicationModelResolver
 {
-    private readonly IApplicationModelResolver _development;
+    private readonly IApplicationModelResolver _local;
     private readonly IApplicationModelResolver _deployed;
 
     public EnvironmentApplicationModelResolver(
-        IApplicationModelResolver development,
+        IApplicationModelResolver local,
         IApplicationModelResolver deployed)
     {
-        _development = development;
+        _local = local;
         _deployed = deployed;
     }
 
@@ -289,7 +289,7 @@ internal sealed class EnvironmentApplicationModelResolver : IApplicationModelRes
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return (context.Environment.IsDevelopment ? _development : _deployed).ResolveAsync(
+        return (context.Environment.IsLocal ? _local : _deployed).ResolveAsync(
             context,
             cancellationToken);
     }

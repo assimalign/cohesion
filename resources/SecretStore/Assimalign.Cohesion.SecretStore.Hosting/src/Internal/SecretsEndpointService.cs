@@ -101,11 +101,11 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         }
 
         if (string.Equals(endpoint.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
-            (!string.Equals(resourceContext.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
+            (!string.Equals(resourceContext.EnvironmentName, AppEnvironment.Keys.Local, StringComparison.OrdinalIgnoreCase) ||
              !IPAddress.IsLoopback(bindAddress)))
         {
             throw new InvalidOperationException(
-                "A SecretStore permits plaintext HTTP only on loopback in Development.");
+                "A SecretStore permits plaintext HTTP only on loopback in Local.");
         }
 
         _basePath = endpoint.AbsolutePath == "/"

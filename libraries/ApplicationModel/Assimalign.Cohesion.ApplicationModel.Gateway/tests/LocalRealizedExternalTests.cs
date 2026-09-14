@@ -69,7 +69,7 @@ public class LocalRealizedExternalTests
             stopObserved);
         IApplicationBuilder builder = Application.CreateBuilder(
                 ApplicationName.Parse(ConsumerApplication),
-                ["--environment", "Development", "--realize", Resource])
+                ["--environment", AppEnvironment.Keys.Local, "--realize", Resource])
             .UseGateway(gateway);
         IApplicationResourceDescriptor external = builder.RemoteReference(
             declaration,
@@ -173,7 +173,7 @@ public class LocalRealizedExternalTests
             [manifest]);
         IApplicationBuilder builder = Application.CreateBuilder(
                 ApplicationName.Parse(ConsumerApplication),
-                ["--environment", "Development", "--realize", Resource])
+                ["--environment", AppEnvironment.Keys.Local, "--realize", Resource])
             .UseGateway(gateway);
         builder.RemoteReference(
             declaration,

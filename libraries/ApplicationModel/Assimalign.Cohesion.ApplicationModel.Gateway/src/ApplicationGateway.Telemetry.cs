@@ -50,7 +50,7 @@ public abstract partial class ApplicationGateway
                     return true;
                 }
             }
-            if (model.Environment.IsDevelopment)
+            if (model.Environment.IsLocal)
             {
                 foreach (ResourceManifestEndpoint declared in candidate.Endpoints)
                 {

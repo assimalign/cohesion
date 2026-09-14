@@ -38,12 +38,13 @@ internal static class SecretStoreTestHost
         ReadOnlyMemory<byte> applicationTrustKey = default,
         string? gatewayName = "local",
         string applicationName = "appa",
-        string resourceName = "secrets")
+        string resourceName = "secrets",
+        string environmentName = AppEnvironment.Keys.Local)
     {
         return new ResourceContext(
             applicationName,
             resourceName,
-            "Development",
+            environmentName,
             gatewayName,
             dataPath,
             new Dictionary<string, Uri> { ["api"] = endpoint },

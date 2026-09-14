@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.ApplicationModel;
 internal sealed class ApplicationBuilder : IApplicationBuilder
 {
     private readonly GatewayCommandLineOptions _options;
-    private readonly ApplicationEnvironment _environment;
+    private ApplicationEnvironment _environment;
     private readonly ApplicationResourceCollection _resources = new();
     private readonly List<ApplicationResourceDescriptor> _descriptors = new();
     private readonly Dictionary<ResourceName, (
@@ -139,6 +139,18 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
     {
         ArgumentNullException.ThrowIfNull(gateway);
         _gateway = gateway;
+        _environment = _options.Environment is null
+            ? ApplicationEnvironment.FromHost()
+            : ApplicationEnvironment.FromName(_options.Environment);
+        if (_options.Environment is null &&
+            string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable(AppEnvironment.Keys.EnvironmentKey)) &&
+            string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable(AppEnvironment.Keys.DotNetEnvironmentKey)) &&
+            (string.Equals(gateway.Name.ToString(), "local", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(gateway.Name.ToString(), "inprocess", StringComparison.OrdinalIgnoreCase)))
+        {
+            _environment = ApplicationEnvironment.FromName(AppEnvironment.Keys.Local);
+        }
+
         return this;
     }
 
@@ -335,17 +347,17 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
             return;
         }
 
-        if (!_environment.IsDevelopment)
+        if (!_environment.IsLocal)
         {
             throw new InvalidOperationException(
-                "--realize is Development-only and cannot be used in this application environment.");
+                "--realize is Local-only and cannot be used in this application environment.");
         }
 
         if (_gateway is null || !SupportsExternalRealization(_gateway.Name))
         {
             throw new InvalidOperationException(
                 $"Gateway '{_gateway?.Name.ToString() ?? "unselected"}' cannot honor --realize. " +
-                "Use the Local, InProcess, or Docker gateway in Development.");
+                "Use the Local, InProcess, or Docker gateway in Local.");
         }
 
         foreach (ResourceName requested in _options.Realize)
@@ -580,7 +592,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
             if (source.Resource is ExternalResource external && !external.IsRealized)
             {
                 // The provider owns an unresolved external's internal graph. Its closure is
-                // retained only so an explicit Development --realize can expand it later.
+                // retained only so an explicit Local --realize can expand it later.
                 continue;
             }
 
@@ -881,7 +893,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
             return configured;
         }
 
-        if (!environment.IsDevelopment)
+        if (!environment.IsLocal)
         {
             return default;
         }
@@ -896,7 +908,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
         if (string.IsNullOrEmpty(value))
         {
             throw new InvalidOperationException(
-                "An RFC1123 application name is required. Pass it to Application.CreateBuilder(ApplicationName, args) or call UseName(...) before Build(); only unnamed Development builders use the entry-assembly fallback.");
+                "An RFC1123 application name is required. Pass it to Application.CreateBuilder(ApplicationName, args) or call UseName(...) before Build(); only unnamed Local builders use the entry-assembly fallback.");
         }
 
         if (value.Length > 63 ||

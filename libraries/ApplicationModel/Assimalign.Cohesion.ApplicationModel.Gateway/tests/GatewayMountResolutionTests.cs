@@ -27,7 +27,7 @@ public sealed class GatewayMountResolutionTests
         var gateway = new TestGateway(state, [controller], options: options);
         IApplicationBuilder builder = Application.CreateBuilder(
                 ApplicationName.Parse("appa"),
-                ["--environment", "Development"])
+                ["--environment", AppEnvironment.Keys.Local])
             .UseGateway(gateway);
         IApplicationResourceDescriptor secrets = builder.AddResource(CreateManifest("secrets", "SecretStore"));
         IApplicationResourceDescriptor configuration = builder.AddResource(
@@ -82,7 +82,7 @@ public sealed class GatewayMountResolutionTests
         var gateway = new TestGateway(state, [controller], options: options);
         IApplicationBuilder builder = Application.CreateBuilder(
                 ApplicationName.Parse("appa"),
-                ["--environment", "Development"])
+                ["--environment", AppEnvironment.Keys.Local])
             .UseGateway(gateway);
         IApplicationResourceDescriptor secrets = builder.AddResource(CreateManifest("secrets", "SecretStore"));
         IApplicationResourceDescriptor api = builder.AddResource(CreateManifest(
@@ -151,7 +151,7 @@ public sealed class GatewayMountResolutionTests
         options.Parameters["certificate"] = pem;
         var controller = new StoreEndpointController();
         var gateway = new TestGateway(new InMemoryResourceStateManager(), [controller], options: options);
-        IApplicationBuilder builder = Application.CreateBuilder("appa", ["--environment", "Development"]).UseGateway(gateway);
+        IApplicationBuilder builder = Application.CreateBuilder("appa", ["--environment", AppEnvironment.Keys.Local]).UseGateway(gateway);
         IApplicationResourceDescriptor? secrets = branch == "development" ? null : builder.AddResource(CreateManifest("secrets", "SecretStore"));
         string? source = branch switch { "parameter" => "parameter:certificate", "store" => "secrets:certs/supplied-api", _ => null };
         IApplicationResourceDescriptor api = builder.AddResource(CreateManifest("api", "Web",

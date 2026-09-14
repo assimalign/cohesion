@@ -13,7 +13,7 @@ public sealed class ApplicationModelResolutionContext
     /// <param name="environment">The current target environment.</param>
     /// <param name="runMode">The current gateway operation.</param>
     /// <param name="gatewayIdentity">The one gateway that will own all resolved models.</param>
-    /// <param name="realize">The external resource names requested for Development realization.</param>
+    /// <param name="realize">The external resource names requested for Local realization.</param>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="environment"/> is <see langword="null"/>.
     /// </exception>
@@ -45,6 +45,6 @@ public sealed class ApplicationModelResolutionContext
     /// <summary>Gets the shared gateway identity.</summary>
     public ResourceName GatewayIdentity { get; }
 
-    /// <summary>Gets the external resources requested for Development realization.</summary>
+    /// <summary>Gets the external resources requested for Local realization.</summary>
     public IReadOnlyList<ResourceName> Realize { get; }
 }

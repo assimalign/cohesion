@@ -55,9 +55,10 @@ internal sealed class CliFixture : IDisposable
         string sdk = "Assimalign.Cohesion.Sdk.Gateway", string path = "Gateway/Gateway.csproj") =>
         Write(path, $"<Project Sdk=\"{sdk}\"><PropertyGroup>{properties}</PropertyGroup></Project>");
 
-    internal CliApplication Application(string stdin = "", string? token = null) =>
+    internal CliApplication Application(string stdin = "", string? token = null,
+        Func<string, string?>? environment = null) =>
         new(Runner, Http, new StringReader(stdin), Output, Error, Root, Home,
-            name => name == "COHESION_TOKEN" ? token : null, DelayAsync, Clock);
+            environment ?? (name => name == "COHESION_TOKEN" ? token : null), DelayAsync, Clock);
 
     private Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken = default)
     {

@@ -13,6 +13,50 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
 public sealed class WebApplicationConfigurationTests
 {
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Configuration: Local and Development load distinct environment files")]
+    [InlineData(AppEnvironment.Keys.Local, "local-machine")]
+    [InlineData(AppEnvironment.Keys.Development, "development-deployment")]
+    public void CreateBuilderWithArgs_WithLocalOrDevelopmentEnvironment_ShouldLoadMatchingFile(
+        string environmentName,
+        string expectedValue)
+    {
+        // Arrange
+        string contentRootPath = Path.Combine(
+            Path.GetTempPath(),
+            $"cohesion-web-configuration-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(contentRootPath);
+        try
+        {
+            File.WriteAllText(Path.Combine(contentRootPath, "appsettings.json"),
+                """{"EnvironmentFileSelection":"base"}""");
+            File.WriteAllText(Path.Combine(contentRootPath, "appsettings.Local.json"),
+                """{"EnvironmentFileSelection":"local-machine"}""");
+            File.WriteAllText(Path.Combine(contentRootPath, "appsettings.Development.json"),
+                """{"EnvironmentFileSelection":"development-deployment"}""");
+            using IDisposable resourceScope = ResourceRuntime.CreateScope(new ResourceContext(
+                environmentName: environmentName,
+                contentRootPath: contentRootPath));
+
+            // Act
+            WebApplicationBuilder builder = WebApplication.CreateBuilder(
+                [],
+                typeof(WebApplicationConfigurationTests).Assembly);
+            try
+            {
+                // Assert
+                builder.Configuration["EnvironmentFileSelection"].ShouldBe(expectedValue);
+            }
+            finally
+            {
+                builder.Configuration.Dispose();
+            }
+        }
+        finally
+        {
+            Directory.Delete(contentRootPath, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - CreateBuilder(args): composes the default configuration sources in precedence order")]
     public void CreateBuilderWithArgs_WhenConfigurationSourcesOverlap_ShouldApplyDocumentedPrecedence()
     {

@@ -45,6 +45,17 @@ The internal application-environment implementation delegates process resolution
 `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"` precedence rule out of the
 orchestration package.
 
+`Local` identifies developer-machine execution; `Development` is a named deployed environment
+with the same strict behavior as Staging and Production. `IsLocal` alone selects relaxed
+realization, naming, and executable model-resolution paths; `IsDevelopment` identifies the
+deployed name. `Application.CreateSet` and `ApplicationBuilder.UseGateway` default local and
+inprocess gateways to Local only when no explicit environment option or nonblank process
+environment value exists. Other gateways retain Core's Production default. Gateway reselection
+resolves the environment again, so changing to Docker cannot carry a prior implicit Local value.
+Host resolution preserves Core's raw value, including whitespace, until gateway selection;
+only explicit names are validated immediately. This allows the gateway-aware Local default to
+handle blank process values without changing Core's precedence or introducing another fallback.
+
 `CohesionApplicationAttribute` records the SDK-selected application name in gateway assembly
 metadata for build and tooling inspection. It is not a runtime discovery mechanism: generated
 gateway code supplies the same identity directly to `Application.CreateBuilder(ApplicationName,
@@ -189,7 +200,7 @@ identity with an `IApplicationModelResolver`. The supplied resolvers cover:
 - `Executable(path)` — invoke the member gateway with `--mode describe`;
 - `File(path)` — reconstruct the model embedded in an application export;
 - `Gateway(address, client)` — obtain that export through `IControlPlaneClient`;
-- `ControlPlane(executablePath, exportPath)` — use executable describe in Development and the
+- `ControlPlane(executablePath, exportPath)` — use executable describe in Local and the
   exported model otherwise.
 
 Member models are resolved at `RunAsync` start in declaration order. The set rejects duplicate
@@ -208,7 +219,7 @@ order and requires state to be scoped by `(application, resource)`; equal resour
 different applications must not collide. SDK generation of `Applications.<Name>` is a consumer
 convenience over this seam and is not required by the contract itself.
 
-In Development, executable resolution applies `--realize` only after the first description shows
+In Local, executable resolution applies `--realize` only after the first description shows
 that the member declares the requested external. An imported export must already record a matching
 external as realized, and the set rejects any requested name that no member realized.
 
@@ -219,7 +230,7 @@ external as realized, and the set rejects any requested name that no member real
   remains available for callers that start from the parameterless overload. Invocation intent
   carried by the immutable model includes `--adopt` ownership consent and
   `--restart-orphans` local-process recovery policy; platform gateways decide how to realize it.
-- `--realize <external>` is validated during `Build()`. It is accepted only in Development for
+- `--realize <external>` is validated during `Build()`. It is accepted only in Local for
   gateway identities `local`, `inprocess`, and `docker`, requires an embedded target manifest,
   and replaces the requested external plus its reachable same-application closure with ordinary
   planned resources. Cross-application references discovered within that closure remain external,
@@ -254,7 +265,7 @@ external as realized, and the set rejects any requested name that no member real
 This package is `Core`-only and AOT-clean: capability matching is `is`-based and
 there is **no reflection-based serialization**. Manifest, plan, and describe-mode
 model documents use explicit `JsonSerializerContext` contracts. Entry-assembly name
-fallback is used only in Development and is slugged before validation; assembly
+fallback is used only in Local and is slugged before validation; assembly
 attributes are never read at run time. The generated value types use
 `System.Text.Json` converters that are source-emitted, not reflection-based.
 

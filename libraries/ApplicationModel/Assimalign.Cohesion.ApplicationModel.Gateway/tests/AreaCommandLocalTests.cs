@@ -35,8 +35,8 @@ public sealed class AreaCommandLocalTests
         };
         options.Parameters.Add("credential", "local-command-secret");
         var gateway = new LocalGateway(options);
-        IApplicationBuilder builder = Application.CreateBuilder((ApplicationName)"appa", ["--environment", "Development"]).UseGateway(gateway);
-        // These transport fixtures use generic Development HTTP manifests, as the existing
+        IApplicationBuilder builder = Application.CreateBuilder((ApplicationName)"appa", ["--environment", AppEnvironment.Keys.Local]).UseGateway(gateway);
+        // These transport fixtures use generic Local HTTP manifests, as the existing
         // store gateway tests do. Production area planners are tested separately with HTTPS.
         IApplicationResourceDescriptor identity = builder.AddResource(Manifest(root, "identity", "IdentityHub", "https",
             ["identityhub.add-audience", "identityhub.add-client"], credential: true));
@@ -54,7 +54,7 @@ public sealed class AreaCommandLocalTests
         try
         {
             await ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
-            IApplicationBuilder peerBuilder = Application.CreateBuilder((ApplicationName)"peer", ["--environment", "Development"])
+            IApplicationBuilder peerBuilder = Application.CreateBuilder((ApplicationName)"peer", ["--environment", AppEnvironment.Keys.Local])
                 .UseGateway(new LocalGateway());
             peerBuilder.AddResource(Manifest(root, "peer-resource", "Rezolvr", "admin", ["rezolvr.add-a-record"]) with { Application = "peer" });
             using var peerKey = new GatewayTrustKey(ECDsa.Create(ECCurve.NamedCurves.nistP256));

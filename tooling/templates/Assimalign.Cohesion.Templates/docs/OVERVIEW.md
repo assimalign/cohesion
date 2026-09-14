@@ -25,6 +25,11 @@ Gateways inherit their always-enabled behavior from `Sdk.Gateway`.
 Generated root files include `Directory.Build.props`, `global.json`, `nuget.config`, `.gitignore`
 and a credential guard workflow. Replace the organization feed placeholder and registry before
 using your own packages or publishing images. Authentication belongs outside tracked files.
+Each project also includes `Properties/launchSettings.json`, with a project-named profile
+setting `COHESION_ENVIRONMENT=Local`. Landing-zone API local overrides use `appsettings.Local.json`.
+For an explicit shell environment, use `dotnet run --no-launch-profile` so launch settings
+do not override it. Development is a strict deployed environment; the framework's unset
+default remains Production.
 
 The template package contains content only, with no runtime dependency or public assembly API.
 Generated applications consume Cohesion SDK/framework packages. Local and InProcess gateway

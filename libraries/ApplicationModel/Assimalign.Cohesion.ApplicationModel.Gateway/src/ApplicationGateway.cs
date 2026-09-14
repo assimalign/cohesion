@@ -869,21 +869,21 @@ public abstract partial class ApplicationGateway :
                     throw;
                 }
                 catch (Exception exception) when (
-                    model.Environment.IsDevelopment &&
+                    model.Environment.IsLocal &&
                     exception is HttpRequestException or InvalidDataException or NotSupportedException)
                 {
-                    // Development is the only environment allowed to fall back to the
+                    // Local is the only environment allowed to fall back to the
                     // application-local trusted-issuers document.
                 }
             }
 
             if (!stored)
             {
-                if (!model.Environment.IsDevelopment)
+                if (!model.Environment.IsLocal)
                 {
                     throw new InvalidOperationException(
                         $"Application '{model.Name}' has no reachable own SecretStore endpoint " +
-                        $"for trust grant '{peerName}'. Local fallback is Development-only.");
+                        $"for trust grant '{peerName}'. Local fallback is Local-only.");
                 }
 
                 await TrustedIssuerDocument.WriteFileAsync(
@@ -920,7 +920,7 @@ public abstract partial class ApplicationGateway :
                 .ConfigureAwait(false);
             trust.ReplaceKey(replacement);
             RemoveBootstrapCredentials(model.Name);
-            if (model.Environment.IsDevelopment)
+            if (model.Environment.IsLocal)
             {
                 await TrustedIssuerDocument.WriteFileAsync(
                         GetTrustedIssuersPath(model.Name),
@@ -1984,7 +1984,7 @@ public abstract partial class ApplicationGateway :
         var created = new ApplicationTrustState(model.Name, Name, key);
         try
         {
-            if (model.Environment.IsDevelopment)
+            if (model.Environment.IsLocal)
             {
                 string path = GetTrustedIssuersPath(model.Name);
                 if (File.Exists(path))
@@ -2122,7 +2122,7 @@ public abstract partial class ApplicationGateway :
     {
         if (!TryGetOwnSecretStoreEndpoint(model, out ResourceManifest? store, out Uri? endpoint))
         {
-            if (requireEndpoint && store is not null && !model.Environment.IsDevelopment)
+            if (requireEndpoint && store is not null && !model.Environment.IsLocal)
             {
                 throw new InvalidOperationException(
                     $"Application '{model.Name}' could not load TrustedIssuers because its own " +
@@ -2134,7 +2134,7 @@ public abstract partial class ApplicationGateway :
 
         if (!CanSendCredential(model, endpoint!, out string? securityFailure))
         {
-            if (model.Environment.IsDevelopment)
+            if (model.Environment.IsLocal)
             {
                 return;
             }
@@ -2158,19 +2158,19 @@ public abstract partial class ApplicationGateway :
             exception.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
             // A production application with no peer grants has no persisted document yet.
-            // Development retains its explicitly permitted local fallback until the
+            // Local retains its explicitly permitted local fallback until the
             // application's store contains a replacement document.
-            if (!model.Environment.IsDevelopment)
+            if (!model.Environment.IsLocal)
             {
                 GetTrustState(model.Name).ReplacePeers(Array.Empty<TrustedIssuer>());
             }
         }
         catch (Exception exception) when (
-            model.Environment.IsDevelopment &&
+            model.Environment.IsLocal &&
             exception is HttpRequestException or InvalidDataException or JsonException or
                 NotSupportedException)
         {
-            // The signed design allows only Development to retain its local fallback while
+            // The signed design allows only Local to retain its local fallback while
             // the application's own SecretStore is unavailable.
         }
         catch (Exception exception) when (
@@ -2257,7 +2257,7 @@ public abstract partial class ApplicationGateway :
                 return true;
             }
 
-            if (model.Environment.IsDevelopment)
+            if (model.Environment.IsLocal)
             {
                 for (int endpointIndex = 0; endpointIndex < candidate.Endpoints.Count; endpointIndex++)
                 {
@@ -2354,7 +2354,7 @@ public abstract partial class ApplicationGateway :
         out string? failure)
     {
         if (string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
-            (model.Environment.IsDevelopment &&
+            (model.Environment.IsLocal &&
              string.Equals(endpoint.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
              endpoint.IsLoopback))
         {
@@ -2363,7 +2363,7 @@ public abstract partial class ApplicationGateway :
         }
 
         failure = $"Application '{model.Name}' refuses to send a bearer credential to " +
-            $"non-TLS endpoint '{endpoint}'. Use HTTPS, or loopback HTTP in Development.";
+            $"non-TLS endpoint '{endpoint}'. Use HTTPS, or loopback HTTP in Local.";
         return false;
     }
 

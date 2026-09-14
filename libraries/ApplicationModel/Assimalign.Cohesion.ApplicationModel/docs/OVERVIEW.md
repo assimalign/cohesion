@@ -4,6 +4,11 @@ This Core-only package declares resources, dependency edges, external references
 realization plans, and application-owned resource commands. It supplies `IApplicationBuilder`,
 `IApplicationModel`, application sets, and the transport-neutral gateway contracts.
 
+`IApplicationEnvironment.IsLocal` identifies developer-machine execution; `IsDevelopment`
+identifies the strict deployed Development environment. Local and InProcess gateways default
+to Local only when both command-line and process-environment input omit a nonblank environment.
+Explicit values remain authoritative, and other gateways retain the Core resolution rule.
+
 ```csharp
 var builder = Application.CreateBuilder(ApplicationName.Parse("orders"), args)
     .UseGateway(gateway);

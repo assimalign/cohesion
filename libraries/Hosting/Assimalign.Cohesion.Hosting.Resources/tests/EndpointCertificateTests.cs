@@ -15,6 +15,29 @@ namespace Assimalign.Cohesion.Hosting.Resources.Tests;
 
 public sealed class EndpointCertificateTests
 {
+    [Theory(DisplayName = "Cohesion Test [Hosting.Resources] - Certificate: Standalone fallback is Local and loopback only")]
+    [InlineData(AppEnvironment.Keys.Local, "localhost", true)]
+    [InlineData("lOcAl", "127.0.0.1", true)]
+    [InlineData(AppEnvironment.Keys.Local, "service.example.com", false)]
+    [InlineData(AppEnvironment.Keys.Development, "localhost", false)]
+    [InlineData(AppEnvironment.Keys.Production, "127.0.0.1", false)]
+    public void CreateDevelopmentEndpointCertificate_EnvironmentAndHost_ShouldEnforceLocalPosture(
+        string environmentName, string host, bool permitted)
+    {
+        var context = new ResourceContext(environmentName: environmentName);
+
+        if (permitted)
+        {
+            using X509Certificate2 certificate = context.CreateDevelopmentEndpointCertificate(host);
+            certificate.HasPrivateKey.ShouldBeTrue();
+        }
+        else
+        {
+            Should.Throw<InvalidOperationException>(() => context.CreateDevelopmentEndpointCertificate(host))
+                .Message.ShouldContain("loopback Local");
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Hosting.Resources] - Certificate: Accepts legacy EC and RSA private-key labels")]
     [InlineData(false)]
     [InlineData(true)]
@@ -132,7 +155,7 @@ public sealed class EndpointCertificateTests
         File.WriteAllBytes(path, stored);
         try
         {
-            var context = new ResourceContext("app", "api", "Development", "local", null, null, null, null, null,
+            var context = new ResourceContext("app", "api", AppEnvironment.Keys.Development, "local", null, null, null, null, null,
                 default, default, new Dictionary<string, string?> { [ResourceEnvironment.Mount("api-tls.pem")] = path },
                 new Dictionary<string, string> { ["https"] = "api-tls.pem" });
             context.TryGetEndpointCertificate("https", out X509Certificate2? certificate).ShouldBeTrue();

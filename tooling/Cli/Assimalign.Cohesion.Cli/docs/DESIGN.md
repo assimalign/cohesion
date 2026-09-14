@@ -22,6 +22,21 @@ come first, letting later gateway mode options preserve the gateway's existing p
 No gateway-name allowlist is added. `Templates` owns the accepted short-name list and
 checks the landing-zone-only topology option without rewriting it.
 
+Only `run` supplies the developer-machine `--environment Local` convenience argument:
+both shell environment variables (`COHESION_ENVIRONMENT`, `DOTNET_ENVIRONMENT`) must be
+absent or whitespace, the remaining arguments must contain no `--environment` or
+`--environment=` spelling (case-insensitive, including passthrough), and the effective
+gateway must be unspecified, `local` or `inprocess`. Explicit and passthrough gateway
+values compare case-insensitively; later passthrough values retain precedence. `deploy`
+and `trust` never inject an environment. The injected environment reader keeps tests
+independent of the developer's shell. Literals preserve the packed CLI's runtime-free graph.
+
+When either shell environment variable is nonblank, every gateway command supplies
+`--no-launch-profile` to `dotnet run`: launch profile variables otherwise override the
+inherited shell values. This preserves explicit Development and other deployed selections.
+Development uses strict deployed security posture; Local alone selects developer-machine
+conveniences. The framework's unset Production default is unchanged.
+
 `GatewayDiscovery` reads project XML without MSBuild execution. SDK markers accept
 attribute name/version and child Sdk forms. Explicit project paths avoid ambiguous recursive
 selection. State defaults beside the gateway csproj: the CLI explicitly starts gateway
@@ -53,7 +68,7 @@ tests exercise that reader's DPAPI/JsonDocument contract on CLI-produced bytes. 
 writers are not transactionally merged. Callers must serialize mutations.
 
 No local command opens the gateway's private trust key/key ring. Federation grants are
-written by the gateway into the application's own SecretStore, with a Development-only
+written by the gateway into the application's own SecretStore, with a Local-only
 local fallback; the CLI does not implement a second grant store.
 
 ## Login protocol and proposed credential store
@@ -62,7 +77,7 @@ local fallback; the CLI does not implement a second grant store.
 endpoint with the device grant. Approval is manual. `authorization_pending` continues,
 `slow_down` adds five seconds to subsequent polls, and expiration/access denial stop the
 flow. Cancellation covers requests and delays. HTTP redirects are disabled; credential
-endpoints require HTTPS except for loopback development endpoints. Token/error response
+endpoints require HTTPS except for loopback Local endpoints. Token/error response
 bodies are never included in diagnostics. `--print` reserves stdout for the access token;
 approval instructions go to stderr.
 
@@ -74,7 +89,7 @@ The host filename intentionally has one slot per host (ports, issuer paths and c
 collide; IPv6 colons are replaced by underscores). **Item 27 (#972) must pin or revise this
 proposal.** Client secrets and device codes are not saved.
 
-IdentityHub's landed flow is Development/loopback-only. It does not issue a gateway-trust-key
+IdentityHub's landed flow is Local/loopback-only. It does not issue a gateway-trust-key
 token accepted by current control planes. The §7(6) IdentityHub-token bridge remains later work.
 
 ## Error model and extension points

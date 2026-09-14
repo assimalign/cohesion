@@ -36,7 +36,7 @@ public sealed partial class GatewayControlPlaneTests
             await ((IApplicationGateway)provider).StartAsync(providerModel, cancellation.Token);
             (Uri address, JsonElement providerKey) = ReadMetadata(root, "appa");
             IApplicationBuilder builder = Application.CreateBuilder(
-                ApplicationName.Parse("caller"), ["--environment", "Development"]).UseGateway(caller);
+                ApplicationName.Parse("caller"), ["--environment", AppEnvironment.Keys.Local]).UseGateway(caller);
             builder.AddResource(CreateManifest("caller", "worker", "test", 43111));
             IApplicationResourceDescriptor target = builder.RemoteReference(
                 new ExternalResourceDeclaration("api", "appa", ["http"], optional: false,

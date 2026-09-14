@@ -34,7 +34,7 @@ internal sealed class DeviceLogin(
             LoginJsonContext.Default.DiscoveryDocument, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(discovery.DeviceAuthorizationEndpoint))
         {
-            throw new CliException($"IdentityHub at {issuerUrl} does not expose the device flow (at HEAD it is enabled only for a Development hub bound to loopback — IdentityEndpointService.cs:79-81)");
+            throw new CliException($"IdentityHub at {issuerUrl} does not expose the device flow (at HEAD it is enabled only for a Local hub bound to loopback — IdentityEndpointService.cs:89-90)");
         }
         if (discovery.Issuer is not null && discovery.Issuer.TrimEnd('/') != issuerUrl)
         {
@@ -153,7 +153,7 @@ internal sealed class DeviceLogin(
         Uri endpoint = HttpEndpoint.Parse(value);
         if (endpoint.Scheme != Uri.UriSchemeHttps && !endpoint.IsLoopback)
         {
-            throw new CliException("IdentityHub credentials require HTTPS, except for a loopback Development hub.");
+            throw new CliException("IdentityHub credentials require HTTPS, except for a loopback Local hub.");
         }
         return endpoint;
     }

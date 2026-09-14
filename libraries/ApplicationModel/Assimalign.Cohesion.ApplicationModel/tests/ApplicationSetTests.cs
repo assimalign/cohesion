@@ -261,7 +261,7 @@ public class ApplicationSetTests
                 [
                     "--mode=apply",
                     "--gateway=local",
-                    "--environment=Development",
+                    "--environment=Local",
                     "--realize=peer-api",
                 ])
             .AddApplication(new ApplicationDeclaration(
@@ -373,6 +373,27 @@ public class ApplicationSetTests
         gateway.SingleModelCallCount.ShouldBe(0);
     }
 
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Application set realization refuses deployed environments")]
+    [InlineData(AppEnvironment.Keys.Development)]
+    [InlineData(AppEnvironment.Keys.Staging)]
+    [InlineData(AppEnvironment.Keys.Production)]
+    public async Task RunAsync_RealizeOutsideLocal_ShouldRejectBeforeResolvingMembers(string environment)
+    {
+        // Arrange
+        var gateway = new RecordingMultiModelGateway("local");
+        var resolver = new RecordingResolver("member", CreateModel("member"), new List<ApplicationName>());
+        IApplicationSet set = Application.CreateSet(gateway, ["--environment", environment, "--realize=peer-api"])
+            .AddApplication(new ApplicationDeclaration("member", resolver));
+
+        // Act
+        InvalidOperationException error = await Should.ThrowAsync<InvalidOperationException>(() => set.RunAsync(CancellationToken.None));
+
+        // Assert
+        error.Message.ShouldContain("Local-only");
+        resolver.CallCount.ShouldBe(0);
+        gateway.Calls.ShouldBeEmpty();
+    }
+
     private static IApplicationModel CreateModel(ApplicationName name)
     {
         IApplicationBuilder builder = Application.CreateBuilder(
@@ -397,7 +418,7 @@ public class ApplicationSetTests
                 ApplicationName.Parse("owner"),
                 [
                     "--mode=apply",
-                    "--environment=Development",
+                    "--environment=Local",
                     "--realize=peer-api",
                 ])
             .UseGateway(new FakeGateway("local"));

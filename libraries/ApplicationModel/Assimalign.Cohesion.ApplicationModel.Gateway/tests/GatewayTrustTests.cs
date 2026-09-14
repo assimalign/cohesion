@@ -255,7 +255,7 @@ public sealed class GatewayTrustTests
             options: options,
             name: "test-gateway");
         IApplicationBuilder builder = Application
-            .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", "Production"])
+            .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", AppEnvironment.Keys.Production])
             .UseGateway(gateway);
         builder.AddResource(CreateSecretStoreManifest());
         IApplicationModel model = builder.Build().Model;
@@ -309,7 +309,7 @@ public sealed class GatewayTrustTests
             name: "test-gateway");
         var resolver = new TrustAwareExternalResolver(gateway);
         IApplicationBuilder builder = Application
-            .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", "Production"])
+            .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", AppEnvironment.Keys.Production])
             .UseGateway(gateway);
         builder.RemoteReference(
             CreateExternalDeclaration(),
@@ -340,8 +340,12 @@ public sealed class GatewayTrustTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - TrustedIssuers: Development store absence preserves the local fallback")]
-    public async Task StartAsync_WhenDevelopmentStoreHasNoDocument_ShouldPreserveLocalFallback()
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - TrustedIssuers: Only Local retains a fallback after store not-found")]
+    [InlineData(AppEnvironment.Keys.Local, true)]
+    [InlineData(AppEnvironment.Keys.Development, false)]
+    [InlineData(AppEnvironment.Keys.Staging, false)]
+    [InlineData(AppEnvironment.Keys.Production, false)]
+    public async Task StartAsync_StoreNotFound_ShouldRestrictLocalFallback(string environment, bool expectPeer)
     {
         // Arrange
         string root = CreateTestDirectory();
@@ -363,7 +367,7 @@ public sealed class GatewayTrustTests
             },
             name: "test-gateway");
         IApplicationBuilder builder = Application
-            .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", "Development"])
+            .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", environment])
             .UseGateway(gateway);
         builder.AddResource(CreateSecretStoreManifest());
         IApplicationModel model = builder.Build().Model;
@@ -378,9 +382,9 @@ public sealed class GatewayTrustTests
 
             // Assert
             IReadOnlyList<TrustedIssuer> issuers = gateway.GetTrustedIssuers(model.Name);
-            issuers.Count.ShouldBe(2);
+            issuers.Count.ShouldBe(expectPeer ? 2 : 1);
             issuers[0].Issuer.ShouldBe("appa");
-            issuers[1].Issuer.ShouldBe("peer");
+            if (expectPeer) { issuers[1].Issuer.ShouldBe("peer"); }
         }
         finally
         {
@@ -413,7 +417,7 @@ public sealed class GatewayTrustTests
             name: "test-gateway",
             ownSecretStoreEndpointResolver: (_, _) => storeEndpoint);
         IApplicationBuilder builder = Application
-            .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", "Production"])
+            .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", AppEnvironment.Keys.Production])
             .UseGateway(gateway);
         builder.AddResource(CreateSecretStoreManifest());
         IApplicationModel model = builder.Build().Model;
@@ -439,6 +443,49 @@ public sealed class GatewayTrustTests
             client.StoredIssuer.ShouldBe("peer");
             JsonWebToken.Parse(client.StoredCredential.ShouldNotBeNull()).Audiences.ShouldBe(["secrets"]);
             gateway.GetTrustedIssuers(model.Name).Count.ShouldBe(2);
+        }
+        finally
+        {
+            await ((IApplicationGateway)gateway).StopAsync(CancellationToken.None);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Trust add: Deployed environments refuse missing or plaintext own stores")]
+    [InlineData(AppEnvironment.Keys.Development, false)]
+    [InlineData(AppEnvironment.Keys.Development, true)]
+    [InlineData(AppEnvironment.Keys.Production, false)]
+    [InlineData(AppEnvironment.Keys.Production, true)]
+    public async Task AddTrustedIssuerAsync_WithoutSecureOwnStore_ShouldRefuseLocalFallback(string environment, bool loopback)
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        using var cancellation = new CancellationTokenSource(TestTimeout);
+        var gateway = new TestGateway(
+            new InMemoryResourceStateManager(),
+            [new InputHistoryController()],
+            options: new ApplicationGatewayOptions { ExportDirectory = root },
+            name: "test-gateway",
+            ownSecretStoreEndpointResolver: (_, _) => loopback ? new Uri("http://localhost:8443/") : null);
+        IApplicationBuilder builder = Application.CreateBuilder("appa", ["--environment", environment]).UseGateway(gateway);
+        if (loopback) { builder.AddResource(CreateSecretStoreManifest()); }
+        else { builder.AddResource(new TestResource("api")); }
+        IApplicationModel model = builder.Build().Model;
+        IApplicationBuilder peerBuilder = Application.CreateBuilder("peer", ["--environment=Local"]).UseGateway(gateway);
+        peerBuilder.AddResource(new TestResource("api"));
+        using var peerKey = new GatewayTrustKey(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+        ApplicationExportDocument export = ApplicationExportDocument.Create(peerBuilder.Build().Model, "1", trustKey: peerKey.PublicJwk);
+
+        try
+        {
+            // Act
+            InvalidOperationException error = await Should.ThrowAsync<InvalidOperationException>(
+                () => gateway.AddTrustedIssuerAsync(model, "peer", export, cancellation.Token));
+
+            // Assert
+            error.Message.ShouldContain(loopback ? "non-TLS" : "Local-only");
+            File.Exists(Path.Combine(root, "appa", "trust", "trusted-issuers.json")).ShouldBeFalse();
+            gateway.GetTrustedIssuers(model.Name).ShouldNotContain(issuer => issuer.Issuer == "peer");
         }
         finally
         {
@@ -481,7 +528,7 @@ public sealed class GatewayTrustTests
         string resource)
     {
         IApplicationBuilder builder = Application
-            .CreateBuilder(ApplicationName.Parse(application), ["--environment", "Development"])
+            .CreateBuilder(ApplicationName.Parse(application), ["--environment", AppEnvironment.Keys.Local])
             .UseGateway(gateway);
         builder.AddResource(new TestResource(resource));
         return builder.Build().Model;

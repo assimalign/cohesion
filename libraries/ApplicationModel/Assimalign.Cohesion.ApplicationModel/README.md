@@ -10,6 +10,10 @@ The gateway SDK records its build-selected identity as
 descriptive only: generated `Gateway.CreateBuilder(args)` passes the same name directly to
 `Application.CreateBuilder(ApplicationName, args)`, and runtime code does not reflect the attribute.
 
+`Local` is the developer-machine environment. `Development`, `Staging`, and `Production` use
+strict deployed behavior. Local and InProcess gateways default to Local only when the environment
+was omitted from both command-line options and process variables; explicit values always win.
+
 ## Build and run one model
 
 ```csharp
@@ -79,10 +83,10 @@ gateway base owns the lifecycle policy:
 Resolution is part of each reconcile pass. Stopping or deleting an external only detaches the
 local observation; it does not mutate the application that owns the resource.
 
-## Development realization
+## Local realization
 
 `--realize <external>` changes a declared external back into locally realized resources only when
-the selected environment is `Development` and the selected gateway identity is `local`,
+the selected environment is `Local` and the selected gateway identity is `local`,
 `inprocess`, or `docker`. The declaration must include its manifest. Realization walks the
 reachable same-application manifests in the embedded closure; crossings from that closure into a
 different application remain external. The realized resources retain their owning application
@@ -124,7 +128,7 @@ await set.RunAsync();
 An application set resolves every member at run start in declaration order, verifies that each
 resolver returned the declared application, applies command-line/environment external overrides,
 then sends the ordered models to one `IMultiModelApplicationGateway`. `ControlPlane(...)` invokes
-the member executable with `--mode describe` in Development and reads its exported model in other
+the member executable with `--mode describe` in Local and reads its exported model in other
 environments. `Executable`, `File`, and `Gateway` resolvers are also available directly.
 
 When an imported external targets another member of the same set, an
@@ -132,7 +136,7 @@ When an imported external targets another member of the same set, an
 observed state. The external falls back to its configured resolver only while that sibling is not
 observable, avoiding a round trip through the sibling gateway's control plane.
 
-For Development `--realize`, executable resolution first describes each member, then re-describes
+For Local `--realize`, executable resolution first describes each member, then re-describes
 only members that declare the requested external. File/control-plane imports accept the request
 only when their exported model already records that external as realized; the set validates every
 requested name once across all members.

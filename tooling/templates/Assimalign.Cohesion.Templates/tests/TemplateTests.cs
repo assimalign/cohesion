@@ -37,6 +37,12 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
         configs.Select(file => Directory.GetParent(Path.GetDirectoryName(file)!)!.Name).Order().ToArray()
             .ShouldBe(TemplateRepository.Roster.Order().ToArray());
         AssertNoRetiredContent(TemplateRepository.ContentRoot, emitted: false);
+        string[] contentProjects = SourceProjects(TemplateRepository.ContentRoot);
+        contentProjects.Length.ShouldBe(37);
+        foreach (string project in contentProjects)
+        {
+            AssertLocalLaunchProfile(project);
+        }
 
         // Act and assert: the installed package, rather than raw content copying, owns every output.
         string? singleLanding = null;
@@ -130,6 +136,7 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
         foreach (string project in projects)
         {
             File.Exists(Path.Combine(Path.GetDirectoryName(project)!, "Program.cs")).ShouldBeTrue(project);
+            AssertLocalLaunchProfile(project);
             XDocument document = XDocument.Load(project);
             string sdk = document.Root!.Attribute("Sdk")!.Value;
             if (sdk.EndsWith(".Gateway", StringComparison.Ordinal))
@@ -186,11 +193,18 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
             Directory.Exists(Path.Combine(output, "Gateway")).ShouldBe(topology == "single");
             File.Exists(Path.Combine(output, name + (topology == "single" ? ".K8s.slnx" : ".Federated.slnx"))).ShouldBeTrue();
             Directory.Exists(Path.Combine(output, ".topologies")).ShouldBeFalse();
+            foreach (string zone in new[] { "AppA", "AppB", "AppC" })
+            {
+                string api = Path.Combine(output, "Zones", zone, $"{name}.{zone}.Api");
+                File.Exists(Path.Combine(api, "appsettings.Local.json")).ShouldBeTrue();
+                File.Exists(Path.Combine(api, "appsettings.Development.json")).ShouldBeFalse();
+            }
         }
 
         string ignore = File.ReadAllText(Path.Combine(output, ".gitignore"));
         ignore.ShouldContain(".cohesion/", Case.Sensitive);
         ignore.ShouldContain("parameters.json", Case.Sensitive);
+        ignore.ShouldNotContain("appsettings", Case.Sensitive);
         File.Exists(Path.Combine(output, ".github", "workflows", "credential-guard.yml")).ShouldBeTrue();
         XDocument nuget = XDocument.Load(Path.Combine(output, "nuget.config"));
         nuget.Descendants("packageSource" + "Credentials").ShouldBeEmpty();
@@ -209,6 +223,19 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
 
     private static string[] SourceProjects(string output) => Directory.GetFiles(output, "*.csproj", SearchOption.AllDirectories);
 
+    private static void AssertLocalLaunchProfile(string project)
+    {
+        string file = Path.Combine(Path.GetDirectoryName(project)!, "Properties", "launchSettings.json");
+        File.Exists(file).ShouldBeTrue(project);
+        using JsonDocument document = TemplateRepository.ReadJson(file);
+        JsonProperty profile = document.RootElement.GetProperty("profiles").EnumerateObject().Single();
+        profile.Name.ShouldBe(Path.GetFileNameWithoutExtension(project));
+        profile.Value.GetProperty("commandName").GetString().ShouldBe("Project");
+        JsonProperty environment = profile.Value.GetProperty("environmentVariables").EnumerateObject().Single();
+        environment.Name.ShouldBe("COHESION_ENVIRONMENT");
+        environment.Value.GetString().ShouldBe("Local");
+    }
+
     private static void AssertTopologyDifferences(string single, string federated)
     {
         string[] singleFiles = Directory.GetFiles(single, "*", SearchOption.AllDirectories)
@@ -218,7 +245,8 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
         singleFiles.Except(federatedFiles).Order().ToArray().ShouldBe(new[]
         {
             "Example.K8s.slnx", "Gateway/Example.Gateway/Example.Gateway.csproj",
-            "Gateway/Example.Gateway/Program.cs", "Gateway/Example.Gateway/appsettings.json"
+            "Gateway/Example.Gateway/Program.cs", "Gateway/Example.Gateway/appsettings.json",
+            "Gateway/Example.Gateway/Properties/launchSettings.json"
         }.Order().ToArray());
         federatedFiles.Except(singleFiles).ToArray().ShouldBe(["Example.Federated.slnx"]);
         string[] differences = singleFiles.Intersect(federatedFiles)

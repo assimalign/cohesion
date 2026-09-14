@@ -159,7 +159,7 @@ public class ExternalResourceResolverTests
         IApplicationBuilder builder = Application
             .CreateBuilder(
                 ApplicationName.Parse("appa"),
-                ["--environment", "Development", "--realize", "external-api"])
+                ["--environment", AppEnvironment.Keys.Local, "--realize", "external-api"])
             .UseGateway(gateway);
         IApplicationResourceDescriptor external = builder.RemoteReference(
             declaration,

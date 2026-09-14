@@ -62,7 +62,7 @@ public sealed class ExternalResourceDeclaration
     /// <summary>Gets the embedded target manifest, when build-time metadata was available.</summary>
     public ResourceManifest? Manifest { get; }
 
-    /// <summary>Gets the embedded transitive closure used by Development realization.</summary>
+    /// <summary>Gets the embedded transitive closure used by Local realization.</summary>
     public IReadOnlyList<ResourceManifest> Closure { get; }
 
     /// <summary>Gets the canonical target-manifest hash, when a manifest is embedded.</summary>

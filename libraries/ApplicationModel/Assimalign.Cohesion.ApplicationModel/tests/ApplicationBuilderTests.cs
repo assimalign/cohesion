@@ -11,8 +11,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Tests;
 public class ApplicationBuilderTests
 {
     [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Command-line options support split and equals forms")]
-    [InlineData("--mode", "describe", "--gateway", "fake", "--environment", "Development", "--adopt", "--restart-orphans")]
-    [InlineData("--mode", "describe", "--gateway", "fake", "--environment", "Development", "--adopt", "true", "--restart-orphans", "true")]
+    [InlineData("--mode", "describe", "--gateway", "fake", "--environment", AppEnvironment.Keys.Development, "--adopt", "--restart-orphans")]
+    [InlineData("--mode", "describe", "--gateway", "fake", "--environment", AppEnvironment.Keys.Development, "--adopt", "true", "--restart-orphans", "true")]
     [InlineData("--mode=describe", "--gateway=fake", "--environment=Development", "--adopt=true", "--restart-orphans=true")]
     public void CreateBuilder_CommandLineOptions_AreCarriedByModel(params string[] args)
     {
@@ -30,6 +30,7 @@ public class ApplicationBuilderTests
         model.GatewayIdentity.ShouldBe((ResourceName)"fake");
         model.Environment.Name.ShouldBe((EnvironmentName)"Development");
         model.Environment.IsDevelopment.ShouldBeTrue();
+        model.Environment.IsLocal.ShouldBeFalse();
         model.Adopt.ShouldBeTrue();
         model.RestartOrphans.ShouldBeTrue();
         model.Owner.ShouldBe("appa@fake");
@@ -314,10 +315,13 @@ public class ApplicationBuilderTests
         Should.NotThrow(() => model.AssertOwner("other@kubernetes"));
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Args builder requires a name outside Development")]
-    public void Build_ArgsBuilderWithoutNameOutsideDevelopment_ThrowsActionableError()
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Args builder requires a name outside Local")]
+    [InlineData(AppEnvironment.Keys.Development)]
+    [InlineData(AppEnvironment.Keys.Staging)]
+    [InlineData(AppEnvironment.Keys.Production)]
+    public void Build_ArgsBuilderWithoutNameOutsideLocal_ThrowsActionableError(string environment)
     {
-        IApplicationBuilder builder = Application.CreateBuilder(["--environment", "Production"])
+        IApplicationBuilder builder = Application.CreateBuilder(["--environment", environment])
             .UseGateway(new FakeGateway());
         builder.AddResource(new FakeResource("dns"));
 

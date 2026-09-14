@@ -36,7 +36,7 @@ public sealed class GatewayStoreResolutionEndToEndTests
         var gateway = new LoopbackSecretStoreGateway(state, controller, options);
         IApplicationBuilder builder = Application.CreateBuilder(
                 ApplicationName.Parse("appa"),
-                ["--environment", "Development"])
+                ["--environment", AppEnvironment.Keys.Local])
             .UseGateway(gateway);
         IApplicationResourceDescriptor store = builder.AddResource(CreateManifest(
             "secrets",

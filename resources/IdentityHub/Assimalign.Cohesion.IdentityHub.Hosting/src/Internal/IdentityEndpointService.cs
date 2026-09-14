@@ -87,7 +87,7 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         _requireAuthentication = resourceContext.GatewayName is not null;
         _resourceAudience = resourceContext.ResourceName ?? string.Empty;
         _allowDevelopmentDeviceApproval =
-            string.Equals(resourceContext.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(resourceContext.EnvironmentName, AppEnvironment.Keys.Local, StringComparison.OrdinalIgnoreCase) &&
             IPAddress.IsLoopback(_bindAddress);
         _resourceContext = resourceContext;
 
@@ -102,7 +102,7 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         if (isHttp && !_allowDevelopmentDeviceApproval)
         {
             throw new InvalidOperationException(
-                "IdentityHub permits plaintext HTTP only on loopback in Development.");
+                "IdentityHub permits plaintext HTTP only on loopback in Local.");
         }
 
         if (isHttps && resourceContext.TryGetEndpointCertificate("https", out _serverCertificate, out X509Certificate2Collection chain))
@@ -116,7 +116,7 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         {
             throw new InvalidOperationException(
                 "IdentityHub requires a PEM certificate, private key, and optional chain in the 'tls' " +
-                "resource mount outside loopback Development. Self-signed TLS is development-only.");
+                "resource mount outside loopback Local. Self-signed TLS is Local-only.");
         }
 
         if (_requireAuthentication)
@@ -494,7 +494,7 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         SetDevelopmentApprovalHeaders(context);
         if (context.Request.Method == HttpMethod.Get || context.Request.Method == HttpMethod.Head)
         {
-            const string html = "<!doctype html><html><body><p>This local development approval signs in as <code>development-user</code>.</p><form method=\"post\"><label>Code <input name=\"user_code\" autocomplete=\"one-time-code\" required></label><button>Approve</button></form></body></html>";
+            const string html = "<!doctype html><html><body><p>This Local approval signs in as <code>development-user</code>.</p><form method=\"post\"><label>Code <input name=\"user_code\" autocomplete=\"one-time-code\" required></label><button>Approve</button></form></body></html>";
             await WriteBytesAsync(context, Encoding.UTF8.GetBytes(html), "text/html; charset=utf-8")
                 .ConfigureAwait(false);
             return;

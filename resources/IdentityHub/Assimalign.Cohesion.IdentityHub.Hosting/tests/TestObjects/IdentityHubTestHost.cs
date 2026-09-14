@@ -26,7 +26,7 @@ internal static class IdentityHubTestHost
         ReadOnlyMemory<byte> applicationTrustKey = default,
         string applicationName = "appa",
         string resourceName = "identity",
-        string environmentName = "Development",
+        string environmentName = AppEnvironment.Keys.Local,
         ResourceMount? tlsCertificate = null)
     {
         endpoint ??= GetEndpoint();

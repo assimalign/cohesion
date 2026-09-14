@@ -160,3 +160,10 @@ enabled `CohesionApplicationModel` registration causes an area builder to instal
 - Dependency injection, configuration, logging, and HTTP delivery belong to their respective
   packages.
 - Hosting does not install a synchronization context or task scheduler.
+
+## Environment names
+
+Host environment predicates use ordinal case-insensitive matching. `IsLocal()` identifies the
+developer-machine environment; `IsDevelopment()` identifies an ordinary deployable environment
+and grants no developer-only fallback. Names come from `AppEnvironment.Keys`; plain-host and
+Core unset defaults remain Production.

@@ -25,6 +25,20 @@ The application tree is flattened to the repository root. The landing-zone sourc
 `--topology federated` removes the root application-set gateway and substitutes only the solution,
 six gateway configuration files and README from `.topologies/federated`. This keeps the shared
 programs and project references identical. The package contains exactly 37 content project files.
+Each of those projects includes `Properties/launchSettings.json`: exactly one profile named
+after the project, with `commandName: Project` and `COHESION_ENVIRONMENT: Local`. Template
+name substitution updates the profile name together with the csproj filename. Both topology
+outputs carry the profiles for their emitted projects; federated output also removes the root
+gateway's profile. The three landing-zone APIs use `appsettings.Local.json`.
+
+Local is the developer-machine environment. Development is an ordinary deployed environment
+with strict security behavior, and the framework's unset default stays Production. These
+profiles select Local for `dotnet run` and IDE launch. An explicit command-line environment
+overrides the profile; use `dotnet run --no-launch-profile` when selecting an environment
+through inherited shell variables because launch profiles override inherited variables.
+The CLI handles that switch when a shell environment variable is supplied. The root landing-zone
+application set also appends Local only when its existing explicit-argument and variable checks
+find no environment, preserving direct executable launch convenience.
 The root application's set uses the generated `Applications.AppA`, `AppB` and `AppC` members;
 the landed example's `Appa`, `Appb` and `Appc` spellings do not compile against the current SDK.
 
@@ -82,6 +96,8 @@ builds; it sets no project defaults. Logs and generated projects remain availabl
 
 Feed-free assertions cover every installed template and both topology choices, complete inventory pins,
 explicit identity and opt-in, seven-property absence, authored programs, source hygiene and root files.
+They also cover all 37 source launch profiles, profile-name substitution, emitted Local settings
+filenames and the root gateway profile's removal from federated output.
 Name replacement and explicit gateway identity receive separate coverage. Feed-backed tests first
 repeat those assertions, then substitute only the SDK pin values and the isolated smoke feed config.
 They build the generated tree and check manifest presence for enabled projects and absence for disabled

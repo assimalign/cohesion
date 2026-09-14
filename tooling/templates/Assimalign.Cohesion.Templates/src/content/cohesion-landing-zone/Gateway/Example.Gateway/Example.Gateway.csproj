@@ -4,7 +4,7 @@
     one registry, state keyed by (namespace, resource)). Lives in cohesion-system in-cluster and is the sole production
     owner of every namespace it applies (cohesion.io/owner). It references the area gateway projects; Sdk.Gateway generates
     Applications.<Name> for each, and the set obtains every member's model through that gateway's own control plane
-    (`mode describe` locally, the exported model in-cluster). The per-area gateways still run alone in Development.
+    (`mode describe` locally, the exported model in-cluster). The per-area gateways still run alone in Local.
   -->
   <PropertyGroup>
     <CohesionApplicationName>cohesion-system</CohesionApplicationName>

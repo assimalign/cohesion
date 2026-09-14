@@ -2,7 +2,7 @@
 
 IdentityHub is the L3 identity service platform intended to manage tenants, directories, applications, principals, credentials, sessions, token services, federation, and provisioning.
 
-The application builder configures a minimal code-first OpenID Connect issuer with persisted ES256 keys, client credentials, a loopback Development device-authorization flow, and a Cohesion resource control plane. Production HTTPS consumes a gateway-materialized `tls` Secret mount; the self-signed fallback is Development-only.
+The application builder configures a minimal code-first OpenID Connect issuer with persisted ES256 keys, client credentials, a loopback Local device-authorization flow, and a Cohesion resource control plane. Production HTTPS consumes a gateway-materialized `tls` Secret mount; the self-signed fallback is Local-only.
 
 ## Projects
 

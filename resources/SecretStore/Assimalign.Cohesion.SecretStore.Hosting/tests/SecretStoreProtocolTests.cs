@@ -21,6 +21,52 @@ namespace Assimalign.Cohesion.SecretStore.Hosting.Tests;
 
 public sealed class SecretStoreProtocolTests
 {
+    [Theory(DisplayName = "Cohesion Test [SecretStore.Hosting] - Plaintext: deployable environments reject loopback HTTP")]
+    [InlineData(AppEnvironment.Keys.Development, true)]
+    [InlineData(AppEnvironment.Keys.Development, false)]
+    [InlineData(AppEnvironment.Keys.Production, true)]
+    [InlineData(AppEnvironment.Keys.Production, false)]
+    public void Build_WithDeployableLoopbackHttp_ShouldRejectPlaintext(string environmentName, bool managed)
+    {
+        // Arrange
+        using var directory = new TemporaryDirectory();
+        ResourceContext context = SecretStoreTestHost.CreateContext(
+            SecretStoreTestHost.GetEndpoint(),
+            directory.Path,
+            gatewayName: managed ? "local" : null,
+            environmentName: environmentName);
+        using IDisposable scope = ResourceRuntime.CreateScope(context);
+        ISecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+
+        // Act
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        error.Message.ShouldContain("plaintext HTTP only on loopback in Local", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [SecretStore.Hosting] - Local plaintext: loopback HTTP is permitted")]
+    [InlineData(AppEnvironment.Keys.Local)]
+    [InlineData("local")]
+    public async Task Build_WithLocalLoopbackHttp_ShouldPermitPlaintext(string environmentName)
+    {
+        // Arrange
+        using var directory = new TemporaryDirectory();
+        ResourceContext context = SecretStoreTestHost.CreateContext(
+            SecretStoreTestHost.GetEndpoint(),
+            directory.Path,
+            gatewayName: null,
+            environmentName: environmentName);
+        using IDisposable scope = ResourceRuntime.CreateScope(context);
+        ISecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+
+        // Act
+        await using ISecretStoreApplication application = builder.Build();
+
+        // Assert
+        application.Context.HostedServices.ShouldNotBeEmpty();
+    }
+
     [Fact(DisplayName = "Cohesion Test [SecretStore.Hosting] - Bootstrap context: rejects a credential that does not match the resource identity")]
     public async Task StartAsync_WithMismatchedAmbientCredential_ShouldRejectBootstrapContext()
     {

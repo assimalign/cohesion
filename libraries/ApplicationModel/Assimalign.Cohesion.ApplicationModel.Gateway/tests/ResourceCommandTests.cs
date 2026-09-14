@@ -111,7 +111,7 @@ public class ResourceCommandTests
     }
 
     private static IApplicationBuilder CreateBuilder(IApplicationGateway gateway) =>
-        Application.CreateBuilder(ApplicationName.Parse("appa"), ["--environment", "Development"]).UseGateway(gateway);
+        Application.CreateBuilder(ApplicationName.Parse("appa"), ["--environment", AppEnvironment.Keys.Local]).UseGateway(gateway);
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Commands: Reapply removes a withdrawn declaration before reconciling")]
     public async Task ReconcileAsync_WithdrawnDeclaration_ShouldRemoveOwnedCommand()
@@ -163,7 +163,7 @@ public class ResourceCommandTests
 
         IApplicationModel Claim(string name)
         {
-            IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse(name), ["--environment", "Development"])
+            IApplicationBuilder builder = Application.CreateBuilder(ApplicationName.Parse(name), ["--environment", AppEnvironment.Keys.Local])
                 .UseGateway(gateway);
             builder.AddResource(Manifest("worker", name));
             IApplicationResourceDescriptor external = builder.RemoteReference(
@@ -193,7 +193,7 @@ public class ResourceCommandTests
         ResourceManifest manifest = Manifest("db");
         provider.AddResource(manifest);
         IApplicationModel providerModel = provider.Build().Model;
-        IApplicationBuilder caller = Application.CreateBuilder((ApplicationName)"caller", ["--environment", "Development"])
+        IApplicationBuilder caller = Application.CreateBuilder((ApplicationName)"caller", ["--environment", AppEnvironment.Keys.Local])
             .UseGateway(gateway);
         caller.AddResource(Manifest("worker", "caller"));
         IApplicationResourceDescriptor external = caller.RemoteReference(

@@ -46,7 +46,7 @@ public sealed class DeviceLoginTests
 
         calls.ShouldBe(1);
         fixture.Error.ToString().ShouldContain("does not expose the device flow", Case.Sensitive);
-        fixture.Error.ToString().ShouldContain("Development hub bound to loopback", Case.Sensitive);
+        fixture.Error.ToString().ShouldContain("Local hub bound to loopback", Case.Sensitive);
         Directory.Exists(fixture.Home).ShouldBeFalse();
         fixture.Runner.Calls.ShouldBeEmpty();
     }

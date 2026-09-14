@@ -285,7 +285,9 @@ public sealed class ConfigurationStorePlannerTests
 
     private sealed class TestApplicationEnvironment : IApplicationEnvironment
     {
-        public EnvironmentName Name => "Development";
+        public EnvironmentName Name => AppEnvironment.Keys.Development;
+
+        public bool IsLocal => false;
 
         public bool IsDevelopment => true;
     }

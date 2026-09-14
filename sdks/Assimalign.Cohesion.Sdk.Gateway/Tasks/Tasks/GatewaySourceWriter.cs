@@ -446,13 +446,13 @@ internal static class GatewaySourceWriter
         source.AppendLine("        {");
         source.AppendLine("            selected = global::System.Environment.GetEnvironmentVariable(\"COHESION_GATEWAY\");");
         source.AppendLine("        }");
-        source.AppendLine("        if (global::System.String.IsNullOrWhiteSpace(selected) && builder.Environment.IsDevelopment)");
+        source.AppendLine("        if (global::System.String.IsNullOrWhiteSpace(selected) && builder.Environment.IsLocal)");
         source.AppendLine("        {");
         source.AppendLine("            selected = \"local\";");
         source.AppendLine("        }");
         source.AppendLine("        return global::System.String.IsNullOrWhiteSpace(selected)");
         source.AppendLine("            ? throw new global::System.InvalidOperationException(");
-        source.AppendLine("                \"No Cohesion gateway was selected. Pass --gateway, set COHESION_GATEWAY, or use Development for the local default.\")");
+        source.AppendLine("                \"No Cohesion gateway was selected. Pass --gateway, set COHESION_GATEWAY, or use Local for the local default.\")");
         source.AppendLine("            : selected;");
         source.AppendLine("    }");
         source.AppendLine();

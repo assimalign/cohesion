@@ -7,13 +7,18 @@ Each domain's Directory.Build.props writes its CohesionApplication explicitly.
 Every resource enables orchestration and generates a manifest, typed Resource accessors and its
 area-owned default control plane. Gateways inherit their always-enabled SDK behavior.
 Cross-domain references become generated externals; configure the consumer gateway's remote
-bindings for your environment. The included programs retain the landed examples' development
+bindings for your environment. The included programs retain the landed examples' developer-machine
 endpoint bindings and zone Database/API/SPA realization subset.
 
 The appsettings files describe the intended multi-cluster placement: Platform on cluster-03,
 Identity on cluster-01, Networking on cluster-02 and zones on cluster-04. Current providers
 are Local and InProcess, with Networking restricted to Local for its non-composable VPN data plane.
 Kubernetes providers and production trust configuration are separate integration work.
+
+Every project has `Properties/launchSettings.json` selecting environment `Local` for
+developer-machine runs. The zone APIs keep local overrides in `appsettings.Local.json`.
+Development uses strict deployed security. To supply an environment through shell variables,
+use `dotnet run --no-launch-profile` so launch settings do not override those values.
 
 ```bash
 dotnet build Example.Federated.slnx

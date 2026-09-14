@@ -512,7 +512,7 @@ jobs:
             throw "Published Gateway apphost was not found at '$appHost'."
           }
 
-          $json = (& $appHost --mode describe --gateway local --environment Development | Out-String).Trim()
+          $json = (& $appHost --mode describe --gateway local --environment Local | Out-String).Trim()
           if ($LASTEXITCODE -ne 0) {
             throw "Published Gateway sample exited with code $LASTEXITCODE."
           }

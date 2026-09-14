@@ -138,7 +138,7 @@ public class RemoteReferenceTests
             closure: [identity, cache, platform]);
         IApplicationBuilder builder = Application.CreateBuilder(
                 "appa",
-                ["--environment", "Development", "--realize", "identity-hub"])
+                ["--environment", AppEnvironment.Keys.Local, "--realize", "identity-hub"])
             .UseGateway(new FakeGateway("local"));
         builder.AddResource(TestManifestFactory.Create("api") with
         {
@@ -181,7 +181,7 @@ public class RemoteReferenceTests
             closure: [identity, cache]);
         IApplicationBuilder builder = Application.CreateBuilder(
                 "appa",
-                ["--environment", "Development", "--realize", "identity-hub"])
+                ["--environment", AppEnvironment.Keys.Local, "--realize", "identity-hub"])
             .UseGateway(new FakeGateway("local"));
         builder.AddResource(TestManifestFactory.Create("api") with
         {
@@ -201,8 +201,11 @@ public class RemoteReferenceTests
         Plan(model, "identity-cache").Hints.ContainsKey("cohesion.external").ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Realize is Development only")]
-    public void Build_RealizeExternalOutsideDevelopment_ShouldFail()
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Realize is Local only")]
+    [InlineData(AppEnvironment.Keys.Development)]
+    [InlineData(AppEnvironment.Keys.Staging)]
+    [InlineData(AppEnvironment.Keys.Production)]
+    public void Build_RealizeExternalOutsideLocal_ShouldFail(string environment)
     {
         // Arrange
         ResourceManifest identity = TestManifestFactory.Create("identity-hub", "identity");
@@ -215,7 +218,7 @@ public class RemoteReferenceTests
             closure: [identity]);
         IApplicationBuilder builder = Application.CreateBuilder(
                 "appa",
-                ["--environment", "Production", "--realize", "identity-hub"])
+                ["--environment", environment, "--realize", "identity-hub"])
             .UseGateway(new FakeGateway("local"));
         builder.AddResource(TestManifestFactory.Create("api"));
         builder.AddExternal(declaration);
@@ -224,7 +227,7 @@ public class RemoteReferenceTests
         InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => builder.Build());
 
         // Assert
-        exception.Message.ShouldContain("Development-only");
+        exception.Message.ShouldContain("Local-only");
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Required boundary reference wins when optional reference is declared first")]

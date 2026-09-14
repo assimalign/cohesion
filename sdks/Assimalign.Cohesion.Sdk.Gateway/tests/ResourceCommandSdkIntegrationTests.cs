@@ -50,7 +50,7 @@ public sealed class ResourceCommandSdkIntegrationTests
 
         // Act: compare manifest commands with the area's factory, excluding protocol bootstrap commands.
         DotNetBuildResult describe = await workspace.RunBuiltProjectAsync(
-            "CommandGateway", ["--mode=describe", "--gateway=local", "--environment=Development"], cancellationSource.Token);
+            "CommandGateway", ["--mode=describe", "--gateway=local", "--environment=Local"], cancellationSource.Token);
 
         // Assert
         describe.ExitCode.ShouldBe(0, describe.Output);

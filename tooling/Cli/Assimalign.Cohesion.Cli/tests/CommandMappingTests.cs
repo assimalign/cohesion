@@ -43,10 +43,175 @@ public sealed class CommandMappingTests
         using var fixture = new CliFixture();
         string project = fixture.Gateway();
 
-        foreach (string name in new[] { "local", "inprocess", "docker", "kubernetes", "custom" })
+        foreach (string name in new[] { "local", "LOCAL", "inprocess", "InProcess", "docker", "kubernetes", "custom" })
         {
             (await fixture.Application().ExecuteAsync(["run", "--gateway", name], CancellationToken.None)).ShouldBe(0);
-            fixture.Runner.Calls.Last().Arguments.ShouldBe(new[] { "run", "--project", project, "--", "--gateway", name });
+            string[] environment = name.Equals("local", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("inprocess", StringComparison.OrdinalIgnoreCase) ? ["--environment", "Local"] : [];
+            fixture.Runner.Calls.Last().Arguments.ShouldBe(["run", "--project", project, "--", "--gateway", name, .. environment]);
+        }
+    }
+
+    /// <summary>Unset and whitespace-only shell variables permit the developer-machine run default.</summary>
+    /// <param name="cohesionEnvironment">The Cohesion shell environment value.</param>
+    /// <param name="dotnetEnvironment">The .NET shell environment value.</param>
+    /// <returns>A task representing command mapping verification.</returns>
+    [Theory(DisplayName = "Cohesion Test [Tooling.Cli] - Run: Should select Local only for unset shell environments")]
+    [InlineData(null, null)]
+    [InlineData("", "")]
+    [InlineData(" \t", null)]
+    [InlineData(null, "\r\n ")]
+    [InlineData(" \t", "\r\n")]
+    public async Task Run_WithoutEnvironment_ShouldAppendLocalAsync(string? cohesionEnvironment, string? dotnetEnvironment)
+    {
+        // Arrange
+        using var fixture = new CliFixture();
+        string project = fixture.Gateway();
+        CliApplication application = fixture.Application(environment: name =>
+            name == "COHESION_ENVIRONMENT" ? cohesionEnvironment : name == "DOTNET_ENVIRONMENT" ? dotnetEnvironment : null);
+
+        // Act
+        int result = await application.ExecuteAsync(["run", "--mode", "describe"], CancellationToken.None);
+
+        // Assert
+        result.ShouldBe(0);
+        fixture.Runner.Calls.Single().Arguments.ShouldBe([
+            "run", "--project", project, "--", "--environment", "Local", "--mode", "describe"]);
+    }
+
+    /// <summary>Either explicit shell variable must survive a template's Local launch profile.</summary>
+    /// <param name="cohesionEnvironment">The Cohesion shell environment value.</param>
+    /// <param name="dotnetEnvironment">The .NET shell environment value.</param>
+    /// <returns>A task representing command mapping verification.</returns>
+    [Theory(DisplayName = "Cohesion Test [Tooling.Cli] - Run: Should preserve explicit shell environments")]
+    [InlineData("Development", null)]
+    [InlineData(null, "Development")]
+    [InlineData(" \t", "Development")]
+    [InlineData("Development", "Production")]
+    [InlineData("Local", null)]
+    public async Task Run_WithEnvironmentVariable_ShouldDisableLaunchProfileAsync(string? cohesionEnvironment, string? dotnetEnvironment)
+    {
+        // Arrange
+        using var fixture = new CliFixture();
+        string project = fixture.Gateway();
+        CliApplication application = fixture.Application(environment: name =>
+            name == "COHESION_ENVIRONMENT" ? cohesionEnvironment : name == "DOTNET_ENVIRONMENT" ? dotnetEnvironment : null);
+
+        // Act
+        int result = await application.ExecuteAsync(["run", "--mode", "describe"], CancellationToken.None);
+
+        // Assert
+        result.ShouldBe(0);
+        fixture.Runner.Calls.Single().Arguments.ShouldBe([
+            "run", "--project", project, "--no-launch-profile", "--", "--mode", "describe"]);
+    }
+
+    /// <summary>Explicit environment arguments retain their spelling before and after passthrough.</summary>
+    /// <param name="passthrough">Whether to place the option after the passthrough separator.</param>
+    /// <param name="option">The explicit environment option spelling.</param>
+    /// <param name="value">The separate option value, if present.</param>
+    /// <returns>A task representing command mapping verification.</returns>
+    [Theory(DisplayName = "Cohesion Test [Tooling.Cli] - Run: Should preserve explicit environment arguments")]
+    [InlineData(false, "--environment", "Development")]
+    [InlineData(true, "--environment", "Development")]
+    [InlineData(false, "--EnViRoNmEnT", "Production")]
+    [InlineData(true, "--ENVIRONMENT", "Local")]
+    [InlineData(false, "--environment=Development", null)]
+    [InlineData(true, "--EnViRoNmEnT=Development", null)]
+    [InlineData(true, "--environment", null)]
+    [InlineData(true, "--environment=", null)]
+    public async Task Run_WithEnvironmentArgument_ShouldPreserveArgumentsAsync(bool passthrough, string option, string? value)
+    {
+        // Arrange
+        using var fixture = new CliFixture();
+        string project = fixture.Gateway();
+        string[] environmentArguments = value is null ? [option] : [option, value];
+        string[] arguments = passthrough ? ["run", "--", .. environmentArguments] : ["run", .. environmentArguments];
+
+        // Act
+        int result = await fixture.Application().ExecuteAsync(arguments, CancellationToken.None);
+
+        // Assert
+        result.ShouldBe(0);
+        fixture.Runner.Calls.Single().Arguments.ShouldBe(["run", "--project", project, "--", .. environmentArguments]);
+    }
+
+    /// <summary>Gateway equals forms and passthrough selections control only the Local convenience default.</summary>
+    /// <param name="gateway">The explicit gateway provider.</param>
+    /// <param name="injectLocal">Whether the run should receive the Local environment argument.</param>
+    /// <returns>A task representing command mapping verification.</returns>
+    [Theory(DisplayName = "Cohesion Test [Tooling.Cli] - Run: Should honor effective passthrough gateway selection")]
+    [InlineData("local", true)]
+    [InlineData("INPROCESS", true)]
+    [InlineData("docker", false)]
+    [InlineData("Docker", false)]
+    [InlineData("kubernetes", false)]
+    [InlineData("custom", false)]
+    public async Task Run_WithGatewayForms_ShouldRespectProviderAsync(string gateway, bool injectLocal)
+    {
+        // Arrange
+        using var fixture = new CliFixture();
+        string project = fixture.Gateway();
+        foreach (string[] gatewayArguments in new[]
+        {
+            new[] { "--gateway=" + gateway },
+            new[] { "--", "--gateway", gateway },
+            new[] { "--", "--GATEWAY=" + gateway },
+            new[] { "--gateway", "local", "--", "--gateway", gateway }
+        })
+        {
+            // Act
+            int result = await fixture.Application().ExecuteAsync(["run", .. gatewayArguments], CancellationToken.None);
+
+            // Assert
+            result.ShouldBe(0);
+            string[] mapped = fixture.Runner.Calls.Last().Arguments.ToArray();
+            mapped.Count(argument => argument == "--environment").ShouldBe(injectLocal ? 1 : 0);
+            if (injectLocal)
+            {
+                mapped[Array.IndexOf(mapped, "--environment") + 1].ShouldBe("Local");
+            }
+            mapped.Take(4).ShouldBe(["run", "--project", project, "--"]);
+            if (gatewayArguments.Length == 1)
+            {
+                mapped.Skip(4).ShouldBe(injectLocal
+                    ? ["--gateway", gateway, "--environment", "Local"]
+                    : ["--gateway", gateway]);
+            }
+            else
+            {
+                mapped.Last().ShouldBe(gatewayArguments.Last());
+            }
+        }
+    }
+
+    /// <summary>Deploy and trust preserve explicit shell environments without inventing an environment argument.</summary>
+    /// <returns>A task representing command mapping verification.</returns>
+    [Fact(DisplayName = "Cohesion Test [Tooling.Cli] - Gateway: Deploy and trust should never inject Local")]
+    public async Task Gateway_WithDeployOrTrust_ShouldPreserveEnvironmentAsync()
+    {
+        // Arrange
+        using var fixture = new CliFixture();
+        fixture.Gateway();
+        foreach (string? shellEnvironment in new[] { null, "Development" })
+        {
+            CliApplication application = fixture.Application(environment: name =>
+                name == "DOTNET_ENVIRONMENT" ? shellEnvironment : null);
+            foreach (string[] arguments in new[]
+            {
+                new[] { "deploy", "--gateway", "local" },
+                new[] { "trust", "issue", "--developer", "Dev" },
+                new[] { "trust", "add", "peer", "--from", "peer.json" }
+            })
+            {
+                // Act
+                int result = await application.ExecuteAsync(arguments, CancellationToken.None);
+
+                // Assert
+                result.ShouldBe(0);
+                fixture.Runner.Calls.Last().Arguments.ShouldNotContain("--environment");
+                fixture.Runner.Calls.Last().Arguments.Contains("--no-launch-profile").ShouldBe(shellEnvironment is not null);
+            }
         }
     }
 

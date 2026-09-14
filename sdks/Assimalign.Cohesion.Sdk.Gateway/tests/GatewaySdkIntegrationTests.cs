@@ -184,7 +184,7 @@ public sealed class GatewaySdkIntegrationTests
         // Act: execute the package-built gateway's real Describe edge.
         DotNetBuildResult describe = await workspace.RunBuiltProjectAsync(
             "GatewaySmoke",
-            ["--mode=describe", "--gateway=local", "--environment=Development"],
+            ["--mode=describe", "--gateway=local", "--environment=Local"],
             cancellationSource.Token);
 
         // Assert: Describe emits a model document and carries the manifest-inferred edge.
@@ -223,7 +223,7 @@ public sealed class GatewaySdkIntegrationTests
             [
                 "--mode=describe",
                 "--gateway=jit-test",
-                "--environment=Development",
+                "--environment=Local",
                 "--jit-provider-token=received",
             ],
             cancellationSource.Token);
@@ -238,7 +238,7 @@ public sealed class GatewaySdkIntegrationTests
             [
                 "--mode=describe",
                 "--gateway=jit-test",
-                "--environment=Development",
+                "--environment=Local",
                 "--jit-provider-token=received",
                 "--configure-provider",
             ],

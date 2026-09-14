@@ -20,6 +20,10 @@ public static class Application
     /// The gateway is not multi-model capable, or a command-line option is invalid or selects
     /// another gateway.
     /// </exception>
+    /// <remarks>
+    /// Local and InProcess gateways use the Local environment when no environment option or
+    /// nonblank process environment variable is supplied. Explicit environment values are preserved.
+    /// </remarks>
     public static IApplicationSet CreateSet(IApplicationGateway gateway, string[] args)
     {
         ArgumentNullException.ThrowIfNull(gateway);
@@ -42,6 +46,15 @@ public static class Application
         IApplicationEnvironment environment = options.Environment is null
             ? ApplicationEnvironment.FromHost()
             : ApplicationEnvironment.FromName(options.Environment);
+        if (options.Environment is null &&
+            string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable(AppEnvironment.Keys.EnvironmentKey)) &&
+            string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable(AppEnvironment.Keys.DotNetEnvironmentKey)) &&
+            (string.Equals(gateway.Name.ToString(), "local", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(gateway.Name.ToString(), "inprocess", StringComparison.OrdinalIgnoreCase)))
+        {
+            environment = ApplicationEnvironment.FromName(AppEnvironment.Keys.Local);
+        }
+
         return new CohesionApplicationSet(
             multiModelGateway,
             environment,
@@ -69,7 +82,7 @@ public static class Application
     /// A recognized gateway command-line option is missing or has an invalid value.
     /// </exception>
     /// <remarks>
-    /// An unnamed builder derives a slug from the entry assembly only in Development. In
+    /// An unnamed builder derives a slug from the entry assembly only in Local. In
     /// other environments, call <see cref="IApplicationBuilder.UseName(ApplicationName)"/> before building.
     /// </remarks>
     public static IApplicationBuilder CreateBuilder(string[] args) => new ApplicationBuilder(args);

@@ -24,8 +24,8 @@ public class HttpServerConfigurationTests
     [InlineData("Http2s", HttpProtocol.Http20)]
     public async Task Bind_HttpsProtocols_ShouldUseCertificateMount(string protocol, HttpProtocol expected)
     {
-        var development = new ResourceContext(environmentName: "Development");
-        using X509Certificate2 certificate = development.CreateDevelopmentEndpointCertificate("localhost");
+        var local = new ResourceContext(environmentName: AppEnvironment.Keys.Local);
+        using X509Certificate2 certificate = local.CreateDevelopmentEndpointCertificate("localhost");
         using var key = certificate.GetECDsaPrivateKey()!;
         string pem = certificate.ExportCertificatePem() + "\n" + key.ExportPkcs8PrivateKeyPem();
         var resource = new ResourceContext(mounts: new Dictionary<string, ResourceMount>

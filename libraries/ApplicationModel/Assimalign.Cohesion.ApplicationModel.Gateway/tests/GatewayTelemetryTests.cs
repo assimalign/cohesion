@@ -30,7 +30,7 @@ public sealed class GatewayTelemetryTests
     public void Discovery_BeforeSinkIsRunning_ShouldInjectNothing(bool includeSink)
     {
         var gateway = new LocalGateway();
-        IApplicationBuilder builder = Application.CreateBuilder("telemetry-tests", ["--environment", "Development"]).UseGateway(gateway);
+        IApplicationBuilder builder = Application.CreateBuilder("telemetry-tests", ["--environment", AppEnvironment.Keys.Local]).UseGateway(gateway);
         if (includeSink) { builder.AddResource(Manifest("logs", "LogSpace", "query", "Assimalign.Cohesion.LogSpace.SinkHost") with { Endpoints = [Endpoint("query", 8443), Endpoint("otlp", 4318)] }); }
         builder.AddResource(Manifest("web", "Web", "https", "Assimalign.Cohesion.Web.HttpsHost"));
         IApplicationModel model = builder.Build().Model;
@@ -51,7 +51,7 @@ public sealed class GatewayTelemetryTests
             ReadinessBudget = TimeSpan.FromSeconds(30), ProbeInterval = TimeSpan.FromMilliseconds(100), ProbeTimeout = TimeSpan.FromSeconds(3), StopGrace = TimeSpan.FromSeconds(5) });
         var details = new ConcurrentQueue<string>();
         gateway.ResourceStates.StateChanged += (_, change) => details.Enqueue(change.Detail ?? change.Current.ToString());
-        IApplicationBuilder builder = Application.CreateBuilder("telemetry-tests", ["--environment", "Development"]).UseGateway(gateway);
+        IApplicationBuilder builder = Application.CreateBuilder("telemetry-tests", ["--environment", AppEnvironment.Keys.Local]).UseGateway(gateway);
         IApplicationResourceDescriptor sink = builder.AddResource(Manifest("logs", "LogSpace", "query", "Assimalign.Cohesion.LogSpace.SinkHost") with
         {
             Endpoints = [Endpoint("query", 8443), Endpoint("otlp", 4318)],
@@ -83,7 +83,7 @@ public sealed class GatewayTelemetryTests
             claims.RootElement.GetProperty("scope").GetString().ShouldBe("telemetry");
             File.Exists(Path.Combine(directory, "logs", ".state", "telemetry.headers")).ShouldBeFalse();
 
-            var context = new ResourceContext(applicationName: "telemetry-tests", resourceName: "web", environmentName: "Development", gatewayName: "local",
+            var context = new ResourceContext(applicationName: "telemetry-tests", resourceName: "web", environmentName: AppEnvironment.Keys.Local, gatewayName: "local",
                 contentRootPath: null, endpoints: null, mounts: null, settings: null, references: null,
                 bootstrapCredential: ReadOnlyMemory<byte>.Empty, applicationTrustKey: ReadOnlyMemory<byte>.Empty,
                 ambientValues: new Dictionary<string, string?> { [ResourceEnvironment.TrustBundlePath] = Path.Combine(directory, "web", ".state", "trust.pem") });

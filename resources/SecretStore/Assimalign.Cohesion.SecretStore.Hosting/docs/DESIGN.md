@@ -17,6 +17,8 @@ protocol.
 
 ## Composition and endpoint selection
 
+`Local` is the developer-machine environment. `Development` is a deployable environment and requires HTTPS even on loopback, as does `Production`. An unset environment still resolves to `Production`.
+
 Every build materializes caller-added `IHostService` factories once, in registration order, then
 appends one `SecretsEndpointService`. The shared host starts in that order and stops in reverse,
 so the data endpoint starts last and drains first. A builder may be built only once.
@@ -29,7 +31,7 @@ The `api` endpoint is selected in this order:
 4. `https://127.0.0.1:8443`.
 
 Only absolute `http` and `https` endpoint URIs are accepted. Hosts must be `localhost` or a
-bindable IP address. Plaintext HTTP is restricted to loopback in the `Development` environment;
+bindable IP address. Plaintext HTTP is restricted to loopback in the `Local` environment;
 HTTPS is otherwise required. An unauthenticated standalone store is loopback-only for either
 scheme. A non-root path on the endpoint URI becomes a prefix for every route below.
 
@@ -79,7 +81,7 @@ Missing, malformed, expired, untrusted, or incorrectly signed credentials return
 `WWW-Authenticate: Bearer` challenge. A valid token for the wrong audience returns `403`.
 Trust commands must set `owner` to `<iss>@<sub>`; declared secret and certificate commands use `<iss>`. Standalone hosts (no gateway name) do
 not require bearer authentication and therefore may bind only to loopback. Plaintext HTTP is
-allowed only on loopback in `Development`, regardless of hosting mode. This is bootstrap
+allowed only on loopback in `Local`, regardless of hosting mode. This is bootstrap
 credential authentication, not a general user authorization or secret-policy engine.
 
 ## Protected persistence and certificate authority

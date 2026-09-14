@@ -25,6 +25,11 @@ Database/API/SPA realization subset; their SecretStore references remain declare
 Docker and Kubernetes are future provider choices, not included in this scaffold.
 The appsettings files retain the intended single-cluster placement for that future integration.
 
+Every project has `Properties/launchSettings.json` selecting environment `Local` for
+developer-machine runs. The zone APIs keep local overrides in `appsettings.Local.json`.
+Development uses strict deployed security. To supply an environment through shell variables,
+use `dotnet run --no-launch-profile` so launch settings do not override those values.
+
 ```bash
 dotnet build Example.K8s.slnx
 dotnet run --project Zones/AppA/Example.AppA.Gateway -- --gateway local --mode describe
@@ -33,7 +38,7 @@ dotnet run --project Zones/AppA/Example.AppA.Gateway -- --gateway inprocess --mo
 ```
 
 Cross-domain references become generated externals. Configure their endpoint bindings in the
-domain gateway before running a complete environment. Local examples use development endpoints;
+domain gateway before running a complete environment. Local examples use developer-machine endpoints;
 production placement, remote trust and domain-specific configuration require your environment's values.
 Set the organization feed owner in nuget.config and the image registry in Directory.Build.props.
 

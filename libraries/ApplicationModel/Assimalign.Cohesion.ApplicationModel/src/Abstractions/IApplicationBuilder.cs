@@ -107,6 +107,11 @@ public interface IApplicationBuilder
     /// <param name="gateway">The gateway that will realize the model.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="gateway"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// Local and InProcess gateways use the Local environment when no environment option or
+    /// nonblank process environment variable is supplied. Reselecting a gateway recalculates
+    /// that default; explicit environment values are preserved.
+    /// </remarks>
     IApplicationBuilder UseGateway(IApplicationGateway gateway);
 
     /// <summary>

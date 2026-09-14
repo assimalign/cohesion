@@ -40,7 +40,7 @@ public static class ApplicationModelResolvers
         new GatewayApplicationModelResolver(address, client);
 
     /// <summary>
-    /// Uses local executable describe in Development and an exported model in other environments.
+    /// Uses local executable describe in Local and an exported model in other environments.
     /// </summary>
     /// <param name="executablePath">The local gateway executable or managed DLL.</param>
     /// <param name="exportPath">The in-cluster mounted export path.</param>
