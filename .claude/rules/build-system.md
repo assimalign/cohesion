@@ -49,13 +49,18 @@ Plus a `global.json` pinning every Cohesion SDK in the chain:
 
 ```json
 {
-    "sdk": { "version": "10.0.101" },
+    "sdk": {
+        "version": "10.0.300",
+        "rollForward": "latestFeature"
+    },
     "msbuild-sdks": {
         "Assimalign.Cohesion.Sdk":     "10.0.0",
         "Assimalign.Cohesion.Sdk.Web": "10.0.0"
     }
 }
 ```
+
+The SDK pin check in `sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.PinValidation.targets` requires .NET SDK >= 10.0.300 (`COHSDK002`); the repository's `global.json` is the canonical example.
 
 No installer required. Consumers get every Cohesion library belonging to the chosen framework(s) automatically through the chain `Sdk.<Domain>` → `Sdk` (base) → `Microsoft.NET.Sdk`.
 
