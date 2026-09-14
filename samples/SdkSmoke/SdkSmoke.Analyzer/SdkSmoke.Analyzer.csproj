@@ -1,0 +1,6 @@
+<Project Sdk="Assimalign.Cohesion.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles><NoWarn>$(NoWarn);CA2252</NoWarn>
+  </PropertyGroup>
+</Project>

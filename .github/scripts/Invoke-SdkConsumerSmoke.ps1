@@ -4,7 +4,7 @@
     Validates Cohesion SDK and shared-framework packages through isolated consumers.
 
 .DESCRIPTION
-    Creates package-only consumers for the base, Web, and Database SDKs plus an analyzer-bearing
+    Copies package-only consumers for the base, Web, and Database SDKs plus an analyzer-bearing
     base-SDK profile. Each consumer is built, published self-contained for the supplied runtime
     identifier, and run. The analyzer profile also proves that generated output arrived through
     the SDK -> framework targeting-pack chain.
@@ -21,6 +21,9 @@
 .PARAMETER WorkingDirectory
     Optional parent for the isolated consumer workspace. Defaults to RUNNER_TEMP in CI and
     _out/sdk-smoke locally.
+
+.PARAMETER SampleDirectory
+    Optional checked-in consumer source directory. Defaults to samples/SdkSmoke in the repository.
 #>
 [CmdletBinding()]
 param(
@@ -33,7 +36,9 @@ param(
     [Parameter(Mandatory)]
     [string] $RuntimeIdentifier,
 
-    [string] $WorkingDirectory
+    [string] $WorkingDirectory,
+
+    [string] $SampleDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,6 +53,13 @@ if ([string]::IsNullOrWhiteSpace($RuntimeIdentifier)) {
 
 $packageDirectory = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $repositoryDirectory = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+if (-not $SampleDirectory) {
+    $SampleDirectory = Join-Path $repositoryDirectory 'samples/SdkSmoke'
+}
+if (-not (Test-Path -LiteralPath $SampleDirectory -PathType Container)) {
+    throw "SdkSmoke sample directory '$SampleDirectory' does not exist."
+}
+$SampleDirectory = (Resolve-Path -LiteralPath $SampleDirectory).Path
 if (-not $WorkingDirectory) {
     $WorkingDirectory = if ($env:RUNNER_TEMP) {
         Join-Path $env:RUNNER_TEMP 'cohesion-sdk-smoke'
@@ -82,28 +94,26 @@ if ($missingPackage.Count -gt 0) {
     throw "SDK smoke feed is missing required packages: $($missingPackage -join ', ')."
 }
 
+# Ignore build output at every depth so stale generated files cannot satisfy or duplicate assertions.
+foreach ($sampleFile in Get-ChildItem -LiteralPath $SampleDirectory -Recurse -File) {
+    $relativePath = [System.IO.Path]::GetRelativePath($SampleDirectory, $sampleFile.FullName)
+    if ($relativePath -match '(^|[\\/])(bin|obj)([\\/]|$)') {
+        continue
+    }
+
+    $destination = Join-Path $workspace $relativePath
+    New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+    Copy-Item -LiteralPath $sampleFile.FullName -Destination $destination -Force
+}
+
 $nugetPath = Join-Path $workspace 'NuGet.Config'
-[xml] $nuget = @'
-<?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <packageSources>
-    <clear />
-    <add key="cohesion-smoke" value="placeholder" />
-    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
-  </packageSources>
-  <packageSourceMapping>
-    <packageSource key="cohesion-smoke">
-      <package pattern="Assimalign.Cohesion.*" />
-    </packageSource>
-    <packageSource key="nuget.org">
-      <package pattern="*" />
-    </packageSource>
-  </packageSourceMapping>
-</configuration>
-'@
+[xml] $nuget = Get-Content -LiteralPath $nugetPath -Raw
 $localSource = @($nuget.configuration.packageSources.add) |
     Where-Object { $_.key -eq 'cohesion-smoke' } |
     Select-Object -First 1
+if ($null -eq $localSource) {
+    throw 'SdkSmoke NuGet.Config has no cohesion-smoke package source.'
+}
 $localSource.value = $packageDirectory
 $nuget.Save($nugetPath)
 
@@ -122,103 +132,35 @@ $consumerGlobalJson |
     ConvertTo-Json -Depth 10 |
     Set-Content -LiteralPath (Join-Path $workspace 'global.json') -Encoding utf8
 
-$coreProgramTemplate = @'
-using System;
-
-using Assimalign.Cohesion;
-
-Console.WriteLine("Cohesion SDK smoke: __PROFILE__:" + typeof(AppEnvironment).FullName);
-'@
-$analyzerProgram = @'
-using System;
-
-using Assimalign.Cohesion.ObjectMapping;
-
-Console.WriteLine("Cohesion SDK smoke: Analyzer:" + typeof(UserMapper).FullName);
-
-internal sealed class SourceUser
-{
-    public string Name { get; set; } = string.Empty;
-
-    public int Id { get; set; }
-}
-
-internal sealed class TargetUser
-{
-    public string DisplayName { get; set; } = string.Empty;
-
-    public int UserId { get; set; }
-}
-
-internal partial class UserMapper : MapperProfile<TargetUser, SourceUser>
-{
-    protected override void Configure(MapperProfileDescriptor<TargetUser, SourceUser> descriptor) =>
-        descriptor
-            .MapMember(target => target.DisplayName, source => source.Name)
-            .MapMember(target => target.UserId, source => source.Id);
-}
-'@
-
 $profiles = @(
     [pscustomobject]@{
         Name = 'SdkSmoke.App'
-        Sdk = 'Assimalign.Cohesion.Sdk'
-        Program = $coreProgramTemplate.Replace('__PROFILE__', 'App')
         ExpectedOutput = 'Cohesion SDK smoke: App:Assimalign.Cohesion.AppEnvironment'
         Analyzer = $false
     }
     [pscustomobject]@{
         Name = 'SdkSmoke.Web'
-        Sdk = 'Assimalign.Cohesion.Sdk.Web'
-        Program = $coreProgramTemplate.Replace('__PROFILE__', 'Web')
         ExpectedOutput = 'Cohesion SDK smoke: Web:Assimalign.Cohesion.AppEnvironment'
         Analyzer = $false
     }
     [pscustomobject]@{
         Name = 'SdkSmoke.Database'
-        Sdk = 'Assimalign.Cohesion.Sdk.Database'
-        Program = $coreProgramTemplate.Replace('__PROFILE__', 'Database')
         ExpectedOutput = 'Cohesion SDK smoke: Database:Assimalign.Cohesion.AppEnvironment'
         Analyzer = $false
     }
     [pscustomobject]@{
         Name = 'SdkSmoke.Analyzer'
-        Sdk = 'Assimalign.Cohesion.Sdk'
-        Program = $analyzerProgram
         ExpectedOutput = 'Cohesion SDK smoke: Analyzer:UserMapper'
         Analyzer = $true
     }
 )
-
-$projectTemplate = @'
-<Project Sdk="{0}">
-  <PropertyGroup>
-    <IsPackable>false</IsPackable>
-    {1}
-  </PropertyGroup>
-</Project>
-'@
 
 $env:NUGET_PACKAGES = Join-Path $workspace '.nuget/packages'
 $env:DOTNET_CLI_HOME = Join-Path $workspace '.dotnet'
 
 foreach ($profile in $profiles) {
     $profileDirectory = Join-Path $workspace $profile.Name
-    New-Item -ItemType Directory -Path $profileDirectory -Force | Out-Null
-    Set-Content `
-        -LiteralPath (Join-Path $profileDirectory 'Program.cs') `
-        -Value $profile.Program `
-        -Encoding utf8
-
-    $extraProperties = if ($profile.Analyzer) {
-        '<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles><NoWarn>$(NoWarn);CA2252</NoWarn>'
-    }
-    else {
-        ''
-    }
-    $project = $projectTemplate -f $profile.Sdk, $extraProperties
     $projectPath = Join-Path $profileDirectory "$($profile.Name).csproj"
-    Set-Content -LiteralPath $projectPath -Value $project -Encoding utf8
 
     Write-Host "::group::$($profile.Name) build"
     & dotnet build $projectPath --configuration Release --nologo
