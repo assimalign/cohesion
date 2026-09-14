@@ -15,7 +15,7 @@
   </PropertyGroup>
   <ItemGroup>
     <CohesionEndpoint Update="api" Public="true" Certificate="tls" />
-    <CohesionMount Include="tls" Kind="Secret" Source="platform-secretstore:certs/platform-configurationstore" />
+    <CohesionMount Update="tls" Source="platform-secretstore:certs/platform-configurationstore" />
     <CohesionResourceReference Include="..\Example.Platform.SecretStore\Example.Platform.SecretStore.csproj" />
     <Content Include="Configuration\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

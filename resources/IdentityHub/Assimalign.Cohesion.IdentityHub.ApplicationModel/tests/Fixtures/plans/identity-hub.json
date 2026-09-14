@@ -27,7 +27,8 @@
         "endpoint": "https",
         "containerPort": 8443,
         "protocol": "tcp",
-        "scheme": "https"
+        "scheme": "https",
+        "certificate": ""
       }
     ],
     "mounts": [

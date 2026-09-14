@@ -13,7 +13,7 @@
   </PropertyGroup>
   <ItemGroup>
     <CohesionEndpoint Update="https" Public="true" Certificate="tls" />
-    <CohesionMount Include="tls" Kind="Secret" Source="platform-secretstore:certs/identity-hub" />
+    <CohesionMount Update="tls" Source="platform-secretstore:certs/identity-hub" />
     <CohesionMount Include="signing" Kind="Secret" Source="platform-secretstore:identity/signing-keys" />
     <CohesionSetting Include="IdentityHub:Issuer" Type="Uri" Default="https://identity.example.com" />
     <!-- Application `platform`: generated as Externals.PlatformSecretStore in the identity gateway. -->
