@@ -38,7 +38,7 @@ This document is the execution map for the current GitHub backlog. It assigns pr
 
 - Every service-root initiative starts with its contract or engine epic before its client, hosting, or distribution epic.
 - Runtime and AOT epics always complete before large service hosting or reflection-sensitive features.
-- Nested service composition must be defined in L2 before L3 services are expected to host or compose other services through the runtime.
+- L2 provides the landed per-area `AddService` seam over nestable `IHost` and `Gateway.InProcess` composite realization; L3 services compose through those contracts.
 - Database model epics depend on the shared database core storage and execution epics.
 - Identity federation depends on the shared `IdentityModel` foundation, the token or key epic, and the operational services initiative for secure config and secret handling.
 - Eventing, IoT, email, and notifications depend on the core messaging primitives and on operational observability.
@@ -58,7 +58,7 @@ This document is the execution map for the current GitHub backlog. It assigns pr
 Use issue dependencies to encode the real execution path in GitHub:
 
 - Runtime is blocked by Foundation.
-- Nested host composition is part of Runtime and must land before dependent L3 services are expected to compose other hosts.
+- Nested host composition is delivered in Runtime through per-area `AddService` (item 9) and `Gateway.InProcess` (item 24); dependent L3 services use those seams.
 - SDK is blocked by Foundation.
 - Database Core is blocked by Runtime and Foundation.
 - Web is blocked by Runtime and Foundation.
@@ -83,28 +83,17 @@ Use issue dependencies to encode the real execution path in GitHub:
 
 ## Nested Service Composition
 
-- `libraries/Hosting/Assimalign.Cohesion.Hosting/src/Internal/HostToServiceWrapper.cs` and `libraries/Hosting/Assimalign.Cohesion.Hosting/src/Extensions/HostExtensions.cs` show the intended runtime model: a host can run as an `IHostService` inside another host.
-- This means several L3 services are not truly independent top-level products. Some are service substrates that other services compose, while others are composed services that depend on those substrates.
-- `ConfigurationStore` is a good example: its service host may depend on L2 runtime composition, web-facing admin endpoints, a database substrate, and identity contracts or `IdentityHub` depending on whether auth is delegated or embedded.
-- The backlog should therefore distinguish:
-- substrate initiatives such as web, database, shared identity contracts, and runtime composition
-- composed service initiatives such as configuration, secrets, API management, scheduler, messaging channels, and control-plane services
+- The public composition model is the per-area builder's `AddService` seam over nestable `IHost` (item 9, `51045965`; design note `4ef29290`). `HostToServiceWrapper.cs` and `HostExtensions.cs` in `libraries/Hosting/Assimalign.Cohesion.Hosting/src/` are the underlying host-as-service plumbing.
+- `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` realizes composite members through their real application entry points (item 24, `a03cfcf8`); its [package design](../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md) owns the lifecycle and resource-context contract.
+- The built layers are L1 foundation plus SDK/tooling; L2 application runtime and composition (`ApplicationModel`, the gateway family, and `Hosting`); and L3 the 18 service platforms.
+- Service dependencies remain explicit graph relationships; the composite's platform-neutral plan belongs to the base ApplicationModel planner.
 
-## Hierarchy Prefix Scheme
+## WBS Title Scheme and Backlog Dispositions
 
-- Use hierarchical title prefixes to reflect both layer and decomposition depth.
-- Suggested pattern:
-- initiative: `[L3.4] Cohesion - Operational Services`
-- epic: `[L3.4.1] Configuration and Secrets`
-- feature: `[L3.4.1.2] ConfigurationStore Hosting and Persistence`
-- story: `[L3.4.1.2.1] Compose ConfigurationStore host with database persistence`
-- Recommended interpretation:
-- the first segment is the layer
-- the second segment is the service family or substrate group
-- the third segment is the epic within that family
-- the fourth segment is the feature
-- the fifth segment is the story
-- This naming scheme is now applied across the GitHub backlog and should be preserved for future items.
+- [Workflow rules](../.claude/rules/workflow.md) define `[<wbs>] <title>` in Project #13: area epic `L01.01.NN`, feature `L01.01.NN.MM`, task `L01.01.NN.MM.PP`.
+- The initiative table's `[L3.x]` titles are legacy display names, mapped to WBS ids by the [developer-experience design](DEVELOPER_EXPERIENCE_DESIGN.md) §10 issue map; retain those table rows as historical scheduling context.
+- Program epics #17/#18/#19 and #130–#132 are superseded by that design and its §13 `[R]` decisions.
+- Item 41's remaining dispositions were already applied in GitHub during the 2026-09-07 review: #23/#139–#141 delivered; #21 re-titled "InProcess gateway"; #304 maps to item 9; #305 satisfied; #306/#307 folded into item 9. This records that review; it does not perform backlog mutations.
 
 ## GitHub Project Update Rules
 
