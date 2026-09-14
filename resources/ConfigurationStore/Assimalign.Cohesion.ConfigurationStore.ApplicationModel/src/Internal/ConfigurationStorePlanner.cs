@@ -43,12 +43,26 @@ internal static class ConfigurationStorePlanner
                 $"ConfigurationStore resource '{manifest.Name}' requires exactly one endpoint named '{ApiEndpointName}'.");
         }
 
-        if (manifest.Mounts.Count is not 1 ||
-            !string.Equals(manifest.Mounts[0].Name, DataMountName, StringComparison.Ordinal) ||
-            manifest.Mounts[0].Kind is not ResourceMountKind.Volume)
+        // Exactly one Volume mount, named `data`, carries the store. Secret and Configuration mounts
+        // (the `tls` certificate mount the SDK declares for the https endpoint, or any the application
+        // adds) sit beside it and never produce a claim.
+        int volumeMounts = 0;
+        bool hasDataVolume = false;
+        foreach (ResourceManifestMount mount in manifest.Mounts)
+        {
+            if (mount.Kind is not ResourceMountKind.Volume)
+            {
+                continue;
+            }
+
+            volumeMounts++;
+            hasDataVolume |= string.Equals(mount.Name, DataMountName, StringComparison.Ordinal);
+        }
+
+        if (volumeMounts is not 1 || !hasDataVolume)
         {
             throw new InvalidOperationException(
-                $"ConfigurationStore resource '{manifest.Name}' requires exactly one Volume mount named '{DataMountName}'.");
+                $"ConfigurationStore resource '{manifest.Name}' requires exactly one Volume mount named '{DataMountName}'; Secret and Configuration mounts may be declared beside it.");
         }
     }
 

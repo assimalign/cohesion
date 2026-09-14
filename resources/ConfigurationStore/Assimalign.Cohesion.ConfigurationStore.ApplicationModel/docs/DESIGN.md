@@ -42,7 +42,7 @@ mapping, the planner requires:
 - manifest kind `ConfigurationStore`, compared ordinally;
 - a `StatefulSet` workload;
 - exactly one endpoint, named `api`; and
-- exactly one mount, the `data` `Volume`.
+- exactly one `Volume` mount, named `data`; Secret and Configuration mounts (such as the `tls` certificate mount the SDK declares for the https endpoint) may sit beside it and never produce a claim.
 
 The shared generic planner then produces `cohesion/plan/v1`. The area planner verifies
 the resulting stateful shape: exactly one replica with stable workload identity, exactly one sized

@@ -216,6 +216,37 @@ public sealed class ConfigurationStorePlannerTests
         error.Message.ShouldContain("exactly one Volume mount named 'data'", Case.Sensitive);
     }
 
+    [Fact(DisplayName = "Cohesion Test [ConfigurationStore.ApplicationModel] - CreatePlan: allows a certificate Secret mount beside the data Volume")]
+    public void CreatePlan_WithCertificateSecretMountBesideData_ShouldPlanExactlyOneVolume()
+    {
+        // Arrange
+        ResourceManifest source = ConfigurationStoreManifestFactory.Create();
+        ResourceManifest manifest = source with
+        {
+            Mounts =
+            [
+                source.Mounts[0],
+                new ResourceManifestMount
+                {
+                    Name = "tls",
+                    Kind = ResourceMountKind.Secret,
+                    ContainerPath = "/cohesion/mounts/tls",
+                },
+            ],
+        };
+        var resource = new ConfigurationStoreResource(manifest);
+        PlanContext context = CreateContext(resource);
+
+        // Act
+        ResourcePlan plan = resource.CreatePlan(context);
+
+        // Assert
+        VolumeSpec volume = plan.Volumes.ShouldHaveSingleItem();
+        volume.Name.ShouldBe("data");
+        plan.Workload.Kind.ShouldBe(WorkloadKind.StatefulSet);
+        Should.NotThrow(() => ResourcePlanValidator.Validate(plan, context));
+    }
+
     private static PlanContext CreateContext(ConfigurationStoreResource resource)
     {
         return new PlanContext(

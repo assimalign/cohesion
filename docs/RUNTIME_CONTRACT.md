@@ -87,7 +87,7 @@ An enabled manifest's `commands` remains a bare string array. The proving kinds 
 `database.add-database`, `database.add-principal`, `configurationstore.set-value`, and
 `configurationstore.remove-value`. Wire kinds use an area prefix and a verb-noun kebab name;
 the C# verbs are `AddDatabase`, `AddPrincipal`, `SetValue`, and `RemoveValue`.
-`configurationstore.add-namespace` is deferred for orchestration to schedule under item 31c.
+`configurationstore.add-namespace` (C# verb `AddNamespace`) landed with item 31c.
 
 Resource command requests use the manifest's `controlPlane.endpoint` and `controlPlane.path`.
 The default Database admin and ConfigurationStore API paths are `/cohesion/v1/commands`:
