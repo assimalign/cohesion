@@ -324,7 +324,6 @@
 	<Folder Name="/cohesion/libraries/ApplicationModel/">
 		<File Path="libraries/ApplicationModel/Directory.Build.props" />
 		<File Path="libraries/ApplicationModel/Directory.Build.targets" />
-		<File Path="libraries/ApplicationModel/REAME.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/">
 		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/README.md" />

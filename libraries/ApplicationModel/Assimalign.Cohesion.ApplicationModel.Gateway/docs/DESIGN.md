@@ -1,10 +1,10 @@
 # Assimalign.Cohesion.ApplicationModel.Gateway — DESIGN
 
 > Layer-2a of the ApplicationModel stack: the **control-plane base** plus the default
-> **LocalGateway**. The full multi-package architecture (declarative contracts, the
-> Kubernetes build-override + self-hosted registry, resource manifest packages) lives in the
-> ApplicationModel area-root `../../DESIGN.md`, and the Layer-1 contract library's own design
-> record is at `../../Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md`.
+> **LocalGateway**. The [ApplicationModel area design v3](../../DESIGN.md) connects the
+> declarative contracts, SDK image pipeline and platform-owned compilers; the
+> [portable contract package design](../../Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md)
+> owns the shared model. The signed developer-experience design remains the direction of record.
 
 ## What this library is
 
@@ -425,9 +425,10 @@ only nonsecret Database metadata and configuration values are introduced here.
 
 ## Non-goals
 
-- Building container images or talking to Kubernetes — those are the platform gateway packages
-  (`…Gateway.Kubernetes` / `…Gateway.Docker`).
-- Owning DI/Config/Logging — that stays inside each `{Resource}.Application` runtime.
+- Building container images — the SDK owns production; platform gateways consume them.
+- Talking to Kubernetes or Docker — those compilers live in cohesion-platforms.
+- Owning DI/Config/Logging — composition stays in `{Resource}.Hosting`, called by the
+  customer's real `Program.cs` executable.
 - A full drift-reconcile loop with server-side apply and informer resync — that is specified for
   the Kubernetes gateway; the local gateway's supervisor is the equivalent for processes.
 

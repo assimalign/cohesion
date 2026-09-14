@@ -141,8 +141,8 @@ orchestration gateway:
 
 - **COHAM001** is the strict dependency-closure guard for an assembly under `resources/**` whose
   name ends in `.ApplicationModel`. It activates only when that project sets
-  `<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>`; Database.ApplicationModel
-  and Web.ApplicationModel are guarded now. Once active, the only permitted non-BCL assemblies
+  `<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>`; every resource
+  `*.ApplicationModel` project — all 18 at HEAD — sets the guard. Once active, the only permitted non-BCL assemblies
   are `Assimalign.Cohesion.Core` (the evaluated Core assembly name),
   `Assimalign.Cohesion.ApplicationModel`, `Assimalign.Cohesion.Hosting`,
   `Assimalign.Cohesion.Hosting.Health`, and `Assimalign.Cohesion.Hosting.Resources`. The area's
@@ -293,6 +293,13 @@ sdks/Assimalign.Cohesion.Sdk/Targets/      ← base SDK only
 ├── ...Sdk.Common.props                    ← shared consumer build logic
 ├── ...Sdk.NameOnly.ProjectReference.targets
 ├── ...Sdk.StronglyTypedSettings.props / .targets
+├── ...Sdk.Defaults.props                  ← SDK-owned consumer project defaults
+├── ...Sdk.PinValidation.targets           ← SDK and platform version-pin validation
+├── ...Sdk.ResourceManifest.props          ← resource manifest metadata defaults
+├── RESOURCE_MANIFEST_README.md            ← resource manifest build contract
+├── Sdk.Image.targets                     ← OCI image production and publication gather
+├── Sdk.Resource.props                    ← resource opt-in properties
+├── Sdk.Resource.targets                  ← manifest and resource surface generation
 └── ...Sdk.ApplicationModel.Build.targets
 
 installer/scripts/

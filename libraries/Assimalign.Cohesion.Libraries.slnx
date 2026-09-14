@@ -36,7 +36,6 @@
 		<File Path="ApplicationModel/DESIGN.md" />
 		<File Path="ApplicationModel/Directory.Build.props" />
 		<File Path="ApplicationModel/Directory.Build.targets" />
-		<File Path="ApplicationModel/REAME.md" />
 	</Folder>
 	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/">
 		<File Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel/README.md" />

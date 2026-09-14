@@ -3,7 +3,7 @@
 > This is the per-library design record for the **Layer 1** ApplicationModel
 > contract package. The current cross-package direction of record is
 > [`DEVELOPER_EXPERIENCE_DESIGN.md`](../../../../docs/DEVELOPER_EXPERIENCE_DESIGN.md);
-> the ApplicationModel area-root `../../DESIGN.md` is an older plan. Read this file
+> the [ApplicationModel area design v3](../../DESIGN.md) summarises the family. Read this file
 > for the contracts that are implemented in this package and why they have this shape.
 
 ## What this library is
@@ -19,7 +19,7 @@ Two planes share one vocabulary here:
 - **Declarative plane** — `IApplication`, `IApplicationModel`, `IApplicationBuilder`,
   `IApplicationResource`, `ResourceManifest`, `IManifestResource`,
   `IPlannedResource`, the platform-neutral `ResourcePlan` records,
-  `IApplicationResourceDescriptor`, `IApplicationResourceCollection`, and
+  `IApplicationResourceDescriptor`, and
   `IApplicationEnvironment`; plus the application-boundary contracts
   `ExternalResourceDeclaration`, `IExternalResource`, `IExternalResourceResolver`,
   and `RemoteReferenceOptions`. The older `IExecutableResource` /
@@ -270,7 +270,8 @@ Docker or Kubernetes integrations.
   behind `Gateway(...)`, plus the resource command dispatch seam.
 - `…ApplicationModel.Gateway.{Platform}` (Layer 2b) — platform compilers and controllers supplied
   outside this contract package.
-- `{Resource}.ApplicationModel` (Layer 3d) — Core-only manifest packages that
+- `{Resource}.ApplicationModel` — guarded, NuGet-only declarative packages referencing
+  `ApplicationModel` and `Hosting.Resources` directly; they
   provide a typed `PlannedResource`, `Add{Resource}(manifest, options)`, the area's
   planner when it differs from `GenericPlanner`, and the resource-side default
   control-plane contract served by `{Resource}.Hosting`.

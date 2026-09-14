@@ -192,6 +192,9 @@ sole explicit exemption holder.
   belong in the `App.<Area>` ItemGroup of `frameworks/Assimalign.Cohesion.App.props`, so
   applications get the family through the SDK without project wiring. Validate with
   `dotnet pack frameworks/Assimalign.Cohesion.App.<Area>.Runtime/src/...csproj`.
+  `<Area>.ApplicationModel` and `<Area>.Client` packages are NuGet-only, injected by
+  `Sdk.<Area>` / `Sdk.Gateway`, and never members of an `App.<Area>` shared framework
+  (owner-signed developer-experience design O2/O27).
 
 Relaxing the rule itself (beyond a per-project exemption) is an architectural decision: change
 `build/Targets/Build.Rules.targets`, this file, and the owning area's README in the same commit,
