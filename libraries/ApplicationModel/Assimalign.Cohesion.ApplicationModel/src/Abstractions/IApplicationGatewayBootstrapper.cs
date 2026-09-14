@@ -6,8 +6,9 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// Emits the selected gateway's platform bootstrap resources without contacting the target
-/// platform.
+/// Emits the selected gateway's own platform installation: the cohesion-system prerequisites
+/// it needs before owning an application, rather than the application's compiled resources.
+/// Writes the installation representation without contacting the target platform.
 /// </summary>
 public interface IApplicationGatewayBootstrapper
 {

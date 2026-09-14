@@ -3,7 +3,8 @@
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// 
+/// Identifies a resource in an application's desired-state graph. Capability interfaces and
+/// manifest-backed resources describe the facts a gateway uses to plan and realize it.
 /// </summary>
 public interface IApplicationResource
 {
