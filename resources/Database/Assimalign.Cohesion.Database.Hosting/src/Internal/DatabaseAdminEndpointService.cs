@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Tcp;
+using Assimalign.Cohesion.Connections.Security;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
@@ -22,8 +25,10 @@ using CohesionHttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
-internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostService
+internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostService, IDisposable
 {
+    private X509Certificate2? _serverCertificate;
+    private X509Certificate2Collection _serverCertificateChain = new();
     private readonly WebApplication _application;
 
     internal DatabaseAdminEndpointService(
@@ -39,16 +44,31 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
         ArgumentNullException.ThrowIfNull(applicationContext);
         ArgumentNullException.ThrowIfNull(healthContributors);
 
-        if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                $"The ambient Database endpoint 'admin' must use the http scheme, not '{endpoint.Scheme}'.");
+                $"The ambient Database endpoint 'admin' must use http or https, not '{endpoint.Scheme}'.");
         }
 
         IPAddress address = ResolveBindAddress(endpoint.IdnHost);
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
-        builder.Server.UseServer(options =>
-            options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));
+        if (string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
+        {
+            if (ResourceRuntime.Current is not ResourceContext certificateContext ||
+                !certificateContext.TryGetEndpointCertificate("admin", out _serverCertificate, out _serverCertificateChain))
+            {
+                throw new InvalidOperationException("The Database https endpoint 'admin' requires its certificate Secret mount (default 'tls').");
+            }
+            SslStreamCertificateContext certificate = SslStreamCertificateContext.Create(_serverCertificate, _serverCertificateChain, offline: true);
+            builder.Server.UseServer(options => options.UseHttp1s(
+                tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port),
+                new TlsServerOptions { AuthenticationOptions = new SslServerAuthenticationOptions { ServerCertificateContext = certificate } }));
+        }
+        else
+        {
+            builder.Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));
+        }
 
         _application = builder.Build();
         IWebApplicationPipelineBuilder pipeline = _application;
@@ -91,6 +111,17 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
                     next)
                 : next.Invoke(context);
         });
+    }
+
+    public new void Dispose()
+    {
+        base.Dispose();
+        ((IDisposable)_application).Dispose();
+        _serverCertificate?.Dispose();
+        foreach (X509Certificate2 certificate in _serverCertificateChain)
+        {
+            certificate.Dispose();
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)

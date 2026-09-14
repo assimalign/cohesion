@@ -182,7 +182,8 @@
           "type": "boolean"
         },
         "certificate": {
-          "$ref": "#/definitions/logicalName"
+          "$ref": "#/definitions/logicalName",
+          "description": "Names a declared Secret mount carrying one PEM bundle (leaf certificate, issuer chain, and exactly one private key), or the reserved literal public."
         }
       }
     },

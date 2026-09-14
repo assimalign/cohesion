@@ -334,3 +334,7 @@ GatewayCommand carries an immutable AllowedCommandKinds list. Repeatable, comma-
 --allow options are valid only in trust-add mode. Absent or empty grants mean unrestricted kinds;
 trust-issue rejects the option. ApplicationModel parses and carries policy; the serving gateway
 enforces it on apply and delete. The CLI's --against option remains deferred.
+
+## HTTPS certificate plan fact (31t)
+
+PortBinding carries optional `Certificate` after `Scheme`, retaining the original three-argument constructor and deconstruction. GenericPlanner copies the manifest value or an empty string. Validation is per endpoint: values must match, and nonempty values other than reserved `public` must identify a Secret MountBinding. ResourceManifest's existing Secret-only rule is unchanged. An HTTPS Secret mount adds no VolumeSpec and does not turn a Deployment into a StatefulSet. ResourceInputs additionally carries certificates-only transport trust bytes beside the bootstrap credential, outside the hashed plan.

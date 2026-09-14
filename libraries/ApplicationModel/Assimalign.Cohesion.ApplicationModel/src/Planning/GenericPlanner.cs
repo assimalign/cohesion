@@ -51,7 +51,8 @@ public static class GenericPlanner
                 endpoint.Name,
                 endpoint.ContainerPort,
                 endpoint.Protocol,
-                endpoint.Scheme);
+                endpoint.Scheme,
+                endpoint.Certificate ?? string.Empty);
 
             services.Add(new ServiceSpec(
                 serviceName,

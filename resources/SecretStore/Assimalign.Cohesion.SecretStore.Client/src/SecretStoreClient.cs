@@ -52,7 +52,14 @@ public static class SecretStoreClient
         return new HttpSecretStoreClient(controlPlaneAddress, credential, _sharedTransport, controlPlaneAddress: true);
     }
 
-    internal static ISecretStoreClient Create(
+    /// <summary>Creates a client with a caller-owned transport, including its TLS trust policy.</summary>
+    /// <param name="endpoint">The HTTP(S) resource endpoint.</param>
+    /// <param name="credential">The opaque bootstrap credential.</param>
+    /// <param name="transport">The transport, owned and disposed by the caller after requests finish.</param>
+    /// <returns>A client using the supplied transport.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentException">The endpoint is not a valid HTTP(S) endpoint.</exception>
+    public static ISecretStoreClient Create(
         Uri endpoint,
         ClientCredential credential,
         HttpMessageInvoker transport)

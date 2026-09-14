@@ -1,9 +1,13 @@
 using System;
 using System.Globalization;
 using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Connections.Tcp;
+using Assimalign.Cohesion.Connections.Security;
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http.Connections;
 
 namespace Assimalign.Cohesion.Web.Hosting.Internal;
@@ -68,9 +72,10 @@ internal static class HttpServerConfiguration
     /// <param name="configuration">The configuration to read from.</param>
     /// <param name="sectionKey">The root section key (for example <c>"Http"</c>).</param>
     /// <param name="options">The listener options to populate.</param>
+    /// <param name="ownCertificate">Receives certificate ownership for disposal with the host.</param>
     /// <exception cref="ArgumentNullException">Thrown when a required argument is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">Thrown when a configured value cannot be parsed.</exception>
-    public static void Bind(IConfiguration configuration, string sectionKey, HttpConnectionListenerOptions options)
+    public static void Bind(IConfiguration configuration, string sectionKey, HttpConnectionListenerOptions options, Action<X509Certificate2>? ownCertificate = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentException.ThrowIfNullOrEmpty(sectionKey);
@@ -81,7 +86,7 @@ internal static class HttpServerConfiguration
         // values into its own per-registration limits.
         Http1ConnectionListenerOptions.Http1Limits boundLimits = new();
         BindLimits(configuration, sectionKey, boundLimits);
-        BindEndpoints(configuration, sectionKey, options, boundLimits);
+        BindEndpoints(configuration, sectionKey, options, boundLimits, ownCertificate);
     }
 
     /// <summary>
@@ -127,7 +132,7 @@ internal static class HttpServerConfiguration
         }
     }
 
-    private static void BindEndpoints(IConfiguration configuration, string sectionKey, HttpConnectionListenerOptions options, Http1ConnectionListenerOptions.Http1Limits boundLimits)
+    private static void BindEndpoints(IConfiguration configuration, string sectionKey, HttpConnectionListenerOptions options, Http1ConnectionListenerOptions.Http1Limits boundLimits, Action<X509Certificate2>? ownCertificate)
     {
         IConfigurationSection? endpoints = configuration.GetSection($"{sectionKey}:Endpoints");
         if (endpoints is null)
@@ -139,12 +144,12 @@ internal static class HttpServerConfiguration
         {
             if (child is IConfigurationSection endpoint)
             {
-                BindEndpoint(endpoint, options, boundLimits);
+                BindEndpoint(endpoint, options, boundLimits, ownCertificate);
             }
         }
     }
 
-    private static void BindEndpoint(IConfigurationSection endpoint, HttpConnectionListenerOptions options, Http1ConnectionListenerOptions.Http1Limits boundLimits)
+    private static void BindEndpoint(IConfigurationSection endpoint, HttpConnectionListenerOptions options, Http1ConnectionListenerOptions.Http1Limits boundLimits, Action<X509Certificate2>? ownCertificate)
     {
         string endpointName = endpoint.Key.ToString();
         string? protocol = GetString(endpoint, "Protocol");
@@ -159,7 +164,36 @@ internal static class HttpServerConfiguration
 
         IPEndPoint bindEndPoint = new(ResolveHost(host), port);
 
-        if (IsHttp2(protocol))
+        bool http2s = string.Equals(protocol, "Http2s", StringComparison.OrdinalIgnoreCase);
+        bool http1s = string.Equals(protocol, "Http1s", StringComparison.OrdinalIgnoreCase) || string.Equals(protocol, "Https", StringComparison.OrdinalIgnoreCase);
+        if (http1s || http2s)
+        {
+            if (!ResourceRuntime.Current.TryGetEndpointCertificate(endpointName, GetString(endpoint, "Certificate"), out X509Certificate2? leaf, out X509Certificate2Collection chain))
+            {
+                throw new InvalidOperationException($"The HTTPS endpoint '{endpointName}' requires its Certificate Secret mount (default 'tls').");
+            }
+            ownCertificate?.Invoke(leaf);
+            foreach (X509Certificate2 issuer in chain)
+            {
+                ownCertificate?.Invoke(issuer);
+            }
+            var tls = new TlsServerOptions
+            {
+                AuthenticationOptions = new SslServerAuthenticationOptions
+                {
+                    ServerCertificateContext = SslStreamCertificateContext.Create(leaf, chain, offline: true),
+                },
+            };
+            if (http2s)
+            {
+                options.UseHttp2s(tcp => tcp.EndPoint = bindEndPoint, tls, http2 => CopySharedLimits(boundLimits, http2.Limits));
+            }
+            else
+            {
+                options.UseHttp1s(tcp => tcp.EndPoint = bindEndPoint, tls, http1 => CopyHttp1Limits(boundLimits, http1.Limits));
+            }
+        }
+        else if (IsHttp2(protocol))
         {
             options.UseHttp2(
                 () => TcpConnectionListener.Create(tcp => tcp.EndPoint = bindEndPoint),
@@ -174,7 +208,7 @@ internal static class HttpServerConfiguration
         else
         {
             throw new InvalidOperationException(
-                $"The HTTP endpoint '{endpointName}' declares an unsupported 'Protocol' ('{protocol}'). Supported values: Http1, Http2.");
+                $"The HTTP endpoint '{endpointName}' declares an unsupported 'Protocol' ('{protocol}'). Supported values: Http1, Http2, Https, Http1s, Http2s.");
         }
     }
 

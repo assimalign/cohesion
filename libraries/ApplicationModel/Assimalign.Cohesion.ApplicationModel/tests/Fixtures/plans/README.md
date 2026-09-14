@@ -8,7 +8,9 @@ then compares the complete JSON tree with the checked-in document.
 
 Every current fixture carries the default control-plane endpoint and path, each endpoint's URI
 scheme (including private endpoints), and the manifest lifecycle restart policy. Empty values for
-those fields are reserved for deserializing legacy version 1 documents and are never golden output.
+those three facts are reserved for deserializing legacy version 1 documents and are never golden output.
+Every port also carries its certificate value: empty when the endpoint has no certificate, a logical
+Secret mount name, or the reserved literal `public`. Mixed empty and populated certificate values are valid.
 
 This directory is the `KindMatrixTests` fixture set vendored by `cohesion-platforms`
 items 33/34 so each platform compiler can be conformance-tested without resource-area
@@ -17,7 +19,7 @@ lands; the initial contract gate covers the representative shapes below.
 
 | Fixture | Contract shape |
 | --- | --- |
-| `web.json` | Deployment with endpoint services, public exposure, and one-to-one probes |
+| `web.json` | Deployment with mixed HTTP/HTTPS endpoints, a tls Secret mount (no volume), public exposure, and one-to-one probes |
 | `database.json` | StatefulSet with a per-replica volume claim and governing headless service |
 | `generic-volume.json` | Kind-neutral volume mapping with the same StatefulSet storage semantics |
 | `daemon-set.json` | DaemonSet with the long-running readiness gate |

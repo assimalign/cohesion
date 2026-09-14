@@ -410,6 +410,49 @@ public class GenericPlannerTests
         error.Message.ShouldContain("only artifact reference", Case.Sensitive);
     }
 
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Certificate plan: Validates each endpoint independently")]
+    [InlineData("tls", ResourceMountKind.Secret, true)]
+    [InlineData("wrong", ResourceMountKind.Secret, false)]
+    [InlineData("tls", ResourceMountKind.Configuration, false)]
+    [InlineData(null, ResourceMountKind.Secret, false)]
+    public void Validate_CertificateBindings_ShouldEnforceManifestAndMount(string? certificate, ResourceMountKind kind, bool valid)
+    {
+        ResourceManifest manifest = CreateWebManifest();
+        PlanContext context = CreateContext(manifest);
+        ResourcePlan plan = GenericPlanner.CreatePlan(context);
+        PortBinding[] ports = [plan.Container.Ports[0], plan.Container.Ports[1] with { Certificate = certificate! }];
+        ResourcePlan changed = CopyPlan(plan, plan.Workload, new ContainerSpec(
+            plan.Container.Name, plan.Container.Artifact, ports,
+            [plan.Container.Mounts[0] with { Kind = kind }],
+            plan.Container.Environment, plan.Container.Probes));
+        if (valid)
+        {
+            Should.NotThrow(() => ResourcePlanValidator.Validate(changed, context));
+            changed.Container.Ports[0].Certificate.ShouldBeEmpty();
+        }
+        else
+        {
+            Should.Throw<InvalidOperationException>(() => ResourcePlanValidator.Validate(changed, context));
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Certificate plan: Reserved public requires no mount")]
+    public void Validate_PublicCertificate_ShouldAcceptWithoutMount()
+    {
+        ResourceManifest source = CreateWebManifest();
+        ResourceManifest manifest = source with
+        {
+            Endpoints = [source.Endpoints[0], source.Endpoints[1] with { Certificate = "public" }],
+            Mounts = [],
+        };
+        PlanContext context = CreateContext(manifest);
+        ResourcePlan plan = GenericPlanner.CreatePlan(context);
+        ResourcePlan copy = JsonSerializer.Deserialize(JsonSerializer.Serialize(plan, ResourcePlanJsonContext.Default.ResourcePlan), ResourcePlanJsonContext.Default.ResourcePlan).ShouldNotBeNull();
+        copy.Container.Ports[1].Certificate.ShouldBe("public");
+        Should.NotThrow(() => ResourcePlanValidator.Validate(copy, context));
+        new PortBinding("http", 8080, "tcp").Certificate.ShouldBeEmpty();
+    }
+
     private static PlanContext CreateContext(
         ResourceManifest manifest,
         IResourceOptions? options = null)
@@ -466,6 +509,7 @@ public class GenericPlannerTests
                 Certificate = "tls"
             }
         ],
+        Mounts = [new ResourceManifestMount { Name = "tls", Kind = ResourceMountKind.Secret, ContainerPath = "/cohesion/mounts/tls" }],
         Probes = new ResourceManifestProbes
         {
             Readiness = new ResourceManifestProbe

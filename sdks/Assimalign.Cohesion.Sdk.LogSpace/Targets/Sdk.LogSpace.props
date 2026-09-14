@@ -16,7 +16,8 @@
 
 	<ItemGroup>
 		<CohesionEndpoint Include="otlp" Scheme="grpc" ContainerPort="4317" Public="false" />
-		<CohesionEndpoint Include="query" Scheme="https" ContainerPort="8443" Public="false" />
+		<CohesionEndpoint Include="query" Scheme="https" Certificate="tls" ContainerPort="8443" Public="false" />
+		<CohesionMount Include="tls" Kind="Secret" ContainerPath="/cohesion/mounts/tls" />
 		<CohesionMount Include="data" Kind="Volume" ContainerPath="/data" Size="10Gi" />
 		<CohesionProbe Include="readiness" Endpoint="query" Http="/readyz" />
 		<CohesionProbe Include="liveness" Endpoint="query" Http="/livez" />

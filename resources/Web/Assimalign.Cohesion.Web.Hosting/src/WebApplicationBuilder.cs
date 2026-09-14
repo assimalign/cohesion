@@ -2,7 +2,9 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Net.Security;
 using System.Reflection;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -10,6 +12,7 @@ using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Configuration.CommandLine;
 using Assimalign.Cohesion.Configuration.Json;
 using Assimalign.Cohesion.Connections.Tcp;
+using Assimalign.Cohesion.Connections.Security;
 using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.FileSystem;
@@ -37,6 +40,8 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     private IWebApplicationPipeline? _pipeline;
 
     private bool _isBuilt;
+
+    internal void OwnEndpointCertificate(X509Certificate2 certificate) => _context.EndpointCertificates.Add(certificate);
 
     public WebApplicationBuilder(WebApplicationOptions options)
         : this(options, resourceAssembly: null)
@@ -233,23 +238,47 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         ResourceContext resourceContext,
         IResourceControlPlane controlPlane)
     {
-        if (!controlPlane.ObservedEndpoints.TryGetValue("http", out Uri? endpoint) &&
-            !resourceContext.Endpoints.TryGetValue("http", out endpoint))
+        string endpointName = "http";
+        if (!controlPlane.ObservedEndpoints.TryGetValue(endpointName, out Uri? endpoint) &&
+            !resourceContext.Endpoints.TryGetValue(endpointName, out endpoint))
         {
-            return;
+            endpointName = "https";
+            if (!controlPlane.ObservedEndpoints.TryGetValue(endpointName, out endpoint) &&
+                !resourceContext.Endpoints.TryGetValue(endpointName, out endpoint))
+            {
+                return;
+            }
         }
 
-        controlPlane.ObserveEndpoint("http", endpoint);
+        controlPlane.ObserveEndpoint(endpointName, endpoint);
 
-        if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                $"The ambient Web endpoint 'http' must use the http scheme, not '{endpoint.Scheme}'.");
+                $"The ambient Web endpoint '{endpointName}' must use http or https, not '{endpoint.Scheme}'.");
         }
 
         IPAddress address = ResolveBindAddress(endpoint.IdnHost);
-        Server.UseServer(options =>
-            options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));
+        if (string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!resourceContext.TryGetEndpointCertificate(endpointName, out X509Certificate2? leaf, out X509Certificate2Collection chain))
+            {
+                throw new InvalidOperationException($"The ambient Web https endpoint '{endpointName}' requires its certificate Secret mount (default 'tls').");
+            }
+            _context.EndpointCertificates.Add(leaf);
+            foreach (X509Certificate2 issuer in chain)
+            {
+                _context.EndpointCertificates.Add(issuer);
+            }
+            SslStreamCertificateContext certificate = SslStreamCertificateContext.Create(leaf, chain, offline: true);
+            Server.UseServer(options => options.UseHttp1s(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port),
+                new TlsServerOptions { AuthenticationOptions = new SslServerAuthenticationOptions { ServerCertificateContext = certificate } }));
+        }
+        else
+        {
+            Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));
+        }
     }
 
     private static IPAddress ResolveBindAddress(string host)

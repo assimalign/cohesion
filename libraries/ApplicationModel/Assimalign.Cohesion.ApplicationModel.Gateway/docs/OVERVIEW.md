@@ -44,3 +44,9 @@ provider. Resource:key sources reuse the existing mount/store resolution path an
 explicit target dependency. Failures return named Rejected details. Resolved bytes exist only in
 the transient delivery envelope; model declarations, ids and the applied-declaration ledger retain
 the original source reference. Literal secret sources are prohibited in the descriptor verb.
+
+## HTTPS transport identities (31t)
+
+Certificate mounts remain ordinary single-file Secret inputs. Explicit parameter or resource sources are authoritative and unusable bundles return a named Unresolved result. A source-free certificate mount first requests `certs/<resource>-<endpoint>` from the application's Running SecretStore, excluding that store itself. Before the store is ready or while its CA is pending, the gateway issues a P-256 development transport identity from `<state>/<application>/.state/certs/`. Root certificate and protected PKCS#8 key persist; leaf bundles cache by resource/endpoint with loopback and observed/declared host SANs. New bundles use leaf, intermediates if any, and one PKCS#8 key; readers preserve both existing producer orders and tolerate a supplied root.
+
+Certificates-only transport anchors are carried in ResourceInputs, materialized beside bootstrap.token as a protected `.state/trust.pem`, and exposed through ResourceEnvironment.TrustBundlePath. Local and in-process probes use the shared CustomRootTrust validator while preserving hostname checks. Thin store clients accept a caller-owned transport so the gateway can supply the same trust policy. This transport root is distinct from the ES256 application trust-signing key.

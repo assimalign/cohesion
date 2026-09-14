@@ -27,13 +27,15 @@
         "endpoint": "db",
         "containerPort": 5740,
         "protocol": "tcp",
-        "scheme": "cohesion-db"
+        "scheme": "cohesion-db",
+        "certificate": ""
       },
       {
         "endpoint": "admin",
         "containerPort": 8081,
         "protocol": "tcp",
-        "scheme": "http"
+        "scheme": "http",
+        "certificate": ""
       }
     ],
     "mounts": [

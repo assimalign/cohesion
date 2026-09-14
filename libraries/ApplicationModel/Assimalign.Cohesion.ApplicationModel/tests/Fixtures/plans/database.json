@@ -27,13 +27,15 @@
         "endpoint": "db",
         "containerPort": 5432,
         "protocol": "tcp",
-        "scheme": "tcp"
+        "scheme": "tcp",
+        "certificate": ""
       },
       {
         "endpoint": "admin",
         "containerPort": 8080,
         "protocol": "tcp",
-        "scheme": "http"
+        "scheme": "http",
+        "certificate": ""
       }
     ],
     "mounts": [

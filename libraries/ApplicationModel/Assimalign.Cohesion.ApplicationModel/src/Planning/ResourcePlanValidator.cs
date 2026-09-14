@@ -237,6 +237,15 @@ public static class ResourcePlanValidator
                 $"Manifest endpoint '{endpoint.Name}' is declared more than once.");
 
             PortBinding binding = FindPort(plan.Container.Ports, endpoint.Name, plan.Resource);
+            string certificate = RequireNotNull(binding.Certificate, $"Endpoint '{endpoint.Name}' certificate must not be null.");
+            Require(string.Equals(certificate, endpoint.Certificate ?? string.Empty, StringComparison.Ordinal),
+                $"Endpoint '{endpoint.Name}' certificate '{certificate}' does not match manifest certificate '{endpoint.Certificate}'.");
+            if (certificate.Length != 0 && !string.Equals(certificate, "public", StringComparison.OrdinalIgnoreCase))
+            {
+                MountBinding certificateMount = FindMount(plan.Container.Mounts, certificate, plan.Resource);
+                Require(certificateMount.Kind == ResourceMountKind.Secret,
+                    $"Endpoint '{endpoint.Name}' certificate mount '{certificate}' must be a Secret mount.");
+            }
             Require(
                 binding.ContainerPort == endpoint.ContainerPort,
                 $"Endpoint '{endpoint.Name}' is bound to port '{binding.ContainerPort}', not manifest port " +

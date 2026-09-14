@@ -33,6 +33,7 @@ its environment name as `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Producti
 | `COHESION_MOUNT_<M>_PATH` | Absolute mounted path | For every declared mount after its source is resolved by the gateway | Local: environment pointing under `.cohesion/<app>/<res>/<mount>`; In-process: ambient handle/value; Docker: environment pointing into a volume or tmpfs; Kubernetes: ConfigMap value pointing into a PVC, ConfigMap, or Secret volume |
 | `COHESION_CONFIG__<Section>__<Key>` | Configuration value; `__` maps to `:` | For every setting bridged into the resource | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
 | `COHESION_BOOTSTRAP_TOKEN_PATH` | Path to a file containing an ES256 JWT | When the gateway has minted the resource bootstrap credential; rotated on every reconcile | Local: protected file; In-process: credential value in ambient context; Docker: tmpfs file; Kubernetes: Secret volume |
+| `COHESION_TRUST_BUNDLE_PATH` | Path to a PEM bundle of trust-anchor certificates (no private keys) | When the gateway has issued or is brokering transport trust anchors for the application | Local: protected file; In-process: ambient context value; Docker: tmpfs file; Kubernetes: ConfigMap or Secret volume |
 | `COHESION_STOP_EVENT` | Windows named-event identifier | Only for a Windows local out-of-process resource launched with the named-event stop channel | Local Windows: environment; In-process: outer host signal; Docker/Kubernetes: not set |
 | `COHESION_TELEMETRY_ENDPOINT` | Absolute OTLP collector URI | Optional and reserved in v1; Hosting uses it when configured | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
 | `COHESION_TELEMETRY_PROTOCOL` | `otlp-grpc` or `otlp-http` | Optional and reserved in v1; meaningful when a telemetry endpoint is set | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
@@ -61,6 +62,8 @@ passes the host to a socket API uses `Uri.IdnHost`, which removes IPv6 brackets 
 internationalized domain name to its ASCII-compatible form.
 
 ## Topology notes
+
+- An HTTPS endpoint names an ordinary Secret mount (default `tls`) containing one PEM document. The leaf is the first CERTIFICATE block; exactly one PRIVATE KEY, EC PRIVATE KEY, or RSA PRIVATE KEY block may appear anywhere. Further certificates form the issuer chain and may include a self-signed root. An empty file means no certificate. Trust anchors travel separately through `COHESION_TRUST_BUNDLE_PATH`, never as a declared mount.
 
 - The gateway is the sole writer of declared endpoint bind values. With no gateway, item 12's
   ambient resource context falls back to the declared development port so standalone `dotnet run`

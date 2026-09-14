@@ -43,9 +43,22 @@ internal sealed class LogSpaceControlPlaneEndpointService : IHostService, IDispo
         IPAddress address = ResolveBindAddress(endpoint.IdnHost);
         // Parameterless construction deliberately avoids resource registration on this private host.
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
-        SslStreamCertificateContext certificate = resourceContext.Mounts.TryGetValue("tls", out ResourceMount? mount)
-            ? CreateMountedServerCertificateContext(mount)
-            : CreateDevelopmentServerCertificateContext(endpoint.IdnHost);
+        SslStreamCertificateContext certificate;
+        if (resourceContext.TryGetEndpointCertificate("query", out _serverCertificate, out X509Certificate2Collection chain))
+        {
+            _serverCertificateChain = new X509Certificate2[chain.Count];
+            chain.CopyTo(_serverCertificateChain, 0);
+            certificate = SslStreamCertificateContext.Create(_serverCertificate, chain, offline: true);
+        }
+        else if (string.Equals(resourceContext.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) && IPAddress.IsLoopback(address))
+        {
+            _serverCertificate = resourceContext.CreateDevelopmentEndpointCertificate(endpoint.IdnHost);
+            certificate = SslStreamCertificateContext.Create(_serverCertificate, null, offline: true);
+        }
+        else
+        {
+            throw new InvalidOperationException("LogSpace requires its certificate Secret mount (default 'tls') outside loopback Development.");
+        }
         builder.Server.UseServer(options => options.UseHttp1s(
             tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port),
             new TlsServerOptions
@@ -79,126 +92,6 @@ internal sealed class LogSpaceControlPlaneEndpointService : IHostService, IDispo
             : IPAddress.TryParse(host, out IPAddress? address)
                 ? address
                 : throw new InvalidOperationException($"The LogSpace endpoint host '{host}' is not a bindable IP address.");
-    private SslStreamCertificateContext CreateDevelopmentServerCertificateContext(string host)
-    {
-        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var request = new CertificateRequest($"CN={host}", key, HashAlgorithmName.SHA256);
-        var names = new SubjectAlternativeNameBuilder();
-        if (IPAddress.TryParse(host, out IPAddress? address))
-        {
-            names.AddIpAddress(address);
-        }
-        else
-        {
-            names.AddDnsName(host);
-        }
-
-        request.CertificateExtensions.Add(names.Build());
-        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(
-            certificateAuthority: false,
-            hasPathLengthConstraint: false,
-            pathLengthConstraint: 0,
-            critical: false));
-        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
-            new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") },
-            critical: false));
-        request.CertificateExtensions.Add(new X509KeyUsageExtension(
-            X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
-            critical: false));
-        request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(
-            request.PublicKey,
-            critical: false));
-        using X509Certificate2 ephemeral = request.CreateSelfSigned(
-            DateTimeOffset.UtcNow.AddMinutes(-5),
-            DateTimeOffset.UtcNow.AddYears(1));
-        _serverCertificate = X509CertificateLoader.LoadPkcs12(
-            ephemeral.Export(X509ContentType.Pkcs12),
-            null);
-        return SslStreamCertificateContext.Create(_serverCertificate, null, offline: true);
-    }
-
-    private SslStreamCertificateContext CreateMountedServerCertificateContext(ResourceMount mount)
-    {
-        byte[] content = mount.ReadAllBytes();
-        char[] pem = new char[Encoding.UTF8.GetCharCount(content)];
-        X509Certificate2? loadedServerCertificate = null;
-        var loadedChain = new List<X509Certificate2>();
-        var parsedCertificates = new X509Certificate2Collection();
-        try
-        {
-            Encoding.UTF8.GetChars(content, pem);
-            using X509Certificate2 parsedServerCertificate = X509Certificate2.CreateFromPem(pem, pem);
-            if (!parsedServerCertificate.HasPrivateKey)
-            {
-                throw new InvalidOperationException(
-                    "The LogSpace 'tls' mount certificate does not contain a matching private key.");
-            }
-
-            byte[] pkcs12 = parsedServerCertificate.Export(X509ContentType.Pkcs12);
-            try
-            {
-                loadedServerCertificate = X509CertificateLoader.LoadPkcs12(
-                    pkcs12,
-                    null);
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(pkcs12);
-            }
-
-            DateTime now = DateTime.UtcNow;
-            if (loadedServerCertificate.NotBefore.ToUniversalTime() > now ||
-                loadedServerCertificate.NotAfter.ToUniversalTime() <= now)
-            {
-                throw new InvalidOperationException(
-                    "The LogSpace 'tls' mount certificate is not currently valid.");
-            }
-
-            parsedCertificates.ImportFromPem(pem);
-            for (int index = 0; index < parsedCertificates.Count; index++)
-            {
-                X509Certificate2 certificate = parsedCertificates[index];
-                if (!certificate.RawDataMemory.Span.SequenceEqual(
-                        loadedServerCertificate.RawDataMemory.Span))
-                {
-                    loadedChain.Add(X509CertificateLoader.LoadCertificate(certificate.RawData));
-                }
-            }
-
-            var additionalCertificates = new X509Certificate2Collection(loadedChain.ToArray());
-            SslStreamCertificateContext context = SslStreamCertificateContext.Create(
-                loadedServerCertificate,
-                additionalCertificates,
-                offline: true);
-            _serverCertificate = loadedServerCertificate;
-            _serverCertificateChain = loadedChain.ToArray();
-            loadedServerCertificate = null;
-            loadedChain.Clear();
-            return context;
-        }
-        catch (CryptographicException exception)
-        {
-            throw new InvalidOperationException(
-                "The LogSpace 'tls' resource mount must contain a PEM certificate, " +
-                "matching private key, and optional certificate chain.",
-                exception);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(content);
-            Array.Clear(pem);
-            loadedServerCertificate?.Dispose();
-            for (int index = 0; index < loadedChain.Count; index++)
-            {
-                loadedChain[index].Dispose();
-            }
-
-            for (int index = 0; index < parsedCertificates.Count; index++)
-            {
-                parsedCertificates[index].Dispose();
-            }
-        }
-    }
 
 
 }

@@ -118,21 +118,15 @@ never falls back to a new self-signed root.
 
 ## Explicit bootstrap gap
 
-`PlatformEnrollmentEndpoint` currently selects pending-enrollment mode but the runtime does not
-call that URI. No gateway component yet drives the three HTTP enrollment operations, delivers the
-corresponding trust grant automatically, or installs a trust anchor into `SecretStore.Client` for
-the first HTTPS connection. Consequently, automatic per-application enrollment and TLS bootstrap
-described by the developer-experience direction are not end-to-end today. An operator or gateway
-must perform request, parent signing, and completion explicitly (or supply initial authority
-material), and HTTPS clients must be given an out-of-band trusted root. A pending child also has
-no enrolled authority from which to issue its HTTPS server certificate, so its HTTPS listener
-cannot start until the gateway provides a provisional transport identity or completes enrollment
-through a separate bootstrap channel. The Development-only loopback HTTP route is sufficient for
-the explicit in-process enrollment test, but not a production bootstrap. Readiness remains
-unhealthy while a configured child authority is awaiting completion.
-
-Likewise, `parameter:` certificate mount resolution and `Certificate="public"` are gateway-side
-or future behaviors, not features interpreted by this host.
+`PlatformEnrollmentEndpoint` selects pending-enrollment mode. Gateway-driven automatic enrollment
+remains deferred at the client request/response seam; the store's CSR, signing, and completion
+routes already exist. The gateway now supplies a provisional transport certificate and trusted
+anchors, so a pending child can serve HTTPS before its own authority is enrolled. Readiness
+remains unhealthy until enrollment completes. The listener chooses the contract certificate first
+and its own CA second. Parameter-supplied certificates are resolved by the gateway; `public`
+remains reserved for later ACME integration. Default issued leaves include localhost and both
+loopback IP SANs so local clients can validate the same application certificate; explicitly supplied
+SANs remain authoritative.
 
 ## Boundaries and AOT posture
 
@@ -181,5 +175,9 @@ continues to work. This owner split lets local gateway declarations authenticate
 
 Restricted trust grants accept `{trustKey,allowedCommandKinds}` while unrestricted grants retain
 the bare JWK payload. The protected trust document round-trips the optional string array; absent
-or empty means every command kind is allowed. Enroll(platformStore) is deferred to item 31t:
+or empty means every command kind is allowed. Enroll(platformStore) remains deferred after item 31t:
 automatic Platform enrollment needs a gateway-owned mediator and Platform-audience signer.
+
+## HTTPS endpoint certificate contract (31t)
+
+The enabled resource's `api` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged. The mounted transport certificate wins before the store-owned CA fallback, so pending intermediate enrollment can expose its HTTPS listener independently of CA readiness.

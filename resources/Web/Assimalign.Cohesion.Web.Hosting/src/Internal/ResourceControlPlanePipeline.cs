@@ -32,9 +32,8 @@ internal sealed class ResourceControlPlanePipeline : IWebApplicationPipeline
         RequireAuthentication = requireAuthentication;
         _applicationContext = applicationContext ?? throw new ArgumentNullException(nameof(applicationContext));
         _next = next ?? throw new ArgumentNullException(nameof(next));
-        _controlPlanePort = controlPlane.ObservedEndpoints.TryGetValue(
-            "http",
-            out Uri? endpoint)
+        _controlPlanePort = (controlPlane.ObservedEndpoints.TryGetValue("http", out Uri? endpoint) ||
+            controlPlane.ObservedEndpoints.TryGetValue("https", out endpoint))
             ? endpoint.Port
             : null;
     }

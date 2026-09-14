@@ -12,7 +12,7 @@ Device authorization and the built-in verification page are available only when 
 
 The data mount contains one persisted P-256 PKCS#8 signing key. Creation uses an atomic same-directory move and owner-only permissions on Unix. JWKS publishes only public `EC`/`P-256`/`ES256` coordinates; `kid` is the RFC 7638 SHA-256 thumbprint of canonical public members. Token creation uses IdentityModel's `JsonWebTokenWriter`. Signing is serialized because the ECDSA instance is shared.
 
-HTTPS consumes a materialized `tls` resource mount containing the PEM leaf certificate, matching private key, and optional chain. This uses the existing `ResourceMount` carrier, including its in-process bytes and Windows protected-file behavior. When that mount is absent, an ephemeral self-signed certificate is allowed only on loopback in Development; every other HTTPS binding fails closed with an explicit configuration error. TLS material is always distinct from the issuer signing key. The current runtime context does not carry an endpoint-to-certificate-mount association, so `tls` is the Hosting-local convention until that shared contract is extended.
+HTTPS consumes a materialized `tls` resource mount containing the PEM leaf certificate, matching private key, and optional chain. This uses the existing `ResourceMount` carrier, including its in-process bytes and Windows protected-file behavior. When that mount is absent, an ephemeral self-signed certificate is allowed only on loopback in Development; every other HTTPS binding fails closed with an explicit configuration error. TLS material is always distinct from the issuer signing key. ResourceContext resolves generated endpoint-to-mount metadata, with `tls` as the compatibility fallback. The shared reader preserves the same single PEM document and certificate chain.
 
 Issued access tokens contain `iss`, `sub`, `aud`, `iat`, `nbf`, `exp`, `jti`, `client_id`, and token-use metadata. The configured lifetime is capped at 24 hours.
 
@@ -56,3 +56,7 @@ declaration stores the mount name, never credential bytes. Hosting reads and has
 credential when initializing or updating the registry, so restart requires the mount again.
 Clients must reference existing audiences; add the audience before the client. Conflicting resource
 seeds or changed client declarations are rejected until the owning declaration is deleted.
+
+## HTTPS endpoint certificate contract (31t)
+
+The enabled resource's `https` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged. The existing loopback Development fallback and plaintext restriction remain; production errors continue to name tls.

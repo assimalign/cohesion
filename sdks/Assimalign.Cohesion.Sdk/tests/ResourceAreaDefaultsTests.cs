@@ -10,6 +10,26 @@ namespace Assimalign.Cohesion.Sdk.Tests;
 
 public sealed class ResourceAreaDefaultsTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sdk] - HTTPS area defaults declare the tls Secret certificate mount")]
+    [InlineData("ConfigurationStore")]
+    [InlineData("IdentityHub")]
+    [InlineData("LogSpace")]
+    [InlineData("SecretStore")]
+    public void HttpsAreaDefaults_ShouldDeclareCertificateAndSecretMount(string area)
+    {
+        DirectoryInfo? root = new(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "Assimalign.Cohesion.slnx")))
+        {
+            root = root.Parent;
+        }
+        root.ShouldNotBeNull();
+        XDocument defaults = XDocument.Load(Path.Combine(root.FullName, "sdks", $"Assimalign.Cohesion.Sdk.{area}", "Targets", $"Sdk.{area}.props"));
+        defaults.Descendants("CohesionEndpoint").Single(endpoint => (string?)endpoint.Attribute("Scheme") == "https").Attribute("Certificate")!.Value.ShouldBe("tls");
+        XElement mount = defaults.Descendants("CohesionMount").Single(mount => (string?)mount.Attribute("Include") == "tls");
+        mount.Attribute("Kind")!.Value.ShouldBe("Secret");
+        mount.Attribute("ContainerPath")!.Value.ShouldBe("/cohesion/mounts/tls");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sdk] - Generic area defaults register their control plane and probes")]
     [InlineData("ApiManager", "http")]
     [InlineData("EmailHub", "http")]

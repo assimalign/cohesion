@@ -105,6 +105,7 @@ builds should not set the escape property.
 | COHSDK005 | Error | A framework-dependent container cannot start because its base lacks Cohesion shared frameworks. |
 | COHSDK008 | Error | `CohesionApplicationModel` is enabled for a project whose output is not an executable. |
 | COHSDK009 | Error | A `CohesionResourceProperty` key does not use the current resource kind's prefix. |
+| COHSDK010 | Error | HTTPS Certificate must name a declared Secret mount; non-HTTPS Certificate metadata is rejected. Reserved `public` is exempt. |
 
 See [DESIGN.md](./DESIGN.md) for the implementation contracts and
 [`docs/VERSIONING.md`](../../../docs/VERSIONING.md) for repository-wide package

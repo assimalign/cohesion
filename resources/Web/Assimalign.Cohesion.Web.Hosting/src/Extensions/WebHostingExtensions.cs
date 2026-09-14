@@ -77,7 +77,7 @@ public static class WebHostingExtensions
         {
             ArgumentNullException.ThrowIfNull(configuration);
 
-            return builder.UseServer((_, options) => HttpServerConfiguration.Bind(configuration, sectionKey, options));
+            return builder.UseServer((_, options) => HttpServerConfiguration.Bind(configuration, sectionKey, options, builder.OwnEndpointCertificate));
         }
     }
 
@@ -132,13 +132,21 @@ public static class WebHostingExtensions
         /// <c>isSecure</c> flag.
         /// </remarks>
         public HttpConnectionListenerOptions UseHttp1s(Action<TcpConnectionListenerOptions> configure, TlsServerOptions tlsOptions)
+            => options.UseHttp1s(configure, tlsOptions, null);
+
+        /// <summary>Serves HTTP/1 over TLS with explicit per-listener protocol options.</summary>
+        /// <param name="configure">The TCP listener configuration.</param>
+        /// <param name="tlsOptions">The server TLS options.</param>
+        /// <param name="configureHttp">Optional protocol settings, including request limits.</param>
+        /// <returns>The current listener options.</returns>
+        public HttpConnectionListenerOptions UseHttp1s(Action<TcpConnectionListenerOptions> configure, TlsServerOptions tlsOptions, Action<Http1ConnectionListenerOptions>? configureHttp)
         {
             ArgumentNullException.ThrowIfNull(configure);
             ArgumentNullException.ThrowIfNull(tlsOptions);
 
             EnsureApplicationProtocols(tlsOptions, SslApplicationProtocol.Http11);
 
-            return options.UseHttp1(() => TcpConnectionListener.Create(configure).UseTls(tlsOptions));
+            return options.UseHttp1(() => TcpConnectionListener.Create(configure).UseTls(tlsOptions), configureHttp ?? (static _ => { }));
         }
 
         /// <summary>
@@ -165,13 +173,21 @@ public static class WebHostingExtensions
         /// the defaulted <c>h2</c> protocol id is what makes the secured listener reachable as HTTP/2.
         /// </remarks>
         public HttpConnectionListenerOptions UseHttp2s(Action<TcpConnectionListenerOptions> configure, TlsServerOptions tlsOptions)
+            => options.UseHttp2s(configure, tlsOptions, null);
+
+        /// <summary>Serves HTTP/2 over TLS with explicit per-listener protocol options.</summary>
+        /// <param name="configure">The TCP listener configuration.</param>
+        /// <param name="tlsOptions">The server TLS options.</param>
+        /// <param name="configureHttp">Optional protocol settings, including request limits.</param>
+        /// <returns>The current listener options.</returns>
+        public HttpConnectionListenerOptions UseHttp2s(Action<TcpConnectionListenerOptions> configure, TlsServerOptions tlsOptions, Action<Http2ConnectionListenerOptions>? configureHttp)
         {
             ArgumentNullException.ThrowIfNull(configure);
             ArgumentNullException.ThrowIfNull(tlsOptions);
 
             EnsureApplicationProtocols(tlsOptions, SslApplicationProtocol.Http2);
 
-            return options.UseHttp2(() => TcpConnectionListener.Create(configure).UseTls(tlsOptions));
+            return options.UseHttp2(() => TcpConnectionListener.Create(configure).UseTls(tlsOptions), configureHttp ?? (static _ => { }));
         }
 
         /// <summary>

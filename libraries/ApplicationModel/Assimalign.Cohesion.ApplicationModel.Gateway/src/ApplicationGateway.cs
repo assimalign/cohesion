@@ -167,7 +167,9 @@ public abstract partial class ApplicationGateway :
             {
                 resolved.Add(
                     mount.Mount,
-                    ResourceMountInput.Resolved(source, ReadOnlyMemory<byte>.Empty));
+                    mount.Kind == ResourceMountKind.Secret && IsCertificateMount(context, mount.Mount)
+                        ? await ResolveDefaultCertificateAsync(context, plan, mount, cancellationToken).ConfigureAwait(false)
+                        : ResourceMountInput.Resolved(source, ReadOnlyMemory<byte>.Empty));
                 continue;
             }
 
@@ -305,10 +307,23 @@ public abstract partial class ApplicationGateway :
             context.Model,
             descriptor.Resource.Name);
         ApplicationTrustState trust = GetTrustState(context.Model.Name);
+        foreach (MountBinding mount in plan.Container.Mounts)
+        {
+            if (mount.Kind == ResourceMountKind.Secret && IsCertificateMount(context, mount.Mount))
+            {
+                ResourceMountInput validated = ValidateCertificateInput(plan, mount, resolved[mount.Mount]);
+                resolved[mount.Mount] = validated;
+                if (validated.IsResolved && !validated.Content.IsEmpty)
+                {
+                    GetCertificateAuthority(context.Model.Name).AddAnchors(Encoding.UTF8.GetString(validated.Content.Span));
+                }
+            }
+        }
         return new ResourceInputs(
             resolved,
             Encoding.ASCII.GetBytes(bootstrapCredential),
-            trust.PublicKey);
+            trust.PublicKey,
+            GetCertificateAuthority(context.Model.Name).ExportAnchors());
     }
 
     private async ValueTask<ResourceMountInput> ResolveStoreSourceAsync(
@@ -322,6 +337,7 @@ public abstract partial class ApplicationGateway :
         string credential,
         CancellationToken cancellationToken)
     {
+        ConfigureStoreTransport(context.Model.Name, endpoint);
         if (mount.Kind == ResourceMountKind.Secret &&
             string.Equals(sourceManifest.Kind, "SecretStore", StringComparison.OrdinalIgnoreCase))
         {
@@ -332,7 +348,14 @@ public abstract partial class ApplicationGateway :
                     string certificate = await _options.StoreClient
                         .ReadCertificateAsync(endpoint, credential, key, cancellationToken)
                         .ConfigureAwait(false);
-                    return ResourceMountInput.Resolved(source, Encoding.UTF8.GetBytes(certificate));
+                    ResourceMountInput input = ValidateCertificateInput(plan, mount,
+                        ResourceMountInput.Resolved(source, Encoding.UTF8.GetBytes(certificate)));
+                    if (input.IsResolved && !input.Content.IsEmpty)
+                    {
+                        string root = await _options.StoreClient.ReadCertificateAsync(endpoint, credential, "ca/root", cancellationToken).ConfigureAwait(false);
+                        GetCertificateAuthority(context.Model.Name).AddAnchors(root);
+                    }
+                    return input;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -2212,6 +2235,7 @@ public abstract partial class ApplicationGateway :
                                 path: null,
                                 out endpoint))
                         {
+                            ConfigureStoreTransport(model.Name, endpoint);
                             return true;
                         }
                     }
@@ -2227,6 +2251,7 @@ public abstract partial class ApplicationGateway :
                         $"for application '{model.Name}'.");
                 }
 
+                ConfigureStoreTransport(model.Name, endpoint);
                 return true;
             }
 
@@ -2247,7 +2272,8 @@ public abstract partial class ApplicationGateway :
                             path: null,
                             out endpoint))
                     {
-                        return true;
+                        ConfigureStoreTransport(model.Name, endpoint);
+                return true;
                     }
                 }
             }

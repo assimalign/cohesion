@@ -24,6 +24,18 @@ internal static class ResourceSourceWriter
         builder.AppendLine("/// <summary>Provides strongly typed access to this Cohesion resource's runtime inputs.</summary>");
         builder.AppendLine("public static partial class Resource");
         builder.AppendLine("{");
+        builder.AppendLine("    [global::System.Runtime.CompilerServices.ModuleInitializer]");
+        builder.AppendLine("    internal static void RegisterEndpointCertificates()");
+        builder.AppendLine("    {");
+        builder.AppendLine("        global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.RegisterEndpointCertificates(typeof(Resource).Assembly,");
+        builder.AppendLine("            new global::System.Collections.Generic.Dictionary<string, string>(global::System.StringComparer.OrdinalIgnoreCase)");
+        builder.AppendLine("            {");
+        foreach (ResourceEndpointModel endpoint in manifest.Endpoints.Where(endpoint => !string.IsNullOrEmpty(endpoint.Certificate)))
+        {
+            builder.AppendLine($"                [{Quote(endpoint.Name)}] = {Quote(endpoint.Certificate ?? string.Empty)},");
+        }
+        builder.AppendLine("            });");
+        builder.AppendLine("    }");
         builder.AppendLine("    /// <summary>Gets the resource name.</summary>");
         builder.AppendLine($"    public const string Name = {Quote(manifest.Name)};");
         builder.AppendLine();

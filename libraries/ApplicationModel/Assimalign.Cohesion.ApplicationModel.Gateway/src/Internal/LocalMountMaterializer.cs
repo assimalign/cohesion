@@ -73,6 +73,8 @@ internal sealed class LocalMountMaterializer
             environment,
             cancellationToken).ConfigureAwait(false);
 
+        await MaterializeTrustBundleAsync(application, resource.Name, inputs.TrustBundle, environment, cancellationToken).ConfigureAwait(false);
+
         for (int index = 0; index < mounts.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -154,6 +156,18 @@ internal sealed class LocalMountMaterializer
         return Task.CompletedTask;
     }
 
+    internal async Task MaterializeTrustBundleAsync(ApplicationName application, ResourceName resource,
+        ReadOnlyMemory<byte> trustBundle, IDictionary<string, string> environment, CancellationToken cancellationToken)
+    {
+        string applicationDirectory = SafeChild(_stateDirectory, application.ToString(), "application");
+        string resourceDirectory = SafeChild(applicationDirectory, resource.ToString(), "resource");
+        ILocalFileProtector? protector = OperatingSystem.IsWindows()
+            ? new WindowsLocalFileProtector(Path.Combine(applicationDirectory, ".state"), application)
+            : null;
+        await MaterializeBootstrapCredentialAsync(resourceDirectory, resource, trustBundle, protector, environment,
+            cancellationToken, "trust.pem", ResourceEnvironment.TrustBundlePath).ConfigureAwait(false);
+    }
+
     private static string SafeChild(string parent, string name, string kind)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -224,19 +238,21 @@ internal sealed class LocalMountMaterializer
         ReadOnlyMemory<byte> credential,
         ILocalFileProtector? protector,
         IDictionary<string, string> environment,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string fileName = "bootstrap.token",
+        string variable = ResourceEnvironment.BootstrapTokenPath)
     {
         string stateDirectory = SafeChild(resourceDirectory, ".state", "resource state");
         string credentialPath = SafeChild(
             stateDirectory,
-            "bootstrap.token",
+            fileName,
             "bootstrap credential");
 
         if (credential.IsEmpty)
         {
             GatewayEnvironmentVariables.Remove(
                 environment,
-                ResourceEnvironment.BootstrapTokenPath);
+                variable);
             if (File.Exists(credentialPath))
             {
                 File.Delete(credentialPath);
@@ -252,7 +268,7 @@ internal sealed class LocalMountMaterializer
         {
             persisted = protector is null
                 ? content
-                : protector.Protect(resource.ToString(), "bootstrap.token", content);
+                : protector.Protect(resource.ToString(), fileName, content);
             await WriteFileAsync(credentialPath, persisted, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -266,7 +282,7 @@ internal sealed class LocalMountMaterializer
 
         GatewayEnvironmentVariables.Set(
             environment,
-            ResourceEnvironment.BootstrapTokenPath,
+            variable,
             credentialPath);
     }
 

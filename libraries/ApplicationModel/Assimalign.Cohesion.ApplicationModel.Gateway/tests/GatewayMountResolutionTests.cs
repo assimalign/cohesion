@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -121,6 +123,85 @@ public sealed class GatewayMountResolutionTests
         // Assert
         options.Parameters["region"].ShouldBe("west");
         options.Parameters["tenant"].ShouldBe("appa");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Certificate resolution: Explicit source, own store and development fallback have defined precedence")]
+    [InlineData("parameter", 1)]
+    [InlineData("store", 1)]
+    [InlineData("default-store", 1)]
+    [InlineData("development", 1)]
+    [InlineData("parameter", 0)]
+    [InlineData("parameter", 2)]
+    [InlineData("store", 0)]
+    [InlineData("store", 2)]
+    public async Task StartAsync_CertificateResolution_ShouldEnforceOrderAndShape(string branch, int keys)
+    {
+        string root = Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "mount-certs-" + Guid.NewGuid().ToString("N"))).FullName;
+        var authority = new GatewayCertificateAuthority(Path.Combine(root, "fixture"), "fixture");
+        string real = authority.Issue("supplied-api", []);
+        using X509Certificate2 supplied = X509Certificate2.CreateFromPem(real, real);
+        string pem = keys == 0 ? supplied.ExportCertificatePem() : real;
+        if (keys == 2)
+        {
+            pem += real[real.IndexOf("-----BEGIN PRIVATE KEY-----", StringComparison.Ordinal)..];
+        }
+        var client = new RecordingStoreClient { CertificatePem = pem, RootPem = Encoding.UTF8.GetString(authority.ExportAnchors().Span) };
+        var options = CreateOptions(client);
+        options.ExportDirectory = root;
+        options.Parameters["certificate"] = pem;
+        var controller = new StoreEndpointController();
+        var gateway = new TestGateway(new InMemoryResourceStateManager(), [controller], options: options);
+        IApplicationBuilder builder = Application.CreateBuilder("appa", ["--environment", "Development"]).UseGateway(gateway);
+        IApplicationResourceDescriptor? secrets = branch == "development" ? null : builder.AddResource(CreateManifest("secrets", "SecretStore"));
+        string? source = branch switch { "parameter" => "parameter:certificate", "store" => "secrets:certs/supplied-api", _ => null };
+        IApplicationResourceDescriptor api = builder.AddResource(CreateManifest("api", "Web",
+            mounts: [new ResourceManifestMount { Name = "tls", Kind = ResourceMountKind.Secret, ContainerPath = "/cohesion/mounts/tls", Source = source }],
+            certificateMount: "tls", referenceResources: secrets is null ? [] : ["secrets"]));
+        if (secrets is not null)
+        {
+            api.DependsOn(secrets);
+        }
+        try
+        {
+            await ((IApplicationGateway)gateway).StartAsync(builder.Build().Model);
+            ResourceInputs inputs = controller.TargetInputs.ShouldNotBeNull();
+            ResourceMountInput input = inputs.Mounts["tls"];
+            input.IsResolved.ShouldBe(keys == 1);
+            if (keys != 1)
+            {
+                input.UnresolvedReason.ShouldNotBeNull().ShouldContain("mount 'tls'");
+                input.UnresolvedReason.ShouldContain("exactly one");
+            }
+            else
+            {
+                using X509Certificate2 actual = X509Certificate2.CreateFromPem(Encoding.UTF8.GetString(input.Content.Span), Encoding.UTF8.GetString(input.Content.Span));
+                if (branch == "development")
+                {
+                    actual.Thumbprint.ShouldNotBe(supplied.Thumbprint);
+                    client.CertificateRequests.ShouldBeEmpty();
+                }
+                else
+                {
+                    actual.Thumbprint.ShouldBe(supplied.Thumbprint);
+                    Encoding.UTF8.GetString(input.Content.Span).ShouldBe(pem);
+                }
+                if (branch == "parameter")
+                {
+                    client.CertificateRequests.ShouldBeEmpty();
+                }
+                if (branch == "default-store")
+                {
+                    client.CertificateRequests.ShouldContain("certs/api-api");
+                    client.CertificateRequests.ShouldContain("ca/root");
+                }
+                Encoding.UTF8.GetString(inputs.TrustBundle.Span).ShouldNotContain("PRIVATE KEY");
+            }
+        }
+        finally
+        {
+            await ((IApplicationGateway)gateway).StopAsync();
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private static ApplicationGatewayOptions CreateOptions(IGatewayStoreClient client) => new()
@@ -257,6 +338,12 @@ public sealed class GatewayMountResolutionTests
     {
         public bool CertificateUnavailable { get; init; }
 
+        public string CertificatePem { get; init; } = string.Empty;
+
+        public string RootPem { get; init; } = string.Empty;
+
+        public List<string> CertificateRequests { get; } = new();
+
         public Uri? SecretEndpoint { get; private set; }
 
         public Uri? ConfigurationEndpoint { get; private set; }
@@ -300,9 +387,10 @@ public sealed class GatewayMountResolutionTests
             SecretEndpoint = endpoint;
             SecretCredential = credential;
             CertificateName = name;
+            CertificateRequests.Add(name);
             return CertificateUnavailable
-                ? ValueTask.FromException<string>(new NotSupportedException("Certificate issuance awaits item 31."))
-                : ValueTask.FromResult("certificate");
+                ? ValueTask.FromException<string>(new NotSupportedException("Certificate issuance is unavailable from this test store."))
+                : ValueTask.FromResult(name == "ca/root" ? RootPem : CertificatePem);
         }
 
         public ValueTask<IReadOnlyDictionary<string, string?>> ReadConfigurationAsync(

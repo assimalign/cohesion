@@ -87,3 +87,5 @@ bool isMatch = pattern.IsMatch("settings/appsettings.json");
 
 string environmentName = AppEnvironment.GetEnvironmentName();
 ```
+
+`ResourceEnvironment.TrustBundlePath` is the additive transport trust-anchor path immediately after the bootstrap path. Its contents are certificates only; Hosting.Resources owns protected-file reading and TLS chain validation. The constant, runtime table, and golden variable list remain in identical order.

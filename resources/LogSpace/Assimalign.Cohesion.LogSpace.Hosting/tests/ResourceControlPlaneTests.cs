@@ -88,6 +88,19 @@ public sealed class ResourceControlPlaneTests
         await application.StopAsync(CancellationToken.None);
     }
 
+    [Theory(DisplayName = "Cohesion Test [LogSpace.Hosting] - HTTPS: Missing certificate fails closed outside loopback Development")]
+    [InlineData("Production", "127.0.0.1")]
+    [InlineData("Development", "0.0.0.0")]
+    public void Build_MissingCertificate_ShouldFailClosed(string environment, string host)
+    {
+        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
+            environmentName: environment,
+            endpoints: new Dictionary<string, Uri> { ["query"] = Uri.CreateEndpoint("https", host, 8443) }));
+        ILogSpaceApplicationBuilder builder = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly);
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(() => builder.Build());
+        error.Message.ShouldContain("tls");
+    }
+
     private static ILogSpaceApplicationBuilder CreateBuilder(Assembly assembly)
     {
         MethodInfo method = typeof(LogSpaceApplication).GetMethod("CreateBuilder", BindingFlags.Static | BindingFlags.NonPublic,

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.Common;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -33,6 +34,20 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     }
 
     public override WebApplicationContext Context => _context;
+
+    /// <inheritdoc />
+    protected override async ValueTask DisposeAsync(bool disposing)
+    {
+        await base.DisposeAsync(disposing).ConfigureAwait(false);
+        if (disposing)
+        {
+            foreach (X509Certificate2 certificate in _context.EndpointCertificates)
+            {
+                certificate.Dispose();
+            }
+            _context.EndpointCertificates.Clear();
+        }
+    }
 
     public WebApplication Use(Func<IHttpContext, WebApplicationMiddleware, Task> middleware)
     {

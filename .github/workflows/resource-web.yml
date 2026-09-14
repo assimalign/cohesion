@@ -59,3 +59,17 @@ jobs:
           area: 'resources'
           category: 'Web'
           project: ${{ matrix.projects }}
+
+  https-sample:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: ['Assimalign.Cohesion.Web.HttpsHost']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - run: dotnet build build/Tasks -c Release
+      - run: dotnet build resources/Web/samples/${{ matrix.projects }}/${{ matrix.projects }}.csproj -c Release

@@ -21,7 +21,6 @@ internal interface IInProcessProbeRunner
 
 internal sealed class InProcessProbeRunner : IInProcessProbeRunner
 {
-    private static readonly HttpClient Client = new();
     private readonly InProcessGatewayOptions _options;
 
     internal InProcessProbeRunner(InProcessGatewayOptions options)
@@ -92,7 +91,10 @@ internal sealed class InProcessProbeRunner : IInProcessProbeRunner
                 "Bearer " + Encoding.UTF8.GetString(context.BootstrapCredential.Span));
         }
 
-        using HttpResponseMessage response = await Client
+        using var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false };
+        handler.SslOptions.RemoteCertificateValidationCallback = context.CreateOutboundTrustValidator();
+        using var client = new HttpClient(handler);
+        using HttpResponseMessage response = await client
             .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.OK)

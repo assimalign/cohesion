@@ -26,7 +26,8 @@
         "endpoint": "control",
         "containerPort": 8080,
         "protocol": "tcp",
-        "scheme": "http"
+        "scheme": "http",
+        "certificate": ""
       }
     ],
     "mounts": [],

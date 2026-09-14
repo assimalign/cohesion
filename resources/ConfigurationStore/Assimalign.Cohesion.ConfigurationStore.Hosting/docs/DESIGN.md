@@ -47,9 +47,8 @@ Hosting.Resources, Hosting.Health, IdentityModel JWT primitives, and the private
 infrastructure dependencies; no Gateway or other ConfigurationStore feature package is referenced.
 JSON is parsed and written explicitly, with no reflection-based serialization.
 
-The inherited SDK default still declares HTTPS without a certificate mount, while this host currently
-has only an HTTP binder. Until the endpoint/TLS contract is completed, development manifests must
-override `api` to loopback HTTP; the unresolved contract is called out in the implementation report.
+The SDK default declares HTTPS with the `tls` Secret mount. The enabled host binds that endpoint
+using the shared certificate contract; explicit HTTP endpoints remain supported.
 
 
 ## Declarative command delivery
@@ -88,3 +87,7 @@ contents. A different seed or foreign owner is rejected with a named detail. Res
 are not implicitly adopted. Deletion removes the owned namespace; callers should remove its value
 commands first. Existing SetValue and RemoveValue behavior remains unchanged, including 404 for
 unknown namespaces.
+
+## HTTPS endpoint certificate contract (31t)
+
+The enabled resource's `api` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged.

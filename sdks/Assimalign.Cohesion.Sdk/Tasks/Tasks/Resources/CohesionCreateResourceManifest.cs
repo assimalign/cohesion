@@ -214,6 +214,7 @@ public sealed class CohesionCreateResourceManifest : Task
 
         List<ResourceEndpointModel> endpoints = ParseEndpoints();
         List<ResourceMountModel> mounts = ParseMounts();
+        ResolveEndpointCertificates(endpoints, mounts);
         List<ResourceSettingModel> settings = ParseSettings();
         List<ResourceReferenceModel> references = ParseReferences();
         Dictionary<string, ResourceProbeModel> probes = ParseProbes(endpoints);
@@ -328,6 +329,41 @@ public sealed class CohesionCreateResourceManifest : Task
 
         Log.LogMessage(MessageImportance.Normal, $"Generated Cohesion resource manifest '{ManifestOutputPath}'.");
         return true;
+    }
+
+    private void ResolveEndpointCertificates(List<ResourceEndpointModel> endpoints, List<ResourceMountModel> mounts)
+    {
+        for (int index = 0; index < endpoints.Count; index++)
+        {
+            ResourceEndpointModel endpoint = endpoints[index];
+            bool https = string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(endpoint.Certificate, "public", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (https && string.IsNullOrWhiteSpace(endpoint.Certificate))
+            {
+                endpoint = endpoint with { Certificate = "tls" };
+                endpoints[index] = endpoint;
+                if (!mounts.Any(mount => string.Equals(mount.Name, "tls", StringComparison.Ordinal)))
+                {
+                    mounts.Add(new ResourceMountModel("tls", "Secret", "/cohesion/mounts/tls", Source: null, Size: null));
+                }
+            }
+            if (string.IsNullOrWhiteSpace(endpoint.Certificate))
+            {
+                continue;
+            }
+            if (!https)
+            {
+                Error("COHSDK010", $"{ProjectName}: endpoint '{endpoint.Name}' declares Certificate='{endpoint.Certificate}' but its scheme is '{endpoint.Scheme}'; Certificate requires an https endpoint.");
+                continue;
+            }
+            if (!mounts.Any(mount => string.Equals(mount.Name, endpoint.Certificate, StringComparison.Ordinal) && string.Equals(mount.Kind, "Secret", StringComparison.OrdinalIgnoreCase)))
+            {
+                Error("COHSDK010", $"{ProjectName}: endpoint '{endpoint.Name}' declares Certificate='{endpoint.Certificate}', which is not a declared Secret mount; add <CohesionMount Include=\"{endpoint.Certificate}\" Kind=\"Secret\" />.");
+            }
+        }
     }
 
     private List<ResourceEndpointModel> ParseEndpoints()
@@ -794,7 +830,9 @@ public sealed class CohesionCreateResourceManifest : Task
                 endpoints.Add(endpoint with
                 {
                     Name = $"{memberName}-{endpoint.Name}",
-                    Certificate = endpoint.Certificate is null ? null : $"{memberName}-{endpoint.Certificate}"
+                    Certificate = endpoint.Certificate is null || string.Equals(endpoint.Certificate, "public", StringComparison.OrdinalIgnoreCase)
+                        ? endpoint.Certificate
+                        : $"{memberName}-{endpoint.Certificate}"
                 });
             }
             foreach (ResourceMountModel mount in reference.Mounts)

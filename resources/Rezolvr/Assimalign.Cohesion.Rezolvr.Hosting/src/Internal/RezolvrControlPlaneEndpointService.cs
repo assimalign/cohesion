@@ -1,9 +1,12 @@
 using System;
 using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Tcp;
+using Assimalign.Cohesion.Connections.Security;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http.Connections;
@@ -15,6 +18,8 @@ namespace Assimalign.Cohesion.Rezolvr.Hosting;
 
 internal sealed class RezolvrControlPlaneEndpointService : IHostService, IDisposable
 {
+    private X509Certificate2? _serverCertificate;
+    private X509Certificate2Collection _serverCertificateChain = new();
     private readonly WebApplication _application;
     private readonly IResourceControlPlane _controlPlane;
     private readonly RezolvrRecordRepository _repository;
@@ -33,15 +38,31 @@ internal sealed class RezolvrControlPlaneEndpointService : IHostService, IDispos
         ArgumentNullException.ThrowIfNull(applicationContext);
         _controlPlane = controlPlane;
         _repository = repository;
-        if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("The Rezolvr control-plane endpoint 'admin' requires http.");
+            throw new InvalidOperationException("The Rezolvr control-plane endpoint 'admin' requires http or https.");
         }
 
         IPAddress address = ResolveBindAddress(endpoint.IdnHost);
         // Parameterless construction deliberately avoids resource registration on this private host.
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
-        builder.Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));
+        if (string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
+        {
+            if (resourceContext is not ResourceContext certificateContext ||
+                !certificateContext.TryGetEndpointCertificate("admin", out _serverCertificate, out _serverCertificateChain))
+            {
+                throw new InvalidOperationException("The Rezolvr https endpoint 'admin' requires its certificate Secret mount (default 'tls').");
+            }
+            SslStreamCertificateContext certificate = SslStreamCertificateContext.Create(_serverCertificate, _serverCertificateChain, offline: true);
+            builder.Server.UseServer(options => options.UseHttp1s(
+                tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port),
+                new TlsServerOptions { AuthenticationOptions = new SslServerAuthenticationOptions { ServerCertificateContext = certificate } }));
+        }
+        else
+        {
+            builder.Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));
+        }
         _application = builder.Build();
         IWebApplicationPipelineBuilder pipeline = _application;
         pipeline.UseResourceControlPlane(controlPlane, resourceContext,
@@ -65,6 +86,11 @@ internal sealed class RezolvrControlPlaneEndpointService : IHostService, IDispos
     public void Dispose()
     {
         ((IDisposable)_application).Dispose();
+        _serverCertificate?.Dispose();
+        foreach (X509Certificate2 certificate in _serverCertificateChain)
+        {
+            certificate.Dispose();
+        }
 
     }
 

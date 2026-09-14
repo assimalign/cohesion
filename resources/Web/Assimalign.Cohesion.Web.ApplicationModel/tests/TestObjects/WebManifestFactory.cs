@@ -40,6 +40,15 @@ internal static class WebManifestFactory
                     Certificate = "manifest-tls",
                 },
             ],
+            Mounts =
+            [
+                new ResourceManifestMount
+                {
+                    Name = "manifest-tls",
+                    Kind = ResourceMountKind.Secret,
+                    ContainerPath = "/cohesion/mounts/manifest-tls",
+                },
+            ],
             Probes = new ResourceManifestProbes
             {
                 Readiness = new ResourceManifestProbe

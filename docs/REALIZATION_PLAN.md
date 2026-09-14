@@ -21,19 +21,23 @@ Plans are UTF-8 JSON. Property names are camel case, enums are serialized by nam
 `ResourceName` and `ArtifactRef` are JSON strings. The source-generated
 `ResourcePlanJsonContext` is the .NET definition of the wire shape.
 
-Version 1 originally shipped without carrying three manifest facts that every platform compiler
-can need: the default control-plane location, endpoint URI schemes, and lifecycle restart policy.
-Their additive fields remain in `cohesion/plan/v1` for wire compatibility. A legacy document that
-omits them deserializes to empty compatibility sentinels. `ResourcePlanValidator` accepts only the
-complete legacy omission; a populated value must be valid and match its manifest. `GenericPlanner`
-and every new plan must populate all three. A compiler may reject a legacy plan before gathering
-when the missing fact is required for a faithful realization.
+Version 1 originally shipped without carrying four manifest facts that every platform compiler
+can need: the default control-plane location, endpoint URI schemes, lifecycle restart policy, and endpoint certificate mounts.
+Their additive fields remain in `cohesion/plan/v1` for wire compatibility. Omitted fields
+deserialize to empty compatibility sentinels. The existing legacy-omission rules for control
+planes, schemes, and restart policies remain; populated values must match their manifests.
+Certificate values are validated per endpoint: an HTTP endpoint may have an empty certificate
+beside an HTTPS endpoint naming a Secret mount. There is no all-declared-or-all-omitted
+certificate invariant. A non-empty certificate names a Secret plan mount, except for reserved
+`public`; an empty certificate cannot erase a manifest certificate. `GenericPlanner` carries
+all four facts. A compiler may reject a legacy plan before gathering when a missing fact is
+required for faithful realization.
 
 Every named property outside the contents of `hints` is specification. A consumer must reject:
 
 - an unknown specification field;
 - an unknown enum value;
-- a missing required field or an invalid null, except for the three documented legacy omissions;
+- a missing required field or an invalid null, except for the documented compatibility omissions;
 - a schema identifier it does not support.
 
 The rejection happens during `Build()` or `--mode render`, before artifact gathering or platform
@@ -45,7 +49,7 @@ continue. It must not silently reinterpret an unknown hint as specification. A r
 may refine a compiler choice only where the specification leaves that choice open; it cannot
 weaken or contradict a specification field.
 
-Except for the three version 1 completion fields documented above, the schema identifier must be
+Except for the four version 1 completion fields documented above, the schema identifier must be
 bumped when any specification field or enum member is added,
 removed, renamed, changes type or cardinality, or changes meaning. This includes adding an
 otherwise optional specification field. Adding, removing, or changing a hint key never bumps the
@@ -143,6 +147,7 @@ workload must refuse the plan by name in `CanRealize`.
 | `containerPort` | integer | The endpoint's declared container port. |
 | `protocol` | string | The declared transport protocol, normally `tcp` or `udp`. |
 | `scheme` | string | The declared endpoint URI scheme. An empty value is accepted only when deserializing a legacy v1 plan that omitted this field. |
+| `certificate` | string | Logical Secret mount carrying the endpoint PEM bundle, reserved `public`, or an empty string. Must match the manifest endpoint; null is invalid. |
 
 ### `ControlPlaneSpec`
 
@@ -226,7 +231,7 @@ There is exactly one exposure for each public endpoint and none for a private en
 | `lifecycle.restartPolicy` | `workload.restartPolicy`, unchanged. |
 | `controlPlane` | `controlPlane.endpoint` and `controlPlane.path`, unchanged. |
 | `artifact` | `container.artifact = "self"`; platform artifact identity stays outside the plan. |
-| endpoint | One `PortBinding`, including its URI scheme, and one endpoint `ServiceSpec`, in declaration order. |
+| endpoint | One `PortBinding`, including its URI scheme and certificate mount, and one endpoint `ServiceSpec`, in declaration order. |
 | public endpoint | One `ExposureSpec` backed by its endpoint service. |
 | Configuration or Secret mount | One `MountBinding`; no `VolumeSpec`. The gateway resolves its source. |
 | Volume mount | One `MountBinding`, one sized per-replica `VolumeSpec`, `StatefulSet`, stable identity, and one headless governing `ServiceSpec`. Manifest generation defaults a Volume-mounted resource to `StatefulSet`; the planner rejects a contradictory manifest. |

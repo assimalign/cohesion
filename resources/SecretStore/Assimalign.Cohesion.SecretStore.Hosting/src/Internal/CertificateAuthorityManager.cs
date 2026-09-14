@@ -214,7 +214,8 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 }
             }
 
-            using X509Certificate2 leaf = CreateLeaf(leafName, subjectAlternativeNames ?? [leafName], effectiveSubject, effectiveNames);
+            using X509Certificate2 leaf = CreateLeaf(leafName,
+                subjectAlternativeNames ?? [leafName, "localhost", "127.0.0.1", "::1"], effectiveSubject, effectiveNames);
             string pem = ExportLeafBundle(leaf);
             byte[] encoded = Encoding.UTF8.GetBytes(pem);
             try

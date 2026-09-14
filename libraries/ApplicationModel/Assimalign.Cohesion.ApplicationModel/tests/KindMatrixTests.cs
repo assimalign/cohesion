@@ -145,6 +145,7 @@ public class KindMatrixTests
                 Certificate = "tls"
             }
         ],
+        Mounts = [new ResourceManifestMount { Name = "tls", Kind = ResourceMountKind.Secret, ContainerPath = "/cohesion/mounts/tls" }],
         Probes = new ResourceManifestProbes
         {
             Readiness = new ResourceManifestProbe

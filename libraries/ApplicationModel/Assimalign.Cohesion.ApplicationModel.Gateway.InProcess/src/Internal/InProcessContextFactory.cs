@@ -90,6 +90,9 @@ internal sealed class InProcessContextFactory
             member,
             outerContext);
 
+        await new LocalMountMaterializer(_stateDirectory).MaterializeTrustBundleAsync(control.Model.Name,
+            control.Resource.Name, compilation.Inputs.TrustBundle, ambientEnvironment, cancellationToken).ConfigureAwait(false);
+
         var resourceContext = new ResourceContext(
             applicationName: control.Model.Name.ToString(),
             resourceName: control.Resource.Name.ToString(),
@@ -102,7 +105,9 @@ internal sealed class InProcessContextFactory
             references: references,
             bootstrapCredential: compilation.Inputs.BootstrapCredential,
             applicationTrustKey: compilation.Inputs.ApplicationTrustKey,
-            ambientValues: CreateAmbientValues(ambientEnvironment));
+            ambientValues: CreateAmbientValues(ambientEnvironment),
+            endpointCertificates: plan.Container.Ports.Where(port => !string.IsNullOrEmpty(port.Certificate))
+                .ToDictionary(port => port.Endpoint, port => port.Certificate, StringComparer.Ordinal));
 
         return new InProcessMemberConfiguration(
             control,

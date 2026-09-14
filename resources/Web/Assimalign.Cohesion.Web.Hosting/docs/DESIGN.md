@@ -457,12 +457,12 @@ The binding is deliberately **not** reflection-based:
   **not** resolved at bind time — a hostname that is not one of those is an
   error, because binding-time DNS is an I/O surprise the composition root should
   not hide.
-- **Endpoint protocol.** `Http1` (default) or `Http2`; anything else throws.
+- **Endpoint protocol.** `Http1` (default), `Http2`, `Https`/`Http1s`, or `Http2s`; anything else throws. TLS endpoints use `Certificate` to name a Secret mount.
 
 ### Scope boundary
 
-`UseConfiguration` binds endpoints and the HTTP/1.1 server limits only. TLS
-composition, HTTP/3 registration, and the connection-dispatch rewrite are
+`UseConfiguration` binds HTTP and HTTPS endpoints and their protocol-specific server limits.
+HTTP/3 registration and the connection-dispatch rewrite are
 separate concerns (the latter under #762). Data-rate limits are deferred with
 the transport's streaming-body rework.
 
@@ -692,3 +692,7 @@ No reflection, no runtime codegen, and no sync-over-async bridge. Registration i
 delegate wiring; the ALPN/TLS defaults are list/enum assignments; awaited transport
 binding uses ordinary `ValueTask` APIs. `IsAotCompatible=true` holds with no special
 handling.
+
+## HTTPS endpoint certificate contract (31t)
+
+The enabled resource's `http` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged. Ambient binding tries http and then https by endpoint name, admitting both URI schemes. Manual Http:Endpoints configuration also accepts Protocol Https/Http1s/Http2s and Certificate as a mount name. Server.UseConfiguration remains opt-in and is not wired by default.

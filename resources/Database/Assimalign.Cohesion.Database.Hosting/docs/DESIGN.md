@@ -254,3 +254,7 @@ named Rejected detail explaining that boundary. It does not create an ad hoc wir
 The existing admin GET and POST paths and envelope remain stable. DELETE /cohesion/v1/commands uses
 the same envelope. Unsupported commands return 501 with status/detail; provider refusals return 409;
 blank keys return 400. Direct in-process delivery uses the same handler and ownership checks.
+
+## HTTPS endpoint certificate contract (31t)
+
+The enabled resource's `admin` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged.

@@ -172,3 +172,13 @@ neither host nor its plane is kept alive by the lookup. Generated registration c
 The command ledger is invocation-local, not durable. A host restart loses declaration ownership.
 Area handlers must refuse to adopt pre-existing unmanaged resources when later deletion could destroy
 them; Database applies that rule. Durable command ownership remains a follow-up.
+
+## Endpoint certificate contract (31t)
+
+`ResourceContext.TryGetEndpointCertificate(endpoint, out leaf, out chain)` reads one ordinary Secret mount. The full constructor accepts an optional endpoint-to-mount dictionary; generated Resource.g.cs registers the same immutable metadata by executable assembly through ResourceRuntime.RegisterEndpointCertificates. Control-plane creation applies it to the current invocation. Without a mapping, the conventional mount is `tls`; a normalized environment lookup also handles names containing punctuation. The explicit-mount overload supports manually configured Web endpoints.
+
+Absent or empty mounts return false. Present material requires the leaf as the first certificate and exactly one private key anywhere, accepting PKCS#8, EC, and RSA key labels. Chain parsing accepts either producer order and includes supplied roots. PKCS#12 re-import gives Windows SslStream a usable key association. The caller owns and disposes the returned leaf and chain. Intermediate secret buffers are cleared. The implementation uses only BCL cryptography and preserves the COHAM001 closure and the existing ResourceMount carrier.
+
+`TryGetTrustBundle` reads ResourceEnvironment.TrustBundlePath through ResourceMount's protected-file reader. `CreateOutboundTrustValidator` preserves missing-certificate and hostname rejection, then builds a server-authentication chain with CustomRootTrust, CustomTrustStore and NoCheck revocation against the supplied anchors. It does not disable TLS validation.
+
+CreateDevelopmentEndpointCertificate supplies the shared ephemeral fallback only for loopback Development contexts. Hosts own and dispose the returned identity. The persisted gateway issuer remains separate from this standalone fallback.

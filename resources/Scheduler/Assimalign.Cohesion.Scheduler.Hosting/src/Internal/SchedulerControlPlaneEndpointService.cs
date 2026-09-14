@@ -1,12 +1,15 @@
 using System;
 using System.Buffers;
 using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Core;
+using Assimalign.Cohesion.Connections.Security;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
@@ -21,6 +24,8 @@ namespace Assimalign.Cohesion.Scheduler.Hosting;
 
 internal sealed class SchedulerControlPlaneEndpointService : IHostService, IDisposable
 {
+    private X509Certificate2? _serverCertificate;
+    private X509Certificate2Collection _serverCertificateChain = new();
     private readonly WebApplication _application;
     private readonly BootstrapTokenVerifier _bootstrapVerifier;
     private readonly string _resourceAudience;
@@ -36,10 +41,11 @@ internal sealed class SchedulerControlPlaneEndpointService : IHostService, IDisp
         ArgumentNullException.ThrowIfNull(resourceContext);
         ArgumentNullException.ThrowIfNull(applicationContext);
 
-        if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                $"The ambient Scheduler endpoint 'http' must use the http scheme, not '{endpoint.Scheme}'.");
+                $"The ambient Scheduler endpoint 'http' must use http or https, not '{endpoint.Scheme}'.");
         }
 
         if (resourceContext.GatewayName is null)
@@ -59,8 +65,22 @@ internal sealed class SchedulerControlPlaneEndpointService : IHostService, IDisp
 
         IPAddress address = ResolveBindAddress(endpoint.IdnHost);
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
-        builder.Server.UseServer(options =>
-            options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));
+        if (string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
+        {
+            if (resourceContext is not ResourceContext certificateContext ||
+                !certificateContext.TryGetEndpointCertificate("http", out _serverCertificate, out _serverCertificateChain))
+            {
+                throw new InvalidOperationException("The Scheduler https endpoint 'http' requires its certificate Secret mount (default 'tls').");
+            }
+            SslStreamCertificateContext certificate = SslStreamCertificateContext.Create(_serverCertificate, _serverCertificateChain, offline: true);
+            builder.Server.UseServer(options => options.UseHttp1s(
+                tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port),
+                new TlsServerOptions { AuthenticationOptions = new SslServerAuthenticationOptions { ServerCertificateContext = certificate } }));
+        }
+        else
+        {
+            builder.Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));
+        }
 
         _application = builder.Build();
         IWebApplicationPipelineBuilder pipeline = _application;
@@ -84,6 +104,11 @@ internal sealed class SchedulerControlPlaneEndpointService : IHostService, IDisp
     public void Dispose()
     {
         ((IDisposable)_application).Dispose();
+        _serverCertificate?.Dispose();
+        foreach (X509Certificate2 certificate in _serverCertificateChain)
+        {
+            certificate.Dispose();
+        }
         _bootstrapVerifier.Dispose();
     }
 

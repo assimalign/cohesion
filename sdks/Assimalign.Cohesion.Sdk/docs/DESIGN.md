@@ -180,6 +180,7 @@ trailing commas are accepted to match the .NET SDK's `global.json` format.
 | COHSDK005 | Error | Framework-dependent `PublishContainer` cannot start because MCR images contain no Cohesion shared frameworks. |
 | COHSDK008 | Error | Enabling the application model requires `OutputType=Exe`. |
 | COHSDK009 | Error | Resource properties must use the current kind's lower-case prefix. |
+| COHSDK010 | Error | HTTPS Certificate must name a declared Secret mount; non-HTTPS Certificate metadata is rejected. Reserved `public` is exempt. |
 
 Package-backed tests under `tests/` are the acceptance boundary. They build
 consumer fixtures from packed SDKs so validation includes NuGet SDK resolution,

@@ -1,6 +1,9 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Net.Http;
+using System.Net.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -19,8 +22,28 @@ internal sealed class GatewayStoreClient : IGatewayStoreClient
 {
     public static GatewayStoreClient Instance { get; } = new();
 
-    private GatewayStoreClient()
+    private readonly ConcurrentDictionary<string, RemoteCertificateValidationCallback> _transportTrust = new(StringComparer.Ordinal);
+
+    internal GatewayStoreClient()
     {
+    }
+
+    internal void SetTransportTrust(Uri endpoint, RemoteCertificateValidationCallback? validator)
+    {
+        if (validator is not null)
+        {
+            _transportTrust[endpoint.GetLeftPart(UriPartial.Authority)] = validator;
+        }
+    }
+
+    private HttpMessageInvoker CreateTransport(Uri endpoint)
+    {
+        var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false };
+        if (_transportTrust.TryGetValue(endpoint.GetLeftPart(UriPartial.Authority), out RemoteCertificateValidationCallback? validator))
+        {
+            handler.SslOptions.RemoteCertificateValidationCallback = validator;
+        }
+        return new HttpMessageInvoker(handler, disposeHandler: true);
     }
 
     public async ValueTask<ReadOnlyMemory<byte>> ReadSecretAsync(
@@ -29,8 +52,9 @@ internal sealed class GatewayStoreClient : IGatewayStoreClient
         string path,
         CancellationToken cancellationToken = default)
     {
+        using HttpMessageInvoker transport = CreateTransport(endpoint);
         return await SecretStoreProtocolClient
-            .Create(endpoint, new SecretClientCredential(credential))
+            .Create(endpoint, new SecretClientCredential(credential), transport)
             .GetSecretAsync(path, cancellationToken)
             .ConfigureAwait(false);
     }
@@ -41,8 +65,9 @@ internal sealed class GatewayStoreClient : IGatewayStoreClient
         string name,
         CancellationToken cancellationToken = default)
     {
+        using HttpMessageInvoker transport = CreateTransport(endpoint);
         return await SecretStoreProtocolClient
-            .Create(endpoint, new SecretClientCredential(credential))
+            .Create(endpoint, new SecretClientCredential(credential), transport)
             .GetCertificateAsync(name, cancellationToken)
             .ConfigureAwait(false);
     }
@@ -53,8 +78,9 @@ internal sealed class GatewayStoreClient : IGatewayStoreClient
         string name,
         CancellationToken cancellationToken = default)
     {
+        using HttpMessageInvoker transport = CreateTransport(endpoint);
         return await ConfigurationStoreProtocolClient
-            .Create(endpoint, new ConfigurationClientCredential(credential))
+            .Create(endpoint, new ConfigurationClientCredential(credential), transport)
             .GetNamespaceAsync(name, cancellationToken)
             .ConfigureAwait(false);
     }
@@ -110,8 +136,9 @@ internal sealed class GatewayStoreClient : IGatewayStoreClient
             payload);
         try
         {
+            using HttpMessageInvoker transport = CreateTransport(endpoint);
             await SecretStoreProtocolClient
-                .Create(endpoint, new SecretClientCredential(credential))
+                .Create(endpoint, new SecretClientCredential(credential), transport)
                 .SendCommandAsync(command, cancellationToken)
                 .ConfigureAwait(false);
         }

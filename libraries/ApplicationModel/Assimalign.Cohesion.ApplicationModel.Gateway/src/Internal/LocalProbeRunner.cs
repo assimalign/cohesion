@@ -10,12 +10,13 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Core;
+using Assimalign.Cohesion.Hosting.Resources;
+
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 internal sealed class LocalProbeRunner
 {
-    private static readonly HttpClient HttpClient = new();
-
     private readonly LocalGatewayOptions _options;
 
     public LocalProbeRunner(LocalGatewayOptions options)
@@ -86,7 +87,12 @@ internal sealed class LocalProbeRunner
                 "Bearer " + Encoding.UTF8.GetString(controlPlaneProbe.BootstrapCredential.Span));
         }
 
-        using HttpResponseMessage response = await HttpClient
+        configuration.Environment.TryGetValue(ResourceEnvironment.TrustBundlePath, out string? trustPath);
+        ResourceContext context = ResourceContext.FromEnvironment(new Dictionary<string, string?> { [ResourceEnvironment.TrustBundlePath] = trustPath });
+        using var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false };
+        handler.SslOptions.RemoteCertificateValidationCallback = context.CreateOutboundTrustValidator();
+        using var client = new HttpClient(handler);
+        using HttpResponseMessage response = await client
             .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
 

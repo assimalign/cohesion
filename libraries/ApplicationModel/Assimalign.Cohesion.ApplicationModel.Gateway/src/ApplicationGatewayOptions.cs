@@ -30,7 +30,7 @@ public class ApplicationGatewayOptions
     /// Gets or sets the Hosting-free client seam used for SecretStore and ConfigurationStore
     /// source resolution. Defaults to the thin protocol-client implementation.
     /// </summary>
-    public IGatewayStoreClient StoreClient { get; set; } = GatewayStoreClient.Instance;
+    public IGatewayStoreClient StoreClient { get; set; } = new GatewayStoreClient();
 
     /// <summary>
     /// Gets per-kind command clients. Shipped resource kinds use their area clients

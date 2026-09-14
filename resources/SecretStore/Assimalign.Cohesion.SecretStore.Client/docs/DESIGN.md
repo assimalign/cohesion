@@ -72,3 +72,5 @@ responses. The observation client treats an empty 2xx body as Applied, or Delete
 and supplies a named HTTP detail when a legacy refusal has no body. DELETE is for the new kinds;
 trust grants remain POST-only. The package still has exactly one Core reference and no Hosting
 or Gateway dependencies. Identity verification and grant policy belong to the endpoint.
+
+The existing custom-transport Create overload is public for gateway-supplied TLS trust. The caller owns the HttpMessageInvoker and must retain it until requests complete, then dispose it. The client remains Core-only and does not discover trust or read protected files.

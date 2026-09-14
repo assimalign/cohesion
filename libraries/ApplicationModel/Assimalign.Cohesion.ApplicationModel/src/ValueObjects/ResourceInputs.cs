@@ -47,6 +47,20 @@ public sealed class ResourceInputs
         IReadOnlyDictionary<string, ResourceMountInput> mounts,
         ReadOnlyMemory<byte> bootstrapCredential,
         ReadOnlyMemory<byte> applicationTrustKey)
+        : this(mounts, bootstrapCredential, applicationTrustKey, default)
+    {
+    }
+
+    /// <summary>Initializes inputs with public application identity and transport trust anchors.</summary>
+    /// <param name="mounts">Inputs keyed by plan mount name.</param>
+    /// <param name="bootstrapCredential">The bootstrap credential, defensively copied.</param>
+    /// <param name="applicationTrustKey">The public JSON Web Key, defensively copied.</param>
+    /// <param name="trustBundle">PEM transport trust-anchor certificates without private keys, defensively copied.</param>
+    public ResourceInputs(
+        IReadOnlyDictionary<string, ResourceMountInput> mounts,
+        ReadOnlyMemory<byte> bootstrapCredential,
+        ReadOnlyMemory<byte> applicationTrustKey,
+        ReadOnlyMemory<byte> trustBundle)
     {
         ArgumentNullException.ThrowIfNull(mounts);
 
@@ -69,6 +83,7 @@ public sealed class ResourceInputs
         ApplicationTrustKey = applicationTrustKey.IsEmpty
             ? ReadOnlyMemory<byte>.Empty
             : applicationTrustKey.ToArray();
+        TrustBundle = trustBundle.ToArray();
     }
 
     /// <summary>Gets immutable mount inputs keyed by plan mount name.</summary>
@@ -82,4 +97,7 @@ public sealed class ResourceInputs
     /// was supplied.
     /// </summary>
     public ReadOnlyMemory<byte> ApplicationTrustKey { get; }
+
+    /// <summary>Gets transport trust-anchor certificates as one PEM document, without private keys.</summary>
+    public ReadOnlyMemory<byte> TrustBundle { get; }
 }

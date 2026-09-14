@@ -61,6 +61,9 @@ public static class ResourceEnvironment
     /// <summary>Gets the bootstrap credential file-path variable.</summary>
     public const string BootstrapTokenPath = "COHESION_BOOTSTRAP_TOKEN_PATH";
 
+    /// <summary>Gets the transport trust-anchor bundle file-path variable.</summary>
+    public const string TrustBundlePath = "COHESION_TRUST_BUNDLE_PATH";
+
     /// <summary>Gets the Windows graceful-stop event variable.</summary>
     public const string StopEvent = "COHESION_STOP_EVENT";
 

@@ -22,6 +22,7 @@ public static class ResourceRuntime
     private static readonly AsyncLocal<ResourceContextFrame?> AmbientContext = new();
     private static readonly ConcurrentDictionary<Assembly, ControlPlaneRegistration> ControlPlanes = new();
     private static readonly ConcurrentDictionary<Assembly, byte> Entries = new();
+    private static readonly ConcurrentDictionary<Assembly, IReadOnlyDictionary<string, string>> EndpointCertificates = new();
     private static readonly ConditionalWeakTable<IHost, IResourceControlPlane> HostControlPlanes = new();
 
     /// <summary>
@@ -117,6 +118,21 @@ public static class ResourceRuntime
         ArgumentNullException.ThrowIfNull(assembly);
 
         return Entries.ContainsKey(assembly);
+    }
+
+    /// <summary>Registers immutable endpoint-to-certificate-mount metadata emitted for an enabled executable.</summary>
+    /// <param name="assembly">The resource executable assembly.</param>
+    /// <param name="endpointCertificates">Endpoint names and their Secret mount names or reserved public literal.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="InvalidOperationException">The assembly already registered its certificate metadata.</exception>
+    public static void RegisterEndpointCertificates(Assembly assembly, IReadOnlyDictionary<string, string> endpointCertificates)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+        ArgumentNullException.ThrowIfNull(endpointCertificates);
+        if (!EndpointCertificates.TryAdd(assembly, new Dictionary<string, string>(endpointCertificates, StringComparer.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException("The resource assembly already registered its endpoint certificate mounts.");
+        }
     }
 
     /// <summary>
@@ -266,6 +282,11 @@ public static class ResourceRuntime
         // invocation frame is the logical resource caller and must win over that process-wide
         // identity so concurrent members resolve only their own registered control plane.
         Assembly registrationAssembly = AmbientContext.Value?.EntryAssembly ?? assembly;
+
+        if (EndpointCertificates.TryGetValue(registrationAssembly, out IReadOnlyDictionary<string, string>? certificates))
+        {
+            Current.SetEndpointCertificates(certificates);
+        }
 
         if (!ControlPlanes.TryGetValue(
             registrationAssembly,

@@ -2,6 +2,7 @@
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace Assimalign.Cohesion.Web.Hosting;
@@ -15,6 +16,7 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
 {
     private IReadOnlyList<IHostService> _applicationServices = Array.Empty<IHostService>();
     private readonly Lazy<IServiceProvider> _serviceProvider;
+    internal List<X509Certificate2> EndpointCertificates { get; } = new();
     internal WebApplicationContext(ServiceProviderBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);

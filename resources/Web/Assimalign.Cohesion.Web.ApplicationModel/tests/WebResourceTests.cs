@@ -24,7 +24,8 @@ public sealed class WebResourceTests
         resource.Name.ShouldBe(manifest.Name);
         resource.Artifact.ShouldBe(manifest.Artifact.Assembly);
         resource.Endpoints.Count.ShouldBe(manifest.Endpoints.Count);
-        resource.Mounts.ShouldBeEmpty();
+        resource.Mounts.Count.ShouldBe(1);
+        resource.Mounts[0].Kind.ShouldBe(ResourceMountKind.Secret);
         resource.Options.ShouldBeSameAs(options);
         resource.PlannerName.ShouldBe("Web planner");
     }

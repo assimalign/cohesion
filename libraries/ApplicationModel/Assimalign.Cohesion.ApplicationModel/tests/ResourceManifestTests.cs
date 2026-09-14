@@ -278,6 +278,19 @@ public class ResourceManifestTests
         exception.Message.ShouldContain(expectedMessage, Case.Sensitive);
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Accepts an HTTPS endpoint with a Secret certificate mount")]
+    public void Validate_HttpsSecretCertificate_ShouldSucceed()
+    {
+        ResourceManifest baseline = CreateManifest();
+        ResourceManifest manifest = baseline with
+        {
+            Endpoints = [baseline.Endpoints[0] with { Scheme = "https", Certificate = "tls" }],
+            Mounts = [new ResourceManifestMount { Name = "tls", Kind = ResourceMountKind.Secret, ContainerPath = "/cohesion/mounts/tls" }],
+        };
+        Should.NotThrow(manifest.Validate);
+        ResourceManifest.Parse(JsonSerializer.Serialize(manifest, ResourceManifestJsonContext.Default.ResourceManifest)).Endpoints[0].Certificate.ShouldBe("tls");
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should reject an empty command kind")]
     public void Validate_WithEmptyCommandKind_ShouldThrow()
     {

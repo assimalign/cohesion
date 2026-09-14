@@ -30,6 +30,7 @@ public class RuntimeContractTests
         "COHESION_MOUNT_<M>_PATH",
         "COHESION_CONFIG__<Section>__<Key>",
         "COHESION_BOOTSTRAP_TOKEN_PATH",
+        "COHESION_TRUST_BUNDLE_PATH",
         "COHESION_STOP_EVENT",
         "COHESION_TELEMETRY_ENDPOINT",
         "COHESION_TELEMETRY_PROTOCOL",

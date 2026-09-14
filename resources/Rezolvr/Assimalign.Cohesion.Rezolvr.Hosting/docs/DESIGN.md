@@ -47,3 +47,7 @@ The command registry survives restart and restores ownership before the listener
 
 Records are stored, not served as DNS answers. ResolverEndpointService remains parked. DNS serving
 and reconciling a durable Volume with the Deployment contract are deferred area work.
+
+## HTTPS endpoint certificate contract (31t)
+
+The enabled resource's `admin` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged.

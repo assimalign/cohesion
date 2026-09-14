@@ -29,7 +29,6 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
     private const string DevelopmentDeviceSubject = "development-user";
     private const string DeviceGrant = "urn:ietf:params:oauth:grant-type:device_code";
     private const string OpenIdScope = "openid";
-    private const string TlsCertificateMountName = "tls";
     private readonly bool _allowDevelopmentDeviceApproval;
     private readonly IdentityHubApplicationContext _applicationContext;
     private readonly IPAddress _bindAddress;
@@ -45,7 +44,7 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
     private readonly bool _requireAuthentication;
     private readonly string _resourceAudience;
     private readonly BootstrapTokenVerifier? _bootstrapVerifier;
-    private readonly ResourceMount? _tlsCertificateMount;
+    private readonly ResourceContext _resourceContext;
     private IdentitySigningKey? _signingKey;
     private WebApplication? _host;
     private X509Certificate2? _serverCertificate;
@@ -90,7 +89,7 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         _allowDevelopmentDeviceApproval =
             string.Equals(resourceContext.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) &&
             IPAddress.IsLoopback(_bindAddress);
-        resourceContext.Mounts.TryGetValue(TlsCertificateMountName, out _tlsCertificateMount);
+        _resourceContext = resourceContext;
 
         bool isHttp = string.Equals(endpoint.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase);
         bool isHttps = string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
@@ -106,7 +105,14 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
                 "IdentityHub permits plaintext HTTP only on loopback in Development.");
         }
 
-        if (isHttps && _tlsCertificateMount is null && !_allowDevelopmentDeviceApproval)
+        if (isHttps && resourceContext.TryGetEndpointCertificate("https", out _serverCertificate, out X509Certificate2Collection chain))
+        {
+            _serverCertificateChain = new X509Certificate2[chain.Count];
+            chain.CopyTo(_serverCertificateChain, 0);
+            _serverCertificateContext = SslStreamCertificateContext.Create(_serverCertificate, chain, offline: true);
+        }
+
+        if (isHttps && _serverCertificateContext is null && !_allowDevelopmentDeviceApproval)
         {
             throw new InvalidOperationException(
                 "IdentityHub requires a PEM certificate, private key, and optional chain in the 'tls' " +
@@ -138,9 +144,7 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         if (string.Equals(_endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
         {
-            _serverCertificateContext = _tlsCertificateMount is null
-                ? CreateDevelopmentServerCertificateContext(_endpoint.IdnHost)
-                : CreateMountedServerCertificateContext(_tlsCertificateMount);
+            _serverCertificateContext ??= CreateDevelopmentServerCertificateContext(_endpoint.IdnHost);
             builder.Server.UseServer((HttpConnectionListenerOptions options) => options.UseHttp1s(
                 tcp => tcp.EndPoint = new IPEndPoint(_bindAddress, _endpoint.Port),
                 new TlsServerOptions
@@ -1114,123 +1118,8 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
 
     private SslStreamCertificateContext CreateDevelopmentServerCertificateContext(string host)
     {
-        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var request = new CertificateRequest($"CN={host}", key, HashAlgorithmName.SHA256);
-        var names = new SubjectAlternativeNameBuilder();
-        if (IPAddress.TryParse(host, out IPAddress? address))
-        {
-            names.AddIpAddress(address);
-        }
-        else
-        {
-            names.AddDnsName(host);
-        }
-
-        request.CertificateExtensions.Add(names.Build());
-        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(
-            certificateAuthority: false,
-            hasPathLengthConstraint: false,
-            pathLengthConstraint: 0,
-            critical: false));
-        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
-            new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") },
-            critical: false));
-        request.CertificateExtensions.Add(new X509KeyUsageExtension(
-            X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
-            critical: false));
-        request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(
-            request.PublicKey,
-            critical: false));
-        using X509Certificate2 ephemeral = request.CreateSelfSigned(
-            DateTimeOffset.UtcNow.AddMinutes(-5),
-            DateTimeOffset.UtcNow.AddYears(1));
-        _serverCertificate = X509CertificateLoader.LoadPkcs12(
-            ephemeral.Export(X509ContentType.Pkcs12),
-            null);
+        _serverCertificate = _resourceContext.CreateDevelopmentEndpointCertificate(host);
         return SslStreamCertificateContext.Create(_serverCertificate, null, offline: true);
-    }
-
-    private SslStreamCertificateContext CreateMountedServerCertificateContext(ResourceMount mount)
-    {
-        byte[] content = mount.ReadAllBytes();
-        char[] pem = new char[Encoding.UTF8.GetCharCount(content)];
-        X509Certificate2? loadedServerCertificate = null;
-        var loadedChain = new List<X509Certificate2>();
-        var parsedCertificates = new X509Certificate2Collection();
-        try
-        {
-            Encoding.UTF8.GetChars(content, pem);
-            using X509Certificate2 parsedServerCertificate = X509Certificate2.CreateFromPem(pem, pem);
-            if (!parsedServerCertificate.HasPrivateKey)
-            {
-                throw new InvalidOperationException(
-                    "The IdentityHub 'tls' mount certificate does not contain a matching private key.");
-            }
-
-            byte[] pkcs12 = parsedServerCertificate.Export(X509ContentType.Pkcs12);
-            try
-            {
-                loadedServerCertificate = X509CertificateLoader.LoadPkcs12(
-                    pkcs12,
-                    null);
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(pkcs12);
-            }
-
-            DateTime now = DateTime.UtcNow;
-            if (loadedServerCertificate.NotBefore.ToUniversalTime() > now ||
-                loadedServerCertificate.NotAfter.ToUniversalTime() <= now)
-            {
-                throw new InvalidOperationException(
-                    "The IdentityHub 'tls' mount certificate is not currently valid.");
-            }
-
-            parsedCertificates.ImportFromPem(pem);
-            for (int index = 0; index < parsedCertificates.Count; index++)
-            {
-                X509Certificate2 certificate = parsedCertificates[index];
-                if (!certificate.RawDataMemory.Span.SequenceEqual(
-                        loadedServerCertificate.RawDataMemory.Span))
-                {
-                    loadedChain.Add(X509CertificateLoader.LoadCertificate(certificate.RawData));
-                }
-            }
-
-            var additionalCertificates = new X509Certificate2Collection(loadedChain.ToArray());
-            SslStreamCertificateContext context = SslStreamCertificateContext.Create(
-                loadedServerCertificate,
-                additionalCertificates,
-                offline: true);
-            _serverCertificate = loadedServerCertificate;
-            _serverCertificateChain = loadedChain.ToArray();
-            loadedServerCertificate = null;
-            loadedChain.Clear();
-            return context;
-        }
-        catch (CryptographicException exception)
-        {
-            throw new InvalidOperationException(
-                "The IdentityHub 'tls' resource mount must contain a PEM certificate, " +
-                "matching private key, and optional certificate chain.",
-                exception);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(content);
-            Array.Clear(pem);
-            loadedServerCertificate?.Dispose();
-            for (int index = 0; index < loadedChain.Count; index++)
-            {
-                loadedChain[index].Dispose();
-            }
-
-            for (int index = 0; index < parsedCertificates.Count; index++)
-            {
-                parsedCertificates[index].Dispose();
-            }
-        }
     }
 
     private enum ClientAuthenticationStatus

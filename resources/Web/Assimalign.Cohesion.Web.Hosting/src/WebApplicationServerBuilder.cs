@@ -23,6 +23,8 @@ public sealed class WebApplicationServerBuilder
     // server's factory below; DI/Config integration for the Web server stays builder-time only.
     private int? _maxConcurrentConnections;
 
+    internal void OwnEndpointCertificate(System.Security.Cryptography.X509Certificates.X509Certificate2 certificate) => _builder.OwnEndpointCertificate(certificate);
+
     internal WebApplicationServerBuilder(WebApplicationBuilder builder)
     {
         _builder = builder;

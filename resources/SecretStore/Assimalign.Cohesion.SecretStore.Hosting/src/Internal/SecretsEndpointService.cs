@@ -42,6 +42,7 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
     private WebApplication? _host;
     private bool _isDisposed;
     private X509Certificate2? _serverCertificate;
+    private X509Certificate2Collection _contractChain = new();
     private SslStreamCertificateContext? _serverCertificateContext;
     private BootstrapTokenVerifier? _tokenVerifier;
 
@@ -133,12 +134,19 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         if (string.Equals(_endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
         {
-            _serverCertificateContext = await _certificateAuthority.GetServerCertificateContextAsync(
-                    _resourceContext.ResourceName ?? "secret-store",
-                    _endpoint.IdnHost,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            _serverCertificate = _serverCertificateContext.TargetCertificate;
+            if (_resourceContext.TryGetEndpointCertificate("api", out _serverCertificate, out _contractChain))
+            {
+                _serverCertificateContext = SslStreamCertificateContext.Create(_serverCertificate, _contractChain, offline: true);
+            }
+            else
+            {
+                _serverCertificateContext = await _certificateAuthority.GetServerCertificateContextAsync(
+                        _resourceContext.ResourceName ?? "secret-store",
+                        _endpoint.IdnHost,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                _serverCertificate = _serverCertificateContext.TargetCertificate;
+            }
             builder.Server.UseServer((HttpConnectionListenerOptions options) => options.UseHttp1s(
                 tcp => tcp.EndPoint = new IPEndPoint(address, _endpoint.Port),
                 new TlsServerOptions
@@ -182,6 +190,10 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
             }
 
             _serverCertificate?.Dispose();
+        foreach (X509Certificate2 certificate in _contractChain)
+        {
+            certificate.Dispose();
+        }
             _serverCertificate = null;
             _serverCertificateContext = null;
         }

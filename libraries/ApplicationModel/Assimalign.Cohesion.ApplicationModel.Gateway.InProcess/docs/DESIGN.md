@@ -185,3 +185,5 @@ liveness restart, reverse stop, and entry-point preservation.
 - Making resource-area builders orchestration-aware.
 - Introducing a second host lifecycle or generated host-construction entry point.
 - Replacing loopback transport with an in-memory connection fabric.
+
+HTTPS mounts retain the existing FromBytes handover. The context constructor receives endpoint certificate mappings from PortBinding and the protected trust-bundle path is copied into its ambient values. HTTP probes use the context's outbound trust validator, preserving hostname validation and rejecting unrelated roots.

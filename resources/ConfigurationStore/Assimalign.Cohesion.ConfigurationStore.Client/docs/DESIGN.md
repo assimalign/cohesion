@@ -82,3 +82,5 @@ retains its Task and EnsureSuccessStatusCode behavior. CreateForControlPlane acc
 control-plane URI and makes those observation methods append only /commands, including custom paths.
 The ordinary Create factory continues appending the existing /cohesion/v1 routes to its resource
 endpoint base path. JSON parsing is explicit and transport cancellation remains caller-controlled.
+
+The existing custom-transport Create overload is public for gateway-supplied TLS trust. The caller owns the HttpMessageInvoker and must retain it until requests complete, then dispose it. The client remains Core-only and does not discover trust or read protected files.

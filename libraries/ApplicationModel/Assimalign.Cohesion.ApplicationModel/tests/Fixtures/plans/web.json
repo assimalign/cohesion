@@ -27,16 +27,25 @@
         "endpoint": "http",
         "containerPort": 8080,
         "protocol": "tcp",
-        "scheme": "http"
+        "scheme": "http",
+        "certificate": ""
       },
       {
         "endpoint": "https",
         "containerPort": 8443,
         "protocol": "tcp",
-        "scheme": "https"
+        "scheme": "https",
+        "certificate": "tls"
       }
     ],
-    "mounts": [],
+    "mounts": [
+      {
+        "mount": "tls",
+        "containerPath": "/cohesion/mounts/tls",
+        "kind": "Secret",
+        "source": null
+      }
+    ],
     "environment": {
       "CUSTOM_VALUE": "preserved",
       "COHESION_APPLICATION": "appa",
