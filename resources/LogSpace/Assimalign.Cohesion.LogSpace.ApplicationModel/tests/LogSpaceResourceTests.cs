@@ -120,7 +120,11 @@ public sealed class LogSpaceResourceTests
             new ResourceManifestEndpoint { Name = "otlp", Scheme = "https", Protocol = "tcp", ContainerPort = 4318, Certificate = "tls" },
             new ResourceManifestEndpoint { Name = "query", Scheme = "https", Protocol = "tcp", ContainerPort = 8443 },
         ],
-        Mounts = [new ResourceManifestMount { Name = "data", Kind = ResourceMountKind.Volume, ContainerPath = "/data", Size = "10Gi" }],
+        Mounts =
+        [
+            new ResourceManifestMount { Name = "data", Kind = ResourceMountKind.Volume, ContainerPath = "/data", Size = "10Gi" },
+            new ResourceManifestMount { Name = "tls", Kind = ResourceMountKind.Secret, ContainerPath = "/cohesion/mounts/tls" },
+        ],
         Probes = new ResourceManifestProbes
         {
             Readiness = new ResourceManifestProbe { Endpoint = "query", Http = "/readyz" },
