@@ -69,8 +69,8 @@ projects outside `resources/` are untouched). Violations fail the build:
   project-reference graph, then the resolved assembly closure after `ResolveAssemblyReferences`.
   The latter also catches package-delivered and `<Reference>`+`HintPath` assemblies. Every error
   names the offending assembly or assemblies.
-- `COHAM001` applies only to opted-in `.ApplicationModel` assemblies. Database.ApplicationModel
-  and Web.ApplicationModel are guarded now. `COHRES003` applies automatically to every shipped
+- `COHAM001` applies only to opted-in `.ApplicationModel` assemblies. All 18 resource
+  `*.ApplicationModel` assemblies are guarded. `COHRES003` applies automatically to every shipped
   resource project and has no opt-in or exemption.
 - Test (`tests/`), example (`examples/`), and sample (`samples/`) projects are automatically
   excluded from these guards — the rule constrains shipped libraries, not harnesses. This
