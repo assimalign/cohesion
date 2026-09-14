@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Client;
 
-internal sealed class HttpDatabaseCommandClient(Uri address, string bearerToken, HttpMessageInvoker transport) : IDatabaseCommandClient
+internal sealed class HttpDatabaseCommandClient(Uri address, string bearerToken, HttpMessageInvoker transport, bool ownsTransport) : IDatabaseCommandClient
 {
     public ValueTask<ResourceCommandObservation> SendCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default) =>
         SendAsync(command, HttpMethod.Post, cancellationToken);
@@ -16,7 +16,13 @@ internal sealed class HttpDatabaseCommandClient(Uri address, string bearerToken,
     public ValueTask<ResourceCommandObservation> DeleteCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default) =>
         SendAsync(command, HttpMethod.Delete, cancellationToken);
 
-    public void Dispose() => transport.Dispose();
+    public void Dispose()
+    {
+        if (ownsTransport)
+        {
+            transport.Dispose();
+        }
+    }
 
     private async ValueTask<ResourceCommandObservation> SendAsync(ResourceCommand command, HttpMethod method, CancellationToken cancellationToken)
     {

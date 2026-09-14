@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
+using System.Net.Security;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -273,10 +274,12 @@ public abstract partial class ApplicationGateway
                 {
                     return new(ResourceCommandStatus.Rejected, transportFailure!);
                 }
+                RemoteCertificateValidationCallback? validator = string.Equals(address.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                    ? CreateOutboundTrustValidator(target.Model.Name) : null;
                 string token = ((IResourceCommandCredentialProvider)this).GetResourceCommandCredential(target.Model.Name, manifest.Name);
                 result = delete
-                    ? await client.DeleteAsync(address, token, deliveryCommand, cancellationToken).ConfigureAwait(false)
-                    : await client.ApplyAsync(address, token, deliveryCommand, cancellationToken).ConfigureAwait(false);
+                    ? await client.DeleteAsync(address, token, deliveryCommand, validator, cancellationToken).ConfigureAwait(false)
+                    : await client.ApplyAsync(address, token, deliveryCommand, validator, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (ResourceCommandRejectedException exception)

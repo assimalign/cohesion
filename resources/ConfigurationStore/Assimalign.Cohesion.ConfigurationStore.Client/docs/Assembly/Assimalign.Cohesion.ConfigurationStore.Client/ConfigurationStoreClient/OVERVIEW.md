@@ -23,6 +23,13 @@ cookie state. Callers do not own or dispose the shared transport.
 URI, including custom paths. Its `ObserveCommandAsync` and `DeleteCommandAsync` append `/commands`
 directly. The original factory and read/submission methods retain their existing route composition.
 
+`CreateForControlPlane(Uri controlPlaneAddress, ClientCredential credential, HttpMessageInvoker transport)`
+uses the supplied full manifest control-plane path and caller-owned transport, including its TLS
+trust policy. The existing two-argument overload delegates using the shared transport.
+The caller keeps a supplied invoker alive until requests finish and disposes it afterward; the
+client does not own it. A null transport throws `ArgumentNullException`; endpoint and credential
+validation are unchanged. The existing three-argument `Create` follows the same ownership rule.
+
 ## Links
 
 - [Assembly overview](../OVERVIEW.md)

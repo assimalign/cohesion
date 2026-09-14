@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -37,14 +38,24 @@ public abstract partial class ApplicationGateway
     {
         if (_options.StoreClient is GatewayStoreClient client)
         {
-            GatewayCertificateAuthority authority = GetCertificateAuthority(application);
-            if (!authority.ExportAnchors().IsEmpty)
-            {
-                var context = new ResourceContext(application.ToString(), null, null, null, null, null, null, null, null,
-                    default, default, new Dictionary<string, string?> { [ResourceEnvironment.TrustBundlePath] = authority.TrustPath });
-                client.SetTransportTrust(endpoint, context.CreateOutboundTrustValidator());
-            }
+            client.SetTransportTrust(endpoint, CreateOutboundTrustValidator(application));
         }
+    }
+
+    /// <inheritdoc/>
+    RemoteCertificateValidationCallback? IResourceTransportTrustProvider.CreateOutboundTrustValidator(ApplicationName application) =>
+        CreateOutboundTrustValidator(application);
+
+    private RemoteCertificateValidationCallback? CreateOutboundTrustValidator(ApplicationName application)
+    {
+        GatewayCertificateAuthority authority = GetCertificateAuthority(application);
+        if (authority.ExportAnchors().IsEmpty)
+        {
+            return null;
+        }
+        var context = new ResourceContext(application.ToString(), null, null, null, null, null, null, null, null,
+            default, default, new Dictionary<string, string?> { [ResourceEnvironment.TrustBundlePath] = authority.TrustPath });
+        return context.CreateOutboundTrustValidator();
     }
 
     private async ValueTask<ResourceMountInput> ResolveDefaultCertificateAsync(

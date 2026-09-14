@@ -16,6 +16,50 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Tests;
 
 public sealed partial class GatewayControlPlaneTests
 {
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway.ControlPlane] - Command dispatch: Forwards application transport trust to HTTPS resources")]
+    public async Task Configure_HttpsCommandClient_ShouldReceiveApplicationTrust()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        using var cancellation = new CancellationTokenSource(TestTimeout);
+        var areaClient = new RecordingGatewayCommandClient { ExpectedScheme = "https" };
+        var options = new ApplicationGatewayOptions { ExportDirectory = root };
+        options.CommandClients.Add(areaClient);
+        GatewayControlPlane.Configure(options, GatewayRunMode.Run);
+        var gateway = new TestGateway(options);
+        areaClient.ExpectedValidator = gateway.TransportValidator;
+        IApplicationBuilder builder = Application.CreateBuilder((ApplicationName)"appa", ["--environment", AppEnvironment.Keys.Local]).UseGateway(gateway);
+        builder.AddResource(CreateManifest("appa", "api", "test", 43110, scheme: "https"));
+        IApplicationModel model = builder.Build().Model;
+        IApplicationGateway control = gateway;
+        IAuthenticatedControlPlaneClient client = GatewayControlPlane.CreateClient();
+        var command = new ResourceCommand("trusted-command", "test.apply", "caller", "setting", "value"u8.ToArray());
+        try
+        {
+            await control.StartAsync(model, cancellation.Token);
+            (Uri address, _) = ReadMetadata(root, "appa");
+            string callerToken = await GrantCommandCallerAsync(gateway, model, "caller", cancellation.Token);
+
+            // Act
+            ResourceCommandResult applied = await client.ApplyCommandAsync(address, "api", callerToken, command, cancellation.Token);
+
+            // Assert
+            applied.Status.ShouldBe(ResourceCommandStatus.Applied);
+            areaClient.Applied.ShouldBe(1);
+            areaClient.Validator.ShouldBeSameAs(gateway.TransportValidator);
+            gateway.TrustApplication.ShouldBe(model.Name);
+            ResourceCommandResult deleted = await client.DeleteCommandAsync(address, "api", callerToken, command, cancellation.Token);
+            deleted.Status.ShouldBe(ResourceCommandStatus.Applied);
+            areaClient.Deleted.ShouldBe(1);
+            areaClient.Validator.ShouldBeSameAs(gateway.TransportValidator);
+        }
+        finally
+        {
+            await control.StopAsync(CancellationToken.None);
+            DeleteTestDirectory(root);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway.ControlPlane] - Claiming gateway: Apply and remove remote declarations through the served peer")]
     public async Task StartAsync_RemoteCommands_ShouldObserveAndRemoveThroughPeer()
     {

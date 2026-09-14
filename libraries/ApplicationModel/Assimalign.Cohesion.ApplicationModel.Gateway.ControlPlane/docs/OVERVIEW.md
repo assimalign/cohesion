@@ -21,6 +21,10 @@ routes. `GatewayControlPlane.Configure` adapts Database and ConfigurationStore g
 clients into the server's dispatcher seam. Both paths retain `Applied`/`Rejected` and provider
 detail, and a failed deletion retains the key's ownership reservation.
 
+The serving gateway's `IResourceTransportTrustProvider` supplies its application's TLS validator
+to the required `serverCertificateValidator` parameter on dispatcher apply and delete. HTTPS
+resource delivery uses the same anchors as probes and store reads; `null` keeps default trust.
+
 ## Command trust grants (O25 / item 31c)
 
 TrustedIssuer.AllowedCommandKinds is an immutable normalized ordinal list. The original

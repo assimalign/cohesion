@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,6 +17,58 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 public class ResourceCommandTests
 {
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Commands: Pass application transport trust only to HTTPS targets")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StartAsync_Commands_ShouldPassApplicationTrustToClient(bool https)
+    {
+        // Arrange
+        string root = Path.Combine(AppContext.BaseDirectory, "cmd-trust-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var events = new List<string>();
+        var state = new InMemoryResourceStateManager();
+        var client = new RecordingCommandClient(events);
+        var options = new ApplicationGatewayOptions { ExportDirectory = root };
+        options.CommandClients.Clear();
+        options.CommandClients.Add(client);
+        string? pem = https ? new GatewayCertificateAuthority(Path.Combine(root, "appa"), "appa").Issue("db-admin", []) : null;
+        var gateway = new TestGateway(state, [new CommandController(events, https ? "https" : "http")], options: options);
+        IApplicationBuilder builder = CreateBuilder(gateway);
+        IApplicationResourceDescriptor target = AddCommandTarget(builder);
+        IApplicationModel model = builder.Build().Model;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        try
+        {
+            // Act
+            await ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
+
+            // Assert
+            if (https)
+            {
+                RemoteCertificateValidationCallback validator = client.Validator.ShouldNotBeNull();
+                using X509Certificate2 leaf = X509Certificate2.CreateFromPem(pem!);
+                string unrelatedPem = new GatewayCertificateAuthority(Path.Combine(root, "unrelated"), "unrelated").Issue("db-admin", []);
+                using X509Certificate2 unrelated = X509Certificate2.CreateFromPem(unrelatedPem);
+                validator(this, leaf, null, SslPolicyErrors.RemoteCertificateChainErrors).ShouldBeTrue();
+                validator(this, unrelated, null, SslPolicyErrors.RemoteCertificateChainErrors).ShouldBeFalse();
+                validator(this, leaf, null, SslPolicyErrors.RemoteCertificateNameMismatch | SslPolicyErrors.RemoteCertificateChainErrors).ShouldBeFalse();
+            }
+            else
+            {
+                client.Validator.ShouldBeNull();
+            }
+            state.GetCommandObservations(target.Resource.Id).Single().Status.ShouldBe(ResourceCommandStatus.Applied);
+            await ((IApplicationGateway)gateway).UninstallAsync(model, cancellation.Token);
+            (client.Validator is not null).ShouldBe(https);
+            state.GetCommandObservations(target.Resource.Id).ShouldBeEmpty();
+        }
+        finally
+        {
+            await ((IApplicationGateway)gateway).StopAsync(CancellationToken.None);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Commands: Apply after Running before dependents and remove on teardown")]
     public async Task StartAsync_Commands_ShouldApplyObserveAndTeardown()
     {

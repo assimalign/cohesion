@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -10,6 +11,10 @@ using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Core;
+using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.SecretStore.Client;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
@@ -92,6 +97,65 @@ public sealed class AreaCommandLocalTests
             {
                 gateway.ResourceStates.GetCommandObservations(resource.Id).ShouldBeEmpty();
             }
+        }
+        finally
+        {
+            await ((IApplicationGateway)gateway).StopAsync(CancellationToken.None);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>Commands and teardown authenticate the real HTTPS host through the gateway's development issuer.</summary>
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - LocalGateway: area commands deliver over HTTPS with the gateway development issuer")]
+    public async Task LocalGateway_ShouldDeliverAreaCommandsOverHttps()
+    {
+        // Arrange
+        string root = Path.Combine(FindRepository(), "_out", "31cb-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var options = new LocalGatewayOptions
+        {
+            BaseDirectory = AppContext.BaseDirectory,
+            StateDirectory = Path.Combine(root, "state"),
+            ExportDirectory = Path.Combine(root, "export"),
+            ProbeInterval = TimeSpan.FromMilliseconds(50),
+            ProbeTimeout = TimeSpan.FromSeconds(2),
+            ReadinessBudget = TimeSpan.FromSeconds(30),
+            StopGrace = TimeSpan.FromSeconds(5),
+        };
+        options.Parameters.Add("credential", "local-command-secret");
+        var gateway = new LocalGateway(options);
+        IApplicationBuilder builder = Application.CreateBuilder((ApplicationName)"appa", ["--environment", AppEnvironment.Keys.Local]).UseGateway(gateway);
+        IApplicationResourceDescriptor secrets = builder.AddResource(Manifest(root, "secrets", "SecretStore", "api", ["secretstore.add-secret"]) with
+        {
+            Endpoints = [new ResourceManifestEndpoint { Name = "api", Scheme = "https", Protocol = "tcp", ContainerPort = 8443, Certificate = "tls" }],
+            Mounts = [new ResourceManifestMount { Name = "tls", Kind = ResourceMountKind.Secret, ContainerPath = "/cohesion/mounts/tls" }],
+        });
+        AddCommand(builder, secrets, "secretstore.add-secret", "key", """{"path":"key","source":"parameter:credential"}""");
+        IApplicationModel model = builder.Build().Model;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        try
+        {
+            // Act
+            await ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
+
+            // Assert
+            gateway.ResourceStates.GetState(secrets.Resource.Id).ShouldBe(ResourceLifecycle.Running);
+            ResourceEndpoint endpoint = gateway.ResourceStates.GetObservedEndpoints(secrets.Resource.Id).Single(value => value.Name == "api");
+            endpoint.Scheme.ShouldBe("https");
+            gateway.ResourceStates.GetCommandObservations(secrets.Resource.Id).Single().Status.ShouldBe(ResourceCommandStatus.Applied);
+            string trustPath = Path.Combine(root, "state", "appa", ".state", "certs", "trust.protected");
+            File.Exists(trustPath).ShouldBeTrue();
+            ResourceContext context = ResourceContext.FromEnvironment(new Dictionary<string, string?> { [ResourceEnvironment.TrustBundlePath] = trustPath });
+            using var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false };
+            handler.SslOptions.RemoteCertificateValidationCallback = context.CreateOutboundTrustValidator();
+            handler.SslOptions.RemoteCertificateValidationCallback.ShouldNotBeNull();
+            using var transport = new HttpMessageInvoker(handler, disposeHandler: false);
+            string token = ((IResourceCommandCredentialProvider)gateway).GetResourceCommandCredential(model.Name, secrets.Resource.Name);
+            ISecretStoreClient client = SecretStoreClient.Create(new UriBuilder(endpoint.Scheme, endpoint.Host!, endpoint.Port).Uri, new ClientCredential(token), transport);
+            Encoding.UTF8.GetString((await client.GetSecretAsync("key", cancellation.Token)).Span).ShouldBe("local-command-secret");
+
+            await ((IApplicationGateway)gateway).UninstallAsync(model, cancellation.Token);
+            gateway.ResourceStates.GetCommandObservations(secrets.Resource.Id).ShouldBeEmpty();
         }
         finally
         {

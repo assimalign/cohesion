@@ -1,4 +1,5 @@
 using System;
+using System.Net.Security;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,6 +12,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Tests;
 
 internal sealed class RecordingGatewayCommandClient : IGatewayResourceCommandClient
 {
+    public RemoteCertificateValidationCallback? Validator { get; private set; }
+
     public string ResourceKind => "test";
 
     public int Applied { get; private set; }
@@ -21,11 +24,25 @@ internal sealed class RecordingGatewayCommandClient : IGatewayResourceCommandCli
 
     public string ExpectedOwner { get; set; } = "caller";
 
+    public string ExpectedScheme { get; set; } = "http";
+
+    public RemoteCertificateValidationCallback? ExpectedValidator { get; set; }
+
     public ValueTask<ResourceCommandResult> ApplyAsync(
-        Uri address, string bearerToken, ResourceCommand command, CancellationToken cancellationToken = default)
+        Uri address, string bearerToken, ResourceCommand command,
+        RemoteCertificateValidationCallback? serverCertificateValidator, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        address.ShouldBe(new Uri("http://127.0.0.1:43110/cohesion/v1"));
+        Validator = serverCertificateValidator;
+        address.ShouldBe(new Uri($"{ExpectedScheme}://127.0.0.1:43110/cohesion/v1"));
+        if (ExpectedValidator is null)
+        {
+            serverCertificateValidator.ShouldBeNull();
+        }
+        else
+        {
+            serverCertificateValidator.ShouldBeSameAs(ExpectedValidator);
+        }
         JsonWebToken.Parse(bearerToken).Audiences.ShouldContain("api");
         command.Owner.ShouldBe(ExpectedOwner);
         Applied++;
@@ -35,10 +52,20 @@ internal sealed class RecordingGatewayCommandClient : IGatewayResourceCommandCli
     }
 
     public ValueTask<ResourceCommandResult> DeleteAsync(
-        Uri address, string bearerToken, ResourceCommand command, CancellationToken cancellationToken = default)
+        Uri address, string bearerToken, ResourceCommand command,
+        RemoteCertificateValidationCallback? serverCertificateValidator, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        address.ShouldBe(new Uri("http://127.0.0.1:43110/cohesion/v1"));
+        Validator = serverCertificateValidator;
+        address.ShouldBe(new Uri($"{ExpectedScheme}://127.0.0.1:43110/cohesion/v1"));
+        if (ExpectedValidator is null)
+        {
+            serverCertificateValidator.ShouldBeNull();
+        }
+        else
+        {
+            serverCertificateValidator.ShouldBeSameAs(ExpectedValidator);
+        }
         JsonWebToken.Parse(bearerToken).Audiences.ShouldContain("api");
         command.Owner.ShouldBe(ExpectedOwner);
         Deleted++;

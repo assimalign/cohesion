@@ -1,4 +1,5 @@
 using System;
+using System.Net.Security;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,9 +14,10 @@ internal sealed class GatewayCommandDispatcher(IGatewayResourceCommandClient cli
 
     public async ValueTask<ReadOnlyMemory<byte>> ApplyAsync(
         Uri address, string bearerToken, ResourceCommand command,
+        RemoteCertificateValidationCallback? serverCertificateValidator,
         CancellationToken cancellationToken = default)
     {
-        ResourceCommandResult result = await client.ApplyAsync(address, bearerToken, command, cancellationToken).ConfigureAwait(false);
+        ResourceCommandResult result = await client.ApplyAsync(address, bearerToken, command, serverCertificateValidator, cancellationToken).ConfigureAwait(false);
         if (result.Status != ResourceCommandStatus.Applied)
         {
             throw new ResourceCommandRejectedException(result.Detail);
@@ -25,9 +27,10 @@ internal sealed class GatewayCommandDispatcher(IGatewayResourceCommandClient cli
 
     public async ValueTask DeleteAsync(
         Uri address, string bearerToken, ResourceCommand command,
+        RemoteCertificateValidationCallback? serverCertificateValidator,
         CancellationToken cancellationToken = default)
     {
-        ResourceCommandResult result = await client.DeleteAsync(address, bearerToken, command, cancellationToken).ConfigureAwait(false);
+        ResourceCommandResult result = await client.DeleteAsync(address, bearerToken, command, serverCertificateValidator, cancellationToken).ConfigureAwait(false);
         if (result.Status != ResourceCommandStatus.Applied)
         {
             throw new ResourceCommandRejectedException(result.Detail);

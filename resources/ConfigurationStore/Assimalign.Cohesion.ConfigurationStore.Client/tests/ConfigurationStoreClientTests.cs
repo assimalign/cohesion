@@ -16,6 +16,34 @@ namespace Assimalign.Cohesion.ConfigurationStore.Client.Tests;
 
 public class ConfigurationStoreClientTests
 {
+    [Fact(DisplayName = "Cohesion Test [ConfigurationStore.Client] - CreateForControlPlane: Sends through the caller's transport at the exact manifest path")]
+    public async Task CreateForControlPlane_WithTransport_ShouldSendThroughIt()
+    {
+        // Arrange
+        string? observedUri = null;
+        string? observedMethod = null;
+        var handler = new FakeHttpMessageHandler((request, _) =>
+        {
+            observedUri = request.RequestUri!.AbsoluteUri;
+            observedMethod = request.Method.Method;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+        });
+        using var transport = new HttpMessageInvoker(handler);
+        IConfigurationStoreClient client = ConfigurationStoreClient.CreateForControlPlane(
+            new Uri("https://resource.test:8443/custom/control"), new ClientCredential("bootstrap-token"), transport);
+        var command = new ResourceCommand("id", "configurationstore.set-value", "appa", "key", ReadOnlyMemory<byte>.Empty);
+
+        // Act
+        await client.ObserveCommandAsync(command, CancellationToken.None);
+
+        // Assert
+        observedUri.ShouldBe("https://resource.test:8443/custom/control/commands");
+        observedMethod.ShouldBe("POST");
+        await client.DeleteCommandAsync(command, CancellationToken.None);
+        observedUri.ShouldBe("https://resource.test:8443/custom/control/commands");
+        observedMethod.ShouldBe("DELETE");
+    }
+
     [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - ListNamespacesAsync: Should send an authenticated request and return names")]
     public async Task ListNamespacesAsync_WhenEndpointReturnsArray_ShouldReturnNames()
     {

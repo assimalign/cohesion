@@ -38,12 +38,8 @@ internal sealed class GatewayStoreClient : IGatewayStoreClient
 
     private HttpMessageInvoker CreateTransport(Uri endpoint)
     {
-        var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false };
-        if (_transportTrust.TryGetValue(endpoint.GetLeftPart(UriPartial.Authority), out RemoteCertificateValidationCallback? validator))
-        {
-            handler.SslOptions.RemoteCertificateValidationCallback = validator;
-        }
-        return new HttpMessageInvoker(handler, disposeHandler: true);
+        _transportTrust.TryGetValue(endpoint.GetLeftPart(UriPartial.Authority), out RemoteCertificateValidationCallback? validator);
+        return GatewayHttpTransport.Create(validator);
     }
 
     public async ValueTask<ReadOnlyMemory<byte>> ReadSecretAsync(

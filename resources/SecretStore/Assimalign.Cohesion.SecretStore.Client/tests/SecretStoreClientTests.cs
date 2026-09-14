@@ -15,6 +15,34 @@ namespace Assimalign.Cohesion.SecretStore.Client.Tests;
 
 public class SecretStoreClientTests
 {
+    [Fact(DisplayName = "Cohesion Test [SecretStore.Client] - CreateForControlPlane: Sends through the caller's transport at the exact manifest path")]
+    public async Task CreateForControlPlane_WithTransport_ShouldSendThroughIt()
+    {
+        // Arrange
+        string? observedUri = null;
+        string? observedMethod = null;
+        var handler = new FakeHttpMessageHandler((request, _) =>
+        {
+            observedUri = request.RequestUri!.AbsoluteUri;
+            observedMethod = request.Method.Method;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+        });
+        using var transport = new HttpMessageInvoker(handler);
+        ISecretStoreClient client = SecretStoreClient.CreateForControlPlane(
+            new Uri("https://resource.test:8443/custom/control"), new ClientCredential("bootstrap-token"), transport);
+        var command = new ResourceCommand("id", "secretstore.add-secret", "appa", "key", ReadOnlyMemory<byte>.Empty);
+
+        // Act
+        await client.ObserveCommandAsync(command, CancellationToken.None);
+
+        // Assert
+        observedUri.ShouldBe("https://resource.test:8443/custom/control/commands");
+        observedMethod.ShouldBe("POST");
+        await client.DeleteCommandAsync(command, CancellationToken.None);
+        observedUri.ShouldBe("https://resource.test:8443/custom/control/commands");
+        observedMethod.ShouldBe("DELETE");
+    }
+
     [Fact(DisplayName = "Cohesion Test [SecretStore] - GetSecretAsync: Should send an authenticated request and return bytes")]
     public async Task GetSecretAsync_WhenEndpointReturnsBytes_ShouldReturnBytes()
     {

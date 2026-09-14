@@ -73,6 +73,13 @@ statically.
 
 ## Declarative command delivery
 
+`DatabaseCommandClient.Create(Uri controlPlaneAddress, string bearerToken, HttpMessageInvoker transport)`
+accepts a caller-owned transport, including its TLS trust policy. Disposing the returned client
+does not dispose that transport; the caller retains it until requests finish and disposes it
+afterward. The two-argument factory still creates a transport owned and disposed by the client.
+Both overloads perform the same endpoint and credential validation; a null supplied transport
+throws `ArgumentNullException`. The client does not discover application trust.
+
 IDatabaseCommandClient is the separate HTTP admin command contract. DatabaseCommandClient.Create
 accepts the full manifest control-plane URI (including its path) and an opaque bootstrap bearer.
 SendCommandAsync posts the camel-case id/kind/owner/key/payload envelope to commands; payload is

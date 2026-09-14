@@ -7,6 +7,8 @@ owned declarations; teardown removes commands and realized resources in reverse 
 Database, ConfigurationStore, Rezolvr, IdentityHub and SecretStore command delivery uses `ApplicationGatewayOptions.CommandClients`.
 Replace a kind's registration to use another `IGatewayResourceCommandClient`. In-process hosts
 expose their registered control plane directly; remote commands use the peer gateway client.
+Custom clients must accept the `serverCertificateValidator` parameter on apply and delete and
+use it for the target application's TLS trust; `null` preserves platform default trust.
 Command outcomes are available through `IApplicationResourceStateManager.GetCommandObservations`
 and exported with provider detail. Required rejection blocks dependent startup.
 
@@ -36,8 +38,11 @@ Manifest advertisement, command-token scope and owner-equals-issuer checks remai
 ## Area command delivery
 
 Default command clients now cover Database, ConfigurationStore, Rezolvr, IdentityHub and
-SecretStore. Each thin adapter uses a Core-only area client and preserves refusal details.
+SecretStore. Each thin adapter uses its area's client and preserves refusal details.
 SecretStore's empty successful trust response maps to Applied.
+
+Default adapters apply the supplied validator through a per-call, caller-owned transport;
+`IResourceTransportTrustProvider` supplies the same application trust to hosted control planes.
 
 Before delivering secretstore.add-secret, parameter sources use the application's parameter
 provider. Resource:key sources reuse the existing mount/store resolution path and require an

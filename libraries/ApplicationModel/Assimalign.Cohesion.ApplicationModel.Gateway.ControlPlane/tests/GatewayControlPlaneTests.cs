@@ -3,6 +3,7 @@ using System.Buffers.Text;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
+using System.Net.Security;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
@@ -335,7 +336,8 @@ public sealed partial class GatewayControlPlaneTests
         string application,
         string name,
         string kind,
-        int port) =>
+        int port,
+        string scheme = "http") =>
         new()
         {
             Name = name,
@@ -352,7 +354,7 @@ public sealed partial class GatewayControlPlaneTests
                 new ResourceManifestEndpoint
                 {
                     Name = "http",
-                    Scheme = "http",
+                    Scheme = scheme,
                     Protocol = "tcp",
                     ContainerPort = port,
                 },
@@ -458,7 +460,7 @@ public sealed partial class GatewayControlPlaneTests
         }
     }
 
-    private sealed class TestGateway : ApplicationGateway
+    private sealed class TestGateway : ApplicationGateway, IResourceTransportTrustProvider
     {
         private readonly InMemoryResourceStateManager _state = new();
         private readonly IReadOnlyList<IApplicationResourceController> _controllers =
@@ -467,6 +469,16 @@ public sealed partial class GatewayControlPlaneTests
         public TestGateway(ApplicationGatewayOptions options)
             : base(options)
         {
+        }
+
+        public RemoteCertificateValidationCallback TransportValidator { get; } = (_, _, _, _) => false;
+
+        public ApplicationName? TrustApplication { get; private set; }
+
+        RemoteCertificateValidationCallback? IResourceTransportTrustProvider.CreateOutboundTrustValidator(ApplicationName application)
+        {
+            TrustApplication = application;
+            return TransportValidator;
         }
 
         public override ResourceName Name => "control-plane-test";
@@ -558,9 +570,11 @@ public sealed partial class GatewayControlPlaneTests
             Uri address,
             string bearerToken,
             ResourceCommand command,
+            RemoteCertificateValidationCallback? serverCertificateValidator,
             CancellationToken cancellationToken = default)
         {
             address.AbsolutePath.ShouldBe("/cohesion/v1");
+            serverCertificateValidator.ShouldBeNull();
             JsonWebToken.Parse(bearerToken).Audiences.ShouldContain("api");
             Applied++;
             return ValueTask.FromResult<ReadOnlyMemory<byte>>("accepted"u8.ToArray());
@@ -570,9 +584,11 @@ public sealed partial class GatewayControlPlaneTests
             Uri address,
             string bearerToken,
             ResourceCommand command,
+            RemoteCertificateValidationCallback? serverCertificateValidator,
             CancellationToken cancellationToken = default)
         {
             address.AbsolutePath.ShouldBe("/cohesion/v1");
+            serverCertificateValidator.ShouldBeNull();
             JsonWebToken.Parse(bearerToken).Audiences.ShouldContain("api");
             Deleted++;
             return ValueTask.CompletedTask;

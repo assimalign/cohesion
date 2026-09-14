@@ -13,6 +13,8 @@ The assembly is NativeAOT-compatible and uses source-generated JSON. It composes
 `Assimalign.Cohesion.Web.Hosting` or a platform `*.Hosting` package. The reference to
 `Hosting.Resources` is limited to the owner-approved `ResourceCommand` envelope used at the
 dispatcher boundary.
+The dispatcher also receives a BCL `RemoteCertificateValidationCallback?` through its required
+`serverCertificateValidator` parameter; it does not discover transport trust itself.
 
 ## Lifecycle and publication
 
@@ -74,6 +76,14 @@ implementation. The existing five routes remain unchanged. Provider refusals pre
 detail through the adapter and remote client. Ownership reservations are separate from the
 last-operation observations, so a rejected deletion retains the applied key until the dispatcher
 confirms removal.
+
+The server obtains `IResourceTransportTrustProvider` from its serving gateway alongside the
+credential provider. For each HTTPS apply or delete it requests the served application's current
+outbound validator and passes it through `IResourceCommandDispatcher` to the area client. These
+are the same certificate-authority anchors used by the gateway's probes and store reads. HTTP
+targets, a missing provider, and applications without anchors pass `null` for platform default
+trust. Adding the required `serverCertificateValidator` parameter before cancellation is a
+public breaking change to both dispatcher members; it changes no route, mount, or wire contract.
 
 The serving gateway continues forwarding its target bootstrap credential. ConfigurationStore's
 landed owner-equals-issuer policy consequently refuses foreign-owned envelopes with that provider

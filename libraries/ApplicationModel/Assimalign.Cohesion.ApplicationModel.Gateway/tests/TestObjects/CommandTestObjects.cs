@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Net.Security;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -15,6 +16,8 @@ internal sealed partial class GatewayCommandJsonContext : JsonSerializerContext;
 
 internal sealed class RecordingCommandClient(List<string> events) : IGatewayResourceCommandClient
 {
+    public RemoteCertificateValidationCallback? Validator { get; private set; }
+
     public string ResourceKind => "Database";
     public ResourceCommandResult Result { get; set; } = new(ResourceCommandStatus.Applied, "database created");
     public int ApplyCount { get; private set; }
@@ -23,9 +26,11 @@ internal sealed class RecordingCommandClient(List<string> events) : IGatewayReso
     public HostCommand? Command { get; private set; }
 
     public ValueTask<ResourceCommandResult> ApplyAsync(
-        Uri address, string bearerToken, HostCommand command, CancellationToken cancellationToken = default)
+        Uri address, string bearerToken, HostCommand command,
+        RemoteCertificateValidationCallback? serverCertificateValidator, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        Validator = serverCertificateValidator;
         events.Add("apply:" + command.Key);
         ApplyCount++;
         Address = address;
@@ -35,15 +40,17 @@ internal sealed class RecordingCommandClient(List<string> events) : IGatewayReso
     }
 
     public ValueTask<ResourceCommandResult> DeleteAsync(
-        Uri address, string bearerToken, HostCommand command, CancellationToken cancellationToken = default)
+        Uri address, string bearerToken, HostCommand command,
+        RemoteCertificateValidationCallback? serverCertificateValidator, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        Validator = serverCertificateValidator;
         events.Add("remove:" + command.Key);
         return ValueTask.FromResult(new ResourceCommandResult(ResourceCommandStatus.Applied, "removed"));
     }
 }
 
-internal sealed class CommandController(List<string> events) : IApplicationResourceController
+internal sealed class CommandController(List<string> events, string scheme = "http") : IApplicationResourceController
 {
     public bool CanRealize(ResourcePlan plan, out string? reason) { reason = null; return true; }
 
@@ -52,7 +59,7 @@ internal sealed class CommandController(List<string> events) : IApplicationResou
         cancellationToken.ThrowIfCancellationRequested();
         events.Add("reconcile:" + context.Resource.Name);
         context.State.SetState(context.Resource.Id, ResourceLifecycle.Running, observedEndpoints:
-            [new ResourceEndpoint("admin", "http", 12345, Host: "127.0.0.1")]);
+            [new ResourceEndpoint("admin", scheme, 12345, Host: "127.0.0.1")]);
         return Task.CompletedTask;
     }
 

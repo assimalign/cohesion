@@ -28,7 +28,8 @@ public abstract partial class ApplicationGateway :
     IApplicationSetExternalResourceResolver,
     IApplicationGatewayCommandHandler,
     IApplicationTrustGateway,
-    IResourceCommandCredentialProvider
+    IResourceCommandCredentialProvider,
+    IResourceTransportTrustProvider
 {
     private const string LiteralPrefix = "literal:";
     private const string ParameterPrefix = "parameter:";

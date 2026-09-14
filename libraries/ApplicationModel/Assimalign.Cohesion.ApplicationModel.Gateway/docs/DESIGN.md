@@ -460,8 +460,18 @@ Manifest advertisement, command-token scope and owner-equals-issuer checks remai
 ## Area command delivery
 
 Default command clients now cover Database, ConfigurationStore, Rezolvr, IdentityHub and
-SecretStore. Each thin adapter uses a Core-only area client and preserves refusal details.
+SecretStore. Each thin adapter uses its area's client and preserves refusal details.
 SecretStore's empty successful trust response maps to Applied.
+
+Each adapter receives the target application's outbound TLS validator through the required
+`serverCertificateValidator` parameter on `IGatewayResourceCommandClient.ApplyAsync` and
+`DeleteAsync`. The gateway derives it per delivery from that application's certificate-authority
+anchors, using the same shared validator as probes and store reads. HTTP targets and applications
+without anchors pass `null`, preserving platform default trust. Each adapter owns a per-call
+`HttpMessageInvoker`; the area client leaves that caller-owned transport open.
+`IResourceTransportTrustProvider` exposes the same validator to hosted control planes for
+inbound peer command dispatch. Both public command interfaces require the new parameter, a
+breaking API change; the wire and runtime contracts are unchanged.
 
 Before delivering secretstore.add-secret, parameter sources use the application's parameter
 provider. Resource:key sources reuse the existing mount/store resolution path and require an

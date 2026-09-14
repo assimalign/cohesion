@@ -24,10 +24,17 @@ detail; an HTTP failure without an observation receives a named HTTP fallback de
 
 ## Lifecycle and transport
 
-Each factory-created client owns an HttpMessageInvoker and its SocketsHttpHandler, and is disposable. Factory creation is synchronous;
+The two-argument factory creates a client-owned HttpMessageInvoker and SocketsHttpHandler. Factory creation is synchronous;
 I/O starts only in a command method. Cancellation tokens flow through send and response reads.
 Redirects and cookies are disabled to keep the bearer credential on its requested endpoint.
 The factory accepts guarded HTTP(S) addresses; production transport policy belongs to the host.
+
+`IdentityHubCommandClient.Create(Uri controlPlaneAddress, string bearerToken, HttpMessageInvoker transport)`
+accepts a caller-owned transport, including its TLS trust policy. Disposing the returned client
+does not dispose that transport; the caller retains it until requests finish and disposes it
+afterward. The two-argument factory still creates a transport owned and disposed by the client.
+Both overloads perform the same endpoint and credential validation; a null supplied transport
+throws `ArgumentNullException`. The client does not discover application trust.
 
 ## Error model
 

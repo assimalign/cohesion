@@ -1,4 +1,6 @@
 using System;
+using System.Net.Http;
+using System.Net.Security;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,9 +16,11 @@ internal sealed class ConfigurationStoreGatewayCommandClient : IGatewayResourceC
 
     public async ValueTask<ResourceCommandResult> ApplyAsync(
         Uri address, string bearerToken, HostCommand command,
+        RemoteCertificateValidationCallback? serverCertificateValidator,
         CancellationToken cancellationToken = default)
     {
-        var client = ConfigurationStoreClient.CreateForControlPlane(address, new ClientCredential(bearerToken));
+        using HttpMessageInvoker transport = GatewayHttpTransport.Create(serverCertificateValidator);
+        var client = ConfigurationStoreClient.CreateForControlPlane(address, new ClientCredential(bearerToken), transport);
         var observation = await client.ObserveCommandAsync(Convert(command), cancellationToken).ConfigureAwait(false);
         return new ResourceCommandResult(
             observation.Status is "Applied" or "Deleted" ? ResourceCommandStatus.Applied : ResourceCommandStatus.Rejected,
@@ -25,9 +29,11 @@ internal sealed class ConfigurationStoreGatewayCommandClient : IGatewayResourceC
 
     public async ValueTask<ResourceCommandResult> DeleteAsync(
         Uri address, string bearerToken, HostCommand command,
+        RemoteCertificateValidationCallback? serverCertificateValidator,
         CancellationToken cancellationToken = default)
     {
-        var client = ConfigurationStoreClient.CreateForControlPlane(address, new ClientCredential(bearerToken));
+        using HttpMessageInvoker transport = GatewayHttpTransport.Create(serverCertificateValidator);
+        var client = ConfigurationStoreClient.CreateForControlPlane(address, new ClientCredential(bearerToken), transport);
         var observation = await client.DeleteCommandAsync(Convert(command), cancellationToken).ConfigureAwait(false);
         return new ResourceCommandResult(
             observation.Status is "Applied" or "Deleted" ? ResourceCommandStatus.Applied : ResourceCommandStatus.Rejected,

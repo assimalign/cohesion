@@ -45,11 +45,14 @@ base64-encoded payload properties.
 
 ## Transport and ownership
 
-The public factory shares one process-lifetime `HttpMessageInvoker` backed by `SocketsHttpHandler`.
-Redirect following and cookies are disabled so Authorization cannot cross authorities or mix with
-ambient cookie state. Clients do not
-own or dispose that shared transport. An internal overload accepts a caller-owned invoker for tests;
-`InternalsVisibleTo` grants access only to the package's test assembly.
+The two-argument factories share a process-lifetime `HttpMessageInvoker` backed by
+`SocketsHttpHandler`, with redirects and cookies disabled. Creating clients is synchronous and
+performs no I/O. Both `Create` and
+`CreateForControlPlane(Uri controlPlaneAddress, ClientCredential credential, HttpMessageInvoker transport)`
+accept a caller-owned transport, including its TLS trust policy. The latter preserves the exact
+manifest control-plane path for command delivery. The client never owns or disposes the supplied
+transport; the caller retains it until requests finish, then disposes it. Trust discovery and
+protected-file reading stay outside this Core-only package.
 
 ## Errors and cancellation
 

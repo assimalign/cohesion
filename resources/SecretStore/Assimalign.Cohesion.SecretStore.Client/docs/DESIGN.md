@@ -44,9 +44,14 @@ client-side and orchestration command contracts.
 
 ## Transport lifecycle
 
-Production clients share a process-lifetime `SocketsHttpHandler`; creating clients is synchronous
-and performs no I/O. The internal test seam accepts an `HttpMessageInvoker`, allowing unit tests to
-exercise the complete request/response protocol with an in-memory handler and no sockets.
+The two-argument factories share a process-lifetime `HttpMessageInvoker` backed by
+`SocketsHttpHandler`, with redirects and cookies disabled. Creating clients is synchronous and
+performs no I/O. Both `Create` and
+`CreateForControlPlane(Uri controlPlaneAddress, ClientCredential credential, HttpMessageInvoker transport)`
+accept a caller-owned transport, including its TLS trust policy. The latter preserves the exact
+manifest control-plane path for command delivery. The client never owns or disposes the supplied
+transport; the caller retains it until requests finish, then disposes it. Trust discovery and
+protected-file reading stay outside this Core-only package.
 
 ## AOT posture
 

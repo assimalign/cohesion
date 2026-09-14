@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Security;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -45,6 +46,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
     private IApplicationResourceStateManager? _state;
     private ITrustedIssuerProvider? _trustedIssuers;
     private IResourceCommandCredentialProvider? _commandCredentials;
+    private IResourceTransportTrustProvider? _transportTrust;
     private TcpConnectionListener? _tcpListener;
     private HttpConnectionListener? _httpListener;
     private CancellationTokenSource? _serverCancellation;
@@ -136,6 +138,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                 _state = state;
                 _trustedIssuers = trustedIssuers;
                 _commandCredentials = trustedIssuers as IResourceCommandCredentialProvider;
+                _transportTrust = trustedIssuers as IResourceTransportTrustProvider;
                 _tcpListener = tcpListener;
                 _httpListener = httpListener;
                 _serverCancellation = new CancellationTokenSource();
@@ -730,10 +733,14 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
             string bearerToken = _commandCredentials.GetResourceCommandCredential(
                 _application,
                 descriptor.Resource.Name);
+            RemoteCertificateValidationCallback? validator = _transportTrust is not null &&
+                string.Equals(address!.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                ? _transportTrust.CreateOutboundTrustValidator(_application) : null;
             await dispatcher.DeleteAsync(
                     address!,
                     bearerToken,
                     command,
+                    validator,
                     cancellationToken)
                 .ConfigureAwait(false);
             RemoveCommand(descriptor!.Resource.Name, id!);
@@ -854,10 +861,14 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
             string bearerToken = _commandCredentials.GetResourceCommandCredential(
                 _application,
                 descriptor.Resource.Name);
+            RemoteCertificateValidationCallback? validator = _transportTrust is not null &&
+                string.Equals(address!.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                ? _transportTrust.CreateOutboundTrustValidator(_application) : null;
             ReadOnlyMemory<byte> result = await dispatcher.ApplyAsync(
                     address!,
                     bearerToken,
                     command,
+                    validator,
                     cancellationToken)
                 .ConfigureAwait(false);
             return CreateObservation(
