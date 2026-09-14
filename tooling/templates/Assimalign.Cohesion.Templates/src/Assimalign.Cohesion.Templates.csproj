@@ -14,9 +14,11 @@
   </PropertyGroup>
 
   <!-- Package staging leaves the tracked templates untouched, including their version tokens. -->
+  <!-- A release pack must never stamp a local-feed version into the template pins. Install-Local.ps1 opts in with
+       CohesionTemplatesAllowLocalPins=true so a local feed ships templates that pin the .local packages it actually holds. -->
   <Target Name="PrepareCohesionTemplates" BeforeTargets="_GetPackageFiles">
-    <Error Condition="$([System.String]::Copy('$(CohesionVersion)').Contains('.local'))"
-           Text="Template SDK pins must use the canonical Cohesion version, never a local-feed version." />
+    <Error Condition="$([System.String]::Copy('$(CohesionVersion)').Contains('.local')) and '$(CohesionTemplatesAllowLocalPins)' != 'true'"
+           Text="Template SDK pins must use the canonical Cohesion version, never a local-feed version (Install-Local.ps1 sets CohesionTemplatesAllowLocalPins=true)." />
     <PropertyGroup>
       <_TemplateStage>$(IntermediateOutputPath)templates/</_TemplateStage>
       <_RepositoryGlobalJson>$([System.IO.File]::ReadAllText('$(CohesionRepositoryDirectory)global.json'))</_RepositoryGlobalJson>

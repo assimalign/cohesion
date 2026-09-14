@@ -132,6 +132,8 @@ $localPackProperties = @(
     "-p:VersionSuffix=$($localVersion.VersionSuffix)"
     "-p:PackageVersion=$($localVersion.Version)"
     "-p:PackageOutputPath=$feedDir"
+    # The dotnet new templates pin the package version being packed; only the local pack may stamp a .local pin.
+    "-p:CohesionTemplatesAllowLocalPins=true"
 )
 
 if (-not $Rids -or $Rids.Count -eq 0) {
