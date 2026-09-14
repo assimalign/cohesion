@@ -93,17 +93,20 @@ The generated application name is used in two ways:
   reads the attribute to discover identity.
 
 Same-application manifests produce `Add*` methods. A typed area mapping supplies its
-area-owned options type, `DescriptorType`, and `Add<Area>` method; an unimplemented area uses
+area-owned options type, `DescriptorType`, and `Add<Area>` method; an unmapped area uses
 `ResourceOptions` and `IApplicationBuilder.AddResource`. Boundary-crossing manifests
 produce `ExternalResourceDeclaration` values instead of realization verbs. A referenced
 Composite gateway additionally produces an `Applications.<Name>` declaration resolved
 through that gateway's control plane.
 
-Web, Database, and ConfigurationStore mappings return `IWebResourceDescriptor`,
-`IDatabaseResourceDescriptor`, and `IConfigurationStoreResourceDescriptor`. This retains
-the area's typed command verbs on generated `Add*` results. Custom mappings that omit
-`DescriptorType` keep `IApplicationResourceDescriptor`. In-process binding is applied
-after constructing the descriptor, and the original typed descriptor is returned.
+Web, Database, ConfigurationStore, SecretStore, IdentityHub, Rezolvr, and LogSpace
+mappings return their area's `I<Area>ResourceDescriptor` and accept its
+`<Area>ResourceOptions`. Database, ConfigurationStore, SecretStore, IdentityHub, and
+Rezolvr retain typed command verbs on generated `Add*` results. Web preserves its
+existing typed planner; LogSpace provides typed options and a named telemetry-sink
+descriptor without command verbs. Custom mappings that omit `DescriptorType` keep
+`IApplicationResourceDescriptor`. In-process binding is applied after constructing
+the descriptor, and the original typed descriptor is returned.
 
 `CohesionGatewayClientKind` maps both mount sources and command targets to narrow
 client packages. A manifest with a non-empty `commands` array requires its kind's
@@ -147,14 +150,20 @@ The minimal honest implementation is therefore:
 
 1. Inject only the fixed ApplicationModel/Gateway packages and explicitly selected
    provider packages during evaluation.
-2. Keep the current finite Web, Database, ConfigurationStore, SecretStore-client,
-   Database-client, and ConfigurationStore-client bootstrap explicit and documented while they are the only
-   shipped typed dependencies.
+2. Keep the finite bootstrap explicit: the seven Web, Database, ConfigurationStore,
+   SecretStore, IdentityHub, Rezolvr, and LogSpace ApplicationModel packages plus the
+   three SecretStore, Database, and ConfigurationStore client packages, all pinned at
+   `$(CohesionVersion)`. Every gateway restores this set, regardless of its manifests.
 3. Validate the manifest-derived requirement set after resolution and fail with an
    actionable diagnostic when a required compile dependency is unavailable.
-4. Do not silently inject every current and future `<Area>.ApplicationModel` or client
-   package. That hides the restore-order defect, bloats every gateway, and weakens the
-   package boundary.
+4. Preserve the existing Web mapping and add rows and injected packages for areas whose
+   ApplicationModel ships a typed descriptor with command verbs, plus LogSpace for typed
+   options on the telemetry sink. Every other area stays on the generic
+   `ResourceOptions`/`AddResource` path. This seven-area bootstrap is the shipped shape;
+   T11's manifest-derived injection remains the documented future shape. Keeping the
+   list finite and explicit avoids injecting every current and future area or client
+   package, which would hide the restore-order defect, bloat every gateway, and weaken
+   the package boundary.
 
 The recommended complete fix is a producer-authored, restore-visible dependency
 descriptor. A manifest package should place only its orchestration ApplicationModel and
@@ -221,7 +230,8 @@ stubs:
   repository.
 - `CohesionPlatformsVersion` has no repository-wide version source beyond the SDK's
   temporary Cohesion-version default.
-- Web, Database, and ConfigurationStore provide typed area ApplicationModel mappings.
+- Web, Database, ConfigurationStore, SecretStore, IdentityHub, Rezolvr, and LogSpace
+  provide typed area ApplicationModel mappings; other areas use the generic path.
 - First-restore manifest dependency metadata has not landed; the finite dependency
   bootstrap described above is transitional.
 - The Gateway SDK suppresses the base SDK's implicit `Assimalign.Cohesion.App` reference

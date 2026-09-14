@@ -37,6 +37,11 @@ public sealed class GatewaySdkIntegrationTests
         appASource.ShouldContain("Manifests.PlatformConfigurationStore");
         appASource.ShouldNotContain("AddPlatformConfigurationStore(");
 
+        string resourceSource = File.ReadAllText(GeneratedOutput(
+            workspace.ProjectDirectory("AppAWeb"),
+            "Resource.g.cs"));
+        resourceSource.ShouldContain("public static class PlatformConfigurationStore", Case.Sensitive);
+
         string rootDirectory = workspace.ProjectDirectory("RootGateway");
         string rootSource = File.ReadAllText(GeneratedOutput(rootDirectory, "Gateway.g.cs"));
         rootSource.ShouldContain("ApplicationDeclaration AppA");

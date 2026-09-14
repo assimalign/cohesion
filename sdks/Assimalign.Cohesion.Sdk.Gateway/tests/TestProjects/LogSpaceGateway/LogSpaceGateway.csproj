@@ -1,0 +1,10 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <PropertyGroup>
+    <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
+    <CohesionResourceName>typed-logs-gateway</CohesionResourceName>
+    <CohesionGatewayAot>false</CohesionGatewayAot>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionResourceReference Include="..\TypedLogSpace\TypedLogSpace.csproj" />
+  </ItemGroup>
+</Project>

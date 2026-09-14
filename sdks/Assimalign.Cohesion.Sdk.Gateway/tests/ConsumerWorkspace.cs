@@ -21,7 +21,11 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.Sdk.Web",
         "Assimalign.Cohesion.Sdk.ConfigurationStore",
         "Assimalign.Cohesion.Sdk.Database",
-        "Assimalign.Cohesion.Sdk.Gateway"
+        "Assimalign.Cohesion.Sdk.Gateway",
+        "Assimalign.Cohesion.Sdk.SecretStore",
+        "Assimalign.Cohesion.Sdk.IdentityHub",
+        "Assimalign.Cohesion.Sdk.Rezolvr",
+        "Assimalign.Cohesion.Sdk.LogSpace"
     ];
 
     private static readonly string[] RequiredPackageIds =
@@ -48,6 +52,10 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.Web.ApplicationModel",
         "Assimalign.Cohesion.Database.ApplicationModel",
         "Assimalign.Cohesion.ConfigurationStore.ApplicationModel",
+        "Assimalign.Cohesion.SecretStore.ApplicationModel",
+        "Assimalign.Cohesion.IdentityHub.ApplicationModel",
+        "Assimalign.Cohesion.Rezolvr.ApplicationModel",
+        "Assimalign.Cohesion.LogSpace.ApplicationModel",
         "Assimalign.Cohesion.Database",
         "Assimalign.Cohesion.Database.Client",
         "Assimalign.Cohesion.Database.Execution",

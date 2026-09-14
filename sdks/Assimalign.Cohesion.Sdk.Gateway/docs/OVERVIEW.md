@@ -39,11 +39,14 @@ gateway source. The generated surface includes:
 - `Applications.<Name>` for referenced gateway applications;
 - `UseGateway(args)` and the provider-specific configuration overload.
 
-Generated Database, ConfigurationStore, and Web `Add*` verbs return the area's typed
-descriptor. Database descriptors expose `AddDatabase` and `AddPrincipal`;
-ConfigurationStore descriptors expose `SetValue` and `RemoveValue`. Their manifests
-advertise accepted kinds as bare strings in `commands`. A command-bearing target also
-requires its narrow client package, even when it is not used as a mount source.
+Generated Web, Database, ConfigurationStore, SecretStore, IdentityHub, Rezolvr, and
+LogSpace `Add*` verbs accept the area's typed options and return its typed descriptor.
+Database exposes `AddDatabase` and `AddPrincipal`; ConfigurationStore exposes `SetValue`
+and `RemoveValue`; SecretStore exposes `AddSecret` and `IssueCertificate`; IdentityHub
+exposes `AddAudience` and `AddClient`; Rezolvr exposes `AddARecord` and `AddCnameRecord`.
+LogSpace supplies typed options for the telemetry sink without command verbs.
+Command-bearing manifests advertise accepted kinds as bare strings in `commands` and
+require their narrow client package, even when they are not used as mount sources.
 
 Gateway inherits the base SDK's [project defaults](../../Assimalign.Cohesion.Sdk/docs/OVERVIEW.md#project-defaults):
 `Exe`, `net10.0`, preview language/features, disabled implicit usings, enabled
@@ -114,13 +117,15 @@ contracts are available and covered by package-boundary CI:
 - Docker and Kubernetes provider packages and their `CohesionGatewayProvider`
   contributions live outside this repository and require an agreed
   `CohesionPlatformsVersion`.
-- Web, Database, and ConfigurationStore are the typed area ApplicationModel mappings.
-  Other manifest kinds use the generic `ResourceOptions`/`AddResource` path until their
-  area packages land.
+- Web, Database, ConfigurationStore, SecretStore, IdentityHub, Rezolvr, and LogSpace are
+  the typed area ApplicationModel mappings. The set preserves Web and covers typed
+  descriptors with command verbs, plus LogSpace's telemetry-sink options. Every other
+  manifest kind uses the generic `ResourceOptions`/`AddResource` path.
 - Manifest-derived ApplicationModel and mount/command-client requirements become known after
-  restore. The current guarded implementation makes the shipped Web, Database,
-  ConfigurationStore, SecretStore client, Database client, and ConfigurationStore client dependencies available up front;
-  it must not expand that fallback to every future area package.
+  restore. The shipped bootstrap restores all seven mapped ApplicationModel packages and
+  the SecretStore, Database, and ConfigurationStore clients up front at `$(CohesionVersion)`.
+  T11's manifest-derived injection remains the future contract; the finite explicit list
+  avoids bloating every gateway with every current and future area package.
 - The NuGet-only boundary requires the Gateway SDK to suppress the base SDK's implicit
   `Assimalign.Cohesion.App` reference before the base props import. The in-process bridge
   currently names the shipped Web and Database frameworks; selective per-manifest framework

@@ -17,7 +17,7 @@ public sealed class ResourceCommandSdkIntegrationTests
         // Arrange
         using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
-            "GatewaySmokeDatabase", "CommandConfigurationStore", "CommandGateway");
+            "GatewaySmokeDatabase", "CommandConfigurationStore", "CommandSecretStore", "CommandGateway");
 
         // Act
         DotNetBuildResult build = await workspace.BuildAsync("CommandGateway", cancellationSource.Token);
@@ -30,15 +30,25 @@ public sealed class ResourceCommandSdkIntegrationTests
         string source = File.ReadAllText(sourcePath);
         source.ShouldContain("public global::Assimalign.Cohesion.Database.ApplicationModel.IDatabaseResourceDescriptor AddGatewaySmokeDatabase(", Case.Sensitive);
         source.ShouldContain("public global::Assimalign.Cohesion.ConfigurationStore.ApplicationModel.IConfigurationStoreResourceDescriptor AddCommandConfiguration(", Case.Sensitive);
+        source.ShouldContain("public global::Assimalign.Cohesion.SecretStore.ApplicationModel.ISecretStoreResourceDescriptor AddCommandSecrets(global::System.Action<global::Assimalign.Cohesion.SecretStore.ApplicationModel.SecretStoreResourceOptions>? configure = null)", Case.Sensitive);
+        source.ShouldContain("global::Assimalign.Cohesion.SecretStore.ApplicationModel.SecretStoreResourceExtensions.AddSecretStore(builder, Manifests.CommandSecrets, options)", Case.Sensitive);
+        source.ShouldNotContain("builder.AddResource(", Case.Sensitive);
         File.ReadAllLines(Path.Combine(directory, "obj", "command-clients.txt"))
-            .ShouldBe(new[] { "Assimalign.Cohesion.ConfigurationStore.Client", "Assimalign.Cohesion.Database.Client" });
+            .ShouldBe(new[]
+            {
+                "Assimalign.Cohesion.ConfigurationStore.Client",
+                "Assimalign.Cohesion.Database.Client",
+                "Assimalign.Cohesion.SecretStore.Client"
+            });
         string[] references = File.ReadAllLines(Path.Combine(directory, "obj", "command-reference-paths.txt"));
         references.ShouldContain("Assimalign.Cohesion.Database.Client");
         references.ShouldContain("Assimalign.Cohesion.ConfigurationStore.Client");
+        references.ShouldContain("Assimalign.Cohesion.SecretStore.Client");
         references.ShouldNotContain("Assimalign.Cohesion.Database.Hosting");
         references.ShouldNotContain("Assimalign.Cohesion.ConfigurationStore.Hosting");
+        references.ShouldNotContain("Assimalign.Cohesion.SecretStore.Hosting");
 
-        // Act: the fixture compares each emitted manifest's command kinds directly with its area's runtime factory.
+        // Act: compare manifest commands with the area's factory, excluding protocol bootstrap commands.
         DotNetBuildResult describe = await workspace.RunBuiltProjectAsync(
             "CommandGateway", ["--mode=describe", "--gateway=local", "--environment=Development"], cancellationSource.Token);
 

@@ -7,6 +7,7 @@
   <ItemGroup>
     <CohesionResourceReference Include="..\GatewaySmokeDatabase\GatewaySmokeDatabase.csproj" />
     <CohesionResourceReference Include="..\CommandConfigurationStore\CommandConfigurationStore.csproj" />
+    <CohesionResourceReference Include="..\CommandSecretStore\CommandSecretStore.csproj" />
   </ItemGroup>
   <Target Name="CaptureCommandClients" AfterTargets="Build">
     <WriteLinesToFile File="$(BaseIntermediateOutputPath)command-clients.txt"
