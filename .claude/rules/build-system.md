@@ -285,7 +285,7 @@ sdks/
 
 sdks/Assimalign.Cohesion.Sdk/Targets/      ← base SDK only
 ├── ...Sdk.FrameworkReference.props        ← KnownFrameworkReference list (every framework)
-├── ...Sdk.Common.props / .targets         ← shared consumer build logic
+├── ...Sdk.Common.props                    ← shared consumer build logic
 ├── ...Sdk.NameOnly.ProjectReference.targets
 ├── ...Sdk.StronglyTypedSettings.props / .targets
 └── ...Sdk.ApplicationModel.Build.targets

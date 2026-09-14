@@ -15,7 +15,6 @@
 		<ValidateExecutableReferencesMatchSelfContained Condition="'$(ValidateExecutableReferencesMatchSelfContained)' == ''">false</ValidateExecutableReferencesMatchSelfContained>
 	</PropertyGroup>
 
-    <!-- <Import Project="..\Targets\Assimalign.Cohesion.Sdk.Common.targets"/> -->
     <Import Sdk="Microsoft.NET.Sdk" Project="Sdk.targets" />
     <Import Project="..\Targets\Assimalign.Cohesion.Sdk.PinValidation.targets" />
     <Import Project="..\Targets\Assimalign.Cohesion.Sdk.StronglyTypedSettings.targets" />
