@@ -1217,6 +1217,7 @@ public abstract partial class ApplicationGateway :
         lock (_credentialGate)
         {
             _bootstrapCredentials.Clear();
+            _telemetryCredentials.Clear();
         }
 
         await RefreshAvailableTrustedIssuersAsync(cancellationToken).ConfigureAwait(false);
@@ -1256,6 +1257,7 @@ public abstract partial class ApplicationGateway :
                 .ConfigureAwait(false);
             context.SetInputs(inputs ?? throw new InvalidOperationException(
                 $"Gateway '{Name}' returned null inputs for resource '{descriptor.Resource.Name}'."));
+            context.Telemetry = ResolveTelemetry(model, descriptor.Resource);
 
             bool wasAdmitted = _admitted.Contains(item.Key);
             if (!wasAdmitted)
@@ -2488,6 +2490,7 @@ public abstract partial class ApplicationGateway :
         lock (_credentialGate)
         {
             _bootstrapCredentials.Clear();
+            _telemetryCredentials.Clear();
         }
         _controlPlanes.Clear();
         _parameters.Clear();

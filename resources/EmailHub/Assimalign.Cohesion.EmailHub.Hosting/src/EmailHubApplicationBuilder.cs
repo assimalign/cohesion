@@ -5,6 +5,8 @@ using System.Reflection;
 using Assimalign.Cohesion.EmailHub;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Hosting.Telemetry;
+using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.EmailHub.Hosting;
 
@@ -12,6 +14,7 @@ internal sealed class EmailHubApplicationBuilder : IEmailHubApplicationBuilder
 {
     private readonly List<Func<IHostContext, IHostService>> _serviceRegistrations = new();
 
+    private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
 
@@ -22,6 +25,11 @@ internal sealed class EmailHubApplicationBuilder : IEmailHubApplicationBuilder
         {
             _controlPlane = controlPlane ?? throw new InvalidOperationException("The registered EmailHub control-plane factory returned null.");
             _resourceContext = ResourceRuntime.Current;
+            _loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+            if (telemetry is not null)
+            {
+                _serviceRegistrations.Insert(0, _ => telemetry);
+            }
         }
     }
 

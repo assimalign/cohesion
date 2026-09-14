@@ -18,6 +18,7 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.TestHost" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.HttpsHost" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.LogSpace.SinkHost" />
     <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
   </ItemGroup>
 

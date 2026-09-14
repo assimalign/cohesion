@@ -5,6 +5,8 @@ using System.Reflection;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Hosting.Telemetry;
+using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.IdentityHub;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting;
@@ -15,6 +17,7 @@ internal sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBui
 
     private readonly string[] _args;
     private readonly Dictionary<string, IdentityHubClientRegistration> _clients = new(StringComparer.Ordinal);
+    private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly HashSet<string> _audiences = new(StringComparer.Ordinal);
     private readonly ResourceContext _resourceContext;
@@ -28,6 +31,11 @@ internal sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBui
 
         _args = (string[])args.Clone();
         _resourceContext = ResourceRuntime.Current;
+        _loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+        if (telemetry is not null)
+        {
+            _serviceRegistrations.Insert(0, _ => telemetry);
+        }
         if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
         {
             _controlPlane = controlPlane ?? throw new InvalidOperationException(

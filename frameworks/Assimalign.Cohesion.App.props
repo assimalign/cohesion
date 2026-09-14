@@ -102,9 +102,12 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting.Health" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting.Resources" />
+        <!-- The telemetry sibling travels with base App for every runtime composition root, outside guarded ApplicationModel closures. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting.Telemetry" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Debug" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Console" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenTelemetry" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectPool" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectValidation" />

@@ -1285,7 +1285,6 @@
 		<File Path="OpenTelemetry/Directory.Build.props" />
 		<File Path="OpenTelemetry/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/" />
 	<Folder Name="/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/src/">
 		<Project Path="OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/src/Assimalign.Cohesion.OpenTelemetry.csproj" />
 	</Folder>
@@ -1410,5 +1409,34 @@
 	</Folder>
 	<Folder Name="/libraries/Security/Assimalign.Cohesion.Security.DataProtection/tests/">
 		<Project Path="Security/Assimalign.Cohesion.Security.DataProtection/tests/Assimalign.Cohesion.Security.DataProtection.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/">
+		<File Path="Hosting/Assimalign.Cohesion.Hosting.Telemetry/README.md" />
+	</Folder>
+	<Folder Name="/libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/">
+		<File Path="Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md" />
+		<File Path="Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/src/">
+		<Project Path="Hosting/Assimalign.Cohesion.Hosting.Telemetry/src/Assimalign.Cohesion.Hosting.Telemetry.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/tests/">
+		<Project Path="Hosting/Assimalign.Cohesion.Hosting.Telemetry/tests/Assimalign.Cohesion.Hosting.Telemetry.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/Assembly/Assimalign.Cohesion.Hosting.Telemetry/ResourceTelemetry/">
+		<File Path="Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/Assembly/Assimalign.Cohesion.Hosting.Telemetry/ResourceTelemetry/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/">
+		<File Path="OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/README.md" />
+	</Folder>
+	<Folder Name="/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/">
+		<File Path="OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/DESIGN.md" />
+		<File Path="OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/tests/">
+		<Project Path="OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/tests/Assimalign.Cohesion.OpenTelemetry.Tests.csproj" />
+	</Folder>
+	<Folder Name="/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/Assembly/Assimalign.Cohesion.OpenTelemetry/">
+		<File Path="OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/Assembly/Assimalign.Cohesion.OpenTelemetry/OVERVIEW.md" />
 	</Folder>
 </Solution>

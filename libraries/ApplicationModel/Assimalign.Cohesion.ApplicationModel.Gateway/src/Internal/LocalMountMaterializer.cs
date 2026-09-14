@@ -168,6 +168,18 @@ internal sealed class LocalMountMaterializer
             cancellationToken, "trust.pem", ResourceEnvironment.TrustBundlePath).ConfigureAwait(false);
     }
 
+    internal async Task MaterializeTelemetryHeadersAsync(ApplicationName application, ResourceName resource,
+        ReadOnlyMemory<byte> headers, IDictionary<string, string> environment, CancellationToken cancellationToken)
+    {
+        string applicationDirectory = SafeChild(_stateDirectory, application.ToString(), "application");
+        string resourceDirectory = SafeChild(applicationDirectory, resource.ToString(), "resource");
+        ILocalFileProtector? protector = OperatingSystem.IsWindows()
+            ? new WindowsLocalFileProtector(Path.Combine(applicationDirectory, ".state"), application)
+            : null;
+        await MaterializeBootstrapCredentialAsync(resourceDirectory, resource, headers, protector, environment,
+            cancellationToken, "telemetry.headers", ResourceEnvironment.TelemetryHeadersPath).ConfigureAwait(false);
+    }
+
     private static string SafeChild(string parent, string name, string kind)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);

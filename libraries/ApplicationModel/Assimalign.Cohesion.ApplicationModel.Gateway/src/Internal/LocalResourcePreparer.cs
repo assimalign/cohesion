@@ -65,6 +65,10 @@ internal sealed class LocalResourcePreparer
             environment,
             cancellationToken).ConfigureAwait(false);
 
+        await _mounts.MaterializeTelemetryHeadersAsync(application, resource.Name,
+            compilation.Telemetry?.HeadersDocument ?? ReadOnlyMemory<byte>.Empty,
+            environment, cancellationToken).ConfigureAwait(false);
+
         if (resource is LocalExecutableResource localExecutable)
         {
             bool markerIsReadiness = localExecutable.ReadyMarker is not null

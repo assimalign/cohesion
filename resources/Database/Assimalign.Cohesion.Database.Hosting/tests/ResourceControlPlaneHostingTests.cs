@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -22,6 +23,17 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 public sealed class ResourceControlPlaneHostingTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Telemetry off creates no logger factory or extra host service")]
+    public async Task TelemetryOff_ShouldPreserveComposition()
+    {
+        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext());
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), typeof(ResourceControlPlaneHostingTests).Assembly);
+        typeof(DatabaseApplicationBuilder).GetField("_loggerFactory", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(builder).ShouldBeNull();
+        await using var application = builder.Build();
+        await using var baseline = DatabaseApplication.CreateBuilder().Build();
+        application.Context.HostedServices.Count().ShouldBe(baseline.Context.HostedServices.Count());
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - CreateBuilder(args): honors the registered control plane and ambient admin endpoint")]
     public async Task CreateBuilderWithArgs_WhenRegistered_ShouldComposeControlPlane()
     {

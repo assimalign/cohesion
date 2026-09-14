@@ -118,6 +118,7 @@ $script:CohesionReleaseLibrary = @(
     'libraries/Hosting/Assimalign.Cohesion.Hosting'
     'libraries/Hosting/Assimalign.Cohesion.Hosting.Health'
     'libraries/Hosting/Assimalign.Cohesion.Hosting.Resources'
+    'libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry'
 
     # libraries/Http
     'libraries/Http/Assimalign.Cohesion.Http'
@@ -161,7 +162,8 @@ $script:CohesionReleaseLibrary = @(
     'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Serialization'
     'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Validation'
 
-    # libraries/OpenTelemetry ships nothing yet - the project compiles to an empty assembly.
+    # libraries/OpenTelemetry
+    'libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry'
 
     # libraries/Resilience
     'libraries/Resilience/Assimalign.Cohesion.Resilience'
@@ -392,8 +394,8 @@ $script:CohesionReleaseRuntimeIdentifier = @(
 # Source-less projects to ship ANYWAY, to reserve the package id on nuget.org before the
 # implementation lands. Empty by default, and the default is the safe one.
 #
-# Seven projects under libraries/ and resources/ currently compile to an empty assembly - Amqp,
-# the three Dns.Client transports, OpenTelemetry, Web.Authorization, Web.Cors. They are real CI
+# Six projects under libraries/ and resources/ currently compile to an empty assembly - Amqp,
+# the three Dns.Client transports, Web.Authorization, Web.Cors. They are real CI
 # citizens and they already reach consumers inside the shared-framework packs (they are listed in
 # frameworks/Assimalign.Cohesion.App.props), but a STANDALONE `Assimalign.Cohesion.Amqp` package
 # on nuget.org is a different artifact: a permanent, unlistable-only promise of functionality the

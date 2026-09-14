@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
@@ -21,6 +21,7 @@ using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Web.Hosting.Internal;
@@ -93,6 +94,10 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 
         if (_controlPlane is not null && resourceContext is not null)
         {
+            if (ResourceTelemetry.Configure(resourceContext, Logging, out IHostService? telemetry))
+            {
+                _serviceRegistrations.Insert(0, _ => telemetry!);
+            }
             ResourceRuntime.RegisterConnectionFactoryResolver(CreateConnectionFactory);
             Services.AddSingleton(_controlPlane);
             BindAmbientHttpEndpoint(resourceContext, _controlPlane);

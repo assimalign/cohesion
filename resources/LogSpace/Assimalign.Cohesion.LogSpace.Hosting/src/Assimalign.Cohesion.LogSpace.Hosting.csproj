@@ -1,9 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <InternalsVisibleTo Include="Assimalign.Cohesion.LogSpace.Hosting.Tests" />
+  </ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.LogSpace" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Telemetry" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel.Token" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Http.RequestLimits" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.ControlPlane" />

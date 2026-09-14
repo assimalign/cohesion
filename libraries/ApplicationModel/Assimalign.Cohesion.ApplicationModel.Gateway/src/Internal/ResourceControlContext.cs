@@ -44,6 +44,8 @@ internal sealed class ResourceControlContext : IResourceControlContext
 
     public ResourceInputs Inputs { get; private set; }
 
+    internal ResourceTelemetryInjection? Telemetry { get; set; }
+
     public IReadOnlyList<ResourceDependencyObservation> ObservedDependencies { get; }
 
     public void SetInputs(ResourceInputs inputs)

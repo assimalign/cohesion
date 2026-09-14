@@ -117,7 +117,7 @@ public sealed class LogSpaceResourceTests
         Artifact = new ResourceManifestArtifact { Assembly = "Sample.LogSpace", Composable = true },
         Endpoints =
         [
-            new ResourceManifestEndpoint { Name = "otlp", Scheme = "grpc", Protocol = "tcp", ContainerPort = 4317 },
+            new ResourceManifestEndpoint { Name = "otlp", Scheme = "https", Protocol = "tcp", ContainerPort = 4318, Certificate = "tls" },
             new ResourceManifestEndpoint { Name = "query", Scheme = "https", Protocol = "tcp", ContainerPort = 8443 },
         ],
         Mounts = [new ResourceManifestMount { Name = "data", Kind = ResourceMountKind.Volume, ContainerPath = "/data", Size = "10Gi" }],

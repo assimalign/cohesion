@@ -5,6 +5,8 @@ using System.Reflection;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Hosting.Telemetry;
+using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Security.DataProtection;
 using Assimalign.Cohesion.SecretStore;
 
@@ -15,6 +17,7 @@ internal sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBui
     private const string DefaultEndpoint = "https://127.0.0.1:8443";
 
     private readonly string[] _args;
+    private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext _resourceContext;
     private readonly Dictionary<string, ReadOnlyMemory<byte>> _secrets = new(StringComparer.Ordinal);
@@ -29,6 +32,11 @@ internal sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBui
 
         _args = (string[])args.Clone();
         _resourceContext = ResourceRuntime.Current;
+        _loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+        if (telemetry is not null)
+        {
+            _serviceFactories.Insert(0, _ => telemetry);
+        }
         if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
         {
             _controlPlane = controlPlane ?? throw new InvalidOperationException(

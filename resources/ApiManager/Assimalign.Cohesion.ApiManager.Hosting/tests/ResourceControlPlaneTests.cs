@@ -39,7 +39,10 @@ public sealed class ResourceControlPlaneTests
             bootstrapCredential: managed ? Encoding.UTF8.GetBytes(token) : ReadOnlyMemory<byte>.Empty,
             applicationTrustKey: managed ? identity.PublicKey : ReadOnlyMemory<byte>.Empty);
         using IDisposable scope = ResourceRuntime.CreateScope(resource);
-        await using IApiManagerApplication application = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly).Build();
+        IApiManagerApplicationBuilder builder = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly);
+        typeof(ApiManagerApplicationBuilder).GetField("_loggerFactory", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(builder).ShouldBeNull();
+        await using IApiManagerApplication application = builder.Build();
+        System.Linq.Enumerable.Count(application.Context.HostedServices).ShouldBe(1);
         Task run = application.RunAsync(timeout.Token);
         while (application.Context.State is not HostState.Started)
         {
@@ -81,7 +84,9 @@ public sealed class ResourceControlPlaneTests
     {
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             endpoints: new Dictionary<string, Uri> { ["http"] = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort()) }));
-        await using IApiManagerApplication application = CreateBuilder(typeof(IApiManagerApplication).Assembly).Build();
+        IApiManagerApplicationBuilder builder = CreateBuilder(typeof(IApiManagerApplication).Assembly);
+        typeof(ApiManagerApplicationBuilder).GetField("_loggerFactory", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(builder).ShouldBeNull();
+        await using IApiManagerApplication application = builder.Build();
         application.Context.HostedServices.ShouldBeEmpty();
         ResourceRuntime.TryGetControlPlane(application, out _).ShouldBeFalse();
         await application.StartAsync(CancellationToken.None);

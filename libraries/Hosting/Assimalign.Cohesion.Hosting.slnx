@@ -50,4 +50,20 @@
 	<Folder Name="/Hosting/refs/" >
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 	</Folder>
+	<Folder Name="/Hosting/Assimalign.Cohesion.Hosting.Telemetry/">
+		<File Path="Assimalign.Cohesion.Hosting.Telemetry/README.md" />
+	</Folder>
+	<Folder Name="/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/">
+		<File Path="Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Hosting.Telemetry/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Hosting/Assimalign.Cohesion.Hosting.Telemetry/src/">
+		<Project Path="Assimalign.Cohesion.Hosting.Telemetry/src/Assimalign.Cohesion.Hosting.Telemetry.csproj" />
+	</Folder>
+	<Folder Name="/Hosting/Assimalign.Cohesion.Hosting.Telemetry/tests/">
+		<Project Path="Assimalign.Cohesion.Hosting.Telemetry/tests/Assimalign.Cohesion.Hosting.Telemetry.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/Assembly/Assimalign.Cohesion.Hosting.Telemetry/ResourceTelemetry/">
+		<File Path="Assimalign.Cohesion.Hosting.Telemetry/docs/Assembly/Assimalign.Cohesion.Hosting.Telemetry/ResourceTelemetry/OVERVIEW.md" />
+	</Folder>
 </Solution>

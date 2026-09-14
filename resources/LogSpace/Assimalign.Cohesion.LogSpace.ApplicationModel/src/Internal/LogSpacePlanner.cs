@@ -24,7 +24,7 @@ internal static class LogSpacePlanner
         {
             throw new InvalidOperationException("LogSpace requires the 'query' endpoint and '/cohesion/v1' control-plane path.");
         }
-        RequireEndpoint(manifest, "otlp", "grpc", "tcp");
+        RequireEndpoint(manifest, "otlp", "https", "tcp");
         RequireEndpoint(manifest, "query", "https", "tcp");
         if (!manifest.Mounts.Any(static mount => mount.Name == "data" &&
             mount.Kind is ResourceMountKind.Volume && mount.ContainerPath == "/data" &&

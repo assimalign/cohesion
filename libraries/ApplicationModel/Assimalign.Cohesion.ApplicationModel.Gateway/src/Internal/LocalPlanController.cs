@@ -74,7 +74,8 @@ internal sealed class LocalPlanController : IApplicationResourceController
             artifact,
             context.Inputs,
             context.ObservedDependencies,
-            _options);
+            _options,
+            (context as ResourceControlContext)?.Telemetry);
         LocalResourceConfiguration configuration = await _preparer
             .PrepareAsync(context, compilation, cancellationToken)
             .ConfigureAwait(false);
@@ -104,7 +105,8 @@ internal sealed class LocalPlanController : IApplicationResourceController
         IExecutableArtifact artifact,
         ResourceInputs inputs,
         IReadOnlyList<ResourceDependencyObservation> observedDependencies,
-        LocalGatewayOptions options)
+        LocalGatewayOptions options,
+        ResourceTelemetryInjection? telemetry = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(artifact);
@@ -139,10 +141,11 @@ internal sealed class LocalPlanController : IApplicationResourceController
         }
 
         ObservedDependencyEnvironment.Apply(observedDependencies, environment);
+        ResourceTelemetryInjection.Apply(telemetry, environment);
 
         // Reading this immutable option is intentional: compilation receives all platform
         // options as an input and performs no platform I/O or mutation.
         _ = options.LivenessFailureThreshold;
-        return new LocalPlanCompilation(plan, artifact, inputs, environment);
+        return new LocalPlanCompilation(plan, artifact, inputs, environment, telemetry);
     }
 }

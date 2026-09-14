@@ -24,7 +24,9 @@ public sealed class ResourceAreaDefaultsTests
         }
         root.ShouldNotBeNull();
         XDocument defaults = XDocument.Load(Path.Combine(root.FullName, "sdks", $"Assimalign.Cohesion.Sdk.{area}", "Targets", $"Sdk.{area}.props"));
-        defaults.Descendants("CohesionEndpoint").Single(endpoint => (string?)endpoint.Attribute("Scheme") == "https").Attribute("Certificate")!.Value.ShouldBe("tls");
+        XElement[] https = defaults.Descendants("CohesionEndpoint").Where(endpoint => (string?)endpoint.Attribute("Scheme") == "https").ToArray();
+        https.ShouldNotBeEmpty();
+        https.ShouldAllBe(endpoint => (string?)endpoint.Attribute("Certificate") == "tls");
         XElement mount = defaults.Descendants("CohesionMount").Single(mount => (string?)mount.Attribute("Include") == "tls");
         mount.Attribute("Kind")!.Value.ShouldBe("Secret");
         mount.Attribute("ContainerPath")!.Value.ShouldBe("/cohesion/mounts/tls");

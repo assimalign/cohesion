@@ -1,6 +1,3 @@
-# Assimalign.Cohesion.LogSpace.Hosting
+# LogSpace Hosting
 
-The LogSpace runtime composition entry point and optional resource control-plane listener.
-
-- [Overview](docs/OVERVIEW.md)
-- [Design](docs/DESIGN.md)
+Authenticated OTLP/HTTP JSON log ingest on private HTTPS 4318, query/control-plane on private HTTPS 8443, and append-only mounted storage. See [Overview](docs/OVERVIEW.md) and [Design](docs/DESIGN.md).

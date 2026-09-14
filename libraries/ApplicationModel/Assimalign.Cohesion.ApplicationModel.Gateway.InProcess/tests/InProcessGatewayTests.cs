@@ -23,6 +23,34 @@ public sealed class InProcessGatewayTests
 {
     private const string DisplayPrefix = "Cohesion Test [ApplicationModel.Gateway.InProcess] - ";
 
+    [Fact(DisplayName = DisplayPrefix + "telemetry reaches invocation values and removes the protected carrier when absent")]
+    public async Task CreateContext_Telemetry_ShouldMaterializeAmbientValues()
+    {
+        string root = CreateTemporaryDirectory();
+        try
+        {
+            TestControlContext control = TestControlContext.Create(root, resourceName: "app-web");
+            var artifact = new InProcessResourceArtifact(control.Resource.Id, Assembly.GetExecutingAssembly(), root);
+            var injection = new ResourceTelemetryInjection(new Uri("https://localhost:4318"), "Authorization: Bearer test\n"u8.ToArray());
+            var compilation = InProcessPlanController.Compile(control.Plan, artifact, control.Inputs, control.ObservedDependencies, injection);
+            var contexts = new InProcessContextFactory(root);
+            var configuration = await contexts.CreateAsync(control, compilation, new ResourceContext(contentRootPath: root), CancellationToken.None);
+            configuration.ResourceContext.TryGetEnvironmentValue(ResourceEnvironment.TelemetryEndpoint, out string? endpoint).ShouldBeTrue();
+            endpoint.ShouldBe("https://localhost:4318");
+            configuration.ResourceContext.TryGetEnvironmentValue(ResourceEnvironment.TelemetryProtocol, out string? protocol).ShouldBeTrue();
+            protocol.ShouldBe("otlp-http");
+            configuration.ResourceContext.TryGetEnvironmentValue(ResourceEnvironment.TelemetryHeadersPath, out string? path).ShouldBeTrue();
+            new HostingResourceMount(path!).ReadAllBytes().ShouldBe("Authorization: Bearer test\n"u8.ToArray());
+            var absent = InProcessPlanController.Compile(control.Plan, artifact, control.Inputs, control.ObservedDependencies);
+            var next = await contexts.CreateAsync(control, absent, new ResourceContext(contentRootPath: root), CancellationToken.None);
+            next.ResourceContext.TryGetEnvironmentValue(ResourceEnvironment.TelemetryEndpoint, out _).ShouldBeFalse();
+            next.ResourceContext.TryGetEnvironmentValue(ResourceEnvironment.TelemetryProtocol, out _).ShouldBeFalse();
+            next.ResourceContext.TryGetEnvironmentValue(ResourceEnvironment.TelemetryHeadersPath, out _).ShouldBeFalse();
+            File.Exists(path).ShouldBeFalse();
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     [Fact(DisplayName = DisplayPrefix + "plain executable is refused by name before startup")]
     public void Build_WithPlainExecutable_ShouldRefuseColocation()
     {

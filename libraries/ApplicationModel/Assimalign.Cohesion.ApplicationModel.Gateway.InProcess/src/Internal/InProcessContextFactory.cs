@@ -92,6 +92,9 @@ internal sealed class InProcessContextFactory
 
         await new LocalMountMaterializer(_stateDirectory).MaterializeTrustBundleAsync(control.Model.Name,
             control.Resource.Name, compilation.Inputs.TrustBundle, ambientEnvironment, cancellationToken).ConfigureAwait(false);
+        await new LocalMountMaterializer(_stateDirectory).MaterializeTelemetryHeadersAsync(control.Model.Name,
+            control.Resource.Name, compilation.Telemetry?.HeadersDocument ?? ReadOnlyMemory<byte>.Empty,
+            ambientEnvironment, cancellationToken).ConfigureAwait(false);
 
         var resourceContext = new ResourceContext(
             applicationName: control.Model.Name.ToString(),

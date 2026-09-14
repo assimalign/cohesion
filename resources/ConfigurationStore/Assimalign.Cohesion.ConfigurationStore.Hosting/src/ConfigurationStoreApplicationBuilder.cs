@@ -6,6 +6,8 @@ using System.Reflection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.ConfigurationStore;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Hosting.Telemetry;
+using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
 
@@ -14,6 +16,7 @@ internal sealed class ConfigurationStoreApplicationBuilder : IConfigurationStore
     private const string DefaultEndpoint = "http://127.0.0.1:8080";
 
     private readonly string[] _args;
+    private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly Dictionary<string, IReadOnlyDictionary<string, string?>> _namespaces =
         new(StringComparer.Ordinal);
@@ -32,6 +35,11 @@ internal sealed class ConfigurationStoreApplicationBuilder : IConfigurationStore
             _controlPlane = controlPlane ?? throw new InvalidOperationException(
                 "The registered ConfigurationStore control-plane factory returned null.");
             _resourceContext = ResourceRuntime.Current;
+            _loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+            if (telemetry is not null)
+            {
+                _serviceRegistrations.Insert(0, _ => telemetry);
+            }
         }
     }
 

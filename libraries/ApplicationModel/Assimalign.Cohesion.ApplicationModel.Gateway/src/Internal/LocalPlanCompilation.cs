@@ -10,11 +10,13 @@ internal sealed class LocalPlanCompilation
         ResourcePlan plan,
         IExecutableArtifact artifact,
         ResourceInputs inputs,
-        IReadOnlyDictionary<string, string> environment)
+        IReadOnlyDictionary<string, string> environment,
+        ResourceTelemetryInjection? telemetry = null)
     {
         Plan = plan ?? throw new ArgumentNullException(nameof(plan));
         Artifact = artifact ?? throw new ArgumentNullException(nameof(artifact));
         Inputs = inputs ?? throw new ArgumentNullException(nameof(inputs));
+        Telemetry = telemetry;
         ArgumentNullException.ThrowIfNull(environment);
 
         Environment = new ReadOnlyDictionary<string, string>(
@@ -26,6 +28,8 @@ internal sealed class LocalPlanCompilation
     public IExecutableArtifact Artifact { get; }
 
     public ResourceInputs Inputs { get; }
+
+    internal ResourceTelemetryInjection? Telemetry { get; }
 
     public IReadOnlyDictionary<string, string> Environment { get; }
 }

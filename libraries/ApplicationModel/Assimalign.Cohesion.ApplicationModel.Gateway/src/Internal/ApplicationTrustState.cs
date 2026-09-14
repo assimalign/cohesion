@@ -57,7 +57,8 @@ internal sealed class ApplicationTrustState : IDisposable
         string subject,
         TimeSpan lifetime,
         DateTimeOffset now,
-        bool allowControlPlaneCommands = false)
+        bool allowControlPlaneCommands = false,
+        bool telemetry = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(audience);
         ArgumentException.ThrowIfNullOrWhiteSpace(subject);
@@ -75,6 +76,10 @@ internal sealed class ApplicationTrustState : IDisposable
                 ExpiresAt = now.Add(lifetime),
             };
             descriptor.Audiences.Add(audience);
+            if (telemetry)
+            {
+                descriptor.Claims.Add(new IdentityClaim("scope", "telemetry"));
+            }
             if (allowControlPlaneCommands)
             {
                 descriptor.Claims.Add(new IdentityClaim(TokenUseClaim, GatewayTokenUse));

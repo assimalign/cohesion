@@ -29,7 +29,8 @@ internal sealed class LogSpaceControlPlaneEndpointService : IHostService, IDispo
         Uri endpoint,
         IResourceControlPlane controlPlane,
         ResourceContext resourceContext,
-        LogSpaceApplicationContext applicationContext)
+        LogSpaceApplicationContext applicationContext,
+        LogSegmentStore? store = null)
     {
         Uri.ThrowIfNotEndpoint(endpoint);
         ArgumentNullException.ThrowIfNull(controlPlane);
@@ -67,6 +68,7 @@ internal sealed class LogSpaceControlPlaneEndpointService : IHostService, IDispo
             }));
         _application = builder.Build();
         IWebApplicationPipelineBuilder pipeline = _application;
+        pipeline.Use(next => context => LogSpaceHttp.QueryAsync(context, next, resourceContext, store));
         pipeline.UseResourceControlPlane(controlPlane, resourceContext,
             () => applicationContext.State is HostState.Started);
     }

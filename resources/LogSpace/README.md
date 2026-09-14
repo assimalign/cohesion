@@ -2,12 +2,13 @@
 
 LogSpace is the L3 observability service platform intended to provide append-only log ingestion, indexing, retention, archival, query, correlation lookup, and export.
 
-The host supports enabled-resource control planes; domain services remain fillers pending the area program.
+The enabled host receives authenticated OTLP/HTTP JSON logs over HTTPS, persists append-only segments under its data mount, and serves bounded authenticated NDJSON queries. Retention, archival and Database.Embedded consumption are deferred.
 
 ## Projects
 
 - `Assimalign.Cohesion.LogSpace` defines the public area-root application and builder contracts.
-- `Assimalign.Cohesion.LogSpace.Hosting` provides the concrete creation entry point and host lifecycle with explicit `IHostService` registration.
+- `Assimalign.Cohesion.LogSpace.Hosting` owns HTTPS ingest/query, scoped-token verification, mounted segments and host lifecycle.
+- `samples/Assimalign.Cohesion.LogSpace.SinkHost` is the real executable used by LocalGateway acceptance tests.
 - `Assimalign.Cohesion.LogSpace.Telemetry` reserves the area-specific telemetry integration surface and is currently project scaffolding.
 
 - `Assimalign.Cohesion.LogSpace.ApplicationModel` supplies the typed manifest, planner, descriptor, and default control-plane factory as a NuGet-only package.

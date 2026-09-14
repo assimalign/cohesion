@@ -1,7 +1,7 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.LogSpace">
   <!-- The platform telemetry sink: an ordinary executable whose Program.cs composes ingestion, storage and query in C#.
        Resources emit through *.Hosting when COHESION_TELEMETRY_ENDPOINT is set.
-       Sdk.LogSpace defaults: endpoint `otlp` (grpc 4317, private), endpoint `query` (https 8443, private), mount `data` (Volume, 10Gi), StatefulSet. -->
+       Sdk.LogSpace defaults: endpoint `otlp` (https 4318, private), endpoint `query` (https 8443, private), mount `data` (Volume, 10Gi), StatefulSet. -->
   <PropertyGroup>
     <CohesionResourceName>platform-logspace</CohesionResourceName>
     <!-- Opt-in to orchestration. Enabled: Sdk.LogSpace generates resource.json (the manifest), Resource.g.cs (typed accessors:

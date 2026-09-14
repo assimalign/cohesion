@@ -11,11 +11,13 @@ internal sealed class InProcessPlanCompilation
         InProcessResourceArtifact artifact,
         ResourceInputs inputs,
         IReadOnlyList<ResourceDependencyObservation> observedDependencies,
-        IReadOnlyDictionary<string, string> ambientValues)
+        IReadOnlyDictionary<string, string> ambientValues,
+        ResourceTelemetryInjection? telemetry = null)
     {
         Plan = plan ?? throw new ArgumentNullException(nameof(plan));
         Artifact = artifact ?? throw new ArgumentNullException(nameof(artifact));
         Inputs = inputs ?? throw new ArgumentNullException(nameof(inputs));
+        Telemetry = telemetry;
         ArgumentNullException.ThrowIfNull(observedDependencies);
         ArgumentNullException.ThrowIfNull(ambientValues);
 
@@ -34,6 +36,8 @@ internal sealed class InProcessPlanCompilation
     internal InProcessResourceArtifact Artifact { get; }
 
     internal ResourceInputs Inputs { get; }
+
+    internal ResourceTelemetryInjection? Telemetry { get; }
 
     internal IReadOnlyList<ResourceDependencyObservation> ObservedDependencies { get; }
 

@@ -5,6 +5,8 @@ using System.Reflection;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Hosting.Telemetry;
+using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Scheduler;
 
 namespace Assimalign.Cohesion.Scheduler.Hosting;
@@ -14,6 +16,7 @@ internal sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
     private readonly Dictionary<JobId, IScheduleJob> _jobs = [];
     private readonly List<IScheduleProvider> _providers = [];
     private readonly List<Func<IHostContext, IHostService>> _serviceFactories = [];
+    private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
     private bool _isBuilt;
@@ -28,6 +31,11 @@ internal sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
             _controlPlane = controlPlane ?? throw new InvalidOperationException(
                 "The registered Scheduler resource control-plane factory returned null.");
             _resourceContext = ResourceRuntime.Current;
+            _loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+            if (telemetry is not null)
+            {
+                _serviceFactories.Insert(0, _ => telemetry);
+            }
         }
     }
 

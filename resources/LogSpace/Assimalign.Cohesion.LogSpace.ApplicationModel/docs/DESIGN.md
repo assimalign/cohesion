@@ -2,7 +2,7 @@
 
 LogSpaceResource wraps a manifest snapshot and typed LogSpaceResourceOptions, and delegates to its internal planner. AddLogSpace returns ILogSpaceResourceDescriptor, a thin graph-descriptor wrapper retaining dependencies and the built plan. The planner validates the kind, StatefulSet workload, declared area endpoint schemes/protocols, and query control plane at /cohesion/v1, then delegates realization to GenericPlanner. Endpoint ports, extra endpoints, secret/configuration mounts, and generic deployer options remain manifest-driven; no platform types are referenced.
 
-SDK defaults are otlp grpc/tcp:4317 and query https/tcp:8443, StatefulSet, and data Volume at /data with 10Gi. The planner requires the sized data mount; deployer Storage.Size may override capacity. The control plane does not implement telemetry ingestion (item 31b).
+The planner requires otlp https/tcp (SDK port 4318), alongside query https/tcp:8443, StatefulSet, and the data Volume at /data with 10Gi. The planner requires the sized data mount; deployer Storage.Size may override capacity. The control plane does not implement telemetry ingestion (item 31b).
 
 LogSpaceResourceControlPlane.Create returns a fresh Hosting.Resources control plane with no accepted command kinds. Runtime Hosting discovers the generated registration and serves its protocol through the private Web.ControlPlane feature. Unsupported command envelopes are refused with 501; domain commands are deferred to item 31c.
 

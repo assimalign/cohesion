@@ -36,7 +36,7 @@ its environment name as `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Producti
 | `COHESION_TRUST_BUNDLE_PATH` | Path to a PEM bundle of trust-anchor certificates (no private keys) | When the gateway has issued or is brokering transport trust anchors for the application | Local: protected file; In-process: ambient context value; Docker: tmpfs file; Kubernetes: ConfigMap or Secret volume |
 | `COHESION_STOP_EVENT` | Windows named-event identifier | Only for a Windows local out-of-process resource launched with the named-event stop channel | Local Windows: environment; In-process: outer host signal; Docker/Kubernetes: not set |
 | `COHESION_TELEMETRY_ENDPOINT` | Absolute OTLP collector URI | Optional and reserved in v1; Hosting uses it when configured | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
-| `COHESION_TELEMETRY_PROTOCOL` | `otlp-grpc` or `otlp-http` | Optional and reserved in v1; meaningful when a telemetry endpoint is set | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
+| `COHESION_TELEMETRY_PROTOCOL` | `otlp-grpc` or `otlp-http` | Optional; otlp-http is implemented as OTLP/HTTP JSON; otlp-grpc remains contract-valid but this build refuses it | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
 | `COHESION_TELEMETRY_HEADERS_PATH` | Path to an OTLP headers file | Optional and reserved in v1 when collector headers are required | Local: protected file path; In-process: ambient context; Docker: tmpfs file; Kubernetes: Secret volume |
 | `COHESION_LOG_FORMAT` | `json`; unset means ordinary stdout/stderr text | Optional and reserved in v1 | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
 
@@ -78,8 +78,11 @@ internationalized domain name to its ASCII-compatible form.
   Composite resource's mount directory.
 - Mount and bootstrap sources are resolved by the gateway. Resources read the delivered value
   and do not pull secrets or configuration from an orchestrator.
-- The telemetry variables are reserved now but remain optional. When none are set, logging is
-  stdout/stderr only.
+- The optional telemetry variables are honoured by Hosting.Telemetry in local and in-process resource hosts.
+  Headers use the bootstrap-credential carrier: a protected file locally and in-process, tmpfs in Docker,
+  and a Secret volume in Kubernetes. With no telemetry endpoint, existing logging behavior is unchanged.
+  This build exports logs as OTLP/HTTP JSON; protobuf, gRPC, traces and metrics remain deferred.
+  Gateway telemetry tokens carry aud=LogSpace, sub=emitter and scope=telemetry; they cannot authorize sink management or query.
 
 ## Declarative resource commands
 

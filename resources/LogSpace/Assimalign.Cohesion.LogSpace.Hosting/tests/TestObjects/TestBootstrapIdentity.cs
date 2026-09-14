@@ -27,20 +27,21 @@ internal sealed class TestBootstrapIdentity : IDisposable
 
     internal ReadOnlyMemory<byte> PublicKey { get; }
 
-    internal string Issue(string audience)
+    internal string Issue(string audience, string? emitter = null, bool telemetry = false)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         var descriptor = new JsonWebTokenDescriptor
         {
             Id = Guid.NewGuid().ToString("N"),
             Issuer = Issuer,
-            Subject = new SubjectIdentifier(Subject, issuer: Issuer),
+            Subject = new SubjectIdentifier(emitter ?? Subject, issuer: Issuer),
             TokenType = "JWT",
             IssuedAt = now,
             NotBefore = now,
             ExpiresAt = now.AddHours(1),
         };
         descriptor.Audiences.Add(audience);
+        if (telemetry) { descriptor.Claims.Add(new IdentityClaim("scope", "telemetry")); }
         return JsonWebTokenWriter.CreateEs256(_key, _keyId).Write(descriptor);
     }
 

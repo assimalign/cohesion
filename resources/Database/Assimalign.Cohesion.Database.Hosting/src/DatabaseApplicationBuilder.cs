@@ -8,6 +8,8 @@ using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Hosting.Telemetry;
+using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
@@ -31,6 +33,8 @@ namespace Assimalign.Cohesion.Database.Hosting;
 public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 {
     private readonly DatabaseApplicationOptions _options;
+    private readonly ILoggerFactory? _loggerFactory;
+    private readonly IHostService? _telemetry;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
     private readonly List<IHealthContributor> _healthContributors = new();
@@ -65,6 +69,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             _controlPlane = controlPlane ?? throw new InvalidOperationException(
                 "The registered database resource control-plane factory returned null.");
             _resourceContext = ResourceRuntime.Current;
+            _loggerFactory = ResourceTelemetry.Configure(_resourceContext, out _telemetry);
             _options.Environment = _resourceContext.EnvironmentName;
             _options.ContentRootPath = FileSystemPath.Parse(_resourceContext.ContentRootPath);
             ResourceRuntime.RegisterConnectionFactoryResolver(CreateConnectionFactory);
@@ -229,6 +234,12 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         if (_isBuilt)
         {
             throw new InvalidOperationException("The database application has already been built.");
+        }
+
+        if (_telemetry is not null)
+        {
+            // Options may already contain services; telemetry must stop after those producers too.
+            _options.Services.Insert(0, _telemetry);
         }
 
         // The context wraps the live option lists, so each factory sees every

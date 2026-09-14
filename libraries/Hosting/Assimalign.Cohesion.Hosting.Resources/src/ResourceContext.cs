@@ -536,6 +536,23 @@ public sealed partial class ResourceContext
                 $"The '{protocol}' resolver returned '{factory.GetType().FullName}', not '{typeof(TConnectionFactory).FullName}'.");
     }
 
+    /// <summary>Reads a value from this invocation's frozen environment snapshot.</summary>
+    /// <param name="name">The environment variable name, normally a <see cref="ResourceEnvironment"/> constant.</param>
+    /// <param name="value">The nonblank value when present; otherwise null.</param>
+    /// <returns>Whether the invocation supplies a nonblank value.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is null or blank.</exception>
+    public bool TryGetEnvironmentValue(string name, [NotNullWhen(true)] out string? value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        value = GetEnvironmentValue(name);
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+        value = null;
+        return false;
+    }
+
     internal string? GetEnvironmentValue(string name)
         => ResourceEnvironment.GetValue(_environmentVariables, name);
 

@@ -4,6 +4,8 @@ using System.Reflection;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Hosting.Telemetry;
+using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.IoTHub;
 
 namespace Assimalign.Cohesion.IoTHub.Hosting;
@@ -12,6 +14,7 @@ internal sealed class IoTHubApplicationBuilder : IIoTHubApplicationBuilder
 {
     private readonly List<Func<IHostContext, IHostService>> _serviceRegistrations = new();
 
+    private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
 
@@ -22,6 +25,11 @@ internal sealed class IoTHubApplicationBuilder : IIoTHubApplicationBuilder
         {
             _controlPlane = controlPlane ?? throw new InvalidOperationException("The registered IoTHub control-plane factory returned null.");
             _resourceContext = ResourceRuntime.Current;
+            _loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+            if (telemetry is not null)
+            {
+                _serviceRegistrations.Insert(0, _ => telemetry);
+            }
         }
     }
 

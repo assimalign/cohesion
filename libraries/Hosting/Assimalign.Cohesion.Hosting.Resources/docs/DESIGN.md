@@ -106,7 +106,7 @@ The first accepted signal is retained for drain-abort classification.
 When the started hook completes before a stop is accepted, the process contract is ordered by
 Hosting's observer callbacks:
 
-`cohesion-resource: ready` → `cohesion-resource: stopping` → `cohesion-resource: stopped`
+`cohesion-resource: ready` â†’ `cohesion-resource: stopping` â†’ `cohesion-resource: stopped`
 
 `ready` means startup and `OnStartedAsync` completed. `stopping` means the state transition was
 accepted and precedes service drain. `stopped` means the stop sequence, host reset, and
@@ -182,3 +182,5 @@ Absent or empty mounts return false. Present material requires the leaf as the f
 `TryGetTrustBundle` reads ResourceEnvironment.TrustBundlePath through ResourceMount's protected-file reader. `CreateOutboundTrustValidator` preserves missing-certificate and hostname rejection, then builds a server-authentication chain with CustomRootTrust, CustomTrustStore and NoCheck revocation against the supplied anchors. It does not disable TLS validation.
 
 CreateDevelopmentEndpointCertificate supplies the shared ephemeral fallback only for loopback Development contexts. Hosts own and dispose the returned identity. The persisted gateway issuer remains separate from this standalone fallback.
+
+Telemetry composition lives in the sibling Hosting.Telemetry package, which references Resources in one direction only. COHAM001 (build/Targets/Build.Rules.targets resolved allowlist at 252-257) forbids Logging and OpenTelemetry in guarded ApplicationModel closures. ResourceContext.TryGetEnvironmentValue exposes the existing invocation dictionary to this sibling in both process topologies without adding any dependency.

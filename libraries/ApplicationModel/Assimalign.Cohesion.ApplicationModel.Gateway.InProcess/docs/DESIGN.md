@@ -187,3 +187,7 @@ liveness restart, reverse stop, and entry-point preservation.
 - Replacing loopback transport with an in-memory connection fabric.
 
 HTTPS mounts retain the existing FromBytes handover. The context constructor receives endpoint certificate mappings from PortBinding and the protected trust-bundle path is copied into its ambient values. HTTP probes use the context's outbound trust validator, preserving hostname validation and rejecting unrelated roots.
+
+## Telemetry invocation values (31b)
+
+InProcessPlanController.Compile copies the plan environment and explicitly applies the gateway's internal ResourceTelemetryInjection. InProcessContextFactory then materializes `.state/telemetry.headers` through LocalMountMaterializer immediately after the trust bundle, including empty-content removal. CreateAmbientValues carries endpoint, protocol and that protected path into ResourceContext; Hosting.Telemetry reads them through the additive TryGetEnvironmentValue member, with no process-environment fallback. The headers use the same ResourceMount.ReadAllBytes path as local hosts. Member stop invokes the registered telemetry IHostService for bounded final-batch flush. Discovery ordering, scoped emitter credentials and the absence of an inferred dependency follow the gateway design.

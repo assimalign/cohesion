@@ -4,6 +4,8 @@ using System.Reflection;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Hosting.Telemetry;
+using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.NotificationHub;
 
 namespace Assimalign.Cohesion.NotificationHub.Hosting;
@@ -12,6 +14,7 @@ internal sealed class NotificationHubApplicationBuilder : INotificationHubApplic
 {
     private readonly List<Func<IHostContext, IHostService>> _serviceFactories = [];
 
+    private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
 
@@ -22,6 +25,11 @@ internal sealed class NotificationHubApplicationBuilder : INotificationHubApplic
         {
             _controlPlane = controlPlane ?? throw new InvalidOperationException("The registered NotificationHub control-plane factory returned null.");
             _resourceContext = ResourceRuntime.Current;
+            _loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+            if (telemetry is not null)
+            {
+                _serviceFactories.Insert(0, _ => telemetry);
+            }
         }
     }
 

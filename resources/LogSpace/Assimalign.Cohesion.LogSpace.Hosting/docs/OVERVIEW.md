@@ -1,7 +1,5 @@
-# Assimalign.Cohesion.LogSpace.Hosting
+# LogSpace Hosting overview
 
-`LogSpaceApplication.CreateBuilder(args)` returns the root builder interface. Explicit services preserve registration/start order and reverse stop order. Enabled resources discover their area control plane and serve health, readiness, liveness, endpoint discovery, stop, and command envelopes on the ambient `query` endpoint (https). The plain host opens no listener without registration.
+LogSpaceApplication.CreateBuilder(args).Build() composes the ambient resource. An enabled otlp endpoint registers the receiver and a dedicated segment flush service. query hosts management and GET /cohesion/v1/logs; a plain unregistered host remains an ordered collection of explicit services. SinkHost demonstrates the ambient contract.
 
-Managed namespaced routes use ES256 bootstrap verification. The private Web implementation stays out of consumer reference packs. Domain service behavior and command kinds remain deferred.
-
-See [DESIGN.md](DESIGN.md).
+POST /v1/logs requires application/json and a signed ES256 telemetry token. Query accepts resource, since (ISO-8601), limit (default 100/max 1000), and cursor, returning application/x-ndjson and X-Cohesion-Next-Cursor when more scanning is possible. Query pages are bounded to four million characters (plus at most one bounded record). Query and management require the sink's ordinary bootstrap/dev credential; telemetry scope is rejected.

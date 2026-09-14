@@ -5,6 +5,8 @@ using System.Reflection;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Hosting.Telemetry;
+using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Rezolvr;
 
 namespace Assimalign.Cohesion.Rezolvr.Hosting;
@@ -13,6 +15,7 @@ internal sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
 {
     private readonly List<Func<IHostContext, IHostService>> _serviceFactories = [];
 
+    private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
 
@@ -23,6 +26,11 @@ internal sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
         {
             _controlPlane = controlPlane ?? throw new InvalidOperationException("The registered Rezolvr control-plane factory returned null.");
             _resourceContext = ResourceRuntime.Current;
+            _loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+            if (telemetry is not null)
+            {
+                _serviceFactories.Insert(0, _ => telemetry);
+            }
         }
     }
 

@@ -18,7 +18,8 @@ jobs:
         projects: [
             "Assimalign.Cohesion.Hosting",
             "Assimalign.Cohesion.Hosting.Health",
-            "Assimalign.Cohesion.Hosting.Resources"
+            "Assimalign.Cohesion.Hosting.Resources",
+            "Assimalign.Cohesion.Hosting.Telemetry"
           ]
     steps:
       - uses: actions/checkout@v4

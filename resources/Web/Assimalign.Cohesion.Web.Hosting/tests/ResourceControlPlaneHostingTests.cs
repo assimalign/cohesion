@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -23,6 +24,17 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
 public sealed class ResourceControlPlaneHostingTests
 {
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Telemetry off preserves the existing logging factory and hosted services")]
+    public async Task TelemetryOff_ShouldPreserveComposition()
+    {
+        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext());
+        var builder = WebApplication.CreateBuilder([], typeof(ResourceControlPlaneHostingTests).Assembly);
+        await using var application = builder.Build();
+        await using var baseline = WebApplication.CreateBuilder().Build();
+        application.Context.HostedServices.Count().ShouldBe(baseline.Context.HostedServices.Count());
+        application.Context.ServiceProvider.GetRequiredService<Assimalign.Cohesion.Logging.ILoggerFactory>().Providers.ShouldBeEmpty();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Control plane: terminal routes run ahead of user middleware")]
     public async Task ControlPlaneRoutes_WhenRegistered_ShouldRunAheadOfUserMiddleware()
     {
