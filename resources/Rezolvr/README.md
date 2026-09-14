@@ -2,6 +2,8 @@
 
 Rezolvr is the L3 networking service platform intended to be a standalone DNS server with authoritative zones, forwarding and recursive resolution, caching, transfers, and administration.
 
+Rezolvr is a DNS server product and is never the service-discovery subsystem. Discovery uses observed endpoints, Service DNS, and export documents.
+
 The host supports enabled-resource control planes; domain services remain fillers pending the area program.
 
 ## Projects
