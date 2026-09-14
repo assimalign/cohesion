@@ -101,7 +101,9 @@ internal sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBui
         ValidateRegistrations();
         string environmentName = _resourceContext.EnvironmentName;
         var options = new IdentityHubApplicationOptions { Environment = environmentName };
-        var context = new IdentityHubApplicationContext(environmentName);
+        var context = new IdentityHubApplicationContext(
+            environmentName,
+            _resourceContext is null ? null : System.IO.FileSystemPath.Parse(_resourceContext.ContentRootPath));
         var hostedServices = new IHostService[_serviceRegistrations.Count + 1];
 
         for (int index = 0; index < _serviceRegistrations.Count; index++)

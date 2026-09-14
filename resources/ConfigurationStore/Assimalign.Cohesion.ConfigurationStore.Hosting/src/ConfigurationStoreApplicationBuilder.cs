@@ -87,7 +87,9 @@ internal sealed class ConfigurationStoreApplicationBuilder : IConfigurationStore
 
         string environmentName = _resourceContext?.EnvironmentName ?? "production";
         var options = new ConfigurationStoreApplicationOptions { Environment = environmentName };
-        var context = new ConfigurationStoreApplicationContext(environmentName);
+        var context = new ConfigurationStoreApplicationContext(
+            environmentName,
+            _resourceContext is null ? null : System.IO.FileSystemPath.Parse(_resourceContext.ContentRootPath));
         var hostedServices = new IHostService[_serviceRegistrations.Count + 1];
 
         for (int index = 0; index < _serviceRegistrations.Count; index++)

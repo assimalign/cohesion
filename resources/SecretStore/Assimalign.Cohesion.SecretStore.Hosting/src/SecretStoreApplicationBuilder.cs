@@ -104,7 +104,9 @@ internal sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBui
 
         string environmentName = _resourceContext.EnvironmentName;
         var options = new SecretStoreApplicationOptions { Environment = environmentName };
-        var context = new SecretStoreApplicationContext(environmentName);
+        var context = new SecretStoreApplicationContext(
+            environmentName,
+            _resourceContext is null ? null : System.IO.FileSystemPath.Parse(_resourceContext.ContentRootPath));
         var hostedServices = new IHostService[_serviceFactories.Count + 1];
         for (int index = 0; index < _serviceFactories.Count; index++)
         {
