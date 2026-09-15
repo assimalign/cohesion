@@ -815,8 +815,10 @@ public class ComponentIntegrationGeneratorTests
             new[] { seam });
         string generated = NormalizeLineEndings(GeneratedText(result));
 
+        // The expected block is normalized too: a CRLF checkout (the Windows runners) would otherwise
+        // compare CRLF source text against the LF-normalized generator output.
         generated.ShouldContain(
-            Indent(
+            NormalizeLineEndings(Indent(
                 """
                     public global::Test.Seams.ISeam AddEndToEnd(global::System.Action<global::Test.EndToEndBuilderContributor.ThingBuilder> @configure)
                     {
@@ -837,7 +839,7 @@ public class ComponentIntegrationGeneratorTests
                         return builder;
                     }
                 """,
-                spaces: 8),
+                spaces: 8)),
             Case.Sensitive);
         AssertNoErrors(result.Compilation);
     }
