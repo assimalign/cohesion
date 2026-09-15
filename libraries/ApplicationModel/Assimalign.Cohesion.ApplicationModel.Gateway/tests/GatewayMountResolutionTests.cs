@@ -32,11 +32,27 @@ public sealed class GatewayMountResolutionTests
         var controller = new StoreMountController();
         var gateway = new TestGateway(state, [controller], options: options);
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        // Reserve a loopback port without listening so no unrelated server can receive the read.
-        using var reservation = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        reservation.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-        int port = ((IPEndPoint)reservation.LocalEndPoint!).Port;
+        // A loopback listener that accepts and immediately closes every connection: the read fails at
+        // the TLS handshake on every platform. (A bound-but-not-listening socket is refused on Windows
+        // and Linux but left hanging on macOS until the cancellation fires.)
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
         var endpoint = new Uri($"https://127.0.0.1:{port}/");
+        Task refusing = Task.Run(async () =>
+        {
+            try
+            {
+                while (true)
+                {
+                    using Socket accepted = await listener.AcceptSocketAsync(cancellation.Token);
+                    accepted.Close();
+                }
+            }
+            catch (Exception exception) when (exception is OperationCanceledException or ObjectDisposedException or SocketException)
+            {
+            }
+        });
 
         try
         {
@@ -108,6 +124,8 @@ public sealed class GatewayMountResolutionTests
         {
             try
             {
+                listener.Stop();
+                await refusing;
                 await ((IApplicationGateway)gateway).StopAsync(CancellationToken.None);
             }
             finally
