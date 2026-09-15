@@ -36,6 +36,9 @@ internal sealed class GatewayStoreClient : IGatewayStoreClient
         }
     }
 
+    internal bool TryGetTransportTrust(Uri endpoint, out RemoteCertificateValidationCallback? validator) =>
+        _transportTrust.TryGetValue(endpoint.GetLeftPart(UriPartial.Authority), out validator);
+
     private HttpMessageInvoker CreateTransport(Uri endpoint)
     {
         _transportTrust.TryGetValue(endpoint.GetLeftPart(UriPartial.Authority), out RemoteCertificateValidationCallback? validator);

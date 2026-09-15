@@ -210,6 +210,7 @@ reconcile pass and calls
 `SecretStore.Client` and `ConfigurationStore.Client` protocol packages. This is the narrow,
 signed O13 boundary: sharing those client contracts avoids hand-rolling their wire protocols,
 while `*.Hosting` remains forbidden and no store client enters a resource runtime.
+Store reads validate the store's certificate against the store owner's application anchors, so a consumer in another application can trust a sibling store without holding its root itself.
 
 A manifest endpoint can designate a Secret mount through its `Certificate` field. That path
 uses `IGatewayStoreClient.ReadCertificateAsync` and validates the PEM bundle before resolving

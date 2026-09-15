@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
+using System.Net.Security;
+using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
@@ -16,6 +19,107 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 public sealed class GatewayMountResolutionTests
 {
+    /// <summary>Verifies that a cross-application mount registers only the store owner's TLS authority.</summary>
+    /// <returns>A task representing the regression check.</returns>
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Mount sources: A cross-application store read trusts the store owner's authority")]
+    public async Task ResolveInputs_CrossApplicationStoreMount_ShouldTrustStoreOwnerAuthority()
+    {
+        // Arrange
+        string root = Path.Combine(AppContext.BaseDirectory, "xstore-" + Guid.NewGuid().ToString("N"));
+        var options = new ApplicationGatewayOptions { ExportDirectory = root };
+        var store = (GatewayStoreClient)options.StoreClient;
+        var state = new InMemoryResourceStateManager();
+        var controller = new StoreMountController();
+        var gateway = new TestGateway(state, [controller], options: options);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        // Reserve a loopback port without listening so no unrelated server can receive the read.
+        using var reservation = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        reservation.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        int port = ((IPEndPoint)reservation.LocalEndPoint!).Port;
+        var endpoint = new Uri($"https://127.0.0.1:{port}/");
+
+        try
+        {
+            string pem = new GatewayCertificateAuthority(Path.Combine(root, "platform"), "platform")
+                .Issue("secrets-api", []);
+            var consumerAuthority = new GatewayCertificateAuthority(Path.Combine(root, "appa"), "appa");
+            consumerAuthority.ExportAnchors().IsEmpty.ShouldBeTrue();
+            store.TryGetTransportTrust(endpoint, out var initialValidator).ShouldBeFalse();
+            initialValidator.ShouldBeNull();
+
+            ResourceManifest provider = CreateManifest("secrets", "SecretStore") with
+            {
+                Application = "platform",
+                Endpoints =
+                [
+                    new ResourceManifestEndpoint
+                    {
+                        Name = "api", Scheme = "https", Protocol = "tcp", ContainerPort = 8443,
+                    },
+                ],
+            };
+            IApplicationBuilder builder = Application.CreateBuilder("appa", ["--mode=apply", "--environment=Development"])
+                .UseGateway(gateway);
+            // Use the external fallback: a realized provider in a set registers its trust while
+            // refreshing its own TrustedIssuers, before this consumer's mount can be resolved.
+            var resolver = new StoreEndpointResolver(new ResourceEndpoint("api", "https", port, Host: "127.0.0.1"));
+            builder.AddExternal(new ExternalResourceDeclaration(
+                provider.Name, provider.Application, ["api"], optional: false, provider, [provider]), resolver);
+            builder.AddResource(CreateManifest("api", "Web") with
+            {
+                Mounts =
+                [
+                    new ResourceManifestMount
+                    {
+                        Name = "cfg", Kind = ResourceMountKind.Secret,
+                        ContainerPath = "/cohesion/mounts/cfg", Source = "secrets:key",
+                    },
+                ],
+                References =
+                [
+                    new ResourceManifestReference
+                    {
+                        Resource = provider.Name, Application = provider.Application,
+                        Endpoints = ["api"], Manifest = provider.ApplicationModel,
+                    },
+                ],
+            });
+            IApplication application = builder.Build();
+
+            // Act: the unavailable store leaves the mount unresolved, after trust registration.
+            await Should.ThrowAsync<InvalidOperationException>(() => application.RunAsync(cancellation.Token));
+
+            // Assert
+            store.TryGetTransportTrust(endpoint, out var validator).ShouldBeTrue();
+            validator.ShouldNotBeNull();
+            using X509Certificate2 leaf = X509Certificate2.CreateFromPem(pem, pem);
+            validator(null!, leaf, null, SslPolicyErrors.RemoteCertificateChainErrors).ShouldBeTrue();
+            string unrelatedPem = new GatewayCertificateAuthority(Path.Combine(root, "other"), "other")
+                .Issue("x", []);
+            using X509Certificate2 unrelated = X509Certificate2.CreateFromPem(unrelatedPem, unrelatedPem);
+            validator(null!, unrelated, null, SslPolicyErrors.RemoteCertificateChainErrors).ShouldBeFalse();
+            consumerAuthority.ExportAnchors().IsEmpty.ShouldBeTrue();
+            resolver.CallCount.ShouldBe(1);
+            ResourceMountInput mount = controller.Inputs.ShouldNotBeNull().Mounts["cfg"];
+            mount.IsResolved.ShouldBeFalse();
+            mount.UnresolvedReason.ShouldNotBeNull().ShouldContain("could not resolve 'secrets:key'", Case.Sensitive);
+        }
+        finally
+        {
+            try
+            {
+                await ((IApplicationGateway)gateway).StopAsync(CancellationToken.None);
+            }
+            finally
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+            }
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Mount sources: Store references resolve through observed endpoints and bootstrap credentials")]
     public async Task StartAsync_StoreReferences_ShouldResolveThroughObservedEndpoints()
     {
