@@ -38,7 +38,7 @@ This document is the execution map for the current GitHub backlog. It assigns pr
 
 - Every service-root initiative starts with its contract or engine epic before its client, hosting, or distribution epic.
 - Runtime and AOT epics always complete before large service hosting or reflection-sensitive features.
-- L2 provides the landed per-area `AddService` seam over nestable `IHost` and `Gateway.InProcess` composite realization; L3 services compose through those contracts.
+- L2 provides the concrete `<Area>.Hosting` builders' `AddService` verb (O34) over nestable `IHost` and `Gateway.InProcess` composite realization; L3 services compose through those contracts.
 - Database model epics depend on the shared database core storage and execution epics.
 - Identity federation depends on the shared `IdentityModel` foundation, the token or key epic, and the operational services initiative for secure config and secret handling.
 - Eventing, IoT, email, and notifications depend on the core messaging primitives and on operational observability.
@@ -58,7 +58,7 @@ This document is the execution map for the current GitHub backlog. It assigns pr
 Use issue dependencies to encode the real execution path in GitHub:
 
 - Runtime is blocked by Foundation.
-- Nested host composition is delivered in Runtime through per-area `AddService` (item 9) and `Gateway.InProcess` (item 24); dependent L3 services use those seams.
+- Nested host composition is delivered in Runtime through the concrete `<Area>.Hosting` builders' `AddService` verb (item 9, revised by O34) and `Gateway.InProcess` (item 24); dependent L3 services use those seams.
 - SDK is blocked by Foundation.
 - Database Core is blocked by Runtime and Foundation.
 - Web is blocked by Runtime and Foundation.
@@ -83,7 +83,7 @@ Use issue dependencies to encode the real execution path in GitHub:
 
 ## Nested Service Composition
 
-- The public composition model is the per-area builder's `AddService` seam over nestable `IHost` (item 9, `51045965`; design note `4ef29290`). `HostToServiceWrapper.cs` and `HostExtensions.cs` in `libraries/Hosting/Assimalign.Cohesion.Hosting/src/` are the underlying host-as-service plumbing.
+- The public composition model is the concrete `<Area>.Hosting` builder's `AddService` verb (O34; root contracts reference no hosting library) over nestable `IHost` (item 9, `51045965`; design note `4ef29290`). `HostToServiceWrapper.cs` and `HostExtensions.cs` in `libraries/Hosting/Assimalign.Cohesion.Hosting/src/` are the underlying host-as-service plumbing.
 - `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` realizes composite members through their real application entry points (item 24, `a03cfcf8`); its [package design](../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md) owns the lifecycle and resource-context contract.
 - The built layers are L1 foundation plus SDK/tooling; L2 application runtime and composition (`ApplicationModel`, the gateway family, and `Hosting`); and L3 the 18 service platforms.
 - Service dependencies remain explicit graph relationships; the composite's platform-neutral plan belongs to the base ApplicationModel planner.

@@ -2,7 +2,7 @@
 
 > **Historical:** superseded by [DEVELOPER_EXPERIENCE_DESIGN.md](DEVELOPER_EXPERIENCE_DESIGN.md)
 > and the per-area `docs/DESIGN.md` files; retained for the per-service shape notes.
-> The current composition model is the per-area `AddService` seam over nestable `IHost`,
+> The current composition model is the concrete `<Area>.Hosting` builders' `AddService` verb (O34) over nestable `IHost`,
 > with `Gateway.InProcess` realizing composites. Item 31b (`acc951aa`) delivered the
 > `libraries/OpenTelemetry` extension for logs; traces and metrics remain deferred.
 > The three proposed Core libraries (`Serialization`, `Security`, `Diagnostics`) were not created.
