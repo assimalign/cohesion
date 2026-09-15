@@ -419,6 +419,16 @@ jobs:
         with:
           global-json-file: global.json
 
+      # The Database SDK tests build in-tree Database projects whose value types run a task from
+      # build/Tasks; a fresh checkout must build the tasks first (MSB4062 otherwise).
+      - name: Build build tasks
+        shell: pwsh
+        run: |
+          dotnet build "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj" --configuration Release --nologo
+          if ($LASTEXITCODE -ne 0) {
+            throw "build/Tasks build failed with exit code $LASTEXITCODE."
+          }
+
       - name: Download package-boundary feed
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
