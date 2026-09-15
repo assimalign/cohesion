@@ -65,9 +65,10 @@ A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these
 
 | Project | Role |
 | --- | --- |
-| `Assimalign.Cohesion.Web` | The root: pipeline and composition abstractions (`IWebApplication*`, `AddService(IHostService)`, `WebApplicationMiddleware`) every library builds against |
-| `Assimalign.Cohesion.Web.ControlPlane` | Resource control-plane routes for private listeners, ES256 bootstrap verification, and protocol parity with the Web runtime |
-| `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, server, builder-time DI/config/logging composition |
+| `Assimalign.Cohesion.Web` | The root: pipeline and composition abstractions (`IWebApplication*`, `WebApplicationMiddleware`) every library builds against |
+| `Assimalign.Cohesion.Web.Hosting.Resources` | Resource control-plane routes for private listeners, ES256 bootstrap verification, and protocol parity with the Web runtime |
+| `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, server, concrete-builder `AddService`, builder-time DI/config/logging composition |
+| `Assimalign.Cohesion.Web.Hosting.Health` | Adapts `Hosting.Health` contributors onto the `Web.Health` builder; no production consumer in this slice |
 | `Assimalign.Cohesion.Web.Routing` | Router, route patterns/constraints, endpoint metadata bag, link generation |
 | `Assimalign.Cohesion.Web.Api` | Endpoint mapping over the router: plain `Map`/`MapGet` terminal middleware plus source-generated typed-delegate binding (`(int id, IHttpContext) => ...` — route/query/header/body/form + injections, 400/415 outcomes); the interceptor generator lives in `analyzers/Assimalign.Cohesion.SourceGeneration.Web` |
 | `Assimalign.Cohesion.Web.Serialization` | The content-serialization registry: media-type-keyed request-reader/response-writer halves, `AddJsonSerialization` over a source-generated resolver (AOT), and the `ReadContentAsync`/`WriteContentAsync` call sites |
@@ -91,9 +92,9 @@ A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these
 | `Assimalign.Cohesion.Web.ApplicationModel` | Declarative Web resource model and the enabled resource's default control-plane factory |
 
 Layering: L3 platform. Everything here builds on the L1 protocol stack (`libraries/Http`,
-`libraries/Connections`, `libraries/Security`). The root additionally references the plain,
-Core-only `libraries/Hosting` lifecycle contracts for `AddService(IHostService)`; it brings no
-DI, configuration, or logging surface. The broader L2 runtime/composition libraries
+`libraries/Connections`, `libraries/Security`). The root and feature libraries reference
+no `Assimalign.Cohesion.Hosting*` library. Background work uses the concrete
+`WebApplicationBuilder.AddService` verb in `Web.Hosting`. The broader L2 runtime/composition libraries
 (`libraries/DependencyInjection`, `libraries/Configuration`, `libraries/Logging`) are consumed
 by the hosting module and by the `Web.Testing` harness (which drives the runtime and resolves the
 server from its service provider) — never by feature libraries. `Web.ApplicationModel` references

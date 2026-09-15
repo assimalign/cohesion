@@ -37,8 +37,9 @@ the whole base surface — including child-owned vocabulary the contracts speak
   `IDatabaseApplication` / `IDatabaseApplicationContext`: model packages
   register their engines and servers against this root seam (e.g.
   `Database.Sql`'s `AddSqlDatabase(...)` / `AddSqlServer(...)` verbs) without
-  knowing the hosting implementation; composition roots register plain Hosting
-  `IHostService` values or context factories through `AddService`.
+  knowing the hosting implementation. Composition roots register background work
+  through the concrete `DatabaseApplicationBuilder.AddService` in `Database.Hosting`;
+  the root contracts expose no hosting-library types.
   `Database.Hosting` implements the seam (`DatabaseApplication.CreateBuilder()`)
   so services start before servers and stop after them in reverse order.
 - **Code-first schema declarations** — `DatabaseSchema.Create(...)` and
@@ -57,7 +58,7 @@ the whole base surface — including child-owned vocabulary the contracts speak
 
 ## Dependencies
 
-`Core`, plain `Hosting` (the `IHostService` application-builder seam), the nine
+`Core`, the nine
 child roots the root rolls up (`Database.Execution`,
 `Database.Governance`, `Database.Indexing`, `Database.Language`,
 `Database.Protocol`, `Database.Security`, `Database.Storage`,

@@ -6,11 +6,15 @@ pipeline endpoints, and an AOT-safe JSON response writer.
 
 `App.Web` exposes this assembly publicly, so application authors can register their own
 `IHealthCheck` implementations, inline probes, or transport-neutral `Hosting.Health`
-`IHealthContributor` instances. `App.Database` also carries the assembly privately as part of
+`IHealthContributor` instances through the optional `Web.Hosting.Health` adapter package.
+`App.Database` also carries the health-model assembly privately as part of
 its Web runtime closure; that private inclusion does not expose the Web health API to Database
 applications.
 
 ```csharp
+using Assimalign.Cohesion.Web.Health;
+using Assimalign.Cohesion.Web.Hosting.Health;
+
 IHealthCheckService health = HealthChecks.CreateBuilder()
     .AddCheck(
         "self",
@@ -30,3 +34,6 @@ select a different slice, or an empty collection to include a contributor only i
 health.
 
 See [`docs/OVERVIEW.md`](docs/OVERVIEW.md) and [`docs/DESIGN.md`](docs/DESIGN.md).
+
+Hosting contributor integration is supplied by `Assimalign.Cohesion.Web.Hosting.Health`.
+`Web.Health` owns the health model and endpoints and references no hosting library (O34).

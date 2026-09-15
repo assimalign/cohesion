@@ -146,16 +146,16 @@ the `WebApplication.CreateBuilder()` idiom. The split of responsibilities:
   engine registration (`AddEngine` — server-less, embedded registrations) and
   server registration (`AddServer` — an instance, or a factory deferred to
   `Build` that receives the **application context**, mirroring the Web area's
-  context-receiving factory). It also carries `AddService` for a plain Hosting
-  `IHostService` instance or a context factory resolved once at `Build`. Services
-  preserve registration order, start before all servers, and stop in reverse
-  order after every server drains. Model verbs like `Database.Sql`'s
+  context-receiving factory). The root has no `AddService` member and references no
+  hosting library (O34). Model verbs like `Database.Sql`'s
   `AddSqlDatabase(...)` / `AddSqlServer(...)` compose against this seam only, so
   a model registers itself **without knowing the hosting implementation** — registration
   remains values and typed factories only (no container).
 - **This module's `DatabaseApplicationBuilder`** implements the seam over a
   `DatabaseApplicationOptions` instance and exposes it (`builder.Options`) for
-  hosting-specific settings and fully manual option composition. Deferred service
+  hosting-specific settings and fully manual option composition. Its `AddService`
+  pair accepts a plain Hosting service instance or context factory. Services preserve
+  registration order, start before servers, and stop after servers drain. Deferred service
   and server factories resolve at `Build()` in their respective registration
   order against the live context (instance registrations are wrapped as trivial
   factories, so ordering is registration-faithful across each pair of overloads).
@@ -262,3 +262,7 @@ The enabled resource's `admin` listener consumes the shared Hosting.Resources en
 ## Optional telemetry (31b)
 
 The registered resource constructor calls ResourceTelemetry.Configure using the invocation snapshot. With no gateway or telemetry endpoint, existing providers and hosted services are unchanged. When enabled, the shared Hosting.Telemetry sibling adds OTLP/HTTP JSON logging and a service registered before producers; reverse StopAsync drains producers before a flush bounded by five seconds and the host shutdown token. Logging remains composed only in Hosting. See libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md for ordering and protocol limits.
+
+The health adapter in `Web.Hosting.Health` has no production consumer in this slice.
+This module retains its direct `Hosting.Health` reference and private `Web.Health`
+model reference; the admin endpoint's existing explicit mapping stays in place.

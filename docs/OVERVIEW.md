@@ -32,7 +32,7 @@ connects the packages to the signed direction and records the build-out decision
 | Hosting | `Assimalign.Cohesion.Hosting` (nestable lifecycle), `.Health`, `.Resources` (ambient runtime context), `.Telemetry` (resource log-export bootstrap and shutdown). |
 | OpenTelemetry | `Assimalign.Cohesion.OpenTelemetry` is implemented by item 31b (`acc951aa`): `OtlpProtocol`, `OtlpSignal`, `OtlpExporterOptions`, `IOtlpLogExporter`, `OtlpLogRecord`, and `OtlpExporter`; OTLP/HTTP JSON logs, with traces, metrics, and protobuf deferred. |
 | Resource declarative planes | All 18 areas deliver a guarded `<Area>.ApplicationModel` package: typed resource, planner, graph verbs, and the area's default-control-plane factory. They are NuGet-only. |
-| Web control plane | `Assimalign.Cohesion.Web.ControlPlane` supplies Web's runtime control-plane integration. |
+| Web hosting family | `Assimalign.Cohesion.Web.Hosting.Resources` supplies resource control-plane integration; `Assimalign.Cohesion.Web.Hosting.Health` adapts Hosting contributors onto the independent Web health model. |
 | Orchestration clients | `SecretStore.Client`, `ConfigurationStore.Client`, `IdentityHub.Client`, and `Rezolvr.Client` support gateway-side protected mounts and commands. |
 
 The seven areas with real service hosts are **Web, Database, ConfigurationStore, SecretStore,

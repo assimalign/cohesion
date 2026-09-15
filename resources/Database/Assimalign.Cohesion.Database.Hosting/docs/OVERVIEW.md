@@ -40,7 +40,7 @@ machines this module never drives (see `docs/DESIGN.md`).
   engine's `State` and `Workers` inventory into one Database contribution.
 - `DatabaseApplicationOptions` collects the servers, the embedded engine
   registrations, and additional `IHostService`s.
-- `IDatabaseApplicationBuilder.AddService` registers a plain `IHostService`
+- `DatabaseApplicationBuilder.AddService` registers a plain `IHostService`
   instance or a factory over the final `IDatabaseApplicationContext`; services
   retain registration order, start before all servers, and stop after them in
   reverse order.

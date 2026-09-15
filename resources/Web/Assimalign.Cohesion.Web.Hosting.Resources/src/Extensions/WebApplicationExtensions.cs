@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.Web.ControlPlane;
+namespace Assimalign.Cohesion.Web.Hosting.Resources;
 
 /// <summary>Installs the resource control-plane protocol on a private Web listener.</summary>
 public static class WebApplicationExtensions

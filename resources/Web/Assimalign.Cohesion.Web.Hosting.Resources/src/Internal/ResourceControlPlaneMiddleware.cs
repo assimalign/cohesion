@@ -15,7 +15,7 @@ using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 
-namespace Assimalign.Cohesion.Web.ControlPlane;
+namespace Assimalign.Cohesion.Web.Hosting.Resources;
 
 internal static class ResourceControlPlaneMiddleware
 {

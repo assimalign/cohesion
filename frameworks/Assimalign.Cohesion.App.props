@@ -166,7 +166,6 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authorization" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Caching" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Compression" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.ControlPlane" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.CookiePolicy" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Cors" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Diagnostics" />
@@ -176,6 +175,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Health" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.HostFiltering" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting.Health" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.HttpsPolicy" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.ProblemDetails" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Query" />
@@ -339,7 +340,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.ControlPlane" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
@@ -376,7 +377,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.ControlPlane" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
@@ -396,7 +397,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.ControlPlane" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
@@ -437,7 +438,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.ControlPlane" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
@@ -457,7 +458,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.ControlPlane" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
@@ -477,7 +478,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.ControlPlane" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
@@ -497,7 +498,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.ControlPlane" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
@@ -517,7 +518,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.ControlPlane" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
@@ -537,7 +538,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.ControlPlane" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
@@ -557,7 +558,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.ControlPlane" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
@@ -577,7 +578,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.ControlPlane" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
@@ -642,7 +643,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.ControlPlane" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 </Project>

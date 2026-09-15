@@ -22,11 +22,11 @@ dependency cost is always opt-in. The breakdown signal — this file's reason to
 is the root absorbing anything feature- or model-specific; that is an architecture
 conversation, not a convenience call.
 
-The root references `Assimalign.Cohesion.Http` plus the plain, Core-only
-`Assimalign.Cohesion.Hosting` lifecycle contracts needed by the public `AddService`
-seam. It still references no DI, configuration, logging, or area runtime package:
-composition integration is `Web.Hosting`'s one job, and the root remains importable by
-every feature library without dragging that runtime surface along.
+The root references `Assimalign.Cohesion.Http` and no `Assimalign.Cohesion.Hosting*`
+library (O34). `IWebApplication` exposes `Context`, `StartAsync`, and `StopAsync`;
+`IWebApplicationBuilder` supplies Web registration verbs and `Build()`. Background-work
+registration belongs to the concrete `WebApplicationBuilder` in `Web.Hosting`.
+DI, configuration, and logging integration remain builder-time hosting concerns.
 
 ## The pipeline model (middleware-first)
 
@@ -46,11 +46,10 @@ registration form.
 
 ## Application lifecycle services
 
-`IWebApplicationBuilder.AddService` accepts an `IHostService` instance or a factory over
-the final `IWebApplicationContext`. The factory runs once when the application is built,
-which makes a nested host's `AsService()` wrapper and other lifecycle components
-composable through the public area-root builder seam without exposing the concrete
-`WebApplicationBuilder`.
+The concrete `WebApplicationBuilder.AddService` in `Web.Hosting` accepts an
+`IHostService` instance or a factory over the final `IWebApplicationContext`. The
+factory runs once at build time. The root builder has no service-registration member
+or hosting-library reference; no area-owned service abstraction is introduced (O34).
 
 Application services and Web servers form two ordered phases rather than one interleaved
 list: services start first in service-registration order, then servers start in

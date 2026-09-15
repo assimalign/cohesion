@@ -1754,18 +1754,31 @@
 	<Folder Name="/resources/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/Assembly/Assimalign.Cohesion.VpnGateway.ApplicationModel/">
 		<File Path="VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/Assembly/Assimalign.Cohesion.VpnGateway.ApplicationModel/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.ControlPlane/">
-		<File Path="Web/Assimalign.Cohesion.Web.ControlPlane/README.md" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Health/">
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Health/README.md" />
 	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.ControlPlane/docs/">
-		<File Path="Web/Assimalign.Cohesion.Web.ControlPlane/docs/DESIGN.md" />
-		<File Path="Web/Assimalign.Cohesion.Web.ControlPlane/docs/OVERVIEW.md" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Health/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Health/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Health/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.ControlPlane/src/">
-		<Project Path="Web/Assimalign.Cohesion.Web.ControlPlane/src/Assimalign.Cohesion.Web.ControlPlane.csproj" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Health/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.Health/src/Assimalign.Cohesion.Web.Hosting.Health.csproj" />
 	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.ControlPlane/tests/">
-		<Project Path="Web/Assimalign.Cohesion.Web.ControlPlane/tests/Assimalign.Cohesion.Web.ControlPlane.Tests.csproj" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Health/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.Health/tests/Assimalign.Cohesion.Web.Hosting.Health.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/">
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/README.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/src/Assimalign.Cohesion.Web.Hosting.Resources.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/tests/Assimalign.Cohesion.Web.Hosting.Resources.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/">
 		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Client/README.md" />

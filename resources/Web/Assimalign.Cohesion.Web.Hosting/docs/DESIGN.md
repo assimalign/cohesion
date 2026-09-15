@@ -43,7 +43,7 @@ Three properties fall out of that intent and shape the whole implementation:
 
 ## Application lifecycle composition
 
-The root `IWebApplicationBuilder.AddService` seam registers application lifecycle
+The concrete `WebApplicationBuilder.AddService` verb registers application lifecycle
 services independently of server registration. At `Build`, `WebApplicationBuilder`
 invokes each deferred service factory exactly once against the final
 `IWebApplicationContext` and freezes the resulting services in registration order.
@@ -705,3 +705,11 @@ The enabled resource's `http` listener consumes the shared Hosting.Resources end
 ## Optional telemetry (31b)
 
 The registered resource constructor calls ResourceTelemetry.Configure using the invocation snapshot. With no gateway or telemetry endpoint, existing providers and hosted services are unchanged. When enabled, the shared Hosting.Telemetry sibling adds OTLP/HTTP JSON logging and a service registered before producers; reverse StopAsync drains producers before a flush bounded by five seconds and the host shutdown token. Logging remains composed only in Hosting. See libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md for ordering and protocol limits.
+
+## Hosting family (O34)
+
+The root contracts and feature libraries reference no `Assimalign.Cohesion.Hosting*`
+library. `Web.Hosting.Resources` and `Web.Hosting.Health` own reusable hosting
+integration. They never reference this runtime module. COHRES002 still permits this
+module to reference only the Web root, so its internal control-plane terminal stays
+independent of `Web.Hosting.Resources`; consolidation is the 31f follow-up.

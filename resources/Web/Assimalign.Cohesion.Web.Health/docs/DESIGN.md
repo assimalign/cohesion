@@ -10,9 +10,12 @@ explicit API without introducing a DI-specific hosting layer.
 ## Public application composition
 
 Web application and resource authors can register typed checks, inline probes, or
-`Hosting.Health` contributors:
+`Hosting.Health` contributors through the optional `Web.Hosting.Health` package:
 
 ```csharp
+using Assimalign.Cohesion.Web.Health;
+using Assimalign.Cohesion.Web.Hosting.Health;
+
 IHealthCheckService health = HealthChecks.CreateBuilder()
     .AddCheck(
         "self",
@@ -31,23 +34,11 @@ only while composing the builder; `Build()` snapshots them into an immutable
 `IHealthCheckService`. The service is supplied to endpoint middleware explicitly, so request-time
 service location is unnecessary.
 
-## Hosting contributor bridge
+## Hosting contributor integration
 
-`Assimalign.Cohesion.Hosting.Health.IHealthContributor` is the transport-neutral host health contract.
-`AddContributor` adapts one contributor into a Web `IHealthCheck` registration:
-
-- `IHealthContributor.Name` becomes the registration name and follows the normal case-insensitive
-  duplicate-name rule.
-- `Hosting.Health` `Healthy`, `Degraded`, and `Unhealthy` values map explicitly to their Web health
-  counterparts.
-- Description and diagnostic data are preserved.
-- The evaluation cancellation token is forwarded to the contributor.
-- Failure status and timeout use the same policy as `AddCheck`.
-- Omitted tags default to both `ready` and `live`; explicit tags replace that default, and an empty
-  collection selects aggregate-only participation.
-
-The bridge does not copy the Hosting model into the HTTP surface or make Hosting depend on Web.
-The dependency direction remains Web.Health → Hosting.
+The `AddContributor` adapter lives in `Assimalign.Cohesion.Web.Hosting.Health` (O34).
+That hosting-family library references this model and `Hosting.Health`; this package
+references only the Web root. No root or feature library may reference the adapter.
 
 ## Status model and aggregation
 
@@ -78,8 +69,8 @@ The default `HealthCheckJsonResponseWriter` uses `Utf8JsonWriter`, not reflectio
 serialization. Diagnostic data is handled through a closed primitive-value switch with a string
 fallback. Custom behavior is available through `IHealthResponseWriter`.
 
-The contributor adapter is ordinary static code with an explicit status switch. The complete
-registration, evaluation, and default response path remains trim- and NativeAOT-compatible.
+The registration, evaluation, and default response path remains trim- and NativeAOT-compatible.
+The optional contributor adapter has its own hosting-family package and tests.
 
 ## Framework packaging
 

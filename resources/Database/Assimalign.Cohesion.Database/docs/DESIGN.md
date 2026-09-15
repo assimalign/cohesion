@@ -176,11 +176,11 @@ surface. Child roots never reference the root.
   `AddSqlServer(...)` as `extension(IDatabaseApplicationBuilder)` members and
   never references `Database.Hosting` (COHRES001 intact); the hosting module
   ships the implementation (`DatabaseApplicationBuilder`) and the creation
-  entry point (`DatabaseApplication.CreateBuilder()`). The root seam also accepts
-  plain Hosting `IHostService` instances and context factories through
-  `AddService`; those services start in registration order before all servers and
-  stop in reverse order after the servers drain. This is a lifecycle contract,
-  not a DI or configuration surface. Multiple `AddServer` registrations are
+  entry point (`DatabaseApplication.CreateBuilder()`). The concrete
+  `DatabaseApplicationBuilder.AddService` in `Database.Hosting` accepts plain Hosting
+  service instances and context factories; those services start before servers and
+  stop after them in reverse order. The root references no hosting library and
+  exposes no service-registration verb (O34). Multiple `AddServer` registrations are
   allowed — servers are per-model. This mirrors the Web area exactly
   (`IWebApplicationBuilder` in the `Web` root, `WebApplication.CreateBuilder()`
   in `Web.Hosting`, `AddAuthentication` in `Web.Authentication`) — and the
@@ -287,8 +287,7 @@ allowlisted syntax tree and are never activated by the compiler.
 - No connection/network concepts (that is the per-model server machinery in
   the model packages — `SqlDatabaseServer` in `Database.Sql` — and
   `Database.Client`).
-- No DI or configuration surface. The root references plain Hosting only for
-  the `IHostService` lifecycle value accepted by the application-builder seam;
-  hosting implementation and configuration remain in `Database.Hosting`.
+- No DI, configuration, or `Assimalign.Cohesion.Hosting*` reference. Background-work
+  registration and hosting implementation remain in `Database.Hosting` (O34).
 - No model-specific request or result types — models subclass the
   `Database.Execution` family in their own packages.

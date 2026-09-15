@@ -11,7 +11,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ControlPlane" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting.Resources" />
 	</ItemGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Testing" />

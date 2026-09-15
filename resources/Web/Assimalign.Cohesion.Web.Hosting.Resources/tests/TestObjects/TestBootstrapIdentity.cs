@@ -7,7 +7,7 @@ using System.Text.Json;
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
-namespace Assimalign.Cohesion.Web.ControlPlane.Tests;
+namespace Assimalign.Cohesion.Web.Hosting.Resources.Tests;
 
 internal sealed class TestBootstrapIdentity : IDisposable
 {

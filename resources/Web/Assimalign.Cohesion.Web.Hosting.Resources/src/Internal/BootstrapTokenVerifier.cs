@@ -8,7 +8,7 @@ using System.Text.Json;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
-namespace Assimalign.Cohesion.Web.ControlPlane;
+namespace Assimalign.Cohesion.Web.Hosting.Resources;
 
 internal sealed class BootstrapTokenVerifier : IDisposable
 {

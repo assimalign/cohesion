@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting.Health;
 
-namespace Assimalign.Cohesion.Web.Health.Tests;
+namespace Assimalign.Cohesion.Web.Hosting.Health.Tests;
 
 /// <summary>
 /// A configurable transport-neutral health contributor used to exercise the Web health adapter.

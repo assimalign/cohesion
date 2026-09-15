@@ -18,11 +18,11 @@ using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Web.Testing;
 using Assimalign.Cohesion.Web.Testing.TestHost;
 
-namespace Assimalign.Cohesion.Web.ControlPlane.Tests;
+namespace Assimalign.Cohesion.Web.Hosting.Resources.Tests;
 
 public sealed class ResourceControlPlaneTests
 {
-    [Fact(DisplayName = "Cohesion Test [Web.ControlPlane] - Protocol parity: matches the real Web.Hosting terminal")]
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Protocol parity: matches the real Web.Hosting terminal")]
     public async Task Routes_WithSameResourceContext_ShouldMatchWebHosting()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -81,7 +81,7 @@ public sealed class ResourceControlPlaneTests
             using HttpResponseMessage left = await SendAsync(hostedClient, method, path, body, token, timeout.Token);
             using HttpResponseMessage right = await SendAsync(featureClient, method, path, body, token, timeout.Token);
             left.StatusCode.ShouldBe(expected, $"Web.Hosting: {method} {path}");
-            right.StatusCode.ShouldBe(left.StatusCode, $"Web.ControlPlane: {method} {path}");
+            right.StatusCode.ShouldBe(left.StatusCode, $"Web.Hosting.Resources: {method} {path}");
             (await right.Content.ReadAsStringAsync(timeout.Token)).ShouldBe(await left.Content.ReadAsStringAsync(timeout.Token));
             right.Content.Headers.ContentType?.ToString().ShouldBe(left.Content.Headers.ContentType?.ToString());
             right.Headers.WwwAuthenticate.ToString().ShouldBe(left.Headers.WwwAuthenticate.ToString());
@@ -90,7 +90,7 @@ public sealed class ResourceControlPlaneTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.ControlPlane] - Readiness: gates owning host startup and preserves health data")]
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Readiness: gates owning host startup and preserves health data")]
     public async Task Readiness_BeforeOwnerStarts_ShouldBeUnavailable()
     {
         await using var factory = new WebApplicationTestFactory();
@@ -125,7 +125,7 @@ public sealed class ResourceControlPlaneTests
         values.GetProperty("decimal").GetDecimal().ShouldBe(3.75M);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.ControlPlane] - Bootstrap: verifies signature, identity, audience, lifetime, and rotation")]
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Bootstrap: verifies signature, identity, audience, lifetime, and rotation")]
     public async Task Authorization_WithManagedContext_ShouldVerifyJwtClaims()
     {
         using var identity = new TestBootstrapIdentity("tests", "gateway");
@@ -159,7 +159,7 @@ public sealed class ResourceControlPlaneTests
         bare.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.ControlPlane] - Commands: lists applied envelopes and returns conflict refusals")]
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Commands: lists applied envelopes and returns conflict refusals")]
     public async Task Commands_WithHandler_ShouldExposeStateAndRejectConflictingOwnership()
     {
         await using var factory = new WebApplicationTestFactory();

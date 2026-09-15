@@ -1,6 +1,6 @@
-# Web.ControlPlane design
+# Web.Hosting.Resources design
 
-The feature extends `IWebApplicationPipelineBuilder` with `UseResourceControlPlane(controlPlane, resourceContext, isApplicationReady)`. Callers install it first on a private listener. It owns no port, host, service container, or configuration provider. The readiness callback observes the owning resource host's `HostState.Started`, not merely listener startup.
+The hosting-family integration extends `IWebApplicationPipelineBuilder` with `UseResourceControlPlane(controlPlane, resourceContext, isApplicationReady)`. Callers install it first on a private listener. It owns no port, host, service container, or configuration provider. The readiness callback observes the owning resource host's `HostState.Started`, not merely listener startup.
 
 The route and envelope contract matches Web.Hosting's terminal: public `/healthz`, `/readyz`, `/livez` aliases; namespaced health, readiness, liveness, endpoints, stop, and commands beneath `/cohesion/v1`. Reads allow GET/HEAD, stop allows POST, and commands allow GET/HEAD/POST/DELETE. Unknown namespaced routes are 404. Health reports preserve diagnostic values and ordinal contribution/endpoint ordering. HEAD suppresses bodies.
 
@@ -8,7 +8,7 @@ Managed namespaced requests verify an ES256 JWT with the published application P
 
 Command discovery includes both acceptedCommandKinds and applied commands. Non-object envelopes, non-string/base64 payloads, and blank identity fields are 400. Unsupported kinds return 501 and ownership/replay rejections return 409, both with status=Rejected and detail. This package declares no command kinds or handlers.
 
-COHRES001/002 prevent Web.Hosting from consuming this feature. Its existing terminal remains independent, with executable parity tests to detect protocol drift. Web.Hosting's private ResponseCompletionFeature cannot be consumed here; stop uses that terminal's direct-stop fallback. A public response-completion seam is deferred, rather than adding reflection or an isolation waiver.
+COHRES002 prevents Web.Hosting from consuming this hosting-family integration. COHRES001 prevents roots and feature libraries from referencing it and prevents it from referencing Web.Hosting. Its existing terminal remains independent, with executable parity tests to detect protocol drift. Web.Hosting's private ResponseCompletionFeature cannot be consumed here; stop uses that terminal's direct-stop fallback. A public response-completion seam is deferred, rather than adding reflection or an isolation waiver.
 
 Serialization uses Utf8JsonWriter and JsonDocument only. Dependencies are Web root, Hosting.Resources, Hosting.Health, and IdentityModel.Token.JsonWebToken. App.Web exposes the feature publicly; other areas consume its implementation privately. No ApplicationModel package enters a framework.
 

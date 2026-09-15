@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
-using Assimalign.Cohesion.Web.ControlPlane;
+using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting;
 
 namespace Assimalign.Cohesion.ApiManager.Hosting;

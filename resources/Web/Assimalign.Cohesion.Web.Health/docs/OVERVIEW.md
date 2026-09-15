@@ -10,8 +10,8 @@ and `/livez` pipeline endpoints.
 
 - **Model:** `IHealthCheck`, `HealthStatus`, `HealthCheckResult`, `HealthReport`,
   `HealthReportEntry`, and `HealthCheckRegistration`.
-- **Composition:** `HealthChecks.CreateBuilder()`, `IHealthChecksBuilder`, inline and typed checks,
-  and `AddContributor` for `Assimalign.Cohesion.Hosting.Health.IHealthContributor`.
+- **Composition:** `HealthChecks.CreateBuilder()`, `IHealthChecksBuilder`, inline and typed checks.
+  The optional `Web.Hosting.Health` package adds `AddContributor` for host contributors.
 - **Filtering:** `HealthTags` and `HealthCheckPredicates` for aggregate, readiness, and liveness
   views.
 - **HTTP delivery:** `MapHealthChecks`, `MapReadinessCheck`, `MapLivenessCheck`,
@@ -19,9 +19,9 @@ and `/livez` pipeline endpoints.
 
 ## Dependencies
 
-The package references `Assimalign.Cohesion.Web` for pipeline and HTTP contracts and
-`Assimalign.Cohesion.Hosting.Health` for the transport-neutral contributor bridge. It does not
-depend on a dependency-injection container.
+The package references `Assimalign.Cohesion.Web` for pipeline and HTTP contracts. It references
+no hosting library or dependency-injection container. `Web.Hosting.Health` references this
+package and `Hosting.Health` to supply the optional contributor bridge.
 
 ## Framework delivery
 
@@ -38,6 +38,9 @@ The package can also be referenced directly outside those framework profiles.
 Compose an immutable service, then explicitly map the endpoints that the application exposes:
 
 ```csharp
+using Assimalign.Cohesion.Web.Health;
+using Assimalign.Cohesion.Web.Hosting.Health;
+
 IHealthCheckService health = HealthChecks.CreateBuilder()
     .AddCheck(
         "self",
@@ -58,3 +61,6 @@ both `ready` and `live` are applied; pass an empty collection for aggregate-only
 
 The middleware receives `IHealthCheckService` explicitly. It does not locate services during a
 request and does not mutate registrations after the service is built.
+
+Hosting contributor integration is supplied by `Assimalign.Cohesion.Web.Hosting.Health`.
+`Web.Health` owns the health model and endpoints and references no hosting library (O34).
