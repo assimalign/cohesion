@@ -4,7 +4,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 
 namespace Assimalign.Cohesion.Web.Routing.Tests.TestObjects;
@@ -45,10 +44,6 @@ internal sealed class TestWebApplication : IWebApplicationBuilder, IWebApplicati
         _features.Add(configure(_context));
         return this;
     }
-
-    public IWebApplicationBuilder AddService(IHostService service) => this;
-
-    public IWebApplicationBuilder AddService(Func<IWebApplicationContext, IHostService> factory) => this;
 
     public IWebApplicationBuilder AddServer(IWebApplicationServer server) => this;
 

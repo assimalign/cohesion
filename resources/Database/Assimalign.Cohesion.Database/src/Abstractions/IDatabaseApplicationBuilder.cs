@@ -3,7 +3,6 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database;
 
-using Assimalign.Cohesion.Hosting;
 
 /// <summary>
 /// The composition surface for a database application. Model packages extend this
@@ -41,31 +40,6 @@ public interface IDatabaseApplicationBuilder
     /// <returns>The builder, for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="engine"/> is <see langword="null"/>.</exception>
     IDatabaseApplicationBuilder AddEngine(IDatabaseEngine engine);
-
-    /// <summary>
-    /// Registers a host service on the application lifecycle. Services start in
-    /// registration order before any database server and stop in reverse
-    /// registration order after every server has drained.
-    /// </summary>
-    /// <param name="service">The service to start and stop with the application.</param>
-    /// <returns>The builder, for chaining.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
-    IDatabaseApplicationBuilder AddService(IHostService service);
-
-    /// <summary>
-    /// Registers a host service factory that receives the final database
-    /// application context. The factory is invoked once when the application is
-    /// built, and the resulting service follows service registration order.
-    /// Services start before any database server and stop after every server has
-    /// drained.
-    /// </summary>
-    /// <param name="service">The factory that creates the service from the application context.</param>
-    /// <returns>The builder, for chaining.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">
-    /// The factory returns <see langword="null"/> when the application is built.
-    /// </exception>
-    IDatabaseApplicationBuilder AddService(Func<IDatabaseApplicationContext, IHostService> service);
 
     /// <summary>
     /// Registers a pre-built wire-protocol server on the application. May be called

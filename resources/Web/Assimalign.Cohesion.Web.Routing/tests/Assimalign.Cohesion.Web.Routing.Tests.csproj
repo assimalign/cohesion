@@ -4,7 +4,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
     <CohesionPackageReference Include="coverlet.collector" />
     <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />

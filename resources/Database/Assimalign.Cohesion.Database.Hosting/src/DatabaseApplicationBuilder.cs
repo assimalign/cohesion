@@ -182,7 +182,14 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         return this;
     }
 
-    /// <inheritdoc cref="IDatabaseApplicationBuilder.AddService(IHostService)" />
+    /// <summary>
+    /// Registers a host service on the application lifecycle. Services start in
+    /// registration order before any database server and stop in reverse
+    /// registration order after every server has drained.
+    /// </summary>
+    /// <param name="service">The service to start and stop with the application.</param>
+    /// <returns>The builder, for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
     public DatabaseApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
@@ -192,7 +199,19 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         return this;
     }
 
-    /// <inheritdoc cref="IDatabaseApplicationBuilder.AddService(Func{IDatabaseApplicationContext, IHostService})" />
+    /// <summary>
+    /// Registers a host service factory that receives the final database
+    /// application context. The factory is invoked once when the application is
+    /// built, and the resulting service follows service registration order.
+    /// Services start before any database server and stop after every server has
+    /// drained.
+    /// </summary>
+    /// <param name="service">The factory that creates the service from the application context.</param>
+    /// <returns>The builder, for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The factory returns <see langword="null"/> when the application is built.
+    /// </exception>
     public DatabaseApplicationBuilder AddService(Func<IDatabaseApplicationContext, IHostService> service)
     {
         ArgumentNullException.ThrowIfNull(service);
@@ -326,8 +345,6 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     }
 
     IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddEngine(IDatabaseEngine engine) => AddEngine(engine);
-    IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddService(IHostService service) => AddService(service);
-    IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddService(Func<IDatabaseApplicationContext, IHostService> service) => AddService(service);
     IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddServer(IDatabaseServer server) => AddServer(server);
     IDatabaseApplicationBuilder IDatabaseApplicationBuilder.AddServer(Func<IDatabaseApplicationContext, IDatabaseServer> configure) => AddServer(configure);
     IDatabaseApplication IDatabaseApplicationBuilder.Build() => Build();

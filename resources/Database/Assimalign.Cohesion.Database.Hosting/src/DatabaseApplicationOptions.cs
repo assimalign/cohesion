@@ -46,7 +46,7 @@ public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplication
 
     /// <summary>
     /// Gets the additional host services composed ahead of the servers, including
-    /// services registered through <see cref="IDatabaseApplicationBuilder.AddService(IHostService)"/>.
+    /// services registered through <see cref="DatabaseApplicationBuilder.AddService(IHostService)"/>.
     /// They start in registration order before the servers and stop in reverse
     /// registration order after the servers have drained.
     /// </summary>

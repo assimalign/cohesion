@@ -42,17 +42,17 @@ public class DatabaseApplicationBuilderTests
         engine.State.ShouldBe(EngineState.Running);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - AddService: an instance registered through the root builder runs before the server")]
-    public async Task AddService_WithInstance_RegistersThroughRootBuilderAndRunsBeforeServer()
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - AddService: an instance registered through the concrete builder runs before the server")]
+    public async Task AddService_WithInstance_RegistersThroughConcreteBuilderAndRunsBeforeServer()
     {
         // Arrange
         var log = new List<string>();
         var service = new RecordingService(log, "service");
         var server = new RecordingServer(log, "server");
-        IDatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
+        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
 
         // Act
-        IDatabaseApplicationBuilder returnedBuilder = builder.AddService(service);
+        DatabaseApplicationBuilder returnedBuilder = builder.AddService(service);
         builder.AddServer(server);
         IDatabaseApplication application = builder.Build();
         await application.StartAsync(DatabaseHostTestHarness.Timeout());
@@ -75,7 +75,7 @@ public class DatabaseApplicationBuilderTests
         var server = new RecordingServer(log, "server", engine);
         IDatabaseApplicationContext? observedContext = null;
         int factoryCalls = 0;
-        IDatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
+        DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
         builder.AddServer(server);
         builder.AddService(firstService);
         builder.AddService(context =>

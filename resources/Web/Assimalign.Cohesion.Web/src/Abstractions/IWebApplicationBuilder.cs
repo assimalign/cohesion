@@ -2,7 +2,6 @@
 
 namespace Assimalign.Cohesion.Web;
 
-using Assimalign.Cohesion.Hosting;
 using Http;
 
 
@@ -34,34 +33,6 @@ public interface IWebApplicationBuilder
     /// <param name="configure"></param>
     /// <returns></returns>
     IWebApplicationBuilder AddFeature(Func<IWebApplicationContext, IHttpFeature> configure);
-
-    /// <summary>
-    /// Adds a lifecycle service to the application.
-    /// </summary>
-    /// <remarks>
-    /// Lifecycle services start in registration order before every Web server and stop in
-    /// reverse order after every Web server has stopped.
-    /// </remarks>
-    /// <param name="service">The lifecycle service to add.</param>
-    /// <returns>The same builder for chaining.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="service"/> is null.</exception>
-    IWebApplicationBuilder AddService(IHostService service);
-
-    /// <summary>
-    /// Adds a lifecycle service created from the final application context.
-    /// </summary>
-    /// <remarks>
-    /// The factory is invoked once when the application is built. Lifecycle services start in
-    /// registration order before every Web server and stop in reverse order after every Web
-    /// server has stopped.
-    /// </remarks>
-    /// <param name="factory">The factory that creates the lifecycle service.</param>
-    /// <returns>The same builder for chaining.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
-    /// <exception cref="InvalidOperationException">
-    /// The factory returns <see langword="null"/> when the application is built.
-    /// </exception>
-    IWebApplicationBuilder AddService(Func<IWebApplicationContext, IHostService> factory);
 
     /// <summary>
     /// Adds a server instance to the application host lifecycle.

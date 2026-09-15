@@ -150,7 +150,16 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         return this;
     }
 
-    /// <inheritdoc cref="IWebApplicationBuilder.AddService(IHostService)" />
+    /// <summary>
+    /// Adds a lifecycle service to the application.
+    /// </summary>
+    /// <remarks>
+    /// Lifecycle services start in registration order before every Web server and stop in
+    /// reverse order after every Web server has stopped.
+    /// </remarks>
+    /// <param name="service">The lifecycle service to add.</param>
+    /// <returns>The same builder for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is null.</exception>
     public WebApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
@@ -159,7 +168,20 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         return this;
     }
 
-    /// <inheritdoc cref="IWebApplicationBuilder.AddService(Func{IWebApplicationContext, IHostService})" />
+    /// <summary>
+    /// Adds a lifecycle service created from the final application context.
+    /// </summary>
+    /// <remarks>
+    /// The factory is invoked once when the application is built. Lifecycle services start in
+    /// registration order before every Web server and stop in reverse order after every Web
+    /// server has stopped.
+    /// </remarks>
+    /// <param name="factory">The factory that creates the lifecycle service.</param>
+    /// <returns>The same builder for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The factory returns <see langword="null"/> when the application is built.
+    /// </exception>
     public WebApplicationBuilder AddService(Func<IWebApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
@@ -352,14 +374,6 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     IHost IHostBuilder.Build()
     {
         return Build();
-    }
-    IWebApplicationBuilder IWebApplicationBuilder.AddService(IHostService service)
-    {
-        return AddService(service);
-    }
-    IWebApplicationBuilder IWebApplicationBuilder.AddService(Func<IWebApplicationContext, IHostService> factory)
-    {
-        return AddService(factory);
     }
     IWebApplicationBuilder IWebApplicationBuilder.AddServer(IWebApplicationServer server)
     {

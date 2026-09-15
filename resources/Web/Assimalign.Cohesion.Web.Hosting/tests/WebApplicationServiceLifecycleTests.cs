@@ -27,15 +27,14 @@ public class WebApplicationServiceLifecycleTests
         IWebApplicationContext? factoryContext = null;
         int factoryCount = 0;
 
-        ((IWebApplicationBuilder)builder)
-            .AddService(firstService)
-            .AddServer(server)
-            .AddService(context =>
-            {
-                factoryCount++;
-                factoryContext = context;
-                return secondService;
-            });
+        builder.AddService(firstService);
+        ((IWebApplicationBuilder)builder).AddServer(server);
+        builder.AddService(context =>
+        {
+            factoryCount++;
+            factoryContext = context;
+            return secondService;
+        });
 
         await using WebApplication application = builder.Build();
 
