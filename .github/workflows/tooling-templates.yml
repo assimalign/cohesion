@@ -89,6 +89,8 @@ jobs:
             'Assimalign.Cohesion.Database.Types'
             'Assimalign.Cohesion.SecretStore.Client'
             'Assimalign.Cohesion.ConfigurationStore.Client'
+            'Assimalign.Cohesion.IdentityHub.Client'
+            'Assimalign.Cohesion.Rezolvr.Client'
             'Assimalign.Cohesion.IdentityHub.ApplicationModel'
             'Assimalign.Cohesion.SecretStore.ApplicationModel'
             'Assimalign.Cohesion.Rezolvr.ApplicationModel'

@@ -150,7 +150,18 @@ public sealed class JsonWebTokenWriterTests
     public void CreateEs256_WhenCurveIsSecp256K1_ShouldThrow()
     {
         // Arrange
-        using ECDsa privateKey = ECDsa.Create(ECCurve.CreateFromFriendlyName("secp256k1"));
+        ECDsa privateKey;
+        try
+        {
+            privateKey = ECDsa.Create(ECCurve.CreateFromFriendlyName("secp256k1"));
+        }
+        catch (PlatformNotSupportedException)
+        {
+            // macOS (Apple CryptoKit) cannot generate secp256k1 keys, so the rejection path cannot be
+            // reached there; Windows and Linux legs exercise it. xUnit v2 has no dynamic skip.
+            return;
+        }
+        using ECDsa _ = privateKey;
 
         // Act
         Action create = () => JsonWebTokenWriter.CreateEs256(privateKey, keyId);

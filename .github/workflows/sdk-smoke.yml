@@ -200,6 +200,16 @@ jobs:
         with:
           global-json-file: global.json
 
+      # Build.CodeGeneration.targets runs a task from build/Tasks inside the Database closure that
+      # Sdk.Database.Tasks references; a fresh checkout must build the tasks first (MSB4062 otherwise).
+      - name: Build build tasks
+        shell: pwsh
+        run: |
+          dotnet build "./build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj" --configuration Release --nologo
+          if ($LASTEXITCODE -ne 0) {
+            throw "build/Tasks build failed with exit code $LASTEXITCODE."
+          }
+
       - name: "Build: ${{ matrix.projects }}"
         shell: pwsh
         run: |

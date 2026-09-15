@@ -56,7 +56,18 @@ public sealed class JsonWebTokenSignatureVerifierTests
     public void CreateEcdsa_WhenCurveIsSecp256K1_ShouldThrow()
     {
         // Arrange
-        using ECDsa publicKey = ECDsa.Create(ECCurve.CreateFromFriendlyName("secp256k1"));
+        ECDsa publicKey;
+        try
+        {
+            publicKey = ECDsa.Create(ECCurve.CreateFromFriendlyName("secp256k1"));
+        }
+        catch (PlatformNotSupportedException)
+        {
+            // macOS (Apple CryptoKit) cannot generate secp256k1 keys, so the rejection path cannot be
+            // reached there; Windows and Linux legs exercise it. xUnit v2 has no dynamic skip.
+            return;
+        }
+        using ECDsa _ = publicKey;
 
         // Act
         Action create = () => JsonWebTokenSignatureVerifier.CreateEcdsa(publicKey);

@@ -23,6 +23,13 @@ internal sealed class CertificateAuthorityManager : IDisposable
     private const string PublicCertificateName = "public";
     private static readonly TimeSpan LeafRenewalWindow = TimeSpan.FromDays(7);
 
+    // macOS cannot load PKCS#12 private keys as ephemeral (X509CertificateLoader rejects EphemeralKeySet with
+    // PlatformNotSupportedException); it stores them in a temporary keychain instead. Every other platform keeps
+    // the keys out of the persistent store.
+    private static readonly X509KeyStorageFlags PrivateKeyStorageFlags = OperatingSystem.IsMacOS()
+        ? X509KeyStorageFlags.Exportable
+        : X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable;
+
     private readonly string _authorityPath;
     private readonly string _leafDirectoryPath;
     private readonly string _pendingPath;
@@ -608,7 +615,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 X509Certificate2 issuer = X509CertificateLoader.LoadPkcs12(
                     pfx,
                     null,
-                    X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable);
+                    PrivateKeyStorageFlags);
                 X509Certificate2[] chain = root.TryGetProperty("chain", out JsonElement chainProperty)
                     ? chainProperty.EnumerateArray()
                         .Select(static item => X509CertificateLoader.LoadCertificate(item.GetBytesFromBase64()))
@@ -717,7 +724,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
             return X509CertificateLoader.LoadPkcs12(
                 withKey.Export(X509ContentType.Pkcs12),
                 null,
-                X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable);
+                PrivateKeyStorageFlags);
         }
         finally
         {
@@ -799,7 +806,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 return X509CertificateLoader.LoadPkcs12(
                     pfx,
                     null,
-                    X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable);
+                    PrivateKeyStorageFlags);
             }
             finally
             {
@@ -823,7 +830,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 return X509CertificateLoader.LoadPkcs12(
                     pfx,
                     null,
-                    X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable);
+                    PrivateKeyStorageFlags);
             }
             finally
             {
@@ -876,7 +883,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
             return X509CertificateLoader.LoadPkcs12(
                 pfx,
                 null,
-                X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable);
+                PrivateKeyStorageFlags);
         }
         finally
         {
