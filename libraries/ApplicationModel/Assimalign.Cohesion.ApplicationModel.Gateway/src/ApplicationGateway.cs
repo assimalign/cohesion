@@ -338,7 +338,11 @@ public abstract partial class ApplicationGateway :
         string credential,
         CancellationToken cancellationToken)
     {
-        ConfigureStoreTransport(context.Model.Name, endpoint);
+        // The store presents a certificate issued under ITS application's authority (its own
+        // development issuer or a root it enrolled with), so the transport trust is keyed on the
+        // store owner, not on the application consuming the mount. In-set consumers of another
+        // application's store hit exactly this path.
+        ConfigureStoreTransport(sourceManifest.Application, endpoint);
         if (mount.Kind == ResourceMountKind.Secret &&
             string.Equals(sourceManifest.Kind, "SecretStore", StringComparison.OrdinalIgnoreCase))
         {
