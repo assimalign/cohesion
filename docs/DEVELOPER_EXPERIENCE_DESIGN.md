@@ -480,7 +480,7 @@ The embedded registry is a **fallback for locally-published images** (O10 — a 
 | 31f | — | #975 | generic resource control-plane factories; execution sub-item | `b5dbb6ea` |
 | 31b | `L03.04.01.05` | #976 | assigned at filing | `acc951aa`, `67bbcf4b` |
 | 31c | `L01.01.02.17` | #977 | assigned at filing | `81570328`, `8f37545d` |
-| 31c-b | L01.01.02.17.01 | #990 | gateway command delivery over the application's transport trust (31c defect) | this commit (Refs: #990) |
+| 31c-b | L01.01.02.17.01 | #990 | gateway command delivery over the application's transport trust (31c defect) | `d8128454` |
 | 31s | `L03.04.01.06` | #982 | substantive half of design item 31 (the filler half is its own feature) | `c49ee153`, `03b30d07` (also H1) |
 | 31s-b | — | #982 | substantive resource follow-up | `b7c50e0c` |
 | 31s-c | — | #982 | IdentityHub discovery and command follow-up | `adfe4ac2`, `25a7638f` |
