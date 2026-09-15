@@ -13,10 +13,10 @@
 	      Assimalign.Cohesion.<Area>.Hosting - the composition root that integrates
 	      DI, configuration, logging, and transports.
 
-	        * COHRES001 - No library in the area may reference the area's hosting
-	          module. A feature library that referenced it would drag the whole
-	          composition surface into every consumer and push users toward
-	          container-driven design.
+	        * COHRES001 - No library in the area may reference the exact runtime
+	          module except a named exemption holder. Roots and feature libraries may
+	          not reference the area's Hosting.<Suffix> integrations. Hosting-family
+	          integrations may reference each other, but never the exact runtime module.
 
 	        * COHRES002 - The hosting module may reference no library in its own
 	          area except the area root, Assimalign.Cohesion.<Area>. The shared
@@ -28,6 +28,13 @@
 	        * COHRES003 - No shipped project under resources/ may reference an
 	          Assimalign.Cohesion.ApplicationModel.Gateway* assembly. Gateway
 	          orchestration belongs outside resource-area packages, with no opt-out.
+
+	        * COHRES004 - Roots and feature libraries may resolve no
+	          Assimalign.Cohesion.Hosting or Assimalign.Cohesion.Hosting.* assembly.
+	          Only the hosting family (<Area>.Hosting and <Area>.Hosting.<Suffix>),
+	          <Area>.Testing, and <Area>.ApplicationModel may depend on that closure.
+	          CohesionHostingLibraryReferenceMigration=true temporarily disables this
+	          guard for exactly the 18 O34 migration projects, never their dependents.
 
 	        * COHAM001 - An opted-in resources/ assembly whose name ends in
 	          .ApplicationModel may reference only Assimalign.Cohesion.Core,
@@ -91,7 +98,7 @@
 	    and the owning area's README in the same commit, with explicit user
 	    confirmation.
 
-	    COHAM001 and COHRES003 use the same two enforcement layers: the augmented
+	    COHAM001, COHRES003, and COHRES004 use the same two enforcement layers: the augmented
 	    project-reference graph before ResolveAssemblyReferences, then the resolved
 	    @(ReferencePath) closure after ResolveAssemblyReferences. The second layer
 	    catches package and HintPath assemblies in addition to direct/transitive
@@ -109,6 +116,11 @@
 
 		<_CohesionAreaRootProject Condition="'$(_CohesionResourceArea)' != ''">Assimalign.Cohesion.$(_CohesionResourceArea)</_CohesionAreaRootProject>
 		<_CohesionAreaHostingProject Condition="'$(_CohesionResourceArea)' != ''">$(_CohesionAreaRootProject).Hosting</_CohesionAreaHostingProject>
+		<_CohesionHostingFamilyPrefix Condition="'$(_CohesionResourceArea)' != ''">$(_CohesionAreaHostingProject).</_CohesionHostingFamilyPrefix>
+		<_CohesionIsHostingFamilyProject>false</_CohesionIsHostingFamilyProject>
+		<_CohesionIsHostingFamilyProject Condition="'$(_CohesionResourceArea)' != ''
+		                                          AND ('$(MSBuildProjectName)' == '$(_CohesionAreaHostingProject)'
+		                                          OR $([System.String]::Copy('$(MSBuildProjectName)').ToLowerInvariant().StartsWith('$(_CohesionHostingFamilyPrefix.ToLowerInvariant())')))">true</_CohesionIsHostingFamilyProject>
 		<!-- Lower-cased 'Assimalign.Cohesion.<Area>.' prefix for the case-insensitive
 		     same-area match (String.StartsWith is case-sensitive; a reference's casing
 		     may not match the on-disk name). -->
@@ -120,17 +132,6 @@
 		                                        AND '$([System.IO.Path]::GetFileName($(MSBuildProjectDirectory)))' != 'tests'
 		                                        AND !$(MSBuildProjectDirectory.Contains('examples'))
 		                                        AND !$(MSBuildProjectDirectory.Contains('samples'))">true</_CohesionHostingRuleApplies>
-
-		<!-- Normalized, semicolon-fenced view of the project's opt-out list, so a
-		     whole-name membership test is a simple Contains (spaces stripped; assembly
-		     names never contain spaces). Empty when the project declares no exemptions. -->
-		<_CohesionHostingIsolationExemptionsFenced Condition="'$(CohesionHostingIsolationExemptions)' != ''">;$(CohesionHostingIsolationExemptions.Replace(' ', '').ToLowerInvariant());</_CohesionHostingIsolationExemptionsFenced>
-
-		<!-- True when this project has exempted its area's hosting assembly (COHRES001). -->
-		<_CohesionHostingReferenceExempt>false</_CohesionHostingReferenceExempt>
-		<_CohesionHostingReferenceExempt Condition="'$(_CohesionAreaHostingProject)' != ''
-		                                            AND '$(_CohesionHostingIsolationExemptionsFenced)' != ''
-		                                            AND $(_CohesionHostingIsolationExemptionsFenced.Contains(';$(_CohesionAreaHostingProject.ToLowerInvariant());'))">true</_CohesionHostingReferenceExempt>
 
 		<!-- Shared scope for the ApplicationModel and gateway-boundary rules. Match
 		     harness names as complete path segments, case-insensitively. -->
@@ -146,9 +147,16 @@
 		                                                AND '$(CohesionApplicationModelGuard)' == 'true'
 		                                                AND '$(AssemblyName)' != ''
 		                                                AND $([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel'))">true</_CohesionApplicationModelRuleApplies>
+		<!-- O34 migration is per project, never inherited by its dependents. -->
+		<_CohesionHostingLibraryRuleApplies>false</_CohesionHostingLibraryRuleApplies>
+		<_CohesionHostingLibraryRuleApplies Condition="'$(_CohesionResourceBoundaryRulesApply)' == 'true'
+		                                             AND '$(_CohesionIsHostingFamilyProject)' != 'true'
+		                                             AND '$(MSBuildProjectName)' != '$(_CohesionAreaRootProject).Testing'
+		                                             AND !$([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel'))
+		                                             AND '$(CohesionHostingLibraryReferenceMigration)' != 'true'">true</_CohesionHostingLibraryRuleApplies>
 	</PropertyGroup>
 
-	<!-- The opt-out list as items, for filtering the per-assembly COHRES002 candidates. -->
+	<!-- The opt-out list as items, for filtering the per-assembly COHRES001/002 candidates. -->
 	<ItemGroup Condition="'$(_CohesionHostingRuleApplies)' == 'true' AND '$(CohesionHostingIsolationExemptions)' != ''">
 		<_CohesionHostingIsolationExemption Include="$(CohesionHostingIsolationExemptions)" />
 	</ItemGroup>
@@ -170,23 +178,32 @@
 	        Condition="'$(_CohesionHostingRuleApplies)' == 'true'">
 
 		<ItemGroup>
-			<_CohesionHostingReference Include="@(ProjectReference)"
-			                           Condition="'%(Filename)' == '$(_CohesionAreaHostingProject)'" />
+			<_CohesionExactHostingReference Include="@(ProjectReference->'%(Filename)')"
+			                               Condition="'%(Filename)' == '$(_CohesionAreaHostingProject)'" />
+			<_CohesionExactHostingReference Remove="@(_CohesionHostingIsolationExemption)" />
+			<_CohesionHostingFamilyReference Include="@(ProjectReference->'%(Filename)')"
+			                                Condition="'$(_CohesionIsHostingFamilyProject)' != 'true'
+			                                           AND $([System.String]::Copy('%(Filename)').ToLowerInvariant().StartsWith('$(_CohesionHostingFamilyPrefix.ToLowerInvariant())'))" />
+			<_CohesionHostingFamilyReference Remove="@(_CohesionHostingIsolationExemption)" />
 			<_CohesionSameAreaReference Include="@(_CohesionDirectProjectReference->'%(Filename)')"
 			                            Condition="$([System.String]::Copy('%(Filename)').ToLowerInvariant().StartsWith('$(_CohesionAreaPrefixLower)'))" />
 			<_CohesionSameAreaReference Remove="@(_CohesionHostingIsolationExemption)" />
 		</ItemGroup>
 
-		<Error Condition="'@(_CohesionHostingReference)' != '' AND '$(_CohesionHostingReferenceExempt)' != 'true'"
+		<Error Condition="'@(_CohesionExactHostingReference)' != ''"
 		       Code="COHRES001"
 		       Text="Resource hosting-isolation rule: '$(MSBuildProjectName)' references '$(_CohesionAreaHostingProject)'. No library in the '$(_CohesionResourceArea)' area may depend on its hosting/runtime module; compose against the area root '$(_CohesionAreaRootProject)' abstractions instead. If this dependency is a sanctioned exception (deviation protocol, user-approved), add the assembly to the CohesionHostingIsolationExemptions property in this project. See .claude/rules/resource-areas.md." />
+
+		<Error Condition="'@(_CohesionHostingFamilyReference)' != ''"
+		       Code="COHRES001"
+		       Text="Resource hosting-isolation rule: '$(MSBuildProjectName)' references hosting-family assemblies '@(_CohesionHostingFamilyReference, ', ')'. Only the hosting family ('$(_CohesionAreaHostingProject)', '$(_CohesionAreaHostingProject).&lt;Suffix&gt;') may depend on these integrations; area roots and feature libraries may not. Sanctioned exceptions must name each assembly in CohesionHostingIsolationExemptions. See .claude/rules/resource-areas.md." />
 
 		<Error Condition="'@(_CohesionSameAreaReference)' != '' AND '$(MSBuildProjectName)' == '$(_CohesionAreaHostingProject)'"
 		       Code="COHRES002"
 		       Text="Resource hosting-isolation rule: '$(_CohesionAreaHostingProject)' directly references same-area librar(ies) '@(_CohesionSameAreaReference)'. The hosting module may reference only the area root '$(_CohesionAreaRootProject)' - the shared framework delivers the feature family to applications; ship builder verbs with their feature package instead. If a direct reference is a sanctioned exception (deviation protocol, user-approved), add the assembly to the CohesionHostingIsolationExemptions property in this project. See .claude/rules/resource-areas.md." />
 	</Target>
 
-	<!-- Project-reference graph layer for COHAM001 and COHRES003. In a normal
+	<!-- Project-reference graph layer for COHAM001, COHRES003, and COHRES004. In a normal
 	     build ResolveProjectReferences has already added restore-discovered
 	     transitive project references before ResolveAssemblyReferences begins. -->
 	<Target Name="ValidateCohesionResourceBoundaryProjectReferences"
@@ -208,6 +225,13 @@
 				Include="@(ProjectReference)"
 				Condition="'%(ProjectReference.ReferenceOutputAssembly)' != 'false'
 				           AND $([System.String]::Copy('%(Filename)').ToLowerInvariant().StartsWith('assimalign.cohesion.applicationmodel.gateway'))" />
+
+			<_CohesionHostingLibraryProjectReferenceViolation
+				Include="@(ProjectReference)"
+				Condition="'$(_CohesionHostingLibraryRuleApplies)' == 'true'
+				           AND '%(ProjectReference.ReferenceOutputAssembly)' != 'false'
+				           AND ('%(Filename)' == 'Assimalign.Cohesion.Hosting'
+				           OR $([System.String]::Copy('%(Filename)').ToLowerInvariant().StartsWith('assimalign.cohesion.hosting.')))" />
 		</ItemGroup>
 
 		<Error Condition="'@(_CohesionApplicationModelProjectReferenceViolation)' != ''"
@@ -217,6 +241,10 @@
 		<Error Condition="'@(_CohesionGatewayProjectReferenceViolation)' != ''"
 		       Code="COHRES003"
 		       Text="Resource orchestration-isolation rule: '$(AssemblyName)' has prohibited project-reference assembly/assemblies '@(_CohesionGatewayProjectReferenceViolation->'%(Filename)', ', ')'. Shipped projects under resources/** may not reference any 'Assimalign.Cohesion.ApplicationModel.Gateway*' assembly; there is no opt-out. See .claude/rules/resource-areas.md." />
+
+		<Error Condition="'@(_CohesionHostingLibraryProjectReferenceViolation)' != ''"
+		       Code="COHRES004"
+		       Text="Resource hosting-library rule: '$(MSBuildProjectName)' resolves '@(_CohesionHostingLibraryProjectReferenceViolation->'%(Filename)', ', ')'. Only the hosting family ('$(_CohesionAreaHostingProject)', '$(_CohesionAreaHostingProject).&lt;Suffix&gt;'), '$(_CohesionAreaRootProject).Testing' and '$(_CohesionAreaRootProject).ApplicationModel' may depend on Assimalign.Cohesion.Hosting or Assimalign.Cohesion.Hosting.*." />
 	</Target>
 
 	<Target Name="ValidateCohesionHostingIsolationResolvedReferences"
@@ -224,16 +252,25 @@
 	        Condition="'$(_CohesionHostingRuleApplies)' == 'true'">
 
 		<ItemGroup>
-			<_CohesionResolvedHostingReference Include="@(ReferencePath)"
-			                                   Condition="'%(Filename)' == '$(_CohesionAreaHostingProject)'" />
+			<_CohesionResolvedExactHostingReference Include="@(ReferencePath->'%(Filename)')"
+			                                       Condition="'%(Filename)' == '$(_CohesionAreaHostingProject)'" />
+			<_CohesionResolvedExactHostingReference Remove="@(_CohesionHostingIsolationExemption)" />
+			<_CohesionResolvedHostingFamilyReference Include="@(ReferencePath->'%(Filename)')"
+			                                        Condition="'$(_CohesionIsHostingFamilyProject)' != 'true'
+			                                                   AND $([System.String]::Copy('%(Filename)').ToLowerInvariant().StartsWith('$(_CohesionHostingFamilyPrefix.ToLowerInvariant())'))" />
+			<_CohesionResolvedHostingFamilyReference Remove="@(_CohesionHostingIsolationExemption)" />
 		</ItemGroup>
 
-		<Error Condition="'@(_CohesionResolvedHostingReference)' != '' AND '$(_CohesionHostingReferenceExempt)' != 'true'"
+		<Error Condition="'@(_CohesionResolvedExactHostingReference)' != ''"
 		       Code="COHRES001"
 		       Text="Resource hosting-isolation rule: '$(MSBuildProjectName)' resolves the assembly '$(_CohesionAreaHostingProject)' into its reference closure (via a direct or transitive reference, a HintPath, or a package). No library in the '$(_CohesionResourceArea)' area may depend on its hosting/runtime module. If this dependency is a sanctioned exception (deviation protocol, user-approved), add the assembly to the CohesionHostingIsolationExemptions property in this project. See .claude/rules/resource-areas.md." />
+
+		<Error Condition="'@(_CohesionResolvedHostingFamilyReference)' != ''"
+		       Code="COHRES001"
+		       Text="Resource hosting-isolation rule: '$(MSBuildProjectName)' resolves hosting-family assemblies '@(_CohesionResolvedHostingFamilyReference, ', ')' through its direct/transitive/package/HintPath closure. Only the hosting family ('$(_CohesionAreaHostingProject)', '$(_CohesionAreaHostingProject).&lt;Suffix&gt;') may depend on these integrations; area roots and feature libraries may not. Sanctioned exceptions must name each assembly in CohesionHostingIsolationExemptions. See .claude/rules/resource-areas.md." />
 	</Target>
 
-	<!-- Resolved-assembly closure layer for COHAM001 and COHRES003. Framework
+	<!-- Resolved-assembly closure layer for COHAM001, COHRES003, and COHRES004. Framework
 	     references from Microsoft.NETCore.App and the Windows-only ProtectedData
 	     BCL facade are the BCL portion of the COHAM001 allowlist; every other
 	     resolved assembly must be one of the five named Cohesion assemblies. -->
@@ -259,6 +296,14 @@
 			<_CohesionGatewayResolvedReferenceViolation
 				Include="@(ReferencePath)"
 				Condition="$([System.String]::Copy('%(Filename)').ToLowerInvariant().StartsWith('assimalign.cohesion.applicationmodel.gateway'))" />
+
+			<_CohesionHostingLibraryResolvedReferenceViolation
+				Include="@(ReferencePath)"
+				Condition="'$(_CohesionHostingLibraryRuleApplies)' == 'true'
+				           AND '%(ReferencePath.FrameworkReferenceName)' != 'Microsoft.NETCore.App'
+				           AND '%(ReferencePath.NuGetPackageId)' != 'Microsoft.NETCore.App.Ref'
+				           AND ('%(Filename)' == 'Assimalign.Cohesion.Hosting'
+				           OR $([System.String]::Copy('%(Filename)').ToLowerInvariant().StartsWith('assimalign.cohesion.hosting.')))" />
 		</ItemGroup>
 
 		<Error Condition="'@(_CohesionApplicationModelResolvedReferenceViolation)' != ''"
@@ -268,6 +313,10 @@
 		<Error Condition="'@(_CohesionGatewayResolvedReferenceViolation)' != ''"
 		       Code="COHRES003"
 		       Text="Resource orchestration-isolation rule: '$(AssemblyName)' resolves prohibited assembly/assemblies '@(_CohesionGatewayResolvedReferenceViolation->'%(Filename)', ', ')' through its direct/transitive/package/HintPath closure. Shipped projects under resources/** may not resolve any 'Assimalign.Cohesion.ApplicationModel.Gateway*' assembly; there is no opt-out. See .claude/rules/resource-areas.md." />
+
+		<Error Condition="'@(_CohesionHostingLibraryResolvedReferenceViolation)' != ''"
+		       Code="COHRES004"
+		       Text="Resource hosting-library rule: '$(MSBuildProjectName)' resolves '@(_CohesionHostingLibraryResolvedReferenceViolation->'%(Filename)', ', ')'. Only the hosting family ('$(_CohesionAreaHostingProject)', '$(_CohesionAreaHostingProject).&lt;Suffix&gt;'), '$(_CohesionAreaRootProject).Testing' and '$(_CohesionAreaRootProject).ApplicationModel' may depend on Assimalign.Cohesion.Hosting or Assimalign.Cohesion.Hosting.*." />
 	</Target>
 
 </Project>

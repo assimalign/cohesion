@@ -10,9 +10,11 @@ layer on top of this file.
 Every resource area ships exactly one runtime module, `Assimalign.Cohesion.<Area>.Hosting` — the
 composition root that integrates DI, configuration, logging, and transports.
 
-> **COHRES001** — No library in an area may reference its area's hosting module. A feature
-> library that referenced it would drag the whole composition surface into every consumer and
-> push users toward container-driven design.
+> **COHRES001** — No library in an area may reference its exact hosting module except a
+> named exemption holder. Roots and feature libraries may not reference the area's
+> `<Area>.Hosting.<Suffix>` integrations. Hosting-family integrations may reference each
+> other, but never the exact `<Area>.Hosting` runtime module. Exemptions name individual
+> assemblies; an exemption for the runtime does not waive the rest of the hosting family.
 >
 > **COHRES002** — The hosting module may reference no library in its own area except the area
 > root, `Assimalign.Cohesion.<Area>`. The shared framework (`App.<Area>`, via `Sdk.<Area>`)
@@ -23,6 +25,13 @@ composition root that integrates DI, configuration, logging, and transports.
 > **COHRES003** — No shipped project under `resources/**` may resolve an
 > `Assimalign.Cohesion.ApplicationModel.Gateway*` assembly. Gateway orchestration belongs outside
 > resource-area packages; there is no exemption property or opt-out.
+
+> **COHRES004** — Area roots and feature libraries may reference no
+> `Assimalign.Cohesion.Hosting` or `Assimalign.Cohesion.Hosting.*` library, directly or
+> transitively. Only the area's hosting family (`<Area>.Hosting` and
+> `<Area>.Hosting.<Suffix>`), `<Area>.Testing`, and `<Area>.ApplicationModel` may depend
+> on those libraries. Exactly 18 projects retain the temporary per-project
+> `CohesionHostingLibraryReferenceMigration=true` gate until #992 slice 2 (O34).
 
 ApplicationModel packages have an additional rollout guard:
 
@@ -57,24 +66,29 @@ projects outside `resources/` are untouched). Violations fail the build:
 - `COHRES001` is checked in two layers — the project-reference graph (every flavor:
   `CohesionProjectReference`, `CohesionPrivateProjectReference`, raw `ProjectReference`,
   transitive) and the resolved assembly closure after `ResolveAssemblyReferences` (which also
-  catches `<Reference>`+`HintPath` and package-delivered DLLs). Nothing may pull hosting in by
-  any route.
+  catches `<Reference>`+`HintPath` and package-delivered DLLs). Exact-module and hosting-family
+  candidates are checked separately, with exact assembly-name exemptions applied to each.
 - `COHRES002` constrains the hosting module's **direct** references only: same-area assemblies
   legitimately arrive in its resolved closure transitively through the sanctioned area-root
   reference (e.g. `Assimalign.Cohesion.Database` aggregates its child roots — `Database.Types`/
   `Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`/`Governance` — so
   `Database.Hosting → Database` pulls them all in — that is the root's own composition, not a
   hosting violation).
-- `COHAM001` and `COHRES003` are both checked in two layers: the direct/transitive
+- `COHAM001`, `COHRES003`, and `COHRES004` are checked in two layers: the direct/transitive
   project-reference graph, then the resolved assembly closure after `ResolveAssemblyReferences`.
   The latter also catches package-delivered and `<Reference>`+`HintPath` assemblies. Every error
   names the offending assembly or assemblies.
 - `COHAM001` applies only to opted-in `.ApplicationModel` assemblies. All 18 resource
   `*.ApplicationModel` assemblies are guarded. `COHRES003` applies automatically to every shipped
   resource project and has no opt-in or exemption.
+- `COHRES004` applies automatically outside the hosting family, the area's exact `Testing`
+  package, and assemblies ending in `.ApplicationModel`. It rejects the base Hosting library
+  and every `Hosting.*` sibling in both layers. Its temporary migration gate applies only to
+  the declaring project; a dependent is checked independently. Adding another gate requires
+  an owner decision, and the 18 existing gates are removed by #992 slice 2.
 - Test (`tests/`), example (`examples/`), and sample (`samples/`) projects are automatically
   excluded from these guards — the rule constrains shipped libraries, not harnesses. This
-  path-based exclusion applies to COHRES001–003 and COHAM001; everything else in an area is
+  path-based exclusion applies to COHRES001–004 and COHAM001; everything else in an area is
   guarded regardless of folder layout. It is distinct from holding an explicit
   `CohesionHostingIsolationExemptions` waiver.
 
@@ -156,6 +170,12 @@ sole explicit exemption holder.
   the area exception root — the layer that owns both vocabularies translates at its boundary).
   Child-to-child references are fine. The breakdown signal for either shape is the root (or a
   child root) pulling in anything feature- or model-specific.
+- **The hosting integration family:** `Assimalign.Cohesion.<Area>.Hosting.<Suffix>`
+  integrates `Assimalign.Cohesion.Hosting.<Suffix>`; precedents are
+  `Web.Hosting.Resources` and `Web.Hosting.Health`. These libraries may reference the
+  base Hosting library and siblings, the area root, features, other hosting-family
+  integrations, and other areas' packages. They may never reference their own exact
+  `<Area>.Hosting` module; roots and features may not reference them.
 - **The application builder seam:** the area root provides `I<Area>ApplicationBuilder` (and the
   `I<Area>Application` it builds); the hosting module implements them and exposes the creation
   entry point (`<Area>Application.CreateBuilder(string[] args)` — every resource is a `Program.cs` executable;
@@ -170,9 +190,14 @@ sole explicit exemption holder.
   Precedents: `IWebApplicationBuilder` (Web root) + `WebApplication.CreateBuilder(args)`
   (`Web.Hosting`) + `AddAuthentication` (`Web.Authentication`); `IDatabaseApplicationBuilder`
   (Database root) + `DatabaseApplication.CreateBuilder(args)` (`Database.Hosting`) +
-  `AddSqlDatabase` (`Database.Sql`). This pattern is expected to be the same in every area.
+  `AddSqlDatabase` (`Database.Sql`). The root application exposes `Context`, `StartAsync`,
+  and `StopAsync`; its builder exposes area verbs and `Build()`. Background-work
+  registration (`AddService`) is a concrete-builder verb in `<Area>.Hosting`, absent
+  from the root contract; no area-owned service abstraction is introduced. This pattern
+  is expected to be the same in every area (O34; the remaining roots are migration-gated).
 - `Assimalign.Cohesion.<Area>.Hosting` — the runtime module, referencing only the area root and
-  non-area infrastructure. Enabled-resource implementations consume the plain lifecycle host,
+  non-area infrastructure. Roots and feature libraries reference no
+  `Assimalign.Cohesion.Hosting*` library. Enabled-resource implementations consume the plain lifecycle host,
   `Assimalign.Cohesion.Hosting.Resources`, and `Assimalign.Cohesion.Hosting.Health` without
   referencing their area's ApplicationModel package. **If the hosting module ever appears to need a same-area dependency
   beyond the root, that is an architecture revisit — surface it to the user — not a case for

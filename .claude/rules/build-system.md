@@ -153,8 +153,17 @@ orchestration gateway:
   Hosting.Resources' Windows mount reader; third-party packages are not implicitly allowed.
 - **COHRES003** applies automatically to every non-harness project under `resources/**` and bans
   any `Assimalign.Cohesion.ApplicationModel.Gateway*` assembly. It has no opt-in and no exemption.
+- **COHRES004** rejects `Assimalign.Cohesion.Hosting` and every `Assimalign.Cohesion.Hosting.*`
+  assembly for roots and features. Only `<Area>.Hosting`, `<Area>.Hosting.<Suffix>`,
+  `<Area>.Testing`, and `<Area>.ApplicationModel` may depend on that closure. The hosting
+  family is classified case-insensitively. Exactly 18 existing projects declare
+  `CohesionHostingLibraryReferenceMigration=true` with the O34 deviation marker until
+  #992 slice 2; this disables COHRES004 for that project only, never for its dependents.
+  COHRES001 separately rejects an area's exact runtime module and rejects hosting-family
+  integrations from roots/features. Each assembly is filtered against the project's named
+  exemptions independently. COHRES002 still checks only the exact runtime module.
 
-Both guards inspect the direct/transitive project-reference graph before assembly resolution and
+All three guards inspect the direct/transitive project-reference graph before assembly resolution and
 the complete `ReferencePath` closure after `ResolveAssemblyReferences`. The latter catches package
 assets and raw `<Reference>`+`HintPath` routes. Tests, examples, and samples are exempt; error text
 names each offending assembly so the dependency can be removed at its source.

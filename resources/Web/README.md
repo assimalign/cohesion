@@ -7,14 +7,15 @@ shared framework.
 
 ## The dependency rule
 
-The area follows one structural rule, adopted 2026-07-10:
+The hosting family follows O34 (owner decision, 2026-09-15):
 
-> **`Assimalign.Cohesion.Web.Hosting` is the runtime module — it is neither referenced by any
-> Web-area library nor references any of them.** Feature libraries may reference the root
-> `Assimalign.Cohesion.Web`, each other, and anything outside the Web area (`Http.*`,
-> `Security.*`, `IdentityModel.*`, …). The one sanctioned exception is
-> `Assimalign.Cohesion.Web.Testing`, which drives the concrete runtime and therefore references
-> the hosting module (documented in its csproj and DESIGN.md).
+> **Roots and feature libraries reference no `Assimalign.Cohesion.Hosting*` library
+> (COHRES004) or Web hosting-family integration (COHRES001).**
+> `Web.Hosting.Resources` and `Web.Hosting.Health` integrate the shared Hosting libraries.
+> They may reference Web features and each other, but never the exact `Web.Hosting`
+> runtime module. The module references only the Web root within its own area (COHRES002).
+> `Web.Testing` retains its exact-module exemption; `Web.ApplicationModel` retains its
+> COHAM001-fenced `Hosting.Resources` reference.
 
 Why the rule exists:
 
@@ -45,7 +46,7 @@ CI (`.github/workflows/resource-web.yml`) so the guard executes on each push.
 
 ## Adding a new Web feature library
 
-A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these are updated
+A new `Assimalign.Cohesion.Web.<Feature>` or `Web.Hosting.<Suffix>` project is not done until all of these are updated
 (the working checklist also lives in `.claude/rules/web-area.md`):
 
 1. **csproj** — references per the dependency rule; builder verbs (`Add<Feature>`/`Use<Feature>`)
@@ -55,9 +56,11 @@ A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these
 2. **Framework manifest** — `frameworks/Assimalign.Cohesion.App.props`, `App.Web` group, plus any
    new outside-area transitive dependencies. Validate by packing
    `frameworks/Assimalign.Cohesion.App.Web.Runtime` (hard-fails on unresolvable assemblies).
-3. **Solutions** — `resources/Web/Assimalign.Cohesion.Web.slnx` and the root
+3. **Solutions** — `resources/Web/Assimalign.Cohesion.Web.slnx`,
+   `resources/Assimalign.Cohesion.Resources.slnx`, and the root
    `Assimalign.Cohesion.slnx`.
-4. **CI** — the matrix in `.github/workflows/resource-web.yml`.
+4. **CI and inventory** — the matrix in `.github/workflows/resource-web.yml` and
+   `installer/scripts/modules/CohesionPackaging.psm1`; both lists include each packable project.
 5. **Docs** — `docs/OVERVIEW.md` + `docs/DESIGN.md` (plus `docs/Assembly/` as the public API
    stabilizes), and a row in the project map below.
 
