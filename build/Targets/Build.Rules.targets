@@ -33,8 +33,6 @@
 	          Assimalign.Cohesion.Hosting or Assimalign.Cohesion.Hosting.* assembly.
 	          Only the hosting family (<Area>.Hosting and <Area>.Hosting.<Suffix>),
 	          <Area>.Testing, and <Area>.ApplicationModel may depend on that closure.
-	          CohesionHostingLibraryReferenceMigration=true temporarily disables this
-	          guard for exactly the 18 O34 migration projects, never their dependents.
 
 	        * COHAM001 - An opted-in resources/ assembly whose name ends in
 	          .ApplicationModel may reference only Assimalign.Cohesion.Core,
@@ -147,13 +145,11 @@
 		                                                AND '$(CohesionApplicationModelGuard)' == 'true'
 		                                                AND '$(AssemblyName)' != ''
 		                                                AND $([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel'))">true</_CohesionApplicationModelRuleApplies>
-		<!-- O34 migration is per project, never inherited by its dependents. -->
 		<_CohesionHostingLibraryRuleApplies>false</_CohesionHostingLibraryRuleApplies>
 		<_CohesionHostingLibraryRuleApplies Condition="'$(_CohesionResourceBoundaryRulesApply)' == 'true'
 		                                             AND '$(_CohesionIsHostingFamilyProject)' != 'true'
 		                                             AND '$(MSBuildProjectName)' != '$(_CohesionAreaRootProject).Testing'
-		                                             AND !$([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel'))
-		                                             AND '$(CohesionHostingLibraryReferenceMigration)' != 'true'">true</_CohesionHostingLibraryRuleApplies>
+		                                             AND !$([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel'))">true</_CohesionHostingLibraryRuleApplies>
 	</PropertyGroup>
 
 	<!-- The opt-out list as items, for filtering the per-assembly COHRES001/002 candidates. -->

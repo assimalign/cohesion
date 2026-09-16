@@ -156,9 +156,7 @@ orchestration gateway:
 - **COHRES004** rejects `Assimalign.Cohesion.Hosting` and every `Assimalign.Cohesion.Hosting.*`
   assembly for roots and features. Only `<Area>.Hosting`, `<Area>.Hosting.<Suffix>`,
   `<Area>.Testing`, and `<Area>.ApplicationModel` may depend on that closure. The hosting
-  family is classified case-insensitively. Exactly 18 existing projects declare
-  `CohesionHostingLibraryReferenceMigration=true` with the O34 deviation marker until
-  #992 slice 2; this disables COHRES004 for that project only, never for its dependents.
+  family is classified case-insensitively.
   COHRES001 separately rejects an area's exact runtime module and rejects hosting-family
   integrations from roots/features. Each assembly is filtered against the project's named
   exemptions independently. COHRES002 still checks only the exact runtime module.

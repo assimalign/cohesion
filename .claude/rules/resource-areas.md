@@ -30,8 +30,7 @@ composition root that integrates DI, configuration, logging, and transports.
 > `Assimalign.Cohesion.Hosting` or `Assimalign.Cohesion.Hosting.*` library, directly or
 > transitively. Only the area's hosting family (`<Area>.Hosting` and
 > `<Area>.Hosting.<Suffix>`), `<Area>.Testing`, and `<Area>.ApplicationModel` may depend
-> on those libraries. Exactly 18 projects retain the temporary per-project
-> `CohesionHostingLibraryReferenceMigration=true` gate until #992 slice 2 (O34).
+> on those libraries.
 
 ApplicationModel packages have an additional rollout guard:
 
@@ -83,9 +82,7 @@ projects outside `resources/` are untouched). Violations fail the build:
   resource project and has no opt-in or exemption.
 - `COHRES004` applies automatically outside the hosting family, the area's exact `Testing`
   package, and assemblies ending in `.ApplicationModel`. It rejects the base Hosting library
-  and every `Hosting.*` sibling in both layers. Its temporary migration gate applies only to
-  the declaring project; a dependent is checked independently. Adding another gate requires
-  an owner decision, and the 18 existing gates are removed by #992 slice 2.
+  and every `Hosting.*` sibling in both layers.
 - Test (`tests/`), example (`examples/`), and sample (`samples/`) projects are automatically
   excluded from these guards — the rule constrains shipped libraries, not harnesses. This
   path-based exclusion applies to COHRES001–004 and COHAM001; everything else in an area is
@@ -194,7 +191,9 @@ sole explicit exemption holder.
   and `StopAsync`; its builder exposes area verbs and `Build()`. Background-work
   registration (`AddService`) is a concrete-builder verb in `<Area>.Hosting`, absent
   from the root contract; no area-owned service abstraction is introduced. This pattern
-  is expected to be the same in every area (O34; the remaining roots are migration-gated).
+  is expected to be the same in every area (O34).
+  In every area, `CreateBuilder` returns the public concrete builder, and its `Build()`
+  returns the public concrete `Host<TContext>` application (Web, Database, and all 16 fillers).
 - `Assimalign.Cohesion.<Area>.Hosting` — the runtime module, referencing only the area root and
   non-area infrastructure. Roots and feature libraries reference no
   `Assimalign.Cohesion.Hosting*` library. Enabled-resource implementations consume the plain lifecycle host,
