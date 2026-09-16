@@ -502,6 +502,7 @@ The embedded registry is a **fallback for locally-published images** (O10 — a 
 | H1 | — | #982/#957/#856 | hygiene shared by items 17, 30, 31s | `03b30d07` (serves items 17, 30, 31s) |
 | H2 | — | #985 | hygiene shared by items 4, 6, 31, 32 | `4592e3eb`, `2b01f47b`, `fc593c6f`, `efe1f42b`, `794b5bed` (serves items 4, 6, 31, 32) |
 | 992 | `L01.01.10.09` | #992 | Bucket 2 design issue 1 (O34) | `7d35610b`, `6199733c`, `45ad4058`, `ee11e96e`, `1cf87523` (slice 1); `a91f0853`, `13854dea`, `5c11780e` (slice 2: fillers + Scheduler; migration gate removed) |
+| 993–998 | `L01.01.10.09.01`–`.06` | #993–#998 | Owner R3 follow-ups 2026-09-16: O35 terminal unification, base run lifecycle, concrete service factories, health adapter, using hygiene | `0f287f10` (#995); `5da8e684` (#993/#997); `ac8aeb61` (#994); `cd1377c1` (#996); `8ab915b9` (#998); cohesion-examples `65b0dd4` (#998) |
 
 **Landed-map notes (2026-09-14).** Baseline `67bbcf4b` contains 99 commits from `4f0d65cb~1`; `b48a0fd5` subsequently landed for item 39. A dash in a new sub-item's Filed WBS cell means no separately filed WBS was supplied; it is not a newly assigned id. Items 27/41 are this closing pass; item 37 and 38d remain pending.
 
