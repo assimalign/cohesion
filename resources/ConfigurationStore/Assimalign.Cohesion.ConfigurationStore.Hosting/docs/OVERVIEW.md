@@ -58,7 +58,6 @@ unknown namespaces.
 
 Background-work registration belongs to the concrete `ConfigurationStoreApplicationBuilder`: `AddService(IHostService)` and `AddService(Func<ConfigurationStoreApplicationContext, IHostService>)`. The factory deliberately receives the concrete context, unlike Web's AddService and Database's AddServer interface-context overloads, so hosting consumers can use environment, state, and hosted-service members beyond the small root contract. Factories run once per build against the same context retained by the application; the hosted-service snapshot is installed after factory evaluation. Services start in registration order and stop in reverse. No area-owned service abstraction is introduced.
 
-The concrete application preserves the existing RunAsync shortcut for a token already cancelled
-at entry: it starts and stops with uncancelled lifecycle tokens. Other runs delegate to the shared
-host runner. This compatibility method hides the non-virtual base member; callers holding IHost
-use the shared runner directly.
+The base host owns the already-cancelled run semantic: one complete start and graceful stop
+with fresh lifecycle tokens, normal run-observer notifications, and a final Stopped state.
+The concrete application and IHost route share it. Startup failures still roll back and propagate.

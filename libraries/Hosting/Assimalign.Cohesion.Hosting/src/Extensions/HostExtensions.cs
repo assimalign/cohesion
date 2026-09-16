@@ -25,6 +25,10 @@ public static partial class HostExtensions
         /// </summary>
         /// <param name="cancellationToken">Signals a shutdown request for this run.</param>
         /// <returns>A task that represents the complete host lifetime.</returns>
+        /// <remarks>
+        /// A token already cancelled at entry requests a complete start followed immediately
+        /// by a graceful stop with fresh lifecycle tokens. Startup failures still propagate.
+        /// </remarks>
         public Task RunAsync(CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(host);
@@ -50,6 +54,16 @@ public static partial class HostExtensions
         IHost host,
         CancellationToken cancellationToken)
     {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            await host.StartAsync(CancellationToken.None).ConfigureAwait(false);
+            if (host.Context.State is HostState.Started or HostState.Stopping)
+            {
+                await host.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            return;
+        }
+
         await host.StartAsync(cancellationToken).ConfigureAwait(false);
 
         try

@@ -142,19 +142,23 @@ public class ApplicationLifecycleTests
         exception.Message.ShouldContain("service factory returned null", Case.Insensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Scheduler] - RunAsync: propagates cancellation requested before start")]
-    public async Task RunAsync_WhenCancellationIsRequestedBeforeStart_ShouldPropagateCancellation()
+    [Fact(DisplayName = "Cohesion Test [Scheduler] - RunAsync: pre-cancelled token starts and stops once")]
+    public async Task RunAsync_WhenCancellationIsRequestedBeforeStart_ShouldStartAndStopOnce()
     {
         // Arrange
-        await using SchedulerApplication application = SchedulerApplication.CreateBuilder([]).Build();
+        var events = new List<string>();
+        SchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
+        builder.AddService(new RecordingService("service", events));
+        await using SchedulerApplication application = builder.Build();
         using var cancellationTokenSource = new CancellationTokenSource();
         cancellationTokenSource.Cancel();
 
         // Act
-        await Should.ThrowAsync<OperationCanceledException>(
-            () => application.RunAsync(cancellationTokenSource.Token));
+        await application.RunAsync(cancellationTokenSource.Token).WaitAsync(TimeSpan.FromSeconds(5));
 
-        // Assert: the shared host surfaces cancellation before startup completes.
+        // Assert
+        events.ShouldBe(new[] { "service:start", "service:stop" });
+        application.Context.State.ShouldBe(HostState.Stopped);
     }
 
     [Fact(DisplayName = "Cohesion Test [Scheduler.Hosting] - Lifecycle: stop drains an active occurrence")]

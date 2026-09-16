@@ -28,24 +28,6 @@ public sealed class ConfigurationStoreApplication : Host<ConfigurationStoreAppli
     /// </summary>
     public override ConfigurationStoreApplicationContext Context => _context;
 
-    /// <summary>
-    /// Runs the application until shutdown, including a clean start and stop for an already-cancelled token.
-    /// </summary>
-    /// <param name="cancellationToken">The token that requests application shutdown.</param>
-    /// <returns>A task that completes after the application stops.</returns>
-    /// <exception cref="ObjectDisposedException">The application has been disposed.</exception>
-    public new async Task RunAsync(CancellationToken cancellationToken = default)
-    {
-        if (cancellationToken.IsCancellationRequested)
-        {
-            await ((IHost)this).StartAsync(CancellationToken.None).ConfigureAwait(false);
-            await ((IHost)this).StopAsync(CancellationToken.None).ConfigureAwait(false);
-            return;
-        }
-
-        await base.RunAsync(cancellationToken).ConfigureAwait(false);
-    }
-
     IConfigurationStoreApplicationContext IConfigurationStoreApplication.Context => _context;
 
     Task IConfigurationStoreApplication.StartAsync(CancellationToken cancellationToken) =>

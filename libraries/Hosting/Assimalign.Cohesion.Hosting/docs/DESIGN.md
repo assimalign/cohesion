@@ -28,6 +28,13 @@ Per-run cancellation signals that shutdown should begin; it is not the graceful-
 cancelled run token from pre-cancelling every service drain. Coordinator-owned reset makes a cleanly
 stopped or compensated host restartable without relying on a derived hook calling `base`.
 
+A run token already cancelled at entry performs one complete lifecycle: startup uses
+`CancellationToken.None`, followed immediately by graceful shutdown with a fresh stop budget.
+The run completes in `Stopped` and delivers the normal observer sequence. A startup failure still
+rolls back to `Failed` and propagates. Both the concrete host and the plain `IHost` extension own
+this semantic; applications need no shadows. Stop completion is joined only if stopping actually
+began, so a rejected stop cannot strand a run on a completion signal that will never fire.
+
 `IHostContext.WaitForShutdownAsync` is the public lifecycle observation seam. It completes when
 shutdown is requested or the current lifetime begins stopping, stops, or fails; cancelling one
 wait abandons only that caller and does not signal the host. A later start creates a fresh signal.

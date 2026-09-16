@@ -33,24 +33,6 @@ public sealed class SecretStoreApplication : Host<SecretStoreApplicationContext>
     public override SecretStoreApplicationContext Context => _context;
 
     /// <summary>
-    /// Runs the application until shutdown, including a clean start and stop for an already-cancelled token.
-    /// </summary>
-    /// <param name="cancellationToken">The token that requests application shutdown.</param>
-    /// <returns>A task that completes after the application stops.</returns>
-    /// <exception cref="ObjectDisposedException">The application has been disposed.</exception>
-    public new async Task RunAsync(CancellationToken cancellationToken = default)
-    {
-        if (cancellationToken.IsCancellationRequested)
-        {
-            await ((IHost)this).StartAsync(CancellationToken.None).ConfigureAwait(false);
-            await ((IHost)this).StopAsync(CancellationToken.None).ConfigureAwait(false);
-            return;
-        }
-
-        await base.RunAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
     /// Disposes the host and its owned endpoint service.
     /// </summary>
     /// <param name="disposing">Whether to release managed resources.</param>

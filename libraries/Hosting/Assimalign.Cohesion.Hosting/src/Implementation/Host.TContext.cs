@@ -365,6 +365,8 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     /// This compatibility member and the <see cref="IHost"/> extension share the same run
     /// coordinator. When <see cref="HostContext.Runner"/> is set, both routes delegate the
     /// complete lifetime to that pipeline.
+    /// A token already cancelled at entry starts the host with an uncancelled startup token,
+    /// then immediately drains it with a fresh stop budget. Startup failures still propagate.
     /// </remarks>
     public Task RunAsync(CancellationToken cancellationToken = default)
     {
@@ -401,6 +403,16 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
             throw new InvalidOperationException("The host run handle is no longer active.");
         }
 
+        if (cancellationToken.IsCancellationRequested)
+        {
+            // StartAsyncCore owns Init and arms this run's shutdown callback. Passing None
+            // prevents the linked run signal from being born cancelled before startup.
+            await StartAsyncCore(CancellationToken.None).ConfigureAwait(false);
+            hostRun.Started();
+            await StopRunAsync(hostRun).ConfigureAwait(false);
+            return;
+        }
+
         Init(cancellationToken);
 
         // Capture this run's completion signal locally: a direct StopAsync resets the
@@ -416,15 +428,22 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
 
         await runCompletionSource.Task.ConfigureAwait(false);
 
-        // Stop with a fresh token: the run token is cancelled by definition at this point
-        // (its cancellation IS the shutdown signal), so passing it would pre-cancel the
-        // graceful drain. The stop budget comes from ShutdownTimeout inside StopAsync.
+        await StopRunAsync(hostRun).ConfigureAwait(false);
+    }
+
+    // Stop with a fresh budget and join only an accepted stop: a stop that could not begin
+    // has no completion to await.
+    private async Task StopRunAsync(HostRun<TContext> hostRun)
+    {
         if (!hostRun.HasBegunStopping)
         {
             await (this as IHost).StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
 
-        await hostRun.WaitForStopAsync().ConfigureAwait(false);
+        if (hostRun.HasBegunStopping)
+        {
+            await hostRun.WaitForStopAsync().ConfigureAwait(false);
+        }
     }
 
     internal bool TryShutdown(HostRun<TContext> hostRun, Action? onAccepted)
