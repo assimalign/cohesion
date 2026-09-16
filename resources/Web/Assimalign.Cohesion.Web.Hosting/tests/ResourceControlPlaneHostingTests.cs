@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -95,9 +96,9 @@ public sealed class ResourceControlPlaneHostingTests
     {
         int port = ReservePort();
         Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
-        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint },
-            bootstrapCredential: "pipeline-token"u8.ToArray()));
+        using var identity = new TestBootstrapIdentity("tests", "inprocess");
+        string credential = identity.Issue("web");
+        using IDisposable scope = ResourceRuntime.CreateScope(CreateManagedContext(identity, endpoint, credential));
         RecordingPipeline pipeline = new();
         WebApplicationBuilder builder = WebApplication.CreateBuilder(
             [],
@@ -117,7 +118,7 @@ public sealed class ResourceControlPlaneHostingTests
             pipeline.ExecuteCount.ShouldBe(0);
 
             client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "pipeline-token");
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential);
             using HttpResponseMessage health = await client.GetAsync(
                 "/cohesion/v1/healthz",
                 CancellationToken.None);
@@ -230,9 +231,9 @@ public sealed class ResourceControlPlaneHostingTests
     {
         int port = ReservePort();
         Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
-        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint },
-            bootstrapCredential: "secret-token"u8.ToArray()));
+        using var identity = new TestBootstrapIdentity("tests", "inprocess");
+        string credential = identity.Issue("web");
+        using IDisposable scope = ResourceRuntime.CreateScope(CreateManagedContext(identity, endpoint, credential));
         WebApplicationBuilder builder = WebApplication.CreateBuilder(
             [],
             typeof(ResourceControlPlaneHostingTests).Assembly);
@@ -254,7 +255,7 @@ public sealed class ResourceControlPlaneHostingTests
                 "/cohesion/v1/endpoints",
                 CancellationToken.None);
             client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "secret-token");
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential);
             using HttpResponseMessage accepted = await client.GetAsync(
                 "/cohesion/v1/endpoints",
                 CancellationToken.None);
@@ -264,6 +265,15 @@ public sealed class ResourceControlPlaneHostingTests
             missing.Headers.WwwAuthenticate.ShouldHaveSingleItem().Scheme.ShouldBe("Bearer");
             wrong.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
             accepted.StatusCode.ShouldBe(HttpStatusCode.OK);
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", identity.Issue("another-resource"));
+            using HttpResponseMessage forbidden = await client.GetAsync("/cohesion/v1/endpoints", CancellationToken.None);
+            forbidden.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+            forbidden.Headers.WwwAuthenticate.ShouldBeEmpty();
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential);
+            using HttpResponseMessage stopped = await client.PostAsync("/cohesion/v1/stop", null, CancellationToken.None);
+            stopped.StatusCode.ShouldBe(HttpStatusCode.Accepted);
         }
         finally
         {
@@ -271,38 +281,39 @@ public sealed class ResourceControlPlaneHostingTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Control plane: a managed context without a credential fails closed")]
-    public async Task ControlPlane_WhenManagedContextHasNoCredential_ShouldRejectNamespacedRoutes()
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Build: validates managed trust only with a control-plane listener")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Build_WithManagedContextWithoutTrustKey_ShouldValidateOnlyInstalledTerminal(bool listener)
     {
-        int port = ReservePort();
-        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", port);
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            gatewayName: "inprocess",
-            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }));
-        WebApplicationBuilder builder = WebApplication.CreateBuilder(
-            [],
-            typeof(ResourceControlPlaneHostingTests).Assembly);
-        await using WebApplication application = builder.Build();
+            applicationName: "tests", resourceName: "web", gatewayName: "inprocess",
+            endpoints: listener ? new Dictionary<string, Uri> { ["http"] = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort()) } : null));
+        WebApplicationBuilder builder = WebApplication.CreateBuilder([], typeof(ResourceControlPlaneHostingTests).Assembly);
+        if (listener)
+        {
+            InvalidOperationException error = Should.Throw<InvalidOperationException>(() => builder.Build());
+            error.Message.ShouldBe("A gateway-managed resource requires a public application trust key.");
+        }
+        else
+        {
+            await using WebApplication application = builder.Build();
+            builder.ControlPlane.ShouldNotBeNull();
+        }
+    }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Control plane: unmanaged credential does not enable authentication")]
+    public async Task ControlPlane_WithUnmanagedCredential_ShouldRemainOpen()
+    {
+        Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
+        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }, bootstrapCredential: "unused"u8.ToArray()));
+        await using WebApplication application = WebApplication.CreateBuilder([], typeof(ResourceControlPlaneHostingTests).Assembly).Build();
         await ((IHost)application).StartAsync(CancellationToken.None);
-        try
-        {
-            using var client = new HttpClient { BaseAddress = endpoint };
-            using HttpResponseMessage bareProbe = await client.GetAsync(
-                "/readyz",
-                CancellationToken.None);
-            using HttpResponseMessage namespaced = await client.GetAsync(
-                "/cohesion/v1/endpoints",
-                CancellationToken.None);
-
-            bareProbe.StatusCode.ShouldBe(HttpStatusCode.OK);
-            namespaced.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-            namespaced.Headers.WwwAuthenticate.ShouldHaveSingleItem().Scheme.ShouldBe("Bearer");
-        }
-        finally
-        {
-            await ((IHost)application).StopAsync(CancellationToken.None);
-        }
+        using var client = new HttpClient { BaseAddress = endpoint };
+        using HttpResponseMessage response = await client.GetAsync("/cohesion/v1/endpoints", CancellationToken.None);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        await ((IHost)application).StopAsync(CancellationToken.None);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Control plane: stop route completes a resource RunAsync lifecycle")]
@@ -482,6 +493,13 @@ public sealed class ResourceControlPlaneHostingTests
             await ((IHost)application).StopAsync(CancellationToken.None);
         }
     }
+
+    private static ResourceContext CreateManagedContext(TestBootstrapIdentity identity, Uri endpoint, string token) =>
+        new(applicationName: identity.Issuer, resourceName: "web", environmentName: "Testing",
+            gatewayName: identity.Subject, contentRootPath: null,
+            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint }, mounts: null, settings: null,
+            references: null, bootstrapCredential: Encoding.UTF8.GetBytes(token),
+            applicationTrustKey: identity.PublicKey, ambientValues: null);
 
     private sealed class HealthyContributor(string name) : IHealthContributor
     {

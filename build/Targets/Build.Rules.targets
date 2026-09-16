@@ -19,7 +19,8 @@
 	          integrations may reference each other, but never the exact runtime module.
 
 	        * COHRES002 - The hosting module may reference no library in its own
-	          area except the area root, Assimalign.Cohesion.<Area>. The shared
+	          area except the area root, Assimalign.Cohesion.<Area>, and its own
+	          hosting family (<Area>.Hosting.<Suffix>). The shared
 	          framework (App.<Area>, via Sdk.<Area>) delivers the family to
 	          applications, so the runtime needs no compile-time knowledge of the
 	          features it hosts. Builder verbs ship with their feature package and
@@ -182,7 +183,8 @@
 			                                           AND $([System.String]::Copy('%(Filename)').ToLowerInvariant().StartsWith('$(_CohesionHostingFamilyPrefix.ToLowerInvariant())'))" />
 			<_CohesionHostingFamilyReference Remove="@(_CohesionHostingIsolationExemption)" />
 			<_CohesionSameAreaReference Include="@(_CohesionDirectProjectReference->'%(Filename)')"
-			                            Condition="$([System.String]::Copy('%(Filename)').ToLowerInvariant().StartsWith('$(_CohesionAreaPrefixLower)'))" />
+			                            Condition="$([System.String]::Copy('%(Filename)').ToLowerInvariant().StartsWith('$(_CohesionAreaPrefixLower)'))
+			                                       AND !$([System.String]::Copy('%(Filename)').ToLowerInvariant().StartsWith('$(_CohesionHostingFamilyPrefix.ToLowerInvariant())'))" />
 			<_CohesionSameAreaReference Remove="@(_CohesionHostingIsolationExemption)" />
 		</ItemGroup>
 
@@ -196,7 +198,7 @@
 
 		<Error Condition="'@(_CohesionSameAreaReference)' != '' AND '$(MSBuildProjectName)' == '$(_CohesionAreaHostingProject)'"
 		       Code="COHRES002"
-		       Text="Resource hosting-isolation rule: '$(_CohesionAreaHostingProject)' directly references same-area librar(ies) '@(_CohesionSameAreaReference)'. The hosting module may reference only the area root '$(_CohesionAreaRootProject)' - the shared framework delivers the feature family to applications; ship builder verbs with their feature package instead. If a direct reference is a sanctioned exception (deviation protocol, user-approved), add the assembly to the CohesionHostingIsolationExemptions property in this project. See .claude/rules/resource-areas.md." />
+		       Text="Resource hosting-isolation rule: '$(_CohesionAreaHostingProject)' directly references same-area librar(ies) '@(_CohesionSameAreaReference)'. The hosting module may reference only the area root '$(_CohesionAreaRootProject)' and its own hosting family '$(_CohesionHostingFamilyPrefix)&lt;Suffix&gt;' - the shared framework delivers the feature family to applications; ship builder verbs with their feature package instead. If a direct reference is a sanctioned exception (deviation protocol, user-approved), add the assembly to the CohesionHostingIsolationExemptions property in this project. See .claude/rules/resource-areas.md." />
 	</Target>
 
 	<!-- Project-reference graph layer for COHAM001, COHRES003, and COHRES004. In a normal

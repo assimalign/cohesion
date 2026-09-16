@@ -57,7 +57,7 @@ public sealed class WebApplicationProgramTestFactoryTests
 
         payload.ShouldBe(
             "first-host|Testing|alpha|forwarded|mounted|" +
-            "cohesion-db://127.0.0.1:15740|dGVzdC10b2tlbg==");
+            "cohesion-db://127.0.0.1:15740|" + Convert.ToBase64String(context.BootstrapCredential.Span));
         authorization.ShouldBe("none");
         readiness.StatusCode.ShouldBe(HttpStatusCode.OK);
         namespacedReadiness.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
@@ -99,10 +99,10 @@ public sealed class WebApplicationProgramTestFactoryTests
 
         payloads[0].ShouldBe(
             "first-host|Testing|alpha|one|mounted|" +
-            "cohesion-db://127.0.0.1:15740|dGVzdC10b2tlbg==");
+            "cohesion-db://127.0.0.1:15740|" + Convert.ToBase64String(firstContext.BootstrapCredential.Span));
         payloads[1].ShouldBe(
             "second-host|Testing|beta|two|mounted|" +
-            "cohesion-db://127.0.0.1:15740|dGVzdC10b2tlbg==");
+            "cohesion-db://127.0.0.1:15740|" + Convert.ToBase64String(secondContext.BootstrapCredential.Span));
         first.ResourceContext.Endpoints["http"].ShouldBe(firstEndpoint);
         second.ResourceContext.Endpoints["http"].ShouldBe(secondEndpoint);
     }
@@ -122,6 +122,7 @@ public sealed class WebApplicationProgramTestFactoryTests
         Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
         var context = new ResourceContext(
             gatewayName: "inprocess",
+            contentRootPath: null,
             endpoints: new Dictionary<string, Uri> { ["http"] = endpoint });
 
         ArgumentException exception = Should.Throw<ArgumentException>(
@@ -222,10 +223,12 @@ public sealed class WebApplicationProgramTestFactoryTests
         string marker,
         out Uri endpoint)
     {
+        using var identity = new TestBootstrapIdentity("tests", "inprocess");
         endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
         return new ResourceContext(
             applicationName: "tests",
             resourceName: resourceName,
+            contentRootPath: null,
             environmentName: "Testing",
             gatewayName: "inprocess",
             endpoints: new Dictionary<string, Uri> { ["http"] = endpoint },
@@ -241,7 +244,9 @@ public sealed class WebApplicationProgramTestFactoryTests
                     "127.0.0.1",
                     15740),
             },
-            bootstrapCredential: "test-token"u8.ToArray());
+            bootstrapCredential: Encoding.UTF8.GetBytes(identity.Issue(resourceName)),
+            applicationTrustKey: identity.PublicKey,
+            ambientValues: null);
     }
 
     private static int ReservePort()

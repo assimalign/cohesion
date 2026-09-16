@@ -174,9 +174,13 @@ public sealed class ResourceControlPlaneHostingTests
         // Arrange
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
+        using var identity = new TestBootstrapIdentity("tests", "local");
+        string credential = identity.Issue("database");
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint },
-            bootstrapCredential: Encoding.UTF8.GetBytes("database-bootstrap")));
+            applicationName: "tests", resourceName: "database", environmentName: "Testing", gatewayName: "local",
+            contentRootPath: null, endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint },
+            mounts: null, settings: null, references: null, bootstrapCredential: Encoding.UTF8.GetBytes(credential),
+            applicationTrustKey: identity.PublicKey, ambientValues: null));
         DatabaseApplicationBuilder builder = new(
             new DatabaseApplicationOptions(),
             typeof(ResourceControlPlaneHostingTests).Assembly);
@@ -198,7 +202,7 @@ public sealed class ResourceControlPlaneHostingTests
                 "/cohesion/v1/endpoints");
             authenticatedRequest.Headers.TryAddWithoutValidation(
                 "Authorization",
-                "Bearer database-bootstrap");
+                "Bearer " + credential);
             using HttpResponseMessage authenticated = await client.SendAsync(
                 authenticatedRequest,
                 cancellation.Token);
@@ -209,6 +213,17 @@ public sealed class ResourceControlPlaneHostingTests
             anonymous.Headers.WwwAuthenticate.ShouldContain(
                 value => value.Scheme == "Bearer");
             authenticated.StatusCode.ShouldBe(HttpStatusCode.OK);
+            using HttpResponseMessage namespacedProbe = await client.GetAsync("/cohesion/v1/readyz", cancellation.Token);
+            namespacedProbe.StatusCode.ShouldBe(HttpStatusCode.OK);
+            using HttpResponseMessage unknown = await client.GetAsync("/cohesion/v1/unknown", cancellation.Token);
+            unknown.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", identity.Issue("other"));
+            using HttpResponseMessage forbidden = await client.GetAsync("/cohesion/v1/endpoints", cancellation.Token);
+            forbidden.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+            forbidden.Headers.WwwAuthenticate.ShouldBeEmpty();
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential);
+            using HttpResponseMessage stopped = await client.PostAsync("/cohesion/v1/stop", null, cancellation.Token);
+            stopped.StatusCode.ShouldBe(HttpStatusCode.Accepted);
         }
         finally
         {
@@ -216,35 +231,41 @@ public sealed class ResourceControlPlaneHostingTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Control plane: gateway invocation without a bootstrap credential fails closed")]
-    public async Task ControlPlane_WithGatewayAndNoBootstrapCredential_ShouldRejectNamespacedRoutes()
+    [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Build: validates managed trust only with an admin listener")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Build_WithManagedContextWithoutTrustKey_ShouldValidateOnlyInstalledTerminal(bool listener)
+    {
+        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
+            applicationName: "tests", resourceName: "database", gatewayName: "local",
+            endpoints: listener ? new Dictionary<string, Uri> { ["admin"] = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort()) } : null));
+        DatabaseApplicationBuilder builder = new(new DatabaseApplicationOptions(), typeof(ResourceControlPlaneHostingTests).Assembly);
+        if (listener)
+        {
+            InvalidOperationException error = Should.Throw<InvalidOperationException>(() => builder.Build());
+            error.Message.ShouldBe("A gateway-managed resource requires a public application trust key.");
+        }
+        else
+        {
+            await using DatabaseApplication application = builder.Build();
+            builder.ControlPlane.ShouldNotBeNull();
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Control plane: unmanaged credential does not enable authentication")]
+    public async Task ControlPlane_WithUnmanagedCredential_ShouldRemainOpen()
     {
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         Uri endpoint = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort());
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            gatewayName: "local",
-            endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint }));
-        DatabaseApplicationBuilder builder = new(
-            new DatabaseApplicationOptions(),
-            typeof(ResourceControlPlaneHostingTests).Assembly);
+            endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint }, bootstrapCredential: "unused"u8.ToArray()));
+        DatabaseApplicationBuilder builder = new(new DatabaseApplicationOptions(), typeof(ResourceControlPlaneHostingTests).Assembly);
         await using DatabaseApplication application = builder.Build();
-        using var client = new HttpClient { BaseAddress = endpoint };
-
         await ((IHost)application).StartAsync(cancellation.Token);
-        try
-        {
-            using HttpResponseMessage bare = await client.GetAsync("/readyz", cancellation.Token);
-            using HttpResponseMessage namespaced = await client.GetAsync(
-                "/cohesion/v1/endpoints",
-                cancellation.Token);
-
-            bare.StatusCode.ShouldBe(HttpStatusCode.OK);
-            namespaced.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-        }
-        finally
-        {
-            await ((IHost)application).StopAsync(cancellation.Token);
-        }
+        using var client = new HttpClient { BaseAddress = endpoint };
+        using HttpResponseMessage response = await WaitForResponseAsync(client, "/cohesion/v1/endpoints", cancellation.Token);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        await ((IHost)application).StopAsync(CancellationToken.None);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - CreateBuilder(): remains a plain application")]

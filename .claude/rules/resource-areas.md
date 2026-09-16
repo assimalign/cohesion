@@ -17,7 +17,7 @@ composition root that integrates DI, configuration, logging, and transports.
 > assemblies; an exemption for the runtime does not waive the rest of the hosting family.
 >
 > **COHRES002** — The hosting module may reference no library in its own area except the area
-> root, `Assimalign.Cohesion.<Area>`. The shared framework (`App.<Area>`, via `Sdk.<Area>`)
+> root, `Assimalign.Cohesion.<Area>`, and its own hosting family (`<Area>.Hosting.<Suffix>`). The shared framework (`App.<Area>`, via `Sdk.<Area>`)
 > delivers the family to applications, so the runtime needs no compile-time knowledge of the
 > features it hosts. Builder verbs ship with their feature package and compose against the area
 > root's abstractions.
@@ -67,7 +67,8 @@ projects outside `resources/` are untouched). Violations fail the build:
   transitive) and the resolved assembly closure after `ResolveAssemblyReferences` (which also
   catches `<Reference>`+`HintPath` and package-delivered DLLs). Exact-module and hosting-family
   candidates are checked separately, with exact assembly-name exemptions applied to each.
-- `COHRES002` constrains the hosting module's **direct** references only: same-area assemblies
+- `COHRES002` constrains the hosting module's **direct** references only, excluding its own
+  hosting-family prefix from that set: same-area assemblies
   legitimately arrive in its resolved closure transitively through the sanctioned area-root
   reference (e.g. `Assimalign.Cohesion.Database` aggregates its child roots — `Database.Types`/
   `Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`/`Governance` — so
@@ -172,7 +173,8 @@ sole explicit exemption holder.
   `Web.Hosting.Resources` and `Web.Hosting.Health`. These libraries may reference the
   base Hosting library and siblings, the area root, features, other hosting-family
   integrations, and other areas' packages. They may never reference their own exact
-  `<Area>.Hosting` module; roots and features may not reference them.
+  `<Area>.Hosting` module; roots and features may not reference them. The exact
+  `<Area>.Hosting` module may consume them; they may never reference it (COHRES001).
 - **The application builder seam:** the area root provides `I<Area>ApplicationBuilder` (and the
   `I<Area>Application` it builds); the hosting module implements them and exposes the creation
   entry point (`<Area>Application.CreateBuilder(string[] args)` — every resource is a `Program.cs` executable;
@@ -194,12 +196,12 @@ sole explicit exemption holder.
   is expected to be the same in every area (O34).
   In every area, `CreateBuilder` returns the public concrete builder, and its `Build()`
   returns the public concrete `Host<TContext>` application (Web, Database, and all 16 fillers).
-- `Assimalign.Cohesion.<Area>.Hosting` — the runtime module, referencing only the area root and
-  non-area infrastructure. Roots and feature libraries reference no
+- `Assimalign.Cohesion.<Area>.Hosting` — the runtime module, referencing the area root, its own hosting
+  family and non-area infrastructure. Roots and feature libraries reference no
   `Assimalign.Cohesion.Hosting*` library. Enabled-resource implementations consume the plain lifecycle host,
   `Assimalign.Cohesion.Hosting.Resources`, and `Assimalign.Cohesion.Hosting.Health` without
   referencing their area's ApplicationModel package. **If the hosting module ever appears to need a same-area dependency
-  beyond the root, that is an architecture revisit — surface it to the user — not a case for
+  beyond the root and its own hosting family, that is an architecture revisit — surface it to the user — not a case for
   the exemption property or for pushing the dependency's types into the root.**
 - `Assimalign.Cohesion.<Area>.ApplicationModel` — the AOT-compatible, dependency-guarded declarative plane: a
   manifest-backed typed resource, platform-neutral planner, `Add<Area>(...)` graph verbs, and the

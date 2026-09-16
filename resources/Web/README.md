@@ -13,8 +13,9 @@ The hosting family follows O34 (owner decision, 2026-09-15):
 > (COHRES004) or Web hosting-family integration (COHRES001).**
 > `Web.Hosting.Resources` and `Web.Hosting.Health` integrate the shared Hosting libraries.
 > They may reference Web features and each other, but never the exact `Web.Hosting`
-> runtime module. The module references only the Web root within its own area (COHRES002).
-> `Web.Testing` retains its exact-module exemption; `Web.ApplicationModel` retains its
+> runtime module. The module may reference the Web root and its own hosting family
+> (`Web.Hosting.Resources`, `Web.Hosting.Health`) within its area (COHRES002).
+> `Web.Testing` exempts `Web.Hosting` and `Web.Hosting.Resources` to drive the runtime and its control plane; `Web.ApplicationModel` retains its
 > COHAM001-fenced `Hosting.Resources` reference.
 
 Why the rule exists:
@@ -38,7 +39,7 @@ instance of the repo-wide *resource hosting-isolation rule* in
 `resources/<Area>/` ships one `Assimalign.Cohesion.<Area>.Hosting`, no library in the area may
 reference it (`COHRES001`, checked against both the project-reference graph and the resolved
 assembly closure), and the hosting module may directly reference no same-area library except the
-area root (`COHRES002`). A project with a sanctioned, user-approved exception opts out
+area root and its own hosting family (`COHRES002`). A project with a sanctioned, user-approved exception opts out
 per-assembly via the `CohesionHostingIsolationExemptions` property in its own csproj —
 `Web.Testing` declares the standing exemption this way. Test, example, and sample projects are
 exempt — the rule constrains shipped libraries, not harnesses — and every Web project builds in
@@ -64,12 +65,28 @@ A new `Assimalign.Cohesion.Web.<Feature>` or `Web.Hosting.<Suffix>` project is n
 5. **Docs** — `docs/OVERVIEW.md` + `docs/DESIGN.md` (plus `docs/Assembly/` as the public API
    stabilizes), and a row in the project map below.
 
+The runtime consumes the root and its hosting family; feature libraries remain rooted in Web. Arrows show references.
+
+```mermaid
+flowchart LR
+    Host["Web.Hosting"] --> Root["Web"]
+    Host --> Resources["Web.Hosting.Resources"]
+    Resources --> Root
+    Resources --> HR["Hosting.Resources"]
+    Resources --> HH["Hosting.Health"]
+    Resources --> JWT["IdentityModel.Token.JsonWebToken"]
+    Adapter["Web.Hosting.Health"] --> Health["Web.Health"]
+    Adapter --> HH
+    Health --> Root
+    Feature["Web feature libraries"] --> Root
+```
+
 ## Project map
 
 | Project | Role |
 | --- | --- |
 | `Assimalign.Cohesion.Web` | The root: pipeline and composition abstractions (`IWebApplication*`, `WebApplicationMiddleware`) every library builds against |
-| `Assimalign.Cohesion.Web.Hosting.Resources` | Resource control-plane routes for private listeners, ES256 bootstrap verification, and protocol parity with the Web runtime |
+| `Assimalign.Cohesion.Web.Hosting.Resources` | Single resource control-plane terminal, ES256 bootstrap verification, and deferred stop; consumed by `Web.Hosting` and `Database.Hosting` (O35) |
 | `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, server, concrete-builder `AddService`, builder-time DI/config/logging composition |
 | `Assimalign.Cohesion.Web.Hosting.Health` | Adapts `Hosting.Health` contributors onto the `Web.Health` builder; no production consumer in this slice |
 | `Assimalign.Cohesion.Web.Routing` | Router, route patterns/constraints, endpoint metadata bag, link generation |

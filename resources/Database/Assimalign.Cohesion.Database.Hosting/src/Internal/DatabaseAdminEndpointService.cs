@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -18,10 +16,9 @@ using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Health;
 using Assimalign.Cohesion.Web.Hosting;
-using Assimalign.Cohesion.Web.Hosting.Internal;
+using Assimalign.Cohesion.Web.Hosting.Resources;
 
 using HostingHealthStatus = Assimalign.Cohesion.Hosting.Health.HealthStatus;
-using CohesionHttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
@@ -34,13 +31,13 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
     internal DatabaseAdminEndpointService(
         Uri endpoint,
         IResourceControlPlane controlPlane,
-        ReadOnlyMemory<byte> bootstrapCredential,
-        bool requireAuthentication,
+        ResourceContext resourceContext,
         DatabaseApplicationContext applicationContext,
         IReadOnlyList<IHealthContributor> healthContributors)
     {
         Uri.ThrowIfNotEndpoint(endpoint);
         ArgumentNullException.ThrowIfNull(controlPlane);
+        ArgumentNullException.ThrowIfNull(resourceContext);
         ArgumentNullException.ThrowIfNull(applicationContext);
         ArgumentNullException.ThrowIfNull(healthContributors);
 
@@ -75,21 +72,6 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
         IHealthCheckService health = CreateHealthService(
             applicationContext,
             healthContributors);
-        ReadOnlyMemory<byte> credential = bootstrapCredential.ToArray();
-        pipeline.Use(async (context, next) =>
-        {
-            if (context.Request.Path.Value.StartsWith(
-                    "/cohesion/v1",
-                    StringComparison.Ordinal) &&
-                !IsAuthorized(context, credential.Span, requireAuthentication))
-            {
-                context.Response.StatusCode = CohesionHttpStatusCode.Unauthorized;
-                context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer";
-                return;
-            }
-
-            await next.Invoke(context).ConfigureAwait(false);
-        });
         pipeline.MapHealthChecks(
             new HttpPath("/healthz"),
             health);
@@ -100,17 +82,8 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
             health);
         pipeline.MapReadinessCheck(health, new HttpPath("/cohesion/v1/readyz"));
         pipeline.MapLivenessCheck(health, new HttpPath("/cohesion/v1/livez"));
-        pipeline.Use(next => context =>
-        {
-            string path = context.Request.Path.Value;
-            return path is "/cohesion/v1/endpoints" or "/cohesion/v1/stop" or "/cohesion/v1/commands"
-                ? ResourceControlPlaneMiddleware.InvokeAsync(
-                    controlPlane,
-                    endpoint.Port,
-                    context,
-                    next)
-                : next.Invoke(context);
-        });
+        pipeline.Use(next => context => ResourceControlPlaneMiddleware.InvokeAsync(
+            controlPlane, resourceContext, isApplicationReady: true, endpoint.Port, context, next));
     }
 
     public new void Dispose()
@@ -209,35 +182,5 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
             ? address
             : throw new InvalidOperationException(
                 $"The ambient Database admin endpoint host '{host}' is not a bindable IP address.");
-    }
-
-    private static bool IsAuthorized(
-        IHttpContext context,
-        ReadOnlySpan<byte> bootstrapCredential,
-        bool requireAuthentication)
-    {
-        if (bootstrapCredential.IsEmpty)
-        {
-            return !requireAuthentication;
-        }
-
-        if (!context.Request.Headers.TryGetValue(
-                HttpHeaderKey.Authorization,
-                out HttpHeaderValue authorization))
-        {
-            return false;
-        }
-
-        const string bearerPrefix = "Bearer ";
-        string value = authorization.Value;
-        if (!value.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        byte[] presentedCredential = Encoding.UTF8.GetBytes(value[bearerPrefix.Length..]);
-        return CryptographicOperations.FixedTimeEquals(
-            presentedCredential,
-            bootstrapCredential);
     }
 }

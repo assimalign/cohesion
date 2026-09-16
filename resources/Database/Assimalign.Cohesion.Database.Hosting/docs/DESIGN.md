@@ -17,8 +17,20 @@ unconditionally). Its same-area references remain the area root only. The
 non-area plain `Hosting` package supplies lifecycle, `Hosting.Resources` supplies the
 opt-in resource runtime/control-plane contracts, and `Hosting.Health` supplies health
 contribution contracts, while
-private cross-area `Web.Hosting` and `Web.Health` references implement the
+private cross-area `Web.Hosting`, `Web.Hosting.Resources`, and `Web.Health` references implement the
 enabled resource's HTTP admin surface without exposing Web types publicly.
+
+The admin surface uses private Web implementation references while Database exposes only its own area contracts.
+
+```mermaid
+flowchart LR
+    DbHost["Database.Hosting"] --> Db["Database"]
+    DbHost --> WebHost["Web.Hosting"]
+    DbHost --> Terminal["Web.Hosting.Resources"]
+    DbHost --> Health["Web.Health"]
+    WebHost --> Web["Web"]
+    Terminal --> Web
+```
 
 ## Execution model
 
@@ -200,16 +212,24 @@ engine state and full worker name/kind/cadence inventory.
 
 `Build()` also observes every ambient endpoint, attaches the database host for
 graceful stop, and starts a private Web host on the ambient `admin` address.
-`Web.Health` maps `/healthz`, `/readyz`, and `/livez`. The exact Web.Hosting
-control-plane middleware handles `/cohesion/v1/endpoints`,
-`/cohesion/v1/stop`, and `/cohesion/v1/commands`; the accepted Database command
+`Web.Health` maps `/healthz`, `/readyz`, and `/livez` plus their namespaced aliases.
+The single `Web.Hosting.Resources` terminal runs after those maps and handles the remaining
+`/cohesion/v1/*` namespace, including endpoints, stop, commands, and unknown routes; the accepted Database command
 kinds are registered through runtime-owned handlers. Readiness has a dedicated outer-host gate:
 the admin listener may report startup progress while servers bind, but `/readyz`
 cannot become healthy until every server has confirmed accept and the Database host
-is `Started`; `/livez` remains process-oriented. Every `/cohesion/v1/*` request
-requires the ambient bootstrap bearer credential for a gateway-scoped invocation
-and fails closed when that credential is absent; bare health/probe routes remain
-unauthenticated for platform probes. A plain application created with the
+is `Started`; `/livez` remains process-oriented. Gateway-managed namespaced requests
+reaching the terminal require an ES256 bootstrap JWT (application issuer, gateway subject,
+resource audience, kid, signature, required claims, and lifetime at most 24 hours). Missing
+or invalid tokens return 401 with Bearer; a valid wrong-audience token returns 403 without
+a challenge. Build validates the managed identity and P-256 trust key only when the admin
+listener is installed. A managed resource without that listener still builds.
+
+The six mapped probes retain the database.accepting readiness gate and run before the terminal.
+Thus the three namespaced probes are unauthenticated aliases of the already-public bare probes;
+Web and filler hosts authenticate their namespaced probes. All other namespaced routes use the
+terminal as sole authorizer. No gateway name means no authentication, even with an ambient
+credential. Stop is deferred until the 202 response has been written by the default Web server. A plain application created with the
 no-argument or options overload receives none of this behavior.
 
 The private Web references are the sanctioned cross-area implementation seam;

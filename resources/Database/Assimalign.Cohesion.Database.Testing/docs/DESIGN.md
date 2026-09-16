@@ -125,3 +125,10 @@ it does not depend on an application-export API. Coverage asserts:
   and provisioning, and their dedicated work items own compilation.
 - Replacing real-process gateway tests. The in-process factory gives fast resource tests;
   the sample E2E independently validates the SDK manifest and process carrier.
+
+## Bootstrap identity (O35)
+
+Default program factories issue an ephemeral ES256 JWT with issuer `tests`, subject `inprocess`,
+and the program assembly name as audience. The ambient context carries the token and its public
+P-256 trust JWK. Internal stop requests send that JWT as Bearer; public clients remain uncredentialed.
+Custom managed contexts must supply a matching JWT and public trust key.

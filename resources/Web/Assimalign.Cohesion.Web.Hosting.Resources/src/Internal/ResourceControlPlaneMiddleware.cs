@@ -17,7 +17,10 @@ using Assimalign.Cohesion.Http;
 
 namespace Assimalign.Cohesion.Web.Hosting.Resources;
 
-internal static class ResourceControlPlaneMiddleware
+/// <summary>Composes the resource management and probe protocol into a Web pipeline.</summary>
+// Deviates from the repo interface-first rule per O35: hosts need one static composition
+// entry shared with UseResourceControlPlane, without a runtime-module dependency.
+public static class ResourceControlPlaneMiddleware
 {
     private const string HealthJsonContentType = "application/health+json; charset=utf-8";
     private const string HealthPath = "/healthz";
@@ -31,13 +34,38 @@ internal static class ResourceControlPlaneMiddleware
     private const string CommandsPath = "/cohesion/v1/commands";
     private const string HostReadinessContributionName = "cohesion.host";
 
-    internal static async Task InvokeAsync(
+    /// <summary>Serves a control-plane route or forwards the request to the next middleware.</summary>
+    /// <param name="controlPlane">The resource's registered control plane.</param>
+    /// <param name="resourceContext">The ambient resource identity and application trust key.</param>
+    /// <param name="isApplicationReady">Whether the owning application has completed startup.</param>
+    /// <param name="controlPlanePort">The listener port to serve, or null to serve on every listener.</param>
+    /// <param name="context">The current HTTP exchange.</param>
+    /// <param name="next">The middleware to invoke for other routes or listener ports.</param>
+    /// <returns>A task representing request handling.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <remarks>
+    /// Call <see cref="Validate"/> during composition. A non-null port gates every protocol path,
+    /// including bare probes. Stop is deferred until response completion when the server supplies
+    /// <see cref="IWebResponseCompletionFeature"/>; custom servers without it use direct stop.
+    /// </remarks>
+    public static async Task InvokeAsync(
         IResourceControlPlane controlPlane,
         ResourceContext resourceContext,
         bool isApplicationReady,
+        int? controlPlanePort,
         IHttpContext context,
         WebApplicationMiddleware next)
     {
+        ArgumentNullException.ThrowIfNull(controlPlane);
+        ArgumentNullException.ThrowIfNull(resourceContext);
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(next);
+        if (controlPlanePort is int port && context.ConnectionInfo.LocalPort != port)
+        {
+            await next.Invoke(context).ConfigureAwait(false);
+            return;
+        }
+
         string path = context.Request.Path.Value;
         bool isRead = context.Request.Method == HttpMethod.Get || context.Request.Method == HttpMethod.Head;
 
@@ -133,9 +161,18 @@ internal static class ResourceControlPlaneMiddleware
                 return;
             }
 
-            // Web.Hosting's response-completion feature is internal. Use the same direct-stop
-            // fallback as its terminal until a public completion seam is available.
-            await controlPlane.RequestStopAsync(context.RequestCancelled).ConfigureAwait(false);
+            IWebResponseCompletionFeature? responseCompletion =
+                context.Features.Get<IWebResponseCompletionFeature>();
+            if (responseCompletion is not null)
+            {
+                responseCompletion.Register(() => controlPlane.RequestStopAsync(CancellationToken.None));
+            }
+            else
+            {
+                // A custom server may omit the completion feature. Preserve direct-stop
+                // behavior there; the default server defers until the acknowledgement is sent.
+                await controlPlane.RequestStopAsync(context.RequestCancelled).ConfigureAwait(false);
+            }
             context.Response.StatusCode = HttpStatusCode.Accepted;
             return;
         }
@@ -189,6 +226,24 @@ internal static class ResourceControlPlaneMiddleware
         }
 
         await next.Invoke(context).ConfigureAwait(false);
+    }
+
+    /// <summary>Validates the identity required by a gateway-managed resource during composition.</summary>
+    /// <param name="resourceContext">The resource identity and public application trust key.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="resourceContext"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">A managed resource lacks a resource name, application identity, or valid EC P-256 public trust key.</exception>
+    /// <remarks>Standalone resources with no gateway identity require no bootstrap validation.</remarks>
+    public static void Validate(ResourceContext resourceContext)
+    {
+        ArgumentNullException.ThrowIfNull(resourceContext);
+        if (resourceContext.GatewayName is not null)
+        {
+            if (string.IsNullOrWhiteSpace(resourceContext.ResourceName))
+            {
+                throw new InvalidOperationException("A gateway-managed resource requires an ambient resource name.");
+            }
+            using var verifier = new BootstrapTokenVerifier(resourceContext);
+        }
     }
 
     private static ResourceHealthReport MarkHostAsStarting(ResourceHealthReport report)

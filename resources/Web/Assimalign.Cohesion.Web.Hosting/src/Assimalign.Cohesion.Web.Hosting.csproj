@@ -1,11 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<!-- Web-area dependency rule: the hosting/runtime module references only the root
-	     Assimalign.Cohesion.Web project and non-Web-area libraries. Feature libraries
+	     Assimalign.Cohesion.Web project, its own hosting family (O35), and non-Web-area libraries. Feature libraries
 	     (authentication, routing, results, ...) are NEVER referenced here - the App.Web
 	     shared framework delivers them to applications, and their builder verbs ship in
 	     their own packages. See resources/Web/README.md. -->
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />

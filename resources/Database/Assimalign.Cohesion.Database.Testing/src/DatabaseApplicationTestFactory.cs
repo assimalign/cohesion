@@ -7,7 +7,6 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Reflection;
-using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -511,7 +510,8 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
         };
 
         string resourceName = programType.Assembly.GetName().Name ?? programType.Name;
-        string bootstrapCredential = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        using var identity = new TestBootstrapIdentity("tests", "inprocess");
+        string bootstrapCredential = identity.Issue(resourceName);
         return (
             new ResourceContext(
                 applicationName: "tests",
@@ -521,7 +521,11 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
                 contentRootPath: AppContext.BaseDirectory,
                 endpoints: endpoints,
                 mounts: mounts,
-                bootstrapCredential: Encoding.UTF8.GetBytes(bootstrapCredential)),
+                settings: null,
+                references: null,
+                bootstrapCredential: Encoding.UTF8.GetBytes(bootstrapCredential),
+                applicationTrustKey: identity.PublicKey,
+                ambientValues: null),
             dataPath);
     }
 

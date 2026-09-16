@@ -13,6 +13,7 @@ public static class WebApplicationExtensions
         /// <param name="controlPlane">The resource's registered control plane.</param>
         /// <param name="resourceContext">The ambient resource identity, endpoints, and application trust key.</param>
         /// <param name="isApplicationReady">Reports whether the owning resource host has completed startup.</param>
+        /// <param name="controlPlanePort">An optional listener-port gate for every route, including bare probes; null serves every listener.</param>
         /// <returns>The same pipeline builder.</returns>
         /// <exception cref="ArgumentNullException">A required argument is null.</exception>
         /// <exception cref="InvalidOperationException">A managed resource lacks a valid identity or public trust key.</exception>
@@ -20,23 +21,17 @@ public static class WebApplicationExtensions
         public IWebApplicationPipelineBuilder UseResourceControlPlane(
             IResourceControlPlane controlPlane,
             ResourceContext resourceContext,
-            Func<bool> isApplicationReady)
+            Func<bool> isApplicationReady,
+            int? controlPlanePort = null)
         {
             ArgumentNullException.ThrowIfNull(builder);
             ArgumentNullException.ThrowIfNull(controlPlane);
             ArgumentNullException.ThrowIfNull(resourceContext);
             ArgumentNullException.ThrowIfNull(isApplicationReady);
-            if (resourceContext.GatewayName is not null)
-            {
-                if (string.IsNullOrWhiteSpace(resourceContext.ResourceName))
-                {
-                    throw new InvalidOperationException("A gateway-managed resource requires an ambient resource name.");
-                }
-                using var verifier = new BootstrapTokenVerifier(resourceContext);
-            }
+            ResourceControlPlaneMiddleware.Validate(resourceContext);
 
             return builder.Use(next => context => ResourceControlPlaneMiddleware.InvokeAsync(
-                controlPlane, resourceContext, isApplicationReady(), context, next));
+                controlPlane, resourceContext, isApplicationReady(), controlPlanePort, context, next));
         }
     }
 }

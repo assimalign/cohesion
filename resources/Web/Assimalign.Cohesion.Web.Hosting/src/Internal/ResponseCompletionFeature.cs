@@ -2,26 +2,24 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Http;
-
 namespace Assimalign.Cohesion.Web.Hosting.Internal;
 
 /// <summary>
 /// Carries work that must run only after the current response has been written to its transport.
 /// </summary>
 /// <remarks>
-/// The feature is private to Web.Hosting and installed per exchange by
+/// The implementation is private to Web.Hosting and installed per exchange by
 /// <see cref="WebApplicationServer"/>. Keeping the callbacks on the exchange lets terminal
 /// middleware defer host-lifetime signals without coupling the HTTP transport to Hosting.
 /// </remarks>
-internal sealed class ResponseCompletionFeature : IHttpFeature
+internal sealed class ResponseCompletionFeature : IWebResponseCompletionFeature
 {
     private readonly List<Func<ValueTask>> _callbacks = new();
     private bool _isCompleted;
 
     public string Name => nameof(ResponseCompletionFeature);
 
-    internal void Register(Func<ValueTask> callback)
+    public void Register(Func<ValueTask> callback)
     {
         ArgumentNullException.ThrowIfNull(callback);
 

@@ -7,7 +7,8 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 ## The dependency rule (build-enforced)
 
 > **`Assimalign.Cohesion.Web.Hosting` is the runtime module — no Web-area library may reference
-> it, and it may reference no Web-area library except the root `Assimalign.Cohesion.Web`.**
+> it, and it may reference no Web-area library except the root `Assimalign.Cohesion.Web`
+> and its own hosting family (`Web.Hosting.Resources`, `Web.Hosting.Health`).**
 
 - A Web feature library (`Assimalign.Cohesion.Web.<Feature>`) may reference: the root
   `Assimalign.Cohesion.Web`, **other Web feature libraries**, and anything outside the Web area
@@ -20,19 +21,20 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 - The hosting family includes `Web.Hosting.Resources` and `Web.Hosting.Health`, integrating
   the corresponding shared `Hosting.*` libraries. These may reference the Web root,
   feature libraries, other hosting-family integrations, and other areas' packages, but
-  never the exact `Web.Hosting` module. Roots and features may not reference the hosting
+  never the exact `Web.Hosting` module. The exact module may consume its own hosting family
+  under COHRES002. Roots and features may not reference the hosting
   family (COHRES001) or shared Hosting libraries (COHRES004).
 - **Never reference a Web feature library from `Web.Hosting`.** Applications get the whole family
   through the `App.Web` shared framework (via `Sdk.Web`), so the runtime needs no compile-time
   knowledge of the features it hosts.
-- Sole sanctioned exception: `Assimalign.Cohesion.Web.Testing → Web.Hosting` (the test factory
-  drives the concrete runtime), declared via `CohesionHostingIsolationExemptions` in its own
+- Sole sanctioned exception: `Assimalign.Cohesion.Web.Testing → Web.Hosting` and
+  `Web.Hosting.Resources` (the test factory drives the concrete runtime and its control plane), declared via `CohesionHostingIsolationExemptions` in its own
   csproj. Do not add others without the deviation protocol (`deviations.md`) — see
   `resource-areas.md` for the opt-out mechanism.
 
 **Enforcement:** this is the Web instance of the repo-wide **resource hosting-isolation rule** —
 see `resource-areas.md` for the general rule, the `COHRES001`/`COHRES002`/`COHRES004` build errors, the
-two-layer check semantics, and the per-project `CohesionHostingIsolationExemptions` opt-out
+two-layer check semantics, COHRES002 own-hosting-family exclusion, and the per-project `CohesionHostingIsolationExemptions` opt-out
 (deviation protocol required; `Web.Testing` is the standing exemption, declared in its own
 csproj). Every Web project is in the `.github/workflows/resource-web.yml` matrix so the guard
 executes in CI.

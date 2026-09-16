@@ -59,6 +59,12 @@ drains before application services stop. This ordering holds regardless of wheth
 
 ## Server lifecycle contract
 
+`IWebResponseCompletionFeature` is the response-transmission seam beside
+`IWebApplicationServer`. The default server installs it on every exchange and invokes callbacks
+in registration order after writing the response to the transport. Registration after completion
+throws `InvalidOperationException`. Custom servers may omit it; middleware must handle a missing
+feature. This lets a terminal defer lifecycle signals until its acknowledgement has been sent.
+
 `IWebApplicationServer.StartAsync` is the endpoint-acquisition boundary: it does not
 complete until every listener is bound and ready to accept. Binding failures propagate
 through startup instead of surfacing later from an accept loop. `StopAsync` is the

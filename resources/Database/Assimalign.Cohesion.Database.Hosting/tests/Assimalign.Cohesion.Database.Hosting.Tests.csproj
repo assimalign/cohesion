@@ -9,6 +9,7 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 		<!-- Composition acceptance: the host runs a real SQL engine fronted by the

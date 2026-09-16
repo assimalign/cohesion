@@ -23,7 +23,7 @@ machines this module never drives (see `docs/DESIGN.md`).
   `Assimalign.Cohesion.Hosting` (plain lifecycle),
   `Assimalign.Cohesion.Hosting.Health` (health contribution contracts), and
   `Assimalign.Cohesion.Hosting.Resources` (opt-in resource runtime/control plane), plus
-  private cross-area references to `Web.Hosting` and `Web.Health` for the enabled
+  private cross-area references to `Web.Hosting`, `Web.Hosting.Resources`, and `Web.Health` for the enabled
   resource's `admin` endpoint. No Database model package is referenced and no
   Database hosting-isolation exemption is used.
 

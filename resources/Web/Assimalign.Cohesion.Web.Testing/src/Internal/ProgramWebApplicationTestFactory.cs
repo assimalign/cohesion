@@ -6,7 +6,6 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Reflection;
-using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -403,7 +402,9 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
     private static ResourceContext CreateDefaultContext(Type programType)
     {
         int httpPort = ReservePort();
-        string bootstrapCredential = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        string resourceName = programType.Assembly.GetName().Name ?? programType.Name;
+        using var identity = new TestBootstrapIdentity("tests", "inprocess");
+        string bootstrapCredential = identity.Issue(resourceName);
         var endpoints = new Dictionary<string, Uri>(StringComparer.OrdinalIgnoreCase)
         {
             [HttpEndpointName] = Uri.CreateEndpoint("http", "127.0.0.1", httpPort),
@@ -411,12 +412,17 @@ internal sealed class ProgramWebApplicationTestFactory : IWebApplicationProgramT
 
         return new ResourceContext(
             applicationName: "tests",
-            resourceName: programType.Assembly.GetName().Name ?? programType.Name,
+            resourceName: resourceName,
             environmentName: "Testing",
             gatewayName: "inprocess",
             contentRootPath: AppContext.BaseDirectory,
             endpoints: endpoints,
-            bootstrapCredential: Encoding.UTF8.GetBytes(bootstrapCredential));
+            mounts: null,
+            settings: null,
+            references: null,
+            bootstrapCredential: Encoding.UTF8.GetBytes(bootstrapCredential),
+            applicationTrustKey: identity.PublicKey,
+            ambientValues: null);
     }
 
     private static int ReservePort()

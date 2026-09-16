@@ -22,8 +22,8 @@ namespace Assimalign.Cohesion.Web.Hosting.Resources.Tests;
 
 public sealed class ResourceControlPlaneTests
 {
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Protocol parity: matches the real Web.Hosting terminal")]
-    public async Task Routes_WithSameResourceContext_ShouldMatchWebHosting()
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting.Resources] - Composition regression: Web wrapper and direct verb serve the same protocol")]
+    public async Task Routes_ThroughWebWrapperAndDirectVerb_ShouldMatch()
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var identity = new TestBootstrapIdentity("tests", "gateway");

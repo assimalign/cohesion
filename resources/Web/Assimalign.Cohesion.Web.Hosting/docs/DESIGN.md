@@ -11,8 +11,8 @@ nothing resolves services per request.
 2026-07-10, recorded in `resources/Web/README.md`): no Web feature library
 references this package — a feature that did would drag the DI/configuration
 composition surface into every consumer — and this package references **no**
-Web feature library, only the root `Assimalign.Cohesion.Web` abstractions and
-non-Web infrastructure. Applications still see the whole Web family because the
+Web feature library. It references the root `Assimalign.Cohesion.Web` abstractions,
+its own hosting family under O35, and non-Web infrastructure. Applications still see the whole Web family because the
 `App.Web` shared framework (via `Sdk.Web`) delivers every Web assembly; builder
 verbs ship with their features (`AddAuthentication` moved to
 `Web.Authentication`, `AddCookie`/`AddJwtBearer` to their handler packages) and
@@ -23,6 +23,15 @@ This document focuses on the piece with the most load-bearing runtime behaviour:
 `WebApplicationServer`, the default `IWebApplicationServer`. Its dispatch model
 and stop semantics are the contract the rest of the Web middleware stack builds
 on, so they are recorded here rather than left to be re-derived from the code.
+
+The Web runtime references the public response-completion contract and the shared terminal; the terminal depends only on the Web root within this area.
+
+```mermaid
+flowchart LR
+    Runtime["Web.Hosting"] --> Root["Web"]
+    Runtime --> Terminal["Web.Hosting.Resources"]
+    Terminal --> Root
+```
 
 ## Design intent
 
@@ -353,17 +362,25 @@ plus their `/cohesion/v1/healthz`, `/cohesion/v1/readyz`, and
 `/cohesion/v1/livez` aliases, together with `/cohesion/v1/endpoints`,
 `/cohesion/v1/stop`, and `/cohesion/v1/commands`.
 
-The default server installs an internal response-completion feature on each exchange.
+The default server installs the public Web-root `IWebResponseCompletionFeature` contract
+with an internal implementation on each exchange.
 The stop terminal uses it to register the host shutdown signal, returns `202 Accepted`,
 and lets the server invoke that signal only after `SendAsync` has written the response.
 This keeps the control-plane route terminal while preventing server cancellation from
 racing delivery of its own acknowledgement.
 
-When the ambient context carries a bootstrap credential, every `/cohesion/v1/*`
-route requires that exact opaque value as an `Authorization: Bearer` credential;
-comparison is constant-time. The bare probe routes remain directly probeable by
-the platform. A standalone resource with no issued credential retains the local
-unauthenticated behavior.
+The terminal is shared from `Web.Hosting.Resources` (O35); the private copy is deleted.
+Gateway-managed contexts require an ES256 bootstrap JWT for every `/cohesion/v1/*` route:
+application issuer, gateway subject, resource audience, key id, signature, required claims,
+and at most 24 hours of lifetime. Invalid tokens return 401 with a Bearer challenge; a valid
+token for another audience returns 403 without a challenge. Bare probes remain public.
+No gateway name means unauthenticated routes, even when the context carries a credential.
+
+Build validates managed identity and the public P-256 trust key only when an ambient http/https
+listener is bound. A managed control plane without a listener still builds. The pipeline factory
+captures the observed http/https port lazily once; if it is unknown, the wrapper forwards to user
+dispatch without calling the terminal. The shared terminal itself treats null as no port gate,
+which preserves filler behavior. A known port gates all paths, including bare probes.
 
 This module consumes the plain `Hosting` lifecycle plus the opt-in `Hosting.Resources`
 runtime/control-plane and `Hosting.Health` contribution contracts. It never references

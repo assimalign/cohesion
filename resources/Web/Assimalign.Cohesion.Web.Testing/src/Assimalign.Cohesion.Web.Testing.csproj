@@ -4,8 +4,9 @@
 		<!-- Sanctioned exception to the resource hosting-isolation rule (COHRES001,
 		     .claude/rules/resource-areas.md): the test factory drives the concrete runtime
 		     (WebApplication/WebApplicationBuilder), which cannot be done through the
-		     abstractions alone - the standing convention for every area's Testing package. -->
-		<CohesionHostingIsolationExemptions>Assimalign.Cohesion.Web.Hosting</CohesionHostingIsolationExemptions>
+		     abstractions alone. Its runtime closure includes Web.Hosting.Resources for the
+		     control-plane terminal (O35); both assemblies are named explicitly. -->
+		<CohesionHostingIsolationExemptions>Assimalign.Cohesion.Web.Hosting;Assimalign.Cohesion.Web.Hosting.Resources</CohesionHostingIsolationExemptions>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
@@ -16,5 +17,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
 	</ItemGroup>
 </Project>

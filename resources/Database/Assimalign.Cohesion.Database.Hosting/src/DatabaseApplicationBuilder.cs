@@ -10,6 +10,7 @@ using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.Logging;
+using Assimalign.Cohesion.Web.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
@@ -322,12 +323,15 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 (_resourceContext is not null &&
                  _resourceContext.Endpoints.TryGetValue("admin", out endpoint))))
             {
+                if (_resourceContext?.GatewayName is not null)
+                {
+                    ResourceControlPlaneMiddleware.Validate(_resourceContext);
+                }
                 _controlPlane.ObserveEndpoint("admin", endpoint);
                 _options.Services.Add(new DatabaseAdminEndpointService(
                     endpoint,
                     _controlPlane,
-                    _resourceContext?.BootstrapCredential ?? ReadOnlyMemory<byte>.Empty,
-                    _resourceContext?.GatewayName is not null,
+                    _resourceContext!,
                     context,
                     controlPlaneContributors));
             }

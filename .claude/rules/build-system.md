@@ -159,7 +159,7 @@ orchestration gateway:
   family is classified case-insensitively.
   COHRES001 separately rejects an area's exact runtime module and rejects hosting-family
   integrations from roots/features. Each assembly is filtered against the project's named
-  exemptions independently. COHRES002 still checks only the exact runtime module.
+  exemptions independently. COHRES002 still checks only the exact runtime module and excludes the module's own hosting family.
 
 All three guards inspect the direct/transitive project-reference graph before assembly resolution and
 the complete `ReferencePath` closure after `ResolveAssemblyReferences`. The latter catches package

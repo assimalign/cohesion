@@ -307,6 +307,7 @@
         -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Health" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Routing" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
@@ -315,6 +316,9 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
     </ItemGroup>
 
     <!-- ================================================================
@@ -353,6 +357,7 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
@@ -411,6 +416,7 @@
         <!-- IdentityHub.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Forms" />
@@ -592,6 +598,7 @@
         <!-- Scheduler.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
@@ -615,6 +622,7 @@
              bootstrap JWTs without exposing those implementation types in the area ref pack. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />

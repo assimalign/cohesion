@@ -34,11 +34,13 @@ public sealed class ResourceCommandHostingTests
         int number = ((IPEndPoint)port.LocalEndpoint).Port;
         port.Stop();
         var endpoint = new Uri($"http://127.0.0.1:{number}");
-        const string token = "database-command-bootstrap";
+        using var identity = new TestBootstrapIdentity("appa", "local");
+        string token = identity.Issue("database");
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            applicationName: "appa", resourceName: "database", gatewayName: "local",
+            applicationName: "appa", resourceName: "database", environmentName: "Testing", gatewayName: "local", contentRootPath: null,
             endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint },
-            bootstrapCredential: Encoding.UTF8.GetBytes(token)));
+            mounts: null, settings: null, references: null,
+            bootstrapCredential: Encoding.UTF8.GetBytes(token), applicationTrustKey: identity.PublicKey, ambientValues: null));
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "commands" });
         await using var analytics = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "analytics" });
         var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), typeof(ResourceCommandHostingTests).Assembly);

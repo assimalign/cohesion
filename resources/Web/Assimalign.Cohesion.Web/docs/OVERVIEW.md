@@ -8,6 +8,9 @@ against. It is contracts-first and feature-free by design.
 - **Application/builder contracts** — `IWebApplication`, `IWebApplicationBuilder`,
   `IWebApplicationContext`, the `IHostService` application-lifecycle seam, and the
   server seam `IWebApplicationServer`.
+- **Response completion** — `IWebResponseCompletionFeature` registers callbacks that run in
+  order after the response is written to the transport. The default server installs it per
+  exchange; custom servers may omit it. Registration after completion throws.
 - **The middleware-first pipeline** — `IWebApplicationPipeline`,
   `IWebApplicationPipelineBuilder`, `IWebApplicationMiddleware`, the
   `WebApplicationMiddleware` delegate, and the inline `Use(...)` adapter sugar in

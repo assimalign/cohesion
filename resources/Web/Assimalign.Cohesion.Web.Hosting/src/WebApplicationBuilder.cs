@@ -25,6 +25,7 @@ using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Web.Hosting.Internal;
+using Assimalign.Cohesion.Web.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 
@@ -33,8 +34,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     private readonly WebApplicationOptions _options;
     private readonly WebApplicationContext _context;
     private readonly IResourceControlPlane? _controlPlane;
-    private readonly ReadOnlyMemory<byte> _bootstrapCredential;
-    private readonly bool _requireControlPlaneAuthentication;
+    private readonly ResourceContext? _resourceContext;
     private readonly List<IHealthContributor> _healthContributors = new();
     private readonly List<Func<IWebApplicationContext, IHostService>> _serviceRegistrations = new();
 
@@ -69,8 +69,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             _controlPlane = controlPlane ?? throw new InvalidOperationException(
                 "The registered Web resource control-plane factory returned null.");
             resourceContext = ResourceRuntime.Current;
-            _bootstrapCredential = resourceContext.BootstrapCredential.ToArray();
-            _requireControlPlaneAuthentication = resourceContext.GatewayName is not null;
+            _resourceContext = resourceContext;
             options.Environment = resourceContext.EnvironmentName;
         }
 
@@ -201,6 +200,12 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             _options.StartServicesConcurrently || _options.StopServicesConcurrently,
             "Web application servers require serial host lifecycle execution so they start in registration order and stop in reverse order.");
 
+        if (_controlPlane is not null && _resourceContext?.GatewayName is not null &&
+            (_controlPlane.ObservedEndpoints.ContainsKey("http") || _controlPlane.ObservedEndpoints.ContainsKey("https")))
+        {
+            ResourceControlPlaneMiddleware.Validate(_resourceContext);
+        }
+
         var applicationOptions = new WebApplicationOptions
         {
             Environment = _options.Environment,
@@ -219,14 +224,13 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             IWebApplicationPipeline pipeline = _pipeline ??
                 serviceProvider.GetRequiredService<IWebApplicationPipelineBuilder>().Build();
 
-            return _controlPlane is null
-                ? pipeline
-                : new ResourceControlPlanePipeline(
-                    _controlPlane,
-                    _bootstrapCredential,
-                    _requireControlPlaneAuthentication,
-                    _context,
-                    pipeline);
+            if (_controlPlane is null)
+            {
+                return pipeline;
+            }
+            int? port = (_controlPlane.ObservedEndpoints.TryGetValue("http", out Uri? endpoint) ||
+                _controlPlane.ObservedEndpoints.TryGetValue("https", out endpoint)) ? endpoint.Port : null;
+            return new EnabledResourcePipeline(_controlPlane, _resourceContext!, _context, port, pipeline);
         });
 
         var applicationServices = new IHostService[_serviceRegistrations.Count];

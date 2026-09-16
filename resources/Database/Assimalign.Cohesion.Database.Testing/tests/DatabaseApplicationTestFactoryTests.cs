@@ -41,6 +41,8 @@ public class DatabaseApplicationTestFactoryTests
         factory.ResourceContext.Endpoints.Keys.ShouldContain("admin");
         factory.ResourceContext.Mounts["data"].Path.ShouldNotBeNull();
         factory.ResourceContext.BootstrapCredential.IsEmpty.ShouldBeFalse();
+        factory.ResourceContext.ApplicationTrustKey.IsEmpty.ShouldBeFalse();
+        Encoding.UTF8.GetString(factory.ResourceContext.BootstrapCredential.Span).Split('.').Length.ShouldBe(3);
 
         using var client = new HttpClient
         {

@@ -175,3 +175,10 @@ dynamic load, runtime code generation, or reflection-based serialization.
   (`WebApplication`/`WebApplicationBuilder`), which cannot be done through abstractions alone.
 - **`Assimalign.Cohesion.Web.Routing`** — per-application router state (#789) is what makes
   the parallel-isolation guarantee hold; the isolation regression tests live here.
+
+## Bootstrap identity (O35)
+
+Default program factories issue an ephemeral ES256 JWT with issuer `tests`, subject `inprocess`,
+and the program assembly name as audience. The ambient context carries the token and its public
+P-256 trust JWK. Internal stop requests send that JWT as Bearer; public clients remain uncredentialed.
+Custom managed contexts must supply a matching JWT and public trust key.
