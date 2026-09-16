@@ -17,7 +17,7 @@ unconditionally). Its same-area references remain the area root only. The
 non-area plain `Hosting` package supplies lifecycle, `Hosting.Resources` supplies the
 opt-in resource runtime/control-plane contracts, and `Hosting.Health` supplies health
 contribution contracts, while
-private cross-area `Web.Hosting`, `Web.Hosting.Resources`, and `Web.Health` references implement the
+private cross-area `Web.Hosting`, `Web.Hosting.Resources`, `Web.Hosting.Health`, and `Web.Health` references implement the
 enabled resource's HTTP admin surface without exposing Web types publicly.
 
 The admin surface uses private Web implementation references while Database exposes only its own area contracts.
@@ -30,6 +30,9 @@ flowchart LR
     DbHost --> Health["Web.Health"]
     WebHost --> Web["Web"]
     Terminal --> Web
+    DbHost --> Adapter["Web.Hosting.Health"]
+    Adapter --> Health
+    Adapter --> HH["Hosting.Health"]
 ```
 
 ## Execution model
@@ -284,6 +287,8 @@ The enabled resource's `admin` listener consumes the shared Hosting.Resources en
 
 The registered resource constructor calls ResourceTelemetry.Configure using the invocation snapshot. With no gateway or telemetry endpoint, existing providers and hosted services are unchanged. When enabled, the shared Hosting.Telemetry sibling adds OTLP/HTTP JSON logging and a service registered before producers; reverse StopAsync drains producers before a flush bounded by five seconds and the host shutdown token. Logging remains composed only in Hosting. See libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md for ordering and protocol limits.
 
-The health adapter in `Web.Hosting.Health` has no production consumer in this slice.
-This module retains its direct `Hosting.Health` reference and private `Web.Health`
-model reference; the admin endpoint's existing explicit mapping stays in place.
+The admin endpoint uses `Web.Hosting.Health.AddContributor` through the private project/framework
+pair. Its defined Healthy, Degraded, and Unhealthy mappings preserve the existing status,
+description, data, ready/live tags, cancellation, and failure policy. Undefined statuses now
+throw through the Web health failure policy. The readiness-only `database.accepting` check
+remains separate and unchanged.

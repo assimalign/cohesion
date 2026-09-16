@@ -21,6 +21,5 @@ The contributor name identifies the check. Omitted tags include readiness and li
 explicit tags replace those defaults. Failure status and timeout use Web health policy.
 The application owns contributor lifetime; the adapter only evaluates it.
 
-`App.Web` exposes this package. There is no production consumer in this slice;
-`Database.Hosting` retains its existing explicit mapping and `App.Database` adds no
-adapter assembly. See [Design](DESIGN.md) for the dependency and cancellation contracts.
+`App.Web` exposes this package. `Database.Hosting` consumes it through a private project
+reference paired with the adapter assembly in the `App.Database` runtime pack. See [Design](DESIGN.md) for the dependency and cancellation contracts.

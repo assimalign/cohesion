@@ -16,9 +16,8 @@ using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Health;
 using Assimalign.Cohesion.Web.Hosting;
+using Assimalign.Cohesion.Web.Hosting.Health;
 using Assimalign.Cohesion.Web.Hosting.Resources;
-
-using HostingHealthStatus = Assimalign.Cohesion.Hosting.Health.HealthStatus;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
@@ -136,24 +135,7 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
         IHealthChecksBuilder builder = HealthChecks.CreateBuilder();
         foreach (IHealthContributor contributor in contributors)
         {
-            builder.AddCheck(contributor.Name, async (_, cancellationToken) =>
-            {
-                HealthContribution contribution = await contributor
-                    .CheckAsync(cancellationToken)
-                    .ConfigureAwait(false);
-                return contribution.Status switch
-                {
-                    HostingHealthStatus.Healthy => HealthCheckResult.Healthy(
-                        contribution.Description,
-                        contribution.Data),
-                    HostingHealthStatus.Degraded => HealthCheckResult.Degraded(
-                        contribution.Description,
-                        data: contribution.Data),
-                    _ => HealthCheckResult.Unhealthy(
-                        contribution.Description,
-                        data: contribution.Data),
-                };
-            }, tags: [HealthTags.Ready, HealthTags.Live]);
+            builder.AddContributor(contributor);
         }
 
         // The private admin web host starts before the wire-protocol servers so it can report

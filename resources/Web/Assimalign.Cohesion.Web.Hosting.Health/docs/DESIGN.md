@@ -35,7 +35,16 @@ and null-input tests move with the adapter into this package's co-located tests.
 
 ## Delivery and non-goals
 
-The package ships in `App.Web` and the release inventory. It has no production
-consumer in this slice. Database's admin service keeps its existing mapping; adopting
-this adapter there is a follow-up. The adapter owns no HTTP endpoint, transport,
+The package ships in `App.Web` and the release inventory. Database's admin service
+consumes it through the private project/framework pair in `App.Database`, preserving
+its separate accepting gate. The adapter owns no HTTP endpoint, transport,
 health model, or service container.
+
+Database privately references the adapter, which translates the two independent health contracts.
+
+```mermaid
+flowchart LR
+    Db["Database.Hosting"] --> Adapter["Web.Hosting.Health"]
+    Adapter --> Web["Web.Health"]
+    Adapter --> Host["Hosting.Health"]
+```

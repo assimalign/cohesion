@@ -5,7 +5,7 @@ Web.Hosting.Resources is a hosting-family integration over the root pipeline sea
 The integration is public in App.Web and private in each generic resource framework. Area ApplicationModel packages remain NuGet-only. Cross-area hosting implementation references use the coordinated CohesionPrivateProjectReference / CohesionFrameworkPrivateAssembly pair. The integration owns authentication and AOT-safe JSON; each area host owns its listener, readiness gate, and lifecycle.
 
 Web.Hosting.Health integrates Hosting.Health contributors with the independent Web.Health model.
-It has no production consumer in this slice; Database.Hosting retains its existing mapping.
+Database.Hosting consumes it privately for admin health checks, retaining its readiness-only accepting gate.
 
 See [the package design](../Assimalign.Cohesion.Web.Hosting.Resources/docs/DESIGN.md) for the exact protocol and the public response-completion contract.
 

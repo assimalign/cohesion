@@ -23,7 +23,7 @@ machines this module never drives (see `docs/DESIGN.md`).
   `Assimalign.Cohesion.Hosting` (plain lifecycle),
   `Assimalign.Cohesion.Hosting.Health` (health contribution contracts), and
   `Assimalign.Cohesion.Hosting.Resources` (opt-in resource runtime/control plane), plus
-  private cross-area references to `Web.Hosting`, `Web.Hosting.Resources`, and `Web.Health` for the enabled
+  private cross-area references to `Web.Hosting`, `Web.Hosting.Resources`, `Web.Hosting.Health`, and `Web.Health` for the enabled
   resource's `admin` endpoint. No Database model package is referenced and no
   Database hosting-isolation exemption is used.
 
@@ -51,7 +51,7 @@ machines this module never drives (see `docs/DESIGN.md`).
   Provisioning creates only after `OpenDatabaseAsync` reports
   `DatabaseNotFoundException`; other database failures propagate from startup.
 - Enabled resources host their registered `Hosting.Resources` `IResourceControlPlane` on the ambient
-  `admin` endpoint. Health routes use `Web.Health`; endpoint observation,
+  `admin` endpoint. Health routes use `Web.Health` with the `Web.Hosting.Health` contributor adapter; endpoint observation,
   graceful stop, and command dispatch use the shared Web control-plane middleware.
 
 ## Key Types
