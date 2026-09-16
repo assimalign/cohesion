@@ -4,6 +4,7 @@ using Assimalign.Cohesion.Rezolvr.Hosting;
 
 // Owns authoritative DNS, forwarding, and durable records for the organization.
 // Application-specific records remain commands declared by their owning gateways.
-IRezolvrApplicationBuilder builder = RezolvrApplication.CreateBuilder(args);
+RezolvrApplicationBuilder builder = RezolvrApplication.CreateBuilder(args);
 
-await builder.Build().RunAsync();
+await using RezolvrApplication application = builder.Build();
+await application.RunAsync();

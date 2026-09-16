@@ -2,6 +2,7 @@ using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.SecretStore;
 using Assimalign.Cohesion.SecretStore.Hosting;
 
-ISecretStoreApplicationBuilder builder = SecretStoreApplication.CreateBuilder(args);
+SecretStoreApplicationBuilder builder = SecretStoreApplication.CreateBuilder(args);
 
-await builder.Build().RunAsync();
+await using SecretStoreApplication application = builder.Build();
+await application.RunAsync();

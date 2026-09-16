@@ -122,3 +122,9 @@ Package publication remains exclusively in the repository release workflow.
 The shared release module must add this package and exact-path exclusions for all 37 template content
 projects, removing the two obsolete legacy exclusions. Those shared edits are handed to the orchestrator
 and rehearsed in a scratch module. The root solution and README updates follow the same protocol.
+
+## Concrete resource composition (T10 / O34)
+
+Filler resource programs hold the concrete Hosting builder, apply area verbs before Build(),
+and retain the concrete application with await using before calling RunAsync. This keeps host
+execution and disposal available while the root interfaces carry only area contracts.

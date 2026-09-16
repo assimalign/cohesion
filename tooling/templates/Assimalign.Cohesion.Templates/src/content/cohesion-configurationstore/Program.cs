@@ -1,7 +1,8 @@
-using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.ConfigurationStore;
 using Assimalign.Cohesion.ConfigurationStore.Hosting;
+using Assimalign.Cohesion.Hosting;
 
-IConfigurationStoreApplicationBuilder builder = ConfigurationStoreApplication.CreateBuilder(args);
+ConfigurationStoreApplicationBuilder builder = ConfigurationStoreApplication.CreateBuilder(args);
 
-await builder.Build().RunAsync();
+await using ConfigurationStoreApplication application = builder.Build();
+await application.RunAsync();
