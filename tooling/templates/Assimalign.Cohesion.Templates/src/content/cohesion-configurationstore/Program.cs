@@ -1,6 +1,5 @@
 using Assimalign.Cohesion.ConfigurationStore;
 using Assimalign.Cohesion.ConfigurationStore.Hosting;
-using Assimalign.Cohesion.Hosting;
 
 ConfigurationStoreApplicationBuilder builder = ConfigurationStoreApplication.CreateBuilder(args);
 

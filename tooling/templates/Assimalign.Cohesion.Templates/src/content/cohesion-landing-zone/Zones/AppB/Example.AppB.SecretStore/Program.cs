@@ -1,4 +1,3 @@
-using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.SecretStore;
 using Assimalign.Cohesion.SecretStore.Hosting;
 

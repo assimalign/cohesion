@@ -1,7 +1,6 @@
 using System;
 using System.Text;
 
-using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Hosting;
 using Example.AppC.Api;

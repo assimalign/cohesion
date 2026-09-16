@@ -4,7 +4,6 @@ using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Hosting;
 using Example.AppC.Database;
 
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
