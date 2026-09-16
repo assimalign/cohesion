@@ -75,6 +75,9 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] Every library touched has a `docs/DESIGN.md` — if one was missing, it was created in this change (canonical example: `libraries/Dns/Assimalign.Cohesion.Dns/docs/DESIGN.md`)
 - [ ] If this change altered or extended a design decision (lifecycle, error model, contract shape, family layout, AOT posture, non-goals), `docs/DESIGN.md` was updated in the same commit
 - [ ] Public API additions are reflected in `docs/Assembly/<Namespace>/<Type>/OVERVIEW.md` if that page exists for the type
+- [ ] A newly created `docs/DESIGN.md` carries at least one `mermaid` diagram (family/dependency direction, lifecycle, protocol exchange, or pipeline); a new area `README.md` carries the area project map — see `documentation.md`
+- [ ] Existing diagrams in touched docs still match what they depict; arrows still read as "references", and no `%%{init}%%` theming or hardcoded `fill:`/`color:` was introduced
+- [ ] Any mermaid block added or edited was render-previewed — parse errors show up on GitHub and nothing in CI catches them
 
 ## Deviations from rules
 
