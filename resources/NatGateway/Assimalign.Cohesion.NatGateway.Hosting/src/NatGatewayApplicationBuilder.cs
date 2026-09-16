@@ -10,9 +10,12 @@ using Assimalign.Cohesion.NatGateway;
 
 namespace Assimalign.Cohesion.NatGateway.Hosting;
 
-internal sealed class NatGatewayApplicationBuilder : INatGatewayApplicationBuilder
+/// <summary>
+/// Composes a NatGateway application and its hosting services.
+/// </summary>
+public sealed class NatGatewayApplicationBuilder : INatGatewayApplicationBuilder
 {
-    private readonly List<Func<IHostContext, IHostService>> _serviceFactories = [];
+    private readonly List<Func<NatGatewayApplicationContext, IHostService>> _serviceFactories = [];
 
     private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
@@ -33,7 +36,13 @@ internal sealed class NatGatewayApplicationBuilder : INatGatewayApplicationBuild
         }
     }
 
-    public INatGatewayApplicationBuilder AddService(IHostService service)
+    /// <summary>
+    /// Adds an existing host service to the NAT gateway application.
+    /// </summary>
+    /// <param name="service">The service to add.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    public NatGatewayApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
 
@@ -41,7 +50,14 @@ internal sealed class NatGatewayApplicationBuilder : INatGatewayApplicationBuild
         return this;
     }
 
-    public INatGatewayApplicationBuilder AddService(Func<IHostContext, IHostService> factory)
+    /// <summary>
+    /// Adds a host service factory that is materialized once for each build.
+    /// </summary>
+    /// <param name="factory">The factory to invoke with the NAT gateway host context.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="factory"/> returns <see langword="null"/>.</exception>
+    public NatGatewayApplicationBuilder AddService(Func<NatGatewayApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -49,7 +65,11 @@ internal sealed class NatGatewayApplicationBuilder : INatGatewayApplicationBuild
         return this;
     }
 
-    public INatGatewayApplication Build()
+    /// <summary>
+    /// Builds the NAT gateway application.
+    /// </summary>
+    /// <returns>The configured NAT gateway application.</returns>
+    public NatGatewayApplication Build()
     {
         var options = new NatGatewayApplicationOptions();
         var context = new NatGatewayApplicationContext(_resourceContext);
@@ -74,7 +94,7 @@ internal sealed class NatGatewayApplicationBuilder : INatGatewayApplicationBuild
         }
         context.SetHostedServices(hostedServices);
 
-        var application = new NatGatewayApplicationHost(options, context);
+        var application = new NatGatewayApplication(options, context);
         if (_controlPlane is not null)
         {
             ResourceRuntime.HostBuilt(application, _controlPlane);
@@ -82,5 +102,5 @@ internal sealed class NatGatewayApplicationBuilder : INatGatewayApplicationBuild
         return application;
     }
 
-    IHost IHostBuilder.Build() => Build();
+    INatGatewayApplication INatGatewayApplicationBuilder.Build() => Build();
 }

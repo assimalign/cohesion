@@ -21,3 +21,18 @@ As an L3 service platform, ApiManager composes the L2 `Assimalign.Cohesion.Hosti
 - [Root design](./Assimalign.Cohesion.ApiManager/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.ApiManager.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.ApiManager.Hosting/docs/DESIGN.md)
+
+## Application composition (O34)
+
+The root contracts are hosting-free (O34): `IApiManagerApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `IApiManagerApplicationContext` exposes `ContentRootPath`. `IApiManagerApplicationBuilder` exposes `Build()`; it currently declares no area-specific verbs. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
+
+`ApiManagerApplication.CreateBuilder(args)` returns the public concrete `ApiManagerApplicationBuilder`; its `Build()` returns the public `ApiManagerApplication : Host<ApiManagerApplicationContext>`. The public `ApiManagerApplicationContext` implements `IApiManagerApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+```csharp
+using Assimalign.Cohesion.ApiManager.Hosting;
+
+ApiManagerApplicationBuilder builder = ApiManagerApplication.CreateBuilder(args);
+// Add area declarations and optional hosting services before Build().
+await using ApiManagerApplication application = builder.Build();
+await application.RunAsync();
+```

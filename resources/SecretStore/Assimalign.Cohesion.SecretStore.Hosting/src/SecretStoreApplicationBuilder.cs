@@ -7,12 +7,15 @@ using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.Logging;
-using Assimalign.Cohesion.Security.DataProtection;
 using Assimalign.Cohesion.SecretStore;
+using Assimalign.Cohesion.Security.DataProtection;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting;
 
-internal sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuilder
+/// <summary>
+/// Composes a SecretStore application and its hosting services.
+/// </summary>
+public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuilder
 {
     private const string DefaultEndpoint = "https://127.0.0.1:8443";
 
@@ -21,7 +24,7 @@ internal sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBui
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext _resourceContext;
     private readonly Dictionary<string, ReadOnlyMemory<byte>> _secrets = new(StringComparer.Ordinal);
-    private readonly List<Func<IHostContext, IHostService>> _serviceFactories = [];
+    private readonly List<Func<SecretStoreApplicationContext, IHostService>> _serviceFactories = [];
     private CertificateAuthorityOptions? _certificateAuthority;
     private bool _isBuilt;
 
@@ -44,6 +47,26 @@ internal sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBui
         }
     }
 
+    /// <summary>
+    /// Declares an initial secret at a logical store path.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The value seeds the path only when durable state does not already contain a version at
+    /// that path. A restart therefore never rolls back a value that was rotated after seeding.
+    /// </para>
+    /// <para>
+    /// Implementations snapshot <paramref name="value"/> during registration. Paths are compared
+    /// using ordinal semantics and are not normalized.
+    /// </para>
+    /// </remarks>
+    /// <param name="path">The logical path at which to seed the secret.</param>
+    /// <param name="value">The secret bytes to seed.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="path"/> is empty or whitespace, or names an implementation-reserved path.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">The path has already been declared on this builder.</exception>
     public ISecretStoreApplicationBuilder AddSecret(
         string path,
         ReadOnlyMemory<byte> value)
@@ -64,6 +87,27 @@ internal sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBui
         return this;
     }
 
+    /// <summary>
+    /// Declares the certificate authority owned by this secret store.
+    /// </summary>
+    /// <remarks>
+    /// Durable certificate-authority state always wins over composition-time seed material. On a
+    /// first start, paired initial PEM material is used when supplied; otherwise a configured
+    /// Platform endpoint selects gateway-mediated intermediate enrollment. When neither is configured,
+    /// <see cref="CertificateAuthorityOptions.SelfSeedWhenNoPlatform"/> controls whether the store
+    /// creates a self-signed development root. A failed configured Platform enrollment never
+    /// silently falls back to an unrelated self-signed root.
+    /// </remarks>
+    /// <param name="configure">An optional callback that configures the certificate authority.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentException">
+    /// The common name is empty; the Platform enrollment endpoint is not absolute HTTPS; configured
+    /// PEM material is empty; or an initial certificate and private key are not supplied together.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// A certificate authority has already been declared, or no first-start authority source is
+    /// enabled.
+    /// </exception>
     public ISecretStoreApplicationBuilder AddCertificateAuthority(
         Action<CertificateAuthorityOptions>? configure = null)
     {
@@ -79,7 +123,13 @@ internal sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBui
         return this;
     }
 
-    public ISecretStoreApplicationBuilder AddService(IHostService service)
+    /// <summary>
+    /// Adds an existing host service to the secret store application.
+    /// </summary>
+    /// <param name="service">The service to add.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    public SecretStoreApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
 
@@ -87,7 +137,14 @@ internal sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBui
         return this;
     }
 
-    public ISecretStoreApplicationBuilder AddService(Func<IHostContext, IHostService> factory)
+    /// <summary>
+    /// Adds a host service factory that is materialized once for each build.
+    /// </summary>
+    /// <param name="factory">The factory to invoke with the secret store host context.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="factory"/> returns <see langword="null"/>.</exception>
+    public SecretStoreApplicationBuilder AddService(Func<SecretStoreApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -95,7 +152,16 @@ internal sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBui
         return this;
     }
 
-    public ISecretStoreApplication Build()
+    /// <summary>
+    /// Builds the secret store application.
+    /// </summary>
+    /// <returns>The configured secret store application.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The builder has already built an application, a registered service factory returns
+    /// <see langword="null"/>, or the ambient endpoint or data mount cannot host the store.
+    /// </exception>
+    /// <exception cref="ArgumentException">A command-line endpoint or data option is empty or missing its value.</exception>
+    public SecretStoreApplication Build()
     {
         if (_isBuilt)
         {
@@ -155,7 +221,7 @@ internal sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBui
 
         context.SetHostedServices(hostedServices);
         _isBuilt = true;
-        var application = new SecretStoreApplicationHost(options, context, endpointService);
+        var application = new SecretStoreApplication(options, context, endpointService);
         if (_controlPlane is not null)
         {
             ResourceRuntime.HostBuilt(application, _controlPlane);
@@ -164,7 +230,7 @@ internal sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBui
         return application;
     }
 
-    IHost IHostBuilder.Build() => Build();
+    ISecretStoreApplication ISecretStoreApplicationBuilder.Build() => Build();
 
     private Uri ResolveEndpoint()
     {

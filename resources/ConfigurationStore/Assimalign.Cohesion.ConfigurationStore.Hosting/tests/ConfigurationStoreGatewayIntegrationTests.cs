@@ -6,14 +6,15 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Shouldly;
+using Xunit;
+
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Gateway;
 using Assimalign.Cohesion.ConfigurationStore;
 using Assimalign.Cohesion.ConfigurationStore.ApplicationModel;
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
-
-using Shouldly;
-using Xunit;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Tests;
 
@@ -225,7 +226,7 @@ public sealed class ConfigurationStoreGatewayIntegrationTests
     {
         private readonly string _dataPath;
         private readonly Uri _endpoint;
-        private IConfigurationStoreApplication? _application;
+        private ConfigurationStoreApplication? _application;
         private ResourceContext? _resourceContext;
 
         internal ConfigurationStoreGatewayController(Uri endpoint, string dataPath)
@@ -330,10 +331,10 @@ public sealed class ConfigurationStoreGatewayIntegrationTests
                 inputs.ApplicationTrustKey,
                 gatewayName: "local");
 
-            IConfigurationStoreApplication application;
+            ConfigurationStoreApplication application;
             using (ResourceRuntime.CreateScope(resourceContext))
             {
-                IConfigurationStoreApplicationBuilder builder =
+                ConfigurationStoreApplicationBuilder builder =
                     ConfigurationStoreTestHost.CreateBuilder();
                 builder.AddNamespace("features", ns => ns
                     .Set("zeta", null)
@@ -341,11 +342,11 @@ public sealed class ConfigurationStoreGatewayIntegrationTests
                 application = builder.Build();
                 try
                 {
-                    await application.StartAsync(cancellationToken).ConfigureAwait(false);
+                    await ((IHost)application).StartAsync(cancellationToken).ConfigureAwait(false);
                 }
                 catch
                 {
-                    await application.DisposeAsync().ConfigureAwait(false);
+                    await ((IAsyncDisposable)application).DisposeAsync().ConfigureAwait(false);
                     throw;
                 }
             }
@@ -356,7 +357,7 @@ public sealed class ConfigurationStoreGatewayIntegrationTests
 
         private async Task StopConfigurationStoreAsync(CancellationToken cancellationToken)
         {
-            IConfigurationStoreApplication? application = _application;
+            ConfigurationStoreApplication? application = _application;
             ResourceContext? resourceContext = _resourceContext;
             _application = null;
             _resourceContext = null;
@@ -370,11 +371,11 @@ public sealed class ConfigurationStoreGatewayIntegrationTests
                 : ResourceRuntime.CreateScope(resourceContext);
             try
             {
-                await application.StopAsync(cancellationToken).ConfigureAwait(false);
+                await ((IHost)application).StopAsync(cancellationToken).ConfigureAwait(false);
             }
             finally
             {
-                await application.DisposeAsync().ConfigureAwait(false);
+                await ((IAsyncDisposable)application).DisposeAsync().ConfigureAwait(false);
             }
         }
     }

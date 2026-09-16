@@ -61,6 +61,6 @@ internal static class SecretStoreTestHost
             ambientValues: null);
     }
 
-    internal static ISecretStoreApplicationBuilder CreateBuilder()
+    internal static SecretStoreApplicationBuilder CreateBuilder()
         => SecretStoreApplication.CreateBuilder([], typeof(SecretStoreTestHost).Assembly);
 }

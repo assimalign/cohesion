@@ -11,9 +11,12 @@ using Assimalign.Cohesion.Rezolvr;
 
 namespace Assimalign.Cohesion.Rezolvr.Hosting;
 
-internal sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
+/// <summary>
+/// Composes a Rezolvr application and its hosting services.
+/// </summary>
+public sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
 {
-    private readonly List<Func<IHostContext, IHostService>> _serviceFactories = [];
+    private readonly List<Func<RezolvrApplicationContext, IHostService>> _serviceFactories = [];
 
     private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
@@ -34,7 +37,13 @@ internal sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
         }
     }
 
-    public IRezolvrApplicationBuilder AddService(IHostService service)
+    /// <summary>
+    /// Adds an existing host service to the resolver application.
+    /// </summary>
+    /// <param name="service">The service to add.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    public RezolvrApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
 
@@ -42,7 +51,14 @@ internal sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
         return this;
     }
 
-    public IRezolvrApplicationBuilder AddService(Func<IHostContext, IHostService> factory)
+    /// <summary>
+    /// Adds a host service factory that is materialized once for each build.
+    /// </summary>
+    /// <param name="factory">The factory to invoke with the resolver host context.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="factory"/> returns <see langword="null"/>.</exception>
+    public RezolvrApplicationBuilder AddService(Func<RezolvrApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -50,7 +66,11 @@ internal sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
         return this;
     }
 
-    public IRezolvrApplication Build()
+    /// <summary>
+    /// Builds the Rezolvr application.
+    /// </summary>
+    /// <returns>The configured Rezolvr application.</returns>
+    public RezolvrApplication Build()
     {
         var options = new RezolvrApplicationOptions();
         var context = new RezolvrApplicationContext(_resourceContext);
@@ -89,7 +109,7 @@ internal sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
         }
         context.SetHostedServices(hostedServices);
 
-        var application = new RezolvrApplicationHost(options, context);
+        var application = new RezolvrApplication(options, context);
         if (_controlPlane is not null)
         {
             ResourceRuntime.HostBuilt(application, _controlPlane);
@@ -97,5 +117,5 @@ internal sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
         return application;
     }
 
-    IHost IHostBuilder.Build() => Build();
+    IRezolvrApplication IRezolvrApplicationBuilder.Build() => Build();
 }

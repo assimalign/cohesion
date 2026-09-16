@@ -20,11 +20,11 @@ public class ApplicationLifecycleTests
         var events = new List<string>();
         var firstService = new RecordingHostService("first", events);
         var secondService = new RecordingHostService("second", events);
-        IHostContext? factoryContext = null;
+        LoadBalancerApplicationContext? factoryContext = null;
         int factoryCalls = 0;
-        ILoadBalancerApplicationBuilder builder = LoadBalancerApplication.CreateBuilder([]);
+        LoadBalancerApplicationBuilder builder = LoadBalancerApplication.CreateBuilder([]);
 
-        ILoadBalancerApplicationBuilder returnedBuilder = builder
+        LoadBalancerApplicationBuilder returnedBuilder = builder
             .AddService(firstService)
             .AddService(context =>
             {
@@ -33,16 +33,18 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using ILoadBalancerApplication application = builder.Build();
+        await using LoadBalancerApplication application = ((ILoadBalancerApplicationBuilder)builder).Build().ShouldBeOfType<LoadBalancerApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((ILoadBalancerApplication)application).StartAsync(CancellationToken.None);
+        await ((ILoadBalancerApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         returnedBuilder.ShouldBeSameAs(builder);
         factoryCalls.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((ILoadBalancerApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((ILoadBalancerApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.ShouldBe(
             new IHostService[] { firstService, secondService });
         events.ShouldBe(new[]
@@ -57,17 +59,17 @@ public class ApplicationLifecycleTests
     [Fact(DisplayName = "Cohesion Test [LoadBalancer] - AddService: Null registrations should fail explicitly")]
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
-        ILoadBalancerApplicationBuilder builder = LoadBalancerApplication.CreateBuilder([]);
+        LoadBalancerApplicationBuilder builder = LoadBalancerApplication.CreateBuilder([]);
 
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<LoadBalancerApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [LoadBalancer] - AddService: Null factory result should fail at build")]
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
-        ILoadBalancerApplicationBuilder builder = LoadBalancerApplication.CreateBuilder([]);
+        LoadBalancerApplicationBuilder builder = LoadBalancerApplication.CreateBuilder([]);
         builder.AddService(_ => null!);
 
         InvalidOperationException exception = Should.Throw<InvalidOperationException>(
@@ -80,7 +82,7 @@ public class ApplicationLifecycleTests
     public async Task RunAsync_WhenCancellationIsRequested_ShouldStopCleanly()
     {
         // Arrange
-        await using ILoadBalancerApplication application = LoadBalancerApplication.CreateBuilder([]).Build();
+        await using LoadBalancerApplication application = LoadBalancerApplication.CreateBuilder([]).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
 
 

@@ -1,11 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
 
-internal sealed class ConfigurationStoreApplicationContext : HostContext
+/// <summary>
+/// Provides the ConfigurationStore application environment and runtime composition.
+/// </summary>
+public sealed class ConfigurationStoreApplicationContext : HostContext, IConfigurationStoreApplicationContext
 {
     private IReadOnlyList<IHostService> _hostedServices = Array.Empty<IHostService>();
     private readonly IHostEnvironment _environment;
@@ -19,8 +23,19 @@ internal sealed class ConfigurationStoreApplicationContext : HostContext
         _environment = new HostEnvironment(environmentName) { ContentRootPath = contentRootPath };
     }
 
+    /// <summary>
+    /// Gets the configured application content root.
+    /// </summary>
+    public FileSystemPath? ContentRootPath => Environment.ContentRootPath;
+
+    /// <summary>
+    /// Gets the host environment for this application.
+    /// </summary>
     public override IHostEnvironment Environment => _environment;
 
+    /// <summary>
+    /// Gets the hosted services in registration and startup order.
+    /// </summary>
     public override IEnumerable<IHostService> HostedServices => _hostedServices;
 
     internal void SetHostedServices(IReadOnlyList<IHostService> hostedServices)

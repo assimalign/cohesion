@@ -27,8 +27,8 @@ public class ApplicationLifecycleTests
         List<string> events = [];
         RecordingService firstService = new("first", events);
         RecordingService secondService = new("second", events);
-        ISecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
-        IHostContext? factoryContext = null;
+        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        SecretStoreApplicationContext? factoryContext = null;
         var factoryCount = 0;
 
         builder
@@ -40,15 +40,17 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using ISecretStoreApplication application = builder.Build();
+        await using SecretStoreApplication application = ((ISecretStoreApplicationBuilder)builder).Build().ShouldBeOfType<SecretStoreApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((ISecretStoreApplication)application).StartAsync(CancellationToken.None);
+        await ((ISecretStoreApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         factoryCount.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((ISecretStoreApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((ISecretStoreApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.Count().ShouldBe(3);
         application.Context.HostedServices.Take(2)
             .ShouldBe(new IHostService[] { firstService, secondService });
@@ -64,12 +66,12 @@ public class ApplicationLifecycleTests
             SecretStoreTestHost.GetEndpoint(),
             directory.Path,
             gatewayName: null));
-        ISecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
 
         // Act and assert
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<SecretStoreApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [SecretStore.Hosting] - Build: Null service factory result should fail explicitly")]
@@ -81,7 +83,7 @@ public class ApplicationLifecycleTests
             SecretStoreTestHost.GetEndpoint(),
             directory.Path,
             gatewayName: null));
-        ISecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
         builder.AddService(_ => null!);
 
         // Act
@@ -100,7 +102,7 @@ public class ApplicationLifecycleTests
             SecretStoreTestHost.GetEndpoint(),
             directory.Path,
             gatewayName: null));
-        await using ISecretStoreApplication application = SecretStoreTestHost.CreateBuilder().Build();
+        await using SecretStoreApplication application = SecretStoreTestHost.CreateBuilder().Build();
         using var cancellationTokenSource = new CancellationTokenSource();
         cancellationTokenSource.Cancel();
 
@@ -120,12 +122,12 @@ public class ApplicationLifecycleTests
             SecretStoreTestHost.GetEndpoint(),
             directory.Path,
             gatewayName: null));
-        ISecretStoreApplication application = SecretStoreTestHost.CreateBuilder().Build();
+        SecretStoreApplication application = SecretStoreTestHost.CreateBuilder().Build();
         IHostService endpointService = application.Context.HostedServices.Last();
-        await application.StartAsync();
+        await ((IHost)application).StartAsync();
 
         // Act
-        await application.DisposeAsync();
+        await ((IAsyncDisposable)application).DisposeAsync();
 
         // Assert
         await Should.ThrowAsync<ObjectDisposedException>(() => endpointService.StartAsync());

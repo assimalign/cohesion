@@ -11,14 +11,14 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
+using SecretStoreResourceCommand = Assimalign.Cohesion.SecretStore.Client.ResourceCommand;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.SecretStore;
 using Assimalign.Cohesion.SecretStore.Client;
-
-using SecretStoreResourceCommand = Assimalign.Cohesion.SecretStore.Client.ResourceCommand;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Tests;
 
@@ -45,7 +45,7 @@ public sealed class CertificateEnrollmentEndToEndTests
             platformIdentity.PublicKey,
             applicationName: "platform",
             resourceName: "platform-secrets");
-        await using ISecretStoreApplication platform = BuildApplication(
+        await using SecretStoreApplication platform = BuildApplication(
             platformContext,
             builder => builder.AddCertificateAuthority(options =>
                 options.CommonName = "Cohesion Platform Root"));
@@ -53,7 +53,7 @@ public sealed class CertificateEnrollmentEndToEndTests
         bool platformStarted = false;
         try
         {
-            await platform.StartAsync(cancellationTokenSource.Token);
+            await ((IHost)platform).StartAsync(cancellationTokenSource.Token);
             platformStarted = true;
             ISecretStoreClient platformClient = SecretStoreClient.Create(
                 platformEndpoint,
@@ -90,7 +90,7 @@ public sealed class CertificateEnrollmentEndToEndTests
                 applicationIdentity.PublicKey,
                 applicationName: "appa",
                 resourceName: "app-secrets");
-            await using ISecretStoreApplication child = BuildApplication(
+            await using SecretStoreApplication child = BuildApplication(
                 childContext,
                 builder => builder.AddCertificateAuthority(options =>
                 {
@@ -105,7 +105,7 @@ public sealed class CertificateEnrollmentEndToEndTests
             bool childStarted = false;
             try
             {
-                await child.StartAsync(cancellationTokenSource.Token);
+                await ((IHost)child).StartAsync(cancellationTokenSource.Token);
                 childStarted = true;
                 using var httpClient = new HttpClient();
                 ISecretStoreClient childClient = SecretStoreClient.Create(
@@ -226,7 +226,7 @@ public sealed class CertificateEnrollmentEndToEndTests
             {
                 if (childStarted)
                 {
-                    await child.StopAsync(cancellationTokenSource.Token);
+                    await ((IHost)child).StopAsync(cancellationTokenSource.Token);
                 }
             }
         }
@@ -234,17 +234,17 @@ public sealed class CertificateEnrollmentEndToEndTests
         {
             if (platformStarted)
             {
-                await platform.StopAsync(cancellationTokenSource.Token);
+                await ((IHost)platform).StopAsync(cancellationTokenSource.Token);
             }
         }
     }
 
-    private static ISecretStoreApplication BuildApplication(
+    private static SecretStoreApplication BuildApplication(
         ResourceContext context,
-        Action<ISecretStoreApplicationBuilder> configure)
+        Action<SecretStoreApplicationBuilder> configure)
     {
         using IDisposable scope = ResourceRuntime.CreateScope(context);
-        ISecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
         configure.Invoke(builder);
         return builder.Build();
     }

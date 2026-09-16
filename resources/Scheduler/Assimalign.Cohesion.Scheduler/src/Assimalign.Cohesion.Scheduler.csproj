@@ -1,8 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-	<PropertyGroup>
-		<!-- Deviates from the repo hosting-library rule (COHRES004) per design decision O34: migration gate, removed by #992 slice 2. -->
-		<CohesionHostingLibraryReferenceMigration>true</CohesionHostingLibraryReferenceMigration>
-	</PropertyGroup>
+<Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<Compile Remove="Delegates\**" />
 		<Compile Remove="Internal\ScheduleTaskScheduler.cs" />
@@ -15,7 +11,6 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionValueType

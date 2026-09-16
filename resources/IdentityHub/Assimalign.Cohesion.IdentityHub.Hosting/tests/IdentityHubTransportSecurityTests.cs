@@ -32,7 +32,7 @@ public sealed class IdentityHubTransportSecurityTests
     {
         // Arrange
         using var data = new TemporaryDirectory();
-        IIdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(
+        IdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(
             data.Path,
             new Uri(endpointValue, UriKind.Absolute),
             environmentName: environmentName);
@@ -54,14 +54,14 @@ public sealed class IdentityHubTransportSecurityTests
         using var data = new TemporaryDirectory();
         Uri httpEndpoint = IdentityHubTestHost.GetEndpoint();
         var endpoint = new Uri($"https://127.0.0.1:{httpEndpoint.Port}", UriKind.Absolute);
-        await using IIdentityHubApplication application = IdentityHubTestHost.CreateBuilder(
+        await using IdentityHubApplication application = IdentityHubTestHost.CreateBuilder(
             data.Path,
             endpoint,
             environmentName: environmentName).Build();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         // Act
-        await application.StartAsync(timeout.Token);
+        await ((IHost)application).StartAsync(timeout.Token);
         try
         {
             // Assert
@@ -69,7 +69,7 @@ public sealed class IdentityHubTransportSecurityTests
         }
         finally
         {
-            await application.StopAsync(timeout.Token);
+            await ((IHost)application).StopAsync(timeout.Token);
         }
     }
 
@@ -83,12 +83,12 @@ public sealed class IdentityHubTransportSecurityTests
         var certificate = new TestTlsCertificate();
         Uri httpEndpoint = IdentityHubTestHost.GetEndpoint();
         var endpoint = new Uri($"https://127.0.0.1:{httpEndpoint.Port}", UriKind.Absolute);
-        IIdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(
+        IdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(
             data.Path,
             endpoint,
             environmentName: environmentName,
             tlsCertificate: certificate.Mount);
-        await using IIdentityHubApplication application = builder.Build();
+        await using IdentityHubApplication application = builder.Build();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         bool receivedMountedCertificate = false;
         using var handler = new HttpClientHandler
@@ -104,7 +104,7 @@ public sealed class IdentityHubTransportSecurityTests
             },
         };
         using var client = new HttpClient(handler);
-        await application.StartAsync(timeout.Token);
+        await ((IHost)application).StartAsync(timeout.Token);
 
         try
         {
@@ -133,7 +133,7 @@ public sealed class IdentityHubTransportSecurityTests
         }
         finally
         {
-            await application.StopAsync(timeout.Token);
+            await ((IHost)application).StopAsync(timeout.Token);
         }
     }
 }

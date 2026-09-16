@@ -1,20 +1,29 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting;
-
 namespace Assimalign.Cohesion.NotificationHub;
 
 /// <summary>
-/// Represents a notification hub application and its host lifecycle.
+/// Represents the NotificationHub application lifecycle without hosting dependencies.
 /// </summary>
-public interface INotificationHubApplication : IHost
+public interface INotificationHubApplication
 {
     /// <summary>
-    /// Runs the application until shutdown is requested.
+    /// Gets the application context.
     /// </summary>
-    /// <param name="cancellationToken">The token that requests application shutdown.</param>
-    /// <returns>A task that completes after the application has stopped.</returns>
-    /// <exception cref="System.ObjectDisposedException">The application has been disposed.</exception>
-    Task RunAsync(CancellationToken cancellationToken = default);
+    INotificationHubApplicationContext Context { get; }
+
+    /// <summary>
+    /// Starts the application.
+    /// </summary>
+    /// <param name="cancellationToken">The token that cancels application startup.</param>
+    /// <returns>A task that completes when the application has started.</returns>
+    Task StartAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stops the application and drains its active work.
+    /// </summary>
+    /// <param name="cancellationToken">The token that bounds graceful shutdown.</param>
+    /// <returns>A task that completes when the application has stopped.</returns>
+    Task StopAsync(CancellationToken cancellationToken = default);
 }

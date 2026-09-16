@@ -20,11 +20,11 @@ public class ApplicationLifecycleTests
         var events = new List<string>();
         var firstService = new RecordingHostService("first", events);
         var secondService = new RecordingHostService("second", events);
-        IHostContext? factoryContext = null;
+        LogSpaceApplicationContext? factoryContext = null;
         int factoryCalls = 0;
-        ILogSpaceApplicationBuilder builder = LogSpaceApplication.CreateBuilder([]);
+        LogSpaceApplicationBuilder builder = LogSpaceApplication.CreateBuilder([]);
 
-        ILogSpaceApplicationBuilder returnedBuilder = builder
+        LogSpaceApplicationBuilder returnedBuilder = builder
             .AddService(firstService)
             .AddService(context =>
             {
@@ -33,16 +33,18 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using ILogSpaceApplication application = builder.Build();
+        await using LogSpaceApplication application = ((ILogSpaceApplicationBuilder)builder).Build().ShouldBeOfType<LogSpaceApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((ILogSpaceApplication)application).StartAsync(CancellationToken.None);
+        await ((ILogSpaceApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         returnedBuilder.ShouldBeSameAs(builder);
         factoryCalls.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((ILogSpaceApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((ILogSpaceApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.ShouldBe(
             new IHostService[] { firstService, secondService });
         events.ShouldBe(new[]
@@ -57,17 +59,17 @@ public class ApplicationLifecycleTests
     [Fact(DisplayName = "Cohesion Test [LogSpace] - AddService: Null registrations should fail explicitly")]
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
-        ILogSpaceApplicationBuilder builder = LogSpaceApplication.CreateBuilder([]);
+        LogSpaceApplicationBuilder builder = LogSpaceApplication.CreateBuilder([]);
 
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<LogSpaceApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [LogSpace] - AddService: Null factory result should fail at build")]
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
-        ILogSpaceApplicationBuilder builder = LogSpaceApplication.CreateBuilder([]);
+        LogSpaceApplicationBuilder builder = LogSpaceApplication.CreateBuilder([]);
         builder.AddService(_ => null!);
 
         InvalidOperationException exception = Should.Throw<InvalidOperationException>(
@@ -80,7 +82,7 @@ public class ApplicationLifecycleTests
     public async Task RunAsync_WhenCancellationIsRequested_ShouldStopCleanly()
     {
         // Arrange
-        await using ILogSpaceApplication application = LogSpaceApplication.CreateBuilder([]).Build();
+        await using LogSpaceApplication application = LogSpaceApplication.CreateBuilder([]).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
 
 

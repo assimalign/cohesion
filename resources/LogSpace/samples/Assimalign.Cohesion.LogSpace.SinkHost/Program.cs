@@ -14,7 +14,7 @@ public static class Program
     /// <returns>The complete host lifetime.</returns>
     public static async Task Main(string[] args)
     {
-        await using ILogSpaceApplication application = LogSpaceApplication.CreateBuilder(args).Build();
+        await using LogSpaceApplication application = LogSpaceApplication.CreateBuilder(args).Build();
         await application.RunAsync().ConfigureAwait(false);
     }
 

@@ -11,9 +11,12 @@ using Assimalign.Cohesion.LogSpace;
 
 namespace Assimalign.Cohesion.LogSpace.Hosting;
 
-internal sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
+/// <summary>
+/// Composes a LogSpace application and its hosting services.
+/// </summary>
+public sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
 {
-    private readonly List<Func<IHostContext, IHostService>> _serviceRegistrations = new();
+    private readonly List<Func<LogSpaceApplicationContext, IHostService>> _serviceRegistrations = new();
 
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
@@ -31,7 +34,16 @@ internal sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
         }
     }
 
-    public ILogSpaceApplicationBuilder AddService(IHostService service)
+    /// <summary>
+    /// Registers a host service with the LogSpace application.
+    /// </summary>
+    /// <remarks>
+    /// Host services start in registration order and stop in reverse registration order.
+    /// </remarks>
+    /// <param name="service">The host service to register.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    public LogSpaceApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
 
@@ -39,7 +51,18 @@ internal sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
         return this;
     }
 
-    public ILogSpaceApplicationBuilder AddService(Func<IHostContext, IHostService> factory)
+    /// <summary>
+    /// Registers a host service factory with the LogSpace application.
+    /// </summary>
+    /// <remarks>
+    /// The factory is invoked once for each call to <see cref="Build"/> and receives that
+    /// application's final host context. The resulting service follows registration order.
+    /// </remarks>
+    /// <param name="factory">The factory that creates the host service.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The factory returns <see langword="null"/> when the application is built.</exception>
+    public LogSpaceApplicationBuilder AddService(Func<LogSpaceApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -47,7 +70,12 @@ internal sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
         return this;
     }
 
-    public ILogSpaceApplication Build()
+    /// <summary>
+    /// Builds the LogSpace application.
+    /// </summary>
+    /// <returns>The configured LogSpace application.</returns>
+    /// <exception cref="InvalidOperationException">A registered host service factory returns <see langword="null"/>.</exception>
+    public LogSpaceApplication Build()
     {
         var options = new LogSpaceApplicationOptions();
         var context = new LogSpaceApplicationContext(_resourceContext);
@@ -89,7 +117,7 @@ internal sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
         }
         context.SetHostedServices(hostedServices);
 
-        var application = new LogSpaceApplicationHost(options, context);
+        var application = new LogSpaceApplication(options, context);
         if (_controlPlane is not null)
         {
             ResourceRuntime.HostBuilt(application, _controlPlane);
@@ -97,5 +125,5 @@ internal sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
         return application;
     }
 
-    IHost IHostBuilder.Build() => Build();
+    ILogSpaceApplication ILogSpaceApplicationBuilder.Build() => Build();
 }

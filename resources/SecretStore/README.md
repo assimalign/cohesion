@@ -45,3 +45,18 @@ The [ApplicationModel](Assimalign.Cohesion.SecretStore.ApplicationModel/docs/OVE
 commands; [Hosting](Assimalign.Cohesion.SecretStore.Hosting/docs/DESIGN.md) applies them; the Core-only
 [Client](Assimalign.Cohesion.SecretStore.Client/docs/OVERVIEW.md) delivers them for the gateway.
 ApplicationModel and Client are standalone NuGet packages.
+
+## Application composition (O34)
+
+The root contracts are hosting-free (O34): `ISecretStoreApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `ISecretStoreApplicationContext` exposes `ContentRootPath`. `ISecretStoreApplicationBuilder` owns area declarations and `Build()`. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
+
+`SecretStoreApplication.CreateBuilder(args)` returns the public concrete `SecretStoreApplicationBuilder`; its `Build()` returns the public `SecretStoreApplication : Host<SecretStoreApplicationContext>`. The public `SecretStoreApplicationContext` implements `ISecretStoreApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+```csharp
+using Assimalign.Cohesion.SecretStore.Hosting;
+
+SecretStoreApplicationBuilder builder = SecretStoreApplication.CreateBuilder(args);
+// Add area declarations and optional hosting services before Build().
+await using SecretStoreApplication application = builder.Build();
+await application.RunAsync();
+```

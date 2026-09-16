@@ -3,15 +3,18 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 
-using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.ConfigurationStore;
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
 
-internal sealed class ConfigurationStoreApplicationBuilder : IConfigurationStoreApplicationBuilder
+/// <summary>
+/// Composes a ConfigurationStore application and its hosting services.
+/// </summary>
+public sealed class ConfigurationStoreApplicationBuilder : IConfigurationStoreApplicationBuilder
 {
     private const string DefaultEndpoint = "http://127.0.0.1:8080";
 
@@ -21,7 +24,7 @@ internal sealed class ConfigurationStoreApplicationBuilder : IConfigurationStore
     private readonly Dictionary<string, IReadOnlyDictionary<string, string?>> _namespaces =
         new(StringComparer.Ordinal);
     private readonly ResourceContext? _resourceContext;
-    private readonly List<Func<IHostContext, IHostService>> _serviceRegistrations = new();
+    private readonly List<Func<ConfigurationStoreApplicationContext, IHostService>> _serviceRegistrations = new();
     private bool _isBuilt;
 
     internal ConfigurationStoreApplicationBuilder(string[] args, Assembly resourceAssembly)
@@ -43,6 +46,19 @@ internal sealed class ConfigurationStoreApplicationBuilder : IConfigurationStore
         }
     }
 
+    /// <summary>
+    /// Declares a named configuration namespace and its first-start values.
+    /// </summary>
+    /// <remarks>
+    /// Declared values seed a namespace only when no durable namespace document exists.
+    /// Later command mutations therefore survive application restarts.
+    /// </remarks>
+    /// <param name="name">The namespace name.</param>
+    /// <param name="configure">The callback that declares initial key/value entries.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or whitespace.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">A namespace with the same name is already declared.</exception>
     public IConfigurationStoreApplicationBuilder AddNamespace(
         string name,
         Action<IConfigurationNamespaceBuilder> configure)
@@ -62,7 +78,16 @@ internal sealed class ConfigurationStoreApplicationBuilder : IConfigurationStore
         return this;
     }
 
-    public IConfigurationStoreApplicationBuilder AddService(IHostService service)
+    /// <summary>
+    /// Registers a host service with the configuration store application.
+    /// </summary>
+    /// <remarks>
+    /// Host services start in registration order and stop in reverse registration order.
+    /// </remarks>
+    /// <param name="service">The host service to register.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    public ConfigurationStoreApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
 
@@ -70,7 +95,18 @@ internal sealed class ConfigurationStoreApplicationBuilder : IConfigurationStore
         return this;
     }
 
-    public IConfigurationStoreApplicationBuilder AddService(Func<IHostContext, IHostService> factory)
+    /// <summary>
+    /// Registers a host service factory with the configuration store application.
+    /// </summary>
+    /// <remarks>
+    /// The factory is invoked once for each call to <see cref="Build"/> and receives that
+    /// application's final host context. The resulting service follows registration order.
+    /// </remarks>
+    /// <param name="factory">The factory that creates the host service.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The factory returns <see langword="null"/> when the application is built.</exception>
+    public ConfigurationStoreApplicationBuilder AddService(Func<ConfigurationStoreApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -78,7 +114,16 @@ internal sealed class ConfigurationStoreApplicationBuilder : IConfigurationStore
         return this;
     }
 
-    public IConfigurationStoreApplication Build()
+    /// <summary>
+    /// Builds the configuration store application.
+    /// </summary>
+    /// <returns>The configured configuration store application.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The builder has already built an application, a registered host service factory returns
+    /// <see langword="null"/>, or the data mount has no filesystem path.
+    /// </exception>
+    /// <exception cref="ArgumentException">A command-line endpoint or data option is invalid or missing its value.</exception>
+    public ConfigurationStoreApplication Build()
     {
         if (_isBuilt)
         {
@@ -112,7 +157,7 @@ internal sealed class ConfigurationStoreApplicationBuilder : IConfigurationStore
         context.SetHostedServices(hostedServices);
 
         _isBuilt = true;
-        var application = new ConfigurationStoreApplicationHost(options, context);
+        var application = new ConfigurationStoreApplication(options, context);
         if (_controlPlane is not null)
         {
             ResourceRuntime.HostBuilt(application, _controlPlane);
@@ -121,7 +166,7 @@ internal sealed class ConfigurationStoreApplicationBuilder : IConfigurationStore
         return application;
     }
 
-    IHost IHostBuilder.Build() => Build();
+    IConfigurationStoreApplication IConfigurationStoreApplicationBuilder.Build() => Build();
 
     private Uri ResolveEndpoint()
     {

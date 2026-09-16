@@ -10,9 +10,12 @@ using Assimalign.Cohesion.NotificationHub;
 
 namespace Assimalign.Cohesion.NotificationHub.Hosting;
 
-internal sealed class NotificationHubApplicationBuilder : INotificationHubApplicationBuilder
+/// <summary>
+/// Composes a NotificationHub application and its hosting services.
+/// </summary>
+public sealed class NotificationHubApplicationBuilder : INotificationHubApplicationBuilder
 {
-    private readonly List<Func<IHostContext, IHostService>> _serviceFactories = [];
+    private readonly List<Func<NotificationHubApplicationContext, IHostService>> _serviceFactories = [];
 
     private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
@@ -33,7 +36,13 @@ internal sealed class NotificationHubApplicationBuilder : INotificationHubApplic
         }
     }
 
-    public INotificationHubApplicationBuilder AddService(IHostService service)
+    /// <summary>
+    /// Adds an existing host service to the notification hub application.
+    /// </summary>
+    /// <param name="service">The service to add.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    public NotificationHubApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
 
@@ -41,7 +50,14 @@ internal sealed class NotificationHubApplicationBuilder : INotificationHubApplic
         return this;
     }
 
-    public INotificationHubApplicationBuilder AddService(Func<IHostContext, IHostService> factory)
+    /// <summary>
+    /// Adds a host service factory that is materialized once for each build.
+    /// </summary>
+    /// <param name="factory">The factory to invoke with the notification hub host context.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="factory"/> returns <see langword="null"/>.</exception>
+    public NotificationHubApplicationBuilder AddService(Func<NotificationHubApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -49,7 +65,11 @@ internal sealed class NotificationHubApplicationBuilder : INotificationHubApplic
         return this;
     }
 
-    public INotificationHubApplication Build()
+    /// <summary>
+    /// Builds the notification hub application.
+    /// </summary>
+    /// <returns>The configured notification hub application.</returns>
+    public NotificationHubApplication Build()
     {
         var options = new NotificationHubApplicationOptions();
         var context = new NotificationHubApplicationContext(_resourceContext);
@@ -74,7 +94,7 @@ internal sealed class NotificationHubApplicationBuilder : INotificationHubApplic
         }
         context.SetHostedServices(hostedServices);
 
-        var application = new NotificationHubApplicationHost(options, context);
+        var application = new NotificationHubApplication(options, context);
         if (_controlPlane is not null)
         {
             ResourceRuntime.HostBuilt(application, _controlPlane);
@@ -82,5 +102,5 @@ internal sealed class NotificationHubApplicationBuilder : INotificationHubApplic
         return application;
     }
 
-    IHost IHostBuilder.Build() => Build();
+    INotificationHubApplication INotificationHubApplicationBuilder.Build() => Build();
 }

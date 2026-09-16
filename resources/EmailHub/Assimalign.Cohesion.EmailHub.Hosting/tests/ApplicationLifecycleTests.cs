@@ -6,8 +6,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.EmailHub;
+using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.EmailHub.Hosting.Tests;
 
@@ -20,11 +20,11 @@ public class ApplicationLifecycleTests
         var events = new List<string>();
         var firstService = new RecordingHostService("first", events);
         var secondService = new RecordingHostService("second", events);
-        IHostContext? factoryContext = null;
+        EmailHubApplicationContext? factoryContext = null;
         int factoryCalls = 0;
-        IEmailHubApplicationBuilder builder = EmailHubApplication.CreateBuilder([]);
+        EmailHubApplicationBuilder builder = EmailHubApplication.CreateBuilder([]);
 
-        IEmailHubApplicationBuilder returnedBuilder = builder
+        EmailHubApplicationBuilder returnedBuilder = builder
             .AddService(firstService)
             .AddService(context =>
             {
@@ -33,16 +33,18 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using IEmailHubApplication application = builder.Build();
+        await using EmailHubApplication application = ((IEmailHubApplicationBuilder)builder).Build().ShouldBeOfType<EmailHubApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((IEmailHubApplication)application).StartAsync(CancellationToken.None);
+        await ((IEmailHubApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         returnedBuilder.ShouldBeSameAs(builder);
         factoryCalls.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((IEmailHubApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((IEmailHubApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.ShouldBe(
             new IHostService[] { firstService, secondService });
         events.ShouldBe(new[]
@@ -57,17 +59,17 @@ public class ApplicationLifecycleTests
     [Fact(DisplayName = "Cohesion Test [EmailHub] - AddService: Null registrations should fail explicitly")]
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
-        IEmailHubApplicationBuilder builder = EmailHubApplication.CreateBuilder([]);
+        EmailHubApplicationBuilder builder = EmailHubApplication.CreateBuilder([]);
 
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<EmailHubApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [EmailHub] - AddService: Null factory result should fail at build")]
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
-        IEmailHubApplicationBuilder builder = EmailHubApplication.CreateBuilder([]);
+        EmailHubApplicationBuilder builder = EmailHubApplication.CreateBuilder([]);
         builder.AddService(_ => null!);
 
         InvalidOperationException exception = Should.Throw<InvalidOperationException>(
@@ -80,7 +82,7 @@ public class ApplicationLifecycleTests
     public async Task RunAsync_WhenCancellationIsRequested_ShouldStopCleanly()
     {
         // Arrange
-        await using IEmailHubApplication application = EmailHubApplication.CreateBuilder([]).Build();
+        await using EmailHubApplication application = EmailHubApplication.CreateBuilder([]).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
 
 

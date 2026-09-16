@@ -5,6 +5,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using ClientCommand = Assimalign.Cohesion.ConfigurationStore.Client.ResourceCommand;
+using RuntimeCommand = Assimalign.Cohesion.Hosting.Resources.ResourceCommand;
 using Shouldly;
 using Xunit;
 
@@ -12,9 +14,6 @@ using Assimalign.Cohesion.ConfigurationStore;
 using Assimalign.Cohesion.ConfigurationStore.Client;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
-
-using ClientCommand = Assimalign.Cohesion.ConfigurationStore.Client.ResourceCommand;
-using RuntimeCommand = Assimalign.Cohesion.Hosting.Resources.ResourceCommand;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Tests;
 
@@ -76,12 +75,12 @@ public sealed class ResourceCommandHostingTests
             Uri endpoint = ConfigurationStoreTestHost.GetEndpoint();
             string token = identity.Issue("configuration");
             using IDisposable scope = ResourceRuntime.CreateScope(ConfigurationStoreTestHost.CreateContext(endpoint, directory, token, identity.PublicKey));
-            IConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
+            ConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
             builder.AddNamespace("app", ns => ns.Set("Mode", "initial"));
-            await using IConfigurationStoreApplication application = builder.Build();
+            await using ConfigurationStoreApplication application = builder.Build();
             ResourceRuntime.TryGetControlPlane((IHost)application, out IResourceControlPlane? plane).ShouldBeTrue();
             plane.ShouldNotBeNull();
-            await application.StartAsync(cancellation.Token);
+            await ((IHost)application).StartAsync(cancellation.Token);
             try
             {
                 IConfigurationStoreClient read = ConfigurationStoreClient.Create(endpoint, new ClientCredential(token));
@@ -128,7 +127,7 @@ public sealed class ResourceCommandHostingTests
             }
             finally
             {
-                await application.StopAsync(CancellationToken.None);
+                await ((IHost)application).StopAsync(CancellationToken.None);
             }
         }
         finally

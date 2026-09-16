@@ -4,18 +4,19 @@
 
 The area root owns the contracts that executable composition and feature packages target.
 `ISecretStoreApplicationBuilder` is the contract-only builder seam, while
-`ISecretStoreApplication` supplies the host lifecycle expected by an executable resource. The
+`ISecretStoreApplication` supplies the hosting-free application lifecycle. The
 root also owns the two foundational SecretStore declarations needed by a `Program.cs`:
 `AddSecret` and `AddCertificateAuthority`. They are builder members rather than Hosting-owned
 verbs, so any implementation of the root seam can consume the same declaration data.
 
 ## Hosting isolation
 
-The root references only the shared Hosting foundation. The concrete builder, host, context, and
-runtime options remain internal to `Assimalign.Cohesion.SecretStore.Hosting`; feature libraries
-must not reference that runtime module. `CertificateAuthorityOptions` is composition data, not a
-runtime service: it introduces no network, certificate, configuration, or service-container
-dependency into the root.
+The root contracts are hosting-free (O34): `ISecretStoreApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `ISecretStoreApplicationContext` exposes `ContentRootPath`. `ISecretStoreApplicationBuilder` owns area declarations and `Build()`. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
+
+The concrete application, builder, and context live in `Assimalign.Cohesion.SecretStore.Hosting`; options and supporting services remain internal.
+
+`CertificateAuthorityOptions` is composition data: it introduces no network, certificate,
+configuration, or service-container dependency into the root.
 
 ## Code-first secret seeds
 
@@ -47,11 +48,9 @@ application/resource identity as their subject.
 
 ## Composition lifecycle
 
-The builder also accepts existing `IHostService` instances and factories that receive the newly
-created area `IHostContext`. Each factory is invoked once per `Build()`, and the resulting services
-are retained in registration order so the shared host starts them in that order and stops them in
-reverse. The collection is empty when callers register nothing, and the host environment remains
-production.
+Background-work registration belongs to the concrete `SecretStoreApplicationBuilder`: `AddService(IHostService)` and `AddService(Func<SecretStoreApplicationContext, IHostService>)`. The factory deliberately receives the concrete context, unlike Web's AddService and Database's AddServer interface-context overloads, so hosting consumers can use environment, state, and hosted-service members beyond the small root contract. Factories run once per build against the same context retained by the application; the hosted-service snapshot is installed after factory evaluation. Services start in registration order and stop in reverse. No area-owned service abstraction is introduced.
+
+Enabled resources retain their ambient context and registered control-plane behavior; plain application defaults are described by the Hosting design.
 
 ## AOT posture
 
@@ -67,3 +66,9 @@ Platform service, verify bootstrap credentials, or expose a protocol endpoint. T
 responsibilities. Cross-resource command verbs (`AddSecret`, `IssueCertificate`, and `Enroll` on a
 SecretStore resource descriptor) are a separate ApplicationModel surface and are not builder-time
 seed declarations.
+
+## Hosting-free application contract (O34)
+
+`SecretStoreApplication.CreateBuilder(args)` returns the public concrete `SecretStoreApplicationBuilder`; its `Build()` returns the public `SecretStoreApplication : Host<SecretStoreApplicationContext>`. The public `SecretStoreApplicationContext` implements `ISecretStoreApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+Background-work registration (`AddService`) is available only on the concrete Hosting builder.

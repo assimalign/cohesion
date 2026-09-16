@@ -1,11 +1,7 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-	<PropertyGroup>
-		<!-- Deviates from the repo hosting-library rule (COHRES004) per design decision O34: migration gate, removed by #992 slice 2. -->
-		<CohesionHostingLibraryReferenceMigration>true</CohesionHostingLibraryReferenceMigration>
-	</PropertyGroup>
+<Project Sdk="Microsoft.NET.Sdk">
 
 
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 </Project>

@@ -49,9 +49,11 @@ enrolled or provisional transport identity; the loopback HTTP enrollment path is
 `certs/public`/ACME issuance and gateway `parameter:` certificate mounts are also not implemented
 by this host. See [DESIGN.md](./DESIGN.md) for the exact routes and bootstrap boundary.
 
-## Public type
+## Public types
 
-- `SecretStoreApplication` — static creation facade; runtime implementation types are internal.
+- `SecretStoreApplication` — concrete host and creation entry point.
+- `SecretStoreApplicationBuilder` — composition and background-work registration.
+- `SecretStoreApplicationContext` — host environment and runtime state.
 
 ## Commands
 
@@ -85,3 +87,14 @@ Restricted trust grants accept `{trustKey,allowedCommandKinds}` while unrestrict
 the bare JWK payload. The protected trust document round-trips the optional string array; absent
 or empty means every command kind is allowed. Enroll(platformStore) is deferred to item 31t:
 automatic Platform enrollment needs a gateway-owned mediator and Platform-audience signer.
+
+## Concrete composition (T10 / O34)
+
+`SecretStoreApplication.CreateBuilder(args)` returns the public concrete `SecretStoreApplicationBuilder`; its `Build()` returns the public `SecretStoreApplication : Host<SecretStoreApplicationContext>`. The public `SecretStoreApplicationContext` implements `ISecretStoreApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+Background-work registration belongs to the concrete `SecretStoreApplicationBuilder`: `AddService(IHostService)` and `AddService(Func<SecretStoreApplicationContext, IHostService>)`. The factory deliberately receives the concrete context, unlike Web's AddService and Database's AddServer interface-context overloads, so hosting consumers can use environment, state, and hosted-service members beyond the small root contract. Factories run once per build against the same context retained by the application; the hosted-service snapshot is installed after factory evaluation. Services start in registration order and stop in reverse. No area-owned service abstraction is introduced.
+
+The concrete application preserves the existing RunAsync shortcut for a token already cancelled
+at entry: it starts and stops with uncancelled lifecycle tokens. Other runs delegate to the shared
+host runner. This compatibility method hides the non-virtual base member; callers holding IHost
+use the shared runner directly.

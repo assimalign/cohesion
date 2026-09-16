@@ -5,14 +5,17 @@ using System.Reflection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
-using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.IoTHub;
+using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.IoTHub.Hosting;
 
-internal sealed class IoTHubApplicationBuilder : IIoTHubApplicationBuilder
+/// <summary>
+/// Composes an IoTHub application and its hosting services.
+/// </summary>
+public sealed class IoTHubApplicationBuilder : IIoTHubApplicationBuilder
 {
-    private readonly List<Func<IHostContext, IHostService>> _serviceRegistrations = new();
+    private readonly List<Func<IoTHubApplicationContext, IHostService>> _serviceRegistrations = new();
 
     private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
@@ -33,7 +36,16 @@ internal sealed class IoTHubApplicationBuilder : IIoTHubApplicationBuilder
         }
     }
 
-    public IIoTHubApplicationBuilder AddService(IHostService service)
+    /// <summary>
+    /// Registers a host service with the IoT hub application.
+    /// </summary>
+    /// <remarks>
+    /// Host services start in registration order and stop in reverse registration order.
+    /// </remarks>
+    /// <param name="service">The host service to register.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    public IoTHubApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
 
@@ -41,7 +53,18 @@ internal sealed class IoTHubApplicationBuilder : IIoTHubApplicationBuilder
         return this;
     }
 
-    public IIoTHubApplicationBuilder AddService(Func<IHostContext, IHostService> factory)
+    /// <summary>
+    /// Registers a host service factory with the IoT hub application.
+    /// </summary>
+    /// <remarks>
+    /// The factory is invoked once for each call to <see cref="Build"/> and receives that
+    /// application's final host context. The resulting service follows registration order.
+    /// </remarks>
+    /// <param name="factory">The factory that creates the host service.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The factory returns <see langword="null"/> when the application is built.</exception>
+    public IoTHubApplicationBuilder AddService(Func<IoTHubApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -49,7 +72,12 @@ internal sealed class IoTHubApplicationBuilder : IIoTHubApplicationBuilder
         return this;
     }
 
-    public IIoTHubApplication Build()
+    /// <summary>
+    /// Builds the IoT hub application.
+    /// </summary>
+    /// <returns>The configured IoT hub application.</returns>
+    /// <exception cref="InvalidOperationException">A registered host service factory returns <see langword="null"/>.</exception>
+    public IoTHubApplication Build()
     {
         var options = new IoTHubApplicationOptions();
         var context = new IoTHubApplicationContext(_resourceContext);
@@ -75,7 +103,7 @@ internal sealed class IoTHubApplicationBuilder : IIoTHubApplicationBuilder
         }
         context.SetHostedServices(hostedServices);
 
-        var application = new IoTHubApplicationHost(options, context);
+        var application = new IoTHubApplication(options, context);
         if (_controlPlane is not null)
         {
             ResourceRuntime.HostBuilt(application, _controlPlane);
@@ -83,5 +111,5 @@ internal sealed class IoTHubApplicationBuilder : IIoTHubApplicationBuilder
         return application;
     }
 
-    IHost IHostBuilder.Build() => Build();
+    IIoTHubApplication IIoTHubApplicationBuilder.Build() => Build();
 }

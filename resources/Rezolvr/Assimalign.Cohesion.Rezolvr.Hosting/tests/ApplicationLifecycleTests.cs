@@ -20,8 +20,8 @@ public class ApplicationLifecycleTests
         List<string> events = [];
         RecordingService firstService = new("first", events);
         RecordingService secondService = new("second", events);
-        IRezolvrApplicationBuilder builder = RezolvrApplication.CreateBuilder([]);
-        IHostContext? factoryContext = null;
+        RezolvrApplicationBuilder builder = RezolvrApplication.CreateBuilder([]);
+        RezolvrApplicationContext? factoryContext = null;
         var factoryCount = 0;
 
         builder
@@ -33,15 +33,17 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using IRezolvrApplication application = builder.Build();
+        await using RezolvrApplication application = ((IRezolvrApplicationBuilder)builder).Build().ShouldBeOfType<RezolvrApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((IRezolvrApplication)application).StartAsync(CancellationToken.None);
+        await ((IRezolvrApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         factoryCount.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((IRezolvrApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((IRezolvrApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.ShouldBe(new IHostService[] { firstService, secondService });
         events.ShouldBe(new[] { "first:start", "second:start", "second:stop", "first:stop" });
     }
@@ -50,19 +52,19 @@ public class ApplicationLifecycleTests
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
         // Arrange
-        IRezolvrApplicationBuilder builder = RezolvrApplication.CreateBuilder([]);
+        RezolvrApplicationBuilder builder = RezolvrApplication.CreateBuilder([]);
 
         // Act and assert
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<RezolvrApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [Rezolvr.Hosting] - Build: Null service factory result should fail explicitly")]
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
         // Arrange
-        IRezolvrApplicationBuilder builder = RezolvrApplication.CreateBuilder([]);
+        RezolvrApplicationBuilder builder = RezolvrApplication.CreateBuilder([]);
         builder.AddService(_ => null!);
 
         // Act
@@ -76,7 +78,7 @@ public class ApplicationLifecycleTests
     public async Task RunAsync_WhenCancellationIsRequested_ShouldStopCleanly()
     {
         // Arrange
-        await using IRezolvrApplication application = RezolvrApplication.CreateBuilder([]).Build();
+        await using RezolvrApplication application = RezolvrApplication.CreateBuilder([]).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
 
 

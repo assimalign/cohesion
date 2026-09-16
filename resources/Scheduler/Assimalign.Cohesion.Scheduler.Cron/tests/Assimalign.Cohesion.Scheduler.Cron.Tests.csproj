@@ -6,6 +6,5 @@
     <CohesionPackageReference Include="xunit" />
     <CohesionPackageReference Include="xunit.runner.visualstudio" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Scheduler.Cron" />
-    <CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
   </ItemGroup>
 </Project>

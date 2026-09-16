@@ -10,6 +10,7 @@ using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Gateway;
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 using Assimalign.Cohesion.SecretStore;
@@ -209,7 +210,7 @@ public sealed class GatewayStoreResolutionEndToEndTests
     {
         private readonly string _dataPath;
         private readonly Uri _endpoint;
-        private ISecretStoreApplication? _application;
+        private SecretStoreApplication? _application;
 
         internal LoopbackSecretStoreController(Uri endpoint, string dataPath)
         {
@@ -249,14 +250,14 @@ public sealed class GatewayStoreResolutionEndToEndTests
                         resourceName: context.Resource.Name.ToString());
                     using (ResourceRuntime.CreateScope(resourceContext))
                     {
-                        ISecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+                        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
                         builder.AddSecret(
                             "app/api-key",
                             Encoding.UTF8.GetBytes("gateway-secret"));
                         _application = builder.Build();
                     }
 
-                    await _application.StartAsync(cancellationToken);
+                    await ((IHost)_application).StartAsync(cancellationToken);
                 }
 
                 context.State.SetState(
@@ -303,10 +304,10 @@ public sealed class GatewayStoreResolutionEndToEndTests
                 return;
             }
 
-            ISecretStoreApplication application = _application;
+            SecretStoreApplication application = _application;
             _application = null;
-            await application.StopAsync(cancellationToken);
-            await application.DisposeAsync();
+            await ((IHost)application).StopAsync(cancellationToken);
+            await ((IAsyncDisposable)application).DisposeAsync();
         }
     }
 }

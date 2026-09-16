@@ -21,3 +21,18 @@ As an L3 service platform, EventHub composes the L2 `Assimalign.Cohesion.Hosting
 - [Root design](./Assimalign.Cohesion.EventHub/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.EventHub.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.EventHub.Hosting/docs/DESIGN.md)
+
+## Application composition (O34)
+
+The root contracts are hosting-free (O34): `IEventHubApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `IEventHubApplicationContext` exposes `ContentRootPath`. `IEventHubApplicationBuilder` exposes `Build()`; it currently declares no area-specific verbs. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
+
+`EventHubApplication.CreateBuilder(args)` returns the public concrete `EventHubApplicationBuilder`; its `Build()` returns the public `EventHubApplication : Host<EventHubApplicationContext>`. The public `EventHubApplicationContext` implements `IEventHubApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+```csharp
+using Assimalign.Cohesion.EventHub.Hosting;
+
+EventHubApplicationBuilder builder = EventHubApplication.CreateBuilder(args);
+// Add area declarations and optional hosting services before Build().
+await using EventHubApplication application = builder.Build();
+await application.RunAsync();
+```

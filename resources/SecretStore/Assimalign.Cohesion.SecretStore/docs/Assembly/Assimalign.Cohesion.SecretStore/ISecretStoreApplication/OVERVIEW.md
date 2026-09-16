@@ -3,29 +3,23 @@
 Namespace: `Assimalign.Cohesion.SecretStore`
 Assembly: `Assimalign.Cohesion.SecretStore`
 
-## Purpose
+## Purpose and surface
 
-`ISecretStoreApplication` is the public lifecycle contract for a SecretStore application. It extends `IHost` and adds the run-until-shutdown operation used by executable resources.
+The root contracts are hosting-free (O34): `ISecretStoreApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `ISecretStoreApplicationContext` exposes `ContentRootPath`. `ISecretStoreApplicationBuilder` owns area declarations and `Build()`. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
 
-## Surface
+`StartAsync(CancellationToken)` starts the application; `StopAsync(CancellationToken)` drains and stops it. Lifecycle failures propagate to the caller. The contract carries no host identity, runner, or disposal members.
 
-- `RunAsync(CancellationToken cancellationToken = default)` starts the host, waits for shutdown, and completes after the host has stopped.
-- The inherited `IHost` members expose the host identity, context, start, stop, and disposal lifecycle.
+## Hosting implementation
 
-The application runs the host services registered on its builder, or an empty collection when none were supplied. Services start in registration order and stop in reverse. A token that is already cancelled still drives the host through a clean start-and-stop transition; cancellation after startup requests graceful shutdown.
-
-## Exceptions
-
-`RunAsync` throws `ObjectDisposedException` when invoked after the application has been disposed. Lifecycle failures are propagated to the caller.
+`SecretStoreApplication.CreateBuilder(args)` returns the public concrete `SecretStoreApplicationBuilder`; its `Build()` returns the public `SecretStoreApplication : Host<SecretStoreApplicationContext>`. The public `SecretStoreApplicationContext` implements `ISecretStoreApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
 
 ## Usage
 
 ```csharp
-using Assimalign.Cohesion.SecretStore;
 using Assimalign.Cohesion.SecretStore.Hosting;
 
-await using ISecretStoreApplication application =
-    SecretStoreApplication.CreateBuilder(args).Build();
-
-await application.RunAsync(cancellationToken);
+SecretStoreApplicationBuilder builder = SecretStoreApplication.CreateBuilder(args);
+// Add area declarations and optional hosting services before Build().
+await using SecretStoreApplication application = builder.Build();
+await application.RunAsync();
 ```

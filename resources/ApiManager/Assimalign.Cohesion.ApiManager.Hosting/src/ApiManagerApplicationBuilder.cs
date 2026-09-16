@@ -10,9 +10,12 @@ using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.ApiManager.Hosting;
 
-internal sealed class ApiManagerApplicationBuilder : IApiManagerApplicationBuilder
+/// <summary>
+/// Composes an ApiManager application and its hosting services.
+/// </summary>
+public sealed class ApiManagerApplicationBuilder : IApiManagerApplicationBuilder
 {
-    private readonly List<Func<IHostContext, IHostService>> _serviceRegistrations = new();
+    private readonly List<Func<ApiManagerApplicationContext, IHostService>> _serviceRegistrations = new();
 
     private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
@@ -33,7 +36,16 @@ internal sealed class ApiManagerApplicationBuilder : IApiManagerApplicationBuild
         }
     }
 
-    public IApiManagerApplicationBuilder AddService(IHostService service)
+    /// <summary>
+    /// Registers a host service with the API manager application.
+    /// </summary>
+    /// <remarks>
+    /// Host services start in registration order and stop in reverse registration order.
+    /// </remarks>
+    /// <param name="service">The host service to register.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    public ApiManagerApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
 
@@ -41,7 +53,18 @@ internal sealed class ApiManagerApplicationBuilder : IApiManagerApplicationBuild
         return this;
     }
 
-    public IApiManagerApplicationBuilder AddService(Func<IHostContext, IHostService> factory)
+    /// <summary>
+    /// Registers a host service factory with the API manager application.
+    /// </summary>
+    /// <remarks>
+    /// The factory is invoked once for each call to <see cref="Build"/> and receives that
+    /// application's final host context. The resulting service follows registration order.
+    /// </remarks>
+    /// <param name="factory">The factory that creates the host service.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The factory returns <see langword="null"/> when the application is built.</exception>
+    public ApiManagerApplicationBuilder AddService(Func<ApiManagerApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -49,7 +72,12 @@ internal sealed class ApiManagerApplicationBuilder : IApiManagerApplicationBuild
         return this;
     }
 
-    public IApiManagerApplication Build()
+    /// <summary>
+    /// Builds the API manager application.
+    /// </summary>
+    /// <returns>The configured API manager application.</returns>
+    /// <exception cref="InvalidOperationException">A registered host service factory returns <see langword="null"/>.</exception>
+    public ApiManagerApplication Build()
     {
         var options = new ApiManagerApplicationOptions();
         var context = new ApiManagerApplicationContext(_resourceContext);
@@ -75,7 +103,7 @@ internal sealed class ApiManagerApplicationBuilder : IApiManagerApplicationBuild
         }
         context.SetHostedServices(hostedServices);
 
-        var application = new ApiManagerApplicationHost(options, context);
+        var application = new ApiManagerApplication(options, context);
         if (_controlPlane is not null)
         {
             ResourceRuntime.HostBuilt(application, _controlPlane);
@@ -83,5 +111,5 @@ internal sealed class ApiManagerApplicationBuilder : IApiManagerApplicationBuild
         return application;
     }
 
-    IHost IHostBuilder.Build() => Build();
+    IApiManagerApplication IApiManagerApplicationBuilder.Build() => Build();
 }

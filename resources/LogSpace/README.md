@@ -23,3 +23,20 @@ As an L3 service platform, LogSpace composes the L2 `Assimalign.Cohesion.Hosting
 - [Root design](./Assimalign.Cohesion.LogSpace/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.LogSpace.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.LogSpace.Hosting/docs/DESIGN.md)
+
+## Application composition (O34)
+
+The root contracts are hosting-free (O34): `ILogSpaceApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `ILogSpaceApplicationContext` exposes `ContentRootPath`. `ILogSpaceApplicationBuilder` exposes `Build()`; it currently declares no area-specific verbs. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
+
+`LogSpaceApplication.CreateBuilder(args)` returns the public concrete `LogSpaceApplicationBuilder`; its `Build()` returns the public `LogSpaceApplication : Host<LogSpaceApplicationContext>`. The public `LogSpaceApplicationContext` implements `ILogSpaceApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+```csharp
+using Assimalign.Cohesion.LogSpace.Hosting;
+
+LogSpaceApplicationBuilder builder = LogSpaceApplication.CreateBuilder(args);
+// Add area declarations and optional hosting services before Build().
+await using LogSpaceApplication application = builder.Build();
+await application.RunAsync();
+```
+
+The unused public `IHostBuilder.AddLogSpace()` shim was removed by O34. The ApplicationModel descriptor verb is unchanged.

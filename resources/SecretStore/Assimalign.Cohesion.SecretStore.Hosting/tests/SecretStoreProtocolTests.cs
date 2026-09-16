@@ -8,14 +8,14 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
+using SecretStoreResourceCommand = Assimalign.Cohesion.SecretStore.Client.ResourceCommand;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.SecretStore;
 using Assimalign.Cohesion.SecretStore.Client;
-
-using SecretStoreResourceCommand = Assimalign.Cohesion.SecretStore.Client.ResourceCommand;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Tests;
 
@@ -36,7 +36,7 @@ public sealed class SecretStoreProtocolTests
             gatewayName: managed ? "local" : null,
             environmentName: environmentName);
         using IDisposable scope = ResourceRuntime.CreateScope(context);
-        ISecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
 
         // Act
         InvalidOperationException error = Should.Throw<InvalidOperationException>(() => builder.Build());
@@ -58,10 +58,10 @@ public sealed class SecretStoreProtocolTests
             gatewayName: null,
             environmentName: environmentName);
         using IDisposable scope = ResourceRuntime.CreateScope(context);
-        ISecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
 
         // Act
-        await using ISecretStoreApplication application = builder.Build();
+        await using SecretStoreApplication application = builder.Build();
 
         // Assert
         application.Context.HostedServices.ShouldNotBeEmpty();
@@ -79,11 +79,11 @@ public sealed class SecretStoreProtocolTests
             identity.Issue("another-resource"),
             identity.PublicKey);
         using IDisposable scope = ResourceRuntime.CreateScope(context);
-        await using ISecretStoreApplication application = SecretStoreTestHost.CreateBuilder().Build();
+        await using SecretStoreApplication application = SecretStoreTestHost.CreateBuilder().Build();
 
         // Act
         InvalidDataException error = await Should.ThrowAsync<InvalidDataException>(
-            () => application.StartAsync());
+            () => ((IHost)application).StartAsync());
 
         // Assert
         error.Message.ShouldContain("does not match", Case.Sensitive);
@@ -105,11 +105,11 @@ public sealed class SecretStoreProtocolTests
                 token,
                 identity.PublicKey);
             using IDisposable scope = ResourceRuntime.CreateScope(context);
-            ISecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+            SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
             builder.AddSecret("app/api-key", Encoding.UTF8.GetBytes("correct-horse"));
-            await using ISecretStoreApplication application = builder.Build();
+            await using SecretStoreApplication application = builder.Build();
             using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            await application.StartAsync(cancellationTokenSource.Token);
+            await ((IHost)application).StartAsync(cancellationTokenSource.Token);
 
             try
             {
@@ -143,7 +143,7 @@ public sealed class SecretStoreProtocolTests
             }
             finally
             {
-                await application.StopAsync(cancellationTokenSource.Token);
+                await ((IHost)application).StopAsync(cancellationTokenSource.Token);
             }
         }
         finally
@@ -169,11 +169,11 @@ public sealed class SecretStoreProtocolTests
                 token,
                 identity.PublicKey);
             using IDisposable scope = ResourceRuntime.CreateScope(context);
-            ISecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+            SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
             builder.AddSecret("app/connection", Encoding.UTF8.GetBytes("Server=loopback"));
-            await using ISecretStoreApplication application = builder.Build();
+            await using SecretStoreApplication application = builder.Build();
             using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            await application.StartAsync(cancellationTokenSource.Token);
+            await ((IHost)application).StartAsync(cancellationTokenSource.Token);
 
             try
             {
@@ -217,7 +217,7 @@ public sealed class SecretStoreProtocolTests
             }
             finally
             {
-                await application.StopAsync(cancellationTokenSource.Token);
+                await ((IHost)application).StopAsync(cancellationTokenSource.Token);
             }
         }
         finally

@@ -3,11 +3,10 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Scheduler;
-
 using Shouldly;
 using Xunit;
+
+using Assimalign.Cohesion.Scheduler;
 
 namespace Assimalign.Cohesion.Scheduler.Timer.Tests;
 
@@ -64,13 +63,7 @@ public sealed class TimerScheduleTests
             return this;
         }
 
-        public ISchedulerApplicationBuilder AddService(IHostService service) => this;
-
-        public ISchedulerApplicationBuilder AddService(Func<IHostContext, IHostService> factory) => this;
-
         public ISchedulerApplication Build() => throw new NotSupportedException();
-
-        IHost IHostBuilder.Build() => Build();
     }
 
     private sealed class TestJob(

@@ -6,8 +6,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.ApiManager;
+using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.ApiManager.Hosting.Tests;
 
@@ -20,11 +20,11 @@ public class ApplicationLifecycleTests
         var events = new List<string>();
         var firstService = new RecordingHostService("first", events);
         var secondService = new RecordingHostService("second", events);
-        IHostContext? factoryContext = null;
+        ApiManagerApplicationContext? factoryContext = null;
         int factoryCalls = 0;
-        IApiManagerApplicationBuilder builder = ApiManagerApplication.CreateBuilder([]);
+        ApiManagerApplicationBuilder builder = ApiManagerApplication.CreateBuilder([]);
 
-        IApiManagerApplicationBuilder returnedBuilder = builder
+        ApiManagerApplicationBuilder returnedBuilder = builder
             .AddService(firstService)
             .AddService(context =>
             {
@@ -33,16 +33,18 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using IApiManagerApplication application = builder.Build();
+        await using ApiManagerApplication application = ((IApiManagerApplicationBuilder)builder).Build().ShouldBeOfType<ApiManagerApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((IApiManagerApplication)application).StartAsync(CancellationToken.None);
+        await ((IApiManagerApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         returnedBuilder.ShouldBeSameAs(builder);
         factoryCalls.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((IApiManagerApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((IApiManagerApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.ShouldBe(
             new IHostService[] { firstService, secondService });
         events.ShouldBe(new[]
@@ -57,17 +59,17 @@ public class ApplicationLifecycleTests
     [Fact(DisplayName = "Cohesion Test [ApiManager] - AddService: Null registrations should fail explicitly")]
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
-        IApiManagerApplicationBuilder builder = ApiManagerApplication.CreateBuilder([]);
+        ApiManagerApplicationBuilder builder = ApiManagerApplication.CreateBuilder([]);
 
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<ApiManagerApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [ApiManager] - AddService: Null factory result should fail at build")]
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
-        IApiManagerApplicationBuilder builder = ApiManagerApplication.CreateBuilder([]);
+        ApiManagerApplicationBuilder builder = ApiManagerApplication.CreateBuilder([]);
         builder.AddService(_ => null!);
 
         InvalidOperationException exception = Should.Throw<InvalidOperationException>(
@@ -80,7 +82,7 @@ public class ApplicationLifecycleTests
     public async Task RunAsync_WhenCancellationIsRequested_ShouldStopCleanly()
     {
         // Arrange
-        await using IApiManagerApplication application = ApiManagerApplication.CreateBuilder([]).Build();
+        await using ApiManagerApplication application = ApiManagerApplication.CreateBuilder([]).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
 
 

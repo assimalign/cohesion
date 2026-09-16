@@ -10,9 +10,12 @@ using Assimalign.Cohesion.MessageHub;
 
 namespace Assimalign.Cohesion.MessageHub.Hosting;
 
-internal sealed class MessageHubApplicationBuilder : IMessageHubApplicationBuilder
+/// <summary>
+/// Composes a MessageHub application and its hosting services.
+/// </summary>
+public sealed class MessageHubApplicationBuilder : IMessageHubApplicationBuilder
 {
-    private readonly List<Func<IHostContext, IHostService>> _serviceFactories = [];
+    private readonly List<Func<MessageHubApplicationContext, IHostService>> _serviceFactories = [];
 
     private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
@@ -33,7 +36,13 @@ internal sealed class MessageHubApplicationBuilder : IMessageHubApplicationBuild
         }
     }
 
-    public IMessageHubApplicationBuilder AddService(IHostService service)
+    /// <summary>
+    /// Adds an existing host service to the message hub application.
+    /// </summary>
+    /// <param name="service">The service to add.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    public MessageHubApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
 
@@ -41,7 +50,14 @@ internal sealed class MessageHubApplicationBuilder : IMessageHubApplicationBuild
         return this;
     }
 
-    public IMessageHubApplicationBuilder AddService(Func<IHostContext, IHostService> factory)
+    /// <summary>
+    /// Adds a host service factory that is materialized once for each build.
+    /// </summary>
+    /// <param name="factory">The factory to invoke with the message hub host context.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="factory"/> returns <see langword="null"/>.</exception>
+    public MessageHubApplicationBuilder AddService(Func<MessageHubApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -49,7 +65,11 @@ internal sealed class MessageHubApplicationBuilder : IMessageHubApplicationBuild
         return this;
     }
 
-    public IMessageHubApplication Build()
+    /// <summary>
+    /// Builds the message hub application.
+    /// </summary>
+    /// <returns>The configured message hub application.</returns>
+    public MessageHubApplication Build()
     {
         var options = new MessageHubApplicationOptions();
         var context = new MessageHubApplicationContext(_resourceContext);
@@ -74,7 +94,7 @@ internal sealed class MessageHubApplicationBuilder : IMessageHubApplicationBuild
         }
         context.SetHostedServices(hostedServices);
 
-        var application = new MessageHubApplicationHost(options, context);
+        var application = new MessageHubApplication(options, context);
         if (_controlPlane is not null)
         {
             ResourceRuntime.HostBuilt(application, _controlPlane);
@@ -82,5 +102,5 @@ internal sealed class MessageHubApplicationBuilder : IMessageHubApplicationBuild
         return application;
     }
 
-    IHost IHostBuilder.Build() => Build();
+    IMessageHubApplication IMessageHubApplicationBuilder.Build() => Build();
 }

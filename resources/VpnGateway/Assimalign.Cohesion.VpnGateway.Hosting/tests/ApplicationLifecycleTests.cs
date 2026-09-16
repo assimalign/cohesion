@@ -20,8 +20,8 @@ public class ApplicationLifecycleTests
         List<string> events = [];
         RecordingService firstService = new("first", events);
         RecordingService secondService = new("second", events);
-        IVpnGatewayApplicationBuilder builder = VpnGatewayApplication.CreateBuilder([]);
-        IHostContext? factoryContext = null;
+        VpnGatewayApplicationBuilder builder = VpnGatewayApplication.CreateBuilder([]);
+        VpnGatewayApplicationContext? factoryContext = null;
         var factoryCount = 0;
 
         builder
@@ -33,15 +33,17 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using IVpnGatewayApplication application = builder.Build();
+        await using VpnGatewayApplication application = ((IVpnGatewayApplicationBuilder)builder).Build().ShouldBeOfType<VpnGatewayApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((IVpnGatewayApplication)application).StartAsync(CancellationToken.None);
+        await ((IVpnGatewayApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         factoryCount.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((IVpnGatewayApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((IVpnGatewayApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.ShouldBe(new IHostService[] { firstService, secondService });
         events.ShouldBe(new[] { "first:start", "second:start", "second:stop", "first:stop" });
     }
@@ -50,19 +52,19 @@ public class ApplicationLifecycleTests
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
         // Arrange
-        IVpnGatewayApplicationBuilder builder = VpnGatewayApplication.CreateBuilder([]);
+        VpnGatewayApplicationBuilder builder = VpnGatewayApplication.CreateBuilder([]);
 
         // Act and assert
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<VpnGatewayApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [VpnGateway.Hosting] - Build: Null service factory result should fail explicitly")]
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
         // Arrange
-        IVpnGatewayApplicationBuilder builder = VpnGatewayApplication.CreateBuilder([]);
+        VpnGatewayApplicationBuilder builder = VpnGatewayApplication.CreateBuilder([]);
         builder.AddService(_ => null!);
 
         // Act
@@ -76,7 +78,7 @@ public class ApplicationLifecycleTests
     public async Task RunAsync_WhenCancellationIsRequested_ShouldStopCleanly()
     {
         // Arrange
-        await using IVpnGatewayApplication application = VpnGatewayApplication.CreateBuilder([]).Build();
+        await using VpnGatewayApplication application = VpnGatewayApplication.CreateBuilder([]).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
 
 

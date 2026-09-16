@@ -26,7 +26,7 @@ internal sealed class PlainConfigurationStoreScope : IDisposable
             typeof(ConfigurationStoreApplication).Assembly);
     }
 
-    internal IConfigurationStoreApplicationBuilder Builder { get; }
+    internal ConfigurationStoreApplicationBuilder Builder { get; }
 
     internal string DataPath { get; }
 

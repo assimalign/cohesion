@@ -11,11 +11,14 @@ using Assimalign.Cohesion.Scheduler;
 
 namespace Assimalign.Cohesion.Scheduler.Hosting;
 
-internal sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
+/// <summary>
+/// Composes a Scheduler application and its hosting services.
+/// </summary>
+public sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
 {
     private readonly Dictionary<JobId, IScheduleJob> _jobs = [];
     private readonly List<IScheduleProvider> _providers = [];
-    private readonly List<Func<IHostContext, IHostService>> _serviceFactories = [];
+    private readonly List<Func<SchedulerApplicationContext, IHostService>> _serviceFactories = [];
     private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
@@ -39,6 +42,17 @@ internal sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
         }
     }
 
+    /// <summary>
+    /// Declares a job without scheduling it.
+    /// </summary>
+    /// <remarks>
+    /// Cron and Timer feature packages bind declared jobs to providers separately. An unbound
+    /// job remains dormant.
+    /// </remarks>
+    /// <param name="job">The job declaration to register.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="job"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">A different job with the same identifier is registered.</exception>
     public ISchedulerApplicationBuilder AddJob(IScheduleJob job)
     {
         ArgumentNullException.ThrowIfNull(job);
@@ -58,6 +72,13 @@ internal sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
         return this;
     }
 
+    /// <summary>
+    /// Adds a schedule provider to the scheduler application.
+    /// </summary>
+    /// <param name="provider">The provider whose schedules the host executes.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The same provider instance is already registered.</exception>
     public ISchedulerApplicationBuilder AddScheduleProvider(IScheduleProvider provider)
     {
         ArgumentNullException.ThrowIfNull(provider);
@@ -75,7 +96,13 @@ internal sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
         return this;
     }
 
-    public ISchedulerApplicationBuilder AddService(IHostService service)
+    /// <summary>
+    /// Adds an existing host service to the scheduler application.
+    /// </summary>
+    /// <param name="service">The service to add.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    public SchedulerApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
 
@@ -83,7 +110,14 @@ internal sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
         return this;
     }
 
-    public ISchedulerApplicationBuilder AddService(Func<IHostContext, IHostService> factory)
+    /// <summary>
+    /// Adds a host service factory that is materialized once for each build.
+    /// </summary>
+    /// <param name="factory">The factory to invoke with the scheduler host context.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="factory"/> returns <see langword="null"/>.</exception>
+    public SchedulerApplicationBuilder AddService(Func<SchedulerApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -91,7 +125,15 @@ internal sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
         return this;
     }
 
-    public ISchedulerApplication Build()
+    /// <summary>
+    /// Builds the scheduler application.
+    /// </summary>
+    /// <returns>The configured scheduler application.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The builder has already built an application, a service factory returns null, or a provider
+    /// returns invalid, duplicate, or undeclared schedule bindings.
+    /// </exception>
+    public SchedulerApplication Build()
     {
         if (_isBuilt)
         {
@@ -137,7 +179,7 @@ internal sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
         hostedServices.Add(new SchedulerExecutionService(schedules));
         context.SetHostedServices(hostedServices);
 
-        var application = new SchedulerApplicationHost(options, context);
+        var application = new SchedulerApplication(options, context);
         if (_controlPlane is not null)
         {
             ResourceRuntime.HostBuilt(application, _controlPlane);
@@ -147,7 +189,7 @@ internal sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
         return application;
     }
 
-    IHost IHostBuilder.Build() => Build();
+    ISchedulerApplication ISchedulerApplicationBuilder.Build() => Build();
 
     private ISchedule[] GetValidatedSchedules()
     {

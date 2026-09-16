@@ -47,7 +47,7 @@ internal static class ConfigurationStoreTestHost
             ambientValues: null);
     }
 
-    internal static IConfigurationStoreApplicationBuilder CreateBuilder()
+    internal static ConfigurationStoreApplicationBuilder CreateBuilder()
     {
         return ConfigurationStoreApplication.CreateBuilder(
             [],

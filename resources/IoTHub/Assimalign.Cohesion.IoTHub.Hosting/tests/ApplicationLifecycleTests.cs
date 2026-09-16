@@ -20,11 +20,11 @@ public class ApplicationLifecycleTests
         var events = new List<string>();
         var firstService = new RecordingHostService("first", events);
         var secondService = new RecordingHostService("second", events);
-        IHostContext? factoryContext = null;
+        IoTHubApplicationContext? factoryContext = null;
         int factoryCalls = 0;
-        IIoTHubApplicationBuilder builder = IoTHubApplication.CreateBuilder([]);
+        IoTHubApplicationBuilder builder = IoTHubApplication.CreateBuilder([]);
 
-        IIoTHubApplicationBuilder returnedBuilder = builder
+        IoTHubApplicationBuilder returnedBuilder = builder
             .AddService(firstService)
             .AddService(context =>
             {
@@ -33,16 +33,18 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using IIoTHubApplication application = builder.Build();
+        await using IoTHubApplication application = ((IIoTHubApplicationBuilder)builder).Build().ShouldBeOfType<IoTHubApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((IIoTHubApplication)application).StartAsync(CancellationToken.None);
+        await ((IIoTHubApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         returnedBuilder.ShouldBeSameAs(builder);
         factoryCalls.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((IIoTHubApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((IIoTHubApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.ShouldBe(
             new IHostService[] { firstService, secondService });
         events.ShouldBe(new[]
@@ -57,17 +59,17 @@ public class ApplicationLifecycleTests
     [Fact(DisplayName = "Cohesion Test [IoTHub] - AddService: Null registrations should fail explicitly")]
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
-        IIoTHubApplicationBuilder builder = IoTHubApplication.CreateBuilder([]);
+        IoTHubApplicationBuilder builder = IoTHubApplication.CreateBuilder([]);
 
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<IoTHubApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [IoTHub] - AddService: Null factory result should fail at build")]
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
-        IIoTHubApplicationBuilder builder = IoTHubApplication.CreateBuilder([]);
+        IoTHubApplicationBuilder builder = IoTHubApplication.CreateBuilder([]);
         builder.AddService(_ => null!);
 
         InvalidOperationException exception = Should.Throw<InvalidOperationException>(
@@ -80,7 +82,7 @@ public class ApplicationLifecycleTests
     public async Task RunAsync_WhenCancellationIsRequested_ShouldStopCleanly()
     {
         // Arrange
-        await using IIoTHubApplication application = IoTHubApplication.CreateBuilder([]).Build();
+        await using IoTHubApplication application = IoTHubApplication.CreateBuilder([]).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
 
 

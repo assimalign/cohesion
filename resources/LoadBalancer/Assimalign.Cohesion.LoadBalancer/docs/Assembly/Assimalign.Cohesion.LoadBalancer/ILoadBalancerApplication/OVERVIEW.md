@@ -3,29 +3,23 @@
 Namespace: `Assimalign.Cohesion.LoadBalancer`
 Assembly: `Assimalign.Cohesion.LoadBalancer`
 
-## Purpose
+## Purpose and surface
 
-`ILoadBalancerApplication` is the public lifecycle contract for a load balancer application. It extends `IHost` and adds the run-until-shutdown operation used by executable resources.
+The root contracts are hosting-free (O34): `ILoadBalancerApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `ILoadBalancerApplicationContext` exposes `ContentRootPath`. `ILoadBalancerApplicationBuilder` exposes `Build()`; it currently declares no area-specific verbs. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
 
-## Surface
+`StartAsync(CancellationToken)` starts the application; `StopAsync(CancellationToken)` drains and stops it. Lifecycle failures propagate to the caller. The contract carries no host identity, runner, or disposal members.
 
-- `RunAsync(CancellationToken cancellationToken = default)` starts the host, waits for shutdown, and completes after the host has stopped.
-- The inherited `IHost` members expose the host identity, context, start, stop, and disposal lifecycle.
+## Hosting implementation
 
-The current filler implementation registers no hosted services by default. Services explicitly added through `ILoadBalancerApplicationBuilder` participate in the same lifecycle. A token that is already cancelled still drives the host through a clean start-and-stop transition; cancellation after startup requests graceful shutdown.
-
-## Exceptions
-
-`RunAsync` throws `ObjectDisposedException` when invoked after the application has been disposed. Lifecycle failures are propagated to the caller.
+`LoadBalancerApplication.CreateBuilder(args)` returns the public concrete `LoadBalancerApplicationBuilder`; its `Build()` returns the public `LoadBalancerApplication : Host<LoadBalancerApplicationContext>`. The public `LoadBalancerApplicationContext` implements `ILoadBalancerApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
 
 ## Usage
 
 ```csharp
-using Assimalign.Cohesion.LoadBalancer;
 using Assimalign.Cohesion.LoadBalancer.Hosting;
 
-await using ILoadBalancerApplication application =
-    LoadBalancerApplication.CreateBuilder(args).Build();
-
-await application.RunAsync(cancellationToken);
+LoadBalancerApplicationBuilder builder = LoadBalancerApplication.CreateBuilder(args);
+// Add area declarations and optional hosting services before Build().
+await using LoadBalancerApplication application = builder.Build();
+await application.RunAsync();
 ```

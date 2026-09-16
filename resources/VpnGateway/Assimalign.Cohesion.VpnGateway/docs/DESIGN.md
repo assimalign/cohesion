@@ -2,18 +2,26 @@
 
 ## Design intent
 
-The area root owns only the contracts that feature packages compose against. `IVpnGatewayApplicationBuilder` is the contract-only builder seam, while `IVpnGatewayApplication` supplies the host lifecycle expected by an executable resource.
+The area root owns only the contracts that feature packages compose against. `IVpnGatewayApplicationBuilder` is the contract-only builder seam, while `IVpnGatewayApplication` supplies the hosting-free application lifecycle.
 
 ## Hosting isolation
 
-The root references only the shared Hosting foundation. The concrete builder, host, context, and options remain internal to `Assimalign.Cohesion.VpnGateway.Hosting`; feature libraries must not reference that runtime module.
+The root contracts are hosting-free (O34): `IVpnGatewayApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `IVpnGatewayApplicationContext` exposes `ContentRootPath`. `IVpnGatewayApplicationBuilder` exposes `Build()`; it currently declares no area-specific verbs. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
+
+The concrete application, builder, and context live in `Assimalign.Cohesion.VpnGateway.Hosting`; options and supporting services remain internal.
 
 ## Composition lifecycle
 
-The builder accepts existing `IHostService` instances and factories that receive the newly created area `IHostContext`. Each factory is invoked once per `Build()`, and the resulting services are retained in registration order so the shared host starts them in that order and stops them in reverse. The collection is empty when callers register nothing, and the host environment remains production.
+Background-work registration belongs to the concrete `VpnGatewayApplicationBuilder`: `AddService(IHostService)` and `AddService(Func<VpnGatewayApplicationContext, IHostService>)`. The factory deliberately receives the concrete context, unlike Web's AddService and Database's AddServer interface-context overloads, so hosting consumers can use environment, state, and hosted-service members beyond the small root contract. Factories run once per build against the same context retained by the application; the hosted-service snapshot is installed after factory evaluation. Services start in registration order and stop in reverse. No area-owned service abstraction is introduced.
 
-No VPN data-plane service is registered by default. The seam remains composition-only until VPN gateway behavior is implemented.
+Enabled resources retain their ambient context and registered control-plane behavior; plain application defaults are described by the Hosting design.
 
 ## AOT posture
 
 The contracts require no reflection, dynamic code generation, runtime assembly scanning, or container-based activation and remain safe for trimming and NativeAOT.
+
+## Hosting-free application contract (O34)
+
+`VpnGatewayApplication.CreateBuilder(args)` returns the public concrete `VpnGatewayApplicationBuilder`; its `Build()` returns the public `VpnGatewayApplication : Host<VpnGatewayApplicationContext>`. The public `VpnGatewayApplicationContext` implements `IVpnGatewayApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+Background-work registration (`AddService`) is available only on the concrete Hosting builder.

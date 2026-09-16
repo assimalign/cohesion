@@ -30,8 +30,8 @@ public class ApplicationLifecycleTests
         List<string> events = [];
         RecordingService firstService = new("first", events);
         RecordingService secondService = new("second", events);
-        ISchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
-        IHostContext? factoryContext = null;
+        SchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
+        SchedulerApplicationContext? factoryContext = null;
         var factoryCount = 0;
 
         builder
@@ -43,15 +43,17 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using ISchedulerApplication application = builder.Build();
+        await using SchedulerApplication application = ((ISchedulerApplicationBuilder)builder).Build().ShouldBeOfType<SchedulerApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((ISchedulerApplication)application).StartAsync(CancellationToken.None);
+        await ((ISchedulerApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         factoryCount.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((ISchedulerApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((ISchedulerApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.Take(2).ShouldBe(new IHostService[] { firstService, secondService });
         application.Context.HostedServices.Count().ShouldBe(3);
         events.ShouldBe(new[] { "first:start", "second:start", "second:stop", "first:stop" });
@@ -61,18 +63,18 @@ public class ApplicationLifecycleTests
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
         // Arrange
-        ISchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
+        SchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
 
         // Act and assert
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<SchedulerApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [Scheduler.Hosting] - AddScheduleProvider: rejects the same provider instance twice")]
     public void AddScheduleProvider_WithDuplicateInstance_ShouldThrow()
     {
-        ISchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
+        SchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
         var provider = new TestScheduleProvider(new TestSchedule());
         builder.AddScheduleProvider(provider);
 
@@ -85,7 +87,7 @@ public class ApplicationLifecycleTests
     [Fact(DisplayName = "Cohesion Test [Scheduler.Hosting] - Build: rejects one schedule returned by multiple providers")]
     public void Build_WithDuplicateScheduleInstance_ShouldThrow()
     {
-        ISchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
+        SchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
         var schedule = new TestSchedule();
         builder.AddScheduleProvider(new TestScheduleProvider(schedule));
         builder.AddScheduleProvider(new TestScheduleProvider(schedule));
@@ -113,15 +115,15 @@ public class ApplicationLifecycleTests
                 siblingCancelled.TrySetResult();
             }
         });
-        ISchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
+        SchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
         builder.AddScheduleProvider(new TestScheduleProvider(failingSchedule, siblingSchedule));
-        await using ISchedulerApplication application = builder.Build();
-        await application.StartAsync();
+        await using SchedulerApplication application = builder.Build();
+        await ((IHost)application).StartAsync();
 
         failure.TrySetException(expected);
         await siblingCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
         InvalidOperationException observed = await Should.ThrowAsync<InvalidOperationException>(
-            () => application.StopAsync().WaitAsync(TimeSpan.FromSeconds(5)));
+            () => ((IHost)application).StopAsync().WaitAsync(TimeSpan.FromSeconds(5)));
 
         observed.ShouldBeSameAs(expected);
     }
@@ -130,7 +132,7 @@ public class ApplicationLifecycleTests
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
         // Arrange
-        ISchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
+        SchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
         builder.AddService(_ => null!);
 
         // Act
@@ -144,7 +146,7 @@ public class ApplicationLifecycleTests
     public async Task RunAsync_WhenCancellationIsRequestedBeforeStart_ShouldPropagateCancellation()
     {
         // Arrange
-        await using ISchedulerApplication application = SchedulerApplication.CreateBuilder([]).Build();
+        await using SchedulerApplication application = SchedulerApplication.CreateBuilder([]).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
         cancellationTokenSource.Cancel();
 
@@ -160,7 +162,7 @@ public class ApplicationLifecycleTests
     {
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        ISchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
+        SchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
         IScheduleJob job = builder.AddJob("blocking", async (_, token) =>
         {
             token.CanBeCanceled.ShouldBeFalse();
@@ -173,12 +175,12 @@ public class ApplicationLifecycleTests
             TimeSpan.FromHours(1),
             job,
             TimeProvider.System);
-        await using ISchedulerApplication application = builder.Build();
-        await application.StartAsync();
+        await using SchedulerApplication application = builder.Build();
+        await ((IHost)application).StartAsync();
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         using var grace = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
-        Task stopping = application.StopAsync(grace.Token);
+        Task stopping = ((IHost)application).StopAsync(grace.Token);
         await Task.Delay(50);
 
         stopping.IsCompleted.ShouldBeFalse();
@@ -192,7 +194,7 @@ public class ApplicationLifecycleTests
     {
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        ISchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
+        SchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
         IScheduleJob job = builder.AddJob("unbounded", async (_, _) =>
         {
             started.TrySetResult();
@@ -204,15 +206,15 @@ public class ApplicationLifecycleTests
             TimeSpan.FromHours(1),
             job,
             TimeProvider.System);
-        await using ISchedulerApplication application = builder.Build();
-        await application.StartAsync();
+        await using SchedulerApplication application = builder.Build();
+        await ((IHost)application).StartAsync();
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         try
         {
             using var grace = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
             await Should.ThrowAsync<OperationCanceledException>(
-                () => application.StopAsync(grace.Token).WaitAsync(TimeSpan.FromSeconds(5)));
+                () => ((IHost)application).StopAsync(grace.Token).WaitAsync(TimeSpan.FromSeconds(5)));
             application.Context.State.ShouldBe(HostState.Stopped);
         }
         finally
@@ -225,17 +227,17 @@ public class ApplicationLifecycleTests
     public async Task AddJob_WithoutSchedule_ShouldRemainDormant()
     {
         var executionCount = 0;
-        ISchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
+        SchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
         builder.AddJob("dormant", (_, _) =>
         {
             Interlocked.Increment(ref executionCount);
             return ValueTask.CompletedTask;
         });
-        await using ISchedulerApplication application = builder.Build();
+        await using SchedulerApplication application = builder.Build();
 
-        await application.StartAsync();
+        await ((IHost)application).StartAsync();
         await Task.Delay(25);
-        await application.StopAsync();
+        await ((IHost)application).StopAsync();
 
         executionCount.ShouldBe(0);
     }
@@ -243,7 +245,7 @@ public class ApplicationLifecycleTests
     [Fact(DisplayName = "Cohesion Test [Scheduler.Hosting] - Build: rejects schedules bound to undeclared jobs")]
     public void Build_WithUndeclaredScheduledJob_ShouldThrow()
     {
-        ISchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
+        SchedulerApplicationBuilder builder = SchedulerApplication.CreateBuilder([]);
         var job = new TestJob();
         builder.AddTimerSchedule(TimeSpan.FromMinutes(1), job);
 
@@ -278,7 +280,7 @@ public class ApplicationLifecycleTests
             ambientValues: null);
         using (ResourceRuntime.CreateScope(untrustedResourceContext))
         {
-            ISchedulerApplicationBuilder untrustedBuilder = CreateResourceBuilder(entryAssembly);
+            SchedulerApplicationBuilder untrustedBuilder = CreateResourceBuilder(entryAssembly);
             InvalidOperationException error = Should.Throw<InvalidOperationException>(
                 () => untrustedBuilder.Build());
             error.Message.ShouldContain("gateway identity", Case.Insensitive);
@@ -300,9 +302,9 @@ public class ApplicationLifecycleTests
 
         using (ResourceRuntime.CreateScope(resourceContext))
         {
-            ISchedulerApplicationBuilder builder = CreateResourceBuilder(entryAssembly);
-            await using ISchedulerApplication application = builder.Build();
-            await application.StartAsync();
+            SchedulerApplicationBuilder builder = CreateResourceBuilder(entryAssembly);
+            await using SchedulerApplication application = builder.Build();
+            await ((IHost)application).StartAsync();
             using var client = new HttpClient { BaseAddress = endpoint };
 
             HttpResponseMessage health = await client.GetAsync("/healthz");
@@ -320,7 +322,7 @@ public class ApplicationLifecycleTests
             endpointDocument.ShouldContain(endpoint.ToEndpointString());
             endpointDocument.ShouldNotContain(endpoint.ToString());
             stop.StatusCode.ShouldBe(HttpStatusCode.Accepted);
-            await application.StopAsync();
+            await ((IHost)application).StopAsync();
         }
     }
 
@@ -402,7 +404,7 @@ public class ApplicationLifecycleTests
             run?.Invoke(cancellationToken) ?? Task.CompletedTask;
     }
 
-    private static ISchedulerApplicationBuilder CreateResourceBuilder(Assembly resourceAssembly)
+    private static SchedulerApplicationBuilder CreateResourceBuilder(Assembly resourceAssembly)
     {
         MethodInfo createBuilder = typeof(SchedulerApplication).GetMethod(
             "CreateBuilder",
@@ -411,7 +413,7 @@ public class ApplicationLifecycleTests
             [typeof(string[]), typeof(Assembly)],
             modifiers: null)
             ?? throw new InvalidOperationException("The internal resource builder overload was not found.");
-        return (ISchedulerApplicationBuilder)(createBuilder.Invoke(
+        return (SchedulerApplicationBuilder)(createBuilder.Invoke(
             obj: null,
             parameters: [Array.Empty<string>(), resourceAssembly])
             ?? throw new InvalidOperationException("The internal resource builder returned null."));

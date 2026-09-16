@@ -20,8 +20,8 @@ public class ApplicationLifecycleTests
         List<string> events = [];
         RecordingService firstService = new("first", events);
         RecordingService secondService = new("second", events);
-        IMediaHubApplicationBuilder builder = MediaHubApplication.CreateBuilder([]);
-        IHostContext? factoryContext = null;
+        MediaHubApplicationBuilder builder = MediaHubApplication.CreateBuilder([]);
+        MediaHubApplicationContext? factoryContext = null;
         var factoryCount = 0;
 
         builder
@@ -33,15 +33,17 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using IMediaHubApplication application = builder.Build();
+        await using MediaHubApplication application = ((IMediaHubApplicationBuilder)builder).Build().ShouldBeOfType<MediaHubApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((IMediaHubApplication)application).StartAsync(CancellationToken.None);
+        await ((IMediaHubApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         factoryCount.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((IMediaHubApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((IMediaHubApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.ShouldBe(new IHostService[] { firstService, secondService });
         events.ShouldBe(new[] { "first:start", "second:start", "second:stop", "first:stop" });
     }
@@ -50,19 +52,19 @@ public class ApplicationLifecycleTests
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
         // Arrange
-        IMediaHubApplicationBuilder builder = MediaHubApplication.CreateBuilder([]);
+        MediaHubApplicationBuilder builder = MediaHubApplication.CreateBuilder([]);
 
         // Act and assert
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<MediaHubApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [MediaHub.Hosting] - Build: Null service factory result should fail explicitly")]
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
         // Arrange
-        IMediaHubApplicationBuilder builder = MediaHubApplication.CreateBuilder([]);
+        MediaHubApplicationBuilder builder = MediaHubApplication.CreateBuilder([]);
         builder.AddService(_ => null!);
 
         // Act
@@ -76,7 +78,7 @@ public class ApplicationLifecycleTests
     public async Task RunAsync_WhenCancellationIsRequested_ShouldStopCleanly()
     {
         // Arrange
-        await using IMediaHubApplication application = MediaHubApplication.CreateBuilder([]).Build();
+        await using MediaHubApplication application = MediaHubApplication.CreateBuilder([]).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
 
 

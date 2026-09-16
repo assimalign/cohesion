@@ -20,8 +20,8 @@ public class ApplicationLifecycleTests
         List<string> events = [];
         RecordingService firstService = new("first", events);
         RecordingService secondService = new("second", events);
-        IMessageHubApplicationBuilder builder = MessageHubApplication.CreateBuilder([]);
-        IHostContext? factoryContext = null;
+        MessageHubApplicationBuilder builder = MessageHubApplication.CreateBuilder([]);
+        MessageHubApplicationContext? factoryContext = null;
         var factoryCount = 0;
 
         builder
@@ -33,15 +33,17 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using IMessageHubApplication application = builder.Build();
+        await using MessageHubApplication application = ((IMessageHubApplicationBuilder)builder).Build().ShouldBeOfType<MessageHubApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((IMessageHubApplication)application).StartAsync(CancellationToken.None);
+        await ((IMessageHubApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         factoryCount.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((IMessageHubApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((IMessageHubApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.ShouldBe(new IHostService[] { firstService, secondService });
         events.ShouldBe(new[] { "first:start", "second:start", "second:stop", "first:stop" });
     }
@@ -50,19 +52,19 @@ public class ApplicationLifecycleTests
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
         // Arrange
-        IMessageHubApplicationBuilder builder = MessageHubApplication.CreateBuilder([]);
+        MessageHubApplicationBuilder builder = MessageHubApplication.CreateBuilder([]);
 
         // Act and assert
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<MessageHubApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [MessageHub.Hosting] - Build: Null service factory result should fail explicitly")]
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
         // Arrange
-        IMessageHubApplicationBuilder builder = MessageHubApplication.CreateBuilder([]);
+        MessageHubApplicationBuilder builder = MessageHubApplication.CreateBuilder([]);
         builder.AddService(_ => null!);
 
         // Act
@@ -76,7 +78,7 @@ public class ApplicationLifecycleTests
     public async Task RunAsync_WhenCancellationIsRequested_ShouldStopCleanly()
     {
         // Arrange
-        await using IMessageHubApplication application = MessageHubApplication.CreateBuilder([]).Build();
+        await using MessageHubApplication application = MessageHubApplication.CreateBuilder([]).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
 
 

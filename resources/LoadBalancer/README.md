@@ -21,3 +21,20 @@ As an L3 service platform, LoadBalancer composes the L2 `Assimalign.Cohesion.Hos
 - [Root design](./Assimalign.Cohesion.LoadBalancer/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.LoadBalancer.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.LoadBalancer.Hosting/docs/DESIGN.md)
+
+## Application composition (O34)
+
+The root contracts are hosting-free (O34): `ILoadBalancerApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `ILoadBalancerApplicationContext` exposes `ContentRootPath`. `ILoadBalancerApplicationBuilder` exposes `Build()`; it currently declares no area-specific verbs. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
+
+`LoadBalancerApplication.CreateBuilder(args)` returns the public concrete `LoadBalancerApplicationBuilder`; its `Build()` returns the public `LoadBalancerApplication : Host<LoadBalancerApplicationContext>`. The public `LoadBalancerApplicationContext` implements `ILoadBalancerApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+```csharp
+using Assimalign.Cohesion.LoadBalancer.Hosting;
+
+LoadBalancerApplicationBuilder builder = LoadBalancerApplication.CreateBuilder(args);
+// Add area declarations and optional hosting services before Build().
+await using LoadBalancerApplication application = builder.Build();
+await application.RunAsync();
+```
+
+The unused public `IHostBuilder.AddLoadBalancer()` shim was removed by O34. The ApplicationModel descriptor verb is unchanged.

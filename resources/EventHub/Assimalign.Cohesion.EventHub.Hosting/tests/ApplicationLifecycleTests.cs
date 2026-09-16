@@ -6,8 +6,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.EventHub;
+using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.EventHub.Hosting.Tests;
 
@@ -20,11 +20,11 @@ public class ApplicationLifecycleTests
         var events = new List<string>();
         var firstService = new RecordingHostService("first", events);
         var secondService = new RecordingHostService("second", events);
-        IHostContext? factoryContext = null;
+        EventHubApplicationContext? factoryContext = null;
         int factoryCalls = 0;
-        IEventHubApplicationBuilder builder = EventHubApplication.CreateBuilder([]);
+        EventHubApplicationBuilder builder = EventHubApplication.CreateBuilder([]);
 
-        IEventHubApplicationBuilder returnedBuilder = builder
+        EventHubApplicationBuilder returnedBuilder = builder
             .AddService(firstService)
             .AddService(context =>
             {
@@ -33,16 +33,18 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using IEventHubApplication application = builder.Build();
+        await using EventHubApplication application = ((IEventHubApplicationBuilder)builder).Build().ShouldBeOfType<EventHubApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((IEventHubApplication)application).StartAsync(CancellationToken.None);
+        await ((IEventHubApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         returnedBuilder.ShouldBeSameAs(builder);
         factoryCalls.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((IEventHubApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((IEventHubApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.ShouldBe(
             new IHostService[] { firstService, secondService });
         events.ShouldBe(new[]
@@ -57,17 +59,17 @@ public class ApplicationLifecycleTests
     [Fact(DisplayName = "Cohesion Test [EventHub] - AddService: Null registrations should fail explicitly")]
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
-        IEventHubApplicationBuilder builder = EventHubApplication.CreateBuilder([]);
+        EventHubApplicationBuilder builder = EventHubApplication.CreateBuilder([]);
 
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<EventHubApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [EventHub] - AddService: Null factory result should fail at build")]
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
-        IEventHubApplicationBuilder builder = EventHubApplication.CreateBuilder([]);
+        EventHubApplicationBuilder builder = EventHubApplication.CreateBuilder([]);
         builder.AddService(_ => null!);
 
         InvalidOperationException exception = Should.Throw<InvalidOperationException>(
@@ -80,7 +82,7 @@ public class ApplicationLifecycleTests
     public async Task RunAsync_WhenCancellationIsRequested_ShouldStopCleanly()
     {
         // Arrange
-        await using IEventHubApplication application = EventHubApplication.CreateBuilder([]).Build();
+        await using EventHubApplication application = EventHubApplication.CreateBuilder([]).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
 
 

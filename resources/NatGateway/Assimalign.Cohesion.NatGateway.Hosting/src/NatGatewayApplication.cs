@@ -1,29 +1,55 @@
 using System;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.NatGateway;
 
 namespace Assimalign.Cohesion.NatGateway.Hosting;
 
 /// <summary>
-/// Creates NAT gateway application builders.
+/// Hosts a NatGateway application and its ordered service lifecycle.
 /// </summary>
-public static class NatGatewayApplication
+public sealed class NatGatewayApplication : Host<NatGatewayApplicationContext>, INatGatewayApplication
 {
+    private readonly NatGatewayApplicationContext _context;
+
+    internal NatGatewayApplication(
+        NatGatewayApplicationOptions options,
+        NatGatewayApplicationContext context)
+        : base(options)
+    {
+        _context = context;
+    }
+
+    /// <summary>
+    /// Gets the concrete application context.
+    /// </summary>
+    public override NatGatewayApplicationContext Context => _context;
+
+    INatGatewayApplicationContext INatGatewayApplication.Context => _context;
+
+    Task INatGatewayApplication.StartAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StartAsync(cancellationToken);
+
+    Task INatGatewayApplication.StopAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StopAsync(cancellationToken);
+
     /// <summary>
     /// Creates a builder for a NAT gateway application.
     /// </summary>
     /// <param name="args">The command-line arguments supplied to the application.</param>
     /// <returns>A builder for the NAT gateway application.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
-    public static INatGatewayApplicationBuilder CreateBuilder(string[] args)
+    public static NatGatewayApplicationBuilder CreateBuilder(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
 
         return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(NatGatewayApplication).Assembly);
     }
 
-    internal static INatGatewayApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    internal static NatGatewayApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(resourceAssembly);

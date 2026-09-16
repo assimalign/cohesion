@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.SecretStore;
 using Assimalign.Cohesion.SecretStore.ApplicationModel;
@@ -47,7 +48,7 @@ public sealed class ResourceCommandProtocolTests
                 ["credential"] = ResourceMount.FromBytes("test-client-secret"u8),
             }, settings: null, references: null, Encoding.UTF8.GetBytes(token), identity.PublicKey, ambientValues: null);
         using IDisposable scope = ResourceRuntime.CreateScope(context);
-        ISecretStoreApplication application = SecretStoreApplication.CreateBuilder([], typeof(ResourceCommandProtocolTests).Assembly).Build();
+        SecretStoreApplication application = SecretStoreApplication.CreateBuilder([], typeof(ResourceCommandProtocolTests).Assembly).Build();
         ISecretStoreClient client = SecretStoreClient.CreateForControlPlane(address, new ClientCredential(token));
         ResourceCommand[] commands =
         [
@@ -56,7 +57,7 @@ public sealed class ResourceCommandProtocolTests
         ];
         try
         {
-            await application.StartAsync(timeout.Token);
+            await ((IHost)application).StartAsync(timeout.Token);
             foreach (ResourceCommand command in commands)
             {
                 ResourceCommandObservation applied = await client.ObserveCommandAsync(command, timeout.Token);
@@ -172,10 +173,10 @@ public sealed class ResourceCommandProtocolTests
             http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
             using JsonDocument remaining = JsonDocument.Parse(await http.GetStringAsync(new Uri(address.ToString().TrimEnd('/') + "/commands"), timeout.Token));
             remaining.RootElement.GetProperty("commands").GetArrayLength().ShouldBe(0);
-            await application.StopAsync(timeout.Token);
-            await application.DisposeAsync();
+            await ((IHost)application).StopAsync(timeout.Token);
+            await ((IAsyncDisposable)application).DisposeAsync();
             application = SecretStoreApplication.CreateBuilder([], typeof(ResourceCommandProtocolTests).Assembly).Build();
-            await application.StartAsync(timeout.Token);
+            await ((IHost)application).StartAsync(timeout.Token);
             using JsonDocument reloaded = JsonDocument.Parse(await client.GetSecretAsync("trusted-issuers.json", timeout.Token));
             reloaded.RootElement.GetProperty("issuers").EnumerateArray()
                 .Single(item => item.GetProperty("issuer").GetString() == "peer")
@@ -183,8 +184,8 @@ public sealed class ResourceCommandProtocolTests
         }
         finally
         {
-            await application.StopAsync(CancellationToken.None);
-            await application.DisposeAsync();
+            await ((IHost)application).StopAsync(CancellationToken.None);
+            await ((IAsyncDisposable)application).DisposeAsync();
             Directory.Delete(data, recursive: true);
         }
     }

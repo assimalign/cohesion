@@ -7,14 +7,14 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.ConfigurationStore;
-using Assimalign.Cohesion.ConfigurationStore.Client;
-using Assimalign.Cohesion.Hosting.Resources;
-
+using ConfigurationResourceCommand = Assimalign.Cohesion.ConfigurationStore.Client.ResourceCommand;
 using Shouldly;
 using Xunit;
 
-using ConfigurationResourceCommand = Assimalign.Cohesion.ConfigurationStore.Client.ResourceCommand;
+using Assimalign.Cohesion.ConfigurationStore;
+using Assimalign.Cohesion.ConfigurationStore.Client;
+using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Tests;
 
@@ -35,12 +35,12 @@ public sealed class ConfigurationStoreProtocolTests
                 token,
                 identity.PublicKey);
             using IDisposable scope = ResourceRuntime.CreateScope(context);
-            IConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
+            ConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
             builder.AddNamespace("app", ns => ns
                 .Set("Mode", "development")
                 .Set("Optional", null));
-            await using IConfigurationStoreApplication application = builder.Build();
-            await application.StartAsync();
+            await using ConfigurationStoreApplication application = builder.Build();
+            await ((IHost)application).StartAsync();
 
             try
             {
@@ -71,7 +71,7 @@ public sealed class ConfigurationStoreProtocolTests
             }
             finally
             {
-                await application.StopAsync();
+                await ((IHost)application).StopAsync();
             }
         }
         finally
@@ -95,10 +95,10 @@ public sealed class ConfigurationStoreProtocolTests
                 token,
                 identity.PublicKey);
             using IDisposable scope = ResourceRuntime.CreateScope(context);
-            IConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
+            ConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
             builder.AddNamespace("app", ns => ns.Set("Mode", "development"));
-            await using IConfigurationStoreApplication application = builder.Build();
-            await application.StartAsync();
+            await using ConfigurationStoreApplication application = builder.Build();
+            await ((IHost)application).StartAsync();
 
             try
             {
@@ -122,7 +122,7 @@ public sealed class ConfigurationStoreProtocolTests
             }
             finally
             {
-                await application.StopAsync();
+                await ((IHost)application).StopAsync();
             }
         }
         finally
@@ -148,10 +148,10 @@ public sealed class ConfigurationStoreProtocolTests
                 identity.PublicKey);
             using (ResourceRuntime.CreateScope(firstContext))
             {
-                IConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
+                ConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
                 builder.AddNamespace("app", ns => ns.Set("Mode", "declared-first"));
-                await using IConfigurationStoreApplication application = builder.Build();
-                await application.StartAsync();
+                await using ConfigurationStoreApplication application = builder.Build();
+                await ((IHost)application).StartAsync();
                 IConfigurationStoreClient client = ConfigurationStoreClient.Create(
                     firstEndpoint,
                     new ClientCredential(token));
@@ -161,7 +161,7 @@ public sealed class ConfigurationStoreProtocolTests
                     "appa",
                     "app/Mode",
                     Encoding.UTF8.GetBytes("{\"value\":\"durable\"}")));
-                await application.StopAsync();
+                await ((IHost)application).StopAsync();
             }
 
             Uri secondEndpoint = ConfigurationStoreTestHost.GetEndpoint();
@@ -172,10 +172,10 @@ public sealed class ConfigurationStoreProtocolTests
                 identity.PublicKey);
             using (ResourceRuntime.CreateScope(secondContext))
             {
-                IConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
+                ConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
                 builder.AddNamespace("app", ns => ns.Set("Mode", "declared-second"));
-                await using IConfigurationStoreApplication application = builder.Build();
-                await application.StartAsync();
+                await using ConfigurationStoreApplication application = builder.Build();
+                await ((IHost)application).StartAsync();
                 try
                 {
                     IConfigurationStoreClient client = ConfigurationStoreClient.Create(
@@ -187,7 +187,7 @@ public sealed class ConfigurationStoreProtocolTests
                 }
                 finally
                 {
-                    await application.StopAsync();
+                    await ((IHost)application).StopAsync();
                 }
             }
         }
@@ -213,11 +213,11 @@ public sealed class ConfigurationStoreProtocolTests
                 firstIdentity.PublicKey);
             using (ResourceRuntime.CreateScope(firstContext))
             {
-                IConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
+                ConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
                 builder.AddNamespace("app", ns => ns.Set("Mode", "durable"));
-                await using IConfigurationStoreApplication application = builder.Build();
-                await application.StartAsync();
-                await application.StopAsync();
+                await using ConfigurationStoreApplication application = builder.Build();
+                await ((IHost)application).StartAsync();
+                await ((IHost)application).StopAsync();
             }
 
             using var secondIdentity = new TestBootstrapIdentity();
@@ -230,9 +230,9 @@ public sealed class ConfigurationStoreProtocolTests
                 secondIdentity.PublicKey);
             using (ResourceRuntime.CreateScope(secondContext))
             {
-                IConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
-                await using IConfigurationStoreApplication application = builder.Build();
-                await application.StartAsync();
+                ConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
+                await using ConfigurationStoreApplication application = builder.Build();
+                await ((IHost)application).StartAsync();
                 try
                 {
                     IConfigurationStoreClient current = ConfigurationStoreClient.Create(
@@ -250,7 +250,7 @@ public sealed class ConfigurationStoreProtocolTests
                 }
                 finally
                 {
-                    await application.StopAsync();
+                    await ((IHost)application).StopAsync();
                 }
             }
         }
@@ -275,10 +275,10 @@ public sealed class ConfigurationStoreProtocolTests
                 token,
                 identity.PublicKey);
             using IDisposable scope = ResourceRuntime.CreateScope(context);
-            IConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
+            ConfigurationStoreApplicationBuilder builder = ConfigurationStoreTestHost.CreateBuilder();
             builder.AddNamespace("app", ns => ns.Set("Mode", "original"));
-            await using IConfigurationStoreApplication application = builder.Build();
-            await application.StartAsync();
+            await using ConfigurationStoreApplication application = builder.Build();
+            await ((IHost)application).StartAsync();
 
             try
             {
@@ -304,7 +304,7 @@ public sealed class ConfigurationStoreProtocolTests
             }
             finally
             {
-                await application.StopAsync();
+                await ((IHost)application).StopAsync();
             }
         }
         finally

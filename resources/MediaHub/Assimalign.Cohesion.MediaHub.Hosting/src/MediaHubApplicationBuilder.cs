@@ -10,9 +10,12 @@ using Assimalign.Cohesion.MediaHub;
 
 namespace Assimalign.Cohesion.MediaHub.Hosting;
 
-internal sealed class MediaHubApplicationBuilder : IMediaHubApplicationBuilder
+/// <summary>
+/// Composes a MediaHub application and its hosting services.
+/// </summary>
+public sealed class MediaHubApplicationBuilder : IMediaHubApplicationBuilder
 {
-    private readonly List<Func<IHostContext, IHostService>> _serviceFactories = [];
+    private readonly List<Func<MediaHubApplicationContext, IHostService>> _serviceFactories = [];
 
     private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
@@ -33,7 +36,13 @@ internal sealed class MediaHubApplicationBuilder : IMediaHubApplicationBuilder
         }
     }
 
-    public IMediaHubApplicationBuilder AddService(IHostService service)
+    /// <summary>
+    /// Adds an existing host service to the media hub application.
+    /// </summary>
+    /// <param name="service">The service to add.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    public MediaHubApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
 
@@ -41,7 +50,14 @@ internal sealed class MediaHubApplicationBuilder : IMediaHubApplicationBuilder
         return this;
     }
 
-    public IMediaHubApplicationBuilder AddService(Func<IHostContext, IHostService> factory)
+    /// <summary>
+    /// Adds a host service factory that is materialized once for each build.
+    /// </summary>
+    /// <param name="factory">The factory to invoke with the media hub host context.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="factory"/> returns <see langword="null"/>.</exception>
+    public MediaHubApplicationBuilder AddService(Func<MediaHubApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -49,7 +65,11 @@ internal sealed class MediaHubApplicationBuilder : IMediaHubApplicationBuilder
         return this;
     }
 
-    public IMediaHubApplication Build()
+    /// <summary>
+    /// Builds the media hub application.
+    /// </summary>
+    /// <returns>The configured media hub application.</returns>
+    public MediaHubApplication Build()
     {
         var options = new MediaHubApplicationOptions();
         var context = new MediaHubApplicationContext(_resourceContext);
@@ -74,7 +94,7 @@ internal sealed class MediaHubApplicationBuilder : IMediaHubApplicationBuilder
         }
         context.SetHostedServices(hostedServices);
 
-        var application = new MediaHubApplicationHost(options, context);
+        var application = new MediaHubApplication(options, context);
         if (_controlPlane is not null)
         {
             ResourceRuntime.HostBuilt(application, _controlPlane);
@@ -82,5 +102,5 @@ internal sealed class MediaHubApplicationBuilder : IMediaHubApplicationBuilder
         return application;
     }
 
-    IHost IHostBuilder.Build() => Build();
+    IMediaHubApplication IMediaHubApplicationBuilder.Build() => Build();
 }

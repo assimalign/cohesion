@@ -21,3 +21,18 @@ As an L3 service platform, VpnGateway composes the L2 `Assimalign.Cohesion.Hosti
 - [Root design](./Assimalign.Cohesion.VpnGateway/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.VpnGateway.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.VpnGateway.Hosting/docs/DESIGN.md)
+
+## Application composition (O34)
+
+The root contracts are hosting-free (O34): `IVpnGatewayApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `IVpnGatewayApplicationContext` exposes `ContentRootPath`. `IVpnGatewayApplicationBuilder` exposes `Build()`; it currently declares no area-specific verbs. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
+
+`VpnGatewayApplication.CreateBuilder(args)` returns the public concrete `VpnGatewayApplicationBuilder`; its `Build()` returns the public `VpnGatewayApplication : Host<VpnGatewayApplicationContext>`. The public `VpnGatewayApplicationContext` implements `IVpnGatewayApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+```csharp
+using Assimalign.Cohesion.VpnGateway.Hosting;
+
+VpnGatewayApplicationBuilder builder = VpnGatewayApplication.CreateBuilder(args);
+// Add area declarations and optional hosting services before Build().
+await using VpnGatewayApplication application = builder.Build();
+await application.RunAsync();
+```

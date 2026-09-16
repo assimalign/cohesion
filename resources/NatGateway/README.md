@@ -21,3 +21,18 @@ As an L3 service platform, NatGateway composes the L2 `Assimalign.Cohesion.Hosti
 - [Root design](./Assimalign.Cohesion.NatGateway/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.NatGateway.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.NatGateway.Hosting/docs/DESIGN.md)
+
+## Application composition (O34)
+
+The root contracts are hosting-free (O34): `INatGatewayApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `INatGatewayApplicationContext` exposes `ContentRootPath`. `INatGatewayApplicationBuilder` exposes `Build()`; it currently declares no area-specific verbs. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
+
+`NatGatewayApplication.CreateBuilder(args)` returns the public concrete `NatGatewayApplicationBuilder`; its `Build()` returns the public `NatGatewayApplication : Host<NatGatewayApplicationContext>`. The public `NatGatewayApplicationContext` implements `INatGatewayApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+```csharp
+using Assimalign.Cohesion.NatGateway.Hosting;
+
+NatGatewayApplicationBuilder builder = NatGatewayApplication.CreateBuilder(args);
+// Add area declarations and optional hosting services before Build().
+await using NatGatewayApplication application = builder.Build();
+await application.RunAsync();
+```

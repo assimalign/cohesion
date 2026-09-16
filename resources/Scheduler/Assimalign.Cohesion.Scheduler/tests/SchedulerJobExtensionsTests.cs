@@ -1,8 +1,6 @@
 using System;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting;
-
 using Shouldly;
 using Xunit;
 
@@ -43,12 +41,6 @@ public sealed class SchedulerJobExtensionsTests
             return this;
         }
 
-        public ISchedulerApplicationBuilder AddService(IHostService service) => this;
-
-        public ISchedulerApplicationBuilder AddService(Func<IHostContext, IHostService> factory) => this;
-
         public ISchedulerApplication Build() => throw new NotSupportedException();
-
-        IHost IHostBuilder.Build() => Build();
     }
 }

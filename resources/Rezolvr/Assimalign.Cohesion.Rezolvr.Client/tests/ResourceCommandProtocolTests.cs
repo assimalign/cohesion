@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Rezolvr;
 using Assimalign.Cohesion.Rezolvr.ApplicationModel;
@@ -47,7 +48,7 @@ public sealed class ResourceCommandProtocolTests
                 ["credential"] = ResourceMount.FromBytes("test-client-secret"u8),
             }, settings: null, references: null, Encoding.UTF8.GetBytes(token), identity.PublicKey, ambientValues: null);
         using IDisposable scope = ResourceRuntime.CreateScope(context);
-        IRezolvrApplication application = RezolvrApplication.CreateBuilder([], typeof(ResourceCommandProtocolTests).Assembly).Build();
+        RezolvrApplication application = RezolvrApplication.CreateBuilder([], typeof(ResourceCommandProtocolTests).Assembly).Build();
         using IRezolvrCommandClient client = RezolvrCommandClient.Create(address, token);
         ResourceCommand[] commands =
         [
@@ -56,7 +57,7 @@ public sealed class ResourceCommandProtocolTests
         ];
         try
         {
-            await application.StartAsync(timeout.Token);
+            await ((IHost)application).StartAsync(timeout.Token);
             foreach (ResourceCommand command in commands)
             {
                 ResourceCommandObservation applied = await client.SendCommandAsync(command, timeout.Token);
@@ -70,10 +71,10 @@ public sealed class ResourceCommandProtocolTests
                 (await client.SendCommandAsync(commands[index], timeout.Token)).Status.ShouldBe("Applied");
             }
 
-            await application.StopAsync(timeout.Token);
-            await application.DisposeAsync();
+            await ((IHost)application).StopAsync(timeout.Token);
+            await ((IAsyncDisposable)application).DisposeAsync();
             application = RezolvrApplication.CreateBuilder([], typeof(ResourceCommandProtocolTests).Assembly).Build();
-            await application.StartAsync(timeout.Token);
+            await ((IHost)application).StartAsync(timeout.Token);
 
             ResourceRuntime.TryGetControlPlane((Assimalign.Cohesion.Hosting.IHost)application,
                 out IResourceControlPlane? plane).ShouldBeTrue();
@@ -105,8 +106,8 @@ public sealed class ResourceCommandProtocolTests
         }
         finally
         {
-            await application.StopAsync(CancellationToken.None);
-            await application.DisposeAsync();
+            await ((IHost)application).StopAsync(CancellationToken.None);
+            await ((IAsyncDisposable)application).DisposeAsync();
             Directory.Delete(data, recursive: true);
         }
     }

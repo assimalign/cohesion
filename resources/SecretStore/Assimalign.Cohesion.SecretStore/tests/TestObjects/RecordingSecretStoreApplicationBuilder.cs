@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Hosting;
-
 namespace Assimalign.Cohesion.SecretStore.Tests.TestObjects;
 
 internal sealed class RecordingSecretStoreApplicationBuilder : ISecretStoreApplicationBuilder
@@ -28,14 +26,8 @@ internal sealed class RecordingSecretStoreApplicationBuilder : ISecretStoreAppli
         return this;
     }
 
-    public ISecretStoreApplicationBuilder AddService(IHostService service) => this;
-
-    public ISecretStoreApplicationBuilder AddService(Func<IHostContext, IHostService> factory) => this;
-
     public ISecretStoreApplication Build()
     {
         throw new NotSupportedException("The recording builder does not materialize an application.");
     }
-
-    IHost IHostBuilder.Build() => Build();
 }

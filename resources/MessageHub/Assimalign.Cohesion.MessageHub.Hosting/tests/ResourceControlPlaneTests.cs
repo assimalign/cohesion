@@ -39,7 +39,7 @@ public sealed class ResourceControlPlaneTests
             bootstrapCredential: managed ? Encoding.UTF8.GetBytes(token) : ReadOnlyMemory<byte>.Empty,
             applicationTrustKey: managed ? identity.PublicKey : ReadOnlyMemory<byte>.Empty);
         using IDisposable scope = ResourceRuntime.CreateScope(resource);
-        await using IMessageHubApplication application = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly).Build();
+        await using MessageHubApplication application = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly).Build();
         Task run = application.RunAsync(timeout.Token);
         while (application.Context.State is not HostState.Started)
         {
@@ -81,18 +81,18 @@ public sealed class ResourceControlPlaneTests
     {
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             endpoints: new Dictionary<string, Uri> { ["http"] = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort()) }));
-        await using IMessageHubApplication application = CreateBuilder(typeof(IMessageHubApplication).Assembly).Build();
+        await using MessageHubApplication application = CreateBuilder(typeof(MessageHubApplication).Assembly).Build();
         application.Context.HostedServices.ShouldBeEmpty();
         ResourceRuntime.TryGetControlPlane(application, out _).ShouldBeFalse();
-        await application.StartAsync(CancellationToken.None);
-        await application.StopAsync(CancellationToken.None);
+        await ((IHost)application).StartAsync(CancellationToken.None);
+        await ((IHost)application).StopAsync(CancellationToken.None);
     }
 
-    private static IMessageHubApplicationBuilder CreateBuilder(Assembly assembly)
+    private static MessageHubApplicationBuilder CreateBuilder(Assembly assembly)
     {
         MethodInfo method = typeof(MessageHubApplication).GetMethod("CreateBuilder", BindingFlags.Static | BindingFlags.NonPublic,
             binder: null, [typeof(string[]), typeof(Assembly)], modifiers: null)!;
-        return (IMessageHubApplicationBuilder)method.Invoke(null, [Array.Empty<string>(), assembly])!;
+        return (MessageHubApplicationBuilder)method.Invoke(null, [Array.Empty<string>(), assembly])!;
     }
 
     private static int ReservePort()

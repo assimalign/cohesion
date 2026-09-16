@@ -7,8 +7,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.ConfigurationStore;
+using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Tests;
 
@@ -22,11 +22,11 @@ public class ApplicationLifecycleTests
         var events = new List<string>();
         var firstService = new RecordingHostService("first", events);
         var secondService = new RecordingHostService("second", events);
-        IHostContext? factoryContext = null;
+        ConfigurationStoreApplicationContext? factoryContext = null;
         int factoryCalls = 0;
-        IConfigurationStoreApplicationBuilder builder = testScope.Builder;
+        ConfigurationStoreApplicationBuilder builder = testScope.Builder;
 
-        IConfigurationStoreApplicationBuilder returnedBuilder = builder
+        ConfigurationStoreApplicationBuilder returnedBuilder = builder
             .AddService(firstService)
             .AddService(context =>
             {
@@ -35,16 +35,18 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using IConfigurationStoreApplication application = builder.Build();
+        await using ConfigurationStoreApplication application = ((IConfigurationStoreApplicationBuilder)builder).Build().ShouldBeOfType<ConfigurationStoreApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((IConfigurationStoreApplication)application).StartAsync(CancellationToken.None);
+        await ((IConfigurationStoreApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         returnedBuilder.ShouldBeSameAs(builder);
         factoryCalls.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((IConfigurationStoreApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((IConfigurationStoreApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.Take(2).ShouldBe(
             new IHostService[] { firstService, secondService });
         application.Context.HostedServices.Count().ShouldBe(3);
@@ -62,18 +64,18 @@ public class ApplicationLifecycleTests
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
         using var testScope = new PlainConfigurationStoreScope();
-        IConfigurationStoreApplicationBuilder builder = testScope.Builder;
+        ConfigurationStoreApplicationBuilder builder = testScope.Builder;
 
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<ConfigurationStoreApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - AddService: Null factory result should fail at build")]
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
         using var testScope = new PlainConfigurationStoreScope();
-        IConfigurationStoreApplicationBuilder builder = testScope.Builder;
+        ConfigurationStoreApplicationBuilder builder = testScope.Builder;
         builder.AddService(_ => null!);
 
         InvalidOperationException exception = Should.Throw<InvalidOperationException>(
@@ -87,7 +89,7 @@ public class ApplicationLifecycleTests
     {
         // Arrange
         using var testScope = new PlainConfigurationStoreScope();
-        await using IConfigurationStoreApplication application = testScope.Builder.Build();
+        await using ConfigurationStoreApplication application = testScope.Builder.Build();
         using var cancellationTokenSource = new CancellationTokenSource();
         cancellationTokenSource.Cancel();
 

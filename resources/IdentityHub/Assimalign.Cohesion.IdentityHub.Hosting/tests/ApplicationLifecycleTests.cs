@@ -22,11 +22,11 @@ public class ApplicationLifecycleTests
         var firstService = new RecordingHostService("first", events);
         var secondService = new RecordingHostService("second", events);
         using var data = new TemporaryDirectory();
-        IHostContext? factoryContext = null;
+        IdentityHubApplicationContext? factoryContext = null;
         int factoryCalls = 0;
-        IIdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(data.Path);
+        IdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(data.Path);
 
-        IIdentityHubApplicationBuilder returnedBuilder = builder
+        IdentityHubApplicationBuilder returnedBuilder = builder
             .AddService(firstService)
             .AddService(context =>
             {
@@ -35,16 +35,18 @@ public class ApplicationLifecycleTests
                 return secondService;
             });
 
-        await using IIdentityHubApplication application = builder.Build();
+        await using IdentityHubApplication application = ((IIdentityHubApplicationBuilder)builder).Build().ShouldBeOfType<IdentityHubApplication>();
 
         // Act
-        await application.StartAsync();
-        await application.StopAsync();
+        await ((IIdentityHubApplication)application).StartAsync(CancellationToken.None);
+        await ((IIdentityHubApplication)application).StopAsync(CancellationToken.None);
 
         // Assert
         returnedBuilder.ShouldBeSameAs(builder);
         factoryCalls.ShouldBe(1);
         factoryContext.ShouldBeSameAs(application.Context);
+        ((IIdentityHubApplication)application).Context.ShouldBeSameAs(application.Context);
+        ((IIdentityHubApplication)application).Context.ContentRootPath.ShouldBe(application.Context.Environment.ContentRootPath);
         application.Context.HostedServices.Take(2).ShouldBe(
             new IHostService[] { firstService, secondService });
         events.ShouldBe(new[]
@@ -59,17 +61,17 @@ public class ApplicationLifecycleTests
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - AddService: Null registrations should fail explicitly")]
     public void AddService_WithNullRegistration_ShouldRejectRegistration()
     {
-        IIdentityHubApplicationBuilder builder = IdentityHubApplication.CreateBuilder([]);
+        IdentityHubApplicationBuilder builder = IdentityHubApplication.CreateBuilder([]);
 
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IHostContext, IHostService>)null!));
+            (Func<IdentityHubApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityHub] - AddService: Null factory result should fail at build")]
     public void Build_WithNullServiceFactoryResult_ShouldRejectService()
     {
-        IIdentityHubApplicationBuilder builder = IdentityHubApplication.CreateBuilder([]);
+        IdentityHubApplicationBuilder builder = IdentityHubApplication.CreateBuilder([]);
         builder.AddService(_ => null!);
 
         InvalidOperationException exception = Should.Throw<InvalidOperationException>(
@@ -83,7 +85,7 @@ public class ApplicationLifecycleTests
     {
         // Arrange
         using var data = new TemporaryDirectory();
-        await using IIdentityHubApplication application = IdentityHubTestHost.CreateBuilder(data.Path).Build();
+        await using IdentityHubApplication application = IdentityHubTestHost.CreateBuilder(data.Path).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
         cancellationTokenSource.Cancel();
 

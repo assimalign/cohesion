@@ -1,13 +1,11 @@
 using System;
 
-using Assimalign.Cohesion.Hosting;
-
 namespace Assimalign.Cohesion.SecretStore;
 
 /// <summary>
 /// Defines the contract-only composition seam for a secret store application.
 /// </summary>
-public interface ISecretStoreApplicationBuilder : IHostBuilder
+public interface ISecretStoreApplicationBuilder
 {
     /// <summary>
     /// Declares an initial secret at a logical store path.
@@ -56,23 +54,6 @@ public interface ISecretStoreApplicationBuilder : IHostBuilder
         Action<CertificateAuthorityOptions>? configure = null);
 
     /// <summary>
-    /// Adds an existing host service to the secret store application.
-    /// </summary>
-    /// <param name="service">The service to add.</param>
-    /// <returns>This builder.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
-    ISecretStoreApplicationBuilder AddService(IHostService service);
-
-    /// <summary>
-    /// Adds a host service factory that is materialized once for each build.
-    /// </summary>
-    /// <param name="factory">The factory to invoke with the secret store host context.</param>
-    /// <returns>This builder.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException"><paramref name="factory"/> returns <see langword="null"/>.</exception>
-    ISecretStoreApplicationBuilder AddService(Func<IHostContext, IHostService> factory);
-
-    /// <summary>
     /// Builds the secret store application.
     /// </summary>
     /// <returns>The configured secret store application.</returns>
@@ -80,5 +61,5 @@ public interface ISecretStoreApplicationBuilder : IHostBuilder
     /// The builder has already built an application, a registered service factory returns
     /// <see langword="null"/>, or the ambient endpoint or data mount cannot host the store.
     /// </exception>
-    new ISecretStoreApplication Build();
+    ISecretStoreApplication Build();
 }

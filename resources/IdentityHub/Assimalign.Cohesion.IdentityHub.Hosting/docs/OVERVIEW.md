@@ -2,7 +2,8 @@
 
 ## Summary
 
-Provides `IdentityHubApplication.CreateBuilder(args)` and the internal, AOT-safe OpenID Connect issuer runtime.
+Provides `IdentityHubApplication.CreateBuilder(args)` and the public concrete application, builder,
+and context for the AOT-safe OpenID Connect issuer runtime. Issuer services remain internal.
 
 The host serves discovery, persisted ES256 JWKS, client-credentials tokens, public health probes, and the bootstrap-authenticated Cohesion resource control plane. Configuration is code-first through `AddAudience` and `AddClient`; the generated resource manifest supplies the `https` endpoint and `data` volume. Only `openid` and an empty scope are accepted.
 
@@ -32,3 +33,14 @@ declaration stores the mount name, never credential bytes. Hosting reads and has
 credential when initializing or updating the registry, so restart requires the mount again.
 Clients must reference existing audiences; add the audience before the client. Conflicting resource
 seeds or changed client declarations are rejected until the owning declaration is deleted.
+
+## Concrete composition (T10 / O34)
+
+`IdentityHubApplication.CreateBuilder(args)` returns the public concrete `IdentityHubApplicationBuilder`; its `Build()` returns the public `IdentityHubApplication : Host<IdentityHubApplicationContext>`. The public `IdentityHubApplicationContext` implements `IIdentityHubApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+Background-work registration belongs to the concrete `IdentityHubApplicationBuilder`: `AddService(IHostService)` and `AddService(Func<IdentityHubApplicationContext, IHostService>)`. The factory deliberately receives the concrete context, unlike Web's AddService and Database's AddServer interface-context overloads, so hosting consumers can use environment, state, and hosted-service members beyond the small root contract. Factories run once per build against the same context retained by the application; the hosted-service snapshot is installed after factory evaluation. Services start in registration order and stop in reverse. No area-owned service abstraction is introduced.
+
+The concrete application preserves the existing RunAsync shortcut for a token already cancelled
+at entry: it starts and stops with uncancelled lifecycle tokens. Other runs delegate to the shared
+host runner. This compatibility method hides the non-virtual base member; callers holding IHost
+use the shared runner directly.

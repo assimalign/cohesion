@@ -3,29 +3,23 @@
 Namespace: `Assimalign.Cohesion.ApiManager`
 Assembly: `Assimalign.Cohesion.ApiManager`
 
-## Purpose
+## Purpose and surface
 
-`IApiManagerApplication` is the public lifecycle contract for an API manager application. It extends `IHost` and adds the run-until-shutdown operation used by executable resources.
+The root contracts are hosting-free (O34): `IApiManagerApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `IApiManagerApplicationContext` exposes `ContentRootPath`. `IApiManagerApplicationBuilder` exposes `Build()`; it currently declares no area-specific verbs. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
 
-## Surface
+`StartAsync(CancellationToken)` starts the application; `StopAsync(CancellationToken)` drains and stops it. Lifecycle failures propagate to the caller. The contract carries no host identity, runner, or disposal members.
 
-- `RunAsync(CancellationToken cancellationToken = default)` starts the host, waits for shutdown, and completes after the host has stopped.
-- The inherited `IHost` members expose the host identity, context, start, stop, and disposal lifecycle.
+## Hosting implementation
 
-The current filler implementation registers no hosted services by default. Services explicitly added through `IApiManagerApplicationBuilder` participate in the same lifecycle. A token that is already cancelled still drives the host through a clean start-and-stop transition; cancellation after startup requests graceful shutdown.
-
-## Exceptions
-
-`RunAsync` throws `ObjectDisposedException` when invoked after the application has been disposed. Lifecycle failures are propagated to the caller.
+`ApiManagerApplication.CreateBuilder(args)` returns the public concrete `ApiManagerApplicationBuilder`; its `Build()` returns the public `ApiManagerApplication : Host<ApiManagerApplicationContext>`. The public `ApiManagerApplicationContext` implements `IApiManagerApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
 
 ## Usage
 
 ```csharp
-using Assimalign.Cohesion.ApiManager;
 using Assimalign.Cohesion.ApiManager.Hosting;
 
-await using IApiManagerApplication application =
-    ApiManagerApplication.CreateBuilder(args).Build();
-
-await application.RunAsync(cancellationToken);
+ApiManagerApplicationBuilder builder = ApiManagerApplication.CreateBuilder(args);
+// Add area declarations and optional hosting services before Build().
+await using ApiManagerApplication application = builder.Build();
+await application.RunAsync();
 ```

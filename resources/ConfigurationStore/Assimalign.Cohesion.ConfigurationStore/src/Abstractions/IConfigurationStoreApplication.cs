@@ -1,20 +1,29 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting;
-
 namespace Assimalign.Cohesion.ConfigurationStore;
 
 /// <summary>
-/// Represents a configuration store application and its host lifecycle.
+/// Represents the ConfigurationStore application lifecycle without hosting dependencies.
 /// </summary>
-public interface IConfigurationStoreApplication : IHost
+public interface IConfigurationStoreApplication
 {
     /// <summary>
-    /// Runs the application until shutdown is requested.
+    /// Gets the application context.
     /// </summary>
-    /// <param name="cancellationToken">The token that requests application shutdown.</param>
-    /// <returns>A task that completes after the application has stopped.</returns>
-    /// <exception cref="System.ObjectDisposedException">The application has been disposed.</exception>
-    Task RunAsync(CancellationToken cancellationToken = default);
+    IConfigurationStoreApplicationContext Context { get; }
+
+    /// <summary>
+    /// Starts the application.
+    /// </summary>
+    /// <param name="cancellationToken">The token that cancels application startup.</param>
+    /// <returns>A task that completes when the application has started.</returns>
+    Task StartAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stops the application and drains its active work.
+    /// </summary>
+    /// <param name="cancellationToken">The token that bounds graceful shutdown.</param>
+    /// <returns>A task that completes when the application has stopped.</returns>
+    Task StopAsync(CancellationToken cancellationToken = default);
 }

@@ -5,19 +5,17 @@ Assembly: `Assimalign.Cohesion.MediaHub`
 
 ## Purpose
 
-`IMediaHubApplicationBuilder` is the public composition seam for a MediaHub application. It extends `IHostBuilder` while refining `Build()` to return `IMediaHubApplication`.
+`IMediaHubApplicationBuilder` is the public composition seam for a MediaHub application. It exposes `Build()` returning `IMediaHubApplication`.
 
 ## Surface and behavior
 
-- `AddService(IHostService service)` registers an existing service instance.
-- `AddService(Func<IHostContext, IHostService> factory)` registers a factory that is invoked once per build against the new MediaHub context.
 - `Build()` creates a configured MediaHub application.
 
-Registrations retain insertion order. The shared host starts the materialized services in that order and stops them in reverse; a builder with no registrations still produces an empty collection. The concrete builder remains internal to `Assimalign.Cohesion.MediaHub.Hosting`.
+Registrations retain insertion order. The shared host starts the materialized services in that order and stops them in reverse; a builder with no registrations still produces an empty collection. The public concrete `MediaHubApplicationBuilder` lives in `Assimalign.Cohesion.MediaHub.Hosting`.
 
 ## Exceptions
 
-`AddService` throws `ArgumentNullException` for a null service or factory. `Build()` throws `InvalidOperationException` when a factory returns null, and otherwise propagates factory failures.
+The concrete Hosting builder's `AddService` throws `ArgumentNullException` for a null service or factory. `Build()` throws `InvalidOperationException` when a factory returns null, and otherwise propagates factory failures.
 
 ## Usage
 
@@ -25,6 +23,14 @@ Registrations retain insertion order. The shared host starts the materialized se
 using Assimalign.Cohesion.MediaHub;
 using Assimalign.Cohesion.MediaHub.Hosting;
 
-IMediaHubApplicationBuilder builder = MediaHubApplication.CreateBuilder(args);
-await using IMediaHubApplication application = builder.Build();
+MediaHubApplicationBuilder builder = MediaHubApplication.CreateBuilder(args);
+await using MediaHubApplication application = builder.Build();
 ```
+
+## Hosting-free application contract (O34)
+
+The root contracts are hosting-free (O34): `IMediaHubApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `IMediaHubApplicationContext` exposes `ContentRootPath`. `IMediaHubApplicationBuilder` exposes `Build()`; it currently declares no area-specific verbs. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
+
+`MediaHubApplication.CreateBuilder(args)` returns the public concrete `MediaHubApplicationBuilder`; its `Build()` returns the public `MediaHubApplication : Host<MediaHubApplicationContext>`. The public `MediaHubApplicationContext` implements `IMediaHubApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+Background-work registration (`AddService`) is available only on the concrete Hosting builder.

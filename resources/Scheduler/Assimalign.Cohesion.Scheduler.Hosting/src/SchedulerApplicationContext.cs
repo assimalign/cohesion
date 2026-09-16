@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,7 +12,10 @@ using Assimalign.Cohesion.Scheduler;
 
 namespace Assimalign.Cohesion.Scheduler.Hosting;
 
-internal sealed class SchedulerApplicationContext : HostContext, ISchedulerApplicationContext, IHealthContributor
+/// <summary>
+/// Provides the Scheduler application environment and runtime composition.
+/// </summary>
+public sealed class SchedulerApplicationContext : HostContext, ISchedulerApplicationContext, IHealthContributor
 {
     private readonly IHostEnvironment _environment;
     private IReadOnlyList<IHostService> _hostedServices = Array.Empty<IHostService>();
@@ -36,18 +40,44 @@ internal sealed class SchedulerApplicationContext : HostContext, ISchedulerAppli
         Schedules = new ReadOnlyCollection<ISchedule>(schedules.ToArray());
     }
 
+    /// <summary>
+    /// Gets the configured application content root.
+    /// </summary>
+    public FileSystemPath? ContentRootPath => Environment.ContentRootPath;
+
+    /// <summary>
+    /// Gets the host environment for this application.
+    /// </summary>
     public override IHostEnvironment Environment => _environment;
 
+    /// <summary>
+    /// Gets the hosted services in registration and startup order.
+    /// </summary>
     public override IEnumerable<IHostService> HostedServices => _hostedServices;
 
+    /// <summary>
+    /// Gets all declared jobs, including jobs without a schedule.
+    /// </summary>
     public IReadOnlyList<IScheduleJob> Jobs { get; }
 
+    /// <summary>
+    /// Gets the registered schedule providers.
+    /// </summary>
     public IReadOnlyList<IScheduleProvider> ScheduleProviders { get; }
 
     internal IReadOnlyList<ISchedule> Schedules { get; }
 
+    /// <summary>
+    /// Gets the name used for this application health contribution.
+    /// </summary>
     public string Name => "scheduler";
 
+    /// <summary>
+    /// Reports the health of the application.
+    /// </summary>
+    /// <param name="cancellationToken">The token that cancels the health check.</param>
+    /// <returns>The current application health contribution.</returns>
+    /// <exception cref="OperationCanceledException">The cancellation token is cancelled.</exception>
     public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

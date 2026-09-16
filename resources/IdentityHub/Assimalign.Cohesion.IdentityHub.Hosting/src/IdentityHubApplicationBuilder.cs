@@ -6,12 +6,15 @@ using System.Reflection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
-using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.IdentityHub;
+using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting;
 
-internal sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuilder
+/// <summary>
+/// Composes an IdentityHub application and its hosting services.
+/// </summary>
+public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuilder
 {
     private const string DefaultEndpoint = "https://127.0.0.1:8443";
 
@@ -21,7 +24,7 @@ internal sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBui
     private readonly IResourceControlPlane? _controlPlane;
     private readonly HashSet<string> _audiences = new(StringComparer.Ordinal);
     private readonly ResourceContext _resourceContext;
-    private readonly List<Func<IHostContext, IHostService>> _serviceRegistrations = new();
+    private readonly List<Func<IdentityHubApplicationContext, IHostService>> _serviceRegistrations = new();
     private bool _isBuilt;
 
     internal IdentityHubApplicationBuilder(string[] args, Assembly resourceAssembly)
@@ -43,6 +46,13 @@ internal sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBui
         }
     }
 
+    /// <summary>
+    /// Declares an audience for access tokens issued by this identity hub.
+    /// </summary>
+    /// <param name="audience">The exact audience identifier.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentException"><paramref name="audience"/> is empty or whitespace.</exception>
+    /// <exception cref="InvalidOperationException">The audience is already declared or the application has been built.</exception>
     public IIdentityHubApplicationBuilder AddAudience(string audience)
     {
         EnsureNotBuilt();
@@ -55,6 +65,15 @@ internal sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBui
         return this;
     }
 
+    /// <summary>
+    /// Registers an OAuth client in the identity hub's code-first configuration.
+    /// </summary>
+    /// <param name="clientId">The exact client identifier.</param>
+    /// <param name="configure">The callback that configures grants, credentials, and audiences.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentException"><paramref name="clientId"/> is empty or whitespace.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The client is already registered or the application has been built.</exception>
     public IIdentityHubApplicationBuilder AddClient(
         string clientId,
         Action<IdentityHubClientOptions> configure)
@@ -73,7 +92,17 @@ internal sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBui
         return this;
     }
 
-    public IIdentityHubApplicationBuilder AddService(IHostService service)
+    /// <summary>
+    /// Registers a host service with the identity hub application.
+    /// </summary>
+    /// <remarks>
+    /// Host services start in registration order and stop in reverse registration order.
+    /// </remarks>
+    /// <param name="service">The host service to register.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The application has been built.</exception>
+    public IdentityHubApplicationBuilder AddService(IHostService service)
     {
         EnsureNotBuilt();
         ArgumentNullException.ThrowIfNull(service);
@@ -82,7 +111,18 @@ internal sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBui
         return this;
     }
 
-    public IIdentityHubApplicationBuilder AddService(Func<IHostContext, IHostService> factory)
+    /// <summary>
+    /// Registers a host service factory with the identity hub application.
+    /// </summary>
+    /// <remarks>
+    /// The factory is invoked once for each call to <see cref="Build"/> and receives that
+    /// application's final host context. The resulting service follows registration order.
+    /// </remarks>
+    /// <param name="factory">The factory that creates the host service.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The application has been built, or the factory returns <see langword="null"/> during build.</exception>
+    public IdentityHubApplicationBuilder AddService(Func<IdentityHubApplicationContext, IHostService> factory)
     {
         EnsureNotBuilt();
         ArgumentNullException.ThrowIfNull(factory);
@@ -91,7 +131,16 @@ internal sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBui
         return this;
     }
 
-    public IIdentityHubApplication Build()
+    /// <summary>
+    /// Builds the identity hub application.
+    /// </summary>
+    /// <returns>The configured identity hub application.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The application has already been built, a client has no valid grant or declared audience,
+    /// a service factory returns null, or the data mount has no filesystem path.
+    /// </exception>
+    /// <exception cref="ArgumentException">A command-line endpoint or data option is invalid or missing its value.</exception>
+    public IdentityHubApplication Build()
     {
         if (_isBuilt)
         {
@@ -127,7 +176,7 @@ internal sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBui
         context.SetHostedServices(hostedServices);
 
         _isBuilt = true;
-        var application = new IdentityHubApplicationHost(options, context);
+        var application = new IdentityHubApplication(options, context);
         if (_controlPlane is not null)
         {
             ResourceRuntime.HostBuilt(application, _controlPlane);
@@ -136,7 +185,7 @@ internal sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBui
         return application;
     }
 
-    IHost IHostBuilder.Build() => Build();
+    IIdentityHubApplication IIdentityHubApplicationBuilder.Build() => Build();
 
     private void EnsureNotBuilt()
     {

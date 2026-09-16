@@ -10,9 +10,12 @@ using Assimalign.Cohesion.VpnGateway;
 
 namespace Assimalign.Cohesion.VpnGateway.Hosting;
 
-internal sealed class VpnGatewayApplicationBuilder : IVpnGatewayApplicationBuilder
+/// <summary>
+/// Composes a VpnGateway application and its hosting services.
+/// </summary>
+public sealed class VpnGatewayApplicationBuilder : IVpnGatewayApplicationBuilder
 {
-    private readonly List<Func<IHostContext, IHostService>> _serviceFactories = [];
+    private readonly List<Func<VpnGatewayApplicationContext, IHostService>> _serviceFactories = [];
 
     private readonly ILoggerFactory? _loggerFactory;
     private readonly IResourceControlPlane? _controlPlane;
@@ -33,7 +36,13 @@ internal sealed class VpnGatewayApplicationBuilder : IVpnGatewayApplicationBuild
         }
     }
 
-    public IVpnGatewayApplicationBuilder AddService(IHostService service)
+    /// <summary>
+    /// Adds an existing host service to the VPN gateway application.
+    /// </summary>
+    /// <param name="service">The service to add.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
+    public VpnGatewayApplicationBuilder AddService(IHostService service)
     {
         ArgumentNullException.ThrowIfNull(service);
 
@@ -41,7 +50,14 @@ internal sealed class VpnGatewayApplicationBuilder : IVpnGatewayApplicationBuild
         return this;
     }
 
-    public IVpnGatewayApplicationBuilder AddService(Func<IHostContext, IHostService> factory)
+    /// <summary>
+    /// Adds a host service factory that is materialized once for each build.
+    /// </summary>
+    /// <param name="factory">The factory to invoke with the VPN gateway host context.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="factory"/> returns <see langword="null"/>.</exception>
+    public VpnGatewayApplicationBuilder AddService(Func<VpnGatewayApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
@@ -49,7 +65,11 @@ internal sealed class VpnGatewayApplicationBuilder : IVpnGatewayApplicationBuild
         return this;
     }
 
-    public IVpnGatewayApplication Build()
+    /// <summary>
+    /// Builds the VPN gateway application.
+    /// </summary>
+    /// <returns>The configured VPN gateway application.</returns>
+    public VpnGatewayApplication Build()
     {
         var options = new VpnGatewayApplicationOptions();
         var context = new VpnGatewayApplicationContext(_resourceContext);
@@ -74,7 +94,7 @@ internal sealed class VpnGatewayApplicationBuilder : IVpnGatewayApplicationBuild
         }
         context.SetHostedServices(hostedServices);
 
-        var application = new VpnGatewayApplicationHost(options, context);
+        var application = new VpnGatewayApplication(options, context);
         if (_controlPlane is not null)
         {
             ResourceRuntime.HostBuilt(application, _controlPlane);
@@ -82,5 +102,5 @@ internal sealed class VpnGatewayApplicationBuilder : IVpnGatewayApplicationBuild
         return application;
     }
 
-    IHost IHostBuilder.Build() => Build();
+    IVpnGatewayApplication IVpnGatewayApplicationBuilder.Build() => Build();
 }

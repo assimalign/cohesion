@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.IdentityHub;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
@@ -27,10 +28,10 @@ public sealed class IdentityHubProtocolTests
         // Arrange
         using var data = new TemporaryDirectory();
         Uri endpoint = IdentityHubTestHost.GetEndpoint();
-        IIdentityHubApplicationBuilder builder = CreateConfiguredBuilder(data.Path, endpoint);
-        await using IIdentityHubApplication application = builder.Build();
+        IdentityHubApplicationBuilder builder = CreateConfiguredBuilder(data.Path, endpoint);
+        await using IdentityHubApplication application = builder.Build();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await application.StartAsync(timeout.Token);
+        await ((IHost)application).StartAsync(timeout.Token);
 
         string firstKid;
         string firstX;
@@ -204,13 +205,13 @@ public sealed class IdentityHubProtocolTests
         }
         finally
         {
-            await application.StopAsync(timeout.Token);
+            await ((IHost)application).StopAsync(timeout.Token);
         }
 
         // Act: restart from the same data mount on another listener.
         Uri restartedEndpoint = IdentityHubTestHost.GetEndpoint();
-        await using IIdentityHubApplication restarted = CreateConfiguredBuilder(data.Path, restartedEndpoint).Build();
-        await restarted.StartAsync(timeout.Token);
+        await using IdentityHubApplication restarted = CreateConfiguredBuilder(data.Path, restartedEndpoint).Build();
+        await ((IHost)restarted).StartAsync(timeout.Token);
         try
         {
             using var client = new HttpClient();
@@ -227,7 +228,7 @@ public sealed class IdentityHubProtocolTests
         }
         finally
         {
-            await restarted.StopAsync(timeout.Token);
+            await ((IHost)restarted).StopAsync(timeout.Token);
         }
     }
 
@@ -237,9 +238,9 @@ public sealed class IdentityHubProtocolTests
         // Arrange
         using var data = new TemporaryDirectory();
         Uri endpoint = IdentityHubTestHost.GetEndpoint();
-        await using IIdentityHubApplication application = CreateConfiguredBuilder(data.Path, endpoint).Build();
+        await using IdentityHubApplication application = CreateConfiguredBuilder(data.Path, endpoint).Build();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await application.StartAsync(timeout.Token);
+        await ((IHost)application).StartAsync(timeout.Token);
 
         try
         {
@@ -348,7 +349,7 @@ public sealed class IdentityHubProtocolTests
         }
         finally
         {
-            await application.StopAsync(timeout.Token);
+            await ((IHost)application).StopAsync(timeout.Token);
         }
     }
 
@@ -359,14 +360,14 @@ public sealed class IdentityHubProtocolTests
         using var data = new TemporaryDirectory();
         using var identity = new TestBootstrapIdentity();
         Uri endpoint = IdentityHubTestHost.GetEndpoint();
-        IIdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(
+        IdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(
             data.Path,
             endpoint,
             gatewayName: identity.Subject,
             applicationTrustKey: identity.PublicKey);
-        await using IIdentityHubApplication application = builder.Build();
+        await using IdentityHubApplication application = builder.Build();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await application.StartAsync(timeout.Token);
+        await ((IHost)application).StartAsync(timeout.Token);
 
         try
         {
@@ -398,13 +399,13 @@ public sealed class IdentityHubProtocolTests
         }
         finally
         {
-            await application.StopAsync(timeout.Token);
+            await ((IHost)application).StopAsync(timeout.Token);
         }
     }
 
-    private static IIdentityHubApplicationBuilder CreateConfiguredBuilder(string dataPath, Uri endpoint)
+    private static IdentityHubApplicationBuilder CreateConfiguredBuilder(string dataPath, Uri endpoint)
     {
-        IIdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(dataPath, endpoint);
+        IdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(dataPath, endpoint);
         builder.AddAudience("api");
         builder.AddClient("service", options =>
         {

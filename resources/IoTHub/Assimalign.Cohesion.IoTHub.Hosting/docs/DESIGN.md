@@ -2,7 +2,7 @@
 
 ## Design intent
 
-The hosting module implements the area root's contract-only application seam. Public construction is limited to `IoTHubApplication.CreateBuilder(args)`; the builder, `Host<TContext>` implementation, context, and options are internal.
+The hosting module implements the area root's contract-only application seam. `IoTHubApplication.CreateBuilder(args)` returns the public concrete `IoTHubApplicationBuilder`; its `Build()` returns the public `IoTHubApplication : Host<IoTHubApplicationContext>`. The public `IoTHubApplicationContext` implements `IIoTHubApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
 
 ## Filler execution model
 
@@ -27,3 +27,7 @@ The enabled resource's `http` listener consumes the shared Hosting.Resources end
 ## Optional telemetry (31b)
 
 The registered resource constructor calls ResourceTelemetry.Configure using the invocation snapshot. With no gateway or telemetry endpoint, existing providers and hosted services are unchanged. When enabled, the shared Hosting.Telemetry sibling adds OTLP/HTTP JSON logging and a service registered before producers; reverse StopAsync drains producers before a flush bounded by five seconds and the host shutdown token. Logging remains composed only in Hosting. See libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md for ordering and protocol limits.
+
+## Concrete composition (T10 / O34)
+
+Background-work registration belongs to the concrete `IoTHubApplicationBuilder`: `AddService(IHostService)` and `AddService(Func<IoTHubApplicationContext, IHostService>)`. The factory deliberately receives the concrete context, unlike Web's AddService and Database's AddServer interface-context overloads, so hosting consumers can use environment, state, and hosted-service members beyond the small root contract. Factories run once per build against the same context retained by the application; the hosted-service snapshot is installed after factory evaluation. Services start in registration order and stop in reverse. No area-owned service abstraction is introduced.

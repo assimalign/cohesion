@@ -39,7 +39,7 @@ public sealed class ResourceControlPlaneTests
             bootstrapCredential: managed ? Encoding.UTF8.GetBytes(token) : ReadOnlyMemory<byte>.Empty,
             applicationTrustKey: managed ? identity.PublicKey : ReadOnlyMemory<byte>.Empty);
         using IDisposable scope = ResourceRuntime.CreateScope(resource);
-        await using ILogSpaceApplication application = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly).Build();
+        await using LogSpaceApplication application = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly).Build();
         Task run = application.RunAsync(timeout.Token);
         while (application.Context.State is not HostState.Started)
         {
@@ -81,11 +81,11 @@ public sealed class ResourceControlPlaneTests
     {
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             endpoints: new Dictionary<string, Uri> { ["query"] = Uri.CreateEndpoint("https", "127.0.0.1", ReservePort()) }));
-        await using ILogSpaceApplication application = CreateBuilder(typeof(ILogSpaceApplication).Assembly).Build();
+        await using LogSpaceApplication application = CreateBuilder(typeof(LogSpaceApplication).Assembly).Build();
         application.Context.HostedServices.ShouldBeEmpty();
         ResourceRuntime.TryGetControlPlane(application, out _).ShouldBeFalse();
-        await application.StartAsync(CancellationToken.None);
-        await application.StopAsync(CancellationToken.None);
+        await ((IHost)application).StartAsync(CancellationToken.None);
+        await ((IHost)application).StopAsync(CancellationToken.None);
     }
 
     [Theory(DisplayName = "Cohesion Test [LogSpace.Hosting] - HTTPS: Missing certificate fails closed outside loopback Local")]
@@ -103,7 +103,7 @@ public sealed class ResourceControlPlaneTests
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             environmentName: environment,
             endpoints: new Dictionary<string, Uri> { [endpointName] = Uri.CreateEndpoint("https", host, 8443) }));
-        ILogSpaceApplicationBuilder builder = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly);
+        LogSpaceApplicationBuilder builder = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly);
 
         // Act
         InvalidOperationException error = Should.Throw<InvalidOperationException>(() => builder.Build());
@@ -123,20 +123,20 @@ public sealed class ResourceControlPlaneTests
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             environmentName: environment,
             endpoints: new Dictionary<string, Uri> { [endpointName] = Uri.CreateEndpoint("https", "127.0.0.1", 8443) }));
-        ILogSpaceApplicationBuilder builder = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly);
+        LogSpaceApplicationBuilder builder = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly);
 
         // Act
-        await using ILogSpaceApplication application = builder.Build();
+        await using LogSpaceApplication application = builder.Build();
 
         // Assert
         application.Context.HostedServices.ShouldNotBeEmpty();
     }
 
-    private static ILogSpaceApplicationBuilder CreateBuilder(Assembly assembly)
+    private static LogSpaceApplicationBuilder CreateBuilder(Assembly assembly)
     {
         MethodInfo method = typeof(LogSpaceApplication).GetMethod("CreateBuilder", BindingFlags.Static | BindingFlags.NonPublic,
             binder: null, [typeof(string[]), typeof(Assembly)], modifiers: null)!;
-        return (ILogSpaceApplicationBuilder)method.Invoke(null, [Array.Empty<string>(), assembly])!;
+        return (LogSpaceApplicationBuilder)method.Invoke(null, [Array.Empty<string>(), assembly])!;
     }
 
     private static int ReservePort()

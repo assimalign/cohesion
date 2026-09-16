@@ -22,3 +22,18 @@ As an L3 service platform, MessageHub composes the L2 `Assimalign.Cohesion.Hosti
 - [Root design](./Assimalign.Cohesion.MessageHub/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.MessageHub.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.MessageHub.Hosting/docs/DESIGN.md)
+
+## Application composition (O34)
+
+The root contracts are hosting-free (O34): `IMessageHubApplication` exposes `Context`, `StartAsync`, and `StopAsync`; `IMessageHubApplicationContext` exposes `ContentRootPath`. `IMessageHubApplicationBuilder` exposes `Build()`; it currently declares no area-specific verbs. The root and feature packages reference no `Assimalign.Cohesion.Hosting*` library; COHRES004 enforces the boundary.
+
+`MessageHubApplication.CreateBuilder(args)` returns the public concrete `MessageHubApplicationBuilder`; its `Build()` returns the public `MessageHubApplication : Host<MessageHubApplicationContext>`. The public `MessageHubApplicationContext` implements `IMessageHubApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+```csharp
+using Assimalign.Cohesion.MessageHub.Hosting;
+
+MessageHubApplicationBuilder builder = MessageHubApplication.CreateBuilder(args);
+// Add area declarations and optional hosting services before Build().
+await using MessageHubApplication application = builder.Build();
+await application.RunAsync();
+```

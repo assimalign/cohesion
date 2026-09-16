@@ -6,9 +6,8 @@
 /// <remarks>
 /// Scheduler providers own independent asynchronous loops, so this value does not guarantee
 /// occurrence ordering or OS-thread affinity. A synchronous blocking workload that truly needs
-/// a dedicated thread should be hosted as a
-/// <see cref="Assimalign.Cohesion.Hosting.DedicatedThreadService"/> rather
-/// than implemented as an asynchronous schedule job.
+/// a dedicated thread should be hosted as a dedicated-thread service by the area's
+/// hosting module instead of an asynchronous schedule job.
 /// </remarks>
 public enum SchedulePriority
 {

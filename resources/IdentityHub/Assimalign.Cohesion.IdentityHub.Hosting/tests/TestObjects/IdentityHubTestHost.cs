@@ -19,7 +19,7 @@ internal static class IdentityHubTestHost
         return new Uri($"http://127.0.0.1:{port}", UriKind.Absolute);
     }
 
-    internal static IIdentityHubApplicationBuilder CreateBuilder(
+    internal static IdentityHubApplicationBuilder CreateBuilder(
         string dataPath,
         Uri? endpoint = null,
         string? gatewayName = null,
