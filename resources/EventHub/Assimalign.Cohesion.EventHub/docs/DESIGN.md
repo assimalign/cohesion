@@ -12,7 +12,7 @@ The concrete application, builder, and context live in `Assimalign.Cohesion.Even
 
 ## Composition lifecycle
 
-Background-work registration belongs to the concrete `EventHubApplicationBuilder`: `AddService(IHostService)` and `AddService(Func<EventHubApplicationContext, IHostService>)`. The factory deliberately receives the concrete context, unlike Web's AddService and Database's AddServer interface-context overloads, so hosting consumers can use environment, state, and hosted-service members beyond the small root contract. Factories run once per build against the same context retained by the application; the hosted-service snapshot is installed after factory evaluation. Services start in registration order and stop in reverse. No area-owned service abstraction is introduced.
+Background-work registration belongs to the concrete `EventHubApplicationBuilder`: `AddService(IHostService)` and `AddService(Func<EventHubApplicationContext, IHostService>)`. The factory receives the same concrete context as Web's and Database's AddService, so hosting consumers can use environment, state, and hosted-service members beyond the small root contract. Database's root-level AddServer keeps the interface context. Factories run once per build against the same context retained by the application; the hosted-service snapshot is installed after factory evaluation. Services start in registration order and stop in reverse. No area-owned service abstraction is introduced.
 
 Enabled resources retain their ambient context and registered control-plane behavior; plain application defaults are described by the Hosting design.
 

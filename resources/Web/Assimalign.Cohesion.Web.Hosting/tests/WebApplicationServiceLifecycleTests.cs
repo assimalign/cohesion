@@ -65,7 +65,7 @@ public class WebApplicationServiceLifecycleTests
 
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
         Should.Throw<ArgumentNullException>(() => builder.AddService(
-            (Func<IWebApplicationContext, IHostService>)null!));
+            (Func<WebApplicationContext, IHostService>)null!));
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Application services: Null factory result should fail at build")]

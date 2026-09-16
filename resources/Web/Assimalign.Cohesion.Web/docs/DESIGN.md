@@ -47,7 +47,7 @@ registration form.
 ## Application lifecycle services
 
 The concrete `WebApplicationBuilder.AddService` in `Web.Hosting` accepts an
-`IHostService` instance or a factory over the final `IWebApplicationContext`. The
+`IHostService` instance or a factory over the final concrete `WebApplicationContext`. The
 factory runs once at build time. The root builder has no service-registration member
 or hosting-library reference; no area-owned service abstraction is introduced (O34).
 

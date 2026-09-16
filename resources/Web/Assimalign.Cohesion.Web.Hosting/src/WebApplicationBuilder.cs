@@ -36,7 +36,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
     private readonly List<IHealthContributor> _healthContributors = new();
-    private readonly List<Func<IWebApplicationContext, IHostService>> _serviceRegistrations = new();
+    private readonly List<Func<WebApplicationContext, IHostService>> _serviceRegistrations = new();
 
     private IWebApplicationPipeline? _pipeline;
 
@@ -168,7 +168,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     }
 
     /// <summary>
-    /// Adds a lifecycle service created from the final application context.
+    /// Adds a lifecycle service created from the final concrete application context.
     /// </summary>
     /// <remarks>
     /// The factory is invoked once when the application is built. Lifecycle services start in
@@ -181,7 +181,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     /// <exception cref="InvalidOperationException">
     /// The factory returns <see langword="null"/> when the application is built.
     /// </exception>
-    public WebApplicationBuilder AddService(Func<IWebApplicationContext, IHostService> factory)
+    public WebApplicationBuilder AddService(Func<WebApplicationContext, IHostService> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 

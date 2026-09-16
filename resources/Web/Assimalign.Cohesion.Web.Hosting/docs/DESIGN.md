@@ -55,7 +55,7 @@ Three properties fall out of that intent and shape the whole implementation:
 The concrete `WebApplicationBuilder.AddService` verb registers application lifecycle
 services independently of server registration. At `Build`, `WebApplicationBuilder`
 invokes each deferred service factory exactly once against the final
-`IWebApplicationContext` and freezes the resulting services in registration order.
+`WebApplicationContext` and freezes the resulting services in registration order.
 `WebApplicationContext.HostedServices` enumerates that snapshot before the DI-owned
 server-service registrations, including the constructor-reserved default-server slot.
 

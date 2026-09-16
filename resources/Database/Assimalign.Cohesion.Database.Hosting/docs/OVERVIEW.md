@@ -41,7 +41,7 @@ machines this module never drives (see `docs/DESIGN.md`).
 - `DatabaseApplicationOptions` collects the servers, the embedded engine
   registrations, and additional `IHostService`s.
 - `DatabaseApplicationBuilder.AddService` registers a plain `IHostService`
-  instance or a factory over the final `IDatabaseApplicationContext`; services
+  instance or a factory over the final concrete `DatabaseApplicationContext`; services
   retain registration order, start before all servers, and stop after them in
   reverse order.
 - `DatabaseApplicationBuilder.Provision` and `AddDatabase` register code-first

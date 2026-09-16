@@ -45,7 +45,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     // wrapped as trivial factories so an instance registered after a deferred
     // factory still lands after it in the context's Servers list.
     private readonly List<Func<IDatabaseApplicationContext, IDatabaseServer>> _serverRegistrations = new();
-    private readonly List<Func<IDatabaseApplicationContext, IHostService>> _serviceRegistrations = new();
+    private readonly List<Func<DatabaseApplicationContext, IHostService>> _serviceRegistrations = new();
     private bool _isBuilt;
 
     /// <summary>
@@ -201,8 +201,8 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     }
 
     /// <summary>
-    /// Registers a host service factory that receives the final database
-    /// application context. The factory is invoked once when the application is
+    /// Registers a host service factory that receives the final concrete
+    /// database application context. The factory is invoked once when the application is
     /// built, and the resulting service follows service registration order.
     /// Services start before any database server and stop after every server has
     /// drained.
@@ -213,7 +213,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <exception cref="InvalidOperationException">
     /// The factory returns <see langword="null"/> when the application is built.
     /// </exception>
-    public DatabaseApplicationBuilder AddService(Func<IDatabaseApplicationContext, IHostService> service)
+    public DatabaseApplicationBuilder AddService(Func<DatabaseApplicationContext, IHostService> service)
     {
         ArgumentNullException.ThrowIfNull(service);
 
@@ -274,7 +274,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             _options.Servers.Add(server);
         }
 
-        foreach (Func<IDatabaseApplicationContext, IHostService> registration in _serviceRegistrations)
+        foreach (Func<DatabaseApplicationContext, IHostService> registration in _serviceRegistrations)
         {
             IHostService service = registration.Invoke(context)
                 ?? throw new InvalidOperationException("A deferred host service factory returned null.");

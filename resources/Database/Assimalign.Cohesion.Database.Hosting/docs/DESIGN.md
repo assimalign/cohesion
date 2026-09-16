@@ -166,7 +166,8 @@ the `WebApplication.CreateBuilder()` idiom. The split of responsibilities:
 - **This module's `DatabaseApplicationBuilder`** implements the seam over a
   `DatabaseApplicationOptions` instance and exposes it (`builder.Options`) for
   hosting-specific settings and fully manual option composition. Its `AddService`
-  pair accepts a plain Hosting service instance or context factory. Services preserve
+  pair accepts a plain Hosting service instance or a `Func<DatabaseApplicationContext, IHostService>`
+  factory. The root-level `AddServer` keeps its `IDatabaseApplicationContext` factory. Services preserve
   registration order, start before servers, and stop after servers drain. Deferred service
   and server factories resolve at `Build()` in their respective registration
   order against the live context (instance registrations are wrapped as trivial
