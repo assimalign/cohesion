@@ -6,6 +6,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Database.Sql.Schema;
 
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
@@ -225,8 +226,8 @@ public class DatabaseApplicationBuilderTests
         builder.AddServer(server);
 
         // Act
-        CompiledSchema schema = builder.AddDatabase(engine, "orders", database =>
-            database.Table<Order>("orders", table => table.Key(order => order.Id)));
+        SqlCompiledSchema schema = CompileSchema("orders");
+        builder.AddDatabase(engine, "orders", schema);
         await using DatabaseApplication application = builder.Build();
         await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
         await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
@@ -264,7 +265,7 @@ public class DatabaseApplicationBuilderTests
 
     private sealed record Order(int Id);
 
-    private static CompiledSchema CompileSchema(string name)
-        => DatabaseSchemaCompiler.Compile(DatabaseSchema.Create(name, database =>
+    private static SqlCompiledSchema CompileSchema(string name)
+        => SqlSchemaCompiler.Compile(SqlSchema.Create(name, database =>
             database.Table<Order>("orders", table => table.Key(order => order.Id))), EngineModel.Sql);
 }

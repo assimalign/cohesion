@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -25,32 +26,39 @@ internal sealed class SqlSchemaProvisioner
     }
 
     internal async ValueTask<SchemaMigrationResult> ApplyAsync(
-        CompiledSchema schema,
+        CompiledSchema compiledSchema,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(compiledSchema);
+        if (compiledSchema is not SqlCompiledSchema schema)
+        {
+            throw new SqlSchemaMigrationException(
+                $"SQL database '{_database.Name}' requires a SQL compiled schema, but received model '{compiledSchema.Model}'.");
+        }
+
         ValidateSupportedSchema(schema);
 
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ValidateCatalogOwnership(schema);
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
             string targetHash = schema.Hash;
-            string canonicalDocument = CompiledSchemaSerializer.Serialize(schema);
+            string canonicalDocument = schema.CanonicalDocument;
             if (recorded is not null &&
                 string.Equals(recorded.ContentHash, targetHash, StringComparison.Ordinal) &&
                 string.Equals(recorded.CanonicalDocument, canonicalDocument, StringComparison.Ordinal) &&
                 CatalogMatches(schema))
             {
-                return new SchemaMigrationResult(recorded.ContentHash, targetHash, 0, wasAlreadyApplied: true);
+                return new SchemaMigrationResult(recorded.ContentHash, targetHash, 0, WasAlreadyApplied: true);
             }
 
-            CompiledSchema? current = ReadCurrentSchema(recorded, schema);
-            SchemaMigrationPlan plan = SchemaMigrationPlanner.Plan(current, schema);
+            SqlCompiledSchema? current = ReadCurrentSchema(recorded, schema);
+            SqlSchemaMigrationPlan plan = SqlSchemaMigrationPlanner.Plan(current, schema);
             SqlMigrationScript script = SqlMigrationScriptGenerator.Generate(plan, current);
             var applied = new List<SqlMigrationScriptStep>(script.Steps.Count);
 
-            await using IDatabaseSession session = await _database.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+            await using IDatabaseSession session = _database.CreateSchemaSession(schema.Name, cancellationToken);
             try
             {
                 foreach (SqlMigrationScriptStep step in script.Steps)
@@ -77,7 +85,7 @@ internal sealed class SqlSchemaProvisioner
                 Exception inner = compensation.Failures.Count == 0
                     ? failure
                     : new AggregateException(new[] { failure }.Concat(compensation.Failures));
-                throw new DatabaseSchemaMigrationException(
+                throw new SqlSchemaMigrationException(
                     $"Applying SQL schema '{schema.Name}' failed after {applied.Count} of {script.Steps.Count} operation(s). {state}",
                     inner);
             }
@@ -86,7 +94,7 @@ internal sealed class SqlSchemaProvisioner
                 plan.SourceHash,
                 targetHash,
                 plan.Operations.Count,
-                wasAlreadyApplied: false);
+                WasAlreadyApplied: false);
         }
         finally
         {
@@ -94,15 +102,15 @@ internal sealed class SqlSchemaProvisioner
         }
     }
 
-    private CompiledSchema? ReadCurrentSchema(
+    private SqlCompiledSchema? ReadCurrentSchema(
         SqlCatalogSchemaState? recorded,
-        CompiledSchema desired)
+        SqlCompiledSchema desired)
     {
         if (recorded is not null)
         {
             try
             {
-                CompiledSchema persisted = CompiledSchemaSerializer.Deserialize(recorded.CanonicalDocument);
+                SqlCompiledSchema persisted = SqlCompiledSchemaSerializer.Deserialize(recorded.CanonicalDocument);
                 if (string.Equals(recorded.ContentHash, persisted.Hash, StringComparison.Ordinal) &&
                     CatalogMatches(persisted))
                 {
@@ -120,9 +128,11 @@ internal sealed class SqlSchemaProvisioner
         return SnapshotCatalog(desired);
     }
 
-    private CompiledSchema? SnapshotCatalog(CompiledSchema desired)
+    private SqlCompiledSchema? SnapshotCatalog(SqlCompiledSchema desired)
     {
-        IReadOnlyList<SqlCatalogTable> catalogTables = _catalog.Tables;
+        IReadOnlyList<SqlCatalogTable> catalogTables = _catalog.Tables
+            .Where(table => IsOwnedBy(table.Owner, table.SchemaName, desired.Name))
+            .ToList();
         if (catalogTables.Count == 0)
         {
             return null;
@@ -135,7 +145,7 @@ internal sealed class SqlSchemaProvisioner
         {
             if (!string.Equals(catalogTable.Schema, "dbo", StringComparison.OrdinalIgnoreCase))
             {
-                throw new DatabaseSchemaMigrationException(
+                throw new SqlSchemaMigrationException(
                     $"The live SQL catalog contains table '{catalogTable.Schema}.{catalogTable.Name}', " +
                     "but compiled schemas currently address the 'dbo' schema only.");
             }
@@ -145,7 +155,7 @@ internal sealed class SqlSchemaProvisioner
             {
                 if (column.DefaultLiteral is not null)
                 {
-                    throw new DatabaseSchemaMigrationException(
+                    throw new SqlSchemaMigrationException(
                         $"The live SQL catalog column '{catalogTable.Name}.{column.Name}' has a default literal, " +
                         "which the compiled schema contract cannot represent yet.");
                 }
@@ -172,6 +182,7 @@ internal sealed class SqlSchemaProvisioner
 
             IReadOnlyList<SqlCatalogIndex> catalogIndexes = _catalog.GetIndexes(catalogTable.ObjectId);
             var indexes = catalogIndexes
+                .Where(index => IsOwnedBy(index.Owner, index.SchemaName, desired.Name))
                 .OrderBy(index => index.Name, StringComparer.Ordinal)
                 .Select(index => new CompiledSchemaIndex(index.Name, index.ColumnNames, index.IsUnique))
                 .ToList();
@@ -184,23 +195,22 @@ internal sealed class SqlSchemaProvisioner
                 Array.Empty<CompiledSchemaConstraint>()));
         }
 
-        return new CompiledSchema(
-            CompiledSchema.CurrentFormat,
+        return new SqlCompiledSchema(
+            SqlCompiledSchema.CurrentFormat,
             desired.Name,
             EngineModel.Sql,
             allowsDestructiveChanges: false,
             Array.Empty<CompiledSchemaType>(),
             tables,
-            Array.Empty<CompiledSchemaCollection>(),
             Array.Empty<CompiledSchemaFunction>(),
             Array.Empty<CompiledSchemaTrigger>(),
             Array.Empty<CompiledSchemaPrincipal>(),
             Array.Empty<CompiledSchemaExtension>());
     }
 
-    private bool CatalogMatches(CompiledSchema schema)
+    private bool CatalogMatches(SqlCompiledSchema schema)
     {
-        if (_catalog.Tables.Count != schema.Tables.Count)
+        if (_catalog.Tables.Count(table => IsOwnedBy(table.Owner, table.SchemaName, schema.Name)) != schema.Tables.Count)
         {
             return false;
         }
@@ -208,6 +218,7 @@ internal sealed class SqlSchemaProvisioner
         foreach (CompiledSchemaTable expected in schema.Tables)
         {
             if (!_catalog.TryGetTable("dbo", expected.Name, out SqlCatalogTable actual) ||
+                !IsOwnedBy(actual.Owner, actual.SchemaName, schema.Name) ||
                 actual.Columns.Count != expected.Columns.Count ||
                 !NamesEqual(expected.PrimaryKey?.Columns ?? Array.Empty<string>(), actual.PrimaryKeyColumns))
             {
@@ -233,7 +244,9 @@ internal sealed class SqlSchemaProvisioner
                 }
             }
 
-            IReadOnlyList<SqlCatalogIndex> actualIndexes = _catalog.GetIndexes(actual.ObjectId);
+            IReadOnlyList<SqlCatalogIndex> actualIndexes = _catalog.GetIndexes(actual.ObjectId)
+                .Where(index => IsOwnedBy(index.Owner, index.SchemaName, schema.Name))
+                .ToList();
             if (actualIndexes.Count != expected.Indexes.Count)
             {
                 return false;
@@ -255,6 +268,37 @@ internal sealed class SqlSchemaProvisioner
         return true;
     }
 
+    private void ValidateCatalogOwnership(SqlCompiledSchema schema)
+    {
+        foreach (CompiledSchemaTable table in schema.Tables)
+        {
+            if (!_catalog.TryGetTable("dbo", table.Name, out SqlCatalogTable actual))
+            {
+                continue;
+            }
+
+            if (!IsOwnedBy(actual.Owner, actual.SchemaName, schema.Name))
+            {
+                throw new SqlSchemaMigrationException(
+                    $"SQL schema '{schema.Name}' cannot adopt table '{table.Name}' because it was not created by this schema.");
+            }
+
+            foreach (CompiledSchemaIndex index in table.Indexes)
+            {
+                if (_catalog.TryGetIndex(actual.ObjectId, index.Name, out SqlCatalogIndex existing) &&
+                    !IsOwnedBy(existing.Owner, existing.SchemaName, schema.Name))
+                {
+                    throw new SqlSchemaMigrationException(
+                        $"SQL schema '{schema.Name}' cannot adopt index '{index.Name}' because it was not created by this schema.");
+                }
+            }
+        }
+    }
+
+    private static bool IsOwnedBy(DatabaseObjectOwner owner, string? owningSchema, string schemaName)
+        => owner == DatabaseObjectOwner.Schema &&
+            string.Equals(owningSchema, schemaName, StringComparison.OrdinalIgnoreCase);
+
     private static bool IsPrimaryKeyColumn(CompiledSchemaKey? key, string columnName)
     {
         if (key is null)
@@ -273,22 +317,21 @@ internal sealed class SqlSchemaProvisioner
         return false;
     }
 
-    private void ValidateSupportedSchema(CompiledSchema schema)
+    private void ValidateSupportedSchema(SqlCompiledSchema schema)
     {
         if (schema.Model != EngineModel.Sql)
         {
-            throw new DatabaseSchemaMigrationException(
+            throw new SqlSchemaMigrationException(
                 $"SQL database '{_database.Name}' cannot apply a schema for model '{schema.Model}'.");
         }
 
         if (!string.Equals(schema.Name, _database.Name.ToString(), StringComparison.OrdinalIgnoreCase))
         {
-            throw new DatabaseSchemaMigrationException(
+            throw new SqlSchemaMigrationException(
                 $"SQL database '{_database.Name}' cannot apply schema '{schema.Name}'.");
         }
 
         RejectUnsupported(schema.Types.Count, "custom types");
-        RejectUnsupported(schema.Collections.Count, "key-value collections");
         RejectUnsupported(schema.Functions.Count, "functions");
         RejectUnsupported(schema.Triggers.Count, "triggers");
         RejectUnsupported(schema.Principals.Count, "principals and grants");
@@ -298,7 +341,7 @@ internal sealed class SqlSchemaProvisioner
         {
             if (table.Constraints.Count > 0)
             {
-                throw new DatabaseSchemaMigrationException(
+                throw new SqlSchemaMigrationException(
                     $"SQL table '{table.Name}' declares constraints, but the SQL DDL executor " +
                     "does not support foreign-key or check-constraint migrations yet.");
             }
@@ -307,7 +350,7 @@ internal sealed class SqlSchemaProvisioner
             {
                 if (!string.IsNullOrWhiteSpace(column.CustomType))
                 {
-                    throw new DatabaseSchemaMigrationException(
+                    throw new SqlSchemaMigrationException(
                         $"SQL column '{table.Name}.{column.Name}' uses custom type '{column.CustomType}', " +
                         "but custom-type migrations are not supported yet.");
                 }
@@ -318,7 +361,7 @@ internal sealed class SqlSchemaProvisioner
         {
             if (count > 0)
             {
-                throw new DatabaseSchemaMigrationException(
+                throw new SqlSchemaMigrationException(
                     $"SQL schema '{schema.Name}' declares {kind}, but the SQL DDL executor cannot migrate them yet.");
             }
         }

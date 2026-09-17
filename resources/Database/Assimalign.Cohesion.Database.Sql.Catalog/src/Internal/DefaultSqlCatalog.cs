@@ -104,6 +104,17 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         IReadOnlyList<SqlCatalogColumn> columns,
         IReadOnlyList<string>? primaryKeyColumns = null,
         CancellationToken cancellationToken = default)
+        => CreateTableAsync(schema, name, columns, primaryKeyColumns,
+            DatabaseObjectOwner.Adhoc, schemaName: null, cancellationToken);
+
+    internal ValueTask<SqlCatalogTable> CreateTableAsync(
+        string schema,
+        string name,
+        IReadOnlyList<SqlCatalogColumn> columns,
+        IReadOnlyList<string>? primaryKeyColumns,
+        DatabaseObjectOwner owner,
+        string? schemaName,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -116,7 +127,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
 
             ValidateColumns(schema, name, columns, primaryKeyColumns);
 
-            var table = new SqlCatalogTable(_nextObjectId++, schema, name, columns, primaryKeyColumns);
+            var table = new SqlCatalogTable(_nextObjectId++, schema, name, columns, primaryKeyColumns, owner, schemaName);
 
             using (var transaction = _storage.BeginTransaction())
             {
@@ -212,7 +223,8 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             }
 
             var columns = slot.Table.Columns.Append(column).ToList();
-            var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns);
+            var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns,
+                slot.Table.Owner, slot.Table.SchemaName);
             ReplaceTable(slot, updated);
             return new ValueTask<SqlCatalogTable>(updated);
         }
@@ -257,7 +269,8 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             var columns = slot.Table.Columns
                 .Where(c => !string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase))
                 .ToList();
-            var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns);
+            var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns,
+                slot.Table.Owner, slot.Table.SchemaName);
             ReplaceTable(slot, updated);
             return new ValueTask<SqlCatalogTable>(updated);
         }
@@ -681,6 +694,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             writer.AppendString(pk, Collation.Binary);
         }
 
+        AppendOwnership(ref writer, table.Owner, table.SchemaName);
         return writer.ToArray();
     }
 
@@ -729,7 +743,8 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             primaryKey.Add(reader.ReadString(out _));
         }
 
-        return new SqlCatalogTable(objectId, schema, name, columns, primaryKey);
+        var (owner, schemaName) = ReadOwnership(ref reader);
+        return new SqlCatalogTable(objectId, schema, name, columns, primaryKey, owner, schemaName);
     }
 
     private static byte[] EncodeIndex(SqlCatalogIndex index)
@@ -746,6 +761,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             writer.AppendString(column, Collation.Binary);
         }
 
+        AppendOwnership(ref writer, index.Owner, index.SchemaName);
         return writer.ToArray();
     }
 
@@ -762,7 +778,51 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             columns.Add(reader.ReadString(out _));
         }
 
-        return new SqlCatalogIndex(tableObjectId, name, columns, isUnique);
+        var (owner, schemaName) = ReadOwnership(ref reader);
+        return new SqlCatalogIndex(tableObjectId, name, columns, isUnique, owner, schemaName);
+    }
+
+    private static void AppendOwnership(ref DatabaseKeyWriter writer, DatabaseObjectOwner owner, string? schemaName)
+    {
+        writer.AppendInt8((sbyte)owner);
+        if (schemaName is null)
+        {
+            writer.AppendNull();
+        }
+        else
+        {
+            writer.AppendString(schemaName, Collation.Binary);
+        }
+    }
+
+    private static (DatabaseObjectOwner Owner, string? SchemaName) ReadOwnership(ref DatabaseKeyReader reader)
+    {
+        // Existing records end after the original payload. They predate ownership
+        // and retain ad-hoc mutability instead of acquiring a guessed schema owner.
+        if (reader.IsAtEnd)
+        {
+            return (DatabaseObjectOwner.Adhoc, null);
+        }
+
+        var owner = (DatabaseObjectOwner)reader.ReadInt8();
+        string? schemaName = null;
+        if (reader.PeekType() == DatabaseType.Null)
+        {
+            reader.ReadNull();
+        }
+        else
+        {
+            schemaName = reader.ReadString(out _);
+        }
+
+        if (!reader.IsAtEnd ||
+            owner is not DatabaseObjectOwner.Adhoc and not DatabaseObjectOwner.Schema ||
+            (owner == DatabaseObjectOwner.Schema ? string.IsNullOrWhiteSpace(schemaName) : schemaName is not null))
+        {
+            throw new SqlCatalogException("The persisted object ownership metadata is invalid.");
+        }
+
+        return (owner, schemaName);
     }
 
     private static byte[] EncodeRegistrations(IReadOnlyList<BTreeIndexRegistration> registrations)

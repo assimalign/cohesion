@@ -3,6 +3,7 @@ using System;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Types;
 
@@ -124,18 +125,18 @@ public class SqlSchemaStatementRendererTests
             new CompiledSchemaKey("pk_orders", ["id"]),
             [new CompiledSchemaIndex("ix_orders_id", ["id"])],
             []);
-        var plan = new SchemaMigrationPlan(
+        var plan = new SqlSchemaMigrationPlan(
             null,
             "target-hash",
             [
-                new SchemaMigrationOperation(
-                    SchemaMigrationOperationKind.AddTable,
-                    SchemaMigrationSafety.Safe,
+                new SqlSchemaMigrationOperation(
+                    SqlSchemaMigrationOperationKind.AddTable,
+                    SqlSchemaMigrationSafety.Safe,
                     table.Name,
                     table: table),
-                new SchemaMigrationOperation(
-                    SchemaMigrationOperationKind.AddIndex,
-                    SchemaMigrationSafety.Safe,
+                new SqlSchemaMigrationOperation(
+                    SqlSchemaMigrationOperationKind.AddIndex,
+                    SqlSchemaMigrationSafety.Safe,
                     table.Indexes[0].Name,
                     table.Name,
                     index: table.Indexes[0]),
@@ -162,19 +163,19 @@ public class SqlSchemaStatementRendererTests
     public void Generate_UnsupportedOperation_ShouldFailPrecisely()
     {
         // Arrange
-        var plan = new SchemaMigrationPlan(
+        var plan = new SqlSchemaMigrationPlan(
             "source-hash",
             "target-hash",
-            [new SchemaMigrationOperation(
-                SchemaMigrationOperationKind.AlterColumn,
-                SchemaMigrationSafety.Destructive,
+            [new SqlSchemaMigrationOperation(
+                SqlSchemaMigrationOperationKind.AlterColumn,
+                SqlSchemaMigrationSafety.Destructive,
                 "value",
                 "records",
                 column: new CompiledSchemaColumn("value", DatabaseType.Int64, IsNullable: false),
                 previousColumn: new CompiledSchemaColumn("value", DatabaseType.Int32, IsNullable: false))]);
 
         // Act / Assert
-        Should.Throw<DatabaseSchemaMigrationException>(() => SqlMigrationScriptGenerator.Generate(plan))
+        Should.Throw<SqlSchemaMigrationException>(() => SqlMigrationScriptGenerator.Generate(plan))
             .Message.ShouldContain("ALTER metadata");
     }
 
@@ -182,18 +183,18 @@ public class SqlSchemaStatementRendererTests
     public void Generate_MismatchedPayloadName_ShouldFailPrecisely()
     {
         // Arrange
-        var plan = new SchemaMigrationPlan(
+        var plan = new SqlSchemaMigrationPlan(
             "source-hash",
             "target-hash",
-            [new SchemaMigrationOperation(
-                SchemaMigrationOperationKind.AddColumn,
-                SchemaMigrationSafety.Safe,
+            [new SqlSchemaMigrationOperation(
+                SqlSchemaMigrationOperationKind.AddColumn,
+                SqlSchemaMigrationSafety.Safe,
                 "claimed_name",
                 "orders",
                 column: new CompiledSchemaColumn("actual_name", DatabaseType.String, IsNullable: true))]);
 
         // Act / Assert
-        Should.Throw<DatabaseSchemaMigrationException>(() => SqlMigrationScriptGenerator.Generate(plan))
+        Should.Throw<SqlSchemaMigrationException>(() => SqlMigrationScriptGenerator.Generate(plan))
             .Message.ShouldContain("carries a column definition named 'actual_name'");
     }
 
@@ -201,18 +202,18 @@ public class SqlSchemaStatementRendererTests
     public void Generate_NonNullableAddColumn_ShouldFailPrecisely()
     {
         // Arrange
-        var plan = new SchemaMigrationPlan(
+        var plan = new SqlSchemaMigrationPlan(
             "source-hash",
             "target-hash",
-            [new SchemaMigrationOperation(
-                SchemaMigrationOperationKind.AddColumn,
-                SchemaMigrationSafety.Destructive,
+            [new SqlSchemaMigrationOperation(
+                SqlSchemaMigrationOperationKind.AddColumn,
+                SqlSchemaMigrationSafety.Destructive,
                 "required_value",
                 "orders",
                 column: new CompiledSchemaColumn("required_value", DatabaseType.Int64, IsNullable: false))]);
 
         // Act / Assert
-        Should.Throw<DatabaseSchemaMigrationException>(() => SqlMigrationScriptGenerator.Generate(plan))
+        Should.Throw<SqlSchemaMigrationException>(() => SqlMigrationScriptGenerator.Generate(plan))
             .Message.ShouldContain("requires a default or backfill");
     }
 
@@ -220,22 +221,21 @@ public class SqlSchemaStatementRendererTests
     public void Generate_MismatchedCurrentSchema_ShouldFailPrecisely()
     {
         // Arrange
-        var current = new CompiledSchema(
-            CompiledSchema.CurrentFormat,
+        var current = new SqlCompiledSchema(
+            SqlCompiledSchema.CurrentFormat,
             "orders",
             EngineModel.Sql,
             allowsDestructiveChanges: false,
             Array.Empty<CompiledSchemaType>(),
             Array.Empty<CompiledSchemaTable>(),
-            Array.Empty<CompiledSchemaCollection>(),
             Array.Empty<CompiledSchemaFunction>(),
             Array.Empty<CompiledSchemaTrigger>(),
             Array.Empty<CompiledSchemaPrincipal>(),
             Array.Empty<CompiledSchemaExtension>());
-        var plan = new SchemaMigrationPlan("not-the-current-hash", "target-hash", []);
+        var plan = new SqlSchemaMigrationPlan("not-the-current-hash", "target-hash", []);
 
         // Act / Assert
-        Should.Throw<DatabaseSchemaMigrationException>(
+        Should.Throw<SqlSchemaMigrationException>(
             () => SqlMigrationScriptGenerator.Generate(plan, current))
             .Message.ShouldContain("does not match the supplied current schema hash");
     }

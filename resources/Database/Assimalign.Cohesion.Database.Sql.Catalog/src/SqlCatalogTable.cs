@@ -16,16 +16,21 @@ public sealed class SqlCatalogTable
     /// <param name="name">The table name, unique within its schema.</param>
     /// <param name="columns">The ordered column definitions.</param>
     /// <param name="primaryKeyColumns">The primary-key column names, or empty when the table has no primary key.</param>
+    /// <param name="owner">Whether a compiled schema or an ad-hoc statement created the table.</param>
+    /// <param name="schemaName">The compiled schema that owns the table, or null for ad-hoc tables.</param>
     public SqlCatalogTable(
         ulong objectId,
         string schema,
         string name,
         IReadOnlyList<SqlCatalogColumn> columns,
-        IReadOnlyList<string>? primaryKeyColumns = null)
+        IReadOnlyList<string>? primaryKeyColumns = null,
+        DatabaseObjectOwner owner = DatabaseObjectOwner.Adhoc,
+        string? schemaName = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(schema);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(columns);
+        SqlCatalogOwnership.Validate(owner, schemaName);
 
         if (columns.Count == 0)
         {
@@ -37,6 +42,8 @@ public sealed class SqlCatalogTable
         Name = name;
         Columns = columns;
         PrimaryKeyColumns = primaryKeyColumns ?? Array.Empty<string>();
+        Owner = owner;
+        SchemaName = schemaName;
     }
 
     /// <summary>
@@ -54,6 +61,15 @@ public sealed class SqlCatalogTable
     /// Gets the table name, unique within its schema.
     /// </summary>
     public string Name { get; }
+
+    /// <summary>
+    /// Gets what created this table. Code-first schema tables can only be changed by
+    /// schema application; tables created by ad-hoc statements remain mutable by those statements.
+    /// </summary>
+    public DatabaseObjectOwner Owner { get; }
+
+    /// <summary>Gets the compiled schema that owns this table, or null for an ad-hoc table.</summary>
+    public string? SchemaName { get; }
 
     /// <summary>
     /// Gets the ordered column definitions.

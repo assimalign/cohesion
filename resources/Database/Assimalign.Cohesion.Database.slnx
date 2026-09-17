@@ -438,6 +438,17 @@
 	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Replication/tests/">
 		<Project Path="Assimalign.Cohesion.Database.Sql.Replication/tests/Assimalign.Cohesion.Database.Sql.Replication.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Schema/" />
+	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Schema/docs/">
+		<File Path="Assimalign.Cohesion.Database.Sql.Schema/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Database.Sql.Schema/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Schema/src/">
+		<Project Path="Assimalign.Cohesion.Database.Sql.Schema/src/Assimalign.Cohesion.Database.Sql.Schema.csproj" />
+	</Folder>
+	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Schema/tests/">
+		<Project Path="Assimalign.Cohesion.Database.Sql.Schema/tests/Assimalign.Cohesion.Database.Sql.Schema.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Security/" />
 	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Security/src/">
 		<Project Path="Assimalign.Cohesion.Database.Sql.Security/src/Assimalign.Cohesion.Database.Sql.Security.csproj" />

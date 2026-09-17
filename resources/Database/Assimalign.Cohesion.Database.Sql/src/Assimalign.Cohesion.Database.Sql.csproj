@@ -11,6 +11,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Language" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Catalog" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Schema" />
 		<!-- Direct (not just transitive via Sql.Storage): the engine's public options
 		     surface exposes StorageCommitDurability and its workers drive the IStorage
 		     worker seams. -->

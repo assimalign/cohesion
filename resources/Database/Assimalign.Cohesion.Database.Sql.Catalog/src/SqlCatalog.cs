@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Storage;
 
@@ -28,4 +31,20 @@ public static class SqlCatalog
         ArgumentNullException.ThrowIfNull(storage);
         return DefaultSqlCatalog.Open(storage);
     }
+
+    /// <summary>
+    /// Creates a schema-owned table through the engine's internal provisioning path,
+    /// without adding a capability to the public catalog contract.
+    /// </summary>
+    internal static ValueTask<SqlCatalogTable> CreateSchemaTableAsync(
+        ISqlCatalog catalog,
+        string schema,
+        string name,
+        IReadOnlyList<SqlCatalogColumn> columns,
+        IReadOnlyList<string>? primaryKeyColumns,
+        string schemaName,
+        CancellationToken cancellationToken)
+        => ((DefaultSqlCatalog)catalog).CreateTableAsync(
+            schema, name, columns, primaryKeyColumns,
+            DatabaseObjectOwner.Schema, schemaName, cancellationToken);
 }

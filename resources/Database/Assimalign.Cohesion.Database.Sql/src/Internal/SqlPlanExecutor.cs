@@ -56,7 +56,7 @@ internal sealed class SqlPlanExecutor
             case SqlDeletePlan delete:
                 return await ExecuteDeleteAsync(delete, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateTablePlan create:
-                return await ExecuteCreateTableAsync(create, cancellationToken).ConfigureAwait(false);
+                return await ExecuteCreateTableAsync(create, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropTablePlan drop:
                 return await ExecuteDropTableAsync(drop, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateIndexPlan createIndex:
@@ -64,7 +64,8 @@ internal sealed class SqlPlanExecutor
             case SqlDropIndexPlan dropIndex:
                 return await ExecuteDropIndexAsync(dropIndex, statement, cancellationToken).ConfigureAwait(false);
             case SqlAddColumnPlan addColumn:
-                await AcquireObjectLockAsync(statement, addColumn.Schema, addColumn.Name, LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+                await AcquireObjectLockAsync(statement, addColumn.Schema, addColumn.Name,
+                    "ALTER TABLE ADD COLUMN", cancellationToken).ConfigureAwait(false);
                 await _catalog.AddColumnAsync(addColumn.Schema, addColumn.Name, addColumn.Column, cancellationToken).ConfigureAwait(false);
                 return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
             case SqlDropColumnPlan dropColumn:
@@ -674,14 +675,22 @@ internal sealed class SqlPlanExecutor
 
     // ── DDL ────────────────────────────────────────────────────────────
 
-    private async Task<QueryResult> ExecuteCreateTableAsync(SqlCreateTablePlan plan, CancellationToken cancellationToken)
+    private async Task<QueryResult> ExecuteCreateTableAsync(SqlCreateTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (plan.IfNotExists && _catalog.TryGetTable(plan.Schema, plan.Name, out _))
         {
             return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
         }
 
-        await _catalog.CreateTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, cancellationToken).ConfigureAwait(false);
+        if (statement.ProvisioningSchemaName is string schemaName)
+        {
+            await SqlCatalog.CreateSchemaTableAsync(
+                _catalog, plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, schemaName, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await _catalog.CreateTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, cancellationToken).ConfigureAwait(false);
+        }
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
 
@@ -703,6 +712,11 @@ internal sealed class SqlPlanExecutor
 
         await statement.Coordinator.LockManager.AcquireAsync(
             statement.Transaction.Sequence, LockResource.Object(before.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+
+        SqlCatalogTable current = ReadCurrentTable(before);
+        EnsureCanChange(current.Owner, current.Name, current.SchemaName, "ALTER TABLE DROP COLUMN", statement);
+        EnsureSameIdentity(before, current);
+        before = current;
 
         int droppedOrdinal = -1;
         for (int i = 0; i < before.Columns.Count; i++)
@@ -772,8 +786,7 @@ internal sealed class SqlPlanExecutor
                 return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
             }
 
-            await _catalog.DropTableAsync(plan.Schema, plan.Name, cancellationToken).ConfigureAwait(false);
-            return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+            throw new SqlCatalogException($"Table '{plan.Schema}.{plan.Name}' does not exist.");
         }
 
         // The DDL-vs-writer interlock: an Exclusive table lock waits for every
@@ -781,6 +794,11 @@ internal sealed class SqlPlanExecutor
         // table is dropped — and blocks new ones until this transaction ends.
         await statement.Coordinator.LockManager.AcquireAsync(
             statement.Transaction.Sequence, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+
+        SqlCatalogTable current = ReadCurrentTable(table);
+        EnsureCanChange(current.Owner, current.Name, current.SchemaName, "DROP TABLE", statement);
+        EnsureSameIdentity(table, current);
+        table = current;
 
         // The table's indexes fall with it. The catalog removes their metadata
         // and registrations atomically with the table record; the live trees
@@ -816,13 +834,25 @@ internal sealed class SqlPlanExecutor
     /// <summary>
     /// Acquires a table-grain lock for a DDL statement by schema-qualified name.
     /// </summary>
-    private async ValueTask AcquireObjectLockAsync(SqlStatementContext statement, string schema, string name, LockMode mode, CancellationToken cancellationToken)
+    private async ValueTask AcquireObjectLockAsync(
+        SqlStatementContext statement,
+        string schema,
+        string name,
+        string operation,
+        CancellationToken cancellationToken)
     {
         if (_catalog.TryGetTable(schema, name, out var table))
         {
             await statement.Coordinator.LockManager.AcquireAsync(
-                statement.Transaction.Sequence, LockResource.Object(table.ObjectId), mode, cancellationToken).ConfigureAwait(false);
+                statement.Transaction.Sequence, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+
+            SqlCatalogTable current = ReadCurrentTable(table);
+            EnsureCanChange(current.Owner, current.Name, current.SchemaName, operation, statement);
+            EnsureSameIdentity(table, current);
+            return;
         }
+
+        throw new SqlCatalogException($"Table '{schema}.{name}' does not exist.");
     }
 
     /// <summary>
@@ -906,7 +936,10 @@ internal sealed class SqlPlanExecutor
         // a safe leak, never a re-attached index.
         var registrations = ((IIndexRegistry)_indexManager).ExportRegistrations();
         await _catalog.CreateIndexAsync(
-            new SqlCatalogIndex(plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique),
+            new SqlCatalogIndex(
+                plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
+                statement.ProvisioningSchemaName is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
+                statement.ProvisioningSchemaName),
             registrations,
             cancellationToken).ConfigureAwait(false);
 
@@ -935,6 +968,21 @@ internal sealed class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(
             statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
+        SqlCatalogTable currentTable = ReadCurrentTable(plan.Table);
+        if (!_catalog.TryGetIndex(currentTable.ObjectId, plan.IndexName, out metadata))
+        {
+            EnsureSameIdentity(plan.Table, currentTable);
+            if (plan.IfExists)
+            {
+                return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+            }
+
+            throw new DatabaseException($"No index named '{plan.IndexName}' exists on '{currentTable.Schema}.{currentTable.Name}'.");
+        }
+
+        EnsureCanChange(metadata.Owner, metadata.Name, metadata.SchemaName, "DROP INDEX", statement);
+        EnsureSameIdentity(plan.Table, currentTable);
+
         // The canonical (creation-time) name keyed by the catalog drives the
         // manager lookup: catalog names are case-insensitive, directory names
         // are exact.
@@ -956,6 +1004,41 @@ internal sealed class SqlPlanExecutor
         }
 
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+    }
+
+    private static void EnsureCanChange(
+        DatabaseObjectOwner owner,
+        string objectName,
+        string? schemaName,
+        string operation,
+        SqlStatementContext statement)
+    {
+        if (owner == DatabaseObjectOwner.Schema &&
+            !string.Equals(statement.ProvisioningSchemaName, schemaName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new DatabaseObjectLockedException(objectName, schemaName!, operation);
+        }
+    }
+
+    private SqlCatalogTable ReadCurrentTable(SqlCatalogTable expected)
+    {
+        if (!_catalog.TryGetTable(expected.Schema, expected.Name, out SqlCatalogTable current))
+        {
+            throw new DatabaseException($"Table '{expected.Schema}.{expected.Name}' does not exist.");
+        }
+
+        return current;
+    }
+
+    private static void EnsureSameIdentity(SqlCatalogTable expected, SqlCatalogTable current)
+    {
+        // An object lock protects a catalog identity, not a reusable name. A
+        // drop/recreate during the wait must never authorize changes to the new object.
+        if (expected.ObjectId != current.ObjectId)
+        {
+            throw new DatabaseException(
+                $"Table '{expected.Schema}.{expected.Name}' was replaced while waiting for a DDL lock. Retry the statement.");
+        }
     }
 
     // ── Scan / seek + coercion helpers ─────────────────────────────────

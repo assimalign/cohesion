@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Text;
 
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;

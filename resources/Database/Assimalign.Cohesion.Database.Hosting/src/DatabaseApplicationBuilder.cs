@@ -146,29 +146,33 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     }
 
     /// <summary>
-    /// Declares a logical database in C#, compiles and validates its schema, and registers the
-    /// compiled schema for before-accept provisioning.
+    /// Registers a logical database's model-compiled schema for before-accept provisioning.
     /// </summary>
     /// <param name="engine">The engine that owns the database.</param>
     /// <param name="name">The logical database name.</param>
-    /// <param name="configure">The callback that declares the database schema.</param>
+    /// <param name="schema">The schema already compiled by its model package.</param>
     /// <returns>The immutable compiled schema.</returns>
     /// <exception cref="ArgumentNullException">
-    /// <paramref name="engine"/> or <paramref name="configure"/> is null.
+    /// <paramref name="engine"/> or <paramref name="schema"/> is null.
     /// </exception>
-    /// <exception cref="ArgumentException"><paramref name="name"/> is empty or whitespace.</exception>
-    /// <exception cref="DatabaseSchemaValidationException">The declaration is not valid for the engine's model.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="name"/> is empty, does not identify the compiled schema's database,
+    /// or the schema targets a different engine model.
+    /// </exception>
     public CompiledSchema AddDatabase(
         IDatabaseEngine engine,
         string name,
-        Action<IDatabaseSchemaBuilder> configure)
+        CompiledSchema schema)
     {
         ArgumentNullException.ThrowIfNull(engine);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentNullException.ThrowIfNull(configure);
+        ArgumentNullException.ThrowIfNull(schema);
 
-        IDatabaseSchema declaration = DatabaseSchema.Create(name, configure);
-        CompiledSchema schema = DatabaseSchemaCompiler.Compile(declaration, engine.Model);
+        if (!string.Equals(name, schema.Name, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("The database name must match the compiled schema's name.", nameof(name));
+        }
+
         Provision(engine, schema);
         return schema;
     }

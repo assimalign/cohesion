@@ -18,16 +18,22 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 {
     private readonly SqlTransactionCoordinator _coordinator;
     private readonly SqlQueryExecutor _executor;
+    private readonly string? _provisioningSchemaName;
 
     private SqlDatabaseTransaction? _transaction;
     private SqlStatementMetrics? _lastStatementMetrics;
     private SessionState _state;
 
-    internal SqlDatabaseSession(ISqlDatabase database, SqlTransactionCoordinator coordinator, SqlQueryExecutor executor)
+    internal SqlDatabaseSession(
+        ISqlDatabase database,
+        SqlTransactionCoordinator coordinator,
+        SqlQueryExecutor executor,
+        string? provisioningSchemaName = null)
     {
         Database = database;
         _coordinator = coordinator;
         _executor = executor;
+        _provisioningSchemaName = provisioningSchemaName;
         _state = SessionState.Open;
     }
 
@@ -93,7 +99,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         // Inside an explicit transaction, the statement rides its context.
         if (_transaction is not null && _transaction.State == TransactionState.Active)
         {
-            var scope = new SqlStatementContext(_transaction.Context, _coordinator);
+            var scope = new SqlStatementContext(_transaction.Context, _coordinator, _provisioningSchemaName);
             _lastStatementMetrics = scope.Metrics;
 
             try
@@ -119,7 +125,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 
         try
         {
-            var scope = new SqlStatementContext(context, _coordinator);
+            var scope = new SqlStatementContext(context, _coordinator, _provisioningSchemaName);
             _lastStatementMetrics = scope.Metrics;
             var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
             await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);

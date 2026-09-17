@@ -19,10 +19,19 @@ public sealed class SqlCatalogIndex
     /// <param name="name">The index name, unique within its table.</param>
     /// <param name="columnNames">The ordered key column names.</param>
     /// <param name="isUnique">Whether the index enforces key uniqueness.</param>
-    public SqlCatalogIndex(ulong tableObjectId, string name, IReadOnlyList<string> columnNames, bool isUnique)
+    /// <param name="owner">Whether a compiled schema or an ad-hoc statement created the index.</param>
+    /// <param name="schemaName">The compiled schema that owns the index, or null for an ad-hoc index.</param>
+    public SqlCatalogIndex(
+        ulong tableObjectId,
+        string name,
+        IReadOnlyList<string> columnNames,
+        bool isUnique,
+        DatabaseObjectOwner owner = DatabaseObjectOwner.Adhoc,
+        string? schemaName = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(columnNames);
+        SqlCatalogOwnership.Validate(owner, schemaName);
 
         if (columnNames.Count == 0)
         {
@@ -33,6 +42,8 @@ public sealed class SqlCatalogIndex
         Name = name;
         ColumnNames = columnNames;
         IsUnique = isUnique;
+        Owner = owner;
+        SchemaName = schemaName;
     }
 
     /// <summary>
@@ -54,4 +65,13 @@ public sealed class SqlCatalogIndex
     /// Gets a value indicating whether the index enforces key uniqueness.
     /// </summary>
     public bool IsUnique { get; }
+
+    /// <summary>
+    /// Gets what created this index. Code-first schema indexes can only be changed by
+    /// schema application; indexes created by ad-hoc statements remain mutable by those statements.
+    /// </summary>
+    public DatabaseObjectOwner Owner { get; }
+
+    /// <summary>Gets the compiled schema that owns this index, or null for an ad-hoc index.</summary>
+    public string? SchemaName { get; }
 }

@@ -181,10 +181,14 @@ the `WebApplication.CreateBuilder()` idiom. The split of responsibilities:
   `DatabaseApplication` (the guided richer signature; the interface member
   forwards), which implements the root's `IDatabaseApplication` — `Context` +
   start/stop, the Web shape.
-- **Database declarations stay on the concrete builder.**
-  `AddDatabase(engine, name, configure)` compiles the retained C# declaration
-  immediately and returns/stores its immutable `CompiledSchema` before
-  registering `Provision(engine, schema)`. `DefaultDatabaseProvisioner` opens or
+- **Model packages compile declarations before they reach Hosting.**
+  `AddDatabase(engine, name, schema)` receives the model's immutable `CompiledSchema`,
+  checks its database identity, and returns/stores it by registering
+  `Provision(engine, schema)`. SQL callers use `SqlSchema.Create` and `SqlSchemaCompiler`
+  from `Database.Sql.Schema` in their composition root. This compile-time adaptation
+  keeps Hosting's same-area dependency limited to the area root (COHRES002);
+  no schema vocabulary, interface members, or lifecycle wiring move into Hosting.
+  `DefaultDatabaseProvisioner` opens or
   creates the logical database, requires its `IDatabaseSchemaProvisioner` model
   seam, and reconciles that compiled schema before startup can advance. The raw
   DSL never reaches an engine. Because every additional service is materialized

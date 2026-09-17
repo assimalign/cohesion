@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql;
@@ -15,25 +16,25 @@ public static class SqlMigrationScriptGenerator
     /// operations whose portable plan only needs an object name in the forward direction.
     /// </param>
     /// <returns>The deterministic SQL migration script.</returns>
-    /// <exception cref="DatabaseSchemaMigrationException">
+    /// <exception cref="SqlSchemaMigrationException">
     /// A plan operation cannot be represented by the SQL engine's current DDL dialect.
     /// </exception>
     public static SqlMigrationScript Generate(
-        SchemaMigrationPlan plan,
-        CompiledSchema? currentSchema = null)
+        SqlSchemaMigrationPlan plan,
+        SqlCompiledSchema? currentSchema = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         if (currentSchema is not null &&
             !string.Equals(plan.SourceHash, currentSchema.Hash, StringComparison.Ordinal))
         {
-            throw new DatabaseSchemaMigrationException(
+            throw new SqlSchemaMigrationException(
                 $"Migration plan source hash '{plan.SourceHash ?? "<empty>"}' does not match " +
                 $"the supplied current schema hash '{currentSchema.Hash}'.");
         }
 
         var steps = new List<SqlMigrationScriptStep>(plan.Operations.Count);
 
-        foreach (SchemaMigrationOperation operation in plan.Operations)
+        foreach (SqlSchemaMigrationOperation operation in plan.Operations)
         {
             steps.Add(Render(operation, currentSchema));
         }
@@ -42,24 +43,24 @@ public static class SqlMigrationScriptGenerator
     }
 
     private static SqlMigrationScriptStep Render(
-        SchemaMigrationOperation operation,
-        CompiledSchema? currentSchema)
+        SqlSchemaMigrationOperation operation,
+        SqlCompiledSchema? currentSchema)
     {
         try
         {
             return operation.Kind switch
             {
-                SchemaMigrationOperationKind.AddTable => new SqlMigrationScriptStep(
+                SqlSchemaMigrationOperationKind.AddTable => new SqlMigrationScriptStep(
                     operation,
                     SqlSchemaStatementRenderer.CreateTable(RequireTable(operation)),
                     SqlSchemaStatementRenderer.DropTable(operation.ObjectName)),
 
-                SchemaMigrationOperationKind.DropTable => new SqlMigrationScriptStep(
+                SqlSchemaMigrationOperationKind.DropTable => new SqlMigrationScriptStep(
                     operation,
                     SqlSchemaStatementRenderer.DropTable(operation.ObjectName),
                     rollbackStatementText: null),
 
-                SchemaMigrationOperationKind.AddColumn => new SqlMigrationScriptStep(
+                SqlSchemaMigrationOperationKind.AddColumn => new SqlMigrationScriptStep(
                     operation,
                     SqlSchemaStatementRenderer.AddColumn(
                         RequireParent(operation),
@@ -68,14 +69,14 @@ public static class SqlMigrationScriptGenerator
                         RequireParent(operation),
                         operation.ObjectName)),
 
-                SchemaMigrationOperationKind.DropColumn => new SqlMigrationScriptStep(
+                SqlSchemaMigrationOperationKind.DropColumn => new SqlMigrationScriptStep(
                     operation,
                     SqlSchemaStatementRenderer.DropColumn(
                         RequireParent(operation),
                         operation.ObjectName),
                     rollbackStatementText: null),
 
-                SchemaMigrationOperationKind.AddIndex => new SqlMigrationScriptStep(
+                SqlSchemaMigrationOperationKind.AddIndex => new SqlMigrationScriptStep(
                     operation,
                     SqlSchemaStatementRenderer.CreateIndex(
                         RequireParent(operation),
@@ -84,39 +85,34 @@ public static class SqlMigrationScriptGenerator
                         RequireParent(operation),
                         operation.ObjectName)),
 
-                SchemaMigrationOperationKind.DropIndex => new SqlMigrationScriptStep(
+                SqlSchemaMigrationOperationKind.DropIndex => new SqlMigrationScriptStep(
                     operation,
                     SqlSchemaStatementRenderer.DropIndex(
                         RequireParent(operation),
                         operation.ObjectName),
                     PreviousIndexStatement(operation, currentSchema)),
 
-                SchemaMigrationOperationKind.AlterTable or SchemaMigrationOperationKind.AlterColumn =>
+                SqlSchemaMigrationOperationKind.AlterTable or SqlSchemaMigrationOperationKind.AlterColumn =>
                     throw Unsupported(operation, "ALTER metadata is not implemented by the SQL DDL dialect"),
-
-                SchemaMigrationOperationKind.AddCollection or
-                SchemaMigrationOperationKind.AlterCollection or
-                SchemaMigrationOperationKind.DropCollection =>
-                    throw Unsupported(operation, "key-value collections do not belong to the SQL model"),
 
                 _ => throw Unsupported(operation, "the operation kind is unknown"),
             };
         }
-        catch (DatabaseSchemaMigrationException)
+        catch (SqlSchemaMigrationException)
         {
             throw;
         }
         catch (Exception exception) when (exception is DatabaseException or ArgumentException)
         {
-            throw new DatabaseSchemaMigrationException(
+            throw new SqlSchemaMigrationException(
                 $"Cannot render SQL migration operation '{operation.Kind}' for '{QualifiedName(operation)}': {exception.Message}",
                 exception);
         }
     }
 
     private static string? PreviousIndexStatement(
-        SchemaMigrationOperation operation,
-        CompiledSchema? currentSchema)
+        SqlSchemaMigrationOperation operation,
+        SqlCompiledSchema? currentSchema)
     {
         if (currentSchema is null)
         {
@@ -143,7 +139,7 @@ public static class SqlMigrationScriptGenerator
         return null;
     }
 
-    private static CompiledSchemaTable RequireTable(SchemaMigrationOperation operation)
+    private static CompiledSchemaTable RequireTable(SqlSchemaMigrationOperation operation)
     {
         CompiledSchemaTable table = operation.Table ??
             throw InvalidPayload(operation, "a desired table definition");
@@ -151,7 +147,7 @@ public static class SqlMigrationScriptGenerator
         return table;
     }
 
-    private static CompiledSchemaColumn RequireColumn(SchemaMigrationOperation operation)
+    private static CompiledSchemaColumn RequireColumn(SqlSchemaMigrationOperation operation)
     {
         CompiledSchemaColumn column = operation.Column ??
             throw InvalidPayload(operation, "a desired column definition");
@@ -167,7 +163,7 @@ public static class SqlMigrationScriptGenerator
         return column;
     }
 
-    private static CompiledSchemaIndex RequireIndex(SchemaMigrationOperation operation)
+    private static CompiledSchemaIndex RequireIndex(SqlSchemaMigrationOperation operation)
     {
         CompiledSchemaIndex index = operation.Index ??
             throw InvalidPayload(operation, "a desired index definition");
@@ -176,34 +172,34 @@ public static class SqlMigrationScriptGenerator
     }
 
     private static void RequireMatchingName(
-        SchemaMigrationOperation operation,
+        SqlSchemaMigrationOperation operation,
         string payloadName,
         string payloadKind)
     {
         if (!string.Equals(operation.ObjectName, payloadName, StringComparison.Ordinal))
         {
-            throw new DatabaseSchemaMigrationException(
+            throw new SqlSchemaMigrationException(
                 $"Migration operation '{operation.Kind}' names '{operation.ObjectName}' but carries " +
                 $"a {payloadKind} definition named '{payloadName}'.");
         }
     }
 
-    private static string RequireParent(SchemaMigrationOperation operation)
+    private static string RequireParent(SqlSchemaMigrationOperation operation)
         => !string.IsNullOrWhiteSpace(operation.ParentName)
             ? operation.ParentName
             : throw InvalidPayload(operation, "an owning table name");
 
-    private static DatabaseSchemaMigrationException InvalidPayload(
-        SchemaMigrationOperation operation,
+    private static SqlSchemaMigrationException InvalidPayload(
+        SqlSchemaMigrationOperation operation,
         string expected)
         => new($"Migration operation '{operation.Kind}' for '{QualifiedName(operation)}' does not carry {expected}.");
 
-    private static DatabaseSchemaMigrationException Unsupported(
-        SchemaMigrationOperation operation,
+    private static SqlSchemaMigrationException Unsupported(
+        SqlSchemaMigrationOperation operation,
         string reason)
         => new($"SQL migration operation '{operation.Kind}' for '{QualifiedName(operation)}' is unsupported: {reason}.");
 
-    private static string QualifiedName(SchemaMigrationOperation operation)
+    private static string QualifiedName(SqlSchemaMigrationOperation operation)
         => operation.ParentName is null
             ? operation.ObjectName
             : $"{operation.ParentName}.{operation.ObjectName}";

@@ -10,7 +10,7 @@ against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
 schema is applied, the provisioner requires `EngineModel.Sql`, the same logical
 database name, and a shape the shipped SQL DDL surface can represent. It then
 reconstructs or reads the last canonical catalog state, uses
-`SchemaMigrationPlanner` for deterministic ordering/destructive gating, and
+`SqlSchemaMigrationPlanner` from `Database.Sql.Schema` for deterministic ordering/destructive gating, and
 `SqlMigrationScriptGenerator` for parser-validated engine requests. Supported
 steps are table, column, and secondary-index add/drop; alter/rebuild operations
 and advanced objects (custom types, foreign/check constraints, functions,
@@ -26,6 +26,38 @@ for a destructive multi-statement migration is deliberately not claimed: the
 current catalog has no transaction spanning DDL statements, and irreversible
 data loss cannot be compensated. That kernel seam is recorded as the remaining
 gap rather than hidden behind the content hash.
+
+### Object ownership and the schema package
+
+The area root carries only `CompiledSchema` identity and canonical content, the
+`IDatabaseSchemaProvisioner` seam, and model-independent ownership contracts.
+`Database.Sql.Schema` owns SQL declarations, compiled tables/indexes/constraints,
+validation, serialization, and migration plans. The engine references this thin
+package; the schema package never references the engine or its storage/transport.
+
+Live sessions create `Adhoc` tables and indexes. The provisioner's private
+session carries the compiled schema name in an internal statement context, so
+catalog creation persists `Schema` ownership and that name in the object's first
+durable record. Only that internal session may execute `DROP TABLE`, `ALTER TABLE
+ADD COLUMN`, `ALTER TABLE DROP COLUMN`, or `DROP INDEX` against its schema's
+objects. Normal sessions receive `DatabaseObjectLockedException` with the object,
+compiled schema, and refused operation; row DML remains available. Compensation
+uses the same private session and preserves the existing reversible-step policy.
+
+DDL re-reads catalog ownership after acquiring the exclusive object lock. If a
+table was dropped and its name reused while the statement waited, the acquired
+lock covers the old object id: the statement rejects a schema-owned replacement
+and requires a retry for any other replacement before changing metadata or rows.
+Index drops likewise refresh their description after the wait. Missing-table
+paths fail directly rather than issuing an unlocked catalog mutation by name.
+
+Schema reconciliation compares only objects owned by the applying schema. Ad-hoc
+tables and ad-hoc indexes coexist with it and do not create false drift or become
+implicit destructive migration targets. A desired name that collides with an
+ad-hoc object is rejected before applying any steps; adoption requires a future
+explicit policy. No existing public interface gains an ownership or bypass
+member: table creation uses a narrow internal catalog helper, with friend access
+for this engine, and ordinary `ISqlCatalog.CreateTableAsync` stays ad-hoc.
 
 ## Execution model
 

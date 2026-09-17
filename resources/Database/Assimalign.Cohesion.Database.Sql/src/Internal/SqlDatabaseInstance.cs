@@ -336,6 +336,18 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         return new ValueTask<IDatabaseSession>(session);
     }
 
+    /// <summary>
+    /// Creates the provisioner's private session. Only this path stamps schema ownership
+    /// and authorizes schema-owned DDL; ordinary sessions have no ownership bypass.
+    /// </summary>
+    internal IDatabaseSession CreateSchemaSession(string schemaName, CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+        var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager);
+        return new SqlDatabaseSession(this, _coordinator, executor, schemaName);
+    }
+
     /// <inheritdoc />
     public ValueTask<SchemaMigrationResult> ApplySchemaAsync(
         CompiledSchema schema,

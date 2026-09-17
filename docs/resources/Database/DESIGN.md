@@ -34,9 +34,9 @@ The platform runs in two modes, matching Cohesion's identity:
 
 | # | Requirement | Where it lands |
 |---|---|---|
-| R7 | **Database projects.** A consumer creates an ordinary executable (`<Project Sdk="Assimalign.Cohesion.Sdk.Database">`) whose `Program.cs` composes engines, servers, and a C# schema through `builder.AddDatabase(engine, name, schema)`. The schema model covers tables/collections, custom types, functions, triggers, database-scoped principals, and model extensions; both runtime and the static build compiler lower that retained model to the same canonical `CompiledSchema` document/hash rather than inventing a second source format. Setting `CohesionApplicationModel=enabled` also produces the resource manifest and typed ambient accessors. | Database root schema contracts + `Sdk.Database` targets/Tasks (#857–#859) |
+| R7 | **Database projects.** A consumer creates an ordinary executable (`<Project Sdk="Assimalign.Cohesion.Sdk.Database">`) whose `Program.cs` composes engines, servers, and a model-compiled C# schema through `builder.AddDatabase(engine, name, schema)`. `Database.Sql.Schema` owns SQL tables, custom types, functions, triggers, database-scoped principals, and extensions. Runtime and static build compilation produce the same canonical `SqlCompiledSchema` document/hash. The area root retains only `CompiledSchema` identity and provisioning contracts; other models own their own vocabulary. Setting `CohesionApplicationModel=enabled` also produces the resource manifest and typed ambient accessors. | `Database.Sql.Schema` + `Sdk.Database` targets/Tasks (#857–#859, A3) |
 | R8 | **Migrations as a build tool.** The SQL model gets a migration tool implemented in the Database SDK: diff the compiled schema model against an ordinal baseline (or a live catalog), emit ordered engine-dialect migration scripts, and apply with destructive compatibility checks, idempotent catalog hashing, and reverse-order compensation of completed reversible statements. The landed catalog remains self-committing per statement, so fully atomic destructive multi-statement DDL awaits a batch-transaction seam. | `Sdk.Database` Tasks (`Assimalign.Cohesion.Sdk.Database.Migration.targets`), runtime apply engine in `Database.Sql` + durable state in `Database.Sql.Catalog` |
-| R9 | **Model-specific build tools, loaded by model.** The SDK inspects `$(CohesionDatabaseModel)` on the consumer project and selects from explicit static imports (`Sdk.Database.Sql.targets`, `Sdk.Database.KeyValuePair.targets`). Both shipped models compile schema artifacts; SQL also generates migrations, while KV migration generation fails explicitly until its catalog/statement surface exists. Static allowlisted MSBuild imports — no consumer-controlled path or runtime plugin loading — keep this AOT-clean. | `sdks/Assimalign.Cohesion.Sdk.Database/Targets/` |
+| R9 | **Model-specific build tools, loaded by model.** The SDK inspects `$(CohesionDatabaseModel)` on the consumer project and selects from explicit static imports (`Sdk.Database.Sql.targets`, `Sdk.Database.KeyValuePair.targets`). SQL compiles schema artifacts and generates migrations. After A3 removed the shared collection shape, KeyValuePair compilation and migration generation fail explicitly until that model supplies its own schema package and catalog/statement surface. Static allowlisted MSBuild imports — no consumer-controlled path or runtime plugin loading — keep this AOT-clean. | `sdks/Assimalign.Cohesion.Sdk.Database/Targets/` |
 
 ### 2.3 Explicit non-goals (for the MVP)
 
@@ -97,7 +97,7 @@ Dependency direction is strictly downward. Model engines depend on kernel projec
 
 ### 3.2 The kernel
 
-- **`Database`** — the public contract root: `IDatabase`, `IDatabaseEngine`, `IDatabaseSession`, `IDatabaseTransaction`, `DatabaseException` (the exception root for the contracts and everything above them), `DatabaseNotFoundException` (the exact missing-database signal from `OpenDatabaseAsync`), `DatabaseName`, lifecycle enums, the immutable `IDatabaseSchema` declaration model, and its validated `CompiledSchema`/migration-plan contract. `DatabaseSchema.Create`/`IDatabaseSchemaBuilder` describe custom types, tables and collections (columns/fields, keys, indexes, references), functions, triggers, database-scoped principals, extensions, and destructive opt-in in C#; `DatabaseSchemaCompiler` produces the canonical source-generated JSON/hash shared by Hosting, model engines, and `Sdk.Database`. Model-agnostic; every engine, feature library, and service-surface project references it, and it in turn rolls up the child roots (so `TransactionId`, `ProtocolVersion`, and the rest of the base vocabulary arrive transitively).
+- **`Database`** — the public area root: `IDatabase`, `IDatabaseEngine`, `IDatabaseSession`, `IDatabaseTransaction`, `DatabaseException`, `DatabaseNotFoundException`, `DatabaseName`, lifecycle enums, model-agnostic `CompiledSchema` identity/canonical-document hash, `IDatabaseSchemaProvisioner`, `SchemaMigrationResult`, and the `DatabaseObjectOwner`/`DatabaseObjectLockedException` ownership contract. It rolls up the child roots so their common vocabulary arrives transitively. A shape that differs by model belongs in that model family, never here. A3 moved the former relational declaration/compiler/serializer/migration model into `Database.Sql.Schema`; that thin package is shared by SQL and SDK Tasks without referencing the SQL engine or Hosting.
 - **`Database.Storage`** — the physical layer: slotted pages, buffer pool with pin/evict, free-space map, journal (WAL) streams, backup/recovery seams. Owns `PageId`, `JournalRecord`, CRC integrity. The WAL contract is ARIES-shaped: append redo/undo records under an LSN discipline, checkpoint, replay on open. Durability policy (fsync cadence, group commit) is an engine-level option surfaced through storage. Data pages carry an owner tag driving **per-owner record chains** (2026-07-14): owner-scoped inserts, iteration, and transactional chain release, so a model's "scan one object" costs O(object) instead of O(storage) — the SQL engine keys chains by table object id.
 - **`Database.Transactions`** — the ACID heart (new): `ITransactionManager` (begin/commit/rollback under an `IsolationLevel`), `TransactionSnapshot` (MVCC visibility: xmin/xmax/active-set), `ILockManager` (shared/update/exclusive + intent modes, deadlock detection), `ITransactionLog` (the seam that binds transaction lifecycle to the WAL). Engines *use* the manager; sessions *expose* the resulting `IDatabaseTransaction`.
 - **`Database.Indexing`** — shared index infrastructure: order-preserving byte-comparable `IndexKey` encoding, `IIndex` (point/range search, insert/delete), `IIndexCursor` streaming iteration, B+Tree first and hash later, built on shared pages so index updates ride the same WAL/transaction path as data. **The SQL engine is the first live consumer** (2026-07-14): CREATE/DROP INDEX, MVCC-stamped write-path maintenance, planner seeks, and the open-time aborted-writer purge all compose this package; document indexes, graph adjacency lookups, and the KV primary structure follow the same seams.
@@ -154,8 +154,8 @@ ambient `Hosting.Resources` `ResourceContext` carry endpoints, mounts, settings,
 environment, and the bootstrap credential.
 
 `builder.Provision(engine, compiledSchema)` registers `DefaultDatabaseProvisioner` as an additional host
-service. `builder.AddDatabase(engine, name, schema)` builds the root's C# `IDatabaseSchema`,
-compiles it immediately to `CompiledSchema`, retains that immutable result, and registers the
+service. `builder.AddDatabase(engine, name, schema)` receives a schema already compiled by its
+model package, retains that immutable `CompiledSchema`, and registers the
 same provisioning step. `DatabaseApplication` materializes **all additional
 services before all server wrappers**; because the host starts in registration order, provisioning
 precedes accept regardless of the order in which application verbs appear in `Program.cs`.
@@ -165,6 +165,14 @@ The provisioner creates only after `OpenDatabaseAsync` throws the root's exact
 aborts startup.
 Engines still own their background loops unconditionally and the customer composition root owns
 their disposal, preserving the embedded/hosted equivalence from R10.
+
+SQL compilation lives in `Database.Sql.Schema`: `SqlSchema.Create` retains the C#
+declaration and `SqlSchemaCompiler` lowers it into `SqlCompiledSchema`. Its tables,
+indexes, and constraints carry schema ownership. The SQL catalog durably records
+ownership and the owning compiled schema's name. Session `DROP TABLE`, `ALTER TABLE`,
+and `DROP INDEX` refuse schema-owned targets with `DatabaseObjectLockedException`;
+the internal compiled-schema apply path may change them. Objects created by ad-hoc
+statements remain ad-hoc and fully mutable through those statements.
 
 For an enabled resource, the internal `DatabaseAdminEndpointService : BackgroundService` binds
 the ambient `admin` endpoint and hosts a private `WebApplication`. `Web.Health` maps

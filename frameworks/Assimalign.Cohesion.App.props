@@ -266,6 +266,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Language" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Catalog" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Schema" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Storage" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Client" />
 

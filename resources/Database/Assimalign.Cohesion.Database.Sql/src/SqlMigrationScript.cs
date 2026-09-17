@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Sql.Schema;
+
 namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>Contains deterministic SQL requests for one ordered schema migration plan.</summary>
 public sealed class SqlMigrationScript
 {
-    internal SqlMigrationScript(SchemaMigrationPlan plan, IReadOnlyList<SqlMigrationScriptStep> steps)
+    internal SqlMigrationScript(SqlSchemaMigrationPlan plan, IReadOnlyList<SqlMigrationScriptStep> steps)
     {
         Plan = plan;
         var copy = new SqlMigrationScriptStep[steps.Count];
@@ -19,7 +21,7 @@ public sealed class SqlMigrationScript
     }
 
     /// <summary>Gets the portable migration plan rendered by this script.</summary>
-    public SchemaMigrationPlan Plan { get; }
+    public SqlSchemaMigrationPlan Plan { get; }
 
     /// <summary>Gets the SQL requests in deterministic execution order.</summary>
     public IReadOnlyList<SqlMigrationScriptStep> Steps { get; }
@@ -46,7 +48,7 @@ public sealed class SqlMigrationScript
 public sealed class SqlMigrationScriptStep
 {
     internal SqlMigrationScriptStep(
-        SchemaMigrationOperation operation,
+        SqlSchemaMigrationOperation operation,
         string statementText,
         string? rollbackStatementText)
     {
@@ -60,7 +62,7 @@ public sealed class SqlMigrationScriptStep
     }
 
     /// <summary>Gets the portable operation represented by this step.</summary>
-    public SchemaMigrationOperation Operation { get; }
+    public SqlSchemaMigrationOperation Operation { get; }
 
     /// <summary>Gets the deterministic SQL statement text.</summary>
     public string StatementText { get; }

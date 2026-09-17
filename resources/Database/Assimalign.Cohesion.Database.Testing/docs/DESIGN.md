@@ -124,7 +124,12 @@ it does not depend on an application-export API. Coverage asserts:
 - Schema compilation or migration policy; the resource's normal builder owns declarations
   and provisioning, and their dedicated work items own compilation.
 - Replacing real-process gateway tests. The in-process factory gives fast resource tests;
-  the sample E2E independently validates the SDK manifest and process carrier.
+the sample E2E independently validates the SDK manifest and process carrier.
+
+The fixture declares its relational schema with `Database.Sql.Schema`'s `SqlSchema.Create`,
+compiles it with `SqlSchemaCompiler`, and passes the compiled identity to Hosting's
+`AddDatabase`. The SDK analyzes that same declaration at build time. Hosting's
+before-accept provisioning order and the fixture's runtime behavior are unchanged.
 
 ## Bootstrap identity (O35)
 

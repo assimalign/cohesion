@@ -68,6 +68,27 @@ two questions for the planner: *what objects exist* (with stable identities) and
   document/hash pair and the live table/index catalog before treating a repeated
   apply as a no-op; the marker is never an authority over detected drift.
 
+## Object ownership
+
+Table and secondary-index records persist `DatabaseObjectOwner` and the owning
+compiled schema's name. This name is separate from the SQL namespace (`dbo`): it
+identifies the code-first schema that may alter the object. Ordinary catalog
+creation defaults to `Adhoc`; the SQL provisioner's internal table-creation path
+stamps `Schema` and its name atomically with the first table record. Index
+creation already accepts a complete description and persists the same metadata.
+Column add/drop replacements retain the table's ownership unchanged.
+
+The ownership fields are an appended tuple suffix. Older records without the
+suffix load as `Adhoc`, preserving their existing mutability rather than guessing
+an owner from a database-wide schema marker. Invalid owner/name combinations are
+rejected. The schema hash/document record remains unchanged and continues to
+support drift detection independently of per-object ownership.
+
+The engine enforces the live-session DDL lock; the catalog remains the durable
+metadata component used by sanctioned schema application as well. Its public
+interface has no new member. The schema table-creation helper and implementation
+overload are internal, accessible only to the SQL engine and catalog tests.
+
 ## Error model
 
 `SqlCatalogException : DatabaseException` for catalog violations (duplicate or

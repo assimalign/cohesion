@@ -116,6 +116,37 @@ over the wire — all through the shared kernel, never re-implementing paging, j
 > **E2 is sequencing-critical.** It is cheap now and expensive later. Doing it before D5/D6/D7 means
 > the new engines consume a shared component instead of each growing their own copy.
 
+### Theme F — Object mapping
+
+Typed access built **on top of each model's client**, so an application works in its own types
+instead of rows, documents, or byte streams.
+
+**Three constraints shape this whole theme, and none of them are negotiable:**
+
+1. **It is last by dependency, not by preference.** A mapper sits on a client. The Documents, Graph,
+   and Blob clients do not exist yet. F3–F6 cannot start before their engine and client land.
+2. **No reflection, so it is source-generated.** The repo mandates `IsAotCompatible=true` and bans
+   reflection; every mainstream .NET ORM depends on it, and so does runtime `IQueryable`
+   translation. The mappers are emitted at compile time by a Roslyn generator living in
+   `analyzers/` (the sanctioned `netstandard2.0` / `IsAotCompatible=false` exception), and the query
+   surface is a typed builder, not `IQueryable`.
+3. **The schema model is the single source of truth.** Mappers generate from the retained C# schema
+   model (`Database.Sql.Schema` after feature A3), never from a second, parallel description of the
+   same database. One object model per database or it rots.
+
+| # | Feature | What it means | Status | Work items |
+|---|---|---|---|---|
+| **F1** | **Shared mapping core** | The part that is genuinely the same whatever the store: entity identity, change tracking, unit-of-work with a single `SaveChangesAsync`, and the materialization contracts a generated mapper implements. Ships as `Assimalign.Cohesion.Database.Orm`. | `NEW` | file new |
+| **F2** | **Compile-time mapper generation** | A Roslyn generator reads the schema model and your entity types and emits the mapping code — readers, writers, key handling, change-tracking hooks. Nothing is discovered at runtime, so it survives NativeAOT and costs no startup reflection. | `NEW` | file new |
+| **F3** | **Relational mapper — SQL** | The real ORM: entity-to-table mapping, primary and foreign keys, relationships, change-tracked inserts/updates/deletes, and a typed query builder that compiles to the SQL the engine already parses. Built on `Database.Sql.Client`. | `NEW` | file new |
+| **F4** | **Document mapper — Documents** | An object-document mapper, not a relational one. No joins and no normalization: documents already *are* objects, so the work is identity, serialization shape, and partial update. Built on `Database.Documents.Client`. | `NEW` | file new |
+| **F5** | **Graph mapper — Graph** | An object-graph mapper: nodes, edges, and paths materialized from traversal results into typed objects. A different problem from both of the above — traversal results are shaped like paths, not rows. Built on `Database.Graph.Client`. | `NEW` | file new |
+| **F6** | **Typed accessors — Key-Value and Blob** | **Deliberately not an ORM.** Key-Value gets a typed serializer over a key convention; Blob gets typed metadata over blob properties plus typed stream access. Named honestly so nobody expects querying from a store that cannot query. | `NEW` | file new |
+
+> **On the name.** "ORM" is relational vocabulary. Across five models the accurate term is a data
+> mapper family, and the package names say what each one actually does. Keeping "ORM" only where it
+> is true — F3 — avoids promising relational semantics on stores that have none.
+
 ---
 
 ## 3. Rules, as I will enforce them
@@ -168,6 +199,9 @@ Not forgotten — deferred by your rules 4 and 7, and by prior program decisions
 4. **Phase 4 — Graph engine (D7) + GQL (B4).** Now unblocked by the ISO GQL decision.
 5. **Phase 5 — fills.** SQL system objects (C1), SQL dialect completion (B2), SQL security (D2),
    key-value TTL and security (D4), backup/restore (E1).
+6. **Phase 6 — object mapping (Theme F).** Last, because every mapper sits on a client that Phases
+   2–4 create. Order within it: F1 and F2 (core + generator) → F3 (SQL, the one true ORM and the
+   proving ground for the generator) → F4, F5, F6.
 
 **E2 (shared MVCC extraction, #918) lands inside Phase 1**, before three new engines each grow
 their own copy of the wiring SQL and key-value both wrote independently.
