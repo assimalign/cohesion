@@ -8,9 +8,12 @@
 		<IsTestProject>true</IsTestProject>
 	</PropertyGroup>
 	<ItemGroup>
+		<!-- An explicit ProjectPath: the name-only resolver indexes libraries/ and resources/,
+		     not sdks/, so an SDK task project has to be named by path. Relative to this test
+		     project, which sits at Tasks/tests/ beside the task project's Tasks/src/. -->
 		<CohesionProjectReference
 			Include="Assimalign.Cohesion.Sdk.Database.Tasks"
-			ProjectPath="..\Tasks\Assimalign.Cohesion.Sdk.Database.Tasks.csproj" />
+			ProjectPath="..\src\Assimalign.Cohesion.Sdk.Database.Tasks.csproj" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.Build" />
