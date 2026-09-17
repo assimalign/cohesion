@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents;
 
-/// <summary>A parsed, database-scoped OQL query and its named parameter values.</summary>
+/// <summary>A parsed, database-scoped OQL statement and its named parameter values.</summary>
 public sealed class DocumentQueryRequest : QueryRequest<OqlQueryStatement>
 {
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
@@ -25,12 +25,12 @@ public sealed class DocumentQueryRequest : QueryRequest<OqlQueryStatement>
     /// <inheritdoc />
     public override IReadOnlyDictionary<string, object?>? Parameters => _parameters;
 
-    /// <summary>Parses OQL text into an executable document query request.</summary>
-    /// <param name="oql">The OQL query text.</param>
+    /// <summary>Parses OQL text into an executable document statement request.</summary>
+    /// <param name="oql">The OQL statement text.</param>
     /// <param name="parameters">Named parameter values, without their @ or $ prefix.</param>
     /// <returns>The parsed request.</returns>
-    /// <exception cref="ArgumentException">The query text is empty.</exception>
-    /// <exception cref="DatabaseParseException">The query has an error diagnostic.</exception>
+    /// <exception cref="ArgumentException">The statement text is empty.</exception>
+    /// <exception cref="DatabaseParseException">The statement has an error diagnostic.</exception>
     public static DocumentQueryRequest FromOql(string oql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(oql);

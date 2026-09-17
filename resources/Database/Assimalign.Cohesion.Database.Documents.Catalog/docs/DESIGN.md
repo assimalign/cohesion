@@ -5,8 +5,9 @@
 Documents.Catalog depends on the Database root for ownership vocabulary, Documents.Storage for
 record/content access, Database.Transactions for MVCC and statement brackets, Database.Indexing
 for B+Trees, and Database.Types for scalar key encoding. The engine depends on this package and
-owns sessions, lock acquisition, ownership enforcement, and commit/rollback. There is no Hosting
-or ApplicationModel dependency and no compiled-schema provisioning.
+owns sessions, OQL planning/execution, lock acquisition, ownership enforcement, and
+commit/rollback. There is no Hosting or ApplicationModel dependency and no compiled-schema
+provisioning.
 
 The dependency diagram shows the same reference direction as the prose.
 
@@ -34,10 +35,11 @@ deleter is not visible. Enumeration is ordinal name/identity order, independent 
 page allocation, or B+Tree scan order.
 
 Collections carry `DatabaseObjectOwner` plus an optional owning schema. `Schema` requires a
-nonempty schema name. The engine creates live-session collections as `Adhoc` and rejects session
-drop/index alteration of a schema-owned collection with `DatabaseObjectLockedException`, naming
-the collection, schema, and operation. Catalog metadata can be directly marked for enforcement
-tests; this is not a compiled-schema deployment facility.
+nonempty schema name. The engine creates live-session collections as `Adhoc` and rejects
+`DROP COLLECTION`, OQL `CREATE INDEX`, and OQL `DROP INDEX` against a schema-owned collection with
+`DatabaseObjectLockedException`, naming the collection, schema, and requested operation. Catalog
+metadata can be directly marked for enforcement tests; this is not a compiled-schema deployment
+facility.
 
 The caller holds appropriate shared-kernel locks and checks latest committed metadata before a
 write. In particular, a transaction whose snapshot predates a changed index definition must be
@@ -75,12 +77,23 @@ layer. Document content has its separate multi-page chunk mechanism.
 
 ## Index definition and key semantics
 
-Each index is a nonunique B+Tree over one case-sensitive field path. Paths support dotted object
-fields and nonnegative Int32 array subscripts, for example `customer.address.zip` or
-`items[0].price`. They do not support wildcards, array expansion, field-name escaping, compound
-keys, unique constraints, or expression indexes. The field path must exist and resolve to a
-boolean, decimal-domain number, or string to produce an entry. Missing fields, null, arrays, and
-objects produce no key; the planner uses a collection scan for null/non-scalar predicates.
+Index definitions are lower-level catalog mutations, not a second public engine entry point. The
+Documents planner turns OQL `CREATE INDEX` and `DROP INDEX` expressions into catalog-operation
+plans, and the plan executor invokes this package under the statement's `ITransactionContext`
+after lock acquisition and ownership enforcement. `IDocumentDatabase` therefore needs no index
+members, and the catalog and B+Tree updates retain the same transaction as the DDL statement.
+
+Each index is a nonunique B+Tree over one case-sensitive field path. The catalog stores that path
+in a lossless canonical form matching OQL's document-path segments. Identifier-safe object names
+use dotted syntax and nonnegative Int32 array subscripts use numeric brackets, for example
+`customer.address.zip` or `items[0].price`. Property names that need escaping, including a root
+name containing punctuation, use bracket-string segments with doubled single quotes, for example
+`customer['address.line']` or `['root.name']`. The planner also recognizes the preceding
+extension API's unquoted, delimiter-free segment encoding when it reads persisted definitions,
+so an upgrade does not turn an existing usable index into a scan. Paths do not support wildcards,
+array expansion, compound keys, unique constraints, or expression indexes. The field path must exist and resolve
+to a boolean, decimal-domain number, or string to produce an entry. Missing fields, null, arrays,
+and objects produce no key; the planner uses a collection scan for null/non-scalar predicates.
 
 Booleans use `DatabaseKeyWriter.AppendBoolean`. Every numeric spelling normalizes to decimal and
 uses `AppendDecimal`, so `1` and `1.00` are identical index keys. Strings encode UTF-16 code units
@@ -92,9 +105,10 @@ An encoded key larger than the shared B+Tree's 1,024-byte limit rejects the writ
 metadata replacement. There is no lossy truncation or omitted oversized key.
 
 Index leaf entry references are packed metadata page/slot locations. Leaf entries carry writer
-and deleter stamps through the existing index API. Create builds the tree immediately under the
-collection's exclusive lock, preserving each visible source document's writer stamp. The new
-index definition is invisible to snapshots predating its creation; those snapshots use scans.
+and deleter stamps through the existing index API. Create builds the tree immediately while the
+caller holds the logical database's exclusive writer lock, preserving each visible source
+document's writer stamp. The new index definition is invisible to snapshots predating its
+creation; those snapshots use scans.
 
 ## Mutation, rollback, and recovery
 

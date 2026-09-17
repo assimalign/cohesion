@@ -143,40 +143,52 @@ public sealed partial class OqlQueryParser
 
                 return new OqlCallExpression(function, arguments.AsReadOnly(), Span(start, Previous));
             }
-            List<OqlPathSegment> segments = [new(name, null)];
-            while (!Failed)
-            {
-                if (Take(TokenType.Dot))
-                {
-                    segments.Add(new OqlPathSegment(Identifier(allowKeyword: true), null));
-                }
-                else if (Take(TokenType.LeftBracket))
-                {
-                    var token = Current;
-                    if (Take(TokenType.String))
-                    {
-                        segments.Add(new OqlPathSegment(Unquote(token.Text), null));
-                    }
-                    else if (Take(TokenType.Integer) && int.TryParse(token.Text, NumberStyles.None, CultureInfo.InvariantCulture, out int index))
-                    {
-                        segments.Add(new OqlPathSegment(null, index));
-                    }
-                    else
-                    {
-                        Error("OQL0002", "Expected a nonnegative array index or quoted property name.", token);
-                    }
-
-                    Expect(TokenType.RightBracket, "']'");
-                }
-                else
-                {
-                    break;
-                }
-            }
-            return new OqlPathExpression(segments.AsReadOnly(), Span(start, Previous));
+            return ParsePath(start, name);
         }
         Error("OQL0002", "Expected an expression.", start);
         return new OqlLiteralExpression(null, Span(start, start));
+    }
+
+    private OqlPathExpression ParseDocumentPath()
+    {
+        var start = Current;
+        string name = Identifier();
+        return ParsePath(start, name);
+    }
+
+    private OqlPathExpression ParsePath(Lexeme start, string name)
+    {
+        List<OqlPathSegment> segments = [new(name, null)];
+        while (!Failed)
+        {
+            if (Take(TokenType.Dot))
+            {
+                segments.Add(new OqlPathSegment(Identifier(allowKeyword: true), null));
+            }
+            else if (Take(TokenType.LeftBracket))
+            {
+                var token = Current;
+                if (Take(TokenType.String))
+                {
+                    segments.Add(new OqlPathSegment(Unquote(token.Text), null));
+                }
+                else if (Take(TokenType.Integer) && int.TryParse(token.Text, NumberStyles.None, CultureInfo.InvariantCulture, out int index))
+                {
+                    segments.Add(new OqlPathSegment(null, index));
+                }
+                else
+                {
+                    Error("OQL0002", "Expected a nonnegative array index or quoted property name.", token);
+                }
+
+                Expect(TokenType.RightBracket, "']'");
+            }
+            else
+            {
+                break;
+            }
+        }
+        return new OqlPathExpression(segments.AsReadOnly(), Span(start, Previous));
     }
 
     private static string Unquote(string text) => text.Length >= 2 ? text[1..^1].Replace("''", "'", StringComparison.Ordinal) : string.Empty;

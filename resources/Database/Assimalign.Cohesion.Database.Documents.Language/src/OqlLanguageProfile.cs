@@ -5,7 +5,10 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// <summary>
 /// Provides the lexical vocabulary and clause capabilities for the Object Query Language (OQL).
 /// </summary>
-/// <remarks>The vocabulary is based on the ODMG OQL specification.</remarks>
+/// <remarks>
+/// The query vocabulary is based on the ODMG OQL specification. <c>CREATE INDEX</c> and
+/// <c>DROP INDEX</c> are deliberate Cohesion extensions because ODMG specifies no index DDL.
+/// </remarks>
 public static class OqlLanguageProfile
 {
     private static readonly string[] Keywords =
@@ -14,6 +17,8 @@ public static class OqlLanguageProfile
         "SELECT", "FROM", "WHERE",
         "ORDER", "BY", "GROUP", "HAVING",
         "DISTINCT", "ALL", "AS", "ASC", "DESC",
+        // Index definition
+        "CREATE", "DROP", "INDEX", "ON",
         // Logical
         "AND", "OR", "NOT",
         // Predicates
@@ -45,6 +50,8 @@ public static class OqlLanguageProfile
 
     private static readonly string[] Clauses =
     [
+        OqlClauses.CreateIndex,
+        OqlClauses.DropIndex,
         OqlClauses.Select,
         OqlClauses.From,
         OqlClauses.Where,
@@ -53,7 +60,7 @@ public static class OqlLanguageProfile
         OqlClauses.OrderBy,
     ];
 
-    /// <summary>Gets the OQL language profile used by document-model query consumers.</summary>
+    /// <summary>Gets the OQL language profile used by document-model statement consumers.</summary>
     public static QueryLanguageProfile Instance { get; } = new(
         "OQL",
         Keywords,

@@ -173,8 +173,6 @@ internal sealed class DocumentDatabaseSession : IDatabaseSession
 
 internal sealed class DocumentSessionDatabase(DocumentDatabaseInstance database, DocumentDatabaseSession session) : IDocumentDatabase
 {
-    internal DocumentDatabaseInstance Instance => database;
-    internal DocumentDatabaseSession Session => session;
     public DatabaseName Name => database.Name;
     public IDatabaseEngine Engine => database.Engine;
     public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)

@@ -23,7 +23,7 @@ if (args[0] == "seed")
     var collection = await database.CreateCollectionAsync("items");
     await using var session = await database.CreateSessionAsync();
     await collection.PutAsync(session, "committed", Encoding.UTF8.GetBytes(original));
-    await database.CreateIndexAsync("items", "by_rank", "rank");
+    await session.ExecuteAsync("CREATE INDEX by_rank ON items (rank)");
     await session.BeginTransactionAsync();
     await collection.PutAsync(session, "committed", "{\"rank\":99}"u8.ToArray());
     await collection.PutAsync(session, "partial", Encoding.UTF8.GetBytes(original));

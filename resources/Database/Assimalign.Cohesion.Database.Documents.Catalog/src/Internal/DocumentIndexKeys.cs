@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Types;
@@ -71,7 +72,31 @@ internal static class DocumentIndexKeys
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var parts = new List<object>();
         int cursor = 0;
+        if (IsQuotedProperty()) { ReadQuotedProperty(); }
+        else { ReadBareProperty(); }
+
         while (cursor < path.Length)
+        {
+            if (path[cursor] == '.')
+            {
+                cursor++;
+                ReadBareProperty();
+            }
+            else if (path[cursor] == '[')
+            {
+                if (IsQuotedProperty()) { ReadQuotedProperty(); }
+                else { ReadArrayIndex(); }
+            }
+            else
+            {
+                throw new ArgumentException("Malformed index path separator.", nameof(path));
+            }
+        }
+        return parts;
+
+        bool IsQuotedProperty() => cursor + 1 < path.Length && path[cursor] == '[' && path[cursor + 1] == '\'';
+
+        void ReadBareProperty()
         {
             int start = cursor;
             while (cursor < path.Length && path[cursor] is not ('.' or '[' or ']'))
@@ -83,26 +108,51 @@ internal static class DocumentIndexKeys
                 throw new ArgumentException("An index path requires nonempty field names.", nameof(path));
             }
             parts.Add(path[start..cursor]);
-            while (cursor < path.Length && path[cursor] == '[')
+        }
+
+        void ReadQuotedProperty()
+        {
+            cursor += 2; // ['
+            var name = new StringBuilder();
+            while (cursor < path.Length)
             {
-                start = ++cursor;
-                while (cursor < path.Length && char.IsAsciiDigit(path[cursor]))
+                char character = path[cursor++];
+                if (character != '\'')
+                {
+                    name.Append(character);
+                    continue;
+                }
+                if (cursor < path.Length && path[cursor] == '\'')
+                {
+                    name.Append('\'');
+                    cursor++;
+                    continue;
+                }
+                if (cursor < path.Length && path[cursor] == ']')
                 {
                     cursor++;
+                    parts.Add(name.ToString());
+                    return;
                 }
-                if (cursor == start || cursor == path.Length || path[cursor] != ']'
-                    || !int.TryParse(path.AsSpan(start, cursor - start), NumberStyles.None, CultureInfo.InvariantCulture, out int index))
-                {
-                    throw new ArgumentException("Index array subscripts require a nonnegative Int32.", nameof(path));
-                }
-                parts.Add(index);
+                throw new ArgumentException("Quoted index path properties require doubled apostrophes and a closing bracket.", nameof(path));
+            }
+            throw new ArgumentException("Quoted index path properties require a closing apostrophe and bracket.", nameof(path));
+        }
+
+        void ReadArrayIndex()
+        {
+            int start = ++cursor;
+            while (cursor < path.Length && char.IsAsciiDigit(path[cursor]))
+            {
                 cursor++;
             }
-            if (cursor < path.Length && (path[cursor++] != '.' || cursor == path.Length))
+            if (cursor == start || cursor == path.Length || path[cursor] != ']'
+                || !int.TryParse(path.AsSpan(start, cursor - start), NumberStyles.None, CultureInfo.InvariantCulture, out int index))
             {
-                throw new ArgumentException("Malformed index path separator.", nameof(path));
+                throw new ArgumentException("Index array subscripts require a nonnegative Int32.", nameof(path));
             }
+            parts.Add(index);
+            cursor++;
         }
-        return parts;
     }
 }

@@ -6,13 +6,6 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// <summary>A query over one collection in the session's database.</summary>
 public sealed class OqlSelectExpression : OqlExpression
 {
-    private string? _text;
-
-    /// <inheritdoc />
-    public override string? Text => _text;
-
-    internal void SetStatementText(string text) => _text = text;
-
     /// <summary>Initializes a collection query.</summary>
     /// <param name="collection">The unqualified collection name.</param>
     /// <param name="alias">The optional iteration variable.</param>

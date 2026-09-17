@@ -213,29 +213,6 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
     internal Document ReadDocument(DocumentCatalogEntry entry)
         => new(new DocumentId(entry.Id), new DocumentVersion(entry.Version), DataStorage.ReadContent(Content(entry)));
 
-    internal async ValueTask ChangeIndexAsync(string collectionName, string indexName, string? path, DocumentDatabaseSession? session, CancellationToken token)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(collectionName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(indexName);
-        await RunAsync(session, async operation =>
-        {
-            await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
-            var collection = Catalog.FindCollection(collectionName, operation.Context.Snapshot)
-                ?? throw new DatabaseException($"Collection '{collectionName}' does not exist.");
-            if (collection != Catalog.FindCollection(collectionName, LatestSnapshot(operation.Context))) { ThrowConflict(); }
-            if (collection.Owner == DatabaseObjectOwner.Schema)
-            {
-                throw new DatabaseObjectLockedException(collection.Name, collection.OwningSchema!, "ALTER COLLECTION");
-            }
-            if (!Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot)
-                .SequenceEqual(Catalog.GetDocuments(collection.Id, null, LatestSnapshot(operation.Context))) ||
-                !Catalog.GetIndexes(collection.Id, operation.Context.Snapshot)
-                .SequenceEqual(Catalog.GetIndexes(collection.Id, LatestSnapshot(operation.Context)))) { ThrowConflict(); }
-            if (path is null) { await Catalog.DeleteIndexAsync(collection.Id, indexName, operation.Context, token).ConfigureAwait(false); }
-            else { await Catalog.CreateIndexAsync(collection.Id, indexName, path, operation.Context, token).ConfigureAwait(false); }
-            return true;
-        }, token).ConfigureAwait(false);
-    }
     internal void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 
     public void Dispose()

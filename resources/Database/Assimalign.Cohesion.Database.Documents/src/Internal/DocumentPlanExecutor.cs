@@ -22,6 +22,18 @@ internal static class DocumentPlanExecutor
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         if (error is not null) { throw new DatabaseParseException($"OQL parse error {error.Code}: {error.Message}"); }
         var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters).Plan(statement.OqlExpression);
+        return plan switch
+        {
+            DocumentPlan select => await ExecuteSelectAsync(database, operation, select, parameters, cancellationToken).ConfigureAwait(false),
+            DocumentCreateIndexPlan createIndex => await ExecuteCreateIndexAsync(database, operation, createIndex, cancellationToken).ConfigureAwait(false),
+            DocumentDropIndexPlan dropIndex => await ExecuteDropIndexAsync(database, operation, dropIndex, cancellationToken).ConfigureAwait(false),
+            _ => throw new DatabaseException("The document plan is not executable."),
+        };
+    }
+
+    private static async ValueTask<QueryResult> ExecuteSelectAsync(DocumentDatabaseInstance database, DocumentOperation operation,
+        DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    {
         var query = plan.Logical.Query;
         var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters);
         IReadOnlyList<DocumentCatalogEntry> candidates = plan.Access is DocumentIndexPath seek
@@ -93,6 +105,45 @@ internal static class DocumentPlanExecutor
             var values = plan.Logical.Projections.Select(projection => evaluator.Evaluate(projection.Expression, document, group)).ToArray();
             var orderKeys = query.OrderBy.Select(order => evaluator.Evaluate(order.Expression, document, group)).ToArray();
             output.Add(new EvaluatedRow(values, orderKeys, output.Count));
+        }
+    }
+
+    private static async ValueTask<QueryResult> ExecuteCreateIndexAsync(DocumentDatabaseInstance database, DocumentOperation operation,
+        DocumentCreateIndexPlan plan, CancellationToken cancellationToken)
+    {
+        await PrepareIndexChangeAsync(database, operation, plan.Collection, "CREATE INDEX", cancellationToken).ConfigureAwait(false);
+        await database.Catalog.CreateIndexAsync(plan.Collection.Id, plan.IndexName, plan.Path,
+            operation.Context, cancellationToken).ConfigureAwait(false);
+        return DocumentCommandResult.Success;
+    }
+
+    private static async ValueTask<QueryResult> ExecuteDropIndexAsync(DocumentDatabaseInstance database, DocumentOperation operation,
+        DocumentDropIndexPlan plan, CancellationToken cancellationToken)
+    {
+        await PrepareIndexChangeAsync(database, operation, plan.Collection, "DROP INDEX", cancellationToken).ConfigureAwait(false);
+        await database.Catalog.DeleteIndexAsync(plan.Collection.Id, plan.IndexName,
+            operation.Context, cancellationToken).ConfigureAwait(false);
+        return DocumentCommandResult.Success;
+    }
+
+    private static async ValueTask PrepareIndexChangeAsync(DocumentDatabaseInstance database, DocumentOperation operation,
+        DocumentCollectionMetadata collection, string operationName, CancellationToken cancellationToken)
+    {
+        await database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
+        if (collection != database.Catalog.FindCollection(collection.Name, database.LatestSnapshot(operation.Context)))
+        {
+            DocumentDatabaseInstance.ThrowConflict();
+        }
+        if (collection.Owner == DatabaseObjectOwner.Schema)
+        {
+            throw new DatabaseObjectLockedException(collection.Name, collection.OwningSchema!, operationName);
+        }
+        if (!database.Catalog.GetDocuments(collection.Id, null, operation.Context.Snapshot)
+                .SequenceEqual(database.Catalog.GetDocuments(collection.Id, null, database.LatestSnapshot(operation.Context))) ||
+            !database.Catalog.GetIndexes(collection.Id, operation.Context.Snapshot)
+                .SequenceEqual(database.Catalog.GetIndexes(collection.Id, database.LatestSnapshot(operation.Context))))
+        {
+            DocumentDatabaseInstance.ThrowConflict();
         }
     }
 

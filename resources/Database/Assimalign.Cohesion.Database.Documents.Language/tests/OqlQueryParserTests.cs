@@ -32,13 +32,14 @@ public sealed class OqlQueryParserTests
     public void ValidCorpus_ProducesExecutableSelect(string query)
     {
         var statement = Parse(query);
+        var select = statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>();
 
         statement.Diagnostics.ShouldBeEmpty();
-        statement.OqlExpression.Collection.ShouldNotBeNullOrWhiteSpace();
-        statement.OqlExpression.Projections.ShouldNotBeEmpty();
+        select.Collection.ShouldNotBeNullOrWhiteSpace();
+        select.Projections.ShouldNotBeEmpty();
         statement.Expression.ShouldBeSameAs(statement.OqlExpression);
         statement.Expression.Text.ShouldBe(query);
-        statement.OqlExpression.Location!.Start.ShouldBe(query.IndexOf("SELECT", StringComparison.OrdinalIgnoreCase));
+        select.Location!.Start.ShouldBe(query.IndexOf("SELECT", StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]
@@ -131,7 +132,7 @@ public sealed class OqlQueryParserTests
     [Fact]
     public void ExpressionTree_PreservesPathsAliasesAndOrder()
     {
-        var select = Parse("SELECT p.orders[2]['total'] AS amount FROM people p WHERE p.age >= $minimum ORDER BY amount DESC").OqlExpression;
+        var select = ParseSelect("SELECT p.orders[2]['total'] AS amount FROM people p WHERE p.age >= $minimum ORDER BY amount DESC");
 
         select.Collection.ShouldBe("people");
         select.Alias.ShouldBe("p");
@@ -151,7 +152,7 @@ public sealed class OqlQueryParserTests
     [Fact]
     public void ExpressionTree_ObservesArithmeticComparisonAndBooleanPrecedence()
     {
-        var select = Parse("SELECT 1 + 2 * 3 FROM people WHERE NOT age < 18 AND active = TRUE OR age = 65").OqlExpression;
+        var select = ParseSelect("SELECT 1 + 2 * 3 FROM people WHERE NOT age < 18 AND active = TRUE OR age = 65");
         var addition = select.Projections[0].Expression.ShouldBeOfType<OqlBinaryExpression>();
         addition.Operator.ShouldBe("+");
         addition.Right.ShouldBeOfType<OqlBinaryExpression>().Operator.ShouldBe("*");
@@ -167,7 +168,7 @@ public sealed class OqlQueryParserTests
     [Fact]
     public void ExpressionTree_PreservesGroupingAggregationAndHaving()
     {
-        var select = Parse("SELECT country, COUNT(*) AS n FROM people GROUP BY country HAVING COUNT(*) > 2 ORDER BY n DESC").OqlExpression;
+        var select = ParseSelect("SELECT country, COUNT(*) AS n FROM people GROUP BY country HAVING COUNT(*) > 2 ORDER BY n DESC");
 
         select.GroupBy.ShouldHaveSingleItem().ShouldBeOfType<OqlPathExpression>().Segments[0].Name.ShouldBe("country");
         var call = select.Projections[1].Expression.ShouldBeOfType<OqlCallExpression>();
@@ -189,7 +190,7 @@ public sealed class OqlQueryParserTests
     [Fact]
     public void LiteralValues_AreCultureIndependentAndUnescaped()
     {
-        var expressions = Parse("SELECT 'it''s', 1.25e2, TRUE, NULL FROM people").OqlExpression.Projections;
+        var expressions = ParseSelect("SELECT 'it''s', 1.25e2, TRUE, NULL FROM people").Projections;
 
         expressions[0].Expression.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBe("it's");
         expressions[1].Expression.ShouldBeOfType<OqlLiteralExpression>().Value.ShouldBe(125m);
@@ -198,4 +199,7 @@ public sealed class OqlQueryParserTests
     }
 
     private static OqlQueryStatement Parse(string query) => new OqlQueryParser().Parse(query).ShouldBeOfType<OqlQueryStatement>();
+
+    private static OqlSelectExpression ParseSelect(string query) =>
+        Parse(query).OqlExpression.ShouldBeOfType<OqlSelectExpression>();
 }

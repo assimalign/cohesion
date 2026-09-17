@@ -8,24 +8,25 @@ and execution split. Storage, journaling, paging, locks, MVCC, and B+Tree algori
 belong to the shared kernel. No kernel contract or existing public interface was
 widened. The model adds internal implementations of the frozen document contracts.
 
-The query flows through these stages; catalog metadata informs physical planning,
-and the selected access path retrieves visible document versions for execution.
+Every OQL statement flows through these stages. Catalog metadata informs query access-path
+selection and index-DDL planning; `SELECT`, `CREATE INDEX`, and `DROP INDEX` all reach the same
+plan executor rather than an index-management side channel.
 
 ```mermaid
 flowchart TD
     Text["OQL text"] --> Parse["OqlQueryParser and profile"]
     Parse --> Ast["OqlQueryStatement and diagnostics"]
-    Ast --> Logical["Logical validation and projections"]
-    Logical --> Physical["Collection and access path planning"]
+    Ast --> Logical["Query semantics or index-DDL validation"]
+    Logical --> Physical["DocumentPlanner access path or catalog operation"]
     Catalog["Collection and index catalog"] --> Physical
-    Physical --> Execute["Filter, group, project, order"]
+    Physical --> Execute["DocumentPlanExecutor"]
     Data["Snapshot-visible documents"] --> Execute
-    Execute --> Result["Materialized query result"]
+    Execute --> Result["Query rows or DDL command result"]
 ```
 
 | Assembly | Responsibility |
 | --- | --- |
-| `Database.Documents` | Engine, bound sessions, CRUD, query plans/execution, builder/index extensions |
+| `Database.Documents` | Engine, bound sessions, CRUD, OQL query/index-DDL plans and execution, builder extension |
 | `Database.Documents.Language` | Profile, parser, AST, stable diagnostic locations |
 | `Database.Documents.Catalog` | Versioned collection/document/index metadata and transactional index maintenance |
 | `Database.Documents.Storage` | Explicit JSON validation, stamped metadata/chunk records, kernel record-space adapter |
@@ -38,8 +39,9 @@ There are no Hosting or ApplicationModel references.
 ## Sessions and authority
 
 The database's direct collection methods run automatic transactions. Methods called
-through `session.Database` use that session's active transaction. Collection CRUD
-always takes a session; a collection rejects sessions from another database.
+through `session.Database` use that session's active transaction. OQL statements execute through
+the session and therefore use its active transaction or an automatic statement transaction.
+Collection CRUD always takes a session; a collection rejects sessions from another database.
 A handle obtained through a session remains bound to that specific session and
 fails once it closes. Collection names are database-local, case-sensitive names;
 OQL has one collection source and no database qualification or server commands.
@@ -61,18 +63,19 @@ index writes use the same logical context as content chunks; rollback and crash
 recovery cannot publish a partial document.
 
 Collections created by these APIs have `DatabaseObjectOwner.Adhoc`. A collection
-directly marked `Schema` refuses `DROP COLLECTION` and index changes reported as
-`ALTER COLLECTION`, with `DatabaseObjectLockedException` naming the collection,
-owning schema, and operation. Document contents remain mutable. There is no
+directly marked `Schema` refuses `DROP COLLECTION`, `CREATE INDEX`, and `DROP INDEX`,
+with `DatabaseObjectLockedException` naming the collection, owning schema, and requested
+operation. Document contents remain mutable. There is no
 compiled-schema provisioning authority in this engine.
 
-## Query semantics
+## OQL query and DDL semantics
 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
-SELECT, FROM, WHERE, GROUP BY, HAVING, and ORDER BY are executed; DEFINE, ELEMENT,
-FLATTEN, nested queries, mutation statements, and server statements are rejected
-with `COHDBL001`. The parser advertises only clauses this executor supports.
+SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE INDEX, and DROP INDEX are executed;
+DEFINE, ELEMENT, FLATTEN, nested queries, document data-mutation statements, and server
+statements are rejected with `COHDBL001`. The parser advertises only clauses this executor
+supports.
 AST diagnostics are checked both for text requests and directly constructed requests.
 
 Projection supports whole documents, nested field paths, zero-based array element
@@ -114,11 +117,28 @@ not retain a transaction or borrowed storage memory after execution.
 
 ## Index planning and writes
 
-`CreateIndexAsync` and `DropIndexAsync` are extension members on
-`IDocumentDatabase`; they leave its frozen member list unchanged. They work on the
-internal database and session-bound facade. The catalog owns index definitions and
-maintains shared B+Trees during every Put/Delete and collection drop. Index creation
-populates existing documents in its transaction; queries never lazily build trees.
+`CREATE INDEX <index-name> ON <collection> (<path>)` and
+`DROP INDEX <index-name> ON <collection>` are OQL statements. `DocumentPlanner` binds them to
+catalog-operation plans and `DocumentPlanExecutor` executes those plans under the statement's
+`ITransactionContext`. This replaces the former extension-member entry point and leaves the
+frozen `IDocumentDatabase` member list unchanged; there is no runtime switch on internal database
+implementations.
+
+The create path uses the same segment grammar as a WHERE path, including nested object fields,
+array subscripts, and bracket-string property names. Planning converts those segments to the
+catalog's lossless canonical path without changing their case or treating a property name's
+punctuation as structure.
+
+The executor takes the logical database's exclusive writer lock, enforces schema ownership using
+the specific `CREATE INDEX` or `DROP INDEX` operation name, and delegates the transactional
+catalog/tree work to Documents.Catalog. The catalog owns index definitions and maintains shared
+B+Trees during every Put/Delete and collection drop. Index creation populates existing documents
+in its transaction; queries never lazily build trees. Dropping an index removes its visible
+definition in the same transaction, so subsequent physical plans stop selecting it while older
+snapshots retain their defined visibility.
+
+Successful index DDL returns a command `QueryResult` with `Success` status and an affected count
+of zero; index definition changes are not document-row mutations.
 
 The physical planner uses applicable equality/range predicates on indexed paths,
 including parameter values, reversed operands, and conjunctive bounds. Equality
@@ -127,9 +147,9 @@ the full predicate to candidates, preserving mixed-shape semantics. See the
 [catalog design](../../Assimalign.Cohesion.Database.Documents.Catalog/docs/DESIGN.md)
 for supported scalar keys, visibility filtering, and restart recovery.
 
-## Mutation and serialization semantics
+## Data mutation and serialization semantics
 
-The frozen OQL vocabulary has no mutation clauses. The existing collection API
+OQL now includes index DDL but no document data-mutation clauses. The existing collection API
 provides deterministic mutation semantics: Put replaces the complete JSON value
 by ordinal identity, Delete removes that identity, and each operation either
 completes in its transaction or rolls back. Put captures caller memory before

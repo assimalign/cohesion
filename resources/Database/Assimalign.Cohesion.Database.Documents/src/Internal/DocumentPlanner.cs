@@ -10,12 +10,52 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed class DocumentPlanner(IDocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters)
 {
+    internal DocumentStatementPlan Plan(OqlExpression expression) => expression switch
+    {
+        OqlSelectExpression select => Plan(select),
+        OqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
+        OqlDropIndexExpression dropIndex => PlanDropIndex(dropIndex),
+        _ => throw new DatabaseException("The OQL statement is not supported by the document executor."),
+    };
+
     internal DocumentPlan Plan(OqlSelectExpression query)
     {
         var logical = CreateLogicalPlan(query);
-        var collection = catalog.FindCollection(query.Collection, snapshot)
-            ?? throw new DatabaseException($"Collection '{query.Collection}' does not exist.");
+        var collection = ResolveCollection(query.Collection);
         return new DocumentPlan(logical, collection, ChooseAccess(query, catalog.GetIndexes(collection.Id, snapshot)));
+    }
+
+    private DocumentCreateIndexPlan PlanCreateIndex(OqlCreateIndexExpression create)
+    {
+        if (string.IsNullOrWhiteSpace(create.IndexName))
+        {
+            throw new DatabaseException("CREATE INDEX requires an index name.");
+        }
+
+        string path = IndexPath(create.Path, alias: null)
+            ?? throw new DatabaseException($"CREATE INDEX '{create.IndexName}' requires a representable document path.");
+        return new DocumentCreateIndexPlan(ResolveCollection(create.Collection), create.IndexName, path);
+    }
+
+    private DocumentDropIndexPlan PlanDropIndex(OqlDropIndexExpression drop)
+    {
+        if (string.IsNullOrWhiteSpace(drop.IndexName))
+        {
+            throw new DatabaseException("DROP INDEX requires an index name.");
+        }
+
+        return new DocumentDropIndexPlan(ResolveCollection(drop.Collection), drop.IndexName);
+    }
+
+    private DocumentCollectionMetadata ResolveCollection(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new DatabaseException("An OQL statement requires a collection name.");
+        }
+
+        return catalog.FindCollection(name, snapshot)
+            ?? throw new DatabaseException($"Collection '{name}' does not exist.");
     }
 
     internal static DocumentLogicalPlan CreateLogicalPlan(OqlSelectExpression query)
@@ -69,13 +109,15 @@ internal sealed class DocumentPlanner(IDocumentCatalog catalog, TransactionSnaps
 
     private DocumentAccessPath ChooseAccess(OqlSelectExpression query, IReadOnlyList<DocumentIndexMetadata> indexes)
     {
-        var predicates = new List<(string Path, string Operator, object Value)>();
+        var predicates = new List<(string Path, string? LegacyPath, string Operator, object Value)>();
         if (query.Predicate is not null) { Collect(query.Predicate); }
         DocumentIndexPath? best = null;
         bool bestEquality = false;
         foreach (var index in indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
         {
-            var usable = predicates.Where(predicate => string.Equals(predicate.Path, index.Path, StringComparison.Ordinal)).ToArray();
+            var usable = predicates.Where(predicate =>
+                string.Equals(predicate.Path, index.Path, StringComparison.Ordinal) ||
+                predicate.LegacyPath is not null && string.Equals(predicate.LegacyPath, index.Path, StringComparison.Ordinal)).ToArray();
             var equality = usable.FirstOrDefault(predicate => predicate.Operator == "=");
             bool hasEquality = equality.Value is not null;
             DocumentSeekBound? lower = null;
@@ -124,7 +166,10 @@ internal sealed class DocumentPlanner(IDocumentCatalog catalog, TransactionSnaps
             var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters);
             var value = evaluator.Evaluate(constant, default);
             string? pathName = IndexPath(path, query.Alias);
-            if (pathName is not null && value is bool or decimal or string) { predicates.Add((pathName, operation, value)); }
+            if (pathName is not null && value is bool or decimal or string)
+            {
+                predicates.Add((pathName, LegacyIndexPath(path, query.Alias), operation, value));
+            }
         }
     }
 
@@ -145,9 +190,45 @@ internal sealed class DocumentPlanner(IDocumentCatalog catalog, TransactionSnaps
             var segment = path.Segments[i];
             if (segment.Name is string name)
             {
-                // These names need a quoted path representation that index v1
-                // deliberately does not support. A scan preserves correctness.
-                if (name.IndexOfAny(['.', '[', ']']) >= 0) { return null; }
+                if (CanUseDottedSegment(name))
+                {
+                    if (builder.Length > 0) { builder.Append('.'); }
+                    builder.Append(name);
+                }
+                else
+                {
+                    builder.Append("['").Append(name.Replace("'", "''", StringComparison.Ordinal)).Append("']");
+                }
+            }
+            else { builder.Append('[').Append(segment.Index).Append(']'); }
+        }
+        return builder.Length == 0 ? null : builder.ToString();
+    }
+
+    private static bool CanUseDottedSegment(string name)
+    {
+        if (name.Length == 0 || !(char.IsLetter(name[0]) || name[0] == '_')) { return false; }
+        for (int i = 1; i < name.Length; i++)
+        {
+            if (!(char.IsLetterOrDigit(name[i]) || name[i] == '_')) { return false; }
+        }
+        return true;
+    }
+
+    // The removed extension API accepted unquoted property segments whenever
+    // they contained no structural path delimiter. Keep those persisted
+    // definitions selectable after OQL DDL moves new paths to canonical
+    // bracket quoting.
+    private static string? LegacyIndexPath(OqlPathExpression path, string? alias)
+    {
+        int start = alias is not null && path.Segments.Count > 0 && path.Segments[0].Name == alias ? 1 : 0;
+        var builder = new StringBuilder();
+        for (int i = start; i < path.Segments.Count; i++)
+        {
+            var segment = path.Segments[i];
+            if (segment.Name is string name)
+            {
+                if (name.Length == 0 || name.IndexOfAny(['.', '[', ']']) >= 0) { return null; }
                 if (builder.Length > 0) { builder.Append('.'); }
                 builder.Append(name);
             }

@@ -83,7 +83,7 @@ public sealed partial class OqlQueryParser : QueryParser
         // Capability checks precede syntax parsing, so a known unsupported construct
         // cannot be disguised by the first downstream syntax error it would cause.
         var unsupported = FindUnsupported();
-        OqlSelectExpression expression;
+        OqlExpression expression;
         if (unsupported.Count != 0 || _diagnostics.Count != 0)
         {
             expression = EmptyExpression();
@@ -96,6 +96,23 @@ public sealed partial class OqlQueryParser : QueryParser
         else if (Is("SELECT"))
         {
             expression = ParseSelect();
+        }
+        else if (IsIndexStatement("CREATE"))
+        {
+            expression = ParseCreateIndex();
+        }
+        else if (IsIndexStatement("DROP"))
+        {
+            expression = ParseDropIndex();
+        }
+        else
+        {
+            Error("OQL0002", "Expected SELECT, CREATE INDEX, or DROP INDEX.", Current);
+            expression = EmptyExpression();
+        }
+
+        if (unsupported.Count == 0 && _diagnostics.Count == 0)
+        {
             if (Take(TokenType.Semicolon) && Current.Type != TokenType.Eof)
             {
                 Error("OQL0002", "Only one statement is accepted per query.", Current);
@@ -104,11 +121,6 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 Error("OQL0002", $"Unexpected token '{Current.Text}'.", Current);
             }
-        }
-        else
-        {
-            Error("OQL0002", "Expected SELECT.", Current);
-            expression = EmptyExpression();
         }
 
         expression.SetStatementText(_source);
@@ -149,6 +161,17 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             string value = token.Text.ToUpperInvariant();
+            if (value is "CREATE" or "DROP" && index + 1 < _tokens.Count &&
+                string.Equals(_tokens[index + 1].Text, "INDEX", StringComparison.OrdinalIgnoreCase))
+            {
+                string compound = value == "CREATE" ? OqlClauses.CreateIndex : OqlClauses.DropIndex;
+                if (!Supports(compound))
+                {
+                    var end = _tokens[index + 1];
+                    result.Add((compound, new Lexeme(token.Type, compound, token.Start, end.End, token.Line)));
+                }
+                continue;
+            }
             if (value == "SELECT")
             {
                 if (selected)
@@ -193,6 +216,8 @@ public sealed partial class OqlQueryParser : QueryParser
         _tokens[index - 1].Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.RightParen;
 
     private OqlSelectExpression EmptyExpression() => new(string.Empty, null, [], null, [], null, [], Span(Current, Current));
+    private bool IsIndexStatement(string verb) => Is(verb) && _position + 1 < _tokens.Count &&
+        string.Equals(_tokens[_position + 1].Text, "INDEX", StringComparison.OrdinalIgnoreCase);
     private Lexeme Current => _tokens[Math.Min(_position, _tokens.Count - 1)];
     private Lexeme Previous => _tokens[Math.Max(0, _position - 1)];
     private bool Failed => _diagnostics.Count != 0;

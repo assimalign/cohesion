@@ -109,8 +109,8 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 |---|---|---|
 | SQL | `Assimalign.Cohesion.Database.Sql` | Ships the SQL engine, compiled-schema migration renderer/provisioner, the model's wire-protocol server (`SqlDatabaseServer`), the `SqlDatabaseServerOptions.Listen(Uri)` endpoint bridge, and the model builder verbs; declared dialect in `Sql.Language` |
 | SQL schema | `Assimalign.Cohesion.Database.Sql.Schema` | Thin SQL schema declarations, compiled relational object shapes, canonical serialization, validation, and migration planning; shared by SQL and SDK Tasks, with direct references only to the area root and `Database.Types` |
-| Documents | `Assimalign.Cohesion.Database.Documents` | Session-bound JSON document engine, OQL planning/execution, collection ownership, and transactional index management |
-| Documents language | `Assimalign.Cohesion.Database.Documents.Language` | Declared OQL subset, AST, diagnostics, and conformance corpus |
+| Documents | `Assimalign.Cohesion.Database.Documents` | Session-bound JSON document engine, OQL query/index-DDL planning and execution, collection ownership, and transactional index management |
+| Documents language | `Assimalign.Cohesion.Database.Documents.Language` | Declared OQL query/index-DDL subset, AST, diagnostics, and conformance corpus |
 | Documents catalog | `Assimalign.Cohesion.Database.Documents.Catalog` | Versioned collections, document metadata, and eagerly maintained shared B+Tree indexes |
 | Documents storage | `Assimalign.Cohesion.Database.Documents.Storage` | UTF-8 JSON serialization and stamped chunk chains over shared storage and transactions |
 | Graph | `Assimalign.Cohesion.Database.Graph` | Query standard selection (#193) gates language work |

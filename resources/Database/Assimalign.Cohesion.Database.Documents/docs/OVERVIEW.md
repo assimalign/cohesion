@@ -2,14 +2,15 @@
 
 `Assimalign.Cohesion.Database.Documents` implements named logical databases containing
 versioned UTF-8 JSON documents. Each session is bound to one database. The engine
-supports document CRUD, an explicit OQL query subset, secondary B+Tree indexes,
+supports document CRUD, an explicit OQL query and index-DDL subset, secondary B+Tree indexes,
 snapshot and read-committed transactions, and durable file or in-memory storage.
 
 The public entry point is `DocumentDatabaseEngine.Create(options)`. Cast a created
 database to `IDocumentDatabase`, create a collection, and use a session with the
-existing `IDocumentCollection` methods. `session.Database` carries collection and
-index changes into the session transaction. A database handle used directly runs
-collection/index changes in automatic transactions.
+existing `IDocumentCollection` methods. `session.Database` carries collection changes into the
+session transaction. Index definitions are changed with OQL on the session, using its active
+transaction or an automatic statement transaction; `IDocumentDatabase` has no index-management
+members.
 
 ```csharp
 await using var engine = DocumentDatabaseEngine.Create(new());
@@ -18,7 +19,7 @@ await using var session = await database.CreateSessionAsync();
 var scoped = (IDocumentDatabase)session.Database;
 var orders = await scoped.CreateCollectionAsync("orders");
 await orders.PutAsync(session, "order/1", "{\"customer\":{\"name\":\"Ada\"},\"total\":42}"u8.ToArray());
-await scoped.CreateIndexAsync("orders", "by_total", "total");
+await session.ExecuteAsync("CREATE INDEX by_total ON orders (total)");
 var result = await session.ExecuteAsync("SELECT o.customer.name FROM orders o WHERE o.total >= 40");
 ```
 
@@ -29,7 +30,7 @@ stop before disposal durably closes databases.
 
 The engine references the Documents Language, Catalog, and Storage packages and
 the shared Database root. [DESIGN.md](DESIGN.md) describes transaction ownership,
-query semantics, and limits. The [language design](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md)
+OQL semantics, and limits. The [language design](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md)
 defines the supported grammar; the [storage design](../../Assimalign.Cohesion.Database.Documents.Storage/docs/DESIGN.md)
 defines the on-disk format. Wire clients, replication, security, hosting wiring,
 ApplicationModel, and compiled-schema provisioning are outside this implementation.

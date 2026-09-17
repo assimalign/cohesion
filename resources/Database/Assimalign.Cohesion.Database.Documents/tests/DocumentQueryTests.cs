@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -56,7 +57,7 @@ public sealed class DocumentQueryTests
         whole.GetInt32().ShouldBe(42);
         string query = $"SELECT d.{path} AS value FROM items AS d WHERE d.{path} = 42";
         (await Rows(session, query)).Single().GetInt32(0).ShouldBe(42);
-        await database.CreateIndexAsync("items", "deep_value", path);
+        await session.ExecuteAsync($"CREATE INDEX deep_value ON items ({path})");
         (await Plan(database, query)).Access.ShouldBeOfType<DocumentIndexPath>();
         (await Rows(session, query)).Single().GetInt32(0).ShouldBe(42);
     }
@@ -147,7 +148,7 @@ public sealed class DocumentQueryTests
         string query = $"SELECT name, score FROM items WHERE {predicate}";
         var parameters = new Dictionary<string, object?> { ["minimum"] = 2 };
         var before = await Rows(session, query, parameters);
-        await database.CreateIndexAsync("items", "by_score", "score");
+        await session.ExecuteAsync("CREATE INDEX by_score ON items (score)");
         var plan = await Plan(database, query, parameters);
         var seek = plan.Access.ShouldBeOfType<DocumentIndexPath>();
         seek.Index.Name.ShouldBe("by_score");
@@ -155,6 +156,10 @@ public sealed class DocumentQueryTests
         var after = await Rows(session, query, parameters);
         after.Select(row => row.GetString(0)).ShouldBe(before.Select(row => row.GetString(0)));
         after.ShouldNotBeEmpty();
+        await session.ExecuteAsync("DROP INDEX by_score ON items");
+        (await Plan(database, query, parameters)).Access.ShouldBeOfType<DocumentScanPath>();
+        var afterDrop = await Rows(session, query, parameters);
+        afterDrop.Select(row => row.GetString(0)).ShouldBe(before.Select(row => row.GetString(0)));
     }
 
     [Fact]
@@ -164,7 +169,7 @@ public sealed class DocumentQueryTests
         var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
-        await database.CreateIndexAsync("items", "by_nested", "values[0].number");
+        await session.ExecuteAsync("CREATE INDEX by_nested ON items (values[0].number)");
         await Put(collection, session, "a", "{\"name\":\"a\",\"values\":[{\"number\":1}]}");
         await Put(collection, session, "b", "{\"name\":\"b\",\"values\":[{\"number\":2}]}");
         const string query = "SELECT name FROM items AS d WHERE d.values[0].number = 2";
@@ -180,6 +185,59 @@ public sealed class DocumentQueryTests
         (await Rows(session, query)).Select(row => row.GetString(0)).ShouldBe(["b"]);
         await Put(collection, session, "b", "{\"name\":\"b\",\"values\":[]}");
         (await Rows(session, query)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Index_ddl_uses_the_same_quoted_property_path_grammar_as_where()
+    {
+        await using var engine = DocumentDatabaseEngine.Create(new());
+        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
+        var collection = await database.CreateCollectionAsync("items");
+        await using var session = await database.CreateSessionAsync();
+        await Put(collection, session, "a", "{\"name\":\"match\",\"unusual.field\":{\"odd'name\":2}}");
+        await Put(collection, session, "b", "{\"name\":\"other\",\"unusual.field\":{\"odd'name\":3}}");
+        const string query = "SELECT name FROM items WHERE \"unusual.field\"['odd''name'] = 2";
+
+        (await Plan(database, query)).Access.ShouldBeOfType<DocumentScanPath>();
+        await session.ExecuteAsync("CREATE INDEX by_unusual ON items (\"unusual.field\"['odd''name'])");
+
+        (await Plan(database, query)).Access.ShouldBeOfType<DocumentIndexPath>()
+            .Index.Name.ShouldBe("by_unusual");
+        (await Rows(session, query)).Single().GetString(0).ShouldBe("match");
+    }
+
+    [Fact]
+    public async Task Planner_adopts_legacy_extension_path_indexes_after_reopen()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "cohesion-documents-legacy-index-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using (var engine = DocumentDatabaseEngine.Create(new() { RootPath = root }))
+            {
+                var seedDatabase = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
+                var collection = await seedDatabase.CreateCollectionAsync("items");
+                await using var seedSession = await seedDatabase.CreateSessionAsync();
+                await Put(collection, seedSession, "a", "{\"name\":\"match\",\"postal-code\":2}");
+                await seedDatabase.RunAsync(null, async operation =>
+                {
+                    await seedDatabase.LockWriterAsync(operation.Context, CancellationToken.None);
+                    var metadata = seedDatabase.Catalog.FindCollection("items", operation.Context.Snapshot).ShouldNotBeNull();
+                    await seedDatabase.Catalog.CreateIndexAsync(metadata.Id, "legacy_postal", "postal-code", operation.Context);
+                    return true;
+                }, CancellationToken.None);
+            }
+
+            await using var reopened = DocumentDatabaseEngine.Create(new() { RootPath = root });
+            var database = (IDocumentDatabase)await reopened.OpenDatabaseAsync("test");
+            const string query = "SELECT name FROM items WHERE \"postal-code\" = 2";
+
+            (await Plan(database, query)).Access.ShouldBeOfType<DocumentIndexPath>()
+                .Index.Name.ShouldBe("legacy_postal");
+            await using var session = await database.CreateSessionAsync();
+            (await Rows(session, query)).Single().GetString(0).ShouldBe("match");
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 
     [Theory]
@@ -200,7 +258,7 @@ public sealed class DocumentQueryTests
         var parameters = new Dictionary<string, object?> { ["minimum"] = minimum };
         string query = $"SELECT score FROM items WHERE {predicate} ORDER BY score";
         var before = await Rows(session, query, parameters);
-        await database.CreateIndexAsync("items", "by_score", "score");
+        await session.ExecuteAsync("CREATE INDEX by_score ON items (score)");
         (await Plan(database, query, parameters)).Access.ShouldBeOfType<DocumentIndexPath>();
         var after = await Rows(session, query, parameters);
         after.Select(row => row.GetString(0)).ShouldBe(before.Select(row => row.GetString(0)));
@@ -220,7 +278,7 @@ public sealed class DocumentQueryTests
         await Put(collection, session, "d", "{\"score\":\"true\"}");
         const string query = "SELECT score FROM items WHERE score > FALSE";
         var before = await Rows(session, query);
-        await database.CreateIndexAsync("items", "by_score", "score");
+        await session.ExecuteAsync("CREATE INDEX by_score ON items (score)");
         (await Plan(database, query)).Access.ShouldBeOfType<DocumentIndexPath>();
         var after = await Rows(session, query);
         after.Select(row => row.GetValue(0)).ShouldBe(before.Select(row => row.GetValue(0)));
@@ -237,7 +295,7 @@ public sealed class DocumentQueryTests
         await Put(collection, session, "a", "{\"name\":\"null\",\"score\":null}");
         await Put(collection, session, "b", "{\"name\":\"missing\"}");
         await Put(collection, session, "c", "{\"name\":\"number\",\"score\":1}");
-        await database.CreateIndexAsync("items", "by_score", "score");
+        await session.ExecuteAsync("CREATE INDEX by_score ON items (score)");
         const string query = "SELECT name FROM items WHERE score IS NULL OR score = 1";
         (await Plan(database, query)).Access.ShouldBeOfType<DocumentScanPath>();
         (await Rows(session, query)).Select(row => row.GetString(0)).ShouldBe(["null", "missing", "number"]);
@@ -305,6 +363,7 @@ public sealed class DocumentQueryTests
     {
         var instance = (DocumentDatabaseInstance)database;
         return instance.RunAsync(null, operation => new ValueTask<DocumentPlan>(new DocumentPlanner(instance.Catalog,
-            operation.Context.Snapshot, parameters).Plan(DocumentQueryRequest.FromOql(query).Statement.OqlExpression)), CancellationToken.None);
+            operation.Context.Snapshot, parameters).Plan(
+                (OqlSelectExpression)DocumentQueryRequest.FromOql(query).Statement.OqlExpression)), CancellationToken.None);
     }
 }

@@ -105,7 +105,7 @@ public sealed class DocumentEngineTests
     }
 
     [Fact]
-    public async Task Schema_owned_collection_refuses_drop_and_index_alter_and_adhoc_is_mutable()
+    public async Task Schema_owned_collection_refuses_drop_and_index_ddl_and_adhoc_is_mutable()
     {
         await using var engine = DocumentDatabaseEngine.Create(new());
         var database = (DocumentDatabaseInstance)await engine.CreateDatabaseAsync("test");
@@ -120,11 +120,19 @@ public sealed class DocumentEngineTests
         error.Message.ShouldContain("owned");
         error.Message.ShouldContain("Sales");
         error.Message.ShouldContain("DROP COLLECTION");
-        await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await scoped.CreateIndexAsync("owned", "ix", "a"));
-        await Should.ThrowAsync<DatabaseObjectLockedException>(async () => await scoped.DropIndexAsync("owned", "ix"));
+        var createError = await Should.ThrowAsync<DatabaseObjectLockedException>(async () =>
+            await session.ExecuteAsync("CREATE INDEX ix ON owned (a)"));
+        createError.Message.ShouldContain("owned");
+        createError.Message.ShouldContain("Sales");
+        createError.Message.ShouldContain("CREATE INDEX");
+        var dropError = await Should.ThrowAsync<DatabaseObjectLockedException>(async () =>
+            await session.ExecuteAsync("DROP INDEX ix ON owned"));
+        dropError.Message.ShouldContain("owned");
+        dropError.Message.ShouldContain("Sales");
+        dropError.Message.ShouldContain("DROP INDEX");
         await scoped.CreateCollectionAsync("adhoc");
-        await scoped.CreateIndexAsync("adhoc", "ix", "a");
-        await scoped.DropIndexAsync("adhoc", "ix");
+        await session.ExecuteAsync("CREATE INDEX ix ON adhoc (a)");
+        await session.ExecuteAsync("DROP INDEX ix ON adhoc");
         await scoped.DropCollectionAsync("adhoc");
     }
 
@@ -138,7 +146,8 @@ public sealed class DocumentEngineTests
         var collection = await database.CreateCollectionAsync("items");
         await using var session = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
-        await database.CreateIndexAsync("items", "ix", "a");
+        await using var ddlSession = await database.CreateSessionAsync();
+        await ddlSession.ExecuteAsync("CREATE INDEX ix ON items (a)");
         if (drop)
         {
             await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await ((IDocumentDatabase)session.Database).DropCollectionAsync("items"));

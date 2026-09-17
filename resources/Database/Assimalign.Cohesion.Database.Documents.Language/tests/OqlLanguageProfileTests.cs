@@ -14,6 +14,10 @@ public class OqlLanguageProfileTests
         profile.Language.ShouldBe("OQL");
         profile.IsCaseSensitive.ShouldBeFalse();
         profile.Keywords.ToArray().ShouldContain("SELECT");
+        profile.Keywords.ToArray().ShouldContain("CREATE");
+        profile.Keywords.ToArray().ShouldContain("INDEX");
+        profile.Keywords.ToArray().ShouldContain("DROP");
+        profile.Keywords.ToArray().ShouldContain("ON");
         profile.Functions.ToArray().ShouldContain("COUNT");
     }
 
@@ -24,6 +28,8 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.GroupBy)]
     [InlineData(OqlClauses.Having)]
     [InlineData(OqlClauses.OrderBy)]
+    [InlineData(OqlClauses.CreateIndex)]
+    [InlineData(OqlClauses.DropIndex)]
     public void Instance_DeclaredClause_IsSupported(string clause)
     {
         OqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();

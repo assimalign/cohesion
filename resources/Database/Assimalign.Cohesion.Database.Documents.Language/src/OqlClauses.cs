@@ -6,6 +6,12 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// </summary>
 public static class OqlClauses
 {
+    /// <summary>A <c>CREATE INDEX</c> statement.</summary>
+    public const string CreateIndex = "CREATE INDEX";
+
+    /// <summary>A <c>DROP INDEX</c> statement.</summary>
+    public const string DropIndex = "DROP INDEX";
+
     /// <summary>Selects values from one or more document collections.</summary>
     public const string Select = "SELECT";
 
