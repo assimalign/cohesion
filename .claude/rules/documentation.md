@@ -55,9 +55,12 @@ local edit with a cross-tree edit and guarantee drift. Do not move them.
 
 ### Two standing rules
 
-- **No two markdown files may share a name across an ancestor/descendant pair.** `docs/VERSIONING.md`
-  and `docs/versioning/VERSIONING.md` are different documents with the same name; that is a trap,
-  not a convention. Name the narrower one for what it actually covers.
+- **No two markdown files may share a name across an ancestor/descendant pair.** A reader who sees
+  a path in a diff, a link, or a search hit has to be able to tell which document it is without
+  opening it, and `docs/X.md` beside `docs/x/X.md` defeats that. Name each for what it actually
+  covers. The case this rule was written from: the release policy at `docs/VERSIONING.md` and the
+  strategy note at `docs/versioning/VERSIONING.md` were two unrelated documents under one name —
+  resolved by renaming the policy to `docs/VERSIONING_RELEASE_POLICY.md`, which is what it is.
 - **A moved document is a link fix in the same commit.** Markdown relative links break silently —
   nothing in CI catches them. After moving anything, re-resolve every `](...)` link in the moved
   file *and* every inbound link to it.

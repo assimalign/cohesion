@@ -97,7 +97,7 @@
 		<File Path="docs/REFERENCES.md" />
 		<File Path="docs/RUNTIME_CONTRACT.md" />
 		<File Path="docs/SERVICE_LAYER_DESIGN.md" />
-		<File Path="docs/VERSIONING.md" />
+		<File Path="docs/VERSIONING_RELEASE_POLICY.md" />
 	</Folder>
 	<Folder Name="/cohesion/docs/build/">
 		<File Path="docs/build/MSBUILD_COHESION_PROPS.md" />

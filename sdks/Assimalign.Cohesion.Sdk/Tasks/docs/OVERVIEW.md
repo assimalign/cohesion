@@ -108,7 +108,7 @@ builds should not set the escape property.
 | COHSDK010 | Error | HTTPS Certificate must name a declared Secret mount; non-HTTPS Certificate metadata is rejected. Reserved `public` is exempt. |
 
 See [DESIGN.md](./DESIGN.md) for the implementation contracts and
-[`docs/VERSIONING.md`](../../../../docs/VERSIONING.md) for repository-wide package
+[`docs/VERSIONING_RELEASE_POLICY.md`](../../../../docs/VERSIONING_RELEASE_POLICY.md) for repository-wide package
 and pin versioning rules.
 
 ## Publishing images
