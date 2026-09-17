@@ -7,6 +7,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -109,7 +110,8 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 
         var context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
         var transaction = new SqlDatabaseTransaction(_coordinator, context);
-        _transactionScopes.Push(new SqlTransactionScope(transaction, isolationLevel));
+        _transactionScopes.Push(new SqlTransactionScope(transaction, isolationLevel,
+            isolationLevel == IsolationLevel.Snapshot ? _executor.CaptureCatalogSnapshot() : null));
         return transaction;
     }
 
@@ -133,6 +135,8 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
                         [.. parsed.Statement.Diagnostics]);
                 }
             }
+
+            SqlSystemViews.EnsureReadOnly(parsed.Statement.SqlExpression);
         }
 
         // Control commands bind to the session before an auto-commit context is
@@ -153,7 +157,8 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
                     "DDL requires auto-commit mode because the catalog does not enlist in session transactions.");
             }
 
-            var scope = new SqlStatementContext(transactionScope.Transaction.Context, _coordinator, _provisioningSchema);
+            var scope = new SqlStatementContext(transactionScope.Transaction.Context, _coordinator, _provisioningSchema,
+                Database.Name.ToString(), transactionScope.CatalogSnapshot ?? CaptureSystemViewSnapshot(request));
             _lastStatementMetrics = scope.Metrics;
 
             try
@@ -179,7 +184,8 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 
         try
         {
-            var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema);
+            var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
+                Database.Name.ToString(), CaptureSystemViewSnapshot(request));
             _lastStatementMetrics = scope.Metrics;
             var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
             await _coordinator.CommitAsync(context, cancellationToken).ConfigureAwait(false);
@@ -286,7 +292,15 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         => new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
             [new Diagnostic { Code = code, Message = message, Severity = DiagnosticSeverity.Error }]);
 
-    private sealed record SqlTransactionScope(SqlDatabaseTransaction Transaction, IsolationLevel IsolationLevel);
+    // Ordinary DML does not enumerate the catalog just to construct a context.
+    // Explicit Snapshot transactions capture at BEGIN even if their first metadata
+    // SELECT comes later; read committed and auto-commit capture at statement start.
+    private SqlCatalogSnapshot? CaptureSystemViewSnapshot(QueryRequest request)
+        => request is SqlQueryRequest { Statement.SqlExpression: SqlSelectExpression { From: { } from } } &&
+            SqlSystemViews.Find(from) is not null ? _executor.CaptureCatalogSnapshot() : null;
+
+    private sealed record SqlTransactionScope(
+        SqlDatabaseTransaction Transaction, IsolationLevel IsolationLevel, SqlCatalogSnapshot? CatalogSnapshot);
 
     private void ThrowIfNotOpen()
     {

@@ -50,6 +50,8 @@ internal sealed partial class SqlPlanExecutor
     {
         switch (plan)
         {
+            case SqlSystemViewPlan systemView:
+                return ExecuteSystemView(systemView, statement, cancellationToken);
             case SqlSelectPlan select:
                 return ExecuteSelect(select, statement, cancellationToken);
             case SqlInsertPlan insert:

@@ -145,7 +145,7 @@ Structural fixes that must land before engine work, because every engine inherit
 
 | # | Feature | What it means | Status | Work items |
 |---|---|---|---|---|
-| **C1** | **SQL system objects** | Queryable metadata built into the engine: what tables exist, their columns and types, indexes, constraints, and — tied to A1 — which objects are code-owned versus SQL-owned. Standard-shaped (`INFORMATION_SCHEMA`) so existing tooling recognizes it. | `OPEN` | **#1004** |
+| **C1** ✅ ✅ | **SQL system objects** | Six virtual, database-scoped `INFORMATION_SCHEMA` relations expose tables, columns, keys, checks, and foreign-key actions over the SQL wire protocol. `COHESION_SCHEMA.INDEXES` and `OBJECT_OWNERSHIP` expose index keys and `Adhoc`/`Schema` ownership without adding vendor columns to the ISO-shaped views. Projection, filtering, and ordering use a consistent catalog snapshot; writes and name collisions have a stable read-only diagnostic. See the [MVP view matrix](../../resources/Database/Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#system-view-matrix-c1). | `DONE` | **#1004** |
 | **C2** | **Per-model introspection** | The equivalent for the other models, in each model's own vocabulary: collections and indexes for documents, containers and blobs for blob, keyspaces for key-value, labels and edge types for graph. Scoped per model — a model without a schema gets a smaller surface. | `OPEN` | #1005 |
 
 ### Theme D — Engines

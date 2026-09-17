@@ -33,6 +33,7 @@ internal sealed class SqlPlanner
 
     internal SqlPlan Plan(SqlQueryExpression expression)
     {
+        SqlSystemViews.EnsureReadOnly(expression);
         return expression switch
         {
             SqlSelectExpression select => PlanSelect(select),
@@ -48,7 +49,7 @@ internal sealed class SqlPlanner
         };
     }
 
-    private SqlSelectPlan PlanSelect(SqlSelectExpression select)
+    private SqlPlan PlanSelect(SqlSelectExpression select)
     {
         if (select.Joins.Count > 0)
         {
@@ -65,8 +66,11 @@ internal sealed class SqlPlanner
             throw new DatabaseException("SELECT requires a FROM table.");
         }
 
-        var table = ResolveTable(select.From);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters);
+        // A virtual relation has column metadata, but no stored table or access path.
+        var systemView = SqlSystemViews.Find(select.From);
+        var table = systemView is null ? ResolveTable(select.From) : null;
+        var columns = systemView?.Columns ?? table!.Columns;
+        var evaluator = new SqlExpressionEvaluator(columns, _parameters);
 
         // Lone COUNT(*) is the one aggregate the executor supports.
         bool isCountStar =
@@ -92,16 +96,16 @@ internal sealed class SqlPlanner
 
                 if (column.Expression is SqlStarExpression)
                 {
-                    for (int i = 0; i < table.Columns.Count; i++)
+                    for (int i = 0; i < columns.Count; i++)
                     {
-                        projections.Add(new SqlProjection(table.Columns[i].Name, i, null, table.Columns[i].Type.Type));
+                        projections.Add(new SqlProjection(columns[i].Name, i, null, columns[i].Type.Type));
                     }
                 }
                 else if (column.Expression is SqlColumnReferenceExpression reference)
                 {
                     int ordinal = evaluator.ResolveColumn(reference);
                     projections.Add(new SqlProjection(
-                        column.Alias ?? table.Columns[ordinal].Name, ordinal, null, table.Columns[ordinal].Type.Type));
+                        column.Alias ?? columns[ordinal].Name, ordinal, null, columns[ordinal].Type.Type));
                 }
                 else
                 {
@@ -122,8 +126,15 @@ internal sealed class SqlPlanner
             ValidateExpression(orderBy.Expression, evaluator);
         }
 
+        if (systemView is not null)
+        {
+            return new SqlSystemViewPlan(systemView, projections, select.Where, select.OrderBy,
+                EvaluateCount(select.Limit, "LIMIT"), EvaluateCount(select.Offset, "OFFSET"),
+                select.IsDistinct, isCountStar);
+        }
+
         return new SqlSelectPlan(
-            table,
+            table!,
             projections,
             select.Where,
             select.OrderBy,
@@ -131,7 +142,7 @@ internal sealed class SqlPlanner
             EvaluateCount(select.Offset, "OFFSET"),
             select.IsDistinct,
             isCountStar,
-            SelectAccessPath(table, select.Where));
+            SelectAccessPath(table!, select.Where));
     }
 
     // ── Access-path selection (rule-based, by design) ──────────────────

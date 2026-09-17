@@ -33,6 +33,9 @@ public static class SqlCatalog
         return DefaultSqlCatalog.Open(storage);
     }
 
+    internal static SqlCatalogSnapshot CaptureSnapshot(ISqlCatalog catalog)
+        => ((DefaultSqlCatalog)catalog).CaptureSnapshot();
+
     /// <summary>
     /// Creates a schema-owned table through the engine's internal provisioning path,
     /// without adding a capability to the public catalog contract.

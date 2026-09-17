@@ -1,3 +1,4 @@
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -16,13 +17,17 @@ internal readonly struct SqlStatementContext
     internal SqlStatementContext(
         ITransactionContext transaction,
         TransactionCoordinator coordinator,
-        string? provisioningSchema = null)
+        string? provisioningSchema = null,
+        string databaseName = "",
+        SqlCatalogSnapshot? catalogSnapshot = null)
     {
         Transaction = transaction;
         Coordinator = coordinator;
         Snapshot = transaction.Snapshot;
         Metrics = new SqlStatementMetrics();
         ProvisioningSchema = provisioningSchema;
+        DatabaseName = databaseName;
+        CatalogSnapshot = catalogSnapshot ?? SqlCatalogSnapshot.Empty;
     }
 
     /// <summary>
@@ -48,4 +53,10 @@ internal readonly struct SqlStatementContext
 
     /// <summary>Gets the applying compiled schema's name, or null for a live-session statement.</summary>
     internal string? ProvisioningSchema { get; }
+
+    /// <summary>Gets the current database's catalog identifier for metadata rows.</summary>
+    internal string DatabaseName { get; }
+
+    /// <summary>Gets the catalog directory paired with this statement's visibility lifetime.</summary>
+    internal SqlCatalogSnapshot CatalogSnapshot { get; }
 }

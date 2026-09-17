@@ -57,6 +57,14 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         return catalog;
     }
 
+    internal SqlCatalogSnapshot CaptureSnapshot()
+    {
+        lock (_sync)
+        {
+            return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index));
+        }
+    }
+
     /// <inheritdoc />
     public SqlCatalogSchemaState? SchemaState
     {

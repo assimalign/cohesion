@@ -121,6 +121,27 @@ This identifies the physical index enforcing primary-key metadata, allowing sche
 reconciliation to distinguish it from a separately declared unique index on the
 same columns. Older index records have no marker and load as ordinary indexes.
 
+## Single source for SQL system views (C1)
+
+The engine's `INFORMATION_SCHEMA` and `COHESION_SCHEMA` relations project this
+catalog's table, column, key, index, constraint, and ownership descriptions.
+Those descriptions remain the single source of truth: system views are computed
+when queried and never inserted as stored catalog tables or copied into a second
+metadata store. `SqlCatalogTable` describes stored objects only and gains no
+virtual/system flag. SQL view names, columns, binding, and row projection belong
+to the SQL engine, not to this persistence library.
+
+The existing friend-assembly boundary exposes an internal atomic snapshot of
+tables and their index descriptions under the catalog's metadata lock. The SQL
+session captures it at transaction begin for snapshot isolation and at statement
+start for `ReadCommitted` or auto-commit. The engine derives every view row and
+referenced constraint from that capture, preventing an enumeration from mixing
+metadata before and after a DDL publication. `ISqlCatalog` remains unchanged.
+After a table drop, fresh snapshots contain none of its table, index, constraint,
+column, or ownership metadata. See the SQL engine's
+[virtual relation design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#virtual-system-relations-c1)
+for the query surface and the two deliberately non-standard extension views.
+
 ## Error model
 
 `SqlCatalogException : DatabaseException` for catalog violations (duplicate or
@@ -128,7 +149,9 @@ missing tables/columns, primary-key drops, malformed persisted records).
 
 ## Non-goals
 
-- Views, sequences, permissions (permissions are `Sql.Security`'s feature, #177).
+- Stored user-defined views, sequences, permissions (permissions are
+  `Sql.Security`'s feature, #177). Virtual system views are engine projections
+  of this catalog and require no view records here.
 - Multi-statement DDL atomicity (see self-committing DDL above). The migration
   layer compensates completed reversible statements on failure; an MVCC bracket
   spanning catalog and data DDL requires a future catalog batch-transaction seam.

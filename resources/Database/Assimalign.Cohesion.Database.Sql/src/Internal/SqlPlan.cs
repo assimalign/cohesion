@@ -31,6 +31,17 @@ internal sealed record SqlSelectPlan(
     bool IsCountStar,
     SqlAccessPath Access) : SqlPlan;
 
+/// <summary>A catalog projection with no storage identity or physical access path.</summary>
+internal sealed record SqlSystemViewPlan(
+    SqlSystemViewDefinition View,
+    IReadOnlyList<SqlProjection> Projections,
+    SqlExpression? Where,
+    IReadOnlyList<SqlOrderByColumn> OrderBy,
+    long? Limit,
+    long? Offset,
+    bool IsDistinct,
+    bool IsCountStar) : SqlPlan;
+
 /// <summary>
 /// How a SELECT reaches its table's rows — the seek node the thin IR gained when
 /// the planner adopted secondary indexes. A closed family: the executor drives

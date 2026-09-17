@@ -42,6 +42,66 @@ The remaining **16** are set operations (`UNION`, `INTERSECT`, `EXCEPT`), CTEs
 | `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
 
+## System-view matrix (C1)
+
+The SQL engine exposes the following virtual relations through ordinary `SELECT`,
+including the wire protocol. View names require their schema and are
+case-insensitive. This is the MVP subset of ISO 9075-11 column names and type
+conventions, not the complete ISO view layouts. Columns below are listed in
+`SELECT *` order. No Cohesion-only columns are appended to the ISO relations.
+
+| Relation | Columns, in order | Rows |
+|---|---|---|
+| `INFORMATION_SCHEMA.TABLES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `TABLE_TYPE` | Stored tables in the current database; `TABLE_TYPE = 'BASE TABLE'` |
+| `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION` | One row per table column; ordinals start at one |
+| `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`, `IS_DEFERRABLE`, `INITIALLY_DEFERRED` | Primary keys, unique indexes/constraints, foreign keys, and explicit checks; both deferral fields are `NO` |
+| `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION` | One row per primary, unique, or foreign-key column, in constraint order |
+| `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `UNIQUE_CONSTRAINT_CATALOG`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`, `MATCH_OPTION`, `UPDATE_RULE`, `DELETE_RULE` | Foreign keys with the referenced key identity; `MATCH_OPTION = 'NONE'`, `UPDATE_RULE = 'RESTRICT'`, delete rule `RESTRICT` or `CASCADE` |
+| `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `CHECK_CLAUSE` | Persisted explicit check expressions |
+| `COHESION_SCHEMA.INDEXES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `INDEX_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `IS_UNIQUE`, `IS_PRIMARY_KEY` | Cohesion extension: one row per index key column |
+| `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | Cohesion extension: one row per table or index; `OWNER` is `Adhoc` or `Schema` |
+
+Identifier, descriptive, expression, and `YES`/`NO` columns have shared type
+`String`. Ordinals, lengths, precision, radix, and scale have shared type `Int64`;
+their values are nonnegative, with one-based ordinals. `IS_NULLABLE`,
+`IS_DEFERRABLE`, `INITIALLY_DEFERRED`, `IS_UNIQUE`, and `IS_PRIMARY_KEY` use
+strings `YES`/`NO`. `OBJECT_TYPE` is `TABLE` or `INDEX`; `OWNING_SCHEMA` is the
+compiled schema name, distinct from the SQL namespace in `TABLE_SCHEMA`, and is
+null for ad-hoc objects. Every non-null catalog-name column names the current
+database.
+
+`DATA_TYPE` uses canonical names for catalog type identities; it does not retain
+the original alias spelling. For example, `INT`/`INTEGER` report `INTEGER`,
+`DECIMAL`/`NUMERIC` report `NUMERIC`, and `CHAR`/`VARCHAR`/`TEXT` report
+`CHARACTER VARYING`. The remaining canonical names are `BOOLEAN`, `TINYINT`,
+`SMALLINT`, `BIGINT`, `REAL`, `DOUBLE PRECISION`, `BINARY VARYING`, `DATE`,
+`TIME`, `TIMESTAMP`, `TIMESTAMP WITH TIME ZONE`, `INTERVAL`, `UUID`, `JSON`, and
+`JSONB`. Type parameters appear separately where catalog metadata retains them.
+Unknown or inapplicable values are null; `CHARACTER_OCTET_LENGTH` is null because
+the catalog stores no character-set byte bound. `COLUMN_DEFAULT` is SQL literal
+text, including escaped quotes for string defaults, or null when absent.
+
+Projection, aliases, parameters, `WHERE`, `ORDER BY`, `DISTINCT`, a lone
+`COUNT(*)`, `LIMIT`, and `OFFSET` follow the engine's existing SELECT surface.
+The broader parser matrix above does not imply additional engine support for
+joins, grouping, other aggregates, or subqueries over these relations. A client
+can issue, for example:
+
+```sql
+SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'orders'
+ORDER BY ORDINAL_POSITION;
+```
+
+All relations are read-only. DML and supported table/index DDL targeting them,
+including colliding `CREATE TABLE` statements and `IF [NOT] EXISTS` forms, fail
+with `System view '<SCHEMA>.<VIEW>' is read-only.` The wire error code is
+`ExecutionFailure`. User-defined `CREATE VIEW` / `DROP VIEW` remain unsupported.
+The snapshot rules, ISO-subset limitations, and the rationale for the two
+extension views are recorded in the
+[SQL engine design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#virtual-system-relations-c1).
+
 ## Expressions
 
 Precedence, low to high: `OR` < `AND` < `NOT` < comparison (`=`, `<>`, `<`, `>`,

@@ -62,6 +62,143 @@ explicit policy. No existing public interface gains an ownership or bypass
 member: table creation uses a narrow internal catalog helper, with friend access
 for this engine, and ordinary `ISqlCatalog.CreateTableAsync` stays ad-hoc.
 
+## Virtual system relations (C1)
+
+The catalog is the sole data source for six `INFORMATION_SCHEMA` relations and
+two Cohesion extensions. Their complete MVP column matrix is in
+[DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#system-view-matrix-c1).
+Every row describes an object in the session's current database. The catalog
+name columns contain that database's name; schema qualification continues to
+select a SQL namespace, never another database. `TABLES` lists stored tables as
+`BASE TABLE`; these virtual relations have no catalog table records to list.
+
+### The relation seam and statement snapshot
+
+`SqlPlanner` recognizes the reserved, schema-qualified view names before
+`ResolveTable`. It binds their declared columns into a separate
+`SqlSystemViewPlan`, carrying the view identity, projection, predicate, ordering,
+distinct/count mode, and limit/offset. `SqlSelectPlan` still means a stored
+table, and `SqlCatalogTable` has no virtual/system flag. This keeps physical
+access paths and object locks meaningful instead of inventing a dummy object id
+or storage location for metadata. No existing public interface changes.
+
+`SqlPlanExecutor.SystemViews.cs` projects catalog descriptions to rows at query
+time and applies the same expression evaluator and SELECT semantics as table
+queries: column and expression projection, aliases, parameters, `WHERE`,
+`ORDER BY`, `DISTINCT`, a lone `COUNT(*)`, `LIMIT`, and `OFFSET`. The existing
+planner limits on joins, grouping, other aggregates, and subqueries also apply.
+Rows use the ordinary materialized result and wire codecs, so metadata is
+available over `SqlDatabaseServer` without a separate protocol operation.
+
+An internal catalog snapshot captures tables and their index descriptions
+together under the catalog's existing metadata lock. A snapshot transaction
+retains the capture taken at begin; auto-commit and `ReadCommitted` statements
+capture at statement start. All system rows for that statement use that one
+capture, including referenced-key resolution. Catalog publication cannot split
+a table from its constraints or indexes during a metadata read. Later statements
+see completed DDL according to their isolation level, so `DROP TABLE` removes
+the table, its columns, constraints, indexes, and ownership rows from fresh
+snapshots. There are no metadata rows in the user record space and no persisted
+system-view cache to reconcile.
+
+The dependency split keeps virtual relation binding and execution in SQL while
+the catalog remains the source of stored object descriptions:
+
+```mermaid
+flowchart LR
+    Planner["SqlPlanner"] --> ViewPlan["SqlSystemViewPlan"]
+    Executor["SqlPlanExecutor.SystemViews"] --> ViewPlan
+    Executor --> Snapshot["Sql.Catalog snapshot"]
+    Snapshot --> Catalog["Stored table and index descriptions"]
+```
+
+### Deliberate extension: index metadata
+
+ISO `INFORMATION_SCHEMA` has no general index relation. Cohesion exposes
+`COHESION_SCHEMA.INDEXES`, with one row per ordered index key column. Repeating
+the table/index identity on each key row supports ordinary column projection,
+filtering, and ordering without parsing a vendor-specific DDL string or encoded
+column list. `IS_UNIQUE` and `IS_PRIMARY_KEY` are `YES`/`NO`; the latter
+distinguishes the catalog's primary-key enforcement index from other unique
+indexes. Physical root pages and index-manager registrations stay internal.
+This explicit extension namespace avoids presenting a MySQL `STATISTICS` or
+PostgreSQL `pg_indexes` compatibility contract that Cohesion does not implement.
+
+### Deliberate extension: object ownership
+
+`COHESION_SCHEMA.OBJECT_OWNERSHIP` has one row per table or index, identified by
+its table identity, `OBJECT_TYPE` (`TABLE` or `INDEX`), and `OBJECT_NAME`.
+`OWNER` preserves the catalog values `Adhoc` and `Schema`; `OWNING_SCHEMA` is
+the compiled schema's name for code-provisioned objects and null for ad-hoc
+objects. It remains distinct from `TABLE_SCHEMA`, the SQL namespace. Index
+ownership is reported from the index itself, so an ad-hoc index on a table does
+not accidentally inherit that table's provisioning ownership.
+
+These concepts have no ISO counterpart. A separate Cohesion relation keeps
+non-standard fields out of `INFORMATION_SCHEMA.TABLES`, preserving the documented
+column ordering for tools that map `SELECT *` positionally. The accepted cost
+is an additional metadata query when a client needs provisioning ownership.
+
+### Standard vocabulary and the MVP boundary
+
+This is a documented subset of ISO 9075-11's information schema, not a claim to
+implement every standard view, column, or SQL domain. Identifiers and descriptive
+text use the shared `String` type; standard `yes_or_no` values are strings
+`YES`/`NO`, not Boolean values. Cardinal numbers use nonnegative `Int64` values,
+with ordinal positions starting at one. These conventions follow the
+[information-schema type definitions](https://www.postgresql.org/docs/17/infoschema-datatypes.html)
+and [column metadata conventions](https://www.postgresql.org/docs/18/infoschema-columns.html)
+documented by PostgreSQL's implementation of the standard.
+
+`COLUMNS.DATA_TYPE` reports the canonical SQL name of the catalog's shared type
+identity. The catalog does not preserve the original alias spelling (`INT`
+versus `INTEGER`, for example), so this surface cannot reconstruct it. Declared
+length, precision, scale, nullability, and default text come from catalog fields;
+unknown or inapplicable facts are null, including an unknown character octet
+bound. Cohesion types without an ISO spelling, such as `JSONB`, retain their
+documented dialect name.
+
+Primary keys and unique constraints project the catalog's enforcing indexes;
+foreign keys and explicit checks project persisted constraint descriptions.
+For older catalog records with `PrimaryKeyColumns` but no index marked
+`IsPrimaryKey`, the constraint views infer the name `PrimaryKey_<table>` from
+that existing primary-key declaration, appending `_1`, `_2`, and so on until
+the name does not collide case-insensitively with a recorded index or constraint
+on that table. This fallback does not invent an index row or index ownership;
+separately recorded unique indexes remain `UNIQUE`.
+The catalog does not name `NOT NULL` declarations as separate check objects:
+their nullability is exposed by `COLUMNS`, and no synthetic check names are
+invented. This is a deliberate MVP limitation relative to the standard's
+[check-constraint convention](https://www.postgresql.org/docs/18/infoschema-check-constraints.html).
+Foreign keys store referenced columns rather than an index identity. The views
+resolve those columns to the primary key first (including the legacy fallback),
+then to a matching unique index ordered deterministically by name. Foreign keys
+report `MATCH_OPTION = 'NONE'`, `UPDATE_RULE = 'RESTRICT'`, and
+`DELETE_RULE = 'RESTRICT'` or `'CASCADE'`.
+Constraints are enforced immediately and are not deferrable.
+
+Constraint names remain unique within a table, as the catalog already requires,
+rather than within the entire SQL schema. Consequently `CHECK_CONSTRAINTS` and
+`REFERENTIAL_CONSTRAINTS` can contain ambiguous repeated constraint identities
+if callers reuse names on different tables; `TABLE_CONSTRAINTS` and
+`KEY_COLUMN_USAGE` carry table identities. This existing catalog limitation is
+not changed by introspection; the same portability consequence is described in
+[PostgreSQL's information-schema notes](https://www.postgresql.org/docs/18/information-schema.html).
+Metadata currently follows the engine's database visibility boundary; per-object
+privilege filtering belongs to SQL security (D2).
+
+### Read-only names
+
+`INSERT`, `UPDATE`, `DELETE`, and all supported table/index DDL targeting a
+system relation fail with `DatabaseException` and the stable message
+`System view '<SCHEMA>.<VIEW>' is read-only.` The view name in the diagnostic is
+canonical uppercase, for example `INFORMATION_SCHEMA.TABLES`. The wire server
+returns `ExecutionFailure` with that message and keeps the connection usable.
+`CREATE TABLE` collisions are refused by the same rule, including
+`IF NOT EXISTS`; `DROP TABLE IF EXISTS` and `DROP INDEX IF EXISTS` do not turn
+the refusal into a no-op. `CREATE VIEW` and `DROP VIEW` remain outside the
+declared dialect and retain their existing unsupported-clause diagnostics.
+
 ## Execution model
 
 - **Rule-based planning, plan/execute split.** `SqlPlanner` binds the AST against

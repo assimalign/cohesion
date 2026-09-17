@@ -29,6 +29,8 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
         _indexManager = indexManager;
     }
 
+    internal SqlCatalogSnapshot CaptureCatalogSnapshot() => SqlCatalog.CaptureSnapshot(_catalog);
+
     /// <summary>
     /// Public interface method — requires a transaction context from the session.
     /// </summary>
