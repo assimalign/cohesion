@@ -129,6 +129,102 @@ Per-model satellite projects follow one matrix: `.Language` (where a language ex
 - **`Database.Security`** — authn/authz contracts (principals, roles, permission checks) consumed by the server and per-model security projects.
 - **`Database.Replication` / `Database.Governance`** — shared replication contracts (log shipping seam over the WAL) and operational governance (quotas, tenancy, audit events). Post-MVP build-out; contracts stay in place so model services don't invent local equivalents.
 
+#### Request flow when one host runs more than one model
+
+The diagram below traces a query from client to kernel in a host composing two models, and the
+facts it depicts are stated here in prose so the section stands without it:
+
+- **The endpoint is the model selector; there is no multiplexing front door.** Each model server
+  owns its own `IConnectionListener` (`SqlDatabaseServerOptions.Listener`,
+  `KeyValueDatabaseServerOptions.Listener`), so a host running two models binds two listeners in
+  one process. `ProtocolStartupMessage(Version, Database, Principal)` carries **no model field** —
+  connecting to a given endpoint has already chosen the model. Routing several models behind one
+  endpoint would require a model discriminator in the handshake, which is a protocol change.
+- **Provisioning always precedes accept, regardless of composition order.** `Provision(...)`
+  registers as an *additional host service*, and the built application starts every service before
+  any server adapter. Shutdown reverses it: servers drain first, then services stop in reverse
+  registration order.
+- **A session binds to exactly one database at handshake and cannot leave it.**
+  `OpenDatabaseAsync(startup.Database)` happens once, during authentication, which is the
+  area-wide rule that no API or query language is scoped above a single database.
+- **Engines share the kernel and never reference each other.** Both reach `Database.Storage`,
+  `Database.Transactions`, and `Database.Indexing`; neither depends on the other. Writes serialize
+  per database at the apply gate, so a write in one model never contends with a write in another.
+- **Only SQL and KeyValuePair ship servers today.** The Blob and Documents engines are in-process
+  only; their wire clients wait on a protocol decision (frames cap at 16 MiB and results are
+  column/row shaped, so streaming a large object needs chunked transfer).
+
+<!-- Deviates from the repo documentation rule "no colors, no themes" in diagrams, per owner
+     direction 2026-09-17: the owner asked to see a colored band rendered before deciding whether
+     to relax that rule. Scoped to this diagram only; every other diagram in the repo stays
+     color-free. If the rule stands, replace the `rect rgb(...)` band with a `Note over`. -->
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor SqlCli as "SQL client"
+    actor KvCli as "Key-Value client"
+    participant Host as "DatabaseApplication (one process)"
+    participant SqlSrv as "SqlDatabaseServer — own listener"
+    participant KvSrv as "KeyValueDatabaseServer — own listener"
+    participant SqlEng as "SqlDatabaseEngine"
+    participant KvEng as "KeyValueDatabaseEngine"
+    participant Kernel as "Shared kernel: Storage, Transactions, Indexing"
+
+    Note over Host: Program.cs composes both models into one host
+
+    rect rgb(245,245,245)
+    Note over Host,Kernel: Startup — services before servers, so Provision precedes accept
+    Host->>SqlEng: AddSqlDatabase(options) — engine runs from creation
+    Host->>KvEng: AddKeyValueDatabase(options)
+    SqlEng->>Kernel: spawn workers (checkpoint, WAL flush, write-back, purge)
+    KvEng->>Kernel: spawn workers
+    Host->>SqlEng: Provision(compiled schema) — additional host service
+    SqlEng->>Kernel: apply schema in a transaction
+    Host->>SqlSrv: StartAsync — bind listener, begin accept
+    Host->>KvSrv: StartAsync — bind listener, begin accept
+    end
+
+    Note over SqlCli,KvSrv: No multiplexing front door. The endpoint chosen IS the model.
+
+    par SQL connection
+        SqlCli->>SqlSrv: connect to the SQL endpoint
+        SqlCli->>SqlSrv: Startup(Version, Database, Principal)
+        SqlSrv->>SqlSrv: reject if sessions >= MaxSessions
+        SqlSrv-->>SqlCli: Authenticate (challenge)
+        SqlCli->>SqlSrv: AuthenticateResponse
+        SqlSrv->>SqlEng: OpenDatabaseAsync(startup.Database)
+        SqlEng-->>SqlSrv: IDatabase — session bound to ONE database
+        SqlSrv->>SqlEng: CreateSessionAsync
+        SqlSrv-->>SqlCli: Ready
+        SqlCli->>SqlSrv: Execute("SELECT ...", parameters)
+        SqlSrv->>SqlEng: session.ExecuteAsync
+        SqlEng->>SqlEng: parse against SqlLanguageProfile
+        Note right of SqlEng: clause outside the profile returns COHDBL001
+        SqlEng->>SqlEng: plan — selects a secondary index if one applies
+        SqlEng->>Kernel: snapshot, index seek, versioned reads
+        Kernel-->>SqlEng: rows at the session snapshot
+        SqlSrv-->>SqlCli: ResultHeader
+        SqlSrv-->>SqlCli: ResultRow (repeated)
+        SqlSrv-->>SqlCli: ResultComplete(AffectedCount)
+    and Key-Value connection
+        KvCli->>KvSrv: connect to the Key-Value endpoint
+        KvCli->>KvSrv: Startup(Version, Database, Principal)
+        KvSrv-->>KvCli: Authenticate then Ready
+        KvCli->>KvSrv: Execute("GET key")
+        KvSrv->>KvEng: session.ExecuteAsync
+        KvEng->>Kernel: snapshot read
+        Kernel-->>KvEng: value at snapshot
+        KvSrv-->>KvCli: ResultHeader, ResultRow, ResultComplete
+    end
+
+    Note over SqlEng,Kernel: Both engines share the kernel but never each other. Writes serialize per database at the apply gate, not across the host.
+
+    SqlCli->>SqlSrv: Terminate
+    KvCli->>KvSrv: Terminate
+    Note over Host: Stop — servers drain first, then services stop in reverse order
+```
+
 ### 3.5 Hosting and orchestration
 
 `Database.Hosting` remains **composition-only** with respect to the Database area: its only
