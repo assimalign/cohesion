@@ -124,7 +124,11 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<QueryResult> ExecuteAddConstraintAsync(SqlAddConstraintPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        await AcquireReferentialLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
+        // The backfill below validates every existing row against latest state, so
+        // it needs table-grain exclusivity, not the row-grain referential locks
+        // DML uses: the Exclusive lock on this table taken here, plus the
+        // Exclusive locks on every referenced parent taken by
+        // LockReferencedTablesAsync once the constraint has been bound.
         await AcquireObjectLockAsync(statement, plan.Table.Schema, plan.Table.Name, "ALTER TABLE ADD CONSTRAINT", cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
         if (plan.Constraint.Kind == SqlConstraintKind.PrimaryKey && plan.Table.PrimaryKeyColumns.Count > 0)

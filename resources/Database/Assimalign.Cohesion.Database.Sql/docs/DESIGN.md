@@ -424,15 +424,24 @@ description + exported registrations), the engine binds them.
   effects)) and the tree walk for open-time scrub (the ledger dies with the
   process) — both end in the same physical operations.
 - **The lock-ordering rule** (uniform across INSERT/UPDATE/DELETE so cycles stay
-  detectable and rare): phase one acquires the table IntentExclusive lock, then
-  row Exclusive locks sorted by packed location, then **unique-index key locks
-  sorted by key hash** (`IndexKey.Hash`, the same FNV-1a identity the B+Tree
-  locks internally). Inside the apply gate the B+Tree re-acquires the key lock
-  as a same-owner re-grant that completes synchronously — **no lock wait can
-  ever occur while the gate is held** (a wait there would be invisible to
-  deadlock detection). Non-unique indexes take no key locks. Key locks and row
-  locks share the `LockResource.Entry` space; a hash/location collision only
-  over-locks, and the class ordering keeps acquisition globally consistent.
+  detectable and rare): phase one acquires the adjacent tables' IntentShared
+  locks in object-id order, then the table's IntentExclusive lock, then row
+  Exclusive locks sorted by packed location, then **parent-row Shared locks
+  sorted by (object, entry)** for the outgoing foreign keys the statement takes
+  on and for the ones it releases, then
+  **unique-index key locks sorted by key hash** (`IndexKey.Hash`, the same FNV-1a
+  identity the B+Tree locks internally). Object-grain locks are intent-only
+  across classes one and two, and intent modes are mutually compatible, so only
+  the entry-grain classes can conflict. Inside the apply gate the B+Tree
+  re-acquires the key lock as a same-owner re-grant that completes synchronously
+  — **no lock wait can ever occur while the gate is held** (a wait there would be
+  invisible to deadlock detection). Non-unique indexes take no key locks. Key
+  locks and row locks share the `LockResource.Entry` space; a hash/location
+  collision only over-locks, and the class ordering keeps acquisition globally
+  consistent. **The one deliberate exception is the cascade walk**, which locks
+  rows in discovery order because the closure it is discovering is what
+  determines the lock set; see "Referential enforcement locks parent rows" under
+  constraints for why that trade was taken and what it costs.
 - **Uniqueness = the B+Tree's latest-state check under the exclusive hashed-key
   lock** (never snapshot visibility — write skew; the recorded #851 lesson).
   Violations surface as the area root's `DatabaseException` at the model
@@ -744,12 +753,64 @@ in the key, including its duplicate check. A single numeric or Boolean offending
 value is carried when available; strings, binary values and composite keys are
 omitted, including the encoded index exception that could disclose them.
 
-Foreign-key connected tables acquire existing table object locks in object-id
-order before row/key locks and the apply gate. This deliberately serializes
-writes within a connected reference graph; unrelated tables keep their existing
-concurrency. Snapshot parent checks are also checked against current stamps,
-and incoming-reference checks use current committed/self state while those locks
-are held, preventing a concurrent parent delete from admitting an orphan.
+**Referential enforcement locks parent rows, not reference graphs.** Every
+constraint check needs one guarantee from the lock manager: *before a statement
+reads a table's latest state for some key, every other writer of that key is
+already decided* — committed, or rolled back with its undo complete. Two
+conflicting locks on the **parent row** deliver it:
+
+- A child writer (INSERT, or an UPDATE that sets a foreign key) takes `Shared`
+  on the parent row version it matched, then re-checks that version's stamps
+  under the lock. Holding it is what stops a concurrent parent delete from
+  admitting an orphan; the stamp check is what rejects a parent the writer's own
+  snapshot still sees but a committed transaction has already removed.
+- A child writer that **releases** a reference — deleting the row (including as
+  a cascade target), or changing its key away — takes the same `Shared` lock on
+  the parent row it is giving up. This half is not symmetry for its own sake: a
+  latest-state read treats an *undecided* tombstone as absence, so without it a
+  parent delete concludes the row is unreferenced, commits, and is contradicted
+  the moment the child's transaction rolls back and restores the reference.
+  `ParentDelete_ConcurrentUncommittedChildDelete_ShouldNotStrandTheRestoredChild`
+  is the regression guard. The cascade walk skips the edge it arrived by, whose
+  parent row the statement already holds exclusively — that is also what keeps
+  the constraint-lookup access-path metrics unchanged.
+- A parent writer takes `Exclusive` on every row it deletes or re-keys **before**
+  reading child tables for incoming references. `Shared` and `Exclusive` are
+  incompatible, so by the time that read happens every child writer that acquired
+  *or released* a reference to the row has been decided.
+
+Table-grain locks stay intent-only: `IntentShared` on the adjacent tables a
+statement reads for constraint purposes, which is compatible with other writers'
+`IntentExclusive` and blocks only table-grain DDL, keeping parent definitions
+stable for the life of the statement. A cascade walks the closure locking as it
+descends — a row is exclusively locked before its children are read — because a
+transitive closure cannot be pre-sorted.
+
+**Why not component-wide exclusion (the rejected original).** The first cut took
+`Exclusive` on every table in the transitive closure of the reference graph, in
+object-id order, before row/key locks and the apply gate. It was correct and
+could not deadlock, but in a normalized schema that closure is usually the whole
+database, so a single foreign key serialized nearly every writer — the cost was
+the feature, not an edge case. Narrowing to parent-row granularity buys back
+that concurrency (`ForeignKeyComponent_ConcurrentWritesToDifferentTables_ShouldNotSerialize`
+is the proof: writers of different tables in one component now overlap, and two
+children may hold shared locks on the same parent row at once) and pays for it
+in one place — **referential waits can now form wait-for cycles**, where the
+closure's object-id ordering made them impossible. They surface as the lock
+manager's requester-closes-cycle abort, the retryable
+`DatabaseTransactionDeadlockException` the row-write path already produces, so
+the failure mode is one callers must already handle. The MVCC alternative —
+validating references optimistically and rechecking at commit — was not taken:
+the coordinator has no commit-time validation hook, adding one would be a new
+concurrency mechanism in `Database.Transactions`, and lock-based enforcement
+reuses the machinery that already arbitrates every other wait in the engine.
+
+DDL constraint backfills are the exception that stays table-grain: `ADD
+CONSTRAINT` / `ADD COLUMN` validate *every* existing row against latest state,
+so they hold the `Exclusive` table lock on their own table plus the `Exclusive`
+locks on every referenced parent — the same guarantee at table grain, and DDL is
+rare enough that its cost is not the engine's concurrency story.
+
 Reference lookups select the longest usable leading-column index prefix and
 reorder equality values to match its column order. Partial prefixes retain a
 residual comparison for remaining columns; they scan the table only when no

@@ -132,6 +132,89 @@ public sealed class SqlConstraintRaceTests
     }
 
     [Fact]
+    public async Task ForeignKeyComponent_ConcurrentWritesToDifferentTables_ShouldNotSerialize()
+    {
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-component-concurrency" });
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var setup = await database.CreateSessionAsync();
+        await using var first = await database.CreateSessionAsync();
+        await using var second = await database.CreateSessionAsync();
+
+        // One connected reference component: orders -> customers <- invoices.
+        // Referential enforcement locks the referenced parent rows, not the
+        // component, so writers of different tables in the component overlap.
+        await setup.ExecuteAsync("CREATE TABLE customers (id INT PRIMARY KEY)");
+        await setup.ExecuteAsync("CREATE TABLE orders (id INT PRIMARY KEY, customer_id INT REFERENCES customers(id))");
+        await setup.ExecuteAsync("CREATE TABLE invoices (id INT PRIMARY KEY, customer_id INT REFERENCES customers(id))");
+        await setup.ExecuteAsync("INSERT INTO customers VALUES (1), (2), (4)");
+
+        await first.ExecuteAsync("BEGIN");
+        await second.ExecuteAsync("BEGIN");
+        await first.ExecuteAsync("INSERT INTO orders VALUES (10, 1)", cancellationToken: TestTimeout.Token());
+
+        // Every write below runs while the first transaction is still open and
+        // holds its locks. Each one waited for that transaction's commit under
+        // component-wide locking; none of them may wait now.
+        var otherChild = second.ExecuteAsync("INSERT INTO invoices VALUES (20, 2)", cancellationToken: TestTimeout.Token()).AsTask();
+        otherChild.IsCompleted.ShouldBeTrue();
+        (await otherChild).AffectedCount.ShouldBe(1);
+
+        // Sharing one parent row does not serialize them either: a foreign key
+        // takes a shared lock on the referenced row, and shared locks coexist.
+        var sharedParent = second.ExecuteAsync("INSERT INTO invoices VALUES (21, 1)", cancellationToken: TestTimeout.Token()).AsTask();
+        sharedParent.IsCompleted.ShouldBeTrue();
+        (await sharedParent).AffectedCount.ShouldBe(1);
+
+        // The parent table stays writable while both children hold references
+        // into it; only the referenced rows themselves are locked.
+        var parentInsert = first.ExecuteAsync("INSERT INTO customers VALUES (3)", cancellationToken: TestTimeout.Token()).AsTask();
+        parentInsert.IsCompleted.ShouldBeTrue();
+        (await parentInsert).AffectedCount.ShouldBe(1);
+
+        // Deleting an unreferenced parent row is a write to the same table the
+        // other transaction's foreign keys point at — the shared locks it holds
+        // are on rows 1 and 2, not on row 4.
+        var unrelatedDelete = first.ExecuteAsync("DELETE FROM customers WHERE id = 4", cancellationToken: TestTimeout.Token()).AsTask();
+        unrelatedDelete.IsCompleted.ShouldBeTrue();
+        (await unrelatedDelete).AffectedCount.ShouldBe(1);
+
+        await first.ExecuteAsync("COMMIT");
+        await second.ExecuteAsync("COMMIT");
+        (await Rows(setup, "SELECT id FROM orders")).Select(row => row[0]).ShouldBe(new object?[] { 10 });
+        (await Rows(setup, "SELECT id FROM invoices ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 20, 21 });
+        (await Rows(setup, "SELECT id FROM customers ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2, 3 });
+    }
+
+    [Fact]
+    public async Task ParentDelete_ConcurrentUncommittedChildDelete_ShouldNotStrandTheRestoredChild()
+    {
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-released-reference" });
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var child = await database.CreateSessionAsync();
+        await using var parent = await database.CreateSessionAsync();
+        await child.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)");
+        await child.ExecuteAsync("CREATE TABLE c (id INT PRIMARY KEY, pid INT REFERENCES p(id) ON DELETE RESTRICT)");
+        await child.ExecuteAsync("INSERT INTO p VALUES (1)");
+        await child.ExecuteAsync("INSERT INTO c VALUES (2, 1)");
+
+        // The child's reference is released by a transaction that has not decided
+        // yet. A latest-state read sees the tombstone as absence, so the parent
+        // delete must wait on the releasing transaction rather than conclude the
+        // parent is unreferenced — a rollback would otherwise restore an orphan.
+        await child.ExecuteAsync("BEGIN");
+        await parent.ExecuteAsync("BEGIN");
+        await child.ExecuteAsync("DELETE FROM c WHERE pid = 1");
+        var deletion = parent.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: TestTimeout.Token()).AsTask();
+        deletion.IsCompleted.ShouldBeFalse();
+
+        await child.ExecuteAsync("ROLLBACK");
+        await Should.ThrowAsync<SqlConstraintViolationException>(async () => await deletion);
+        await parent.ExecuteAsync("ROLLBACK");
+        (await Rows(child, "SELECT id FROM p")).Select(row => row[0]).ShouldBe(new object?[] { 1 });
+        (await Rows(child, "SELECT id FROM c")).Select(row => row[0]).ShouldBe(new object?[] { 2 });
+    }
+
+    [Fact]
     public async Task CyclicCascade_ShouldDeleteEachRowOnceAndRollbackTogether()
     {
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "constraint-cycle" });
