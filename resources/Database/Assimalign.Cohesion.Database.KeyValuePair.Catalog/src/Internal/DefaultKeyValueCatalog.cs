@@ -42,6 +42,14 @@ internal sealed class DefaultKeyValueCatalog : IKeyValueCatalog
         return catalog;
     }
 
+    internal KeyValueCatalogSnapshot CaptureSnapshot()
+    {
+        lock (_sync)
+        {
+            return new KeyValueCatalogSnapshot(_entrySpaceFormatVersion, _registrations.ToArray());
+        }
+    }
+
     /// <inheritdoc />
     public int EntrySpaceFormatVersion
     {

@@ -7,6 +7,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
@@ -81,12 +82,26 @@ internal sealed class KeyValueOperationExecutor
         new QueryColumn { Name = "exists", Ordinal = 0, Type = DatabaseType.Boolean },
     ];
 
+    private static readonly IReadOnlyList<QueryColumn> keySpaceColumns =
+    [
+        new QueryColumn { Name = "database_name", Ordinal = 0, Type = DatabaseType.String },
+        new QueryColumn { Name = "keyspace_id", Ordinal = 1, Type = DatabaseType.Int64 },
+        new QueryColumn { Name = "entry_space_format_version", Ordinal = 2, Type = DatabaseType.Int32 },
+        new QueryColumn { Name = "primary_index_name", Ordinal = 3, Type = DatabaseType.String },
+        new QueryColumn { Name = "index_kind", Ordinal = 4, Type = DatabaseType.String },
+        new QueryColumn { Name = "is_unique", Ordinal = 5, Type = DatabaseType.Boolean },
+    ];
+
+    private readonly DatabaseName _databaseName;
+    private readonly IKeyValueCatalog _catalog;
     private readonly KeyValueStorage _storage;
     private readonly IIndex _primaryIndex;
     private readonly RecordVersionIndex _primaryIndexVersions;
 
-    internal KeyValueOperationExecutor(KeyValueStorage storage, IIndex primaryIndex)
+    internal KeyValueOperationExecutor(DatabaseName databaseName, IKeyValueCatalog catalog, KeyValueStorage storage, IIndex primaryIndex)
     {
+        _databaseName = databaseName;
+        _catalog = catalog;
         _storage = storage;
         _primaryIndex = primaryIndex;
         _primaryIndexVersions = new RecordVersionIndex(primaryIndex);
@@ -99,6 +114,7 @@ internal sealed class KeyValueOperationExecutor
     {
         return request switch
         {
+            KeyValueKeySpacesRequest => ExecuteKeySpaces(cancellationToken),
             KeyValueGetRequest get => await ExecuteGetAsync(get, context, cancellationToken).ConfigureAwait(false),
             KeyValueExistsRequest exists => await ExecuteExistsAsync(exists, context, cancellationToken).ConfigureAwait(false),
             KeyValueScanRequest scan => await ExecuteScanAsync(scan, context, cancellationToken).ConfigureAwait(false),
@@ -109,6 +125,29 @@ internal sealed class KeyValueOperationExecutor
     }
 
     // ── Reads ──────────────────────────────────────────────────────────
+
+    private QueryResult ExecuteKeySpaces(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var catalog = KeyValueCatalog.CaptureSnapshot(_catalog);
+        var rows = new List<object?[]>();
+
+        // Only the implicit key space is supported. Catalog registrations are
+        // its source of identity and index metadata; physical pages stay private.
+        foreach (var registration in catalog.IndexRegistrations)
+        {
+            if (registration.ObjectId == KeySpaceObjectId &&
+                string.Equals(registration.Definition.Name, PrimaryIndexName, StringComparison.Ordinal))
+            {
+                rows.Add([
+                    _databaseName.ToString(), (long)registration.ObjectId, catalog.EntrySpaceFormatVersion,
+                    registration.Definition.Name, registration.Definition.Kind.ToString(), registration.Definition.IsUnique,
+                ]);
+            }
+        }
+
+        return new KeyValueMaterializedResultSet(keySpaceColumns, rows);
+    }
 
     private async ValueTask<QueryResult> ExecuteGetAsync(KeyValueGetRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {

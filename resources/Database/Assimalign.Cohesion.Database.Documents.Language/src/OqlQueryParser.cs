@@ -265,6 +265,18 @@ public sealed partial class OqlQueryParser : QueryParser
     private static Location Span(Lexeme start, Lexeme end) =>
         Location.Create(start.Line, end.Line + end.Text.AsSpan().Count('\n'), start.Start, end.End);
 
+    private string CollectionName()
+    {
+        string name = Identifier();
+        // This namespace identifies virtual collections in the current database.
+        // It does not introduce general database-qualified collection names.
+        if (string.Equals(name, "COHESION_SCHEMA", StringComparison.OrdinalIgnoreCase) && Take(TokenType.Dot))
+        {
+            name += "." + Identifier();
+        }
+        return name;
+    }
+
     private string Identifier(bool allowKeyword = false)
     {
         var token = Current;

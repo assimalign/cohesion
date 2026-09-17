@@ -16,7 +16,8 @@ every mandatory ISO feature.
 
 The implemented syntax is an explicitly bounded subset. **`INSERT` is the standard graph-insertion
 verb. `CREATE (pattern)` is a Cohesion compatibility extension**, retained for the phase-5 examples.
-Both compile to the same `Creates` AST. Repeated colon labels and `!=` are accepted conveniences;
+Both compile to the same `Creates` AST. Database-scoped catalog `SHOW` statements are another
+explicit Cohesion extension. Repeated colon labels and `!=` are accepted conveniences;
 applications seeking portable syntax should use one label per pattern and `<>`. Database, graph,
 schema, and session selection statements are outside the profile: all evaluation stays inside the
 already-bound logical database.
@@ -42,7 +43,8 @@ flowchart LR
 ```
 
 `GqlQueryExpression` carries match paths, an optional predicate, insertion paths, deletion variables,
-a detach flag, and projections. Every path holds one more node than relationship. Anonymous nodes
+a detach flag, projections, and an optional `GqlCatalogSurface` for dedicated metadata statements.
+Catalog statements cannot carry graph clauses. Every path holds one more node than relationship. Anonymous nodes
 and relationships have a null variable. Relationship directions are relative to consecutive pattern
 nodes; incoming arrows reverse that relationship's endpoints. A scalar property reference always
 contains a variable and exactly one property key; qualified database names have no AST representation.
@@ -62,6 +64,7 @@ The builtin-function table is empty because the executor implements no functions
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
 | `DETACH DELETE` | Bound node/relationship variables following a match | Deletes incident relationships with the node in one transaction |
+| `SHOW` | `LABELS`, `RELATIONSHIP TYPES`, `PROPERTY KEYS`, `INDEXES`, or `OBJECT OWNERSHIP`; Cohesion extension | Returns typed, read-only metadata from the session database's catalog snapshot |
 
 Match patterns accept `(a)`, `(a:Label {key: value})`, `-[r:TYPE]->`, `<-[r:TYPE]-`, and
 `-[r:TYPE]-`, including anonymous bracketed relationships. Scalar literals are null, Boolean,
@@ -83,6 +86,7 @@ predicate   := comparison ('AND' comparison)*
 comparison  := operand comparison-operator operand | '(' predicate ')'
 operand     := variable '.' property | scalar-literal
 projection  := variable ['.' property] [AS alias]
+catalog     := SHOW (LABELS | RELATIONSHIP TYPES | PROPERTY KEYS | INDEXES | OBJECT OWNERSHIP)
 ```
 
 A mutation can start without `MATCH`; a read or deletion must bind variables through `MATCH`.
@@ -91,6 +95,20 @@ Pattern chains are limited to 64 relationships. Predicates are limited to 128 ne
 also imposes a materialized-binding limit, documented in the Graph engine design. Quantified paths
 are unsupported, so cycles cannot cause unbounded repetition of a path pattern. The executor's
 trail rule permits repeated nodes but forbids repeated relationship identities within one path.
+
+### Dedicated catalog statement choice (C2)
+
+The separate `SHOW` grammar exposes metadata through the query language without constructing fake
+nodes or relationships for `MATCH`. Catalog definitions have stable catalog identities but are not
+graph elements. The extension adds no server scope or database selector and changes no public
+interface. Keywords are case-insensitive and comments and one optional trailing semicolon follow
+the ordinary lexer rules. A statement cannot combine `SHOW` with graph matching, projection or
+mutation. Attempted mutation composition produces `GQL0007`, including verbs such as `SET` and
+`DROP` that are otherwise unsupported. The engine validates direct AST requests too.
+
+The [engine's catalog section](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#catalog-introspection-c2)
+defines ordered result columns, SQL-consistent ownership vocabulary and session snapshot behavior.
+The parser describes only the metadata subject; it never accesses or caches catalog state.
 
 ## Diagnostics and conformance (#194, #195)
 
@@ -103,6 +121,7 @@ trail rule permits repeated nodes but forbids repeated relationship identities w
 | `GQL0004` | Invalid or out-of-range numeric literal |
 | `GQL0005` | Pattern length, comparison count, or expression nesting limit exceeded |
 | `GQL0006` | Duplicate literal property key |
+| `GQL0007` | `Graph catalog introspection is read-only.`: mutation composed with `SHOW` |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
 Capability checks run before syntax parsing, so a recognized unsupported clause does not degrade

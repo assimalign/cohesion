@@ -107,6 +107,30 @@ schema provisioner; tests directly save a Schema marker through the catalog.
 
 ## Verification and limits
 
+### Container ownership discovery (C2)
+
+`IBlobDatabase.GetContainersAsync`, `IBlobContainer.GetBlobsAsync`, and
+`IBlobContainer.GetPropertiesAsync` already provide object discovery. Ownership is the only
+additional surface: the `IBlobContainer.GetOwnershipAsync()` extension reads a read-only property
+bag containing `OWNER` (`DatabaseObjectOwner.Adhoc` or `DatabaseObjectOwner.Schema`) and
+`OWNING_SCHEMA` (the compiled schema name, or null). These names and meanings match SQL's
+`COHESION_SCHEMA.OBJECT_OWNERSHIP`; the existing container handle supplies the object identity.
+No public interface changes, replacement listing API, or Blob statement language are introduced.
+
+The extension reads the container's current catalog version through the same operation snapshot
+as blob reads. Explicit Snapshot transactions retain their visibility; ReadCommitted operations
+read fresh metadata. Automatic operations read current committed metadata. Results are detached
+read-only dictionaries, never stored metadata copies that require synchronization. Mutation
+through `IDictionary` (assignment, add, remove, or clear) throws the documented BCL diagnostic
+`NotSupportedException`; its explanatory message is localized by the runtime. There is no
+ownership write operation.
+
+Ownership remains scoped to the handle's database and session. The stable container id is
+checked before reading, so a dropped and recreated container cannot be inspected through a
+stale handle; disposed sessions and canceled operations retain their ordinary diagnostics.
+An external `IBlobContainer` implementation that does not support this engine extension receives
+`DatabaseException` with "This blob container does not support ownership discovery."
+
 The Shouldly suites cover chunk boundaries, empty objects, replacements, metadata/prefix
 listing, page and content CRC, snapshots, rollback, stale writers, cancellation, ownership,
 logical database lifecycle and scope guards. A child process round-trips a 128 MiB object with

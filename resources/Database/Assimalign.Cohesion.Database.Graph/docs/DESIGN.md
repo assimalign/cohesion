@@ -5,15 +5,27 @@
 The fifth database engine follows Documents' parser/planner/executor composition and Blob's
 engine-owned lifecycle. `GraphDatabaseEngine` is the public factory and engine implementation;
 database, session, transaction, planner and executor implementations are internal. Its dependencies
-are the area root and the Graph.Language, Graph.Catalog and Graph.Storage packages. Storage uses
+are the area root, Connections and the Graph.Language, Graph.Catalog and Graph.Storage packages. Storage uses
 shared Storage, Transactions and Indexing rather than another pager, journal or lock manager.
 
 | Package | Responsibility |
 | --- | --- |
-| `Database.Graph` | Engine, sessions, typed operations, planning and execution |
+| `Database.Graph` | Engine, sessions, typed operations, planning, execution and catalog protocol server |
 | `Database.Graph.Language` | ISO GQL subset, AST and syntax/capability diagnostics |
 | `Database.Graph.Catalog` | Snapshot-visible labels, types, property keys, index metadata and ownership |
 | `Database.Graph.Storage` | Record encoding, kernel adapter, adjacency and property B+Trees |
+
+The engine references the area root, transport abstraction and its model packages; the protocol
+and security contracts arrive through the area's root composition. These are dependency edges:
+
+```mermaid
+flowchart LR
+    Engine["Database.Graph"] --> Root["Database"]
+    Engine --> Connections["Connections"]
+    Engine --> Language["Graph.Language"]
+    Engine --> Catalog["Graph.Catalog"]
+    Engine --> Storage["Graph.Storage"]
+```
 
 No existing public interface changed. `IGraphDatabase` accepts an explicit `IDatabaseSession` for
 each data operation. Every entry point checks the concrete session's database identity; sharing an
@@ -134,10 +146,69 @@ to the frozen traversal contract.
 
 The [supported-clause matrix](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#supported-clause-matrix)
 is the single executable-language inventory: MATCH, WHERE, RETURN, INSERT, CREATE (compatibility
-extension), DELETE and DETACH DELETE. Parameters, functions, variable-length paths, aggregations,
+extension), DELETE, DETACH DELETE and SHOW (catalog extension). Parameters, functions, variable-length paths, aggregations,
 ordering, graph selection and language DDL are not advertised. Label/type/index management is the
 session-bound C# schema API. The ISO decision and conformance corpus are documented alongside the
 parser; this is a bounded ISO subset, not a full conformance claim.
+
+## Catalog introspection (C2)
+
+`GraphSchema.Open(database, session)` already supplies in-process discovery of labels, relationship
+types, property keys and indexes. C2 preserves that interface and makes the same catalog reachable
+through textual requests on the existing `IDatabaseSession.ExecuteAsync` query boundary. Dedicated
+`SHOW` statements are Cohesion GQL extensions, not ISO conformance claims. A catalog definition is
+not a graph node: exposing it through `MATCH` would invent graph identities and relationships and
+would reserve labels in the user graph. `SHOW` instead returns a typed result set with no fabricated
+graph elements or persisted system data.
+
+`GraphDatabaseServer.Create(engine, options)` exposes these statements to the existing generic
+`Database.Client` over the shared Cohesion protocol. The composition root supplies an
+`IConnectionListener` through `GraphDatabaseServerOptions.Listener` and owns the engine lifecycle;
+the server owns the listener and its accepted sessions. Startup authentication binds each connection
+to one database. Typed scalar result columns and rows use the existing protocol codecs, including
+GUID identities and nullable ownership values. The catalog server deliberately supports only `SHOW`
+statements: other graph queries return `ExecutionFailure` with
+`The graph wire server supports catalog SHOW statements only.` Graph element serialization and a
+typed Graph client remain outside this increment. No existing interface gained a transport member.
+
+Each statement has a fixed ordered column contract. All name columns are strings, identity columns
+are GUIDs, and `IS_REQUIRED` and `IS_UNIQUE` are Booleans.
+
+| Statement | Columns in result order |
+| --- | --- |
+| `SHOW LABELS` | `DATABASE_NAME`, `LABEL_ID`, `LABEL_NAME` |
+| `SHOW RELATIONSHIP TYPES` | `DATABASE_NAME`, `RELATIONSHIP_TYPE_ID`, `RELATIONSHIP_TYPE_NAME` |
+| `SHOW PROPERTY KEYS` | `DATABASE_NAME`, `DEFINITION_TYPE`, `DEFINITION_ID`, `DEFINITION_NAME`, `PROPERTY_KEY`, `DATA_TYPE`, `IS_REQUIRED` |
+| `SHOW INDEXES` | `DATABASE_NAME`, `LABEL_ID`, `LABEL_NAME`, `INDEX_NAME`, `PROPERTY_KEY`, `IS_UNIQUE` |
+| `SHOW OBJECT OWNERSHIP` | `DATABASE_NAME`, `DEFINITION_TYPE`, `DEFINITION_ID`, `DEFINITION_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` |
+
+`DEFINITION_TYPE` distinguishes `LABEL` from `RELATIONSHIP TYPE`, including when both have the same
+name. `DATA_TYPE` is the declared shared `DatabaseType` name, or null for an unconstrained key;
+observed property values do not invent a declared type. Current node-property indexes are nonunique,
+so `IS_UNIQUE` is false. Storage pages and physical index registrations stay internal. Definition
+names and their child names retain the catalog's ordinal ordering; label definitions precede
+relationship-type definitions. Definitions remain discoverable when the last graph element is gone.
+
+Ownership follows SQL's `COHESION_SCHEMA.OBJECT_OWNERSHIP` vocabulary: `OBJECT_TYPE`, `OBJECT_NAME`,
+`OWNER` (`Adhoc` or `Schema`) and nullable `OWNING_SCHEMA`. The owning schema is the compiled/schema
+authority, never a graph namespace. Label and relationship-type rows report their persisted owner.
+Property and index metadata has no independent ownership field: its rows report the parent
+definition's authority because catalog mutation enforcement checks that parent. `OBJECT_TYPE` is
+`LABEL`, `RELATIONSHIP TYPE`, `PROPERTY KEY` or `INDEX`; the definition identity disambiguates children.
+
+The executor reads all definitions and children using the operation's existing pinned MVCC snapshot.
+Snapshot transactions retain their original visibility; ReadCommitted and auto-commit statements
+observe catalog changes at statement start. Own uncommitted definitions are visible in the same
+transaction, other sessions cannot see them, and rollback leaves no virtual rows behind. Dropping a
+definition removes its property/index/ownership rows from fresh snapshots. Results are computed at
+execution time and never materialized into the graph's persistent record space.
+
+`SHOW` always targets the session's logical database. There is no database qualifier, server listing,
+graph selection, filtering, projection, or mutation composition in this bounded extension. An
+attempt to append a mutation clause returns `GQL0007: Graph catalog introspection is read-only.`
+before any writer lock or data mutation; hand-built ASTs have the same protection. Unsupported
+read composition returns the ordinary syntax/binding diagnostic. Since no synthetic graph objects
+are created, ordinary graph writes cannot address or change these result rows.
 
 ## Metadata and diagnostics
 
@@ -155,6 +226,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | --- | --- |
 | `COHDBL001` | Unsupported language capability, reported on the parsed statement |
 | `GQL0001`–`GQL0006` | Parser syntax/literal/bound errors; see language design |
+| `GQL0007` | Attempt to mutate catalog introspection results |
 | `COHDBG001` | Invalid pattern, variable binding or traversal specification |
 | `COHDBG002` | Unknown label or relationship type |
 | `COHDBG003` | Schema/data mismatch, restricted deletion or invalid graph mutation |
@@ -177,6 +249,7 @@ grouped durability is configured. The flush worker still services the storage gr
 Names are single path components, directory lookup is case insensitive, and enumeration includes
 persisted databases not yet open in memory. Root-builder `AddGraphDatabase` registers the running
 engine without Hosting dependencies. The family is included in all solution, framework, CI and
-release-inventory surfaces. Wire transport, security, replication, Hosting/ApplicationModel changes
-and compiled-schema provisioning remain out of scope. No reflection or runtime code generation is
-used.
+release-inventory surfaces. General graph wire queries, model security policies, replication,
+Hosting/ApplicationModel changes and compiled-schema provisioning remain out of scope. The catalog
+server uses the shared authenticator rather than adding graph-specific authentication contracts.
+No reflection or runtime code generation is used.

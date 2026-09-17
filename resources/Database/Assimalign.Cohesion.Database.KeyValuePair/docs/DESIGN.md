@@ -15,7 +15,7 @@ Compose kernel pieces, never re-implement them — and compose them in a
 | Primary structure | the record space (scan-primary; indexes are secondary accelerators) | **the B+Tree primary key index** (index-primary; every read is a seek) |
 | Record payload | object-id-prefixed typed tuple, schema from the catalog | key + value as two binary tuple components, self-describing |
 | Conflict grain | table intent locks + per-row location locks + unique-key locks | **key locks only** (one per command) |
-| Statement surface | the SQL dialect | five command verbs (docs/COMMANDS.md) |
+| Statement surface | the SQL dialect | data commands plus `KEYSPACES` discovery (docs/COMMANDS.md) |
 | Catalog | schemas/tables/columns/indexes | registrations + format marker only |
 
 Both engines share, unchanged: the storage substrate (slotted pages, per-owner
@@ -93,7 +93,7 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
 
 ## The text seam (docs/COMMANDS.md — the grammar contract)
 
-The session's text-execute seam parses the five-verb command grammar into the
+The session's text-execute seam parses the command grammar into the
 same typed requests the typed seam executes. **Decision (2026-07-14): the
 recommended minimal-grammar shape was taken** — it makes the model
 wire-compatible with the existing `Execute` message (statement text + named
@@ -105,6 +105,50 @@ prediction) — would have forked the protocol message family and the server pum
 for no expressiveness gain over named binary parameters; it remains open as a
 measured-need optimization, not a default. The grammar is a contract: parser,
 COMMANDS.md, and the corpus tests change together (the DIALECT.md precedent).
+
+## Key-space catalog introspection (C2)
+
+The survey found one implicit key space and no named key-space registry. The
+catalog holds its primary index registration and entry-space format version;
+`GetAsync`, `ExistsAsync`, and `ScanAsync` already expose entry access, but none
+describes that key space. `KEYSPACES` extends the existing command vocabulary
+with discovery through the session and wire protocol. Its typed counterpart is
+`KeyValueKeySpacesRequest`; no existing public interface changes.
+
+The command returns one row describing the catalog-registered implicit space:
+database name, key-space object id, entry format version, primary-index name,
+index kind, and uniqueness. The exact column order and types are specified in
+[COMMANDS.md](COMMANDS.md#key-space-discovery-c2). The key-space id is local to
+the database and does not imply named-space support. Physical index pages remain
+internal. This model has no compiled-schema ownership or ownership enforcement,
+so there is no `OWNER` or `OWNING_SCHEMA` field to report. A smaller surface
+faithfully describes its catalog without inventing relational or schema concepts.
+
+The executor captures format and index registrations together under the
+catalog's metadata lock when each command runs. Rows are computed in memory from
+that capture and never persisted into entry storage or a second metadata cache.
+The next command sees newly published catalog state, even inside a snapshot
+transaction: catalog publications are self-committing, separate from entry MVCC.
+An already returned result retains its capture. The executor receives only its
+session's database catalog and name; no selector can address another database.
+
+The catalog snapshot belongs to the catalog package; the command executor
+depends on that snapshot and returns the ordinary wire result shape:
+
+```mermaid
+flowchart LR
+    Session["KeyValueDatabaseSession"] --> Parser["KeyValueCommandParser"]
+    Session --> Executor["KeyValueOperationExecutor"]
+    Executor --> Snapshot["KeyValuePair.Catalog snapshot"]
+```
+
+`KEYSPACES` is read-only. Both supported mutation verbs reject the reserved
+target (`PUT KEYSPACES ...`, `DELETE KEYSPACES ...`) before execution with
+`DatabaseParseException`, mapped to `ParseFailure` on the wire, and the stable
+diagnostic `The KEYSPACES catalog surface is read-only.` Keys passed as byte
+parameters remain data, including the bytes `KEYSPACES`. Scope, fresh captures,
+unchanged user storage, and client discovery/refusal are covered by
+`KeyValueIntrospectionTests` without replacing existing entry-access tests.
 
 ## The key-value server runtime (`KeyValueDatabaseServer`)
 

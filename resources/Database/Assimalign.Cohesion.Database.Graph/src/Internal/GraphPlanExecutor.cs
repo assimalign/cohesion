@@ -21,6 +21,10 @@ internal static class GraphPlanExecutor
         operation.EnsureActive();
         var error = statement.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
         if (error is not null) { throw new DatabaseParseException($"GQL parse error {error.Code}: {error.Message}"); }
+        if (statement.GqlExpression.CatalogSurface is { } surface)
+        {
+            return GraphCatalogIntrospection.Execute(database, operation, statement.GqlExpression, surface, token);
+        }
         var plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression);
         if (plan.Query.Creates.Count > 0 || plan.Query.DeleteVariables.Count > 0)
         { await database.LockWriterAsync(operation.Context, token).ConfigureAwait(false); }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -12,6 +13,19 @@ namespace Assimalign.Cohesion.Database.Blob.Internal;
 internal sealed class BlobContainer(BlobDatabaseInstance database, BlobContainerMetadata container, BlobDatabaseSession? session) : IBlobContainer
 {
     public string Name => container.Name;
+
+    internal ValueTask<IReadOnlyDictionary<string, object?>> GetOwnershipAsync(CancellationToken cancellationToken)
+        => database.RunAsync(session, operation =>
+        {
+            EnsureContainer(operation.Context);
+            var current = database.Catalog.FindContainer(container.Name, operation.Context.Snapshot)!.Value;
+            return new ValueTask<IReadOnlyDictionary<string, object?>>(
+                new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["OWNER"] = current.Owner,
+                    ["OWNING_SCHEMA"] = current.OwningSchema,
+                }));
+        }, cancellationToken);
 
     public async ValueTask<Stream> OpenWriteAsync(string name, BlobWriteOptions? options = null, CancellationToken cancellationToken = default)
     {

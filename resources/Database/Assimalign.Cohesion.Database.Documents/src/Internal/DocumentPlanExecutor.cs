@@ -24,6 +24,7 @@ internal static class DocumentPlanExecutor
         var plan = new DocumentPlanner(database.Catalog, operation.Context.Snapshot, parameters).Plan(statement.OqlExpression);
         return plan switch
         {
+            DocumentSystemCollectionPlan system => ExecuteSystemCollection(database, operation, system, parameters, cancellationToken),
             DocumentPlan select => await ExecuteSelectAsync(database, operation, select, parameters, cancellationToken).ConfigureAwait(false),
             DocumentCreateIndexPlan createIndex => await ExecuteCreateIndexAsync(database, operation, createIndex, cancellationToken).ConfigureAwait(false),
             DocumentDropIndexPlan dropIndex => await ExecuteDropIndexAsync(database, operation, dropIndex, cancellationToken).ConfigureAwait(false),
@@ -54,8 +55,28 @@ internal static class DocumentPlanExecutor
             if (evaluator.Matches(query.Predicate, json.RootElement)) { matches.Add(json.RootElement.Clone()); }
         }
 
+        return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
+    }
+
+    private static QueryResult ExecuteSystemCollection(DocumentDatabaseInstance database, DocumentOperation operation,
+        DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    {
+        var evaluator = new DocumentExpressionEvaluator(plan.Logical.Query.Alias, parameters);
+        var matches = new List<JsonElement>();
+        foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))
+        {
+            operation.EnsureActive();
+            if (evaluator.Matches(plan.Logical.Query.Predicate, document)) { matches.Add(document); }
+        }
+        return ExecuteRows(plan.Logical, matches, evaluator, cancellationToken);
+    }
+
+    private static QueryResult ExecuteRows(DocumentLogicalPlan logical, List<JsonElement> matches,
+        DocumentExpressionEvaluator evaluator, CancellationToken cancellationToken)
+    {
+        var query = logical.Query;
         var output = new List<EvaluatedRow>();
-        if (plan.Logical.IsGrouped)
+        if (logical.IsGrouped)
         {
             var groups = new SortedDictionary<object?[], List<JsonElement>>(TupleComparer.Instance);
             if (query.GroupBy.Count == 0) { groups.Add([], matches); }
@@ -92,17 +113,17 @@ internal static class DocumentPlanExecutor
                 return left.Ordinal.CompareTo(right.Ordinal);
             });
         }
-        var columns = new QueryColumn[plan.Logical.Projections.Count];
+        var columns = new QueryColumn[logical.Projections.Count];
         for (int i = 0; i < columns.Length; i++)
         {
             var types = output.Select(row => GetType(row.Values[i])).Where(type => type != DatabaseType.Null).Distinct().ToArray();
-            columns[i] = new QueryColumn { Name = plan.Logical.Projections[i].Name, Ordinal = i, Type = types.Length == 1 ? types[0] : DatabaseType.Null };
+            columns[i] = new QueryColumn { Name = logical.Projections[i].Name, Ordinal = i, Type = types.Length == 1 ? types[0] : DatabaseType.Null };
         }
         return new DocumentQueryResult(columns, output.Select(row => row.Values).ToList());
 
         void Project(JsonElement document, IReadOnlyList<JsonElement>? group)
         {
-            var values = plan.Logical.Projections.Select(projection => evaluator.Evaluate(projection.Expression, document, group)).ToArray();
+            var values = logical.Projections.Select(projection => evaluator.Evaluate(projection.Expression, document, group)).ToArray();
             var orderKeys = query.OrderBy.Select(order => evaluator.Evaluate(order.Expression, document, group)).ToArray();
             output.Add(new EvaluatedRow(values, orderKeys, output.Count));
         }

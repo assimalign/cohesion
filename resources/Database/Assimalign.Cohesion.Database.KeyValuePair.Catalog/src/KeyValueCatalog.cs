@@ -9,6 +9,9 @@ using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 /// </summary>
 public static class KeyValueCatalog
 {
+    internal static KeyValueCatalogSnapshot CaptureSnapshot(IKeyValueCatalog catalog)
+        => ((DefaultKeyValueCatalog)catalog).CaptureSnapshot();
+
     /// <summary>
     /// Opens the catalog persisted on the given storage, loading any existing
     /// metadata records.

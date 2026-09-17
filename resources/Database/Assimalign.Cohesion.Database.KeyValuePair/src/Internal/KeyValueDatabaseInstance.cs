@@ -238,7 +238,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        var executor = new KeyValueOperationExecutor(_storage, _primaryIndex);
+        var executor = new KeyValueOperationExecutor(Name, _catalog, _storage, _primaryIndex);
         var session = new KeyValueDatabaseSession(this, _coordinator, executor);
 
         return new ValueTask<IDatabaseSession>(session);

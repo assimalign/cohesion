@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 public sealed class OqlSelectExpression : OqlExpression
 {
     /// <summary>Initializes a collection query.</summary>
-    /// <param name="collection">The unqualified collection name.</param>
+    /// <param name="collection">The unqualified collection name or reserved COHESION_SCHEMA system collection name.</param>
     /// <param name="alias">The optional iteration variable.</param>
     /// <param name="projections">The projected expressions.</param>
     /// <param name="predicate">The optional document filter.</param>

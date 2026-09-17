@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// </summary>
 public static class GqlClauses
 {
+    /// <summary>The Cohesion database-scoped catalog introspection extension.</summary>
+    public const string Show = "SHOW";
     /// <summary>Matches a graph pattern.</summary>
     public const string Match = "MATCH";
 

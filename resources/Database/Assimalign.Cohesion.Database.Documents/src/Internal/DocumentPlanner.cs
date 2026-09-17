@@ -12,6 +12,8 @@ internal sealed class DocumentPlanner(IDocumentCatalog catalog, TransactionSnaps
 {
     internal DocumentStatementPlan Plan(OqlExpression expression) => expression switch
     {
+        OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
+            new DocumentSystemCollectionPlan(CreateLogicalPlan(select), name),
         OqlSelectExpression select => Plan(select),
         OqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
         OqlDropIndexExpression dropIndex => PlanDropIndex(dropIndex),
@@ -27,6 +29,7 @@ internal sealed class DocumentPlanner(IDocumentCatalog catalog, TransactionSnaps
 
     private DocumentCreateIndexPlan PlanCreateIndex(OqlCreateIndexExpression create)
     {
+        DocumentSystemCollections.EnsureReadOnly(create.Collection);
         if (string.IsNullOrWhiteSpace(create.IndexName))
         {
             throw new DatabaseException("CREATE INDEX requires an index name.");
@@ -39,6 +42,7 @@ internal sealed class DocumentPlanner(IDocumentCatalog catalog, TransactionSnaps
 
     private DocumentDropIndexPlan PlanDropIndex(OqlDropIndexExpression drop)
     {
+        DocumentSystemCollections.EnsureReadOnly(drop.Collection);
         if (string.IsNullOrWhiteSpace(drop.IndexName))
         {
             throw new DatabaseException("DROP INDEX requires an index name.");

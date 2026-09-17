@@ -47,6 +47,7 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
     internal ValueTask<IDocumentCollection> CreateCollectionAsync(string name, DocumentDatabaseSession? session, CancellationToken token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        DocumentSystemCollections.EnsureReadOnly(name);
         return RunAsync(session, async operation =>
         {
             await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
@@ -81,6 +82,7 @@ internal sealed class DocumentDatabaseInstance : IDocumentDatabase
     internal async ValueTask DropCollectionAsync(string name, DocumentDatabaseSession? session, CancellationToken token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        DocumentSystemCollections.EnsureReadOnly(name);
         await RunAsync(session, async operation =>
         {
             await LockWriterAsync(operation.Context, token).ConfigureAwait(false);

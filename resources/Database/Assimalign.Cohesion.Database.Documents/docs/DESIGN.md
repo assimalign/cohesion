@@ -70,6 +70,59 @@ compiled-schema provisioning authority in this engine.
 
 ## OQL query and DDL semantics
 
+### Catalog introspection
+
+Collections are already discoverable through `GetCollectionsAsync` and
+`GetCollectionAsync`. OQL adds only the catalog facts those handles do not expose,
+through two virtual document collections:
+
+| Source | Document properties | Cardinality |
+| --- | --- | --- |
+| `COHESION_SCHEMA.INDEXES` | `COLLECTION_CATALOG`, `COLLECTION_NAME`, `INDEX_NAME`, `PATH`, `IS_UNIQUE` | One document per visible index definition; `IS_UNIQUE` is Boolean false for the current nonunique indexes |
+| `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `COLLECTION_CATALOG`, `COLLECTION_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | One document per visible collection; `OBJECT_TYPE` is `COLLECTION` |
+
+`COLLECTION_CATALOG` is the bound database name. `OWNER` preserves SQL's `Adhoc`
+and `Schema` values; `OWNING_SCHEMA` is the schema name or JSON null. Documents
+enforces ownership on the collection: index DDL checks that collection's owner.
+The index metadata has no independent ownership, so the ownership source reports
+collections and does not invent an index owner. Index paths retain the catalog's
+canonical document-path spelling; physical generation IDs and B+Tree pages remain
+internal. There is no collection schema or inferred document-field catalog.
+
+The sources are document shaped: `SELECT *` returns one JSON document per entry,
+and ordinary projection, aliases, parameters, filtering, grouping, aggregates,
+and ordering use the same evaluator as stored documents. For example:
+
+```sql
+SELECT INDEX_NAME, PATH FROM COHESION_SCHEMA.INDEXES
+WHERE COLLECTION_NAME = 'items' ORDER BY INDEX_NAME
+
+SELECT OBJECT_NAME, OWNER, OWNING_SCHEMA
+FROM COHESION_SCHEMA.OBJECT_OWNERSHIP
+```
+
+This follows the existing choice to put document index DDL in OQL and keeps the
+frozen database interface unchanged. The system-source names are case-insensitive;
+their JSON property names are case-sensitive, as with all document paths. Only the
+reserved `COHESION_SCHEMA` qualifier is accepted: it names a source in the session's
+database, never another database. Ordinary `other.items` remains invalid. Quoting
+the entire system-source name also identifies the same reserved source.
+
+Every query computes documents directly from the same transaction catalog snapshot
+used by the statement. Snapshot transactions retain their read horizon, while own
+uncommitted catalog writes are visible. Subsequent statements observe committed
+catalog changes according to their isolation level. No metadata copy, content record,
+or synthetic collection is stored, and existing collection listing stays unchanged.
+
+The sources are read-only. `CREATE INDEX` and `DROP INDEX` targeting either source,
+and `CreateCollectionAsync` or `DropCollectionAsync` using either reserved name,
+throw `DatabaseException` with `System collection '<canonical source>' is read-only.`
+before ordinary catalog lookup or mutation. OQL document `INSERT`, `UPDATE`, and
+`DELETE` remain unsupported everywhere and return the existing `COHDBL001` parse
+diagnostic. Virtual sources do not provide mutable `IDocumentCollection` handles.
+
+### Stored document queries
+
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
 SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, CREATE INDEX, and DROP INDEX are executed;

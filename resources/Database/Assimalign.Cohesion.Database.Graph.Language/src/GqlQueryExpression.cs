@@ -3,7 +3,7 @@ using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
 
-/// <summary>A finite graph match, optional mutation, and optional projection in one database.</summary>
+/// <summary>A finite graph query or read-only catalog statement in one database.</summary>
 /// <param name="matches">The patterns whose variables are bound before mutation or projection.</param>
 /// <param name="predicate">The optional scalar filter over matched bindings.</param>
 /// <param name="creates">The patterns inserted for each matching binding.</param>
@@ -27,4 +27,6 @@ public sealed class GqlQueryExpression(IReadOnlyList<GqlPathPattern> matches, Gq
     public bool DetachDelete { get; } = detachDelete;
     /// <summary>Gets the result projections.</summary>
     public IReadOnlyList<GqlProjection> Projections { get; } = projections;
+    /// <summary>Gets the optional read-only catalog subject; graph clauses cannot accompany it.</summary>
+    public GqlCatalogSurface? CatalogSurface { get; init; }
 }

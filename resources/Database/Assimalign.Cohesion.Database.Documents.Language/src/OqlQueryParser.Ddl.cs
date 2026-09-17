@@ -12,7 +12,7 @@ public sealed partial class OqlQueryParser
 
         string indexName = Identifier();
         Expect("ON");
-        string collection = Identifier();
+        string collection = CollectionName();
         Expect(TokenType.LeftParen, "'('");
         var path = ParseDocumentPath();
         Expect(TokenType.RightParen, "')'");
@@ -28,7 +28,7 @@ public sealed partial class OqlQueryParser
 
         string indexName = Identifier();
         Expect("ON");
-        string collection = Identifier();
+        string collection = CollectionName();
 
         return new OqlDropIndexExpression(indexName, collection, Span(start, Previous));
     }

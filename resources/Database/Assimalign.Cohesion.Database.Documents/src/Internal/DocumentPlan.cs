@@ -9,6 +9,7 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal abstract record DocumentStatementPlan;
 internal sealed record DocumentLogicalPlan(OqlSelectExpression Query, IReadOnlyList<DocumentProjection> Projections, bool IsGrouped);
 internal sealed record DocumentPlan(DocumentLogicalPlan Logical, DocumentCollectionMetadata Collection, DocumentAccessPath Access) : DocumentStatementPlan;
+internal sealed record DocumentSystemCollectionPlan(DocumentLogicalPlan Logical, string Name) : DocumentStatementPlan;
 internal sealed record DocumentCreateIndexPlan(DocumentCollectionMetadata Collection, string IndexName, string Path) : DocumentStatementPlan;
 internal sealed record DocumentDropIndexPlan(DocumentCollectionMetadata Collection, string IndexName) : DocumentStatementPlan;
 internal sealed record DocumentProjection(string Name, OqlExpression Expression);

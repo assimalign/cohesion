@@ -71,7 +71,11 @@ public sealed partial class GqlQueryParser : QueryParser
         }
         _tokens.Add(new Lexeme(TokenType.Eof, string.Empty, _source.Length, _source.Length, line));
 
-        FindUnsupported();
+        // SHOW has a deliberately separate grammar: catalog definitions are not graph elements.
+        // Check attempted composition before generic capability errors (SET, DROP, etc.).
+        bool catalogStatement = Is("SHOW");
+        if (catalogStatement) { FindCatalogMutation(); }
+        else { FindUnsupported(); }
         GqlQueryExpression expression;
         if (Failed) { expression = EmptyExpression(); }
         else if (Current.Type == TokenType.Eof)
@@ -79,6 +83,7 @@ public sealed partial class GqlQueryParser : QueryParser
             Error("GQL0001", "Query text is empty.", Current);
             expression = EmptyExpression();
         }
+        else if (catalogStatement) { expression = ParseCatalog(); }
         else if (Is("MATCH") || Is("CREATE") || Is("INSERT")) { expression = ParseQuery(); }
         else
         {

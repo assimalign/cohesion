@@ -38,7 +38,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | Clause | Supported | Shape or reason |
 | --- | --- | --- |
 | `SELECT` | Yes | One or more projected expressions, optional `AS` output names; `*` returns the source document |
-| `FROM` | Yes | Exactly one unqualified collection and optional iteration variable, with or without `AS` |
+| `FROM` | Yes | Exactly one unqualified collection or reserved `COHESION_SCHEMA` source and optional iteration variable, with or without `AS` |
 | `WHERE` | Yes | Scalar comparison and Boolean document filtering |
 | `GROUP BY` | Yes | One or more grouping expressions |
 | `HAVING` | Yes | Group filtering, including aggregate calls |
@@ -61,11 +61,12 @@ function. There is no implied support for the full ODMG specification.
 
 ```text
 statement    := (query | create-index | drop-index) [';']
-query        := SELECT projection (',' projection)* FROM identifier [AS? identifier]
+query        := SELECT projection (',' projection)* FROM collection [AS? identifier]
                 [WHERE expression] [GROUP BY expression (',' expression)*]
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
-create-index := CREATE INDEX identifier ON identifier '(' path ')'
-drop-index   := DROP INDEX identifier ON identifier
+create-index := CREATE INDEX identifier ON collection '(' path ')'
+drop-index   := DROP INDEX identifier ON collection
+collection   := identifier | COHESION_SCHEMA '.' identifier
 projection   := expression [AS identifier]
 ordering     := expression [ASC | DESC]
 path         := identifier ('.' identifier | '[' integer ']' | '[' string ']')*
@@ -138,7 +139,19 @@ limited to `CREATE INDEX` and `DROP INDEX`: both are parsed, planned, and execut
 engine in the same change that adds them to `OqlLanguageProfile`.
 
 An OQL statement cannot name a server or switch databases. `FROM other.collection` is invalid
-syntax; quoted collection names remain a single opaque identifier. `CREATE DATABASE`,
+syntax; quoted collection names remain a single opaque identifier. The only qualified source
+syntax is the reserved `COHESION_SCHEMA.<name>` namespace in the current database. The engine
+resolves `COHESION_SCHEMA.INDEXES` and `COHESION_SCHEMA.OBJECT_OWNERSHIP` to virtual document
+collections computed from its statement catalog snapshot. Their qualified names are
+case-insensitive, including fully quoted names. Their document fields retain ordinary
+case-sensitive OQL path semantics. No catalog or storage dependency is added to this parser.
+
+The same source syntax is parsed in index DDL so supported mutations receive the engine's
+stable `System collection '<canonical source>' is read-only.` diagnostic instead of an
+accidental syntax or missing-collection error. Projection, filtering, grouping, and ordering
+reuse ordinary SELECT syntax; no separate metadata API or statement class is introduced.
+The engine design documents the field shapes, snapshot visibility, and read-only rules.
+`CREATE DATABASE`,
 `DROP DATABASE`, `USE`, and other SQL data-mutation/transaction commands are unsupported.
 Multiple statements per parse are rejected. Logical database creation and deletion remain
 engine-side C# operations.

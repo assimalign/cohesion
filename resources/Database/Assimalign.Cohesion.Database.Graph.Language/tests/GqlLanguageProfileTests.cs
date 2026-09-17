@@ -59,7 +59,7 @@ public class GqlLanguageProfileTests
     {
         GqlLanguageProfile.Instance.Clauses.ShouldBe([
             GqlClauses.Match, GqlClauses.Return, GqlClauses.Create, GqlClauses.Insert,
-            GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where]);
+            GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where, GqlClauses.Show]);
     }
 
     [Theory]

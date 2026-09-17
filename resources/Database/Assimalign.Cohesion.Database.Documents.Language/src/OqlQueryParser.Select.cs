@@ -17,7 +17,7 @@ public sealed partial class OqlQueryParser
             projections.Add(new OqlProjection(expression, projectionAlias));
         } while (!Failed && Take(TokenType.Comma));
         Expect("FROM");
-        string collection = Identifier();
+        string collection = CollectionName();
         string? alias = null;
         if (Take("AS"))
         {

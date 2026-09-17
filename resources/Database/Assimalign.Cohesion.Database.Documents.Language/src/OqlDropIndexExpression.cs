@@ -9,7 +9,7 @@ public sealed class OqlDropIndexExpression : OqlExpression
 {
     /// <summary>Initializes a document index removal statement.</summary>
     /// <param name="indexName">The name of the index to remove.</param>
-    /// <param name="collection">The unqualified collection name.</param>
+    /// <param name="collection">The collection name; the executor rejects reserved system collections as read-only.</param>
     /// <param name="location">The source span, with an exclusive end offset.</param>
     public OqlDropIndexExpression(string indexName, string collection, Location? location = null) : base(location)
     {
@@ -20,6 +20,6 @@ public sealed class OqlDropIndexExpression : OqlExpression
     /// <summary>Gets the name of the index to remove.</summary>
     public string IndexName { get; }
 
-    /// <summary>Gets the unqualified collection name.</summary>
+    /// <summary>Gets the collection name; database qualification is never accepted.</summary>
     public string Collection { get; }
 }
