@@ -12,9 +12,9 @@
 		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" ExcludeAssets="runtime" />
 	</ItemGroup>
 	<ItemGroup>
-		<Compile Include="..\..\Assimalign.Cohesion.Sdk\Tasks\Internal\Utilities\CohesionIdentifier.cs"
+		<Compile Include="..\..\..\Assimalign.Cohesion.Sdk\Tasks\Internal\Utilities\CohesionIdentifier.cs"
 			Link="Tasks\Internal\CohesionIdentifier.cs" />
-		<Compile Include="..\..\Assimalign.Cohesion.Sdk\Tasks\Tasks\Resources\ImageIndexFile.cs" Link="Tasks\ImageIndexFile.cs" />
-		<Compile Include="..\..\Assimalign.Cohesion.Sdk\Tasks\Tasks\Resources\ResourceFileWriter.cs" Link="Tasks\ResourceFileWriter.cs" />
+		<Compile Include="..\..\..\Assimalign.Cohesion.Sdk\Tasks\Tasks\Resources\ImageIndexFile.cs" Link="Tasks\ImageIndexFile.cs" />
+		<Compile Include="..\..\..\Assimalign.Cohesion.Sdk\Tasks\Tasks\Resources\ResourceFileWriter.cs" Link="Tasks\ResourceFileWriter.cs" />
 	</ItemGroup>
 </Project>
