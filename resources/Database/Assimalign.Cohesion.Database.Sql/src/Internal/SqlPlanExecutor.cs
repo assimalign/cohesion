@@ -22,7 +22,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// secondary-index maintenance, and catalog calls for DDL. Results are
 /// deterministic: scans yield rows in physical order and ORDER BY sorts are stable.
 /// </summary>
-internal sealed class SqlPlanExecutor
+internal sealed partial class SqlPlanExecutor
 {
     private readonly SqlStorage _storage;
     private readonly ISqlCatalog _catalog;
@@ -67,10 +67,11 @@ internal sealed class SqlPlanExecutor
             case SqlDropIndexPlan dropIndex:
                 return await ExecuteDropIndexAsync(dropIndex, statement, cancellationToken).ConfigureAwait(false);
             case SqlAddColumnPlan addColumn:
-                await AcquireObjectLockAsync(statement, addColumn.Schema, addColumn.Name,
-                    "ALTER TABLE ADD COLUMN", cancellationToken).ConfigureAwait(false);
-                await _catalog.AddColumnAsync(addColumn.Schema, addColumn.Name, addColumn.Column, cancellationToken).ConfigureAwait(false);
-                return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+                return await ExecuteAddColumnAsync(addColumn, statement, cancellationToken).ConfigureAwait(false);
+            case SqlAddConstraintPlan addConstraint:
+                return await ExecuteAddConstraintAsync(addConstraint, statement, cancellationToken).ConfigureAwait(false);
+            case SqlDropConstraintPlan dropConstraint:
+                return await ExecuteDropConstraintAsync(dropConstraint, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropColumnPlan dropColumn:
                 return await ExecuteDropColumnAsync(dropColumn, statement, cancellationToken).ConfigureAwait(false);
             default:
@@ -234,6 +235,10 @@ internal sealed class SqlPlanExecutor
 
     private async Task<QueryResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        await AcquireReferentialLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
+        await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
+            LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
+        EnsureCurrentDefinition(plan.Table);
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
         var indexes = GetLiveIndexes(plan.Table);
         var rows = new List<(byte[] Record, object?[] Values)>();
@@ -268,6 +273,8 @@ internal sealed class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(
             statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId), LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
 
+        ValidateRows(plan.Table, rows.Select(row => row.Values).ToList(), statement, cancellationToken);
+
         var uniqueKeyHashes = new List<ulong>();
         foreach (var (_, values) in rows)
         {
@@ -300,6 +307,10 @@ internal sealed class SqlPlanExecutor
 
     private async Task<QueryResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        await AcquireReferentialLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
+        await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
+            LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
+        EnsureCurrentDefinition(plan.Table);
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
         var indexes = GetLiveIndexes(plan.Table);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
@@ -326,6 +337,12 @@ internal sealed class SqlPlanExecutor
 
             replacements.Add((pageId, slotIndex, values, updated,
                 SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, updated, statement.Transaction.Sequence)));
+        }
+
+        ValidateRows(plan.Table, replacements.Select(row => row.NewValues).ToList(), statement, cancellationToken);
+        foreach (var replacement in replacements)
+        {
+            ValidateParentUpdate(plan.Table, replacement.OldValues, replacement.NewValues, statement, cancellationToken);
         }
 
         await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => (t.PageId, t.SlotIndex)), cancellationToken).ConfigureAwait(false);
@@ -377,45 +394,29 @@ internal sealed class SqlPlanExecutor
 
     private async Task<QueryResult> ExecuteDeleteAsync(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        await AcquireReferentialLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
+        await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
+            LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
+        EnsureCurrentDefinition(plan.Table);
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
-        var indexes = GetLiveIndexes(plan.Table);
-        var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
-
-        foreach (var (location, values) in Scan(plan.Table, statement, cancellationToken))
+        var targets = Scan(plan.Table, statement, cancellationToken).Where(row => evaluator.Matches(plan.Where, row.Values)).ToList();
+        var deletions = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>();
+        foreach (var target in targets)
         {
-            if (evaluator.Matches(plan.Where, values))
-            {
-                targets.Add((location.PageId, location.SlotIndex, values));
-            }
+            CollectCascadeDeletes(plan.Table, target.Location, target.Values, deletions, statement, cancellationToken);
         }
 
-        await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => (t.PageId, t.SlotIndex)), cancellationToken).ConfigureAwait(false);
-
-        // Deletes on unique indexes take the key lock too (the B+Tree
-        // delete-side discipline) — acquired here, before the apply gate.
-        var uniqueKeyHashes = new List<ulong>();
-        foreach (var (_, _, values) in targets)
-        {
-            CollectUniqueKeyHashes(indexes, plan.Table, values, uniqueKeyHashes);
-        }
-
-        await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
-
+        ValidateRestrictedDeletes(deletions, statement, cancellationToken);
+        await LockConstraintDeletesAsync(deletions.Values, statement, cancellationToken).ConfigureAwait(false);
         return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
         {
-            foreach (var (pageId, slotIndex, values) in targets)
+            foreach (var deletion in deletions.Values)
             {
-                EnsureLatestVersion(plan.Table, pageId, slotIndex, statement.Transaction.Sequence);
-
-                // Tombstone, not slot removal: older snapshots must keep seeing
-                // the row until the purge worker reclaims versions below every
-                // live snapshot's horizon. The index entries mirror the row
-                // version's deleter stamp.
-                TombstoneVersion(statement, bracket, pageId, slotIndex);
-                await TombstoneIndexEntriesAsync(
-                    statement, indexes, plan.Table, values, SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
+                EnsureLatestVersion(deletion.Table, deletion.Location.PageId, deletion.Location.SlotIndex, statement.Transaction.Sequence);
+                TombstoneVersion(statement, bracket, deletion.Location.PageId, deletion.Location.SlotIndex);
+                await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table), deletion.Table, deletion.Values,
+                    SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
             }
-
             return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, targets.Count);
         }, durable: false, cancellationToken).ConfigureAwait(false);
     }
@@ -502,10 +503,7 @@ internal sealed class SqlPlanExecutor
         {
             if (!_indexManager.TryGetIndex(table.ObjectId, metadata.Name, out var index))
             {
-                // Defensive: metadata and registrations persist atomically, so a
-                // described index always has a tree; tolerate a torn state by
-                // skipping rather than failing writes.
-                continue;
+                throw new DatabaseException($"Index '{metadata.Name}' on '{table.Schema}.{table.Name}' is unavailable; writes cannot bypass its constraints.");
             }
 
             var ordinals = new int[metadata.ColumnNames.Count];
@@ -599,7 +597,15 @@ internal sealed class SqlPlanExecutor
         foreach (var liveIndex in indexes)
         {
             var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
-            await liveIndex.Index.InsertAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await liveIndex.Index.InsertAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
+            }
+            catch (IndexUniqueViolationException)
+            {
+                throw new SqlConstraintViolationException(liveIndex.Metadata.Name, $"{table.Schema}.{table.Name}", "UNIQUE",
+                    SafeValue(liveIndex.KeyOrdinals.Select(ordinal => values[ordinal]).ToArray()));
+            }
             statement.Coordinator.VersionStore.RecordIndexEntryCreated(statement.Transaction.Sequence, liveIndex.Versions, key.Encoded, entryReference);
         }
     }
@@ -632,9 +638,7 @@ internal sealed class SqlPlanExecutor
     /// stays usable.
     /// </summary>
     private static DatabaseException TranslateUniqueViolation(SqlCatalogTable table, IndexUniqueViolationException exception)
-        => new(
-            $"UNIQUE constraint violation on '{table.Schema}.{table.Name}': {exception.Message}",
-            exception);
+        => new SqlConstraintViolationException(exception.IndexName, $"{table.Schema}.{table.Name}", "UNIQUE");
 
     /// <summary>
     /// The latest-state check under the exclusive row lock: a target tombstoned
@@ -685,15 +689,7 @@ internal sealed class SqlPlanExecutor
             return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
         }
 
-        if (statement.ProvisioningSchema is string provisioningSchema)
-        {
-            await SqlCatalog.CreateSchemaTableAsync(
-                _catalog, plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, provisioningSchema, cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            await _catalog.CreateTableAsync(plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, cancellationToken).ConfigureAwait(false);
-        }
+        await CreateConstrainedTableAsync(plan, statement, cancellationToken).ConfigureAwait(false);
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
 
@@ -720,6 +716,7 @@ internal sealed class SqlPlanExecutor
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "ALTER TABLE DROP COLUMN", statement);
         EnsureSameIdentity(before, current);
         before = current;
+        EnsureCanDropColumn(before, plan.ColumnName);
 
         int droppedOrdinal = -1;
         for (int i = 0; i < before.Columns.Count; i++)
@@ -802,6 +799,10 @@ internal sealed class SqlPlanExecutor
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "DROP TABLE", statement);
         EnsureSameIdentity(table, current);
         table = current;
+        if (IncomingReferences(table).Any(reference => reference.Child.ObjectId != table.ObjectId))
+        {
+            throw new DatabaseException($"Table '{table.Name}' is referenced by a foreign key and cannot be dropped.");
+        }
 
         // The table's indexes fall with it. The catalog removes their metadata
         // and registrations atomically with the table record; the live trees
@@ -909,8 +910,8 @@ internal sealed class SqlPlanExecutor
 
                     if (liveKeys is not null && deleter == TransactionSequence.None && !liveKeys.Add(Convert.ToHexString(key.Encoded.Span)))
                     {
-                        throw new DatabaseException(
-                            $"Cannot create UNIQUE index '{plan.IndexName}' on '{plan.Table.Schema}.{plan.Table.Name}': the existing rows contain duplicate keys.");
+                        throw new SqlConstraintViolationException(plan.IndexName, $"{plan.Table.Schema}.{plan.Table.Name}", "UNIQUE",
+                            SafeValue(ordinals.Select(ordinal => values[ordinal]).ToArray()));
                     }
 
                     await index.InsertVersionAsync(
@@ -984,6 +985,7 @@ internal sealed class SqlPlanExecutor
         }
 
         EnsureCanChange(metadata.Owner, metadata.Name, metadata.OwningSchema, "DROP INDEX", statement);
+        EnsureCanDropIndex(currentTable, metadata);
         EnsureSameIdentity(plan.Table, currentTable);
 
         // The canonical (creation-time) name keyed by the catalog drives the
@@ -1083,10 +1085,11 @@ internal sealed class SqlPlanExecutor
         SqlIndexSeekPath seek,
         IIndex index,
         SqlStatementContext statement,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TransactionSnapshot? snapshotOverride = null)
     {
         var range = BuildSeekRange(table, seek);
-        var snapshot = statement.Snapshot;
+        var snapshot = snapshotOverride ?? statement.Snapshot;
 
         // The cursor materializes under the tree's read latch; synchronous
         // drain is the in-process fast path.
@@ -1247,9 +1250,10 @@ internal sealed class SqlPlanExecutor
     private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> Scan(
         SqlCatalogTable table,
         SqlStatementContext statement,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TransactionSnapshot? snapshotOverride = null)
     {
-        var snapshot = statement.Snapshot;
+        var snapshot = snapshotOverride ?? statement.Snapshot;
 
         foreach (var version in ScanVersions(table, cancellationToken, statement.Metrics))
         {

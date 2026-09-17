@@ -553,7 +553,25 @@ internal sealed class SqlPlanner
             }
         }
 
-        return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists);
+        foreach (var constraint in create.Constraints.Where(c => c.Kind == SqlConstraintKind.PrimaryKey))
+        {
+            foreach (string column in constraint.Columns)
+            {
+                if (!primaryKey.Contains(column, StringComparer.OrdinalIgnoreCase))
+                {
+                    primaryKey.Add(column);
+                }
+            }
+        }
+        for (int i = 0; i < columns.Count; i++)
+        {
+            var column = columns[i];
+            if (primaryKey.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral);
+            }
+        }
+        return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists, create.Constraints);
     }
 
     private SqlDropTablePlan PlanDropTable(SqlDropTableExpression drop)
@@ -608,8 +626,12 @@ internal sealed class SqlPlanner
                 new SqlCatalogColumn(
                     add.Column.ColumnName,
                     ResolveTypeName(add.Column.DataType, add.Column.ColumnName),
-                    add.Column.IsNullable && !add.Column.IsPrimaryKey)),
+                    add.Column.IsNullable && !add.Column.IsPrimaryKey,
+                    add.Column.DefaultValue is SqlLiteralExpression literal ? literal.Value : null),
+                add.Column.Constraints),
             SqlAlterDropColumnAction drop => new SqlDropColumnPlan(schema, alter.Table.TableName, drop.ColumnName),
+            SqlAlterAddConstraintAction add => new SqlAddConstraintPlan(ResolveTable(alter.Table), add.Constraint),
+            SqlAlterDropConstraintAction drop => new SqlDropConstraintPlan(ResolveTable(alter.Table), drop.ConstraintName),
             _ => throw new DatabaseException("This ALTER TABLE action is not supported by the executor yet."),
         };
     }
@@ -695,7 +717,7 @@ internal sealed class SqlPlanner
         };
     }
 
-    private static void ValidateExpression(SqlExpression expression, SqlExpressionEvaluator evaluator)
+    internal static void ValidateExpression(SqlExpression expression, SqlExpressionEvaluator evaluator)
     {
         switch (expression)
         {
@@ -725,7 +747,7 @@ internal sealed class SqlPlanner
         return Children(expression).Any(ContainsAggregate);
     }
 
-    private static IEnumerable<SqlExpression> Children(SqlExpression expression)
+    internal static IEnumerable<SqlExpression> Children(SqlExpression expression)
     {
         switch (expression)
         {

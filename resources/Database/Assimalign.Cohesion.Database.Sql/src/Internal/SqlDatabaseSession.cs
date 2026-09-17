@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
@@ -20,7 +22,10 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     private readonly SqlQueryExecutor _executor;
     private readonly string? _provisioningSchema;
 
-    private SqlDatabaseTransaction? _transaction;
+    // B7 can push named scopes onto the same root transaction and attach undo
+    // markers. B2 only ever pushes the root scope; nested BEGIN is an error.
+    private readonly Stack<SqlTransactionScope> _transactionScopes = new();
+    private IsolationLevel _isolationLevel = IsolationLevel.Snapshot;
     private SqlStatementMetrics? _lastStatementMetrics;
     private SessionState _state;
 
@@ -44,7 +49,25 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     public SessionState State => _state;
 
     /// <inheritdoc />
-    public IDatabaseTransaction? CurrentTransaction => _transaction;
+    public IDatabaseTransaction? CurrentTransaction => ActiveScope?.Transaction;
+
+    private SqlTransactionScope? ActiveScope
+    {
+        get
+        {
+            while (_transactionScopes.TryPeek(out var scope))
+            {
+                if (scope.Transaction.State == TransactionState.Active)
+                {
+                    return scope;
+                }
+
+                _transactionScopes.Pop();
+            }
+
+            return null;
+        }
+    }
 
     /// <summary>
     /// Gets the previous statement's execution observability (access path,
@@ -54,7 +77,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 
     /// <inheritdoc />
     public ValueTask<IDatabaseTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default)
-        => BeginTransactionAsync(IsolationLevel.Snapshot, cancellationToken);
+        => BeginTransactionAsync(_isolationLevel, cancellationToken);
 
     /// <inheritdoc />
     /// <remarks>
@@ -79,15 +102,15 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
                 "Use IsolationLevel.Snapshot or IsolationLevel.ReadCommitted.");
         }
 
-        if (_transaction is not null && _transaction.State == TransactionState.Active)
+        if (ActiveScope is not null)
         {
             throw new DatabaseException("A transaction is already active on this session.");
         }
 
         var context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
-        _transaction = new SqlDatabaseTransaction(_coordinator, context);
-
-        return _transaction;
+        var transaction = new SqlDatabaseTransaction(_coordinator, context);
+        _transactionScopes.Push(new SqlTransactionScope(transaction, isolationLevel));
+        return transaction;
     }
 
     /// <inheritdoc />
@@ -95,11 +118,42 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     {
         ThrowIfNotOpen();
         ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Typed requests may be constructed directly from a parser result rather
+        // than FromSql. Never execute an error-recovery AST (notably ROLLBACK TO
+        // must not become a full ROLLBACK while savepoints remain unsupported).
+        if (request is SqlQueryRequest parsed)
+        {
+            foreach (var diagnostic in parsed.Statement.Diagnostics)
+            {
+                if (diagnostic.Severity == DiagnosticSeverity.Error)
+                {
+                    return new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
+                        [.. parsed.Statement.Diagnostics]);
+                }
+            }
+        }
+
+        // Control commands bind to the session before an auto-commit context is
+        // opened. Their result follows the ordinary query/wire diagnostic path.
+        if (request is SqlQueryRequest { Statement.SqlExpression: SqlTransactionExpression control })
+        {
+            _lastStatementMetrics = null;
+            return await ExecuteTransactionControlAsync(control, cancellationToken).ConfigureAwait(false);
+        }
 
         // Inside an explicit transaction, the statement rides its context.
-        if (_transaction is not null && _transaction.State == TransactionState.Active)
+        if (ActiveScope is { } transactionScope)
         {
-            var scope = new SqlStatementContext(_transaction.Context, _coordinator, _provisioningSchema);
+            if (request is SqlQueryRequest { Statement.SqlExpression.CommandType:
+                SqlQueryCommandType.Create or SqlQueryCommandType.Alter or SqlQueryCommandType.Drop })
+            {
+                return TransactionDiagnostic("COHSQLT003",
+                    "DDL requires auto-commit mode because the catalog does not enlist in session transactions.");
+            }
+
+            var scope = new SqlStatementContext(transactionScope.Transaction.Context, _coordinator, _provisioningSchema);
             _lastStatementMetrics = scope.Metrics;
 
             try
@@ -121,7 +175,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 
         // Auto-commit semantics: a one-statement manager transaction, so
         // visibility and conflict semantics are identical to the explicit path.
-        var context = await _coordinator.BeginAsync(IsolationLevel.Snapshot, cancellationToken).ConfigureAwait(false);
+        var context = await _coordinator.BeginAsync(_isolationLevel, cancellationToken).ConfigureAwait(false);
 
         try
         {
@@ -183,15 +237,56 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
             return;
         }
 
-        // Auto-rollback any active transaction
-        if (_transaction is not null && _transaction.State == TransactionState.Active)
+        // Dispose the root once, even after B7 adds nested scopes sharing it.
+        if (ActiveScope is { } scope)
         {
-            await _transaction.DisposeAsync().ConfigureAwait(false);
+            await scope.Transaction.DisposeAsync().ConfigureAwait(false);
         }
 
-        _transaction = null;
+        _transactionScopes.Clear();
         _state = SessionState.Closed;
     }
+
+    private async ValueTask<QueryResult> ExecuteTransactionControlAsync(
+        SqlTransactionExpression control, CancellationToken cancellationToken)
+    {
+        var scope = ActiveScope;
+        if (control.CommandType == SqlQueryCommandType.Begin)
+        {
+            if (scope is not null)
+            {
+                return TransactionDiagnostic("COHSQLT001", "BEGIN requires a session with no open transaction.");
+            }
+
+            await BeginTransactionAsync(_isolationLevel, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            if (scope is null)
+            {
+                return TransactionDiagnostic("COHSQLT002", $"{control.CommandType.ToString().ToUpperInvariant()} requires an open transaction.");
+            }
+
+            if (control.CommandType == SqlQueryCommandType.Commit)
+            {
+                await scope.Transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await scope.Transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            _transactionScopes.Clear();
+        }
+
+        return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
+    }
+
+    private static QueryResult TransactionDiagnostic(string code, string message)
+        => new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
+            [new Diagnostic { Code = code, Message = message, Severity = DiagnosticSeverity.Error }]);
+
+    private sealed record SqlTransactionScope(SqlDatabaseTransaction Transaction, IsolationLevel IsolationLevel);
 
     private void ThrowIfNotOpen()
     {

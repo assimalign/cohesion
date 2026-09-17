@@ -18,6 +18,7 @@ public sealed class SqlCatalogTable
     /// <param name="primaryKeyColumns">The primary-key column names, or empty when the table has no primary key.</param>
     /// <param name="owner">Whether a compiled schema or an ad-hoc statement created the table.</param>
     /// <param name="owningSchema">The compiled schema that provisioned the table, or null for an ad-hoc table.</param>
+    /// <param name="constraints">The foreign-key and check constraints; unique constraints are catalog indexes.</param>
     public SqlCatalogTable(
         ulong objectId,
         string schema,
@@ -25,7 +26,8 @@ public sealed class SqlCatalogTable
         IReadOnlyList<SqlCatalogColumn> columns,
         IReadOnlyList<string>? primaryKeyColumns = null,
         DatabaseObjectOwner owner = DatabaseObjectOwner.Adhoc,
-        string? owningSchema = null)
+        string? owningSchema = null,
+        IReadOnlyList<SqlCatalogConstraint>? constraints = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(schema);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -44,6 +46,12 @@ public sealed class SqlCatalogTable
         PrimaryKeyColumns = primaryKeyColumns ?? Array.Empty<string>();
         Owner = owner;
         OwningSchema = owningSchema;
+        var constraintCopy = new SqlCatalogConstraint[constraints?.Count ?? 0];
+        for (int index = 0; index < constraintCopy.Length; index++)
+        {
+            constraintCopy[index] = constraints![index] ?? throw new ArgumentException("A constraint cannot be null.", nameof(constraints));
+        }
+        Constraints = Array.AsReadOnly(constraintCopy);
     }
 
     /// <summary>
@@ -83,6 +91,9 @@ public sealed class SqlCatalogTable
     /// Gets the primary-key column names (empty when the table has none).
     /// </summary>
     public IReadOnlyList<string> PrimaryKeyColumns { get; }
+
+    /// <summary>Gets the immutable foreign-key and check constraint definitions.</summary>
+    public IReadOnlyList<SqlCatalogConstraint> Constraints { get; }
 
     /// <summary>
     /// Finds a column by name (ordinal, case-insensitive per SQL identifier rules).

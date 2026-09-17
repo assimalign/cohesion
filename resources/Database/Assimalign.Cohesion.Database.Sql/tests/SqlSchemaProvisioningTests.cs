@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
@@ -364,14 +365,14 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await holder.ExecuteAsync("CREATE TABLE orders (id BIGINT PRIMARY KEY, note TEXT);");
         catalog.TryGetTable("dbo", "orders", out var original).ShouldBeTrue();
         await using IDatabaseTransaction holdingTransaction = await holder.BeginTransactionAsync();
-        await holder.ExecuteAsync("CREATE INDEX ix_orders_id ON orders (id);");
+        await ExecuteDdlForLockTestAsync(database, holdingTransaction, "CREATE INDEX ix_orders_id ON orders (id);");
         await using IDatabaseTransaction waitingTransaction = await waiter.BeginTransactionAsync();
 
-        // The explicit transaction is already begun, so execution reaches the
-        // holder's exclusive table lock synchronously before yielding here.
-        var waiting = waiter.ExecuteAsync(statement, cancellationToken: TestTimeout.Token()).AsTask();
+        // Controlled coordinator scopes keep the executor's DDL locks open for
+        // this race. Public session DDL inside a transaction is now refused.
+        var waiting = ExecuteDdlForLockTestAsync(database, waitingTransaction, statement);
         waiting.IsCompleted.ShouldBeFalse();
-        await holder.ExecuteAsync("DROP TABLE orders;");
+        await ExecuteDdlForLockTestAsync(database, holdingTransaction, "DROP TABLE orders;");
         SqlCompiledSchema schema = OrdersSchema(
             [new CompiledSchemaColumn("id", DatabaseType.Int64, false),
              new CompiledSchemaColumn("note", DatabaseType.String, true)],
@@ -411,12 +412,12 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await using IDatabaseSession creator = await database.CreateSessionAsync();
         await holder.ExecuteAsync("CREATE TABLE orders (id BIGINT PRIMARY KEY, note TEXT);");
         await using IDatabaseTransaction holdingTransaction = await holder.BeginTransactionAsync();
-        await holder.ExecuteAsync("CREATE INDEX ix_orders_id ON orders (id);");
+        await ExecuteDdlForLockTestAsync(database, holdingTransaction, "CREATE INDEX ix_orders_id ON orders (id);");
         await using IDatabaseTransaction waitingTransaction = await waiter.BeginTransactionAsync();
 
-        var waiting = waiter.ExecuteAsync(statement, cancellationToken: TestTimeout.Token()).AsTask();
+        var waiting = ExecuteDdlForLockTestAsync(database, waitingTransaction, statement);
         waiting.IsCompleted.ShouldBeFalse();
-        await holder.ExecuteAsync("DROP TABLE orders;");
+        await ExecuteDdlForLockTestAsync(database, holdingTransaction, "DROP TABLE orders;");
         await creator.ExecuteAsync("CREATE TABLE orders (id BIGINT PRIMARY KEY, note TEXT);");
         await creator.ExecuteAsync("CREATE INDEX ix_orders_id ON orders (id);");
         await holdingTransaction.CommitAsync();
@@ -487,7 +488,8 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         table.Owner.ShouldBe(DatabaseObjectOwner.Schema);
         table.OwningSchema.ShouldBe("orders");
         table.FindColumn("note").ShouldBeNull();
-        catalog.GetIndexes(table.ObjectId).ShouldBeEmpty();
+        // Removing declared indexes keeps the primary key's enforcing tree.
+        catalog.GetIndexes(table.ObjectId).ShouldHaveSingleItem().IsPrimaryKey.ShouldBeTrue();
 
         var empty = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "orders", EngineModel.Sql,
             allowsDestructiveChanges: true, [], [], [], [], [], []);
@@ -537,6 +539,15 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
 
         database.ShouldBeOfType<SqlDatabaseInstance>().Catalog.SchemaState.ShouldBeNull();
         await session.ExecuteAsync("DROP TABLE orders;");
+    }
+
+    private static Task<QueryResult> ExecuteDdlForLockTestAsync(
+        IDatabase database, IDatabaseTransaction transaction, string statement)
+    {
+        var instance = (SqlDatabaseInstance)database;
+        var executor = new SqlQueryExecutor(instance.DataStorage, instance.Catalog, instance.IndexManager);
+        var scope = new SqlStatementContext(((SqlDatabaseTransaction)transaction).Context, instance.Coordinator);
+        return executor.ExecuteAsync(SqlQueryRequest.FromSql(statement), scope, TestTimeout.Token());
     }
 
     private SqlDatabaseEngine CreateEngine()

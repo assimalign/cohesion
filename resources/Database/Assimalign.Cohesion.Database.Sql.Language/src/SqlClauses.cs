@@ -147,6 +147,6 @@ public static class SqlClauses
     /// <summary>A <c>ROLLBACK</c> transaction-control statement.</summary>
     public const string Rollback = "ROLLBACK";
 
-    /// <summary>A standalone <c>TRANSACTION</c> control statement.</summary>
+    /// <summary>The optional <c>TRANSACTION</c> keyword on transaction-control statements.</summary>
     public const string Transaction = "TRANSACTION";
 }

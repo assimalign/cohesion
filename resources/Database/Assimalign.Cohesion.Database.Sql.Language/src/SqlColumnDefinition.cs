@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 /// <summary>
@@ -13,13 +15,15 @@ public sealed class SqlColumnDefinition
     /// <param name="isNullable">Whether the column allows NULL values.</param>
     /// <param name="isPrimaryKey">Whether the column is a primary key.</param>
     /// <param name="defaultValue">The default value expression, if any.</param>
-    internal SqlColumnDefinition(string columnName, string dataType, bool isNullable, bool isPrimaryKey, SqlExpression? defaultValue)
+    internal SqlColumnDefinition(string columnName, string dataType, bool isNullable, bool isPrimaryKey, SqlExpression? defaultValue,
+        IReadOnlyList<SqlConstraintDefinition>? constraints = null)
     {
         ColumnName = columnName;
         DataType = dataType;
         IsNullable = isNullable;
         IsPrimaryKey = isPrimaryKey;
         DefaultValue = defaultValue;
+        Constraints = constraints ?? [];
     }
 
     /// <summary>
@@ -46,4 +50,7 @@ public sealed class SqlColumnDefinition
     /// Gets the default value expression, if present.
     /// </summary>
     public SqlExpression? DefaultValue { get; }
+
+    /// <summary>Gets normalized constraints declared on this column.</summary>
+    public IReadOnlyList<SqlConstraintDefinition> Constraints { get; }
 }

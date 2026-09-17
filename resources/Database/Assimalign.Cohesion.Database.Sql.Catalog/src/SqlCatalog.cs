@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Storage;
+using Assimalign.Cohesion.Database.Indexing;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
@@ -47,4 +48,36 @@ public static class SqlCatalog
         => ((DefaultSqlCatalog)catalog).CreateTableAsync(
             schema, name, columns, primaryKeyColumns,
             DatabaseObjectOwner.Schema, owningSchema, cancellationToken);
+
+    internal static ValueTask<SqlCatalogTable> CreateTableAsync(
+        ISqlCatalog catalog, string schema, string name,
+        IReadOnlyList<SqlCatalogColumn> columns, IReadOnlyList<string>? primaryKeyColumns,
+        IReadOnlyList<SqlCatalogConstraint> constraints, DatabaseObjectOwner owner,
+        string? owningSchema, CancellationToken cancellationToken)
+        => ((DefaultSqlCatalog)catalog).CreateTableAsync(
+            schema, name, columns, primaryKeyColumns, owner, owningSchema, cancellationToken, constraints);
+
+    internal static ValueTask<SqlCatalogTable> ReserveTableAsync(
+        ISqlCatalog catalog, string schema, string name,
+        IReadOnlyList<SqlCatalogColumn> columns, IReadOnlyList<string>? primaryKeyColumns,
+        IReadOnlyList<SqlCatalogConstraint> constraints, DatabaseObjectOwner owner,
+        string? owningSchema, CancellationToken cancellationToken)
+        => ((DefaultSqlCatalog)catalog).ReserveTableAsync(
+            schema, name, columns, primaryKeyColumns, constraints, owner, owningSchema, cancellationToken);
+
+    internal static ValueTask PublishTableAsync(
+        ISqlCatalog catalog, SqlCatalogTable table, IReadOnlyList<SqlCatalogIndex> indexes,
+        IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken,
+        bool replaceExisting = false)
+        => ((DefaultSqlCatalog)catalog).PublishTableAsync(table, indexes, registrations, cancellationToken, replaceExisting);
+
+    internal static ValueTask<SqlCatalogTable> AddConstraintAsync(
+        ISqlCatalog catalog, string schema, string name, SqlCatalogConstraint constraint,
+        CancellationToken cancellationToken)
+        => ((DefaultSqlCatalog)catalog).AddConstraintAsync(schema, name, constraint, cancellationToken);
+
+    internal static ValueTask<SqlCatalogTable> DropConstraintAsync(
+        ISqlCatalog catalog, string schema, string name, string constraintName,
+        CancellationToken cancellationToken)
+        => ((DefaultSqlCatalog)catalog).DropConstraintAsync(schema, name, constraintName, cancellationToken);
 }

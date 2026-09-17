@@ -21,13 +21,15 @@ public sealed class SqlCatalogIndex
     /// <param name="isUnique">Whether the index enforces key uniqueness.</param>
     /// <param name="owner">Whether a compiled schema or an ad-hoc statement created the index.</param>
     /// <param name="owningSchema">The compiled schema that provisioned the index, or null for an ad-hoc index.</param>
+    /// <param name="isPrimaryKey">Whether this index is the physical enforcement of the table's primary key.</param>
     public SqlCatalogIndex(
         ulong tableObjectId,
         string name,
         IReadOnlyList<string> columnNames,
         bool isUnique,
         DatabaseObjectOwner owner = DatabaseObjectOwner.Adhoc,
-        string? owningSchema = null)
+        string? owningSchema = null,
+        bool isPrimaryKey = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(columnNames);
@@ -44,6 +46,11 @@ public sealed class SqlCatalogIndex
         IsUnique = isUnique;
         Owner = owner;
         OwningSchema = owningSchema;
+        if (isPrimaryKey && !isUnique)
+        {
+            throw new ArgumentException("A primary-key index must enforce uniqueness.", nameof(isPrimaryKey));
+        }
+        IsPrimaryKey = isPrimaryKey;
     }
 
     /// <summary>
@@ -65,6 +72,9 @@ public sealed class SqlCatalogIndex
     /// Gets a value indicating whether the index enforces key uniqueness.
     /// </summary>
     public bool IsUnique { get; }
+
+    /// <summary>Gets whether this index enforces the table's primary key rather than a separately declared unique constraint.</summary>
+    public bool IsPrimaryKey { get; }
 
     /// <summary>
     /// Gets what created this index. Code-first schema indexes can only be changed by

@@ -13,9 +13,10 @@ reconstructs or reads the last canonical catalog state, uses
 `SqlSchemaMigrationPlanner` from `Database.Sql.Schema` for deterministic ordering/destructive gating, and
 `SqlMigrationScriptGenerator` for parser-validated engine requests. Supported
 steps are table, column, and secondary-index add/drop; alter/rebuild operations
-and advanced objects (custom types, foreign/check constraints, functions,
+and advanced objects (custom types, functions,
 triggers, principals/grants, extensions) fail before execution rather than
-recording a false applied hash.
+recording a false applied hash. Foreign keys and checks now render into provisioning
+DDL and persist in the table catalog; unique declarations use unique indexes.
 
 Each DDL request remains self-committing under the catalog's established rule.
 On a later failure, completed reversible steps run their compensating requests
@@ -194,7 +195,7 @@ for this engine, and ordinary `ISqlCatalog.CreateTableAsync` stays ad-hoc.
   instead of one scan per writer because the in-memory ledger died with the
   process; the checkpoint worker checkpoints data storages *through the
   coordinator*, so truncating checkpoint records carry in-flight logical
-  sequences. DDL flows to the catalog, which self-commits on its own storage
+  sequences. DDL in auto-commit mode flows to the catalog, which self-commits on its own storage
   (see the catalog DESIGN.md for why DDL-in-DML is out of MVP scope), and
   interlocks with row writers through table-grain intent locks (below).
 - **Shared record-space composition (#918).** `SqlTransactionRecordSpace`
@@ -496,10 +497,127 @@ exceptions at creation.
 
 Server non-goals: no host-service adapter (`Database.Hosting` wraps
 `IDatabaseServer` generically through the root seam); no connection-level
-replication endpoints; no transaction frames yet (explicit transaction control
-over the wire lands with the protocol's `Transaction` payload schema); no
+replication endpoints; no special transaction frames (SQL transaction commands
+use the existing `Execute` payload); no
 TLS/transport policy — transport configuration stays in `libraries/Connections`
 drivers, while the server owns bind-through-release lifecycle.
+
+## SQL transaction control and the B7 seam
+
+`BEGIN [TRANSACTION]`, `COMMIT [TRANSACTION]`, and `ROLLBACK [TRANSACTION]`
+are ordinary SQL requests over the existing wire `Execute` message. The session
+dispatches their parsed AST before creating an auto-commit transaction. `BEGIN`
+opens a coordinator context; subsequent queries and DML share that context and
+its visibility snapshot. `COMMIT` awaits the coordinator's durable commit;
+`ROLLBACK` undoes row and index versions and releases locks. Closing the session,
+including EOF, explicit wire termination, or server shutdown, rolls back an open
+transaction before releasing the session. The C# transaction API and SQL control
+commands operate on the same scope.
+
+The session owns `Stack<SqlTransactionScope>`, with zero entries outside a
+transaction and exactly one root entry in B2. Each scope carries its transaction
+and the existing `Database.Transactions.IsolationLevel` value. The session's
+default isolation value is `Snapshot`; begin and auto-commit pass that value to
+the coordinator instead of embedding a level at each call site. B7 anticipates
+`SAVEPOINT name`, `ROLLBACK TO [SAVEPOINT] name`, `RELEASE [SAVEPOINT] name`, and
+`SET TRANSACTION ISOLATION LEVEL ...`: named scopes and undo markers can extend
+the stack, while isolation syntax sets the carried value. B2 implements none of
+that syntax or savepoint undo machinery. `Serializable` remains rejected by the
+existing C# seam until the coordinator supports serialization detection.
+
+The session lifecycle below applies equally to SQL requests and C# transactions.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Open: BEGIN
+    Open --> Open: query or DML
+    Open --> Idle: COMMIT or ROLLBACK
+    Open --> Closed: disconnect rolls back
+    Idle --> Closed: disconnect
+```
+
+State misuse returns `QueryResultStatus.Error` with an error diagnostic, without
+throwing or changing the active transaction. `COHSQLT001` means nested `BEGIN`;
+`COHSQLT002` means `COMMIT` or `ROLLBACK` without an active scope. The wire maps
+these to `ExecutionFailure` and includes the stable diagnostic code in its
+message. The connection remains usable.
+
+DDL still commits on the catalog's separate storage and cannot enlist in a user
+transaction through the frozen catalog contract. `COHSQLT003` therefore refuses
+`CREATE`, `ALTER`, and `DROP` while a session transaction is open, before catalog
+or data mutation. Auto-commit DDL retains its established durability contract.
+This limitation and the unavailable interface seam are recorded in
+`_out/phase4-b2-ESCALATIONS.md`.
+
+## Integrity constraints
+
+`UNIQUE` is a unique index, consistently across SQL syntax, catalog metadata and
+`CompiledSchemaIndex(IsUnique: true)`. A separate compiled constraint kind would
+duplicate both persistence and enforcement and permit the two paths to diverge.
+Named `UNIQUE` declarations keep their name as the index name. Foreign keys and
+checks are table constraint records; their names, ordered columns, reference
+target, delete action and check expression text are persisted in the versioned
+table codec and recovered with the rest of the catalog.
+
+Table creation reserves an unpublished object identity, durably builds its
+unique and primary-key backing trees, then publishes the table, constraints,
+index metadata and registrations in one catalog commit. A crash before publish
+can leave orphan tree pages, but cannot expose an unenforced declaration.
+Adding column constraints or table constraints uses the same atomic publication
+path after validating existing rows. Primary-key backing indexes carry an
+explicit catalog marker; schema reconciliation keeps them separate from the
+schema's declared secondary indexes.
+
+Primary keys use the same physical uniqueness enforcement, with a persisted
+`IsPrimaryKey` marker on their backing indexes. Schema reconciliation excludes
+only those marked indexes from the declared secondary-index list; an explicitly
+declared unique index over the same columns remains a separate schema object.
+Compiled provisioning creates all tables and indexes before adding references,
+so child-first names and cyclic reference graphs provision deterministically.
+
+`SqlPlanExecutor` enforces checks and outgoing references on inserted or updated
+rows, and incoming references on parent deletes or key changes. Checks reject a
+false result; SQL unknown/null passes. Foreign keys with null components are
+not checked (MATCH SIMPLE). A non-null child key needs a parent visible through
+the statement snapshot. Delete defaults to `RESTRICT`; `CASCADE` recursively
+collects child deletions into the same statement apply bracket. Parent key
+updates are restricted while referenced. `ON UPDATE` is unsupported and returns
+`COHDBL001`.
+
+Checks require Boolean predicates made from supported deterministic row
+expressions. Parameters, subqueries, aggregates, unsupported functions and casts
+are rejected during binding. Multiple unnamed constraints receive distinct
+generated names. Cascades are collected before restriction checks; a child
+already in the complete statement deletion set does not prevent that deletion,
+so physical row order and declaration order do not change the result.
+
+Enforcement uses the existing lock manager and coordinator. Unique keys acquire
+transaction-duration key locks before entering the apply gate, then the B+Tree
+checks current entry stamps, including winners committed after the caller's
+snapshot. Two transactions cannot both publish the same unique key. Constraint
+failures roll back the physical statement bracket, preserving earlier successful
+statements in an explicit transaction. The exception is
+`SqlConstraintViolationException`; callers can inspect the constraint name,
+table name and safe offending value. Sensitive/raw binary values are omitted
+where they cannot safely be exposed.
+
+Uniqueness follows the existing index convention: null components participate
+in the key, including its duplicate check. A single numeric or Boolean offending
+value is carried when available; strings, binary values and composite keys are
+omitted, including the encoded index exception that could disclose them.
+
+Foreign-key connected tables acquire existing table object locks in object-id
+order before row/key locks and the apply gate. This deliberately serializes
+writes within a connected reference graph; unrelated tables keep their existing
+concurrency. Snapshot parent checks are also checked against current stamps,
+and incoming-reference checks use current committed/self state while those locks
+are held, preventing a concurrent parent delete from admitting an orphan.
+Reference lookups select the longest usable leading-column index prefix and
+reorder equality values to match its column order. Partial prefixes retain a
+residual comparison for remaining columns; they scan the table only when no
+suitable index exists. A declared index
+whose physical tree is missing fails closed.
 
 ## The application-builder verbs (`AddSqlDatabase`, `AddSqlServer`)
 
@@ -526,7 +644,9 @@ hand them to `AddEngine`/`AddServer`; no container, no configuration binding.
 ## Error model
 
 `DatabaseException` (area root) for everything user-facing: plan-time
-validation, execution errors, constraint violations (nullability). Parse failures
+validation and execution errors. Named integrity violations use
+`SqlConstraintViolationException`, a `DatabaseException` carrying the constraint,
+table and safe offending value. Parse failures
 (`SqlQueryRequest.FromSql`, and therefore the session's text-execute seam) throw
 the root's `DatabaseParseException` so callers — the wire-protocol server in
 particular — can distinguish fix-the-text errors (`ParseFailure` on the wire)

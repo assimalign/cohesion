@@ -22,6 +22,10 @@ public enum SqlSchemaMigrationOperationKind : byte
     AddIndex,
     /// <summary>Drops an index.</summary>
     DropIndex,
+    /// <summary>Adds a foreign-key or check constraint.</summary>
+    AddConstraint,
+    /// <summary>Drops a foreign-key or check constraint.</summary>
+    DropConstraint,
 }
 
 /// <summary>Classifies the data-loss risk of a migration step.</summary>
@@ -45,6 +49,7 @@ public sealed class SqlSchemaMigrationOperation
     /// <param name="column">The desired column definition, when applicable.</param>
     /// <param name="previousColumn">The previous column definition, when applicable.</param>
     /// <param name="index">The desired index definition, when applicable.</param>
+    /// <param name="constraint">The constraint definition, when applicable.</param>
     public SqlSchemaMigrationOperation(
         SqlSchemaMigrationOperationKind kind,
         SqlSchemaMigrationSafety safety,
@@ -53,7 +58,8 @@ public sealed class SqlSchemaMigrationOperation
         CompiledSchemaTable? table = null,
         CompiledSchemaColumn? column = null,
         CompiledSchemaColumn? previousColumn = null,
-        CompiledSchemaIndex? index = null)
+        CompiledSchemaIndex? index = null,
+        CompiledSchemaConstraint? constraint = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(objectName);
         Kind = kind;
@@ -64,6 +70,7 @@ public sealed class SqlSchemaMigrationOperation
         Column = column;
         PreviousColumn = previousColumn;
         Index = index;
+        Constraint = constraint;
     }
 
     /// <summary>Gets the operation kind.</summary>
@@ -82,6 +89,8 @@ public sealed class SqlSchemaMigrationOperation
     public CompiledSchemaColumn? PreviousColumn { get; }
     /// <summary>Gets the desired index definition.</summary>
     public CompiledSchemaIndex? Index { get; }
+    /// <summary>Gets the constraint definition.</summary>
+    public CompiledSchemaConstraint? Constraint { get; }
 }
 
 /// <summary>Contains a deterministic ordered migration plan.</summary>

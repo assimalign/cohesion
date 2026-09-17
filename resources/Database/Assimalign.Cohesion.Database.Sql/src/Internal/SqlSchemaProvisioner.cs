@@ -182,7 +182,7 @@ internal sealed class SqlSchemaProvisioner
 
             IReadOnlyList<SqlCatalogIndex> catalogIndexes = _catalog.GetIndexes(catalogTable.ObjectId);
             var indexes = catalogIndexes
-                .Where(index => IsOwnedBy(index.Owner, index.OwningSchema, desired.Name))
+                .Where(index => !index.IsPrimaryKey && IsOwnedBy(index.Owner, index.OwningSchema, desired.Name))
                 .OrderBy(index => index.Name, StringComparer.Ordinal)
                 .Select(index => new CompiledSchemaIndex(index.Name, index.ColumnNames, index.IsUnique))
                 .ToList();
@@ -192,7 +192,12 @@ internal sealed class SqlSchemaProvisioner
                 columns,
                 primaryKey,
                 indexes,
-                Array.Empty<CompiledSchemaConstraint>()));
+                catalogTable.Constraints.Select(constraint => new CompiledSchemaConstraint(
+                    constraint.Name,
+                    constraint.Kind == SqlCatalogConstraintKind.Reference ? CompiledSchemaConstraintKind.Reference : CompiledSchemaConstraintKind.Check,
+                    constraint.Columns, constraint.ReferencedTable, constraint.ReferencedColumns,
+                    constraint.CheckExpression is null ? null : new CompiledSchemaExpression(constraint.CheckExpression),
+                    constraint.OnDelete == SqlCatalogReferentialAction.Cascade ? CompiledSchemaReferentialAction.Cascade : CompiledSchemaReferentialAction.Restrict)).ToArray()));
         }
 
         return new SqlCompiledSchema(
@@ -220,6 +225,7 @@ internal sealed class SqlSchemaProvisioner
             if (!_catalog.TryGetTable("dbo", expected.Name, out SqlCatalogTable actual) ||
                 !IsOwnedBy(actual.Owner, actual.OwningSchema, schema.Name) ||
                 actual.Columns.Count != expected.Columns.Count ||
+                actual.Constraints.Count != expected.Constraints.Count ||
                 !NamesEqual(expected.PrimaryKey?.Columns ?? Array.Empty<string>(), actual.PrimaryKeyColumns))
             {
                 return false;
@@ -244,8 +250,25 @@ internal sealed class SqlSchemaProvisioner
                 }
             }
 
+            foreach (CompiledSchemaConstraint constraint in expected.Constraints)
+            {
+                SqlCatalogConstraint? persisted = actual.Constraints.FirstOrDefault(value =>
+                    string.Equals(value.Name, constraint.Name, StringComparison.OrdinalIgnoreCase));
+                if (persisted is null ||
+                    (persisted.Kind == SqlCatalogConstraintKind.Reference) != (constraint.Kind == CompiledSchemaConstraintKind.Reference) ||
+                    (constraint.Kind == CompiledSchemaConstraintKind.Reference && !NamesEqual(persisted.Columns, constraint.Columns)) ||
+                    !NamesEqual(persisted.ReferencedColumns, constraint.ReferencedColumns) ||
+                    !string.Equals(persisted.ReferencedTable, constraint.ReferencedObject, StringComparison.OrdinalIgnoreCase) ||
+                    (persisted.Kind == SqlCatalogConstraintKind.Reference && !string.Equals(persisted.ReferencedSchema, "dbo", StringComparison.OrdinalIgnoreCase)) ||
+                    (persisted.OnDelete == SqlCatalogReferentialAction.Cascade) != (constraint.OnDelete == CompiledSchemaReferentialAction.Cascade) ||
+                    !string.Equals(persisted.CheckExpression, constraint.Expression?.CanonicalText, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+
             IReadOnlyList<SqlCatalogIndex> actualIndexes = _catalog.GetIndexes(actual.ObjectId)
-                .Where(index => IsOwnedBy(index.Owner, index.OwningSchema, schema.Name))
+                .Where(index => !index.IsPrimaryKey && IsOwnedBy(index.Owner, index.OwningSchema, schema.Name))
                 .ToList();
             if (actualIndexes.Count != expected.Indexes.Count)
             {
@@ -339,13 +362,6 @@ internal sealed class SqlSchemaProvisioner
 
         foreach (CompiledSchemaTable table in schema.Tables)
         {
-            if (table.Constraints.Count > 0)
-            {
-                throw new SqlSchemaMigrationException(
-                    $"SQL table '{table.Name}' declares constraints, but the SQL DDL executor " +
-                    "does not support foreign-key or check-constraint migrations yet.");
-            }
-
             foreach (CompiledSchemaColumn column in table.Columns)
             {
                 if (!string.IsNullOrWhiteSpace(column.CustomType))

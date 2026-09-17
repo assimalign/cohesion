@@ -114,7 +114,8 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         IReadOnlyList<string>? primaryKeyColumns,
         DatabaseObjectOwner owner,
         string? owningSchema,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<SqlCatalogConstraint>? constraints = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -127,7 +128,8 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
 
             ValidateColumns(schema, name, columns, primaryKeyColumns);
 
-            var table = new SqlCatalogTable(_nextObjectId++, schema, name, columns, primaryKeyColumns, owner, owningSchema);
+            var table = new SqlCatalogTable(_nextObjectId++, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
+            ValidateConstraints(table);
 
             using (var transaction = _storage.BeginTransaction())
             {
@@ -151,6 +153,17 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             if (!_tables.TryGetValue((schema, name), out var slot))
             {
                 throw new SqlCatalogException($"Table '{schema}.{name}' does not exist.");
+            }
+
+            foreach (var dependent in _tables.Values)
+            {
+                if (dependent.Table.ObjectId != slot.Table.ObjectId && dependent.Table.Constraints.Any(constraint =>
+                    constraint.Kind == SqlCatalogConstraintKind.Reference &&
+                    string.Equals(constraint.ReferencedSchema, schema, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(constraint.ReferencedTable, name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw new SqlCatalogException($"Table '{schema}.{name}' is referenced by '{dependent.Table.Schema}.{dependent.Table.Name}'. Drop the foreign key first.");
+                }
             }
 
             // The table's index descriptions and registrations fall with it, in the
@@ -224,7 +237,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
 
             var columns = slot.Table.Columns.Append(column).ToList();
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns,
-                slot.Table.Owner, slot.Table.OwningSchema);
+                slot.Table.Owner, slot.Table.OwningSchema, slot.Table.Constraints);
             ReplaceTable(slot, updated);
             return new ValueTask<SqlCatalogTable>(updated);
         }
@@ -249,6 +262,23 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                 throw new SqlCatalogException($"Column '{columnName}' is part of the primary key of '{schema}.{name}' and cannot be dropped.");
             }
 
+            foreach (var dependent in _tables.Values)
+            {
+                foreach (var constraint in dependent.Table.Constraints)
+                {
+                    bool local = dependent.Table.ObjectId == slot.Table.ObjectId &&
+                        constraint.Columns.Any(column => string.Equals(column, columnName, StringComparison.OrdinalIgnoreCase));
+                    bool referenced = constraint.Kind == SqlCatalogConstraintKind.Reference &&
+                        string.Equals(constraint.ReferencedSchema, schema, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(constraint.ReferencedTable, name, StringComparison.OrdinalIgnoreCase) &&
+                        constraint.ReferencedColumns.Any(column => string.Equals(column, columnName, StringComparison.OrdinalIgnoreCase));
+                    if (local || referenced)
+                    {
+                        throw new SqlCatalogException($"Column '{columnName}' is referenced by constraint '{constraint.Name}'. Drop the constraint first.");
+                    }
+                }
+            }
+
             // An indexed column cannot be dropped: index entries key on the column's
             // values (and row rewrites must never invalidate live entry references).
             foreach (var indexSlot in _indexes.Values)
@@ -270,7 +300,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                 .Where(c => !string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase))
                 .ToList();
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns,
-                slot.Table.Owner, slot.Table.OwningSchema);
+                slot.Table.Owner, slot.Table.OwningSchema, slot.Table.Constraints);
             ReplaceTable(slot, updated);
             return new ValueTask<SqlCatalogTable>(updated);
         }
@@ -323,7 +353,8 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             var table = FindTableByObjectId(index.TableObjectId)
                 ?? throw new SqlCatalogException($"No table with object id {index.TableObjectId} exists.");
 
-            if (_indexes.ContainsKey((index.TableObjectId, index.Name)))
+            if (_indexes.ContainsKey((index.TableObjectId, index.Name)) ||
+                table.Constraints.Any(constraint => string.Equals(constraint.Name, index.Name, StringComparison.OrdinalIgnoreCase)))
             {
                 throw new SqlCatalogException($"An index named '{index.Name}' already exists on '{table.Schema}.{table.Name}'.");
             }
@@ -695,6 +726,27 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         }
 
         AppendOwnership(ref writer, table.Owner, table.OwningSchema);
+        // Versioned trailing extension; old records end after keys or ownership.
+        writer.AppendInt32(1).AppendInt32(table.Constraints.Count);
+        foreach (SqlCatalogConstraint constraint in table.Constraints)
+        {
+            writer.AppendString(constraint.Name, Collation.Binary)
+                  .AppendInt8((sbyte)constraint.Kind)
+                  .AppendInt32(constraint.Columns.Count);
+            foreach (string column in constraint.Columns)
+            {
+                writer.AppendString(column, Collation.Binary);
+            }
+            AppendOptionalString(ref writer, constraint.ReferencedSchema);
+            AppendOptionalString(ref writer, constraint.ReferencedTable);
+            writer.AppendInt32(constraint.ReferencedColumns.Count);
+            foreach (string column in constraint.ReferencedColumns)
+            {
+                writer.AppendString(column, Collation.Binary);
+            }
+            AppendOptionalString(ref writer, constraint.CheckExpression);
+            writer.AppendInt8((sbyte)constraint.OnDelete);
+        }
         return writer.ToArray();
     }
 
@@ -743,8 +795,48 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             primaryKey.Add(reader.ReadString(out _));
         }
 
-        var (owner, owningSchema) = ReadOwnership(ref reader);
-        return new SqlCatalogTable(objectId, schema, name, columns, primaryKey, owner, owningSchema);
+        var (owner, owningSchema) = ReadOwnership(ref reader, allowTrailing: true);
+        var constraints = new List<SqlCatalogConstraint>();
+        if (!reader.IsAtEnd)
+        {
+            int version = reader.ReadInt32();
+            if (version != 1)
+            {
+                throw new SqlCatalogException($"Unsupported table-constraint metadata version {version}.");
+            }
+            int count = reader.ReadInt32();
+            if (count < 0)
+            {
+                throw new SqlCatalogException("The persisted constraint count is invalid.");
+            }
+            for (int index = 0; index < count; index++)
+            {
+                string constraintName = reader.ReadString(out _);
+                var kind = (SqlCatalogConstraintKind)reader.ReadInt8();
+                var localColumns = ReadColumnNames(ref reader);
+                string? referencedSchema = ReadOptionalString(ref reader);
+                string? referencedTable = ReadOptionalString(ref reader);
+                var referencedColumns = ReadColumnNames(ref reader);
+                string? expression = ReadOptionalString(ref reader);
+                var onDelete = (SqlCatalogReferentialAction)reader.ReadInt8();
+                try
+                {
+                    constraints.Add(new SqlCatalogConstraint(constraintName, kind, localColumns,
+                        referencedSchema, referencedTable, referencedColumns, expression, onDelete));
+                }
+                catch (ArgumentException exception)
+                {
+                    throw new SqlCatalogException($"The persisted constraint '{constraintName}' is invalid: {exception.Message}");
+                }
+            }
+        }
+        if (!reader.IsAtEnd)
+        {
+            throw new SqlCatalogException("The persisted table constraint metadata contains trailing values.");
+        }
+        var table = new SqlCatalogTable(objectId, schema, name, columns, primaryKey, owner, owningSchema, constraints);
+        ValidateConstraints(table);
+        return table;
     }
 
     private static byte[] EncodeIndex(SqlCatalogIndex index)
@@ -762,6 +854,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         }
 
         AppendOwnership(ref writer, index.Owner, index.OwningSchema);
+        writer.AppendInt32(1).AppendBoolean(index.IsPrimaryKey);
         return writer.ToArray();
     }
 
@@ -778,8 +871,194 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             columns.Add(reader.ReadString(out _));
         }
 
-        var (owner, owningSchema) = ReadOwnership(ref reader);
-        return new SqlCatalogIndex(tableObjectId, name, columns, isUnique, owner, owningSchema);
+        var (owner, owningSchema) = ReadOwnership(ref reader, allowTrailing: true);
+        bool isPrimaryKey = false;
+        if (!reader.IsAtEnd)
+        {
+            int version = reader.ReadInt32();
+            if (version != 1)
+            {
+                throw new SqlCatalogException($"Unsupported index metadata version {version}.");
+            }
+            isPrimaryKey = reader.ReadBoolean();
+        }
+        if (!reader.IsAtEnd || (isPrimaryKey && !isUnique))
+        {
+            throw new SqlCatalogException("The persisted primary-key index metadata is invalid.");
+        }
+        return new SqlCatalogIndex(tableObjectId, name, columns, isUnique, owner, owningSchema, isPrimaryKey);
+    }
+
+    private static void ValidateConstraints(SqlCatalogTable table)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (SqlCatalogConstraint constraint in table.Constraints)
+        {
+            if (!names.Add(constraint.Name))
+            {
+                throw new SqlCatalogException($"Constraint '{constraint.Name}' is declared more than once on '{table.Schema}.{table.Name}'.");
+            }
+            foreach (string column in constraint.Columns)
+            {
+                if (table.FindColumn(column) is null)
+                {
+                    throw new SqlCatalogException($"Constraint '{constraint.Name}' refers to unknown column '{column}'.");
+                }
+            }
+        }
+    }
+
+    private static IReadOnlyList<string> ReadColumnNames(ref DatabaseKeyReader reader)
+    {
+        int count = reader.ReadInt32();
+        if (count < 0)
+        {
+            throw new SqlCatalogException("The persisted constraint column count is invalid.");
+        }
+        var columns = new List<string>();
+        for (int index = 0; index < count; index++)
+        {
+            columns.Add(reader.ReadString(out _));
+        }
+        return columns;
+    }
+
+    private static void AppendOptionalString(ref DatabaseKeyWriter writer, string? value)
+    {
+        if (value is null)
+        {
+            writer.AppendNull();
+        }
+        else
+        {
+            writer.AppendString(value, Collation.Binary);
+        }
+    }
+
+    private static string? ReadOptionalString(ref DatabaseKeyReader reader)
+    {
+        if (reader.PeekType() == DatabaseType.Null)
+        {
+            reader.ReadNull();
+            return null;
+        }
+        return reader.ReadString(out _);
+    }
+
+    internal ValueTask<SqlCatalogTable> ReserveTableAsync(
+        string schema, string name, IReadOnlyList<SqlCatalogColumn> columns,
+        IReadOnlyList<string>? primaryKeyColumns, IReadOnlyList<SqlCatalogConstraint> constraints,
+        DatabaseObjectOwner owner, string? owningSchema, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            if (_tables.ContainsKey((schema, name)))
+            {
+                throw new SqlCatalogException($"Table '{schema}.{name}' already exists.");
+            }
+            ValidateColumns(schema, name, columns, primaryKeyColumns);
+            var table = new SqlCatalogTable(_nextObjectId++, schema, name, columns, primaryKeyColumns, owner, owningSchema, constraints);
+            ValidateConstraints(table);
+            // Persist the identity before physical trees are created. A crash can
+            // leave unused trees, but can never reuse their identity for a table.
+            using var transaction = _storage.BeginTransaction();
+            PersistCounter(transaction);
+            transaction.Commit();
+            return new ValueTask<SqlCatalogTable>(table);
+        }
+    }
+
+    internal ValueTask PublishTableAsync(
+        SqlCatalogTable table, IReadOnlyList<SqlCatalogIndex> indexes,
+        IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken,
+        bool replaceExisting = false)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            _tables.TryGetValue((table.Schema, table.Name), out TableSlot? existing);
+            if (replaceExisting ? existing is null || existing.Table.ObjectId != table.ObjectId :
+                existing is not null || FindTableByObjectId(table.ObjectId) is not null)
+            {
+                throw new SqlCatalogException($"Table '{table.Schema}.{table.Name}' has an unexpected catalog identity.");
+            }
+            ValidateColumns(table.Schema, table.Name, table.Columns, table.PrimaryKeyColumns);
+            ValidateConstraints(table);
+            var names = new HashSet<string>(table.Constraints.Select(constraint => constraint.Name), StringComparer.OrdinalIgnoreCase);
+            foreach (SqlCatalogIndex index in GetIndexes(table.ObjectId))
+            {
+                if (!names.Add(index.Name) || index.ColumnNames.Any(column => table.FindColumn(column) is null))
+                {
+                    throw new SqlCatalogException($"Index '{index.Name}' conflicts with the replacement table definition.");
+                }
+            }
+            foreach (SqlCatalogIndex index in indexes)
+            {
+                if (index.TableObjectId != table.ObjectId || !names.Add(index.Name) ||
+                    index.ColumnNames.Any(column => table.FindColumn(column) is null) ||
+                    !registrations.Any(registration => registration.ObjectId == table.ObjectId &&
+                        string.Equals(registration.Definition.Name, index.Name, StringComparison.Ordinal) &&
+                        registration.Definition.IsUnique == index.IsUnique))
+                {
+                    throw new SqlCatalogException($"Index '{index.Name}' does not describe a registered index on '{table.Schema}.{table.Name}'.");
+                }
+            }
+            using var transaction = _storage.BeginTransaction();
+            var tableLocation = UpsertRecord(transaction, existing?.Location, EncodeTable(table));
+            var slots = indexes.Select(index => new IndexSlot(index, _storage.InsertRow(transaction, EncodeIndex(index)))).ToArray();
+            var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(registrations));
+            transaction.Commit();
+            _tables[(table.Schema, table.Name)] = new TableSlot(table, tableLocation);
+            foreach (IndexSlot slot in slots)
+            {
+                _indexes[(table.ObjectId, slot.Index.Name)] = slot;
+            }
+            _registrationsLocation = registrationsLocation;
+            _registrations = registrations.ToArray();
+            return default;
+        }
+    }
+
+    internal ValueTask<SqlCatalogTable> AddConstraintAsync(
+        string schema, string name, SqlCatalogConstraint constraint, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(constraint);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            var slot = GetSlot(schema, name);
+            if (_indexes.ContainsKey((slot.Table.ObjectId, constraint.Name)))
+            {
+                throw new SqlCatalogException($"Constraint or index '{constraint.Name}' already exists on '{schema}.{name}'.");
+            }
+            var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, slot.Table.Columns,
+                slot.Table.PrimaryKeyColumns, slot.Table.Owner, slot.Table.OwningSchema,
+                slot.Table.Constraints.Append(constraint).ToArray());
+            ValidateConstraints(updated);
+            ReplaceTable(slot, updated);
+            return new ValueTask<SqlCatalogTable>(updated);
+        }
+    }
+
+    internal ValueTask<SqlCatalogTable> DropConstraintAsync(
+        string schema, string name, string constraintName, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            var slot = GetSlot(schema, name);
+            var constraints = slot.Table.Constraints.Where(constraint =>
+                !string.Equals(constraint.Name, constraintName, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (constraints.Length == slot.Table.Constraints.Count)
+            {
+                throw new SqlCatalogException($"Constraint '{constraintName}' does not exist on '{schema}.{name}'.");
+            }
+            var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, slot.Table.Columns,
+                slot.Table.PrimaryKeyColumns, slot.Table.Owner, slot.Table.OwningSchema, constraints);
+            ReplaceTable(slot, updated);
+            return new ValueTask<SqlCatalogTable>(updated);
+        }
     }
 
     private static void AppendOwnership(ref DatabaseKeyWriter writer, DatabaseObjectOwner owner, string? owningSchema)
@@ -795,7 +1074,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         }
     }
 
-    private static (DatabaseObjectOwner Owner, string? OwningSchema) ReadOwnership(ref DatabaseKeyReader reader)
+    private static (DatabaseObjectOwner Owner, string? OwningSchema) ReadOwnership(ref DatabaseKeyReader reader, bool allowTrailing = false)
     {
         // Existing records end after the original payload. They predate ownership
         // and retain ad-hoc mutability instead of acquiring a guessed schema owner.
@@ -815,7 +1094,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             owningSchema = reader.ReadString(out _);
         }
 
-        if (!reader.IsAtEnd ||
+        if ((!allowTrailing && !reader.IsAtEnd) ||
             owner is not DatabaseObjectOwner.Adhoc and not DatabaseObjectOwner.Schema ||
             (owner == DatabaseObjectOwner.Schema ? string.IsNullOrWhiteSpace(owningSchema) : owningSchema is not null))
         {

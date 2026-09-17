@@ -208,7 +208,17 @@ internal static class SqlCompiledSchemaValidator
                     continue;
                 }
 
-                ValidateMemberNames(constraint.Columns, columns, $"{path}.columns", errors);
+                if (!Enum.IsDefined(constraint.OnDelete) ||
+                    (constraint.Kind == CompiledSchemaConstraintKind.Check && constraint.OnDelete != CompiledSchemaReferentialAction.Restrict))
+                {
+                    Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, $"{path}.onDelete",
+                        "The referential delete action is invalid for this constraint.");
+                }
+
+                if (constraint.Kind != CompiledSchemaConstraintKind.Check || constraint.Columns.Count > 0)
+                {
+                    ValidateMemberNames(constraint.Columns, columns, $"{path}.columns", errors);
+                }
                 if (constraint.Kind == CompiledSchemaConstraintKind.Check)
                 {
                     ValidateExpression(constraint.Expression, $"{path}.expression", errors);

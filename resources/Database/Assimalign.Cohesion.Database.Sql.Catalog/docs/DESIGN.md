@@ -95,6 +95,32 @@ metadata component used by sanctioned schema application as well. Its public
 interface has no new member. The schema table-creation helper and implementation
 overload are internal, accessible only to the SQL engine and catalog tests.
 
+## Constraint persistence
+
+Table records now append a versioned constraint extension after ownership: version
+`1`, constraint count, and each immutable foreign-key/check definition. A reference
+stores its ordered local and target columns, target SQL namespace/table, and
+`RESTRICT` or `CASCADE` delete action. A check stores its SQL expression. Records
+ending after the original primary keys or ownership suffix still load with no
+constraints. Unknown extension versions and malformed definitions fail closed.
+Column changes retain constraints, and add/drop constraint rewrites use the same
+WAL-backed, self-committing record replacement as existing catalog metadata.
+
+`UNIQUE` uses `SqlCatalogIndex.IsUnique`, matching `CompiledSchemaIndex.IsUnique`;
+it does not acquire a competing foreign-key/check constraint kind. Creation of a
+table with unique declarations reserves and durably advances its object identity,
+then the engine commits the empty index trees before publishing the table,
+constraints, index descriptions, and registrations in one catalog transaction.
+A crash before publication leaves no visible table with missing enforcement.
+Replacement publication similarly commits newly added columns/constraints and
+their new indexes together. The internal `SqlCatalog` helpers expose this engine
+path to the existing friend assembly while leaving `ISqlCatalog` unchanged.
+
+Index records have their own version-`1` trailing extension carrying `IsPrimaryKey`.
+This identifies the physical index enforcing primary-key metadata, allowing schema
+reconciliation to distinguish it from a separately declared unique index on the
+same columns. Older index records have no marker and load as ordinary indexes.
+
 ## Error model
 
 `SqlCatalogException : DatabaseException` for catalog violations (duplicate or
@@ -102,8 +128,6 @@ missing tables/columns, primary-key drops, malformed persisted records).
 
 ## Non-goals
 
-- Foreign keys and check constraints (the dialect doesn't parse them yet; the
-  record format has room).
 - Views, sequences, permissions (permissions are `Sql.Security`'s feature, #177).
 - Multi-statement DDL atomicity (see self-committing DDL above). The migration
   layer compensates completed reversible statements on failure; an MVCC bracket

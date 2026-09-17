@@ -36,6 +36,17 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Subquery, "SELECT * FROM t WHERE id IN (SELECT id FROM u);")]
     [InlineData(SqlClauses.Case, "SELECT CASE WHEN id = 1 THEN 'one' ELSE 'other' END FROM t;")]
     [InlineData(SqlClauses.Cast, "SELECT CAST(id AS INT) FROM t;")]
+    [InlineData(SqlClauses.Constraint, "CREATE TABLE t (id INT, CONSTRAINT ck CHECK (id > 0));")]
+    [InlineData(SqlClauses.ForeignKey, "CREATE TABLE t (parent_id INT, FOREIGN KEY (parent_id) REFERENCES parent(id));")]
+    [InlineData(SqlClauses.References, "CREATE TABLE t (parent_id INT REFERENCES parent(id));")]
+    [InlineData(SqlClauses.Check, "CREATE TABLE t (id INT CHECK (id > 0));")]
+    [InlineData(SqlClauses.UniqueConstraint, "CREATE TABLE t (email TEXT UNIQUE);")]
+    [InlineData(SqlClauses.Cascade, "CREATE TABLE t (parent_id INT REFERENCES parent(id) ON DELETE CASCADE);")]
+    [InlineData(SqlClauses.Restrict, "CREATE TABLE t (parent_id INT REFERENCES parent(id) ON DELETE RESTRICT);")]
+    [InlineData(SqlClauses.Begin, "BEGIN;")]
+    [InlineData(SqlClauses.Commit, "COMMIT;")]
+    [InlineData(SqlClauses.Rollback, "ROLLBACK;")]
+    [InlineData(SqlClauses.Transaction, "BEGIN TRANSACTION;")]
     public void Parse_ImplementedClause_IsDeclaredAndParses(string clause, string sql)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();
@@ -63,17 +74,6 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Using)]
     [InlineData(SqlClauses.CreateView)]
     [InlineData(SqlClauses.DropView)]
-    [InlineData(SqlClauses.Constraint)]
-    [InlineData(SqlClauses.ForeignKey)]
-    [InlineData(SqlClauses.References)]
-    [InlineData(SqlClauses.Check)]
-    [InlineData(SqlClauses.UniqueConstraint)]
-    [InlineData(SqlClauses.Cascade)]
-    [InlineData(SqlClauses.Restrict)]
-    [InlineData(SqlClauses.Begin)]
-    [InlineData(SqlClauses.Commit)]
-    [InlineData(SqlClauses.Rollback)]
-    [InlineData(SqlClauses.Transaction)]
     public void Profile_UnsupportedClause_IsNotDeclared(string clause)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();
@@ -96,17 +96,6 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Using, "SELECT * FROM t JOIN u USING (id);")]
     [InlineData(SqlClauses.CreateView, "CREATE VIEW active_users AS SELECT * FROM users;")]
     [InlineData(SqlClauses.DropView, "DROP VIEW active_users;")]
-    [InlineData(SqlClauses.Constraint, "CREATE TABLE t (id INT, CONSTRAINT ck CHECK (id > 0));")]
-    [InlineData(SqlClauses.ForeignKey, "CREATE TABLE t (parent_id INT FOREIGN KEY);")]
-    [InlineData(SqlClauses.References, "CREATE TABLE t (parent_id INT REFERENCES parent(id));")]
-    [InlineData(SqlClauses.Check, "CREATE TABLE t (id INT CHECK (id > 0));")]
-    [InlineData(SqlClauses.UniqueConstraint, "CREATE TABLE t (email TEXT UNIQUE);")]
-    [InlineData(SqlClauses.Cascade, "DROP TABLE t CASCADE;")]
-    [InlineData(SqlClauses.Restrict, "DROP TABLE t RESTRICT;")]
-    [InlineData(SqlClauses.Begin, "BEGIN;")]
-    [InlineData(SqlClauses.Commit, "COMMIT;")]
-    [InlineData(SqlClauses.Rollback, "ROLLBACK;")]
-    [InlineData(SqlClauses.Transaction, "TRANSACTION;")]
     public void Parse_UnsupportedClause_EmitsModelSpecificDiagnostic(string clause, string sql)
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);

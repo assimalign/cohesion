@@ -86,6 +86,17 @@ public static class SqlLanguageProfile
         SqlClauses.Subquery,
         SqlClauses.Case,
         SqlClauses.Cast,
+        SqlClauses.Constraint,
+        SqlClauses.ForeignKey,
+        SqlClauses.References,
+        SqlClauses.Check,
+        SqlClauses.UniqueConstraint,
+        SqlClauses.Cascade,
+        SqlClauses.Restrict,
+        SqlClauses.Begin,
+        SqlClauses.Commit,
+        SqlClauses.Rollback,
+        SqlClauses.Transaction,
     ];
 
     /// <summary>

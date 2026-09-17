@@ -207,17 +207,24 @@ internal sealed class SqlExpressionEvaluator
             return null;
         }
 
+        bool hasUnknown = false;
         foreach (var candidate in expression.Values)
         {
             object? candidateValue = Evaluate(candidate, row);
 
-            if (candidateValue is not null && Compare(value, candidateValue) == 0)
+            if (candidateValue is null)
+            {
+                hasUnknown = true;
+            }
+            else if (Compare(value, candidateValue) == 0)
             {
                 return !expression.IsNegated;
             }
         }
 
-        return expression.IsNegated;
+        // No match with a NULL candidate is UNKNOWN for both IN and NOT IN.
+        // CHECK permits UNKNOWN; WHERE filters it out.
+        return hasUnknown ? null : expression.IsNegated;
     }
 
     private object? EvaluateLike(SqlLikeExpression expression, object?[] row)

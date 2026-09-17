@@ -157,29 +157,37 @@ public sealed partial class SqlQueryParser
 
         // Column definitions: ( col1 TYPE, col2 TYPE, ... )
         var columns = new List<SqlColumnDefinition>();
+        var constraints = new List<SqlConstraintDefinition>();
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
         {
             Advance(ref lexer);
 
-            if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
+            while (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen &&
+                   lexer.Current.Type != TokenType.Semicolon)
             {
-                columns.Add(ParseColumnDefinition(ref lexer));
+                if (IsConstraintStart(ref lexer))
+                {
+                    constraints.Add(ParseConstraint(ref lexer, null));
+                }
+                else
+                {
+                    var column = ParseColumnDefinition(ref lexer);
+                    columns.Add(column);
+                    constraints.AddRange(column.Constraints);
+                }
 
-                while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
+                if (lexer.Current.Type == TokenType.Comma)
                 {
                     Advance(ref lexer);
-                    columns.Add(ParseColumnDefinition(ref lexer));
                 }
+                else { break; }
             }
 
-            if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-            {
-                Advance(ref lexer);
-            }
+            ExpectDdlToken(ref lexer, TokenType.RightParen, "')'");
         }
 
         return new SqlCreateTableExpression(table, columns, ifNotExists, null,
-            Location.Create(1, 1, pos, _lastTokenEnd));
+            Location.Create(1, 1, pos, _lastTokenEnd), constraints);
     }
 
     private SqlColumnDefinition ParseColumnDefinition(ref TokenLexer lexer)
@@ -222,6 +230,7 @@ public sealed partial class SqlQueryParser
         bool isNullable = true;
         bool isPrimaryKey = false;
         SqlExpression? defaultValue = null;
+        var constraints = new List<SqlConstraintDefinition>();
 
         while (!IsAtEnd(ref lexer) &&
                lexer.Current.Type != TokenType.Comma &&
@@ -242,13 +251,13 @@ public sealed partial class SqlQueryParser
                 isNullable = true;
                 Advance(ref lexer);
             }
-            else if (IsKeyword(ref lexer, "PRIMARY"))
+            else if (IsConstraintStart(ref lexer))
             {
-                Advance(ref lexer);
-                if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "KEY"))
+                var constraint = ParseConstraint(ref lexer, columnName);
+                constraints.Add(constraint);
+                if (constraint.Kind == SqlConstraintKind.PrimaryKey)
                 {
                     isPrimaryKey = true;
-                    Advance(ref lexer);
                 }
             }
             else if (IsKeyword(ref lexer, "DEFAULT"))
@@ -258,12 +267,12 @@ public sealed partial class SqlQueryParser
             }
             else
             {
-                // Unknown constraint token, skip
+                AddSyntaxDiagnostic(ref lexer, "Expected a column constraint or the end of the column definition.");
                 Advance(ref lexer);
             }
         }
 
-        return new SqlColumnDefinition(columnName, dataType, isNullable, isPrimaryKey, defaultValue);
+        return new SqlColumnDefinition(columnName, dataType, isNullable, isPrimaryKey, defaultValue, constraints);
     }
 
     private SqlAlterTableExpression ParseAlterTable(ref TokenLexer lexer)
@@ -303,18 +312,25 @@ public sealed partial class SqlQueryParser
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ADD"))
         {
             Advance(ref lexer);
-            // Optional COLUMN keyword
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "COLUMN"))
+            if (IsConstraintStart(ref lexer))
             {
-                Advance(ref lexer);
+                action = new SqlAlterAddConstraintAction(ParseConstraint(ref lexer, null));
             }
-
-            var colDef = ParseColumnDefinition(ref lexer);
-            action = new SqlAlterAddColumnAction(colDef);
+            else
+            {
+                // Optional COLUMN keyword
+                if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "COLUMN"))
+                {
+                    Advance(ref lexer);
+                }
+                action = new SqlAlterAddColumnAction(ParseColumnDefinition(ref lexer));
+            }
         }
         else if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "DROP"))
         {
             Advance(ref lexer);
+            bool isConstraint = IsKeyword(ref lexer, "CONSTRAINT");
+            if (isConstraint) { Advance(ref lexer); }
             // Optional COLUMN keyword
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "COLUMN"))
             {
@@ -327,7 +343,9 @@ public sealed partial class SqlQueryParser
                 colName = CurrentText(ref lexer);
                 Advance(ref lexer);
             }
-            action = new SqlAlterDropColumnAction(colName);
+            action = isConstraint
+                ? new SqlAlterDropConstraintAction(colName)
+                : new SqlAlterDropColumnAction(colName);
         }
         else
         {

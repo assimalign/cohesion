@@ -369,7 +369,7 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
         if (result.Status != QueryResultStatus.Success)
         {
             string detail = result.Diagnostics is { Count: > 0 } diagnostics && diagnostics[0].Message is { } diagnosticMessage
-                ? diagnosticMessage
+                ? $"{diagnostics[0].Code}: {diagnosticMessage}"
                 : $"The statement completed with status {result.Status}.";
 
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, detail, cancellationToken).ConfigureAwait(false);

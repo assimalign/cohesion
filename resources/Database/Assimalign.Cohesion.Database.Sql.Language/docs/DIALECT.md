@@ -11,14 +11,21 @@ for planners and tooling).
 
 ## Statement matrix
 
+The B1 measurement was **21 of 48 declared clauses**. B2 implements **32 of 48**:
+the same 21 plus `CONSTRAINT`, `FOREIGN KEY`, `REFERENCES`, `CHECK`, `UNIQUE`,
+`CASCADE`, `RESTRICT`, `BEGIN`, `COMMIT`, `ROLLBACK`, and optional `TRANSACTION`.
+The remaining **16** are set operations (`UNION`, `INTERSECT`, `EXCEPT`), CTEs
+(`WITH`, `RECURSIVE`), window clauses (`WINDOW`, `OVER`, `PARTITION`), views
+(`CREATE VIEW`, `DROP VIEW`), `NATURAL`, `USING`, `TOP`, `ALL`, `FETCH`, and `RETURNING`.
+
 | Statement | Status | Notes |
 |---|---|---|
 | `SELECT` | Supported | `DISTINCT`, column lists with `AS`/implicit aliases, `FROM` with schema-qualified names + aliases, `INNER/LEFT [OUTER]/RIGHT [OUTER]/FULL [OUTER]/CROSS JOIN ... ON`, `WHERE`, `GROUP BY` (multi), `HAVING`, `ORDER BY ASC/DESC` (multi), `LIMIT`, `OFFSET`, scalar/`IN`/`EXISTS` subqueries |
 | `INSERT` | Supported | optional column list, multi-row `VALUES`, `INSERT ... SELECT` |
 | `UPDATE` | Supported | multi-column `SET`, `WHERE` |
 | `DELETE` | Supported | optional `WHERE` |
-| `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `NOT NULL`/`NULL`, `PRIMARY KEY`, `DEFAULT <literal>` |
-| `ALTER TABLE` | Supported | `ADD [COLUMN] <definition>`, `DROP [COLUMN] <name>` |
+| `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
+| `ALTER TABLE` | Supported | `ADD [COLUMN] <definition>`, `DROP [COLUMN] <name>`, `ADD [CONSTRAINT <name>] <constraint>`, `DROP CONSTRAINT <name>` |
 | `DROP TABLE` | Supported | `IF EXISTS` |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
@@ -29,9 +36,10 @@ for planners and tooling).
 | `WITH` / `WITH RECURSIVE` (CTEs) | Recognized, not supported | rejected with `COHDBL001` |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `COHDBL001` |
 | `CREATE VIEW` / `DROP VIEW` | Recognized, not supported | rejected with `COHDBL001` |
-| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Recognized, not supported | `UNIQUE` remains supported for `CREATE UNIQUE INDEX`; constraint forms report `COHDBL001` |
-| `CASCADE` / `RESTRICT` referential actions | Recognized, not supported | rejected with `COHDBL001` |
-| `BEGIN` / `COMMIT` / `ROLLBACK` / `TRANSACTION` | Recognized, not supported | transaction control is a session/protocol concern; rejected with `COHDBL001` |
+| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported | column and table declarations normalize into constraint definitions; `UNIQUE` lowers to a unique catalog index |
+| `ON DELETE CASCADE` / `ON DELETE RESTRICT` | Supported | omitted deletion action defaults to `RESTRICT`; `DROP TABLE ... CASCADE` is not supported |
+| `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
+| `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
 
 ## Expressions
@@ -92,6 +100,7 @@ function names are lexed but not supported (see the statement matrix).
 | `COHDBL001` | Error | Recognized clause is not supported by the SQL model surface |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
+| `SQL0003` | Error | Malformed transaction-control or constraint/DDL syntax |
 | `SQL0100` | Information | Statement does not end with `;` |
 
 Positions are absolute character offsets into the statement text; line/column

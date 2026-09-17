@@ -63,6 +63,22 @@ public static class SqlSchemaMigrationPlanner
         var oldTables = current.ToDictionary(table => table.Name, identifiers);
         var newTables = desired.ToDictionary(table => table.Name, identifiers);
 
+        // Remove references before their target indexes, columns, or tables.
+        foreach (CompiledSchemaTable oldTable in current.OrderBy(table => table.Name, StringComparer.Ordinal))
+        {
+            newTables.TryGetValue(oldTable.Name, out CompiledSchemaTable? newTable);
+            foreach (CompiledSchemaConstraint constraint in oldTable.Constraints)
+            {
+                CompiledSchemaConstraint? replacement = newTable?.Constraints.FirstOrDefault(value => identifiers.Equals(value.Name, constraint.Name));
+                if (replacement is null || !ConstraintEquals(constraint, replacement, identifiers))
+                {
+                    operations.Add(new SqlSchemaMigrationOperation(
+                        SqlSchemaMigrationOperationKind.DropConstraint, SqlSchemaMigrationSafety.Safe,
+                        constraint.Name, oldTable.Name, constraint: constraint));
+                }
+            }
+        }
+
         // Remove indexes first so later destructive column/table operations never leave dangling metadata.
         foreach (CompiledSchemaTable oldTable in current.OrderBy(table => table.Name, StringComparer.Ordinal))
         {
@@ -93,7 +109,8 @@ public static class SqlSchemaMigrationPlanner
                     SqlSchemaMigrationOperationKind.AddTable,
                     SqlSchemaMigrationSafety.Safe,
                     newTable.Name,
-                    table: newTable));
+                    table: new CompiledSchemaTable(newTable.Name, newTable.RowType, newTable.Columns,
+                        newTable.PrimaryKey, newTable.Indexes, Array.Empty<CompiledSchemaConstraint>())));
                 foreach (CompiledSchemaIndex index in newTable.Indexes.OrderBy(value => value.Name, StringComparer.Ordinal))
                 {
                     operations.Add(new SqlSchemaMigrationOperation(
@@ -142,8 +159,7 @@ public static class SqlSchemaMigrationPlanner
                 newTable.Columns.Select(column => column.Name),
                 identifiers);
             if (columnOrderChanged ||
-                !KeyEquals(oldTable.PrimaryKey, newTable.PrimaryKey, identifiers) ||
-                !ConstraintsEqual(oldTable.Constraints, newTable.Constraints, identifiers))
+                !KeyEquals(oldTable.PrimaryKey, newTable.PrimaryKey, identifiers))
             {
                 operations.Add(new SqlSchemaMigrationOperation(
                     SqlSchemaMigrationOperationKind.AlterTable,
@@ -175,6 +191,23 @@ public static class SqlSchemaMigrationPlanner
                         SqlSchemaMigrationSafety.Destructive,
                         column.Name,
                         oldTable.Name));
+                }
+            }
+        }
+
+        // All tables and unique indexes exist before any FK is bound. Cycles and
+        // self-references therefore need no special ordering or disabled checks.
+        foreach (CompiledSchemaTable newTable in desired.OrderBy(table => table.Name, StringComparer.Ordinal))
+        {
+            oldTables.TryGetValue(newTable.Name, out CompiledSchemaTable? oldTable);
+            foreach (CompiledSchemaConstraint constraint in newTable.Constraints)
+            {
+                CompiledSchemaConstraint? previous = oldTable?.Constraints.FirstOrDefault(value => identifiers.Equals(value.Name, constraint.Name));
+                if (previous is null || !ConstraintEquals(previous, constraint, identifiers))
+                {
+                    operations.Add(new SqlSchemaMigrationOperation(
+                        SqlSchemaMigrationOperationKind.AddConstraint, SqlSchemaMigrationSafety.Safe,
+                        constraint.Name, newTable.Name, constraint: constraint));
                 }
             }
         }
@@ -221,33 +254,14 @@ public static class SqlSchemaMigrationPlanner
             && identifiers.Equals(left.Name, right.Name)
             && left.Columns.SequenceEqual(right.Columns, identifiers));
 
-    private static bool ConstraintsEqual(
-        IReadOnlyList<CompiledSchemaConstraint> left,
-        IReadOnlyList<CompiledSchemaConstraint> right,
-        StringComparer identifiers)
-    {
-        if (left.Count != right.Count)
-        {
-            return false;
-        }
-
-        for (int index = 0; index < left.Count; index++)
-        {
-            CompiledSchemaConstraint first = left[index];
-            CompiledSchemaConstraint second = right[index];
-            if (!identifiers.Equals(first.Name, second.Name)
-                || first.Kind != second.Kind
-                || !first.Columns.SequenceEqual(second.Columns, identifiers)
-                || !identifiers.Equals(first.ReferencedObject, second.ReferencedObject)
-                || !first.ReferencedColumns.SequenceEqual(second.ReferencedColumns, identifiers)
-                || !string.Equals(first.Expression?.CanonicalText, second.Expression?.CanonicalText, StringComparison.Ordinal))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    private static bool ConstraintEquals(CompiledSchemaConstraint first, CompiledSchemaConstraint second, StringComparer identifiers)
+        => identifiers.Equals(first.Name, second.Name)
+        && first.Kind == second.Kind
+        && first.OnDelete == second.OnDelete
+        && (first.Kind == CompiledSchemaConstraintKind.Check || first.Columns.SequenceEqual(second.Columns, identifiers))
+        && identifiers.Equals(first.ReferencedObject, second.ReferencedObject)
+        && first.ReferencedColumns.SequenceEqual(second.ReferencedColumns, identifiers)
+        && string.Equals(first.Expression?.CanonicalText, second.Expression?.CanonicalText, StringComparison.Ordinal);
 
     private static void EnsureSupportedMetadataIsUnchanged(SqlCompiledSchema? current, SqlCompiledSchema desired)
     {

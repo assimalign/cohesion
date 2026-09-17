@@ -29,6 +29,7 @@ public sealed partial class SqlQueryParser : QueryParser
     /// <inheritdoc />
     public override QueryStatement Parse(ReadOnlySpan<char> query)
     {
+        _sourceText = query.ToString();
         var statement = base.Parse(query);
 
         // Stamp the raw statement text so downstream consumers (planners, tooling,
@@ -47,6 +48,7 @@ public sealed partial class SqlQueryParser : QueryParser
     {
         _sawSemicolon = false;
         _lastTokenEnd = 0;
+        _parseDiagnostics.Clear();
 
         bool hasUnsupportedClause =
             TryFindUnsupportedClause(lexer, out string unsupportedClause, out Location unsupportedLocation) &&
@@ -106,6 +108,12 @@ public sealed partial class SqlQueryParser : QueryParser
             {
                 expression = ParseDrop(ref lexer);
             }
+            else if (keyword.Equals("BEGIN", StringComparison.OrdinalIgnoreCase) ||
+                     keyword.Equals("COMMIT", StringComparison.OrdinalIgnoreCase) ||
+                     keyword.Equals("ROLLBACK", StringComparison.OrdinalIgnoreCase))
+            {
+                expression = ParseTransaction(ref lexer);
+            }
             else
             {
                 expression = new SqlQueryExpression(SqlQueryCommandType.Unknown, null,
@@ -121,6 +129,13 @@ public sealed partial class SqlQueryParser : QueryParser
             ConsumeRemaining(ref lexer);
         }
 
+        if (!hasUnsupportedClause && !IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon &&
+            expression is SqlCreateTableExpression or SqlAlterTableExpression or SqlDropTableExpression)
+        {
+            AddSyntaxDiagnostic(ref lexer, "Unexpected token after the DDL statement.");
+            ConsumeRemaining(ref lexer);
+        }
+
         // A supported expression parser may deliberately stop at a clause outside
         // this profile. Consume the rest only to retain terminator tracking.
         if (hasUnsupportedClause && !IsAtEnd(ref lexer))
@@ -129,6 +144,11 @@ public sealed partial class SqlQueryParser : QueryParser
         }
 
         var statement = new SqlQueryStatement(expression);
+
+        foreach (var diagnostic in _parseDiagnostics)
+        {
+            statement.AddDiagnostic(diagnostic);
+        }
 
         if (hasUnsupportedClause)
         {
@@ -171,6 +191,43 @@ public sealed partial class SqlQueryParser : QueryParser
 
     private bool _sawSemicolon;
     private int _lastTokenEnd;
+    private string _sourceText = string.Empty;
+    private readonly List<Diagnostic> _parseDiagnostics = [];
+
+    private SqlTransactionExpression ParseTransaction(ref TokenLexer lexer)
+    {
+        int start = lexer.Current.Position;
+        var command = CurrentText(ref lexer).ToUpperInvariant() switch
+        {
+            "BEGIN" => SqlQueryCommandType.Begin,
+            "COMMIT" => SqlQueryCommandType.Commit,
+            _ => SqlQueryCommandType.Rollback,
+        };
+        Advance(ref lexer);
+        if (IsKeyword(ref lexer, "TRANSACTION"))
+        {
+            Advance(ref lexer);
+        }
+        if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon)
+        {
+            AddSyntaxDiagnostic(ref lexer, "Expected the end of the transaction-control statement.");
+            ConsumeRemaining(ref lexer);
+        }
+        return new SqlTransactionExpression(command, Location.Create(1, 1, start, _lastTokenEnd));
+    }
+
+    private void AddSyntaxDiagnostic(ref TokenLexer lexer, string message)
+    {
+        _parseDiagnostics.Add(new Diagnostic
+        {
+            Code = "SQL0003",
+            Message = message,
+            Start = lexer.Current.Position,
+            End = lexer.Current.Position + lexer.Current.Value.Length,
+            Severity = DiagnosticSeverity.Error,
+            Location = DiagnosticLocation.Absolute,
+        });
+    }
 
     // ── Token navigation helpers ───────────────────────────────────────
 
@@ -375,28 +432,12 @@ public sealed partial class SqlQueryParser : QueryParser
                     return true;
                 }
 
-                if (token.Equals("FOREIGN", StringComparison.OrdinalIgnoreCase) &&
-                    TryPeekToken(lexer, out string foreignKeyToken, out int nextTokenEnd) &&
-                    foreignKeyToken.Equals("KEY", StringComparison.OrdinalIgnoreCase))
+                if (token.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) &&
+                    previousToken?.Equals("ON", StringComparison.OrdinalIgnoreCase) == true)
                 {
-                    clause = SqlClauses.ForeignKey;
-                    location = Location.Create(1, 1, lexer.Current.Position, nextTokenEnd);
+                    clause = "ON UPDATE";
+                    location = Location.Create(1, 1, previousPosition, lexer.Current.Position + lexer.Current.Value.Length);
                     return true;
-                }
-
-                if (token.Equals(SqlClauses.UniqueConstraint, StringComparison.OrdinalIgnoreCase))
-                {
-                    bool isCreateUniqueIndex =
-                        previousToken?.Equals("CREATE", StringComparison.OrdinalIgnoreCase) == true &&
-                        TryPeekToken(lexer, out string uniqueIndexToken, out _) &&
-                        uniqueIndexToken.Equals("INDEX", StringComparison.OrdinalIgnoreCase);
-
-                    if (!isCreateUniqueIndex)
-                    {
-                        clause = SqlClauses.UniqueConstraint;
-                        location = tokenLocation;
-                        return true;
-                    }
                 }
 
                 if (token.Equals(SqlClauses.All, StringComparison.OrdinalIgnoreCase) &&
@@ -446,15 +487,6 @@ public sealed partial class SqlQueryParser : QueryParser
             "TOP" => SqlClauses.Top,
             "NATURAL" => SqlClauses.Natural,
             "USING" => SqlClauses.Using,
-            "CONSTRAINT" => SqlClauses.Constraint,
-            "REFERENCES" => SqlClauses.References,
-            "CHECK" => SqlClauses.Check,
-            "CASCADE" => SqlClauses.Cascade,
-            "RESTRICT" => SqlClauses.Restrict,
-            "BEGIN" => SqlClauses.Begin,
-            "COMMIT" => SqlClauses.Commit,
-            "ROLLBACK" => SqlClauses.Rollback,
-            "TRANSACTION" => SqlClauses.Transaction,
             _ => string.Empty,
         };
 

@@ -45,6 +45,33 @@ and requires the declaration's destructive-change opt-in for data-losing steps.
 Unsupported metadata changes fail explicitly. The model-independent apply
 contract and `SchemaMigrationResult` stay in the root.
 
+Foreign keys and checks are executable schema metadata. The planner first creates
+all tables and their indexes, then emits `AddConstraint` operations rendered as
+`ALTER TABLE ... ADD CONSTRAINT`. This permits references to tables that sort later,
+self-references, and cycles without temporarily disabling enforcement. Constraint
+replacement emits `DropConstraint` before removing dependent columns or indexes,
+then adds the replacement after structural changes. Both constraint operations have
+compensating statements, and the SQL provisioner includes their definitions when
+comparing or reconstructing the live catalog after a failed apply.
+
+`CompiledSchemaConstraint.OnDelete` uses `CompiledSchemaReferentialAction.Restrict`
+by default and can select `Cascade`. The default is omitted from canonical JSON,
+preserving hashes of existing documents that implicitly restricted parent deletes.
+The retained C# `References` builder keeps that default; its public interface is
+unchanged. The compiled concrete model carries the optional action directly.
+
+`UNIQUE` is represented by `CompiledSchemaIndex(IsUnique: true)`, consistently with
+the SQL language and catalog. A unique index supplies both enforcement and lookup,
+so a second constraint kind would duplicate its identity and persistence rules.
+Foreign keys and checks remain `CompiledSchemaConstraint` values. For a check,
+`Expression.CanonicalText` is SQL scalar-expression text, for example `qty > 0`;
+the SQL parser and evaluator validate it at provisioning. Its optional `Columns`
+list is advisory and is not part of check equivalence, because table-level SQL
+checks derive their dependencies from the expression. Function and trigger bodies
+retain their separate compiler-produced expression representation. The frozen
+retained table builder has no check declaration member; callers construct the
+compiled check model directly without adding an interface member.
+
 The package targets `net10.0`, `LangVersion=Preview`, and is AOT-compatible.
 The compiler reads statically supplied expression nodes and their type metadata;
 it does not discover or invoke members with reflection, compile expressions,

@@ -18,7 +18,7 @@ Measured from source, not from the plan. Line counts are production code (`src/`
 
 | Engine | Production code | Tests | Verdict |
 |---|---|---|---|
-| **SQL** | ~14,300 lines across engine, language, catalog, client, storage | ~6,900 | **Working, with a narrower language than it appeared.** Plans, executes, indexes, serves over the wire, MVCC-correct. But the parser implements **21 of its 48 declared clauses** — no transaction control, no referential integrity, no set operations, no CTEs. See feature B2. |
+| **SQL** | ~14,300 lines at B1 baseline; B2 extends engine, language, catalog and schema | ~6,900 at B1 baseline; B2 adds acceptance coverage | **Working, with transaction control and referential integrity.** B2 raises parser/profile coverage from **21 to 32 of 48 declared clauses**: SQL transactions run through the wire server, and durable foreign keys, checks and unique indexes enforce writes. Set operations, CTEs and the remaining 16 clauses are deferred; parser coverage is not a claim that every parsed query shape executes. See feature B2. |
 | **Key-Value** | ~6,500 lines across engine, client, catalog, storage | ~2,700 | **Working.** Storage, commands, server, client all landed. |
 | **Documents** | ~500 lines — root contracts, a 62-line language stub, a 150-line storage stub | ~780 | **Not built.** No parser, no planner, no engine. |
 | **Graph** | ~350 lines — root contracts and an 86-line language stub | ~6 | **Not built.** Also blocked: the query standard was never chosen. |
@@ -74,20 +74,21 @@ Structural fixes that must land before engine work, because every engine inherit
 | # | Feature | What it means | Status | Work items |
 |---|---|---|---|---|
 | **B1** ✅ | **Each model opts into the clauses it supports** | The shared language package today hands every model the same lexer and a flat keyword list. B1 adds a capability profile: a model declares which clauses it accepts, and anything outside the profile produces a precise "not supported by this model" diagnostic instead of a generic parse failure. | `NEW` | file new |
-| **B2** | **A published, complete SQL surface** | **The gap is far larger than it looked — feature B1 measured it: the parser implements 21 of its 48 declared clauses.** See the table below for exactly what is missing. Before B1 these keywords lexed fine and then failed downstream as generic syntax errors, which is why the hole went unnoticed. | `PARTIAL` | #172, #173, #174 |
+| **B2** | **A published, complete SQL surface** | Phase 4 adds wire-accessible `BEGIN` / `COMMIT` / `ROLLBACK`, durable foreign keys with delete cascade/restrict, row checks and unique indexes with concurrent-write enforcement. Coverage rises from **21/48 to 32/48**; the remaining language groups below keep the broader published-surface feature partial. DDL remains self-committing and is refused inside explicit transactions. | `PARTIAL` (Phase 4 transaction/constraint slice implemented) | #172, #173, #174; catalog constraint portions of #175 / #177 |
 
-> **What the SQL surface actually supports (measured 2026-09-17, after B1).**
+> **What the SQL surface actually supports (measured 2026-09-17, after B2).**
 >
-> **Supported (21):** `SELECT` `INSERT` `UPDATE` `DELETE` `CREATE TABLE` `CREATE INDEX`
+> **Supported (32; previously 21 of 48):** `SELECT` `INSERT` `UPDATE` `DELETE` `CREATE TABLE` `CREATE INDEX`
 > `ALTER TABLE` `DROP TABLE` `DROP INDEX` `FROM` `JOIN` `WHERE` `GROUP BY` `HAVING` `ORDER BY`
-> `LIMIT` `OFFSET` `VALUES` subqueries `CASE` `CAST`
+> `LIMIT` `OFFSET` `VALUES` subqueries `CASE` `CAST` `BEGIN` `COMMIT` `ROLLBACK`
+> `TRANSACTION` `FOREIGN KEY` `REFERENCES` `CHECK` `UNIQUE` constraint `CONSTRAINT`
+> `CASCADE` `RESTRICT`. The eleven additions have engine enforcement; some older
+> parser-supported query shapes remain outside the planner's execution surface.
 >
-> **Not implemented (27):**
+> **Not implemented (16):**
 >
 > | Group | Missing |
 > |---|---|
-> | **Transaction control** | `BEGIN` · `COMMIT` · `ROLLBACK` · `TRANSACTION` |
-> | **Referential integrity** | `FOREIGN KEY` · `REFERENCES` · `CHECK` · `UNIQUE` constraint · `CONSTRAINT` · `CASCADE` · `RESTRICT` |
 > | **Set operations** | `UNION` · `INTERSECT` · `EXCEPT` |
 > | **CTEs** | `WITH` · `RECURSIVE` |
 > | **Window functions** | `OVER` · `PARTITION BY` · `WINDOW` |
@@ -95,13 +96,14 @@ Structural fixes that must land before engine work, because every engine inherit
 > | **Joins** | `NATURAL` · `USING` |
 > | **Other** | `TOP` · `ALL` · `FETCH` · `RETURNING` |
 >
-> **The two that matter most for calling SQL an MVP engine:**
+> **The two engine gaps closed by Phase 4:**
 >
-> 1. **No transaction control in the language.** The engine has full MVCC — snapshot isolation,
->    write-conflict detection, deadlock surfacing — but a client connected over the wire cannot
->    write `BEGIN; … COMMIT;`. Transactions are reachable only from the in-process C# session API.
-> 2. **No referential integrity.** No foreign keys, no check constraints, no unique constraints.
->    The catalog and planner have no notion of them.
+> 1. **Transaction control in the language.** A client connected through `SqlDatabaseServer`
+>    can begin a transaction, issue multiple statements, and commit or roll back. Disconnect
+>    aborts outstanding writes. State errors carry stable diagnostics.
+> 2. **Referential integrity.** Foreign-key and check definitions survive catalog restart;
+>    `UNIQUE` uses the same unique-index model as compiled schemas. Enforcement runs inside
+>    statement brackets and uses the existing MVCC lock manager, including concurrent unique keys.
 >
 > Neither is a language-only fix: transaction control needs statement-to-session binding in the
 > engine, and constraints need catalog persistence, planner awareness, and enforcement on the write

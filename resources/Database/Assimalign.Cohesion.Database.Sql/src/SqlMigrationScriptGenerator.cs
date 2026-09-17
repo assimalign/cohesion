@@ -92,6 +92,17 @@ public static class SqlMigrationScriptGenerator
                         operation.ObjectName),
                     PreviousIndexStatement(operation, currentSchema)),
 
+                SqlSchemaMigrationOperationKind.AddConstraint => new SqlMigrationScriptStep(
+                    operation,
+                    SqlSchemaStatementRenderer.AddConstraint(RequireParent(operation), RequireConstraint(operation)),
+                    SqlSchemaStatementRenderer.DropConstraint(RequireParent(operation), operation.ObjectName)),
+
+                SqlSchemaMigrationOperationKind.DropConstraint => new SqlMigrationScriptStep(
+                    operation,
+                    SqlSchemaStatementRenderer.DropConstraint(RequireParent(operation), operation.ObjectName),
+                    operation.Constraint is null ? null : SqlSchemaStatementRenderer.AddConstraint(
+                        RequireParent(operation), RequireConstraint(operation))),
+
                 SqlSchemaMigrationOperationKind.AlterTable or SqlSchemaMigrationOperationKind.AlterColumn =>
                     throw Unsupported(operation, "ALTER metadata is not implemented by the SQL DDL dialect"),
 
@@ -145,6 +156,13 @@ public static class SqlMigrationScriptGenerator
             throw InvalidPayload(operation, "a desired table definition");
         RequireMatchingName(operation, table.Name, "table");
         return table;
+    }
+
+    private static CompiledSchemaConstraint RequireConstraint(SqlSchemaMigrationOperation operation)
+    {
+        CompiledSchemaConstraint constraint = operation.Constraint ?? throw InvalidPayload(operation, "a constraint definition");
+        RequireMatchingName(operation, constraint.Name, "constraint");
+        return constraint;
     }
 
     private static CompiledSchemaColumn RequireColumn(SqlSchemaMigrationOperation operation)

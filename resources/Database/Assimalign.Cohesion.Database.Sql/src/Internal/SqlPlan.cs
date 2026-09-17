@@ -83,11 +83,16 @@ internal sealed record SqlCreateTablePlan(
     string Name,
     IReadOnlyList<SqlCatalogColumn> Columns,
     IReadOnlyList<string> PrimaryKey,
-    bool IfNotExists) : SqlPlan;
+    bool IfNotExists,
+    IReadOnlyList<SqlConstraintDefinition> Constraints) : SqlPlan;
 
 internal sealed record SqlDropTablePlan(string Schema, string Name, bool IfExists) : SqlPlan;
 
-internal sealed record SqlAddColumnPlan(string Schema, string Name, SqlCatalogColumn Column) : SqlPlan;
+internal sealed record SqlAddColumnPlan(string Schema, string Name, SqlCatalogColumn Column, IReadOnlyList<SqlConstraintDefinition> Constraints) : SqlPlan;
+
+internal sealed record SqlAddConstraintPlan(SqlCatalogTable Table, SqlConstraintDefinition Constraint) : SqlPlan;
+
+internal sealed record SqlDropConstraintPlan(SqlCatalogTable Table, string ConstraintName) : SqlPlan;
 
 internal sealed record SqlDropColumnPlan(string Schema, string Name, string ColumnName) : SqlPlan;
 
