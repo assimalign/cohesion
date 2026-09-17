@@ -19,45 +19,219 @@ internal sealed partial class SqlPlanExecutor
 {
     private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values);
 
-    // Related tables take transaction-duration object locks before the apply gate.
-    // This is deliberately conservative: the existing lock manager arbitrates all
-    // waits/deadlocks, and no fresh concurrency or commit-validation mechanism is needed.
-    private async Task AcquireReferentialLocksAsync(SqlCatalogTable table, SqlStatementContext statement, CancellationToken cancellationToken)
+    /// <summary>
+    /// One parent row version a statement's outgoing foreign keys depend on: the
+    /// referenced table and the packed location of the matching version, which is
+    /// the entry-lock identity the row-write path already uses.
+    /// </summary>
+    private readonly record struct SqlParentReference(SqlCatalogTable Parent, PageId PageId, int SlotIndex)
     {
-        var tables = _catalog.Tables;
-        var connected = new HashSet<ulong> { table.ObjectId };
-        bool changed;
-        do
+        public ulong EntryId => SqlRecordLocation.Pack(PageId, SlotIndex);
+    }
+
+    // ── Referential locking: parent-row granularity ────────────────────
+    //
+    // Referential integrity needs exactly one guarantee from the lock manager:
+    // *before a statement reads a table's latest state for some key, every other
+    // writer of that key must already be decided* (committed, or rolled back with
+    // its undo complete). That is what makes `ConstraintCurrentSnapshot` reads
+    // sound. Two conflicting locks on the **parent row** deliver it:
+    //
+    //   - A child writer takes `Shared` on the parent row version it matched
+    //     (`AcquireParentRowLocksAsync`), then re-checks the version's stamps
+    //     under that lock — the same latest-state discipline the row-write path
+    //     applies to its own targets.
+    //   - A child writer that *releases* a reference — deleting the row, or
+    //     changing its key away — takes the same `Shared` lock on the parent row
+    //     it is releasing (`CollectReleasedReferences`). Without it the scheme has
+    //     an orphan window: a latest-state read treats an undecided tombstone as
+    //     absence, so a parent delete would conclude the row is unreferenced,
+    //     commit, and be contradicted when the child's transaction rolls back and
+    //     restores the reference.
+    //   - A parent writer takes `Exclusive` on every row it deletes or re-keys
+    //     *before* reading child tables for incoming references. Shared and
+    //     Exclusive are incompatible, so every child writer that acquired or
+    //     released a reference to that row has been decided by the time the read
+    //     happens.
+    //
+    // Table-grain locks stay intent-only: `IntentShared` on the adjacent tables a
+    // statement reads for constraint purposes, which is compatible with other
+    // writers' `IntentExclusive` and blocks only table-grain DDL. Two transactions
+    // writing different tables of one reference graph no longer serialize.
+    //
+    // This replaces the original component-wide scheme, which took `Exclusive` on
+    // every table in the transitive closure of the reference graph. In a normalized
+    // schema that closure is usually the whole database, so a single foreign key
+    // serialized nearly all writers. The cost of narrowing is that referential
+    // waits can now form wait-for cycles (the closure's object-id ordering made
+    // them impossible); they surface as the lock manager's requester-closes-cycle
+    // abort, the same retryable deadlock the row-write path already produces.
+
+    /// <summary>
+    /// Takes the table-grain <see cref="LockMode.IntentShared"/> locks on the
+    /// parent tables this table's foreign keys point at, in object-id order.
+    /// Intent-shared is compatible with concurrent writers and blocks only
+    /// table-grain DDL, so the parent definitions the statement binds against
+    /// cannot change underneath it.
+    /// </summary>
+    private async ValueTask AcquireOutgoingReferenceIntentLocksAsync(SqlCatalogTable table, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        var parents = new SortedSet<ulong>();
+        foreach (var constraint in table.Constraints)
         {
-            changed = false;
-            foreach (var child in tables)
+            if (constraint.Kind != SqlCatalogConstraintKind.Reference)
             {
-                foreach (var reference in child.Constraints.Where(c => c.Kind == SqlCatalogConstraintKind.Reference))
-                {
-                    if (!_catalog.TryGetTable(reference.ReferencedSchema!, reference.ReferencedTable!, out var parent))
-                    {
-                        throw new DatabaseException($"Referenced table '{reference.ReferencedSchema}.{reference.ReferencedTable}' is unavailable.");
-                    }
-
-                    if (connected.Contains(child.ObjectId) || connected.Contains(parent.ObjectId))
-                    {
-                        changed |= connected.Add(child.ObjectId);
-                        changed |= connected.Add(parent.ObjectId);
-                    }
-                }
+                continue;
             }
-        } while (changed);
 
-        bool hasReference = tables.Any(t => connected.Contains(t.ObjectId) && t.Constraints.Any(c => c.Kind == SqlCatalogConstraintKind.Reference));
-        if (!hasReference)
+            if (!_catalog.TryGetTable(constraint.ReferencedSchema!, constraint.ReferencedTable!, out var parent))
+            {
+                throw new DatabaseException($"Referenced table '{constraint.ReferencedSchema}.{constraint.ReferencedTable}' is unavailable.");
+            }
+
+            parents.Add(parent.ObjectId);
+        }
+
+        await AcquireIntentSharedLocksAsync(parents, statement, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Takes the table-grain <see cref="LockMode.IntentShared"/> locks on the
+    /// child tables that reference this table, in object-id order — the tables a
+    /// parent delete or key change reads for incoming references.
+    /// </summary>
+    private async ValueTask AcquireIncomingReferenceIntentLocksAsync(SqlCatalogTable table, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        var children = new SortedSet<ulong>();
+        foreach (var (child, _) in IncomingReferences(table))
+        {
+            children.Add(child.ObjectId);
+        }
+
+        await AcquireIntentSharedLocksAsync(children, statement, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask AcquireIntentSharedLocksAsync(SortedSet<ulong> objectIds, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        foreach (ulong objectId in objectIds)
+        {
+            await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
+                LockResource.Object(objectId), LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Takes a transaction-duration <see cref="LockMode.Shared"/> lock on every
+    /// parent row version the statement's foreign keys matched — sorted by
+    /// (object, entry) and deduplicated — and re-validates each against its
+    /// current stamps under that lock. Holding the shared lock is what keeps a
+    /// concurrent parent delete from admitting an orphan; the latest-state check
+    /// is what rejects a parent the statement's own snapshot still sees but a
+    /// committed transaction has already removed.
+    /// </summary>
+    /// <param name="references">The matched parent versions; sorted in place.</param>
+    /// <param name="statement">The executing statement.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <param name="validate">
+    /// False for references a statement is *releasing* rather than taking on: the
+    /// lock is still required, but a parent already tombstoned by a committed
+    /// transaction is no reason to fail a statement that is dropping the reference
+    /// to it.
+    /// </param>
+    /// <exception cref="TransactionAbortedException">A matched parent version was removed by a concurrently committed transaction.</exception>
+    private async ValueTask AcquireParentRowLocksAsync(List<SqlParentReference> references, SqlStatementContext statement,
+        CancellationToken cancellationToken, bool validate = true)
+    {
+        if (references.Count == 0)
         {
             return;
         }
 
-        foreach (ulong objectId in connected.Order())
+        references.Sort(static (left, right) => left.Parent.ObjectId == right.Parent.ObjectId
+            ? left.EntryId.CompareTo(right.EntryId)
+            : left.Parent.ObjectId.CompareTo(right.Parent.ObjectId));
+
+        (ulong ObjectId, ulong EntryId)? previous = null;
+        foreach (var reference in references)
         {
+            if (previous == (reference.Parent.ObjectId, reference.EntryId))
+            {
+                continue;
+            }
+
+            previous = (reference.Parent.ObjectId, reference.EntryId);
             await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence,
-                LockResource.Object(objectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+                LockResource.Entry(reference.Parent.ObjectId, reference.EntryId), LockMode.Shared, cancellationToken).ConfigureAwait(false);
+
+            if (validate)
+            {
+                // A visible parent deleted after this snapshot cannot authorize a
+                // new child; under the shared lock the check is also final, because
+                // no concurrent writer can tombstone the version while it is held.
+                EnsureLatestVersion(reference.Parent, reference.PageId, reference.SlotIndex, statement.Transaction.Sequence);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resolves the parent rows a set of rows currently references — the rows a
+    /// delete or key change is releasing — against latest state rather than the
+    /// statement snapshot, because the version a future parent writer will lock is
+    /// the live one, not the one this statement happens to see. The caller locks
+    /// them through <see cref="AcquireParentRowLocksAsync"/> with validation off.
+    /// </summary>
+    /// <param name="table">The table the rows belong to.</param>
+    /// <param name="rows">The row values whose references are being released.</param>
+    /// <param name="references">The collection to append resolved parent versions to.</param>
+    /// <param name="statement">The executing statement.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <param name="changed">
+    /// When supplied, a constraint is resolved for a row only when this predicate
+    /// accepts the (constraint, row index) pair — an UPDATE releases a reference
+    /// only on the constraints whose columns it actually changes.
+    /// </param>
+    /// <param name="skip">
+    /// A constraint to leave out: the cascade edge a row was reached by already
+    /// points at a parent row this statement holds exclusively, so re-resolving it
+    /// would cost a lookup to rediscover a lock already held.
+    /// </param>
+    private void CollectReleasedReferences(SqlCatalogTable table, IReadOnlyList<object?[]> rows, List<SqlParentReference> references,
+        SqlStatementContext statement, CancellationToken cancellationToken,
+        Func<SqlCatalogConstraint, int, bool>? changed = null, SqlCatalogConstraint? skip = null)
+    {
+        foreach (var constraint in table.Constraints)
+        {
+            if (constraint.Kind != SqlCatalogConstraintKind.Reference || ReferenceEquals(constraint, skip))
+            {
+                continue;
+            }
+
+            if (!_catalog.TryGetTable(constraint.ReferencedSchema!, constraint.ReferencedTable!, out var parent))
+            {
+                if (!string.Equals(constraint.ReferencedSchema, table.Schema, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(constraint.ReferencedTable, table.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                parent = table;
+            }
+
+            for (int index = 0; index < rows.Count; index++)
+            {
+                object?[] row = rows[index];
+                object?[] keys = constraint.Columns.Select(column => row[FindColumnOrdinal(table, column)]).ToArray();
+                if (keys.Any(value => value is null) || (changed is not null && !changed(constraint, index)))
+                {
+                    continue; // MATCH SIMPLE, or a key this statement is not changing
+                }
+
+                foreach (var match in FindConstraintRows(parent, constraint.ReferencedColumns!, keys, statement, cancellationToken,
+                    ConstraintCurrentSnapshot(statement)))
+                {
+                    references.Add(new SqlParentReference(parent, match.Location.PageId, match.Location.SlotIndex));
+                }
+            }
         }
     }
 
@@ -71,10 +245,20 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    // Only used under Exclusive object locks for every table in the FK component.
-    // Every non-self writer of these tables has then committed or completed undo.
-    // Latest-state constraint validation prevents snapshot write skew; ordinary
-    // parent visibility still uses the original statement snapshot below.
+    // Reads the record space with no visibility filter at all — every stored
+    // version, whoever wrote it. Latest-state constraint validation is what
+    // prevents snapshot write skew, but it is only sound while the caller holds a
+    // lock that every other writer of the keys it reads must conflict with:
+    //
+    //   - DML incoming-reference reads (parent delete, parent key change) hold the
+    //     Exclusive row lock on the parent row before reading child tables; every
+    //     child writer that matched that row held a Shared lock on it, so the read
+    //     sees only decided writers.
+    //   - DDL constraint backfills (ADD CONSTRAINT / ADD COLUMN) hold the
+    //     Exclusive table lock on their own table and on every referenced parent
+    //     table, which is the same guarantee at table grain.
+    //
+    // Ordinary parent visibility still uses the original statement snapshot below.
     private static TransactionSnapshot ConstraintCurrentSnapshot(SqlStatementContext statement)
         => new(statement.Transaction.Sequence, new TransactionSequence(ulong.MaxValue), new TransactionSequence(ulong.MaxValue), Array.Empty<TransactionSequence>());
 
@@ -145,8 +329,23 @@ internal sealed partial class SqlPlanExecutor
     private static SqlConstraintViolationException Violation(SqlCatalogTable table, SqlCatalogConstraint constraint, object?[] values)
         => new(constraint.Name, $"{table.Schema}.{table.Name}", constraint.Kind == SqlCatalogConstraintKind.Check ? "CHECK" : "FOREIGN KEY", SafeValue(values));
 
+    /// <summary>
+    /// Validates checks and outgoing references for a set of candidate rows.
+    /// </summary>
+    /// <param name="table">The table the rows belong to.</param>
+    /// <param name="rows">The candidate row values.</param>
+    /// <param name="statement">The executing statement.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <param name="current">True to resolve parents against latest state (DDL backfills under the table's exclusive locks) instead of the statement snapshot.</param>
+    /// <param name="references">
+    /// When supplied, the matched parent versions are collected here instead of being
+    /// validated inline; the caller then locks them through
+    /// <see cref="AcquireParentRowLocksAsync"/>, which performs the latest-state check
+    /// under the shared lock. DDL backfills pass null — they already hold the parent
+    /// tables exclusively, so there is no row to lock against.
+    /// </param>
     private void ValidateRows(SqlCatalogTable table, IReadOnlyList<object?[]> rows, SqlStatementContext statement,
-        CancellationToken cancellationToken, bool current = false)
+        CancellationToken cancellationToken, bool current = false, List<SqlParentReference>? references = null)
     {
         foreach (var constraint in table.Constraints)
         {
@@ -203,10 +402,17 @@ internal sealed partial class SqlPlanExecutor
                 {
                     throw Violation(table, constraint, keys);
                 }
-                // A visible parent deleted after this snapshot cannot authorize a new child.
+
                 foreach (var match in matches)
                 {
-                    EnsureLatestVersion(parent, match.Location.PageId, match.Location.SlotIndex, statement.Transaction.Sequence);
+                    if (references is null)
+                    {
+                        // A visible parent deleted after this snapshot cannot authorize a new child.
+                        EnsureLatestVersion(parent, match.Location.PageId, match.Location.SlotIndex, statement.Transaction.Sequence);
+                        continue;
+                    }
+
+                    references.Add(new SqlParentReference(parent, match.Location.PageId, match.Location.SlotIndex));
                 }
             }
         }
@@ -230,29 +436,53 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private void CollectCascadeDeletes(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, object?[] values,
-        Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions, SqlStatementContext statement, CancellationToken cancellationToken)
+    /// <summary>
+    /// Walks the cascade closure of one deleted row, locking as it descends: a row
+    /// is exclusively locked before its child tables are read for incoming
+    /// references, so the latest-state read only ever sees decided writers (see the
+    /// referential-locking note above). The traversal deduplicates by packed
+    /// location, so a cyclic cascade graph deletes each row exactly once.
+    /// </summary>
+    private async Task CollectCascadeDeletesAsync(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, object?[] values,
+        Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions, HashSet<ulong> scannedTables,
+        List<SqlParentReference> released, SqlCatalogConstraint? arrivedBy,
+        SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (!deletions.TryAdd((table.ObjectId, SqlRecordLocation.Pack(location.PageId, location.SlotIndex)), new(table, location, values)))
         {
             return;
         }
 
-        foreach (var (child, constraint) in IncomingReferences(table))
+        await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken).ConfigureAwait(false);
+        if (scannedTables.Add(table.ObjectId))
+        {
+            await AcquireIncomingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
+            await AcquireOutgoingReferenceIntentLocksAsync(table, statement, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Deleting the row releases every reference it holds. The edge it was
+        // reached by is excluded: that parent row is in the deletion set and is
+        // already exclusively locked by this statement.
+        CollectReleasedReferences(table, [values], released, statement, cancellationToken, skip: arrivedBy);
+
+        foreach (var (child, constraint) in IncomingReferences(table).ToList())
         {
             var keys = constraint.ReferencedColumns!.Select(column => values[FindColumnOrdinal(table, column)]).ToArray();
             if (constraint.OnDelete == SqlCatalogReferentialAction.Restrict || keys.Any(value => value is null))
             {
                 continue;
             }
-            foreach (var match in FindConstraintRows(child, constraint.Columns, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement)))
+            // Materialized before descending: the recursion awaits lock
+            // acquisitions, and the storage iterator must not stay open across them.
+            foreach (var match in FindConstraintRows(child, constraint.Columns, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).ToList())
             {
                 if (deletions.ContainsKey((child.ObjectId, SqlRecordLocation.Pack(match.Location.PageId, match.Location.SlotIndex))))
                 {
                     continue;
                 }
 
-                CollectCascadeDeletes(child, match.Location, match.Values, deletions, statement, cancellationToken);
+                await CollectCascadeDeletesAsync(child, match.Location, match.Values, deletions, scannedTables, released,
+                    constraint, statement, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -262,6 +492,8 @@ internal sealed partial class SqlPlanExecutor
     {
         // Validate against the complete deletion set so physical row order and
         // constraint declaration order cannot change the outcome of one statement.
+        // Every row in the set is already exclusively locked by the cascade walk,
+        // which is what makes the latest-state child reads below sound.
         foreach (var deletion in deletions.Values)
         {
             foreach (var (child, constraint) in IncomingReferences(deletion.Table))
@@ -286,6 +518,12 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
+    /// <summary>
+    /// Completes the deletion set's phase-one locks: the row locks are same-owner
+    /// re-grants (the cascade walk took them as it descended, so they complete
+    /// synchronously) and the unique-index key locks follow them, preserving the
+    /// rows-before-keys class ordering of the lock-ordering rule.
+    /// </summary>
     private async Task LockConstraintDeletesAsync(IEnumerable<SqlConstraintDelete> deletions, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         foreach (var group in deletions.GroupBy(deletion => deletion.Table.ObjectId).OrderBy(group => group.Key))

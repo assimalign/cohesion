@@ -235,7 +235,7 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<QueryResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        await AcquireReferentialLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
+        await AcquireOutgoingReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
@@ -266,14 +266,15 @@ internal sealed partial class SqlPlanExecutor
             rows.Add((SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, values, statement.Transaction.Sequence), values));
         }
 
-        // Inserts need no row locks (the rows do not exist yet); the intent
-        // lock coordinates with table-grain DDL, and every unique key the
-        // statement will touch is locked here — before the apply gate — per the
-        // lock-ordering rule.
-        await statement.Coordinator.LockManager.AcquireAsync(
-            statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId), LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
-
-        ValidateRows(plan.Table, rows.Select(row => row.Values).ToList(), statement, cancellationToken);
+        // Inserts need no row locks of their own (the rows do not exist yet); the
+        // intent lock taken above coordinates with table-grain DDL, and every
+        // unique key the statement will touch is locked below — before the apply
+        // gate — per the lock-ordering rule. Foreign keys add one class between
+        // the two: a shared lock on each matched parent row, so a concurrent
+        // parent delete cannot admit an orphan.
+        var references = new List<SqlParentReference>();
+        ValidateRows(plan.Table, rows.Select(row => row.Values).ToList(), statement, cancellationToken, references: references);
+        await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
 
         var uniqueKeyHashes = new List<ulong>();
         foreach (var (_, values) in rows)
@@ -307,7 +308,8 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<QueryResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        await AcquireReferentialLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
+        await AcquireOutgoingReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
+        await AcquireIncomingReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
@@ -339,13 +341,33 @@ internal sealed partial class SqlPlanExecutor
                 SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, updated, statement.Transaction.Sequence)));
         }
 
-        ValidateRows(plan.Table, replacements.Select(row => row.NewValues).ToList(), statement, cancellationToken);
+        // Row locks come before the constraint reads, not after them: the
+        // incoming-reference check below reads child tables in latest state, and
+        // that is only sound while this statement holds the exclusive lock on
+        // every row whose key it might be changing (the referential-locking note
+        // in SqlPlanExecutor.Constraints.cs).
+        await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => (t.PageId, t.SlotIndex)), cancellationToken).ConfigureAwait(false);
+
+        var references = new List<SqlParentReference>();
+        ValidateRows(plan.Table, replacements.Select(row => row.NewValues).ToList(), statement, cancellationToken, references: references);
+        await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
+
+        // A reassigned foreign key releases the row's old parent as well as taking
+        // on the new one, so the old parent row needs the same shared lock. Keys
+        // the statement leaves alone are already covered by the locks above.
+        var released = new List<SqlParentReference>();
+        CollectReleasedReferences(plan.Table, replacements.ConvertAll(row => row.OldValues), released, statement, cancellationToken,
+            changed: (constraint, index) => constraint.Columns.Any(column =>
+            {
+                int ordinal = FindColumnOrdinal(plan.Table, column);
+                return !ValuesEqual(replacements[index].NewValues[ordinal], replacements[index].OldValues[ordinal]);
+            }));
+        await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
+
         foreach (var replacement in replacements)
         {
             ValidateParentUpdate(plan.Table, replacement.OldValues, replacement.NewValues, statement, cancellationToken);
         }
-
-        await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => (t.PageId, t.SlotIndex)), cancellationToken).ConfigureAwait(false);
 
         // Unique key locks after the row locks (the lock-ordering rule): both the
         // old key (its entry is tombstoned) and the new key (its entry is
@@ -394,17 +416,34 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<QueryResult> ExecuteDeleteAsync(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        await AcquireReferentialLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
+        await AcquireIncomingReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
         var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
         var targets = Scan(plan.Table, statement, cancellationToken).Where(row => evaluator.Matches(plan.Where, row.Values)).ToList();
+
+        // Lock the directly targeted rows as one sorted batch before the cascade
+        // walk reads any child table: a parent row must be exclusively locked
+        // before its incoming references are read in latest state. The walk locks
+        // each row it discovers the same way, in discovery order — a transitive
+        // closure cannot be pre-sorted, so referential waits rely on the lock
+        // manager's deadlock detection rather than on a global ordering.
+        await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => t.Location), cancellationToken).ConfigureAwait(false);
+
         var deletions = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>();
+        var scannedTables = new HashSet<ulong>();
+        var released = new List<SqlParentReference>();
         foreach (var target in targets)
         {
-            CollectCascadeDeletes(plan.Table, target.Location, target.Values, deletions, statement, cancellationToken);
+            await CollectCascadeDeletesAsync(plan.Table, target.Location, target.Values, deletions, scannedTables, released,
+                arrivedBy: null, statement, cancellationToken).ConfigureAwait(false);
         }
+
+        // Every deleted row releases the references it held; the shared locks are
+        // what make a concurrent parent delete wait for this transaction to decide
+        // instead of reading the tombstones as absence.
+        await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
 
         ValidateRestrictedDeletes(deletions, statement, cancellationToken);
         await LockConstraintDeletesAsync(deletions.Values, statement, cancellationToken).ConfigureAwait(false);
