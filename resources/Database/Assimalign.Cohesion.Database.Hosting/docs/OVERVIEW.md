@@ -71,8 +71,8 @@ e.g. `AddSqlDatabase` / `AddSqlServer` in `Database.Sql`):
 var builder = DatabaseApplication.CreateBuilder();
 
 SqlDatabaseEngine engine = builder.AddSqlDatabase(options => options.RootPath = dataPath);
-SqlCompiledSchema schema = SqlSchemaCompiler.Compile(SqlSchema.Create("orders", database =>
-    database.Table<Order>(table => table.Key(order => order.Id))), EngineModel.Sql);
+SqlCompiledSchema schema = SqlSchema.Compile("orders", database =>
+    database.Table<Order>(table => table.Key(order => order.Id)));
 builder.AddDatabase(engine, "orders", schema);
 SqlDatabaseServer server = builder.AddSqlServer(engine, options => options.Listener = listener);
 

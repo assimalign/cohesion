@@ -266,6 +266,6 @@ public class DatabaseApplicationBuilderTests
     private sealed record Order(int Id);
 
     private static SqlCompiledSchema CompileSchema(string name)
-        => SqlSchemaCompiler.Compile(SqlSchema.Create(name, database =>
-            database.Table<Order>("orders", table => table.Key(order => order.Id))), EngineModel.Sql);
+        => SqlSchema.Compile(name, database =>
+            database.Table<Order>("orders", table => table.Key(order => order.Id)));
 }

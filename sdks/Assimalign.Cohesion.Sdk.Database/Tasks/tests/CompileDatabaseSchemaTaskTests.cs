@@ -105,7 +105,7 @@ public class CompileDatabaseSchemaTaskTests
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: static and runtime compilers have canonical parity")]
     public void Execute_WithSupportedSchema_ShouldMatchRuntimeCompilerDocumentAndHash()
     {
-        ISqlSchema declaration = SqlSchema.Create("parity", database =>
+        SqlCompiledSchema runtimeSchema = SqlSchema.Compile("parity", database =>
         {
             database.AllowDestructiveChanges();
             database.Type<ParityMoney>(type => type.Decimal(18, 2));
@@ -135,7 +135,6 @@ public class CompileDatabaseSchemaTaskTests
                 principal.Grant(SqlPermission.Read, "next_order");
             });
         });
-        SqlCompiledSchema runtimeSchema = SqlSchemaCompiler.Compile(declaration, EngineModel.Sql);
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("ParitySchema.cs");
         File.WriteAllText(sourcePath, ParitySchemaSource);
@@ -212,7 +211,7 @@ public class CompileDatabaseSchemaTaskTests
         File.Exists(task.HashOutputPath).ShouldBeFalse();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: exactly one SqlSchema.Create declaration is required")]
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: exactly one SqlSchema declaration is required")]
     [InlineData("", 0)]
     [InlineData("""
         public static class SecondSchema
@@ -298,7 +297,7 @@ public class CompileDatabaseSchemaTaskTests
         {
             public static void Configure()
             {
-                SqlSchema.Create("orders", database =>
+                SqlSchema.Compile("orders", database =>
                 {
                     database.Type<Money>(type => type.Decimal(18, 2));
                     database.Table<Order>("Orders", table =>

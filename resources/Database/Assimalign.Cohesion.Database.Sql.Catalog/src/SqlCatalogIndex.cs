@@ -20,18 +20,18 @@ public sealed class SqlCatalogIndex
     /// <param name="columnNames">The ordered key column names.</param>
     /// <param name="isUnique">Whether the index enforces key uniqueness.</param>
     /// <param name="owner">Whether a compiled schema or an ad-hoc statement created the index.</param>
-    /// <param name="schemaName">The compiled schema that owns the index, or null for an ad-hoc index.</param>
+    /// <param name="owningSchema">The compiled schema that provisioned the index, or null for an ad-hoc index.</param>
     public SqlCatalogIndex(
         ulong tableObjectId,
         string name,
         IReadOnlyList<string> columnNames,
         bool isUnique,
         DatabaseObjectOwner owner = DatabaseObjectOwner.Adhoc,
-        string? schemaName = null)
+        string? owningSchema = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(columnNames);
-        SqlCatalogOwnership.Validate(owner, schemaName);
+        SqlCatalogOwnership.Validate(owner, owningSchema);
 
         if (columnNames.Count == 0)
         {
@@ -43,7 +43,7 @@ public sealed class SqlCatalogIndex
         ColumnNames = columnNames;
         IsUnique = isUnique;
         Owner = owner;
-        SchemaName = schemaName;
+        OwningSchema = owningSchema;
     }
 
     /// <summary>
@@ -72,6 +72,9 @@ public sealed class SqlCatalogIndex
     /// </summary>
     public DatabaseObjectOwner Owner { get; }
 
-    /// <summary>Gets the compiled schema that owns this index, or null for an ad-hoc index.</summary>
-    public string? SchemaName { get; }
+    /// <summary>
+    /// Gets the compiled schema that provisioned this index, or null for an ad-hoc index.
+    /// This is ownership metadata, not the SQL namespace of the index's table.
+    /// </summary>
+    public string? OwningSchema { get; }
 }

@@ -682,10 +682,10 @@ internal sealed class SqlPlanExecutor
             return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
         }
 
-        if (statement.ProvisioningSchemaName is string schemaName)
+        if (statement.ProvisioningSchema is string provisioningSchema)
         {
             await SqlCatalog.CreateSchemaTableAsync(
-                _catalog, plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, schemaName, cancellationToken).ConfigureAwait(false);
+                _catalog, plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, provisioningSchema, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -714,7 +714,7 @@ internal sealed class SqlPlanExecutor
             statement.Transaction.Sequence, LockResource.Object(before.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
         SqlCatalogTable current = ReadCurrentTable(before);
-        EnsureCanChange(current.Owner, current.Name, current.SchemaName, "ALTER TABLE DROP COLUMN", statement);
+        EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "ALTER TABLE DROP COLUMN", statement);
         EnsureSameIdentity(before, current);
         before = current;
 
@@ -796,7 +796,7 @@ internal sealed class SqlPlanExecutor
             statement.Transaction.Sequence, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
         SqlCatalogTable current = ReadCurrentTable(table);
-        EnsureCanChange(current.Owner, current.Name, current.SchemaName, "DROP TABLE", statement);
+        EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "DROP TABLE", statement);
         EnsureSameIdentity(table, current);
         table = current;
 
@@ -847,7 +847,7 @@ internal sealed class SqlPlanExecutor
                 statement.Transaction.Sequence, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
             SqlCatalogTable current = ReadCurrentTable(table);
-            EnsureCanChange(current.Owner, current.Name, current.SchemaName, operation, statement);
+            EnsureCanChange(current.Owner, current.Name, current.OwningSchema, operation, statement);
             EnsureSameIdentity(table, current);
             return;
         }
@@ -938,8 +938,8 @@ internal sealed class SqlPlanExecutor
         await _catalog.CreateIndexAsync(
             new SqlCatalogIndex(
                 plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
-                statement.ProvisioningSchemaName is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
-                statement.ProvisioningSchemaName),
+                statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
+                statement.ProvisioningSchema),
             registrations,
             cancellationToken).ConfigureAwait(false);
 
@@ -980,7 +980,7 @@ internal sealed class SqlPlanExecutor
             throw new DatabaseException($"No index named '{plan.IndexName}' exists on '{currentTable.Schema}.{currentTable.Name}'.");
         }
 
-        EnsureCanChange(metadata.Owner, metadata.Name, metadata.SchemaName, "DROP INDEX", statement);
+        EnsureCanChange(metadata.Owner, metadata.Name, metadata.OwningSchema, "DROP INDEX", statement);
         EnsureSameIdentity(plan.Table, currentTable);
 
         // The canonical (creation-time) name keyed by the catalog drives the
@@ -1009,14 +1009,14 @@ internal sealed class SqlPlanExecutor
     private static void EnsureCanChange(
         DatabaseObjectOwner owner,
         string objectName,
-        string? schemaName,
+        string? owningSchema,
         string operation,
         SqlStatementContext statement)
     {
         if (owner == DatabaseObjectOwner.Schema &&
-            !string.Equals(statement.ProvisioningSchemaName, schemaName, StringComparison.OrdinalIgnoreCase))
+            !string.Equals(statement.ProvisioningSchema, owningSchema, StringComparison.OrdinalIgnoreCase))
         {
-            throw new DatabaseObjectLockedException(objectName, schemaName!, operation);
+            throw new DatabaseObjectLockedException(objectName, owningSchema!, operation);
         }
     }
 

@@ -111,7 +111,7 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
             Location? location = calls.Count > 0 ? calls[0].Invocation.GetLocation() : null;
             Error(
                 "COHDBSDK101",
-                $"Database schema compilation requires exactly one SqlSchema.Create(name, configure) declaration; found {calls.Count}.",
+                $"Database schema compilation requires exactly one SqlSchema.Create(name, configure) or SqlSchema.Compile(name, configure) declaration; found {calls.Count}.",
                 location);
             return null;
         }
@@ -121,14 +121,14 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
         string? name = nameExpression is null ? null : ConstantString(model, nameExpression);
         if (string.IsNullOrWhiteSpace(name))
         {
-            Error("COHDBSDK102", "SqlSchema.Create name must be a non-empty compile-time string constant.", nameExpression?.GetLocation() ?? schemaDeclaration.GetLocation());
+            Error("COHDBSDK102", $"SqlSchema.{schemaDeclarationMethod.Name} name must be a non-empty compile-time string constant.", nameExpression?.GetLocation() ?? schemaDeclaration.GetLocation());
         }
 
         ExpressionSyntax? configureExpression = GetArgument(schemaDeclaration, schemaDeclarationMethod, "configure", 1);
         LambdaExpressionSyntax? configure = UnwrapLambda(configureExpression);
         if (configure is null)
         {
-            Error("COHDBSDK103", "SqlSchema.Create configuration must be an inline lambda so the build can analyze it without executing Program.Main.", configureExpression?.GetLocation() ?? schemaDeclaration.GetLocation());
+            Error("COHDBSDK103", $"SqlSchema.{schemaDeclarationMethod.Name} configuration must be an inline lambda so the build can analyze it without executing Program.Main.", configureExpression?.GetLocation() ?? schemaDeclaration.GetLocation());
             return null;
         }
 
@@ -696,7 +696,7 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
 
     private static bool IsSchemaDeclaration(IMethodSymbol method)
     {
-        if (!string.Equals(method.Name, "Create", StringComparison.Ordinal) ||
+        if (method.Name is not ("Create" or "Compile") ||
             !IsOnNamedType(method, "Assimalign.Cohesion.Database.Sql.Schema.SqlSchema") ||
             method.Parameters.Length != 2)
         {

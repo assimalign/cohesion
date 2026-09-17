@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Linq.Expressions;
 
 using Shouldly;
@@ -8,6 +9,63 @@ namespace Assimalign.Cohesion.Database.Sql.Schema.Tests;
 
 public class SqlSchemaTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema: one-step compilation matches the explicit compiler")]
+    public void Compile_WithValidDeclaration_ShouldMatchTwoStepCompilation()
+    {
+        static void Configure(ISqlSchemaBuilder database)
+        {
+            database.Type<Money>(type => type.Decimal(18, 2));
+            database.Table<Order>("orders", table =>
+            {
+                table.Key(order => order.Id);
+                table.Column(order => order.Total);
+                table.Index(order => order.CustomerId);
+            });
+        }
+
+        SqlCompiledSchema schema = SqlSchema.Compile("orders", Configure);
+        SqlCompiledSchema twoStep = SqlSchemaCompiler.Compile(
+            SqlSchema.Create("orders", Configure),
+            EngineModel.Sql);
+
+        schema.Hash.ShouldBe(twoStep.Hash);
+        schema.CanonicalDocument.ShouldBe(twoStep.CanonicalDocument);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema: one-step compilation preserves compiler validation errors")]
+    public void Compile_WithInvalidDeclaration_ShouldMatchTwoStepValidationErrors()
+    {
+        static void Configure(ISqlSchemaBuilder database)
+        {
+            database.Table<Order>("orders", table => table.Key(order => order.Id));
+            database.Table<Order>("orders", table => table.Key(order => order.Id));
+            database.Principal("reader", principal => principal.Grant(SqlPermission.Read, "missing"));
+        }
+
+        SqlSchemaValidationException exception = Should.Throw<SqlSchemaValidationException>(
+            () => SqlSchema.Compile("invalid", Configure));
+        SqlSchemaValidationException twoStep = Should.Throw<SqlSchemaValidationException>(
+            () => SqlSchemaCompiler.Compile(SqlSchema.Create("invalid", Configure), EngineModel.Sql));
+
+        exception.Message.ShouldBe(twoStep.Message);
+        exception.Errors
+            .Select(error => (error.Code, error.Declaration, error.Message))
+            .ShouldBe(twoStep.Errors.Select(error => (error.Code, error.Declaration, error.Message)));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database] - Schema: one-step compilation rejects null and empty arguments")]
+    public void Compile_WithInvalidArguments_ShouldRejectDeclaration()
+    {
+        Should.Throw<ArgumentNullException>(() => SqlSchema.Compile(null!, _ => { }))
+            .ParamName.ShouldBe("name");
+        Should.Throw<ArgumentException>(() => SqlSchema.Compile(string.Empty, _ => { }))
+            .ParamName.ShouldBe("name");
+        Should.Throw<ArgumentException>(() => SqlSchema.Compile(" ", _ => { }))
+            .ParamName.ShouldBe("name");
+        Should.Throw<ArgumentNullException>(() => SqlSchema.Compile("orders", null!))
+            .ParamName.ShouldBe("configure");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database] - Schema: declarations retain the complete compile-time model")]
     public void Create_WithSchemaDeclarations_ShouldRetainCompileTimeModel()
     {

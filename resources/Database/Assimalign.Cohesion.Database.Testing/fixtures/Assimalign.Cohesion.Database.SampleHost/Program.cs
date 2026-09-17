@@ -18,7 +18,7 @@ await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
     options.Durability = Resource.Settings.DatabaseDurability.Get<StorageCommitDurability>();
 });
 
-ISqlSchema declaration = SqlSchema.Create("sample", database =>
+builder.AddDatabase(engine, "sample", SqlSchema.Compile("sample", database =>
 {
     database.Table<Order>("orders", table =>
     {
@@ -26,9 +26,7 @@ ISqlSchema declaration = SqlSchema.Create("sample", database =>
         table.Column(order => order.Item);
         table.Index(order => order.Item);
     });
-});
-
-builder.AddDatabase(engine, "sample", SqlSchemaCompiler.Compile(declaration, EngineModel.Sql));
+}));
 
 builder.AddSqlServer(engine, options => options.Listen(Resource.Endpoints.Db));
 

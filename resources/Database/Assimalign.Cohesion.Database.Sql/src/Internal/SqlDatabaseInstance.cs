@@ -340,12 +340,12 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// Creates the provisioner's private session. Only this path stamps schema ownership
     /// and authorizes schema-owned DDL; ordinary sessions have no ownership bypass.
     /// </summary>
-    internal IDatabaseSession CreateSchemaSession(string schemaName, CancellationToken cancellationToken)
+    internal IDatabaseSession CreateSchemaSession(string provisioningSchema, CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
         var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager);
-        return new SqlDatabaseSession(this, _coordinator, executor, schemaName);
+        return new SqlDatabaseSession(this, _coordinator, executor, provisioningSchema);
     }
 
     /// <inheritdoc />

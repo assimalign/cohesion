@@ -36,12 +36,14 @@ validation, serialization, and migration plans. The engine references this thin
 package; the schema package never references the engine or its storage/transport.
 
 Live sessions create `Adhoc` tables and indexes. The provisioner's private
-session carries the compiled schema name in an internal statement context, so
-catalog creation persists `Schema` ownership and that name in the object's first
-durable record. Only that internal session may execute `DROP TABLE`, `ALTER TABLE
-ADD COLUMN`, `ALTER TABLE DROP COLUMN`, or `DROP INDEX` against its schema's
-objects. Normal sessions receive `DatabaseObjectLockedException` with the object,
-compiled schema, and refused operation; row DML remains available. Compensation
+session carries the compiled schema name as `ProvisioningSchema` in an internal
+statement context, so catalog creation persists `Schema` ownership and that name
+as `OwningSchema` in the object's first durable record. `SqlCatalogTable.Schema`
+remains the separate SQL namespace (for example, `dbo`). Only that internal
+session may execute `DROP TABLE`, `ALTER TABLE ADD COLUMN`, `ALTER TABLE DROP
+COLUMN`, or `DROP INDEX` against its schema's objects. Normal sessions receive
+`DatabaseObjectLockedException` with the object, compiled schema exposed as
+`OwningSchema`, and refused operation; row DML remains available. Compensation
 uses the same private session and preserves the existing reversible-step policy.
 
 DDL re-reads catalog ownership after acquiring the exclusive object lock. If a

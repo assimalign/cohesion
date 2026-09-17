@@ -184,8 +184,8 @@ the `WebApplication.CreateBuilder()` idiom. The split of responsibilities:
 - **Model packages compile declarations before they reach Hosting.**
   `AddDatabase(engine, name, schema)` receives the model's immutable `CompiledSchema`,
   checks its database identity, and returns/stores it by registering
-  `Provision(engine, schema)`. SQL callers use `SqlSchema.Create` and `SqlSchemaCompiler`
-  from `Database.Sql.Schema` in their composition root. This compile-time adaptation
+  `Provision(engine, schema)`. SQL callers use `SqlSchema.Compile` from
+  `Database.Sql.Schema` in their composition root. This compile-time adaptation
   keeps Hosting's same-area dependency limited to the area root (COHRES002);
   no schema vocabulary, interface members, or lifecycle wiring move into Hosting.
   `DefaultDatabaseProvisioner` opens or

@@ -71,18 +71,24 @@ two questions for the planner: *what objects exist* (with stable identities) and
 ## Object ownership
 
 Table and secondary-index records persist `DatabaseObjectOwner` and the owning
-compiled schema's name. This name is separate from the SQL namespace (`dbo`): it
-identifies the code-first schema that may alter the object. Ordinary catalog
-creation defaults to `Adhoc`; the SQL provisioner's internal table-creation path
-stamps `Schema` and its name atomically with the first table record. Index
-creation already accepts a complete description and persists the same metadata.
-Column add/drop replacements retain the table's ownership unchanged.
+compiled schema's name. `SqlCatalogTable.Schema` is strictly the SQL namespace
+(for example, `dbo`); `SqlCatalogTable.OwningSchema` is the compiled schema that
+provisioned the object and is null for ad-hoc objects. `SqlCatalogIndex` exposes
+the same ownership value as `OwningSchema`, distinct from its table's SQL
+namespace. Ordinary catalog creation defaults to `Adhoc`; the SQL provisioner's
+internal table-creation path stamps `Schema` ownership and `OwningSchema`
+atomically with the first table record. Index creation already accepts a complete
+description and persists the same metadata. Column add/drop replacements retain
+the table's ownership unchanged.
 
 The ownership fields are an appended tuple suffix. Older records without the
 suffix load as `Adhoc`, preserving their existing mutability rather than guessing
 an owner from a database-wide schema marker. Invalid owner/name combinations are
-rejected. The schema hash/document record remains unchanged and continues to
-support drift detection independently of per-object ownership.
+rejected. The tuple encoding is positional and never persisted CLR property
+identifiers; renaming the ownership property to `OwningSchema` therefore does not
+change the on-disk format, and catalogs written by the contract-freeze build load
+without a compatibility alias. The schema hash/document record remains unchanged
+and continues to support drift detection independently of per-object ownership.
 
 The engine enforces the live-session DDL lock; the catalog remains the durable
 metadata component used by sanctioned schema application as well. Its public

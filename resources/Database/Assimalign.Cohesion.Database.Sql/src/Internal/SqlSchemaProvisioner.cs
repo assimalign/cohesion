@@ -131,7 +131,7 @@ internal sealed class SqlSchemaProvisioner
     private SqlCompiledSchema? SnapshotCatalog(SqlCompiledSchema desired)
     {
         IReadOnlyList<SqlCatalogTable> catalogTables = _catalog.Tables
-            .Where(table => IsOwnedBy(table.Owner, table.SchemaName, desired.Name))
+            .Where(table => IsOwnedBy(table.Owner, table.OwningSchema, desired.Name))
             .ToList();
         if (catalogTables.Count == 0)
         {
@@ -182,7 +182,7 @@ internal sealed class SqlSchemaProvisioner
 
             IReadOnlyList<SqlCatalogIndex> catalogIndexes = _catalog.GetIndexes(catalogTable.ObjectId);
             var indexes = catalogIndexes
-                .Where(index => IsOwnedBy(index.Owner, index.SchemaName, desired.Name))
+                .Where(index => IsOwnedBy(index.Owner, index.OwningSchema, desired.Name))
                 .OrderBy(index => index.Name, StringComparer.Ordinal)
                 .Select(index => new CompiledSchemaIndex(index.Name, index.ColumnNames, index.IsUnique))
                 .ToList();
@@ -210,7 +210,7 @@ internal sealed class SqlSchemaProvisioner
 
     private bool CatalogMatches(SqlCompiledSchema schema)
     {
-        if (_catalog.Tables.Count(table => IsOwnedBy(table.Owner, table.SchemaName, schema.Name)) != schema.Tables.Count)
+        if (_catalog.Tables.Count(table => IsOwnedBy(table.Owner, table.OwningSchema, schema.Name)) != schema.Tables.Count)
         {
             return false;
         }
@@ -218,7 +218,7 @@ internal sealed class SqlSchemaProvisioner
         foreach (CompiledSchemaTable expected in schema.Tables)
         {
             if (!_catalog.TryGetTable("dbo", expected.Name, out SqlCatalogTable actual) ||
-                !IsOwnedBy(actual.Owner, actual.SchemaName, schema.Name) ||
+                !IsOwnedBy(actual.Owner, actual.OwningSchema, schema.Name) ||
                 actual.Columns.Count != expected.Columns.Count ||
                 !NamesEqual(expected.PrimaryKey?.Columns ?? Array.Empty<string>(), actual.PrimaryKeyColumns))
             {
@@ -245,7 +245,7 @@ internal sealed class SqlSchemaProvisioner
             }
 
             IReadOnlyList<SqlCatalogIndex> actualIndexes = _catalog.GetIndexes(actual.ObjectId)
-                .Where(index => IsOwnedBy(index.Owner, index.SchemaName, schema.Name))
+                .Where(index => IsOwnedBy(index.Owner, index.OwningSchema, schema.Name))
                 .ToList();
             if (actualIndexes.Count != expected.Indexes.Count)
             {
@@ -277,7 +277,7 @@ internal sealed class SqlSchemaProvisioner
                 continue;
             }
 
-            if (!IsOwnedBy(actual.Owner, actual.SchemaName, schema.Name))
+            if (!IsOwnedBy(actual.Owner, actual.OwningSchema, schema.Name))
             {
                 throw new SqlSchemaMigrationException(
                     $"SQL schema '{schema.Name}' cannot adopt table '{table.Name}' because it was not created by this schema.");
@@ -286,7 +286,7 @@ internal sealed class SqlSchemaProvisioner
             foreach (CompiledSchemaIndex index in table.Indexes)
             {
                 if (_catalog.TryGetIndex(actual.ObjectId, index.Name, out SqlCatalogIndex existing) &&
-                    !IsOwnedBy(existing.Owner, existing.SchemaName, schema.Name))
+                    !IsOwnedBy(existing.Owner, existing.OwningSchema, schema.Name))
                 {
                     throw new SqlSchemaMigrationException(
                         $"SQL schema '{schema.Name}' cannot adopt index '{index.Name}' because it was not created by this schema.");
@@ -295,9 +295,9 @@ internal sealed class SqlSchemaProvisioner
         }
     }
 
-    private static bool IsOwnedBy(DatabaseObjectOwner owner, string? owningSchema, string schemaName)
+    private static bool IsOwnedBy(DatabaseObjectOwner owner, string? owningSchema, string expectedSchema)
         => owner == DatabaseObjectOwner.Schema &&
-            string.Equals(owningSchema, schemaName, StringComparison.OrdinalIgnoreCase);
+            string.Equals(owningSchema, expectedSchema, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsPrimaryKeyColumn(CompiledSchemaKey? key, string columnName)
     {

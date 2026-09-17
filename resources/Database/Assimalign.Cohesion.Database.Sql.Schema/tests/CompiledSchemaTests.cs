@@ -55,12 +55,12 @@ public class CompiledSchemaTests
     [Fact]
     public void Compile_WithNestedGenericAndArrayIdentities_ShouldPreserveCanonicalTypeNames()
     {
-        SqlCompiledSchema schema = SqlSchemaCompiler.Compile(SqlSchema.Create("generic-identities", database =>
+        SqlCompiledSchema schema = SqlSchema.Compile("generic-identities", database =>
         {
             database.Table<GenericRow<GenericValue<int[,], string[]>[]>>("arrays", table => table.Key(row => row.Id));
             database.Table<GenericContainer<int>.Nested<string>>("nested", table => table.Key(row => row.Id));
             database.Type<GenericValue<decimal?[,], byte[][]>>(type => type.Decimal(18, 2));
-        }));
+        });
         const string local = "Assimalign.Cohesion.Database.Sql.Schema.Tests:Assimalign.Cohesion.Database.Sql.Schema.Tests.CompiledSchemaTests+";
         const string system = "System.Private.CoreLib:System.";
 
@@ -157,12 +157,12 @@ public class CompiledSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Migration planner: add table and index use deterministic safe order")]
     public void Plan_FromEmptySchema_ShouldAddTableBeforeIndex()
     {
-        SqlCompiledSchema desired = SqlSchemaCompiler.Compile(SqlSchema.Create("catalog", database =>
+        SqlCompiledSchema desired = SqlSchema.Compile("catalog", database =>
             database.Table<Order>("orders", table =>
             {
                 table.Key(order => order.Id);
                 table.Index(order => order.CustomerId);
-            })), EngineModel.Sql);
+            }));
 
         SqlSchemaMigrationPlan plan = SqlSchemaMigrationPlanner.Plan(null, desired);
 
@@ -219,13 +219,13 @@ public class CompiledSchemaTests
     [Fact(DisplayName = "Cohesion Test [Database] - Migration planner: unsupported metadata never reports false convergence")]
     public void Plan_WithMetadataOnlyChange_ShouldFailExplicitly()
     {
-        SqlCompiledSchema current = SqlSchemaCompiler.Compile(SqlSchema.Create("orders", database =>
-            database.Table<Order>("orders", table => table.Key(order => order.Id))), EngineModel.Sql);
-        SqlCompiledSchema desired = SqlSchemaCompiler.Compile(SqlSchema.Create("orders", database =>
+        SqlCompiledSchema current = SqlSchema.Compile("orders", database =>
+            database.Table<Order>("orders", table => table.Key(order => order.Id)));
+        SqlCompiledSchema desired = SqlSchema.Compile("orders", database =>
         {
             database.Table<Order>("orders", table => table.Key(order => order.Id));
             database.Extension("sql.collation", "ordinal");
-        }), EngineModel.Sql);
+        });
 
         SqlSchemaMigrationException exception = Should.Throw<SqlSchemaMigrationException>(
             () => SqlSchemaMigrationPlanner.Plan(current, desired));
@@ -274,7 +274,7 @@ public class CompiledSchemaTests
 
     private static SqlCompiledSchema CompileOrders(bool linesFirst = false)
     {
-        return SqlSchemaCompiler.Compile(SqlSchema.Create("orders-db", database =>
+        return SqlSchema.Compile("orders-db", database =>
         {
             database.Type<Money>(type => type.Decimal(18, 2));
             if (linesFirst)
@@ -292,7 +292,7 @@ public class CompiledSchemaTests
             database.Trigger<Order>(SqlTriggerEvent.AfterInsert, (transaction, row) => transaction.Audit("order.placed", row.Id));
             database.Principal("reader", principal => principal.Grant(SqlPermission.Read, "orders", "order_lines"));
             database.Extension("sql.collation", "ordinal");
-        }), EngineModel.Sql);
+        });
     }
 
     private static void AddOrders(ISqlSchemaBuilder database)
@@ -317,7 +317,7 @@ public class CompiledSchemaTests
     }
 
     private static SqlCompiledSchema CompileVersion(bool includeAge, bool allowDestructive = false)
-        => SqlSchemaCompiler.Compile(SqlSchema.Create("people", database =>
+        => SqlSchema.Compile("people", database =>
         {
             if (allowDestructive)
             {
@@ -333,10 +333,10 @@ public class CompiledSchemaTests
                     table.Column(person => person.Age);
                 }
             });
-        }), EngineModel.Sql);
+        });
 
     private static SqlCompiledSchema CompileIndex(bool useAge)
-        => SqlSchemaCompiler.Compile(SqlSchema.Create("people", database =>
+        => SqlSchema.Compile("people", database =>
             database.Table<Person>("People", table =>
             {
                 table.Key(person => person.Id);
@@ -350,10 +350,10 @@ public class CompiledSchemaTests
                 {
                     table.Index(person => person.Name);
                 }
-            })), EngineModel.Sql);
+            }));
 
     private static SqlCompiledSchema CompileFunctionAndGrants(bool reverse)
-        => SqlSchemaCompiler.Compile(SqlSchema.Create("orders-db", database =>
+        => SqlSchema.Compile("orders-db", database =>
         {
             database.Table<Order>("orders", table => table.Key(order => order.Id));
             database.Table<OrderLine>("order_lines", table => table.Key(line => line.Id));
@@ -375,7 +375,7 @@ public class CompiledSchemaTests
                     principal.Grant(SqlPermission.Read, "orders");
                 });
             }
-        }), EngineModel.Sql);
+        });
 
     private static SqlCompiledSchema ReorderedSchema(string[] columnOrder, bool allowDestructive)
         => OrderedSchema(columnOrder, allowDestructive);

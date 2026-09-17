@@ -42,9 +42,9 @@ public static class SqlCatalog
         string name,
         IReadOnlyList<SqlCatalogColumn> columns,
         IReadOnlyList<string>? primaryKeyColumns,
-        string schemaName,
+        string owningSchema,
         CancellationToken cancellationToken)
         => ((DefaultSqlCatalog)catalog).CreateTableAsync(
             schema, name, columns, primaryKeyColumns,
-            DatabaseObjectOwner.Schema, schemaName, cancellationToken);
+            DatabaseObjectOwner.Schema, owningSchema, cancellationToken);
 }

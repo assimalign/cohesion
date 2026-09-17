@@ -16,13 +16,13 @@ internal readonly struct SqlStatementContext
     internal SqlStatementContext(
         ITransactionContext transaction,
         SqlTransactionCoordinator coordinator,
-        string? provisioningSchemaName = null)
+        string? provisioningSchema = null)
     {
         Transaction = transaction;
         Coordinator = coordinator;
         Snapshot = transaction.Snapshot;
         Metrics = new SqlStatementMetrics();
-        ProvisioningSchemaName = provisioningSchemaName;
+        ProvisioningSchema = provisioningSchema;
     }
 
     /// <summary>
@@ -47,5 +47,5 @@ internal readonly struct SqlStatementContext
     internal SqlStatementMetrics Metrics { get; }
 
     /// <summary>Gets the applying compiled schema's name, or null for a live-session statement.</summary>
-    internal string? ProvisioningSchemaName { get; }
+    internal string? ProvisioningSchema { get; }
 }

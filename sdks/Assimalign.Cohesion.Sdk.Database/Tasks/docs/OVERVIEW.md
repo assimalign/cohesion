@@ -1,9 +1,9 @@
 # Assimalign.Cohesion.Sdk.Database
 
 `Assimalign.Cohesion.Sdk.Database` layers Database resource defaults and build tooling on the
-base Cohesion SDK. A database application keeps its schema in the C# `SqlSchema.Create(...)` calls
-in `Program.cs`; the build never treats `.sql` or another declarative file as a second schema
-source.
+base Cohesion SDK. A database application keeps its schema in a C# `SqlSchema.Compile(...)`
+call (or the lower-level `SqlSchema.Create(...)` form) in `Program.cs`; the build never treats
+`.sql` or another declarative file as a second schema source.
 
 Set `CohesionDatabaseProject` to `true` and select one of the exact model names:
 
@@ -15,8 +15,8 @@ Set `CohesionDatabaseProject` to `true` and select one of the exact model names:
 ```
 
 `Build` statically analyzes the schema declarations without invoking the application's entry
-point. The current artifact contract requires exactly one `SqlSchema.Create(...)` declaration; split
-multiple logical databases into separate SDK artifacts. It writes the canonical schema document to
+point. The current artifact contract requires exactly one `SqlSchema.Compile(...)` or
+`SqlSchema.Create(...)` declaration; split multiple logical databases into separate SDK artifacts. It writes the canonical schema document to
 `$(IntermediateOutputPath)cohesion/database.schema.json` and its lowercase SHA-256 hash to
 `database.schema.sha256`. Both paths can be overridden with
 `CohesionDatabaseSchemaOutputPath` and `CohesionDatabaseSchemaHashOutputPath`.

@@ -206,7 +206,9 @@ surface. Child roots never reference the root.
   `DatabaseObjectOwner.Adhoc` objects remain fully mutable through session
   statements. `DatabaseObjectOwner.Schema` objects can change only through schema
   apply; a session attempting to alter or drop one receives
-  `DatabaseObjectLockedException` identifying the object, schema, and operation.
+  `DatabaseObjectLockedException` identifying the object, its compiled
+  `OwningSchema`, and the operation. `OwningSchema` is provisioning identity,
+  distinct from any model-specific namespace such as a SQL table's `Schema`.
   Model catalogs persist ownership and model engines enforce it. Neither the
   ownership contract nor the exception requires a relational object shape.
 - **`ProtocolVersion` lives in `Database.Protocol`, and the root consumes it.**

@@ -35,7 +35,7 @@ public class ProvisioningTests
         var exception = new DatabaseObjectLockedException("Customers", "AppSchema", "DROP TABLE");
         exception.ShouldBeAssignableTo<DatabaseException>();
         exception.ObjectName.ShouldBe("Customers");
-        exception.SchemaName.ShouldBe("AppSchema");
+        exception.OwningSchema.ShouldBe("AppSchema");
         exception.Operation.ShouldBe("DROP TABLE");
         exception.Message.ShouldBe(
             "Object 'Customers' is owned by schema 'AppSchema' and cannot be changed by DROP TABLE. Alter the schema and redeploy it.");

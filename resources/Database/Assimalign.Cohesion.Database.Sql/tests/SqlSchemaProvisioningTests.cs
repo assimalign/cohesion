@@ -294,12 +294,12 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         await session.ExecuteAsync("CREATE TABLE scratch (id BIGINT);");
         catalog.TryGetTable("dbo", "scratch", out var table).ShouldBeTrue();
         table.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
-        table.SchemaName.ShouldBeNull();
+        table.OwningSchema.ShouldBeNull();
         await session.ExecuteAsync("ALTER TABLE scratch ADD COLUMN note TEXT;");
         await session.ExecuteAsync("CREATE INDEX ix_scratch_id ON scratch (id);");
         catalog.TryGetIndex(table.ObjectId, "ix_scratch_id", out var index).ShouldBeTrue();
         index.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
-        index.SchemaName.ShouldBeNull();
+        index.OwningSchema.ShouldBeNull();
         await session.ExecuteAsync("DROP INDEX ix_scratch_id ON scratch;");
         await session.ExecuteAsync("ALTER TABLE scratch DROP COLUMN note;");
         await session.ExecuteAsync("DROP TABLE scratch;");
@@ -330,7 +330,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
             async () => await session.ExecuteAsync(statement));
 
         exception.ObjectName.ShouldBe(objectName);
-        exception.SchemaName.ShouldBe("orders");
+        exception.OwningSchema.ShouldBe("orders");
         exception.Operation.ShouldBe(operation);
         exception.Message.ShouldContain(objectName);
         exception.Message.ShouldContain("orders");
@@ -338,12 +338,12 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         var catalog = database.ShouldBeOfType<SqlDatabaseInstance>().Catalog;
         catalog.TryGetTable("dbo", "orders", out var table).ShouldBeTrue();
         table.Owner.ShouldBe(DatabaseObjectOwner.Schema);
-        table.SchemaName.ShouldBe("orders");
+        table.OwningSchema.ShouldBe("orders");
         table.FindColumn("note").ShouldNotBeNull();
         table.FindColumn("extra").ShouldBeNull();
         catalog.TryGetIndex(table.ObjectId, "ix_orders_id", out var index).ShouldBeTrue();
         index.Owner.ShouldBe(DatabaseObjectOwner.Schema);
-        index.SchemaName.ShouldBe("orders");
+        index.OwningSchema.ShouldBe("orders");
         (await provisioner.ApplySchemaAsync(schema)).WasAlreadyApplied.ShouldBeTrue();
         await session.ExecuteAsync("INSERT INTO orders (id, note) VALUES (1, 'mutable data');");
     }
@@ -382,7 +382,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         DatabaseObjectLockedException exception = await Should.ThrowAsync<DatabaseObjectLockedException>(
             async () => await waiting);
         exception.ObjectName.ShouldBe(objectName);
-        exception.SchemaName.ShouldBe("orders");
+        exception.OwningSchema.ShouldBe("orders");
         exception.Operation.ShouldBe(operation);
         await waitingTransaction.RollbackAsync();
         catalog.TryGetTable("dbo", "orders", out var replacement).ShouldBeTrue();
@@ -450,13 +450,13 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         var catalog = reopened.ShouldBeOfType<SqlDatabaseInstance>().Catalog;
         catalog.TryGetTable("dbo", "orders", out var table).ShouldBeTrue();
         table.Owner.ShouldBe(DatabaseObjectOwner.Schema);
-        table.SchemaName.ShouldBe("orders");
+        table.OwningSchema.ShouldBe("orders");
         catalog.TryGetIndex(table.ObjectId, "ix_orders_id", out var index).ShouldBeTrue();
         index.Owner.ShouldBe(DatabaseObjectOwner.Schema);
-        index.SchemaName.ShouldBe("orders");
+        index.OwningSchema.ShouldBe("orders");
         catalog.TryGetTable("dbo", "scratch", out var scratch).ShouldBeTrue();
         scratch.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
-        scratch.SchemaName.ShouldBeNull();
+        scratch.OwningSchema.ShouldBeNull();
         await using IDatabaseSession reopenedSession = await reopened.CreateSessionAsync();
         await Should.ThrowAsync<DatabaseObjectLockedException>(
             async () => await reopenedSession.ExecuteAsync("DROP TABLE orders;"));
@@ -485,7 +485,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         var catalog = database.ShouldBeOfType<SqlDatabaseInstance>().Catalog;
         catalog.TryGetTable("dbo", "orders", out var table).ShouldBeTrue();
         table.Owner.ShouldBe(DatabaseObjectOwner.Schema);
-        table.SchemaName.ShouldBe("orders");
+        table.OwningSchema.ShouldBe("orders");
         table.FindColumn("note").ShouldBeNull();
         catalog.GetIndexes(table.ObjectId).ShouldBeEmpty();
 

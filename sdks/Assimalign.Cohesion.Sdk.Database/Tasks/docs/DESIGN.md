@@ -2,8 +2,9 @@
 
 ## Boundaries
 
-The consumer's C# `SqlSchema.Create(name, configure)` declaration is the only schema
-source. The SDK compiler reads Roslyn syntax and symbols from `@(Compile)` and
+The consumer's C# `SqlSchema.Compile(name, configure)` declaration (or the lower-level
+`SqlSchema.Create(name, configure)` form) is the only schema source. The SDK compiler
+reads Roslyn syntax and symbols from `@(Compile)` and
 `@(ReferencePath)`; it never invokes `Program.Main`, starts an engine, loads a consumer plug-in,
 or scans `Schema/**/*.sql`. The compiler lowers that declaration into the SQL family's
 `SqlCompiledSchema` contract and uses `SqlCompiledSchemaSerializer` for the canonical document and
@@ -47,8 +48,8 @@ a project property can never expand into an arbitrary import path.
 compilation fails with `COHDBSDK106` until that model owns a schema package. The task accepts only
 statically analyzable schema declarations: names and numeric configuration are compile-time
 constants, selectors are direct members, and schema callbacks cannot depend on captured runtime
-state. One SDK artifact must contain exactly one `SqlSchema.Create(name, configure)` declaration;
-zero or multiple declarations fail because the current output contract represents one logical
+state. One SDK artifact must contain exactly one `SqlSchema.Compile(name, configure)` or
+`SqlSchema.Create(name, configure)` declaration; zero or multiple declarations fail because the current output contract represents one logical
 database. Unsupported code produces a named file/line diagnostic and fails the build.
 
 The outputs are:

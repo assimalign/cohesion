@@ -11,10 +11,14 @@ through this seam without taking a dependency on the SQL engine, SQL storage,
 Connections.Tcp, or Hosting. The area's root independently composes its generic
 child roots; this package does not invert that direction.
 
-`SqlSchema.Create` returns `ISqlSchema`, built by internal implementations of
-`ISqlSchemaBuilder` and the table/type/principal builder contracts.
-`SqlSchemaCompiler` accepts only `EngineModel.Sql` and lowers the retained C#
-declaration into `SqlCompiledSchema`. The derived type carries SQL tables,
+`SqlSchema.Compile` is the ordinary composition-root entry point: it declares and
+compiles a SQL schema without making the caller repeat `EngineModel.Sql`. It
+delegates to the same `SqlSchema.Create` and `SqlSchemaCompiler` path, so validation,
+canonical documents, and hashes remain identical. `Create` still returns an
+`ISqlSchema`, built by internal implementations of `ISqlSchemaBuilder` and the
+table/type/principal builder contracts, for build tooling and callers that compile
+a declaration they did not author. `SqlSchemaCompiler` accepts only `EngineModel.Sql`
+and lowers that retained C# declaration into `SqlCompiledSchema`. The derived type carries SQL tables,
 columns, keys, indexes, constraints, types, functions, triggers, principals,
 grants, and extensions. The root `CompiledSchema` carries only identity and a
 canonical document, with SHA-256 hashing shared across models.

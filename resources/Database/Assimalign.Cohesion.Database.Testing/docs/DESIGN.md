@@ -126,8 +126,8 @@ it does not depend on an application-export API. Coverage asserts:
 - Replacing real-process gateway tests. The in-process factory gives fast resource tests;
 the sample E2E independently validates the SDK manifest and process carrier.
 
-The fixture declares its relational schema with `Database.Sql.Schema`'s `SqlSchema.Create`,
-compiles it with `SqlSchemaCompiler`, and passes the compiled identity to Hosting's
+The fixture declares and compiles its relational schema with
+`Database.Sql.Schema`'s `SqlSchema.Compile`, then passes the compiled identity to Hosting's
 `AddDatabase`. The SDK analyzes that same declaration at build time. Hosting's
 before-accept provisioning order and the fixture's runtime behavior are unchanged.
 

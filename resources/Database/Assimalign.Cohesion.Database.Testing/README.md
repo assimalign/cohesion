@@ -13,9 +13,8 @@ DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
     options.RootPath = Resource.Mounts.Data.Path);
 
-ISqlSchema declaration = SqlSchema.Create("app", database =>
-    database.Table<Account>(table => table.Key(account => account.Id)));
-builder.AddDatabase(engine, "app", SqlSchemaCompiler.Compile(declaration));
+builder.AddDatabase(engine, "app", SqlSchema.Compile("app", database =>
+    database.Table<Account>(table => table.Key(account => account.Id))));
 builder.AddSqlServer(engine, options => options.Listen(Resource.Endpoints.Db));
 
 await using DatabaseApplication application = builder.Build();
