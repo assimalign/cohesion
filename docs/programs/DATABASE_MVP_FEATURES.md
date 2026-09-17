@@ -22,17 +22,17 @@ Measured from source, not from the plan. Line counts are production code (`src/`
 | **Key-Value** | ~6,500 lines across engine, client, catalog, storage | ~2,700 | **Working.** Storage, commands, server, client all landed. |
 | **Documents** | ~500 lines — root contracts, a 62-line language stub, a 150-line storage stub | ~780 | **Not built.** No parser, no planner, no engine. |
 | **Graph** | ~350 lines — root contracts and an 86-line language stub | ~6 | **Not built.** Also blocked: the query standard was never chosen. |
-| **Blob** | ~260 lines — root contracts and a 6-line storage stub | ~5 | **Not built.** |
+| **Blob** | engine, chunked storage, catalog | 39 | **Working** *(landed `b97a9976`)*. Chunked persistence, atomic publication, streaming reads/writes proven at 128 MiB under a 64 MiB heap, crash-durable, container ownership enforced. No wire client — see #214. |
 | **Cache** | 6 lines | 6 | Out of MVP scope by prior decision. |
 
-**Shared kernel — all landed and in use by both working engines:** durable page store with CRC and
+**Shared kernel — all landed and in use by all three working engines:** durable page store with CRC and
 crash recovery, write-ahead journal, MVCC with snapshot isolation and deadlock detection, B+Tree
 secondary indexes, the shared type system with order-preserving encodings, the execution pipeline,
 and the wire protocol with a pooled client.
 
-**The honest summary:** two of five engines work. The kernel they stand on is solid and proven by
-two independent consumers. The remaining three engines are greenfield, and the work to bring them
-up is comparable in size to everything already built in this area.
+**The honest summary:** three of five engines work. The kernel they stand on is solid and proven by
+three independent consumers, and Blob forced it to grow large-object support it had been missing.
+Documents and Graph remain greenfield.
 
 ### What is open in GitHub
 
@@ -40,7 +40,7 @@ up is comparable in size to everything already built in this area.
 |---|---|---|
 | Documents | #181–#192 + 7 epics | Entire model, language through client |
 | Graph | #193–#204 + 7 epics | #193 (standard selection) gates every other graph item |
-| Blob | #211–#216 + 4 epics | Entire model |
+| Blob | #212, #214–#216 + epics | Engine landed (#211, #213 closed); client blocked on the wire-format decision |
 | Key-Value | #206, #919 (+ #208–#210 Cache, post-MVP) | Security and TTL only |
 | SQL | #176, #177 (+ 5 epics) | Security; migrations deferred |
 | Kernel / cross-cutting | #161, #861, #862, #918 | Backup/restore, encryption, embedded, MVCC extraction |
@@ -59,11 +59,11 @@ Structural fixes that must land before engine work, because every engine inherit
 
 | # | Feature | What it means | Status | Work items |
 |---|---|---|---|---|
-| **A1** | **Every database object knows who created it** | A table created by your C# schema code is marked as code-owned. A table created by running `CREATE TABLE` is marked as SQL-owned. The engine records the difference and persists it in the catalog. | `NEW` | file new |
-| **A2** | **Code-owned objects cannot be altered or dropped by ad-hoc statements** | If your application provisions a `Customers` table from C#, then `DROP TABLE Customers` over a SQL connection is refused with a clear error naming the owning schema. Only a schema deployment can change it. Objects created by plain SQL stay fully mutable by plain SQL. | `NEW` | file new |
-| **A3** | **Schema provisioning moves out of the shared root into the SQL model** | Today the area root carries `IDatabaseSchemaTable`, `IDatabaseSchemaColumn`, triggers, functions, grants and a migration planner that switches on engine model. Relational vocabulary in a model-agnostic root is the violation you flagged. It moves to the SQL model; each other model gets its own provisioning shape, or none. | `NEW` | file new |
-| **A4** | **The multi-root structure is written down** | Documentation stating that `Assimalign.Cohesion.Database` is the area root, that `*.Sql.*`, `*.Blob.*`, `*.Documents.*`, `*.Graph.*`, `*.KeyValuePair.*` are model families inheriting it, and what may live in which. Prevents the next session repeating A3. | `NEW` | file new |
-| **A5** | **No server-scoped query language, anywhere** | A connection binds to exactly one database and cannot address another. Already true at the wire protocol — the startup handshake takes a database name. This feature makes it a *guarded* property: a conformance test per model proving no statement or command can reach across databases or reach the server. | `NEW` | file new |
+| **A1** ✅ | **Every database object knows who created it** | A table created by your C# schema code is marked as code-owned. A table created by running `CREATE TABLE` is marked as SQL-owned. The engine records the difference and persists it in the catalog. | `NEW` | file new |
+| **A2** ✅ | **Code-owned objects cannot be altered or dropped by ad-hoc statements** | If your application provisions a `Customers` table from C#, then `DROP TABLE Customers` over a SQL connection is refused with a clear error naming the owning schema. Only a schema deployment can change it. Objects created by plain SQL stay fully mutable by plain SQL. | `NEW` | file new |
+| **A3** ✅ | **Schema provisioning moves out of the shared root into the SQL model** | Today the area root carries `IDatabaseSchemaTable`, `IDatabaseSchemaColumn`, triggers, functions, grants and a migration planner that switches on engine model. Relational vocabulary in a model-agnostic root is the violation you flagged. It moves to the SQL model; each other model gets its own provisioning shape, or none. | `NEW` | file new |
+| **A4** ✅ | **The multi-root structure is written down** | Documentation stating that `Assimalign.Cohesion.Database` is the area root, that `*.Sql.*`, `*.Blob.*`, `*.Documents.*`, `*.Graph.*`, `*.KeyValuePair.*` are model families inheriting it, and what may live in which. Prevents the next session repeating A3. | `NEW` | file new |
+| **A5** ✅ | **No server-scoped query language, anywhere** *(guards landed `b97a9976` for SQL, Key-Value, Blob)* | A connection binds to exactly one database and cannot address another. Already true at the wire protocol — the startup handshake takes a database name. This feature makes it a *guarded* property: a conformance test per model proving no statement or command can reach across databases or reach the server. | `NEW` | file new |
 
 > **A5 note.** Creating and dropping databases stays on `IDatabaseEngine` in C#. That is host-side
 > composition — the code that owns the engine process — not a client-facing API, and no client or
@@ -73,7 +73,7 @@ Structural fixes that must land before engine work, because every engine inherit
 
 | # | Feature | What it means | Status | Work items |
 |---|---|---|---|---|
-| **B1** | **Each model opts into the clauses it supports** | The shared language package today hands every model the same lexer and a flat keyword list. B1 adds a capability profile: a model declares which clauses it accepts, and anything outside the profile produces a precise "not supported by this model" diagnostic instead of a generic parse failure. | `NEW` | file new |
+| **B1** ✅ | **Each model opts into the clauses it supports** | The shared language package today hands every model the same lexer and a flat keyword list. B1 adds a capability profile: a model declares which clauses it accepts, and anything outside the profile produces a precise "not supported by this model" diagnostic instead of a generic parse failure. | `NEW` | file new |
 | **B2** | **A published, complete SQL surface** | **The gap is far larger than it looked — feature B1 measured it: the parser implements 21 of its 48 declared clauses.** See the table below for exactly what is missing. Before B1 these keywords lexed fine and then failed downstream as generic syntax errors, which is why the hole went unnoticed. | `PARTIAL` | #172, #173, #174 |
 
 > **What the SQL surface actually supports (measured 2026-09-17, after B1).**
@@ -150,16 +150,16 @@ over the wire — all through the shared kernel, never re-implementing paging, j
 | **D3** | **Key-Value engine** | Keyspaces, get/put/delete/scan, transactions, server, client. | `DONE` | #205, #207, #917 merged |
 | **D4** | **Key-Value expiration and security** | Per-entry TTL; authorization on key-value operations. | `OPEN` | #919, #206 |
 | **D5** | **Document engine** | Document persistence with versioned metadata, serialization rules for objects/arrays/scalars, secondary indexes, query planning with projection and aggregation, mutation semantics, and a client. **The largest single engine build on this list.** | `OPEN` | #184–#190 |
-| **D6** | **Blob engine** | Chunked large-object persistence, a metadata catalog, lifecycle operations, upload/download streaming, and a client. Simplest of the three — no query language. | `OPEN` | #211, #213, #214 |
+| **D6** | **Blob engine** | Chunked large-object persistence, metadata catalog, lifecycle, streaming upload/download. **Engine landed `b97a9976`** (#211, #213). The **client (#214) is blocked on a wire-format decision**: the protocol caps a frame at 16 MiB and models results as columns and rows, so streaming needs either new `ProtocolMessageType` entries for chunked transfer or a separate channel. That choice affects every model's client, so it is not being made as a side effect of engine work. | `PARTIAL` | ~~#211~~ ~~#213~~ · #214 blocked |
 | **D7** | **Graph engine** | Durable adjacency storage, a catalog for labels and edge types, traversal execution, and a client. Gated on B4, which is gated on the #193 decision. | `OPEN` | #196–#200, #202 |
-| **D8** | **Per-model ownership enforcement** | A1/A2 applied to each engine in its own terms — code-provisioned collections, containers, keyspaces, and graph types locked the same way relational tables are. Implementation varies; a model with no schema may only need the marker. | `NEW` | file new |
+| **D8** | **Per-model ownership enforcement** *(Blob containers landed `b97a9976` — first non-SQL proof)* | A1/A2 applied to each engine in its own terms — code-provisioned collections, containers, keyspaces, and graph types locked the same way relational tables are. Implementation varies; a model with no schema may only need the marker. | `NEW` | file new |
 
 ### Theme E — Durability and operations
 
 | # | Feature | What it means | Status | Work items |
 |---|---|---|---|---|
 | **E1** | **Backup and restore** | Take a consistent backup of a running database and restore it, with version-compatibility checks. Currently the only open kernel gap. | `OPEN` | #161 |
-| **E2** | **Shared MVCC composition** | Both working engines built their own MVCC wiring. Extracting the shared part before three more engines copy it a third, fourth, and fifth time. | `OPEN` | #918 |
+| **E2** ✅ | **Shared MVCC composition** | Both working engines built their own MVCC wiring. Extracting the shared part before three more engines copy it a third, fourth, and fifth time. | `OPEN` | #918 |
 
 > **E2 is sequencing-critical.** It is cheap now and expensive later. Doing it before D5/D6/D7 means
 > the new engines consume a shared component instead of each growing their own copy.
