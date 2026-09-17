@@ -78,25 +78,53 @@ function Get-ProjectArea {
     return $segments[0]
 }
 
+# Keyed by RELATIVE PATH, and enumerated in a stable ordinal order.
+#
+# Both matter, and the reason is the same bug. Keying by file name silently dropped every
+# project whose base name another project shares - and the survivor was whichever the
+# filesystem happened to hand over last. Get-ChildItem -Recurse returns directory order, which
+# is roughly alphabetical on NTFS and effectively arbitrary on ext4, so a name shared by a
+# src/ project and a tests/ project resolved to a DIFFERENT project on a Linux runner than on
+# a Windows workstation. That flipped those projects between the shipped graph and the harness
+# list, changed the counts, and made -Check fail in CI while passing locally.
+#
+# The duplicate base names are reported below; the repository's name-only reference resolver
+# (build/Targets/Build.References.Projects.targets) indexes by file name too, so they are
+# ambiguous for it as well.
 $projects = [ordered]@{}
+$allFiles = New-Object System.Collections.Generic.List[object]
 foreach ($root in $scanRoots) {
     $rootPath = Join-Path $RepositoryRoot $root
     if (-not (Test-Path -LiteralPath $rootPath)) { continue }
     foreach ($file in Get-ChildItem -LiteralPath $rootPath -Filter '*.csproj' -Recurse -File) {
         $relative = $file.FullName.Substring($RepositoryRoot.Length + 1).Replace('\', '/')
         if ($relative -match '(^|/)(bin|obj)/') { continue }
-        $name = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
-        $projects[$name] = [pscustomobject]@{
-            Name         = $name
-            RelativePath = $relative
-            Root         = $root
-            Area         = Get-ProjectArea $relative
-            Kind         = Get-ProjectKind $relative
-            Project      = @()
-            Private      = @()
-            Analyzer     = @()
-            Package      = @()
-        }
+        $allFiles.Add([pscustomobject]@{ Relative = $relative; Root = $root })
+    }
+}
+
+$byPath = @{}
+$orderedPaths = New-Object System.Collections.Generic.List[string]
+foreach ($file in $allFiles) {
+    $byPath[$file.Relative] = $file
+    $orderedPaths.Add($file.Relative)
+}
+# Ordinal, not culture-aware: the order has to be identical on every platform, and it is the
+# order of a path list, not text for a human to read.
+$orderedPaths.Sort([System.StringComparer]::Ordinal)
+
+foreach ($relative in $orderedPaths) {
+    $entry = $byPath[$relative]
+    $projects[$relative] = [pscustomobject]@{
+        Name         = [System.IO.Path]::GetFileNameWithoutExtension($relative)
+        RelativePath = $relative
+        Root         = $entry.Root
+        Area         = Get-ProjectArea $relative
+        Kind         = Get-ProjectKind $relative
+        Project      = @()
+        Private      = @()
+        Analyzer     = @()
+        Package      = @()
     }
 }
 
@@ -151,9 +179,25 @@ foreach ($project in $projects.Values) {
 # Only shipped/buildable code participates in the graph; harnesses are listed separately.
 $graphProjects = @($projects.Values | Where-Object { $_.Kind -in @('src', 'other') -and $_.Root -in @('libraries', 'resources') })
 
+# Name -> project, for resolving a CohesionProjectReference's Include back to a project. Built
+# over the ordinally-sorted index, preferring a src/ project over a harness when a base name is
+# shared, so the choice is deterministic and matches what a reference by that name means.
+$projectsByName = [ordered]@{}
+$duplicateNames = [ordered]@{}
+foreach ($project in $projects.Values) {
+    $existing = if ($projectsByName.Contains($project.Name)) { $projectsByName[$project.Name] } else { $null }
+    if ($null -eq $existing) {
+        $projectsByName[$project.Name] = $project
+        continue
+    }
+    if (-not $duplicateNames.Contains($project.Name)) { $duplicateNames[$project.Name] = @($existing.RelativePath) }
+    $duplicateNames[$project.Name] = @($duplicateNames[$project.Name]) + $project.RelativePath
+    if ($existing.Kind -ne 'src' -and $project.Kind -eq 'src') { $projectsByName[$project.Name] = $project }
+}
+
 function Get-AreaOf {
     param([string] $Name)
-    if ($projects.Contains($Name)) { return $projects[$Name].Area }
+    if ($projectsByName.Contains($Name)) { return $projectsByName[$Name].Area }
     return $null
 }
 
@@ -229,6 +273,25 @@ Add-Line "| Resource areas | $($resourceAreas.Count) |"
 $edgeCount = ($graphProjects | ForEach-Object { @($_.Project).Count + @($_.Private).Count } | Measure-Object -Sum).Sum
 Add-Line "| Declared project references | $edgeCount |"
 Add-Line ''
+
+# --- Ambiguous project names ---------------------------------------------
+if ($duplicateNames.Count -gt 0) {
+    Add-Line '## Ambiguous project names'
+    Add-Line ''
+    Add-Line 'More than one project file shares each of these base names. That matters beyond this'
+    Add-Line 'document: `CohesionProjectReference` resolves **by file name**'
+    Add-Line '(`build/Targets/Build.References.Projects.targets`), so a reference to one of these names is'
+    Add-Line 'ambiguous and the winner is whichever the resolver indexed last. Where a name is shared by a'
+    Add-Line '`src/` project and a harness, this document resolves it to the `src/` one.'
+    Add-Line ''
+    Add-Line '| Name | Files |'
+    Add-Line '| --- | --- |'
+    foreach ($key in $duplicateNames.Keys) {
+        $paths = (@($duplicateNames[$key]) | ForEach-Object { "``$_``" }) -join '<br>'
+        Add-Line "| ``$key`` | $paths |"
+    }
+    Add-Line ''
+}
 
 # --- Area roll-up --------------------------------------------------------
 Add-Line '## Area roll-up'
