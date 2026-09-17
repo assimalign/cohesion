@@ -13,7 +13,7 @@
             Sdk/Sdk.targets
             Targets/Sdk.<Name>.props
             Targets/Sdk.<Name>.targets
-            Tasks/Assimalign.Cohesion.Sdk.<Name>.Tasks.csproj
+            Tasks/src/Assimalign.Cohesion.Sdk.<Name>.Tasks.csproj
 
         frameworks/Assimalign.Cohesion.App.<Name>.Refs/src/Assimalign.Cohesion.App.<Name>.Refs.csproj
         frameworks/Assimalign.Cohesion.App.<Name>.Runtime/src/Assimalign.Cohesion.App.<Name>.Runtime.csproj
@@ -255,7 +255,7 @@ foreach ($n in $Name) {
     $applicationModelRoot = Join-Path $repoRoot "resources\$n\Assimalign.Cohesion.$n.ApplicationModel"
 
     # SDK ---------------------------------------------------------------
-    Write-IfNotExists -Path (Join-Path $sdkRoot "Tasks\Assimalign.Cohesion.Sdk.$n.Tasks.csproj") `
+    Write-IfNotExists -Path (Join-Path $sdkRoot "Tasks\src\Assimalign.Cohesion.Sdk.$n.Tasks.csproj") `
                      -Content $TasksCsprojTemplate.Replace('{NAME}', $n)
 
     Write-IfNotExists -Path (Join-Path $sdkRoot "Sdk\Sdk.props") `

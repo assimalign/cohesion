@@ -48,7 +48,7 @@ LogSpace supplies typed options for the telemetry sink without command verbs.
 Command-bearing manifests advertise accepted kinds as bare strings in `commands` and
 require their narrow client package, even when they are not used as mount sources.
 
-Gateway inherits the base SDK's [project defaults](../../Assimalign.Cohesion.Sdk/docs/OVERVIEW.md#project-defaults):
+Gateway inherits the base SDK's [project defaults](../../../Assimalign.Cohesion.Sdk/Tasks/docs/OVERVIEW.md#project-defaults):
 `Exe`, `net10.0`, preview language/features, disabled implicit usings, enabled
 nullable analysis, and AOT compatibility. It retains unconditional
 `IsAotCompatible=true` in its props (after consumer `Directory.Build.props`) and

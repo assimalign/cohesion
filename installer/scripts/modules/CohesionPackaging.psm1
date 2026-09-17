@@ -329,7 +329,7 @@ $script:CohesionReleaseLibrary = @(
 )
 
 # SDK families. The base Sdk comes first because the domain SDKs chain to it. Each entry maps to
-# sdks/<name>/Tasks/<name>.Tasks.csproj and packs as the NuGet id <name>.
+# sdks/<name>/Tasks/src/<name>.Tasks.csproj and packs as the NuGet id <name>.
 $script:CohesionReleaseSdk = @(
     'Assimalign.Cohesion.Sdk'
     'Assimalign.Cohesion.Sdk.Web'
@@ -701,7 +701,7 @@ function Get-CohesionReleaseProject {
         }
 
         foreach ($sdk in $script:CohesionReleaseSdk) {
-            $relativePath = "sdks/$sdk/Tasks/$sdk.Tasks.csproj"
+            $relativePath = "sdks/$sdk/Tasks/src/$sdk.Tasks.csproj"
             [pscustomobject]@{
                 Kind              = 'Sdk'
                 Project           = "$sdk.Tasks"
@@ -1387,14 +1387,14 @@ function Assert-CohesionReleaseInventory {
 
     # 5: SDK and framework families resolve to real projects, and none on disk are missing.
     foreach ($sdk in $script:CohesionReleaseSdk) {
-        $sdkProject = Join-CohesionPath -Root $repositoryDirectory -Relative "sdks/$sdk/Tasks/$sdk.Tasks.csproj"
+        $sdkProject = Join-CohesionPath -Root $repositoryDirectory -Relative "sdks/$sdk/Tasks/src/$sdk.Tasks.csproj"
         if (-not (Test-Path -LiteralPath $sdkProject -PathType Leaf)) {
             $failure.Add("SDK inventory entry has no project file: $sdkProject")
         }
     }
 
     foreach ($sdkFolder in @(Get-ChildItem -LiteralPath (Join-Path $repositoryDirectory 'sdks') -Directory)) {
-        $sdkFolderProject = Join-CohesionPath -Root $sdkFolder.FullName -Relative "Tasks/$($sdkFolder.Name).Tasks.csproj"
+        $sdkFolderProject = Join-CohesionPath -Root $sdkFolder.FullName -Relative "Tasks/src/$($sdkFolder.Name).Tasks.csproj"
         if (-not (Test-Path -LiteralPath $sdkFolderProject -PathType Leaf)) {
             continue
         }

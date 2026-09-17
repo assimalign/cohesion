@@ -293,7 +293,10 @@ sdks/
     ├── Sdk/Sdk.targets
     ├── Targets/Sdk.<Domain>.props         ← chained SDKs: per-domain build hooks
     ├── Targets/Sdk.<Domain>.targets
-    └── Tasks/...Tasks.csproj              ← code-generation task DLL
+    └── Tasks/                             ← the task project, laid out like every other project
+        ├── src/...Tasks.csproj            ← code-generation task DLL
+        ├── tests/                         ← its tests, where the family has any
+        └── docs/                          ← its OVERVIEW.md / DESIGN.md, where the family has any
 
 sdks/Assimalign.Cohesion.Sdk/Targets/      ← base SDK only
 ├── ...Sdk.FrameworkReference.props        ← KnownFrameworkReference list (every framework)
@@ -333,6 +336,30 @@ build/Targets/
 assets/branding/nuget/
 └── cohesion-nuget-mono-light-128.png      ← imported from the branding repo; see the README
 ```
+
+## The SDK family layout
+
+An SDK family is `sdks/Assimalign.Cohesion.Sdk[.Domain]/` holding `Sdk/`, `Targets/`, and `Tasks/`.
+`Sdk/` and `Targets/` are **shipped content** — loose props/targets copied verbatim into the nupkg at
+those same paths. `Tasks/` is an ordinary project folder: `Tasks/src/` holds the task csproj and its
+sources, `Tasks/tests/` its tests, `Tasks/docs/` its documentation. That makes every SDK match the
+`src/` + `tests/` + `docs/` shape used everywhere else in the repo.
+
+The package layout is **not** the repo layout. Inside the nupkg, `Tasks/` contains the built
+`*.Tasks.dll`, which is why `Targets/*.targets` reach it as `..\Tasks\<Name>.Tasks.dll` from
+`Targets/`. Those `AssemblyFile` paths describe the package and must not be rewritten to follow a
+repo-side folder move.
+
+`sdks/Directory.Build.props` derives `$(CohesionSdkRootDirectory)` from the project's own location,
+and `sdks/Directory.Build.targets` packs `Sdk/` and `Targets/` relative to **that**, scoped to the
+packable Tasks project. Do not reintroduce `$(MSBuildProjectDirectory)\..`: it silently produced an
+SDK package with no `Sdk/` or `Targets/` folder the moment a project changed depth, and a consumer
+only discovers that at SDK-resolution time. Verify a layout change by packing and listing the
+archive — `Sdk/`, `Targets/`, and `Tasks/*.dll` must all be present.
+
+Adding a family through `New-CohesionDomainScaffold.ps1` emits this layout already; the release
+inventory in `CohesionPackaging.psm1` and `Install-Local.ps1` both resolve
+`sdks/<name>/Tasks/src/<name>.Tasks.csproj`.
 
 ## Architecture rules (hard constraints)
 

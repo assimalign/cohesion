@@ -8,7 +8,7 @@ items, targets, generated source, and build diagnostics. Its task assembly runs
 on .NET 10 and generated source must remain trim- and NativeAOT-safe.
 
 The authoritative developer-experience decisions for this area include §4.1, R3, T21, and T24
-in [`docs/DEVELOPER_EXPERIENCE_DESIGN.md`](../../../docs/DEVELOPER_EXPERIENCE_DESIGN.md).
+in [`docs/DEVELOPER_EXPERIENCE_DESIGN.md`](../../../../docs/DEVELOPER_EXPERIENCE_DESIGN.md).
 
 ## Project defaults
 

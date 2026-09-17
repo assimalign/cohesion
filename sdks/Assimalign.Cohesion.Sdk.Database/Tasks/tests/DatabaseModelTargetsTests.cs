@@ -67,8 +67,10 @@ public class DatabaseModelTargetsTests
         ProjectCollection projects,
         string model)
     {
+        // bin/<cfg>/<tfm> -> tests -> Tasks -> the SDK family root, which is where Targets/ sits.
         string targetsDirectory = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
+            "..",
             "..",
             "..",
             "..",

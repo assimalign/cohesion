@@ -1,0 +1,82 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="41" errors="0" failures="0" not-run="0" inconclusive="0" ignored="0" skipped="0" invalid="0" date="2026-09-17" time="06:45:20">
+  <environment machine-name="CCMS00003" user-domain="CCMS00003" os-version="10.0.26200" user="chase" cwd="C:\Source\repos\assimalign\cohesion" nunit-version="2.5.8.0" platform="Microsoft Windows 11 Pro|C:\WINDOWS|\Device\Harddisk0\Partition3" clr-version="10.0.12" />
+  <culture-info current-culture="en-US" current-uiculture="en-US" />
+  <test-suite type="TestFixture" name="Pester" executed="True" result="Success" success="True" time="5.9981" asserts="0" description="Pester">
+    <results>
+      <test-suite type="TestFixture" name="C:\Source\repos\assimalign\cohesion\installer\scripts\modules\tests\CohesionPackaging.Tests.ps1" executed="True" result="Success" success="True" time="4.9161" asserts="0" description="C:\Source\repos\assimalign\cohesion\installer\scripts\modules\tests\CohesionPackaging.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="CohesionPackaging workflow classification" executed="True" result="Success" success="True" time="0.9308" asserts="0" description="CohesionPackaging workflow classification">
+            <results>
+              <test-case description="uses the signed-off non-matrix workflow set in order" name="CohesionPackaging workflow classification.uses the signed-off non-matrix workflow set in order" time="0.3455" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="tolerates listed non-matrix workflows that are absent" name="CohesionPackaging workflow classification.tolerates listed non-matrix workflows that are absent" time="0.2288" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not exempt framework.yml from matrix parsing" name="CohesionPackaging workflow classification.does not exempt framework.yml from matrix parsing" time="0.1913" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="CohesionPackaging packable source-bearing blind-spot guard" executed="True" result="Success" success="True" time="3.6831" asserts="0" description="CohesionPackaging packable source-bearing blind-spot guard">
+            <results>
+              <test-case description="reports an unmatrixed project under every guarded root" name="CohesionPackaging packable source-bearing blind-spot guard.reports an unmatrixed project under every guarded root" time="0.4151" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="accepts a conventional project named by a non-matrix static workflow" name="CohesionPackaging packable source-bearing blind-spot guard.accepts a conventional project named by a non-matrix static workflow" time="0.1696" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not let one matrix name cover two same-named projects" name="CohesionPackaging packable source-bearing blind-spot guard.does not let one matrix name cover two same-named projects" time="0.1675" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not treat a commented matrix fragment as coverage" name="CohesionPackaging packable source-bearing blind-spot guard.does not treat a commented matrix fragment as coverage" time="0.1206" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not treat a commented entry inside a matrix as coverage" name="CohesionPackaging packable source-bearing blind-spot guard.does not treat a commented entry inside a matrix as coverage" time="0.1174" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not treat a projects key outside strategy.matrix as coverage" name="CohesionPackaging packable source-bearing blind-spot guard.does not treat a projects key outside strategy.matrix as coverage" time="0.1209" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="does not treat matrix-shaped text in a block scalar as coverage" name="CohesionPackaging packable source-bearing blind-spot guard.does not treat matrix-shaped text in a block scalar as coverage" time="0.1207" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="accepts an exact exclusion with a non-empty reason" name="CohesionPackaging packable source-bearing blind-spot guard.accepts an exact exclusion with a non-empty reason" time="0.134" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects an exclusion with a blank reason" name="CohesionPackaging packable source-bearing blind-spot guard.rejects an exclusion with a blank reason" time="0.122" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects an exclusion after the project enters a matrix" name="CohesionPackaging packable source-bearing blind-spot guard.rejects an exclusion after the project enters a matrix" time="0.1373" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="ignores explicitly non-packable, test, and source-less projects" name="CohesionPackaging packable source-bearing blind-spot guard.ignores explicitly non-packable, test, and source-less projects" time="0.2483" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="treats conditional or commented false metadata as potentially packable" name="CohesionPackaging packable source-bearing blind-spot guard.treats conditional or commented false metadata as potentially packable" time="0.1132" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="ignores IsPackable metadata outside evaluated project property groups" name="CohesionPackaging packable source-bearing blind-spot guard.ignores IsPackable metadata outside evaluated project property groups" time="0.1108" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="recognizes explicit SDK imports as packable SDK-style projects" name="CohesionPackaging packable source-bearing blind-spot guard.recognizes explicit SDK imports as packable SDK-style projects" time="0.1026" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="honors a nearest props boundary that does not import its parent" name="CohesionPackaging packable source-bearing blind-spot guard.honors a nearest props boundary that does not import its parent" time="0.1068" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="honors a project-level packable override" name="CohesionPackaging packable source-bearing blind-spot guard.honors a project-level packable override" time="0.113" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="fails when a formerly source-less project gains its first source file" name="CohesionPackaging packable source-bearing blind-spot guard.fails when a formerly source-less project gains its first source file" time="0.1398" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="CohesionPackaging inventory and area-matrix equality" executed="True" result="Success" success="True" time="4.1016" asserts="0" description="CohesionPackaging inventory and area-matrix equality">
+            <results>
+              <test-case description="accepts an aligned inventory and per-area matrix" name="CohesionPackaging inventory and area-matrix equality.accepts an aligned inventory and per-area matrix" time="0.1484" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects an inventory project absent from per-area CI" name="CohesionPackaging inventory and area-matrix equality.rejects an inventory project absent from per-area CI" time="0.1069" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a packable per-area CI project absent from the inventory" name="CohesionPackaging inventory and area-matrix equality.rejects a packable per-area CI project absent from the inventory" time="0.1234" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Source\repos\assimalign\cohesion\installer\scripts\modules\tests\CohesionReleasePolicy.Tests.ps1" executed="True" result="Success" success="True" time="1.082" asserts="0" description="C:\Source\repos\assimalign\cohesion\installer\scripts\modules\tests\CohesionReleasePolicy.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Cohesion local package versions" executed="True" result="Success" success="True" time="0.2554" asserts="0" description="Cohesion local package versions">
+            <results>
+              <test-case description="appends the reserved local identifier to a canonical prerelease" name="Cohesion local package versions.appends the reserved local identifier to a canonical prerelease" time="0.0388" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a stable canonical version until the post-tag bump lands" name="Cohesion local package versions.rejects a stable canonical version until the post-tag bump lands" time="0.0315" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="preserves an exact stable identity only for canonical validation mode" name="Cohesion local package versions.preserves an exact stable identity only for canonical validation mode" time="0.0271" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="preserves an exact prerelease identity in canonical validation mode" name="Cohesion local package versions.preserves an exact prerelease identity in canonical validation mode" time="0.0179" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects the local identifier on the canonical version line" name="Cohesion local package versions.rejects the local identifier on the canonical version line" time="0.0267" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a leading-zero numeric prerelease identifier" name="Cohesion local package versions.rejects a leading-zero numeric prerelease identifier" time="0.0272" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects a local-only identity in the release packer" name="Cohesion local package versions.rejects a local-only identity in the release packer" time="0.0796" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Cohesion local library package pruning" executed="True" result="Success" success="True" time="0.3561" asserts="0" description="Cohesion local library package pruning">
+            <results>
+              <test-case description="selects exact library package artifacts without including prefix-sharing or unrelated files" name="Cohesion local library package pruning.selects exact library package artifacts without including prefix-sharing or unrelated files" time="0.0749" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="Cohesion release policy wiring" executed="True" result="Success" success="True" time="0.8674" asserts="0" description="Cohesion release policy wiring">
+            <results>
+              <test-case description="keeps the signed-off canonical version line" name="Cohesion release policy wiring.keeps the signed-off canonical version line" time="0.0629" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="declares promotion as an opt-in manual dispatch" name="Cohesion release policy wiring.declares promotion as an opt-in manual dispatch" time="0.0415" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="requires a published release tag while running trusted workflow code from the default branch" name="Cohesion release policy wiring.requires a published release tag while running trusted workflow code from the default branch" time="0.0622" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps GitHub Packages staging independent from the promote flag" name="Cohesion release policy wiring.keeps GitHub Packages staging independent from the promote flag" time="0.0386" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="strict-packs and exercises package-only SDK consumers without publishing" name="Cohesion release policy wiring.strict-packs and exercises package-only SDK consumers without publishing" time="0.0332" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="gates both release publishers on the three-OS packed-consumer validation" name="Cohesion release policy wiring.gates both release publishers on the three-OS packed-consumer validation" time="0.034" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="retires the replace-on-main package publisher and disabled workflow" name="Cohesion release policy wiring.retires the replace-on-main package publisher and disabled workflow" time="0.0794" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="passes the local version vector to every local pack invocation and prunes library artifacts" name="Cohesion release policy wiring.passes the local version vector to every local pack invocation and prunes library artifacts" time="0.0482" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="generates the Database SDK consumer pin only after successful package creation" name="Cohesion release policy wiring.generates the Database SDK consumer pin only after successful package creation" time="0.037" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="keeps the Database SDK consumer on the package-backed local source" name="Cohesion release policy wiring.keeps the Database SDK consumer on the package-backed local source" time="0.0511" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+    </results>
+  </test-suite>
+</test-results>

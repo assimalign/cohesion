@@ -43,7 +43,7 @@ reject resolved `*.Hosting` assemblies with `COHGW001`.
 
 MSBuild imports `Sdk.props` before the consumer project body and `Sdk.targets` after it.
 
-The base SDK first supplies the seven [project defaults](../../Assimalign.Cohesion.Sdk/docs/DESIGN.md#project-defaults)
+The base SDK first supplies the seven [project defaults](../../../Assimalign.Cohesion.Sdk/Tasks/docs/DESIGN.md#project-defaults)
 before importing Microsoft's SDK props. Gateway inherits these defaults and preserves
 its stricter behavior: `Targets/Sdk.Gateway.props` unconditionally sets
 `IsAotCompatible=true` after the consumer's `Directory.Build.props`, and its targets

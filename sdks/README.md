@@ -36,7 +36,7 @@ only. Library-style base-SDK consumers explicitly set `OutputType=Library`.
 Resource executables do not multi-target, and a language-version override also
 requires overriding `EnablePreviewFeatures`. Gateway retains unconditional
 `IsAotCompatible=true` in its props and `OutputType=Exe` in its targets. See the
-base SDK's [project defaults](./Assimalign.Cohesion.Sdk/docs/DESIGN.md#project-defaults)
+base SDK's [project defaults](./Assimalign.Cohesion.Sdk/Tasks/docs/DESIGN.md#project-defaults)
 for import ordering and override constraints.
 
 Layered Cohesion SDKs import the base SDK without an inline version. Pin both the
@@ -83,8 +83,8 @@ The generated root and nested types are public. The root type includes an
 AOT-safe `Bind(Assimalign.Cohesion.Configuration.IConfiguration)` method made of
 explicit per-member reads; it does not use the reflection binder. When the
 property is unset, no settings source is generated or compiled. See the base
-SDK [overview](./Assimalign.Cohesion.Sdk/docs/OVERVIEW.md) and
-[design](./Assimalign.Cohesion.Sdk/docs/DESIGN.md).
+SDK [overview](./Assimalign.Cohesion.Sdk/Tasks/docs/OVERVIEW.md) and
+[design](./Assimalign.Cohesion.Sdk/Tasks/docs/DESIGN.md).
 
 ## Gateway SDK boundary
 
@@ -109,7 +109,7 @@ contributions and a first-restore manifest dependency channel are incomplete. We
 Database, and ConfigurationStore are the typed ApplicationModel mappings today.
 The transitional SDK dependency set
 must not be expanded to every area merely to hide the restore-order gap; see
-[`Sdk.Gateway` design](./Assimalign.Cohesion.Sdk.Gateway/docs/DESIGN.md) for the
+[`Sdk.Gateway` design](./Assimalign.Cohesion.Sdk.Gateway/Tasks/docs/DESIGN.md) for the
 required restore-visible producer contract and release gates.
 
 ## Implicit Cohesion.App framework reference

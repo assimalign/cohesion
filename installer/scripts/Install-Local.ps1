@@ -164,7 +164,7 @@ Write-Host ""
 # installer/scripts/modules/CohesionPackaging.psm1 - not two lists that drift.
 #
 # Each framework family has a Ref pack (one .nupkg) and a per-RID Runtime pack (one
-# .nupkg per RID). Each SDK entry maps to sdks/<name>/Tasks/<name>.Tasks.csproj. The
+# .nupkg per RID). Each SDK entry maps to sdks/<name>/Tasks/src/<name>.Tasks.csproj. The
 # base Sdk comes first because the others chain to it. The module keeps both lists
 # aligned with the folders under frameworks/ and sdks/ and with the
 # KnownFrameworkReferences in
@@ -268,10 +268,10 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet build failed for $buildTasksProj" }
 #region 2. SDK packs --------------------------------------------------------
 if (-not $SkipSdks) {
     Write-Host "[2/5] Packing SDK projects..." -ForegroundColor Cyan
-    # Each entry in $cohesionSdks maps to sdks/<SdkName>/Tasks/<SdkName>.Tasks.csproj.
+    # Each entry in $cohesionSdks maps to sdks/<SdkName>/Tasks/src/<SdkName>.Tasks.csproj.
     # Resource-domain SDKs are scaffolded by New-CohesionDomainScaffold.ps1; each
     # corresponds to a folder under resources/ and a framework family in frameworks/.
-    $sdkProjects = $cohesionSdks | ForEach-Object { Join-Path $repoRoot "sdks\$_\Tasks\$_.Tasks.csproj" }
+    $sdkProjects = $cohesionSdks | ForEach-Object { Join-Path $repoRoot "sdks\$_\Tasks\src\$_.Tasks.csproj" }
     foreach ($proj in $sdkProjects) {
         if (-not (Test-Path -LiteralPath $proj)) {
             Write-Host "  (skip, not found) $proj" -ForegroundColor DarkGray
