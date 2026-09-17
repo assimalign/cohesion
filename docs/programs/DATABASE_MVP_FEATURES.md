@@ -20,26 +20,35 @@ Measured from source, not from the plan. Line counts are production code (`src/`
 |---|---|---|---|
 | **SQL** | ~14,300 lines at B1 baseline; B2 extends engine, language, catalog and schema | ~6,900 at B1 baseline; B2 adds acceptance coverage | **Working, with transaction control and referential integrity.** B2 raises parser/profile coverage from **21 to 32 of 48 declared clauses**: SQL transactions run through the wire server, and durable foreign keys, checks and unique indexes enforce writes. Set operations, CTEs and the remaining 16 clauses are deferred; parser coverage is not a claim that every parsed query shape executes. See feature B2. |
 | **Key-Value** | ~6,500 lines across engine, client, catalog, storage | ~2,700 | **Working.** Storage, commands, server, client all landed. |
-| **Documents** | ~500 lines — root contracts, a 62-line language stub, a 150-line storage stub | ~780 | **Not built.** No parser, no planner, no engine. |
-| **Graph** | ~350 lines — root contracts and an 86-line language stub | ~6 | **Not built.** Also blocked: the query standard was never chosen. |
+| **Documents** | engine, OQL parser, planner, chunked storage, catalog | 276 | **Working** *(landed `6085bad3`, `a4770b3f`)*. OQL with 8 executable clauses including `CREATE INDEX` / `DROP INDEX` DDL, planner index selection, nested documents, arrays, mixed-shape collections, collection ownership. No wire client. |
+| **Graph** | engine, GQL parser, traversal planner, adjacency storage, catalog | 189 | **Working** *(landed `1092d6b2`)*. ISO/IEC 39075 GQL with 7 executable clauses, relationship-isomorphic cycle termination, indexed multi-hop traversal, `DETACH DELETE`, label/type ownership. No wire client. |
 | **Blob** | engine, chunked storage, catalog | 39 | **Working** *(landed `b97a9976`)*. Chunked persistence, atomic publication, streaming reads/writes proven at 128 MiB under a 64 MiB heap, crash-durable, container ownership enforced. No wire client — see #214. |
 | **Cache** | 6 lines | 6 | Out of MVP scope by prior decision. |
 
-**Shared kernel — all landed and in use by all three working engines:** durable page store with CRC and
-crash recovery, write-ahead journal, MVCC with snapshot isolation and deadlock detection, B+Tree
-secondary indexes, the shared type system with order-preserving encodings, the execution pipeline,
-and the wire protocol with a pooled client.
+**Shared kernel — landed and in use by all five engines:** durable page store with CRC and crash
+recovery, write-ahead journal, MVCC with snapshot isolation and deadlock detection, the shared
+per-database MVCC composition (extracted in `31047f3a` before three engines could each grow their
+own copy), B+Tree secondary indexes, the shared type system with order-preserving encodings, the
+execution pipeline, and the wire protocol with a pooled client.
 
-**The honest summary:** three of five engines work. The kernel they stand on is solid and proven by
-three independent consumers, and Blob forced it to grow large-object support it had been missing.
-Documents and Graph remain greenfield.
+**The honest summary: all five engines work.** Each composes the kernel rather than
+re-implementing paging, journaling, or locking, and each is crash-durable, ownership-enforcing, and
+scoped to a single database. Blob forced the kernel to grow large-object support it had been
+missing; nothing after it needed a kernel change.
+
+**What separates this from a usable platform** is one decision, not five: **three of the five
+engines have no wire server.** Documents, Blob, and Graph are in-process only, all blocked behind
+the same protocol limits — frames cap at 16 MiB, results are column/row shaped, and the startup
+handshake carries no model discriminator. That is a single coherent wire-format revision, and
+deciding the three cases separately risks three incompatible extensions to `ProtocolMessageType`.
+See feature D6's note and §3.4 of `docs/resources/Database/DESIGN.md`.
 
 ### What is open in GitHub
 
 | Area | Open items | Note |
 |---|---|---|
-| Documents | #181–#192 + 7 epics | Entire model, language through client |
-| Graph | #193–#204 + 7 epics | #193 (standard selection) gates every other graph item |
+| Documents | #190–#192 + epics | #181–#189 close on merge (`6085bad3`). Client, security, replication remain |
+| Graph | #201–#204 + epics | #193–#200 close on merge (`1092d6b2`); **#193 answered: ISO/IEC 39075 GQL**. Security, client, replication remain |
 | Blob | #212, #214–#216 + epics | Engine landed (#211, #213 closed); client blocked on the wire-format decision |
 | Key-Value | #206, #919 (+ #208–#210 Cache, post-MVP) | Security and TTL only |
 | SQL | #176, #177 (+ 5 epics) | Security; migrations deferred |
@@ -63,7 +72,7 @@ Structural fixes that must land before engine work, because every engine inherit
 | **A2** ✅ | **Code-owned objects cannot be altered or dropped by ad-hoc statements** | If your application provisions a `Customers` table from C#, then `DROP TABLE Customers` over a SQL connection is refused with a clear error naming the owning schema. Only a schema deployment can change it. Objects created by plain SQL stay fully mutable by plain SQL. | `NEW` | file new |
 | **A3** ✅ | **Schema provisioning moves out of the shared root into the SQL model** | Today the area root carries `IDatabaseSchemaTable`, `IDatabaseSchemaColumn`, triggers, functions, grants and a migration planner that switches on engine model. Relational vocabulary in a model-agnostic root is the violation you flagged. It moves to the SQL model; each other model gets its own provisioning shape, or none. | `NEW` | file new |
 | **A4** ✅ | **The multi-root structure is written down** | Documentation stating that `Assimalign.Cohesion.Database` is the area root, that `*.Sql.*`, `*.Blob.*`, `*.Documents.*`, `*.Graph.*`, `*.KeyValuePair.*` are model families inheriting it, and what may live in which. Prevents the next session repeating A3. | `NEW` | file new |
-| **A5** ✅ | **No server-scoped query language, anywhere** *(guards landed `b97a9976` for SQL, Key-Value, Blob)* | A connection binds to exactly one database and cannot address another. Already true at the wire protocol — the startup handshake takes a database name. This feature makes it a *guarded* property: a conformance test per model proving no statement or command can reach across databases or reach the server. | `NEW` | file new |
+| **A5** ✅ | **No server-scoped query language, anywhere** *(guards landed for all five engines: SQL, Key-Value, Blob in `b97a9976`; Documents in `6085bad3`; Graph in `1092d6b2`)* | A connection binds to exactly one database and cannot address another. Already true at the wire protocol — the startup handshake takes a database name. This feature makes it a *guarded* property: a conformance test per model proving no statement or command can reach across databases or reach the server. | `NEW` | file new |
 
 > **A5 note.** Creating and dropping databases stays on `IDatabaseEngine` in C#. That is host-side
 > composition — the code that owns the engine process — not a client-facing API, and no client or
@@ -74,7 +83,7 @@ Structural fixes that must land before engine work, because every engine inherit
 | # | Feature | What it means | Status | Work items |
 |---|---|---|---|---|
 | **B1** ✅ | **Each model opts into the clauses it supports** | The shared language package today hands every model the same lexer and a flat keyword list. B1 adds a capability profile: a model declares which clauses it accepts, and anything outside the profile produces a precise "not supported by this model" diagnostic instead of a generic parse failure. | `NEW` | file new |
-| **B2** | **A published, complete SQL surface** | Phase 4 adds wire-accessible `BEGIN` / `COMMIT` / `ROLLBACK`, durable foreign keys with delete cascade/restrict, row checks and unique indexes with concurrent-write enforcement. Coverage rises from **21/48 to 32/48**; the remaining language groups below keep the broader published-surface feature partial. DDL remains self-committing and is refused inside explicit transactions. | `PARTIAL` (Phase 4 transaction/constraint slice implemented) | #172, #173, #174; catalog constraint portions of #175 / #177 |
+| **B2** ✅ | **A published, complete SQL surface** | Phase 4 adds wire-accessible `BEGIN` / `COMMIT` / `ROLLBACK`, durable foreign keys with delete cascade/restrict, row checks and unique indexes with concurrent-write enforcement. Coverage rises from **21/48 to 32/48**; the remaining language groups below keep the broader published-surface feature partial. DDL remains self-committing and is refused inside explicit transactions. | `PARTIAL` (Phase 4 transaction/constraint slice implemented) | #172, #173, #174; catalog constraint portions of #175 / #177 |
 
 > **What the SQL surface actually supports (measured 2026-09-17, after B2).**
 >
@@ -125,8 +134,8 @@ Structural fixes that must land before engine work, because every engine inherit
 | # | Feature | What it means | Status | Work items |
 |---|---|---|---|---|
 | **B7** | **Savepoints and isolation-level syntax** | `SAVEPOINT` / `RELEASE` / `ROLLBACK TO`, and `SET TRANSACTION ISOLATION LEVEL`. The MVCC substrate already models isolation levels, so that half has something real behind it; savepoints need nested undo scopes that do not exist yet. **Deferred, with B2 required to leave room for it.** | `DEFERRED` | file new |
-| **B3** | **OQL — the document query language** | Grammar, AST, diagnostics, and a conformance corpus for querying documents. Nothing exists today beyond a 62-line stub. | `OPEN` | #181, #182, #183 |
-| **B4** | **GQL — the graph query language** | Requires choosing the standard first (ISO GQL is the plan's recommendation). Then grammar, AST, diagnostics, conformance plan. | `OPEN` | **#193 (decision)**, #194, #195 |
+| **B3** ✅ | **OQL — the document query language** | Grammar, AST, diagnostics, and a conformance corpus for querying documents. Nothing exists today beyond a 62-line stub. | `OPEN` | #181, #182, #183 |
+| **B4** ✅ | **GQL — the graph query language** | Requires choosing the standard first (ISO GQL is the plan's recommendation). Then grammar, AST, diagnostics, conformance plan. | `OPEN` | **#193 (decision)**, #194, #195 |
 | ~~**B5**~~ | ~~**A language server per query language**~~ | **Deferred** — editor tooling, not engine capability. An LSP built against grammars still in motion is rework. Revisit once OQL and GQL stabilize. | `DEFERRED` | — |
 
 > **B4 note.** The graph standard is settled: **ISO GQL**. Record the decision on #193 when graph
@@ -151,10 +160,10 @@ over the wire — all through the shared kernel, never re-implementing paging, j
 | **D2** | **SQL security** | Principals, permissions, and protected-operation checks on relational objects. | `OPEN` | #177 |
 | **D3** | **Key-Value engine** | Keyspaces, get/put/delete/scan, transactions, server, client. | `DONE` | #205, #207, #917 merged |
 | **D4** | **Key-Value expiration and security** | Per-entry TTL; authorization on key-value operations. | `OPEN` | #919, #206 |
-| **D5** | **Document engine** | Document persistence with versioned metadata, serialization rules for objects/arrays/scalars, secondary indexes, query planning with projection and aggregation, mutation semantics, and a client. **The largest single engine build on this list.** | `OPEN` | #184–#190 |
-| **D6** | **Blob engine** | Chunked large-object persistence, metadata catalog, lifecycle, streaming upload/download. **Engine landed `b97a9976`** (#211, #213). The **client (#214) is blocked on a wire-format decision**: the protocol caps a frame at 16 MiB and models results as columns and rows, so streaming needs either new `ProtocolMessageType` entries for chunked transfer or a separate channel. That choice affects every model's client, so it is not being made as a side effect of engine work. | `PARTIAL` | ~~#211~~ ~~#213~~ · #214 blocked |
-| **D7** | **Graph engine** | Durable adjacency storage, a catalog for labels and edge types, traversal execution, and a client. Gated on B4, which is gated on the #193 decision. | `OPEN` | #196–#200, #202 |
-| **D8** | **Per-model ownership enforcement** *(Blob containers landed `b97a9976` — first non-SQL proof)* | A1/A2 applied to each engine in its own terms — code-provisioned collections, containers, keyspaces, and graph types locked the same way relational tables are. Implementation varies; a model with no schema may only need the marker. | `NEW` | file new |
+| **D5** ✅ | **Document engine** | Document persistence with versioned metadata, serialization rules for objects/arrays/scalars, secondary indexes, query planning with projection and aggregation, mutation semantics, and a client. **The largest single engine build on this list.** | `OPEN` | #184–#190 |
+| **D6** ✅ | **Blob engine** | Chunked large-object persistence, metadata catalog, lifecycle, streaming upload/download. **Engine landed `b97a9976`** (#211, #213). The **client (#214) is blocked on a wire-format decision**: the protocol caps a frame at 16 MiB and models results as columns and rows, so streaming needs either new `ProtocolMessageType` entries for chunked transfer or a separate channel. That choice affects every model's client, so it is not being made as a side effect of engine work. | `PARTIAL` | ~~#211~~ ~~#213~~ · #214 blocked |
+| **D7** ✅ | **Graph engine** | Durable adjacency storage, a catalog for labels and edge types, traversal execution, and a client. Gated on B4, which is gated on the #193 decision. | `OPEN` | #196–#200, #202 |
+| **D8** ✅ | **Per-model ownership enforcement** *(Blob containers landed `b97a9976` — first non-SQL proof)* | A1/A2 applied to each engine in its own terms — code-provisioned collections, containers, keyspaces, and graph types locked the same way relational tables are. Implementation varies; a model with no schema may only need the marker. | `NEW` | file new |
 
 ### Theme E — Durability and operations
 
