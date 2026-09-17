@@ -114,6 +114,15 @@ Structural fixes that must land before engine work, because every engine inherit
 >    `UNIQUE` uses the same unique-index model as compiled schemas. Enforcement runs inside
 >    statement brackets and uses the existing MVCC lock manager, including concurrent unique keys.
 >
+> **Follow-up landed (`d977d34e`).** Phase 4 first enforced foreign keys by locking the transitive
+> closure of FK-connected tables exclusively — correct and deadlock-free, but in a normalized schema
+> that closure is usually the whole database, so one foreign key serialized nearly every writer.
+> Enforcement now takes table-grain intent locks plus a shared lock on the referenced *parent row*,
+> matching the hierarchical protocol the row-write path already used. The accepted consequence is
+> that wait-for cycles become possible again — the closure's object-id ordering had made them
+> impossible — and they surface as the lock manager's existing retryable deadlock abort. A database
+> of this shape should detect deadlocks, not avoid them by over-locking.
+>
 > Neither is a language-only fix: transaction control needs statement-to-session binding in the
 > engine, and constraints need catalog persistence, planner awareness, and enforcement on the write
 > path. **B2 is therefore an engine feature with a language surface, not parser work** — that is how
