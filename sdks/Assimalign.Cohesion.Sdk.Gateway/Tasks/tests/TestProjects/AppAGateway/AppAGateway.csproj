@@ -1,0 +1,13 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+
+  <PropertyGroup>
+    <CohesionApplicationName>appa</CohesionApplicationName>
+    <CohesionResourceName>appa-gateway</CohesionResourceName>
+    <CohesionGateways>Local</CohesionGateways>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionResourceReference Include="..\AppAWeb\AppAWeb.csproj" />
+  </ItemGroup>
+
+</Project>

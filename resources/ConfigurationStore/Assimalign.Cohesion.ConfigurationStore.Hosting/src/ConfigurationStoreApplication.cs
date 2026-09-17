@@ -1,36 +1,62 @@
 using System;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.ConfigurationStore;
+using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the configuration store resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Hosts a ConfigurationStore application and its ordered service lifecycle.
 /// </summary>
-public sealed class ConfigurationStoreApplication : Host<ConfigurationStoreApplicationContext>
+public sealed class ConfigurationStoreApplication : Host<ConfigurationStoreApplicationContext>, IConfigurationStoreApplication
 {
     private readonly ConfigurationStoreApplicationContext _context;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="ConfigurationStoreApplication"/> class.
-    /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public ConfigurationStoreApplication(ConfigurationStoreApplicationOptions options) : base(options)
+    internal ConfigurationStoreApplication(
+        ConfigurationStoreApplicationOptions options,
+        ConfigurationStoreApplicationContext context)
+        : base(options)
     {
-        ArgumentNullException.ThrowIfNull(options);
-
-        _context = new ConfigurationStoreApplicationContext(options, new IHostService[]
-        {
-            new ConfigurationEndpointService(),
-        });
+        _context = context;
     }
 
     /// <summary>
-    /// Gets the application context.
+    /// Gets the concrete application context.
     /// </summary>
     public override ConfigurationStoreApplicationContext Context => _context;
+
+    IConfigurationStoreApplicationContext IConfigurationStoreApplication.Context => _context;
+
+    Task IConfigurationStoreApplication.StartAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StartAsync(cancellationToken);
+
+    Task IConfigurationStoreApplication.StopAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StopAsync(cancellationToken);
+
+    /// <summary>
+    /// Creates a builder for a configuration store application.
+    /// </summary>
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the configuration store application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static ConfigurationStoreApplicationBuilder CreateBuilder(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(ConfigurationStoreApplication).Assembly;
+        return new ConfigurationStoreApplicationBuilder(args, resourceAssembly);
+    }
+
+    internal static ConfigurationStoreApplicationBuilder CreateBuilder(
+        string[] args,
+        Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+
+        return new ConfigurationStoreApplicationBuilder(args, resourceAssembly);
+    }
 }

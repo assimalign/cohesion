@@ -1,36 +1,62 @@
 using System;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.IdentityHub;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.IdentityHub.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the identity provider resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Hosts an IdentityHub application and its ordered service lifecycle.
 /// </summary>
-public sealed class IdentityHubApplication : Host<IdentityHubApplicationContext>
+public sealed class IdentityHubApplication : Host<IdentityHubApplicationContext>, IIdentityHubApplication
 {
     private readonly IdentityHubApplicationContext _context;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="IdentityHubApplication"/> class.
-    /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public IdentityHubApplication(IdentityHubApplicationOptions options) : base(options)
+    internal IdentityHubApplication(
+        IdentityHubApplicationOptions options,
+        IdentityHubApplicationContext context)
+        : base(options)
     {
-        ArgumentNullException.ThrowIfNull(options);
-
-        _context = new IdentityHubApplicationContext(options, new IHostService[]
-        {
-            new IdentityEndpointService(),
-        });
+        _context = context;
     }
 
     /// <summary>
-    /// Gets the application context.
+    /// Gets the concrete application context.
     /// </summary>
     public override IdentityHubApplicationContext Context => _context;
+
+    IIdentityHubApplicationContext IIdentityHubApplication.Context => _context;
+
+    Task IIdentityHubApplication.StartAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StartAsync(cancellationToken);
+
+    Task IIdentityHubApplication.StopAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StopAsync(cancellationToken);
+
+    /// <summary>
+    /// Creates a builder for an identity hub application.
+    /// </summary>
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the identity hub application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static IdentityHubApplicationBuilder CreateBuilder(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(IdentityHubApplication).Assembly;
+        return new IdentityHubApplicationBuilder(args, resourceAssembly);
+    }
+
+    internal static IdentityHubApplicationBuilder CreateBuilder(
+        string[] args,
+        Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+
+        return new IdentityHubApplicationBuilder(args, resourceAssembly);
+    }
 }

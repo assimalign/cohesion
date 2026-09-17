@@ -1,3 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.OpenTelemetry</RootNamespace>
+		<Description>Bounded, NativeAOT-safe OTLP/HTTP JSON log export without instrumentation or hosting dependencies.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+	</ItemGroup>
 </Project>

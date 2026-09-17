@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Remove="TestObjects\Assimalign.Cohesion.Database.Testing.TestHost\**\*.cs" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Testing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Testing.TestHost" />
+		<!-- Build the SDK consumer and its generated manifest/apphost without making its
+		     Program or runtime closure a compile-time dependency of this test assembly. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.SampleHost" ReferenceOutputAssembly="false" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+	</ItemGroup>
+</Project>

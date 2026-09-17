@@ -1,0 +1,6 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Database">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    
+  </PropertyGroup>
+</Project>

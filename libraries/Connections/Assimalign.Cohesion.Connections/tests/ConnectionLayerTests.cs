@@ -165,6 +165,21 @@ public class ConnectionLayerTests
         listener.IsDisposed.ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Connections] - BindAsync: Layered listener should delegate to inner listener")]
+    public async Task BindAsync_OnLayeredListener_ShouldDelegateToInnerListener()
+    {
+        // Arrange
+        TestConnectionListener listener = new();
+        RecordingConnectionLayer layer = new("noop", [], wrapConnection: false);
+        IConnectionListener layered = listener.Use(layer);
+
+        // Act
+        await layered.BindAsync();
+
+        // Assert
+        listener.BindCount.ShouldBe(1);
+    }
+
     [Fact]
     public void Use_WithNullLayer_ShouldThrowArgumentNullException()
     {

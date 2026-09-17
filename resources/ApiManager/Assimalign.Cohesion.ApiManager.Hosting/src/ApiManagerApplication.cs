@@ -1,36 +1,58 @@
 using System;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.ApiManager;
+using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.ApiManager.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.ApiManager.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the API gateway and management plane resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Hosts an ApiManager application and its ordered service lifecycle.
 /// </summary>
-public sealed class ApiManagerApplication : Host<ApiManagerApplicationContext>
+public sealed class ApiManagerApplication : Host<ApiManagerApplicationContext>, IApiManagerApplication
 {
     private readonly ApiManagerApplicationContext _context;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="ApiManagerApplication"/> class.
-    /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public ApiManagerApplication(ApiManagerApplicationOptions options) : base(options)
+    internal ApiManagerApplication(
+        ApiManagerApplicationOptions options,
+        ApiManagerApplicationContext context)
+        : base(options)
     {
-        ArgumentNullException.ThrowIfNull(options);
-
-        _context = new ApiManagerApplicationContext(options, new IHostService[]
-        {
-            new GatewayEndpointService(),
-        });
+        _context = context;
     }
 
     /// <summary>
-    /// Gets the application context.
+    /// Gets the concrete application context.
     /// </summary>
     public override ApiManagerApplicationContext Context => _context;
+
+    IApiManagerApplicationContext IApiManagerApplication.Context => _context;
+
+    Task IApiManagerApplication.StartAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StartAsync(cancellationToken);
+
+    Task IApiManagerApplication.StopAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StopAsync(cancellationToken);
+
+    /// <summary>
+    /// Creates a builder for an API manager application.
+    /// </summary>
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the API manager application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static ApiManagerApplicationBuilder CreateBuilder(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(ApiManagerApplication).Assembly);
+    }
+
+    internal static ApiManagerApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new ApiManagerApplicationBuilder(args, resourceAssembly);
+    }
 }

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+    <ItemGroup>
+        <CohesionPackageReference Include="coverlet.collector" />
+        <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+        <CohesionPackageReference Include="xunit" />
+        <CohesionPackageReference Include="xunit.runner.visualstudio" />
+        <CohesionPackageReference Include="Shouldly" />
+    </ItemGroup>
+    <ItemGroup>
+        <!-- Deviates from the repo CohesionProjectReference rule per design decision: the name resolver indexes libraries/ and resources/ only (build/Targets/Build.References.Projects.targets:42); tooling/ is outside its roots. -->
+        <ProjectReference Include="../src/Assimalign.Cohesion.Cli.csproj" />
+    </ItemGroup>
+</Project>

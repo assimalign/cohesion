@@ -3,11 +3,11 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
+
 /// <summary>
 /// A minimal <see cref="IDatabaseApplicationBuilder"/> that records registrations,
-/// proving the model verbs compose against the area root's builder seam alone —
-/// no hosting reference is involved anywhere in these tests (COHRES001 stays
-/// intact for <c>Database.Sql</c>).
+/// proving the model verbs compose against the area root's builder seam without
+/// any hosting-library dependency.
 /// </summary>
 internal sealed class RecordingApplicationBuilder : IDatabaseApplicationBuilder
 {

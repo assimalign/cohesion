@@ -1,36 +1,58 @@
 using System;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.VpnGateway;
 
 namespace Assimalign.Cohesion.VpnGateway.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.VpnGateway.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the VPN gateway resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Hosts a VpnGateway application and its ordered service lifecycle.
 /// </summary>
-public sealed class VpnGatewayApplication : Host<VpnGatewayApplicationContext>
+public sealed class VpnGatewayApplication : Host<VpnGatewayApplicationContext>, IVpnGatewayApplication
 {
     private readonly VpnGatewayApplicationContext _context;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="VpnGatewayApplication"/> class.
-    /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public VpnGatewayApplication(VpnGatewayApplicationOptions options) : base(options)
+    internal VpnGatewayApplication(
+        VpnGatewayApplicationOptions options,
+        VpnGatewayApplicationContext context)
+        : base(options)
     {
-        ArgumentNullException.ThrowIfNull(options);
-
-        _context = new VpnGatewayApplicationContext(options, new IHostService[]
-        {
-            new TunnelDataPlaneService(),
-        });
+        _context = context;
     }
 
     /// <summary>
-    /// Gets the application context.
+    /// Gets the concrete application context.
     /// </summary>
     public override VpnGatewayApplicationContext Context => _context;
+
+    IVpnGatewayApplicationContext IVpnGatewayApplication.Context => _context;
+
+    Task IVpnGatewayApplication.StartAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StartAsync(cancellationToken);
+
+    Task IVpnGatewayApplication.StopAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StopAsync(cancellationToken);
+
+    /// <summary>
+    /// Creates a builder for a VPN gateway application.
+    /// </summary>
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the VPN gateway application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static VpnGatewayApplicationBuilder CreateBuilder(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(VpnGatewayApplication).Assembly);
+    }
+
+    internal static VpnGatewayApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new VpnGatewayApplicationBuilder(args, resourceAssembly);
+    }
 }

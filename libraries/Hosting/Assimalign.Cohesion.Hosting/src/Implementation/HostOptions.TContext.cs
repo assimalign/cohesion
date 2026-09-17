@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Threading;
-using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Hosting;
 
@@ -30,8 +29,13 @@ public abstract class HostOptions<TContext> where TContext : HostContext
     public TimeSpan StartupTimeout { get; set; } = Timeout.InfiniteTimeSpan;
 
     /// <summary>
-    /// The allotted time given for shutdown before forced shutdown. Default is 30 seconds.
+    /// Gets or sets the allotted time given for shutdown before forced shutdown. The default
+    /// for an ordinary host is 30 seconds.
     /// </summary>
+    /// <remarks>
+    /// An installed <see cref="IHostRunner"/> can adjust this value for the run through
+    /// <see cref="IHostRun.ShutdownTimeout"/> before it executes the host lifetime.
+    /// </remarks>
     public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>

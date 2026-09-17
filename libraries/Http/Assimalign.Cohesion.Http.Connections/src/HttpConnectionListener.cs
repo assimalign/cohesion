@@ -30,7 +30,12 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     private readonly Channel<HttpConnection> _acceptedConnections;
     private readonly CancellationTokenSource _disposeCancellationTokenSource;
     private readonly Lock _acceptLoopLock;
+    private readonly SemaphoreSlim _bindSemaphore;
+    private readonly bool _advertiseAltService;
+    private readonly TimeSpan _altServiceMaxAge;
+    private readonly string? _altServiceAuthority;
     private bool _acceptLoopsStarted;
+    private bool _isBound;
     private bool _isDisposed;
     private volatile Exception? _acceptLoopException;
 
@@ -83,18 +88,12 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
 
         Protocols = protocols;
 
-        // Compute the Alt-Svc advertisement once — every listener has now been materialized, so the
-        // HTTP/3 endpoint (if any) is known — and push it onto the stream factories that inject it on
-        // their responses. Set before the first connection is accepted (accept loops start lazily on
-        // the first AcceptOrListenAsync), so no factory observes a half-set value.
-        string? altSvcHeaderValue = BuildAltSvcHeaderValue(options.AltServiceAdvertisement, _multiplexedListeners, _streamListeners.Count);
-        if (altSvcHeaderValue is not null)
-        {
-            foreach ((HttpConnectionFactory factory, IConnectionListener _) in _streamListeners)
-            {
-                factory.AltSvcHeaderValue = altSvcHeaderValue;
-            }
-        }
+        // Snapshot advertisement configuration with the rest of the listener-wide options. The
+        // header itself is computed after BindAsync because a port-zero QUIC listener does not know
+        // its advertised port until the transport bind completes.
+        _advertiseAltService = options.AltServiceAdvertisement.Enabled;
+        _altServiceMaxAge = options.AltServiceAdvertisement.MaxAge;
+        _altServiceAuthority = options.AltServiceAdvertisement.Authority;
 
         _acceptLoops = new List<Task>(_streamListeners.Count + _multiplexedListeners.Count);
         _acceptedConnections = Channel.CreateBounded<HttpConnection>(new BoundedChannelOptions(options.BacklogCapacity)
@@ -105,12 +104,71 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
         });
         _disposeCancellationTokenSource = new CancellationTokenSource();
         _acceptLoopLock = new Lock();
+        _bindSemaphore = new SemaphoreSlim(1, 1);
     }
 
     /// <summary>
     /// Gets the configured HTTP protocols supported by this listener.
     /// </summary>
     public HttpProtocol Protocols { get; }
+
+    /// <inheritdoc />
+    public async ValueTask BindAsync(CancellationToken cancellationToken = default)
+    {
+        await _bindSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            ObjectDisposedException.ThrowIf(_isDisposed, nameof(HttpConnectionListener));
+
+            if (_isBound)
+            {
+                return;
+            }
+
+            if (_streamListeners.Count == 0 && _multiplexedListeners.Count == 0)
+            {
+                throw new InvalidOperationException("At least one connection listener must be configured before binding HTTP connections.");
+            }
+
+            try
+            {
+                foreach ((HttpConnectionFactory _, IConnectionListener listener) in _streamListeners)
+                {
+                    await listener.BindAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                foreach ((HttpMultiplexedConnectionFactory _, IMultiplexedConnectionListener listener) in _multiplexedListeners)
+                {
+                    await listener.BindAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                ConfigureAltServiceAdvertisement();
+                _isBound = true;
+            }
+            catch
+            {
+                // Binding is transactional at the aggregate boundary. Preserve the original bind
+                // failure while releasing every listener, including one that failed after acquiring
+                // an operating-system resource of its own.
+                try
+                {
+                    await DisposeCoreAsync().ConfigureAwait(false);
+                }
+                catch
+                {
+                    // The bind exception is the actionable startup failure. Cleanup failures must
+                    // not replace it; all listeners were still given a release attempt.
+                }
+
+                throw;
+            }
+        }
+        finally
+        {
+            _bindSemaphore.Release();
+        }
+    }
 
     /// <summary>
     /// Builds the RFC 7838 <c>Alt-Svc</c> header value the stream protocols advertise, or
@@ -125,24 +183,26 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     /// authority was supplied.
     /// </exception>
     private static string? BuildAltSvcHeaderValue(
-        HttpAltServiceAdvertisementOptions advertisement,
+        bool enabled,
+        TimeSpan maxAge,
+        string? authority,
         List<(HttpMultiplexedConnectionFactory Factory, IMultiplexedConnectionListener Listener)> multiplexedListeners,
         int streamListenerCount)
     {
-        if (!advertisement.Enabled || multiplexedListeners.Count == 0 || streamListenerCount == 0)
+        if (!enabled || multiplexedListeners.Count == 0 || streamListenerCount == 0)
         {
             return null;
         }
 
-        long maxAgeSeconds = (long)advertisement.MaxAge.TotalSeconds;
+        long maxAgeSeconds = (long)maxAge.TotalSeconds;
 
         HttpAltService alternative;
-        if (!string.IsNullOrEmpty(advertisement.Authority))
+        if (!string.IsNullOrEmpty(authority))
         {
-            if (!TryParseAuthority(advertisement.Authority, out string? host, out int port))
+            if (!TryParseAuthority(authority, out string? host, out int port))
             {
                 throw new InvalidOperationException(
-                    $"The configured Alt-Svc authority '{advertisement.Authority}' is not a valid 'host:port' or ':port' value.");
+                    $"The configured Alt-Svc authority '{authority}' is not a valid 'host:port' or ':port' value.");
             }
 
             alternative = HttpAltService.Http3(host, port, maxAgeSeconds);
@@ -214,12 +274,7 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     /// <exception cref="InvalidOperationException">Thrown when no connection listener has been configured.</exception>
     public async Task<HttpConnection> AcceptOrListenAsync(CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_isDisposed, nameof(HttpConnectionListener));
-
-        if (_streamListeners.Count == 0 && _multiplexedListeners.Count == 0)
-        {
-            throw new InvalidOperationException("At least one connection listener must be configured before accepting HTTP connections.");
-        }
+        await BindAsync(cancellationToken).ConfigureAwait(false);
 
         EnsureAcceptLoopsStarted();
 
@@ -257,22 +312,59 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        await _bindSemaphore.WaitAsync().ConfigureAwait(false);
+
+        try
+        {
+            await DisposeCoreAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _bindSemaphore.Release();
+        }
+    }
+
+    private async ValueTask DisposeCoreAsync()
+    {
         if (_isDisposed)
         {
             return;
         }
 
         _isDisposed = true;
-        _disposeCancellationTokenSource.Cancel();
+        List<Exception>? disposalFailures = null;
+
+        try
+        {
+            _disposeCancellationTokenSource.Cancel();
+        }
+        catch (Exception exception)
+        {
+            (disposalFailures ??= new List<Exception>()).Add(exception);
+        }
 
         foreach ((HttpConnectionFactory _, IConnectionListener listener) in _streamListeners)
         {
-            await listener.DisposeAsync().ConfigureAwait(false);
+            try
+            {
+                await listener.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (disposalFailures ??= new List<Exception>()).Add(exception);
+            }
         }
 
         foreach ((HttpMultiplexedConnectionFactory _, IMultiplexedConnectionListener listener) in _multiplexedListeners)
         {
-            await listener.DisposeAsync().ConfigureAwait(false);
+            try
+            {
+                await listener.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (disposalFailures ??= new List<Exception>()).Add(exception);
+            }
         }
 
         Task[] acceptLoops;
@@ -284,11 +376,45 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
 
         if (acceptLoops.Length > 0)
         {
-            await Task.WhenAll(acceptLoops).ConfigureAwait(false);
+            try
+            {
+                await Task.WhenAll(acceptLoops).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (disposalFailures ??= new List<Exception>()).Add(exception);
+            }
+        }
+
+        while (_acceptedConnections.Reader.TryRead(out HttpConnection? connection))
+        {
+            if (connection is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                await connection.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                (disposalFailures ??= new List<Exception>()).Add(exception);
+            }
         }
 
         _acceptedConnections.Writer.TryComplete();
         _disposeCancellationTokenSource.Dispose();
+
+        if (disposalFailures is { Count: 1 })
+        {
+            ExceptionDispatchInfo.Capture(disposalFailures[0]).Throw();
+        }
+
+        if (disposalFailures is { Count: > 1 })
+        {
+            throw new AggregateException("One or more HTTP connection listeners failed to dispose.", disposalFailures);
+        }
     }
 
     /// <summary>
@@ -311,6 +437,26 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
     async Task<IHttpConnection> IHttpConnectionListener.AcceptOrListenAsync(CancellationToken cancellationToken)
     {
         return await AcceptOrListenAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private void ConfigureAltServiceAdvertisement()
+    {
+        string? altSvcHeaderValue = BuildAltSvcHeaderValue(
+            _advertiseAltService,
+            _altServiceMaxAge,
+            _altServiceAuthority,
+            _multiplexedListeners,
+            _streamListeners.Count);
+
+        if (altSvcHeaderValue is null)
+        {
+            return;
+        }
+
+        foreach ((HttpConnectionFactory factory, IConnectionListener _) in _streamListeners)
+        {
+            factory.AltSvcHeaderValue = altSvcHeaderValue;
+        }
     }
 
     private void EnsureAcceptLoopsStarted()
@@ -350,9 +496,19 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                     .AcceptAsync(_disposeCancellationTokenSource.Token)
                     .ConfigureAwait(false);
 
-                HttpConnection httpConnection = connectionFactory.Create(connection, isSecure);
+                HttpConnection httpConnection;
 
-                await _acceptedConnections.Writer.WriteAsync(httpConnection, _disposeCancellationTokenSource.Token).ConfigureAwait(false);
+                try
+                {
+                    httpConnection = connectionFactory.Create(connection, isSecure);
+                }
+                catch
+                {
+                    await DisposeAfterFailedTransferAsync(connection).ConfigureAwait(false);
+                    throw;
+                }
+
+                await QueueAcceptedConnectionAsync(httpConnection).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -390,9 +546,19 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
                     .AcceptAsync(_disposeCancellationTokenSource.Token)
                     .ConfigureAwait(false);
 
-                HttpConnection httpConnection = connectionFactory.Create(multiplexedConnection, isSecure);
+                HttpConnection httpConnection;
 
-                await _acceptedConnections.Writer.WriteAsync(httpConnection, _disposeCancellationTokenSource.Token).ConfigureAwait(false);
+                try
+                {
+                    httpConnection = connectionFactory.Create(multiplexedConnection, isSecure);
+                }
+                catch
+                {
+                    await DisposeAfterFailedTransferAsync(multiplexedConnection).ConfigureAwait(false);
+                    throw;
+                }
+
+                await QueueAcceptedConnectionAsync(httpConnection).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -415,6 +581,37 @@ public sealed class HttpConnectionListener : IHttpConnectionListener
             }
 
             _disposeCancellationTokenSource.Cancel();
+        }
+    }
+
+    private async Task QueueAcceptedConnectionAsync(HttpConnection connection)
+    {
+        try
+        {
+            await _acceptedConnections.Writer
+                .WriteAsync(connection, _disposeCancellationTokenSource.Token)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            // Once a transport accept returns, the aggregate owns its HTTP wrapper. If shutdown
+            // cancels a bounded-channel write, the wrapper never reaches the backlog drain and must
+            // be released here. Preserve the write/cancellation failure if cleanup also fails.
+            await DisposeAfterFailedTransferAsync(connection).ConfigureAwait(false);
+
+            throw;
+        }
+    }
+
+    private static async ValueTask DisposeAfterFailedTransferAsync(IAsyncDisposable connection)
+    {
+        try
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // The failure that prevented ownership transfer remains the actionable exception.
         }
     }
 

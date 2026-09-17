@@ -7,22 +7,57 @@
 	<Folder Name="/IoTHub/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub/" />
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub/docs/">
+		<File Path="Assimalign.Cohesion.IoTHub/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IoTHub/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub/docs/Assembly/Assimalign.Cohesion.IoTHub/IIoTHubApplication/">
+		<File Path="Assimalign.Cohesion.IoTHub/docs/Assembly/Assimalign.Cohesion.IoTHub/IIoTHubApplication/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub/docs/Assembly/Assimalign.Cohesion.IoTHub/IIoTHubApplicationBuilder/">
+		<File Path="Assimalign.Cohesion.IoTHub/docs/Assembly/Assimalign.Cohesion.IoTHub/IIoTHubApplicationBuilder/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub/src/">
 		<Project Path="Assimalign.Cohesion.IoTHub/src/Assimalign.Cohesion.IoTHub.csproj" />
 	</Folder>
-	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/" />
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/">
+		<File Path="Assimalign.Cohesion.IoTHub.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/docs/">
 		<File Path="Assimalign.Cohesion.IoTHub.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.IoTHub.Hosting/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/docs/Assembly/Assimalign.Cohesion.IoTHub.Hosting/IoTHubApplication/">
+		<File Path="Assimalign.Cohesion.IoTHub.Hosting/docs/Assembly/Assimalign.Cohesion.IoTHub.Hosting/IoTHubApplication/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.IoTHub.Hosting/src/Assimalign.Cohesion.IoTHub.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/tests/">
+		<Project Path="Assimalign.Cohesion.IoTHub.Hosting/tests/Assimalign.Cohesion.IoTHub.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/IoTHub/refs/" >
 		<Project Path="../../libraries/Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/">
+		<File Path="Assimalign.Cohesion.IoTHub.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/docs/">
+		<File Path="Assimalign.Cohesion.IoTHub.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IoTHub.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/src/">
+		<Project Path="Assimalign.Cohesion.IoTHub.ApplicationModel/src/Assimalign.Cohesion.IoTHub.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/tests/">
+		<Project Path="Assimalign.Cohesion.IoTHub.ApplicationModel/tests/Assimalign.Cohesion.IoTHub.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IoTHub.ApplicationModel/">
+		<File Path="Assimalign.Cohesion.IoTHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IoTHub.ApplicationModel/OVERVIEW.md" />
 	</Folder>
 </Solution>

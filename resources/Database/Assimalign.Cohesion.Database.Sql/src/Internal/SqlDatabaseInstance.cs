@@ -24,6 +24,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     private readonly ISqlCatalog _catalog;
     private readonly SqlTransactionCoordinator _coordinator;
     private readonly IIndexManager _indexManager;
+    private readonly SqlSchemaProvisioner _schemaProvisioner;
     private bool _disposed;
 
     internal SqlDatabaseInstance(string name, IDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage, bool recover = false)
@@ -47,6 +48,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
             LockManager = _coordinator.LockManager,
             ExistingIndexes = _catalog.GetIndexRegistrations(),
         });
+        _schemaProvisioner = new SqlSchemaProvisioner(this, _catalog);
 
         if (recover)
         {
@@ -332,6 +334,15 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         var session = new SqlDatabaseSession(this, _coordinator, executor);
 
         return new ValueTask<IDatabaseSession>(session);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<SchemaMigrationResult> ApplySchemaAsync(
+        CompiledSchema schema,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        return _schemaProvisioner.ApplyAsync(schema, cancellationToken);
     }
 
     /// <inheritdoc />

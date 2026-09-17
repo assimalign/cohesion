@@ -15,6 +15,9 @@ physical index registrations exported by `Database.Indexing`.
 - **Index registration persistence** — `SaveIndexRegistrationsAsync` /
   `GetIndexRegistrations` store the `BTreeIndexRegistration` set so indexes
   re-attach when the database reopens.
+- **Applied-schema state** — `SchemaState` / `SaveSchemaStateAsync` atomically
+  retain the canonical `CompiledSchema` document and deterministic hash used for
+  idempotent provisioning and live-catalog reconciliation.
 
 ## Dependencies
 

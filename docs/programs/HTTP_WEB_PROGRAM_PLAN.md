@@ -1,0 +1,228 @@
+# HTTP / Web Program Plan
+
+**Status:** active · **Created:** 2026-07-03 · **Owner:** Chase Crawford · **Scope:** the HTTP protocol stack (`libraries/Http*`), its cross-area foundations (`libraries/Connections`, `libraries/Security`, `libraries/Hosting`), and the Web resource (`resources/Web/*`, GitHub Web Platform epic **#6 / L03.01**).
+
+> **Why this file exists.** This program spans ~50 GitHub work items across 8 epics and will be implemented by many separate AI coding sessions. No single session holds the whole picture in context. This document is the **durable sequencing index**: it records what depends on what, what is safe to do in parallel, and the protocol each session follows so the work scales out **without losing the order things must happen in**. GitHub issues hold the *what* and *acceptance criteria*; this file holds the *when* and *in-what-order*. It is a living doc — update the Progress Log and check items off as PRs merge.
+
+This file is temporary scaffolding for the duration of the program. When the Web resource is assembled and this backlog is drained, fold anything durable into the relevant `docs/DESIGN.md` files and delete this doc.
+
+---
+
+## 1. How to run this across multiple sessions (read first)
+
+The safe unit of work is **one GitHub issue = one session = one branch = one PR**. Do not batch unrelated issues into a session; they will collide and the sequencing breaks.
+
+**The session protocol (every session follows this):**
+
+1. **Pick an issue that is unblocked.** An issue is workable only if every entry in its *Blocked by* column (§4) is merged. Never start a blocked issue — its prerequisites define types/seams you would otherwise invent and later fight.
+2. **Read three things before coding:** (a) the issue body and its acceptance criteria; (b) this plan's row for the issue in §4 and the lane guardrails in §3; (c) the repo coding rules (`.claude/rules/`, auto-loaded in Claude sessions) + the area's `docs/DESIGN.md`.
+3. **Branch:** `feature/<wbs>-<slug>` naming the issue's WBS (e.g. `feature/L03.01.01.05-problem-details`). The `cohesion-work-items` skill infers scope-creep placement from this branch.
+4. **Implement to the acceptance criteria.** If you discover out-of-scope work, file it with the `cohesion-work-items` skill (don't expand the current issue) and call it out in your PR description so the orchestrator can slot it into §4.
+5. **Open a PR** with the `Closes #NNNN` block (use `New-CohesionWorkItem.ps1 -EmitClosesBlock` from the same worktree). Close the parent feature manually only when all its children are done.
+6. **Do not edit this plan file.** The orchestrator reconciles the §5 Progress Log from merged PRs — this removes shared-doc merge conflicts when many sessions run in parallel. Just make sure your PR's `Closes #NNNN` block is correct; that is the signal the orchestrator reconciles from.
+
+**Golden rule for parallelism:** issues in different **lanes** (§3) at the same **stage** (§2) can run concurrently in separate sessions with no coordination. Two sessions in the *same* lane touching the same project should be serialized — check the Progress Log for an in-flight sibling before starting.
+
+### How to reference this plan when you prompt a session (avoiding confusion)
+
+Reference **by issue number + this file path**, and let the plan tell the session what to do. Do **not** paste the whole plan into the prompt or say "work on the HTTP stuff" — that reintroduces the ambiguity this file removes.
+
+**Recommended prompt template (copy/paste, fill the number):**
+
+```
+Work GitHub issue #NNNN in assimalign/cohesion.
+
+Before coding, read docs/programs/HTTP_WEB_PROGRAM_PLAN.md — follow the Session Protocol
+in §1, confirm the issue is unblocked per §4, and honor the lane guardrails in §3.
+Follow the repo coding rules (auto-loaded from .claude/rules). Branch, implement to the
+issue's acceptance criteria, and open a PR that closes it. Do not edit the plan file —
+the orchestrator reconciles the §5 Progress Log from merged PRs.
+
+Do not start any work its "Blocked by" prerequisites haven't merged; if it's blocked,
+stop and tell me which prerequisite is outstanding.
+```
+
+**Variations:**
+- *Let the session choose:* replace the first line with `Pick the highest-priority unblocked issue from Stage <N>, Lane <X> in docs/programs/HTTP_WEB_PROGRAM_PLAN.md and work it.` Good when you don't want to micromanage ordering.
+- *A primitive that many things wait on* (e.g. #771, #762): add `This is a fan-out prerequisite — several issues are blocked on it (see §4), so keep the public surface conservative and get the DESIGN.md right.`
+- *Kicking off several in parallel:* open one session per issue, each with the template above and a **different** issue number, only choosing issues that are (a) unblocked and (b) in different lanes. Send them at once.
+
+**Anti-patterns that cause confusion:**
+- Referencing "the plan" without the file path or an issue number → the session guesses.
+- Giving one session two issues "since they're related" → branch/PR collision, and the dependency between them stops being enforced.
+- Starting a Web-middleware issue before **#762** merges → you build on the accept loop that's being replaced.
+- Re-deriving a primitive inline because "it's small" → duplicates a filed foundation item (e.g. inventing media-type parsing instead of consuming #771).
+
+---
+
+## 2. Stages (dependency gates)
+
+A **stage** is a gate, not a calendar. Everything in a stage may proceed once the prior stage's items it depends on are merged. Within a stage, the **lanes** in §3 run in parallel. (Stages are finer-grained than the GitHub `Wave` field — treat Wave as a coarse hint and this document as the authority on order.)
+
+| Stage | Theme | Gate to enter |
+|---|---|---|
+| **0 — Clear the ground** | Delete dead/duplicate code and fix trivially-independent defects so later work isn't built on confusion. | none |
+| **1 — Foundations** | Protocol primitives, transport hardening, cross-area drivers, and the **one** Web-runtime blocker (#762). Everything downstream imports from here. | none (parallel with 0) |
+| **2 — Build-out** | HTTP protocol features and the first wave of Web middleware + routing, each consuming Stage-1 primitives. | its Stage-1 prerequisites merged |
+| **3 — Composition** | Features that compose multiple Stage-2 pieces (h3 end-to-end, caching, groups/links, health endpoint, WebSockets). | its Stage-2 prerequisites merged |
+| **4 — Surface** | The developer-facing API surface that sits on everything: source-gen binding, auth handlers, controller/function execution. | its Stage-3 prerequisites merged |
+
+**The single most important edge in the whole program:** **#762 (rewrite `WebApplicationServer`) is the gate for nearly all Web middleware.** It is a Stage-1, P001 item. Land it early. Until it merges, the only Web-side work that is safe is the Stage-0 deletions and pure-primitive Http-library items.
+
+---
+
+## 3. Lanes (what can run in parallel) + per-lane guardrails
+
+| Lane | Area | Projects | Guardrail (the thing sessions get wrong) |
+|---|---|---|---|
+| **A — HTTP transport** | protocol wire behavior | `libraries/Http/Assimalign.Cohesion.Http.Connections` | Internal types only; no DI/Logging/Config refs. Wire-level failure isolation already lives here — Web must not duplicate it. h3 changes gate on #748 (server control stream). |
+| **B — HTTP primitives** | protocol value objects | `libraries/Http/Assimalign.Cohesion.Http` | Value objects with `TryParse`/serialize, span-based, AOT-safe, **no** field-value parsing in `Http.Connections`. These are the shared toolkit many Web items import — keep surfaces conservative, they're hard to change later. |
+| **C — Cross-area foundations** | drivers & security & hosting | `libraries/Connections/*`, `libraries/Security/*`, `libraries/Hosting`, new `libraries/Health` | Peer-driver placement (`Connections.InMemory` beside Tcp/Udp/Quic). Security crypto is BCL-only, key material never hand-rolled again. |
+| **D — Web runtime** | the composition root & server | `resources/Web/Assimalign.Cohesion.Web`, `...Web.Hosting` | **#762 first.** DI/Logging/Config integration happens **only** here (builder-time). No ASP.NET-style per-concern micro-packages. |
+| **E — Web middleware** | request-pipeline features | `resources/Web/Assimalign.Cohesion.Web.*` feature projects | Each is a thin feature project consuming a Stage-1 primitive + the pipeline. Extensibility via `IHttpFeatureCollection` typed features, not request-time service location. All gate on #762. |
+| **F — Routing & API surface** | endpoints, binding, formatting | `...Web.Routing`, `...Web.Api`, `...Web.ProblemDetails`, `analyzers/...SourceGeneration.Web` | Endpoint **metadata bag (#150)** is the seam auth/CORS/OpenAPI/docs consume — get it right early; AOT mandates source-gen for binding, never reflection. **Direction (2026-07-10): middleware-first** — fluent `.Use(...)` / `IWebApplicationMiddleware` composition over a return-value result model; IResult withdrawn pre-merge, controllers/functions set aside (`Web.Api.Controllers` + `Web.Functions` removed). |
+
+Cross-cutting rules (all lanes): file-scoped namespaces; `CohesionProjectReference`/`CohesionPackageReference`; **no `Microsoft.Extensions.*`**; `IsAotCompatible=true`, no reflection; interface-first with internal impls; XML docs on public APIs; Shouldly tests co-located; create/update `docs/DESIGN.md` in the same change. The path-scoped rules in `.claude/rules/` are canonical and auto-load in Claude sessions.
+
+---
+
+## 4. The work items (with blockers)
+
+Legend: **B** = HTTP primitives, **A** = HTTP transport, **C** = cross-area, **D** = Web runtime, **E** = Web middleware, **F** = routing/API. "Blocked by" lists only *hard* prerequisites (types/seams that must exist first); soft coordination is noted in the issue body.
+
+### Stage 0 — Clear the ground (no blockers; do these first, any order)
+
+| Issue | Lane | Title | Blocked by |
+|---|---|---|---|
+| #761 | D | Delete dead pre-redesign `Web.ApplicationModel` src | — |
+| #766 | D | Delete vestigial `Web.Server` project | — |
+| #759 | B | Retire `Assimalign.Cohesion.Http.Identity` (skeleton) | — |
+| #768 | B | Fix `Sec-WebSocket-Protocol` header-key naming | — |
+| #760 | B | True up `Http.Forms` docs + convenience surface | — |
+
+### Stage 1 — Foundations
+
+| Issue | Lane | Title | Blocked by |
+|---|---|---|---|
+| **#762** | **D** | **Rewrite `WebApplicationServer`: per-connection dispatch, error isolation, disposal, graceful stop** | — · **(gates most of Lane E)** |
+| #763 | D | Add TLS convenience surface to the Web server builder | #762 |
+| #791 | A | Enforce HTTP/1.1 server limits & timeouts (DoS-critical) | — |
+| #764 | A | Harden HTTP/2 against abuse (rapid reset, CONTINUATION flood…) | — |
+| #750 | A | Bound HTTP/2 request-body buffering (flow-control backpressure) | — |
+| #757 | B | Harden cookie model per RFC 6265bis | — |
+| #747 | B | RFC 9651 Structured Field Values parser/serializer | — |
+| #771 | B | `HttpMediaType` + Accept/q-value negotiation primitives | — · **(fan-out)** |
+| #792 | B | RFC 9110 range-request + precondition primitives | — |
+| #770 | B | RFC 7239 `Forwarded` + `X-Forwarded-*` parsing primitives | — |
+| #755 | B | Typed RFC 9111 caching primitives (Cache-Control, validators) | — |
+| #772 | C | Build `Connections.InMemory` driver | — |
+| #774 | C | Purpose-bound data protection + rotating key ring | — |
+| #773 | C | Finish Unix domain sockets + add named-pipe driver | — |
+| #748 | A | HTTP/3 server control stream (SETTINGS emission) | — · **(gates h3 fan-out)** |
+
+### Stage 2 — Build-out
+
+| Issue | Lane | Title | Blocked by |
+|---|---|---|---|
+| #769 | A/B | Streaming response write path (h1/h2/h3) + SSE primitives | #750 (soft) |
+| #751 | A | Bridge HTTP/1.1 transport to ProtocolUpgrade (101) | — |
+| #752 | A | 1xx interim responses (100-continue, 103 Early Hints) | — |
+| #749 | A | Graceful GOAWAY drain (h2 window + h3 lifecycle) | #748 (h3 half) |
+| #758 | A | QPACK dynamic table + encoder Huffman | #748 |
+| #847 | A | Emit QPACK Section-Ack / Stream-Cancellation on the decoder stream | #758 ✓ |
+| #753 | A/B | RFC 9218 extensible priorities | #747 |
+| #756 | B | RFC 9530 Digest Fields | #747 |
+| #746 | B | RFC 10008 HTTP QUERY method semantics | #747, #755 |
+| #754 | A | Alt-Svc advertisement (RFC 7838) | — |
+| #819 | A | Wire request-parse interceptors (#818 seam) into h2/h3 request paths | #818 ✓ |
+| ~~#776~~ | E | ~~Pipeline exception boundary~~ — **superseded by #881** (PR #844 abandoned unmerged; branch kept as salvage reference) | — |
+| #881 | E | Exception boundary, status-code pages, 404 terminal **via the #864 `OnError` hook** (was: over IResult; supersedes #776) | #864 |
+| #877 | E | RFC 10008 server-side QUERY handling — umbrella for tasks #878 (Content-Type validation), #879 (redirect preservation), #880 (conditional-QUERY-as-GET); one session closes all four | #746 ✓, #762 ✓ |
+| #876 | A/B | Content-Digest verification safe for h2 streamed bodies (lazy verify-on-read) | #756 ✓, #819 ✓ |
+| #777 | E | `Web.StaticFiles` over the FileSystem library | #762, #792, #771 (the #864 edge dropped with IResult) |
+| #778 | E | Forwarded-headers middleware + trust model | #762, #770 |
+| #779 | E | `Web.Compression` (response + request) | #762, #769, #771 |
+| #780 | E | `Web.HttpsPolicy` (HTTPS redirection + HSTS) | #763 |
+| #781 | E | Host-filtering middleware (allowed hosts) | #762 |
+| #783 | E | `Web.RateLimiting` (global limiter first) | #762 |
+| #784 | E | Request-timeout policies over the #703 abort feature | #762 |
+| #794 | E | `Web.Diagnostics` (HTTP logging + W3C access logs) | #762 |
+| #785 | E | Async session-store seam + out-of-process sessions | #762 |
+| #793 | E | `Web.Testing` factory over the in-memory driver | #762, #772 |
+| #148 | F | Matcher precedence/405 fixes (existing) | — |
+| #150 | F | Endpoint metadata bag (existing) — **fan-out seam** | — |
+| #864 | F | **Content-serialization registry + `OnError` hook design** (re-scoped 2026-07-10; IResult withdrawn pre-merge — the ProblemDetails payload shipped separately as `Web.ProblemDetails` on PR #887) — **fan-out seam** | #769 ✓, #771 ✓ — design item, **unblocked** |
+| #149 | F | Content negotiation over the #864 serializer registry (re-scoped; was ObjectResult/Ok<T> + IResultFormatter) | #864, #771 |
+| #789 | F | Typed route values, constraints, per-app router state | #148 |
+
+### Stage 3 — Composition
+
+| Issue | Lane | Title | Blocked by |
+|---|---|---|---|
+| #767 | D | HTTP/3 (QUIC) registration surface on the Web builder | #762, #763, #748, #749 |
+| #795 | E | `Web.Caching` (server-owned output caching) | #762, #755, #792 |
+| #782 | E | `Web.Rewrite` (URL rewriting/redirects) | #762 + request-mutation seam decision (#24/#25) |
+| #775 | C/E | Health-check framework + `/healthz` endpoint | #762 (endpoint half), host-lifecycle epics |
+| #810 | A | h1 request-body data-rate limits + per-request body-size override | #769 (streaming-body rework) |
+| #786 | F | Route groups (MapGroup) | #148, #150 |
+| #787 | F | Named routes + LinkGenerator | #148 |
+| #788 | F | Host-based route matching (RequireHost) | #150 |
+| #765 | A/E | WebSockets decision + RFC 6455 (if "build") | #751 (h1), #748 (h3 via #382); supersedes #380–#382 |
+
+### Stage 4 — Surface
+
+| Issue | Lane | Title | Blocked by |
+|---|---|---|---|
+| #796 | F | Source-generated middleware/handler binding + validation (AOT) — middleware-first, no IResult | #150, #864, #771 |
+| #790 | F | Auth scheme model + Cookie/Bearer handlers | #774, #150, IdentityModel #610 |
+| ~~#151~~ | F | ~~Controller/action + function endpoint binding~~ — **set aside 2026-07-10** (niceties; middleware-first direction; `Web.Api.Controllers` + `Web.Functions` projects removed; closed not-planned) | — |
+
+### Post-v1 follow-ups (filed, not scheduled)
+Discovered on #774 and deferred out of its v1: **#806** (SecretStore-backed `IKeyRepository` + escrow), **#807** (at-rest key-document encryption), **#808** (cross-service key sharing) — align with SecretStore #99/#277/#278; pull in when the identity/secret-store lanes need them, not before.
+
+### Deliberately NOT in this program (ADR-gated)
+Real-time hub framework (SignalR-analogue) and gRPC hosting are **decisions, not features** — each needs an ADR first (real-time gates on the #765 WebSocket outcome; gRPC gates on a protobuf-vs-code-first serialization decision). Do not start either without a recorded decision. Skipped entirely: IIS/HTTP.sys, OWIN, SPA dev-proxy, Razor/Blazor UI, request localization.
+
+---
+
+## 5. Progress Log (orchestrator-reconciled from merged PRs)
+
+The orchestrator maintains this table by reconciling merged PRs from GitHub; sessions do not edit it (that avoids shared-doc merge conflicts when many run in parallel). Each row is a merged item and the dependents it unblocks.
+
+- **Wave 1 (2026-07-03): 13 merged** — the foundational spine (#762 gate, #747/#771 fan-out primitives, #774 data protection, #772 in-memory driver, #748 h3 control stream, #791 h1 limits + #818 interceptor seam) plus all Stage-0 cleanup.
+- **Wave 2 (2026-07-06): 16 merged + #776 in review ([PR #844](https://github.com/assimalign/cohesion/pull/844))** — #763 TLS, #150 endpoint metadata, #148 matcher, #792 range, #770 forwarded, #755 caching, #769 streaming/SSE, #751 upgrade bridge, #749 GOAWAY drain, #758 QPACK dynamic, #819 interceptor h2/h3, #753 priorities, #756 digest, #764 h2 abuse, #750 h2 backpressure, #757 cookies. Scope-creep filed: #847 (QPACK decoder-stream ack). **→ Stage 1 (Foundations) is complete; nearly the entire remaining backlog is now unblocked leaf work — see the frontier note below.**
+- **Frontier after Wave 2:** unblocked and workable — Web middleware #777/#778/#779/#780/#781/#783/#784/#785/#793/#794/#795, #767 (UseHttp3), routing #786/#787/#788/#789 + #149 (result writers, gates #796→#151), #746 (QUERY), #752 (1xx), #754 (Alt-Svc), #810 (h1 data-rate), #847, #790 (auth handlers — all deps now merged), #773 (UDS/pipes), #775 (health). **Still gated on a decision, not a dependency:** #765 (WebSockets ADR — #751/#748 now merged, so it's actionable) and #782 (URL-rewrite request-mutation seam). Blocked only by #149: #796 (source-gen binding) → #151 (controllers).
+- **Wave 3a (2026-07-06): 9 merged** — #790 auth scheme+Cookie/Bearer handlers, #746 QUERY (RFC 10008), #789 typed constraints + per-app router, #775 health checks + /healthz, #773 UDS/named pipes, #752 1xx interim, #754 Alt-Svc, #810 h1 data-rate, #847 QPACK decoder acks.
+- **#776 → #881 supersession (2026-07-06):** PR #844 deliberately abandoned unmerged (would have been immediately refactored onto #864); #776 closed as superseded. **#864** now owns the ProblemDetails payload/writer (`Problem` built-in; salvage reference = the closed #844 branch `feature/L03.01.01.05-problem-details`) and is **fully unblocked**; **#881** rebuilds the exception boundary / status-code pages / 404 terminal as an IResult consumer, blocked by #864. The Web-middleware cluster (#781/#783/#784/#785/#794) now takes its boundary/registration pattern from #881.
+- **Wave 4 batching (2026-07-11):** **Batch 4a dispatched** — #864 (serializer registry + `OnError` hook design, lead/fan-out), the collision-light half of the middleware cluster (#777 static files, #778 forwarded, #781 host filter, #784 timeouts, #794 logging), #877(+#878–#880) server-side QUERY, #876 h2-safe digest. Every new-Web-project session touches `frameworks/Assimalign.Cohesion.App.props` + the CI matrix (one line each — trivial rebases expected). **Batch 4b (after #864 merges):** #881, #149, #796 + remaining middleware #779/#780/#783/#785/#795/#767. **Standing decision gates:** #782 (request-mutation seam) and #765 (WebSockets, deferred).
+- **Wave 3b (2026-07-10): 4 merged + 1 partially merged/re-scoped** — #786 route groups ([PR #883](https://github.com/assimalign/cohesion/pull/883)), #787 LinkGenerator ([PR #885](https://github.com/assimalign/cohesion/pull/885)), #788 host matching ([PR #884](https://github.com/assimalign/cohesion/pull/884)), #793 Web.Testing factory ([PR #886](https://github.com/assimalign/cohesion/pull/886)); #864's [PR #887](https://github.com/assimalign/cohesion/pull/887) merged the Web-area hosting-isolation rules, App.Web framework delivery, and `Web.ProblemDetails` — with the IResult implementation withdrawn pre-merge (see the direction change below). New items filed during the wave: #876 (h2-safe digest verification), #877/#878/#879/#880 (server-side QUERY handling, from #746).
+- **Wave 4a (2026-07-16): 8 merged** — #864 serialization registry + OnError hook ([PR #893](https://github.com/assimalign/cohesion/pull/893)), #777 static files ([#897](https://github.com/assimalign/cohesion/pull/897)), #778 forwarded headers ([#892](https://github.com/assimalign/cohesion/pull/892)), #781 host filtering ([#891](https://github.com/assimalign/cohesion/pull/891)), #784 request timeouts ([#894](https://github.com/assimalign/cohesion/pull/894)), #794 HTTP logging ([#896](https://github.com/assimalign/cohesion/pull/896)), #877(+#878/#879/#880) server-side QUERY ([#898](https://github.com/assimalign/cohesion/pull/898)), #876 lazy digest ([#889](https://github.com/assimalign/cohesion/pull/889)). Scope-creep filed during the wave: #890 (RouteHostConstraint → HttpHost rebase), #895 (h1 percent-decode parity).
+- **Batch 4b (2026-07-19): dispatched as a STACKED PR series [#920](https://github.com/assimalign/cohesion/pull/920)→[#927](https://github.com/assimalign/cohesion/pull/927)** — orchestrated in one session (agent sessions + orchestrator review) rather than spun-off chips; one branch per issue, each based on the previous, merge bottom-up in order #881 → #149 → #779 → #780 → #783 → #785 → #795 → #767 (GitHub retargets each PR as its base merges). #796 (source-gen binding, Stage 4) deliberately held for focused follow-up after this stack; standing decision gates #782 (request-mutation seam) and #765 (WebSockets) unchanged. Scope-creep filed: #928 (h3 server control-stream defect — `H3_CLOSED_CRITICAL_STREAM` blocks full h3 round-trips; surfaced by #767's e2e, reproduced against the pre-existing Http.Connections example).
+- **Wave 4b (2026-07-20): all 8 stacked PRs merged** — #881 ([PR #920](https://github.com/assimalign/cohesion/pull/920)), #149 ([#921](https://github.com/assimalign/cohesion/pull/921)), #779 ([#922](https://github.com/assimalign/cohesion/pull/922)), #780 ([#923](https://github.com/assimalign/cohesion/pull/923)), #783 ([#924](https://github.com/assimalign/cohesion/pull/924)), #785 ([#925](https://github.com/assimalign/cohesion/pull/925)), #795 ([#926](https://github.com/assimalign/cohesion/pull/926)), #767 ([#927](https://github.com/assimalign/cohesion/pull/927)). Squash-merge note for future stacks: a stacked branch whose wiring lines sit alphabetically adjacent to a sibling's (Web.Caching next to Web.Compression in App.props/CI/slnx) conflicts on retarget — resolved by merging main into the branch (#926's `303a9b2e`).
+- **Batch 5 (2026-07-20): dispatched as a STACKED PR series [#932](https://github.com/assimalign/cohesion/pull/932)→[#936](https://github.com/assimalign/cohesion/pull/936)** — merge bottom-up in order #928 → #895 → #890 → #796 (PRs #932, #933, #934, #936). #928's root cause was the h3 send path never ending the request stream (FIN), not the control stream; #895 made h1 percent-decode parity uniform (decoded space/control chars are illegal `HttpPath` characters on every transport — widening that set is an owner decision if space-named resources should serve); #796 landed to the middleware-first re-scope (typed-delegate input binding via the interceptor generator + ObjectValidation AOT hardening; no result types). **With #796, §4 is drained except the two decision gates** — #782 (request-mutation seam) and #765 (WebSockets ADR); the plan's retirement clause becomes actionable once they resolve. Scope-creep filed: #937 (graceful h2/h3 malformed-`:path` rejection, from #895).
+- **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
+
+| Date | Issue | PR | Notes |
+|---|---|---|---|
+| 2026-07-03 | #768 | [#797](https://github.com/assimalign/cohesion/pull/797) | Stage 0 · Lane B. Corrected `HttpHeaderKey.SecWebSocketProtocol` to emit `Sec-WebSocket-Protocol` (RFC 6455 §11.3.4) and removed the redundant `WebSocketSubProtocols` alias (one canonical key remains). Added round-trip tests over `IHttpHeaderCollection`. |
+| 2026-07-03 | #762 | [#803](https://github.com/assimalign/cohesion/pull/803) | Stage 1 · Lane D · P001. `WebApplicationServer` rewritten: per-connection dispatch (idle keep-alive no longer starves others), application-exception isolation, connection+context disposal, graceful `StopAsync` drain, optional `MaxConcurrentConnections`. Web.Hosting `docs/DESIGN.md` added. **Unblocks most of Lane E** (#763, #776–#781, #783–#785, #793–#794). |
+| 2026-07-03 | #748 | [#802](https://github.com/assimalign/cohesion/pull/802) (open) | Stage 1 / Lane A. HTTP/3 server control stream: SETTINGS emission (`ENABLE_CONNECT_PROTOCOL=1`, QPACK cap=0), critical-stream / connection-first teardown, inbound post-SETTINGS drain (GOAWAY / MAX_PUSH_ID parse-and-discard). **On merge, unblocks** the h3 half of #749, plus #758, #767, and WebSocket-over-h3 #382. |
+| 2026-07-03 | #774 | [#809](https://github.com/assimalign/cohesion/pull/809) | Stage 1 · Lane C — new `libraries/Security/Assimalign.Cohesion.Security.DataProtection`: purpose-bound protector (AES-256-GCM + HKDF-SHA256, versioned key-id header), rotating key ring with grace-period unprotect, file-system `IKeyRepository`. Rewired `Http.Antiforgery` onto a pluggable `IHttpAntiforgeryProtector` seam (no Security dependency). Follow-ups filed: #806 (SecretStore repo/escrow), #807 (at-rest key encryption), #808 (cross-service sharing); Web.Hosting builder-time wiring stays gated on #762. Unblocks #790. |
+| 2026-07-03 | #772 | [#812](https://github.com/assimalign/cohesion/pull/812) | Stage 1 · Lane C. Built `libraries/Connections/Assimalign.Cohesion.Connections.InMemory` as a Tcp/Udp/Quic peer: cross-wired duplex-pipe connection pairs (`InMemoryConnectionPair.Create`, `InMemoryConnectionListener` + `InMemoryConnectionFactory`) supporting live multi-round-trip exchange, plus a multiplexed variant (`InMemoryMultiplexed…`) for h2/h3-shaped stream tests. Migrated the four transport test projects' duplicated pipe-pair doubles onto it (Security uses the driver directly; Connections/Http.Connections/Amqp re-base their `TestConnection` as thin adapters over the driver, deleting the bespoke pipe wiring). **Unblocks #793** (Web.Testing factory). |
+| 2026-07-03 | #760 | [#801](https://github.com/assimalign/cohesion/pull/801) | Stage 0 · Lane B. Http.Forms trued up: README rewritten to match the shipped parsers; `context.ReadFormAsync(...)` + `request.Form` setter added; urlencoded charset parameter honored (AOT-safe allow-list); unused `BufferBody`/`BufferBodyLengthLimit` options removed and `MultipartBoundaryLengthLimit` enforced; `docs/DESIGN.md` created; `Web.Forms` `UseForms()` middleware tests added. |
+| 2026-07-03 | #771 | [#805](https://github.com/assimalign/cohesion/pull/805) | Stage 1 / Lane B fan-out prerequisite. `HttpMediaType` + `HttpQuality`, `HttpAcceptParser` (Accept family), `HttpContentNegotiation` (media-type / token / encoding), and the `HttpContentTypes` FrozenDictionary. **In review** — unblocks #149, #746, #777, #779 on merge. |
+| 2026-07-03 | #747 | [#804](https://github.com/assimalign/cohesion/pull/804) _(open)_ | RFC 9651 Structured Field Values toolkit (Items/Lists/Dictionaries + all 8 bare types incl. Date & Display String) in core `Assimalign.Cohesion.Http`. Fan-out foundation: unblocks #753 (Priority), #756 (Digest), #746 (QUERY/Accept-Query), and future Proxy-Status / Signature-Input. Lands as span-based AOT-safe value objects (`StructuredField*`); `HttpFieldRules` stays name-classification only. |
+| 2026-07-03 | #791 (Stage 1 / Lane A) | [#811](https://github.com/assimalign/cohesion/pull/811) | HTTP/1.1 server limits & timeouts (414/431/413, keep-alive + request-headers timeouts, `HttpServerLimits`, Web.Hosting config binding). Data-rate limits deferred to #810 (streaming-body rework). Had no blockers. |
+| 2026-07-03 | #818 (Lane A/B, discovered on #791's branch) | [#811](https://github.com/assimalign/cohesion/pull/811) | Request-parse interceptor seam (`IHttpRequestInterceptor` + context + typed rejection in core Http) + new `Http.RequestLimits` package owning `IHttpMaxRequestBodySizeFeature` (moved out of core); transport decoupled from feature packages; Web.Hosting default-installs the limits interceptor. h2/h3 hook wiring is #819; future parse-time consumers: #756 digest, #779 decompression. |
+| 2026-07-03 | #761 | [#799](https://github.com/assimalign/cohesion/pull/799) | Stage 0 · Lane D — deleted dead pre-redesign `Web.ApplicationModel/src`; csproj + slnx preserved for the Phase-4 Layer-3d manifest rebuild (`libraries/ApplicationModel/DESIGN.md` §9.4). No `Assimalign.Cohesion.Transports` code references remain. |
+| 2026-07-03 | #759 | [#798](https://github.com/assimalign/cohesion/pull/798) | Stage 0 (Lane B). Retired the `Assimalign.Cohesion.Http.Identity` skeleton — deleted the directory and removed its entries from all three solution files. Restores the commit-481a6fb layering invariant: no `System.Security.Claims`-typed public surface in the `Assimalign.Cohesion.Http` protocol core. Decision recorded in `resources/Web/Assimalign.Cohesion.Web.Authentication/docs/DESIGN.md`: no `request.User` accessor absorbed (redundant with the existing `context.User`; the skeleton's `ClaimsPrincipal.Current` fallback deliberately not carried over). |
+| 2026-07-03 | #766 | [#800](https://github.com/assimalign/cohesion/pull/800) | Stage 0 (Lane D) · Deleted the vestigial `Web.Server` project pair; `UseHttp1`/`UseHttp2(Action<TcpConnectionListenerOptions>)` sugar now lives only in `WebHostingExtensions` (Web.Hosting, deferred-factory form), with new wrapper tests added. |
+
+---
+
+## 6. Fast reference
+
+- **Epics:** Http `#314` (L01.01.11) · Net/Connections `#324` (L01.01.14) · Security `#325` (L01.01.18) · Hosting `#313` (L01.01.10) · Web Platform `#6` → Runtime/Pipeline `#24`/`#25`/`#26`, API/Tooling `#27`, Routing `#28`, Security/Browser `#2`/`#3`/`#30`.
+- **Skills/rules:** coding rules auto-load from `.claude/rules/` · `cohesion-work-items` skill (file scope-creep, emit PR close blocks).
+- **Canonical rules:** `.claude/rules/` (auto-loaded). **Roadmap context:** `docs/programs/DELIVERY_ROADMAP.md`.
+- **This program's north star:** assemble the Web resource by wiring the `libraries/Http` stack into `resources/Web`; once assembled, the next major effort is pulling the new ApplicationModel design together (`libraries/ApplicationModel/DESIGN.md`).

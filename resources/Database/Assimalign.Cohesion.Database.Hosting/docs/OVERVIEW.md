@@ -16,10 +16,16 @@ machines this module never drives (see `docs/DESIGN.md`).
 - Status: Composition delivered on the redesigned shape (2026-07-13) — the
   application runs the composition root's services, then the registered servers
   (started last, drained first), and implements the root's application-builder
-  seam. Engines take no part in the host lifecycle; workers are engine-internal.
+  seam. Declared databases are provisioned as services before accept. Engines take
+  no part in the host lifecycle; workers are engine-internal and observed through
+  the application context's health contribution.
 - Project references: `Assimalign.Cohesion.Database` (area root) and
-  `Assimalign.Cohesion.Hosting` (non-area hosting foundation). Nothing else — no
-  `Connections`, no `CohesionHostingIsolationExemptions`.
+  `Assimalign.Cohesion.Hosting` (plain lifecycle),
+  `Assimalign.Cohesion.Hosting.Health` (health contribution contracts), and
+  `Assimalign.Cohesion.Hosting.Resources` (opt-in resource runtime/control plane), plus
+  private cross-area references to `Web.Hosting`, `Web.Hosting.Resources`, `Web.Hosting.Health`, and `Web.Health` for the enabled
+  resource's `admin` endpoint. No Database model package is referenced and no
+  Database hosting-isolation exemption is used.
 
 ## Primary Responsibilities
 
@@ -29,11 +35,24 @@ machines this module never drives (see `docs/DESIGN.md`).
   registered server — servers start last and drain first.
 - `DatabaseApplicationContext` implements the root's
   `IDatabaseApplicationContext`: the registered servers (plural — one per model)
-  and the server-less engine registrations.
+  and the server-less engine registrations. It also implements
+  the `Hosting.Health` `IHealthContributor`, folding every distinct registered or server-fronted
+  engine's `State` and `Workers` inventory into one Database contribution.
 - `DatabaseApplicationOptions` collects the servers, the embedded engine
   registrations, and additional `IHostService`s.
-- `DatabaseHostConfiguration` binds the environment-variable conventions a
-  gateway injects (data path, endpoint port, durability).
+- `DatabaseApplicationBuilder.AddService` registers a plain `IHostService`
+  instance or a factory over the final concrete `DatabaseApplicationContext`; services
+  retain registration order, start before all servers, and stop after them in
+  reverse order.
+- `DatabaseApplicationBuilder.Provision` and `AddDatabase` register code-first
+  before-accept provisioning; `AddDatabase` compiles the C# declaration and
+  retains/returns the validated `CompiledSchema`. The model database applies only
+  that compiled contract and records its content hash.
+  Provisioning creates only after `OpenDatabaseAsync` reports
+  `DatabaseNotFoundException`; other database failures propagate from startup.
+- Enabled resources host their registered `Hosting.Resources` `IResourceControlPlane` on the ambient
+  `admin` endpoint. Health routes use `Web.Health` with the `Web.Hosting.Health` contributor adapter; endpoint observation,
+  graceful stop, and command dispatch use the shared Web control-plane middleware.
 
 ## Key Types
 
@@ -41,7 +60,6 @@ machines this module never drives (see `docs/DESIGN.md`).
 - `DatabaseApplicationBuilder` (implements the root's `IDatabaseApplicationBuilder`)
 - `DatabaseApplicationContext` (implements the root's `IDatabaseApplicationContext`)
 - `DatabaseApplicationOptions`
-- `DatabaseHostConfiguration`
 
 ## Composing a host
 
@@ -53,16 +71,36 @@ e.g. `AddSqlDatabase` / `AddSqlServer` in `Database.Sql`):
 var builder = DatabaseApplication.CreateBuilder();
 
 SqlDatabaseEngine engine = builder.AddSqlDatabase(options => options.RootPath = dataPath);
+CompiledSchema schema = builder.AddDatabase(engine, "orders", database =>
+    database.Table<Order>(table => table.Key(order => order.Id)));
 SqlDatabaseServer server = builder.AddSqlServer(engine, options => options.Listener = listener);
 
 await using var app = builder.Build();
 await app.RunAsync();   // starts services, then the servers (the engine is already live)
 ```
 
-Hosting-only composition (additional host services) lives on `builder.Options`;
-constructing `new DatabaseApplication(options)` directly from fully populated
+Additional host services can be registered through the root seam with
+`builder.AddService(service)` or its typed context-factory overload.
+`builder.Options.Services` remains available for fully manual option composition,
+and constructing `new DatabaseApplication(options)` directly from fully populated
 options remains supported. A custom or embedded host creates a model server
 (`SqlDatabaseServer.Create(engine, options)`) and drives
 `IDatabaseServer.StartAsync`/`StopAsync` on its own lifecycle — or skips servers
 entirely and uses the engine in-process. `Database.Client` is the counterpart on
 the other end of the wire.
+
+The `string[] args` builder overload is the enabled-resource entry point. It honors
+`Hosting.Resources` `ResourceRuntime.Current` and an assembly-keyed generated control-plane
+registration; the no-argument and options overloads stay plain hosts and bind no admin listener.
+
+
+## Declarative commands
+
+Enabled hosts register database.add-database and database.add-principal handlers when advertised by
+their generated control plane. The database payload is UTF-8 JSON with database and optional engine;
+the key is `engine/database` when an engine is supplied, otherwise the database name. Database names
+cannot contain `/`; engine names may contain it, keeping the ownership identity unique.
+An omitted engine requires exactly one registered or server-fronted
+engine. Creation calls IDatabaseEngine.CreateDatabaseAsync and teardown calls DropDatabaseAsync,
+with the shared control-plane ownership ledger gating both. Existing databases are refused rather
+than adopted into a declaration that could later delete them.

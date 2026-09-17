@@ -1,8 +1,31 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
-The SQL engine (area architecture: [resources/Database/DESIGN.md](../../DESIGN.md)
+The SQL engine (area architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)
 §3.3): parse (`Sql.Language`) → plan (`SqlPlanner`) → execute (`SqlPlanExecutor`)
 against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
+
+## Compiled-schema provisioning
+
+`ISqlDatabase` implements the root `IDatabaseSchemaProvisioner` seam. Before a
+schema is applied, the provisioner requires `EngineModel.Sql`, the same logical
+database name, and a shape the shipped SQL DDL surface can represent. It then
+reconstructs or reads the last canonical catalog state, uses
+`SchemaMigrationPlanner` for deterministic ordering/destructive gating, and
+`SqlMigrationScriptGenerator` for parser-validated engine requests. Supported
+steps are table, column, and secondary-index add/drop; alter/rebuild operations
+and advanced objects (custom types, foreign/check constraints, functions,
+triggers, principals/grants, extensions) fail before execution rather than
+recording a false applied hash.
+
+Each DDL request remains self-committing under the catalog's established rule.
+On a later failure, completed reversible steps run their compensating requests
+in reverse order and the applied-schema marker remains unchanged. The marker is
+written only after all steps succeed, and a repeated apply is a no-op only when
+the stored canonical document/hash and live catalog all agree. Full atomicity
+for a destructive multi-statement migration is deliberately not claimed: the
+current catalog has no transaction spanning DDL statements, and irreversible
+data loss cannot be compensated. That kernel seam is recorded as the remaining
+gap rather than hidden behind the content hash.
 
 ## Execution model
 
@@ -342,12 +365,15 @@ root's rollup).
 ### Composition seam
 
 `SqlDatabaseServer.Create(engine, options)` — or the `AddSqlServer(engine,
-configure)` builder verb — composes a server. The options carry a **bound
-`IConnectionListener` instance**, not a listener factory: Connections drivers
-bind at construction, so a factory would add a layer that defers nothing, and
-passing the instance keeps ownership unambiguous — *the composition root
-creates and disposes the listener; the server only accepts from it*. Stop is
-signaled by cancelling the pending accept, never by disposing the listener.
+configure)` builder verb — composes a server. The options carry one configured
+`IConnectionListener` instance, not a listener factory. `StartAsync` explicitly
+awaits `BindAsync` before it starts the accept loop or returns; a bind failure is
+propagated only after the listener is terminally disposed, so a partially
+acquired endpoint cannot remain live. `StopAsync` cancels the pending accept,
+drains sessions within the configured budget, then terminally disposes the
+listener. Listener ownership therefore transfers to the server when start is
+attempted. Stop is terminal: restart symmetry is a fresh server with a fresh
+listener, never reuse of the disposed pair.
 `options.Authenticator` defaults to `DatabaseAuthenticator.AllowAll`
 (`Database.Security`) — the MVP development posture, deliberately an explicit,
 discoverable object rather than hidden server behavior. The engine is likewise
@@ -383,9 +409,11 @@ record moves with the machinery):
   `ProtocolVersion.Current` (minors are additive by the protocol's contract, so
   no per-minor branching yet).
 - **Database binding** resolves on the server's one engine: already-open
-  databases first (`TryGetDatabase`), then an open attempt; no match →
-  `DatabaseNotFound` and close. (The pre-per-model server probed a *list* of
-  engines in registration order; one engine per server removed that ambiguity.)
+  databases first (`TryGetDatabase`), then an open attempt; an exact
+  `DatabaseNotFoundException` → wire `DatabaseNotFound` and close. Other open
+  failures propagate to the handshake's internal-error path. (The pre-per-model
+  server probed a *list* of engines in registration order; one engine per server
+  removed that ambiguity.)
 - **Authenticate exchange (MVP):** the challenge frame carries no payload (the
   trust method); the client's response bytes pass to `IDatabaseAuthenticator`
   as opaque evidence. Method-specific payload schemas arrive with real
@@ -425,8 +453,8 @@ Server non-goals: no host-service adapter (`Database.Hosting` wraps
 `IDatabaseServer` generically through the root seam); no connection-level
 replication endpoints; no transaction frames yet (explicit transaction control
 over the wire lands with the protocol's `Transaction` payload schema); no
-TLS/transport policy — transports come bound from `libraries/Connections`
-drivers, and the composition root owns them.
+TLS/transport policy — transport configuration stays in `libraries/Connections`
+drivers, while the server owns bind-through-release lifecycle.
 
 ## The application-builder verbs (`AddSqlDatabase`, `AddSqlServer`)
 
@@ -457,7 +485,9 @@ validation, execution errors, constraint violations (nullability). Parse failure
 (`SqlQueryRequest.FromSql`, and therefore the session's text-execute seam) throw
 the root's `DatabaseParseException` so callers — the wire-protocol server in
 particular — can distinguish fix-the-text errors (`ParseFailure` on the wire)
-from execution errors without model knowledge. `SqlCatalogException` (a `DatabaseException`) surfaces
+from execution errors without model knowledge. Opening a database absent from the
+storage strategy throws the root's `DatabaseNotFoundException`; other open failures
+retain their own error type. `SqlCatalogException` (a `DatabaseException`) surfaces
 catalog violations unchanged.
 
 ## The MVCC integration (scoped under #862)

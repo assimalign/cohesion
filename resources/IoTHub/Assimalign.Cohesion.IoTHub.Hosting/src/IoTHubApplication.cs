@@ -1,37 +1,58 @@
 using System;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.IoTHub;
 
 namespace Assimalign.Cohesion.IoTHub.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.IoTHub.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the IoT device hub resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Hosts an IoTHub application and its ordered service lifecycle.
 /// </summary>
-public sealed class IoTHubApplication : Host<IoTHubApplicationContext>
+public sealed class IoTHubApplication : Host<IoTHubApplicationContext>, IIoTHubApplication
 {
     private readonly IoTHubApplicationContext _context;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="IoTHubApplication"/> class.
-    /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public IoTHubApplication(IoTHubApplicationOptions options) : base(options)
+    internal IoTHubApplication(
+        IoTHubApplicationOptions options,
+        IoTHubApplicationContext context)
+        : base(options)
     {
-        ArgumentNullException.ThrowIfNull(options);
-
-        _context = new IoTHubApplicationContext(options, new IHostService[]
-        {
-            new TelemetryJournalService(),
-            new DeviceIngressService(),
-        });
+        _context = context;
     }
 
     /// <summary>
-    /// Gets the application context.
+    /// Gets the concrete application context.
     /// </summary>
     public override IoTHubApplicationContext Context => _context;
+
+    IIoTHubApplicationContext IIoTHubApplication.Context => _context;
+
+    Task IIoTHubApplication.StartAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StartAsync(cancellationToken);
+
+    Task IIoTHubApplication.StopAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StopAsync(cancellationToken);
+
+    /// <summary>
+    /// Creates a builder for an IoT hub application.
+    /// </summary>
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the IoT hub application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static IoTHubApplicationBuilder CreateBuilder(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(IoTHubApplication).Assembly);
+    }
+
+    internal static IoTHubApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new IoTHubApplicationBuilder(args, resourceAssembly);
+    }
 }

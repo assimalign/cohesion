@@ -3,12 +3,13 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database;
 
+
 /// <summary>
 /// The composition surface for a database application. Model packages extend this
 /// builder with registration verbs (for example <c>AddSqlDatabase(...)</c> and
 /// <c>AddSqlServer(...)</c> in <c>Assimalign.Cohesion.Database.Sql</c>) so each
 /// model registers its own engine and server against the area root's abstractions
-/// without knowing the hosting layer.
+/// without knowing the hosting implementation.
 /// </summary>
 /// <remarks>
 /// This is the Database instance of the cross-area builder pattern
@@ -16,10 +17,12 @@ namespace Assimalign.Cohesion.Database;
 /// root, the implementation and creation entry point live in the hosting module
 /// (<c>DatabaseApplication.CreateBuilder()</c>), and feature/model verbs ship with
 /// their own package as <c>extension(IDatabaseApplicationBuilder)</c> members.
-/// Registration is dependency-free by design — no service container, no
+/// Registration uses values and typed factories only — no service container or
 /// configuration binding — so any composition surface that implements this
-/// interface can host a model. Servers are per-model, so <em>multiple</em> server
-/// registrations are allowed — one per model the application serves.
+/// interface can host a model. Services start before servers in registration
+/// order and stop after them in reverse registration order. Servers are
+/// per-model, so <em>multiple</em> server registrations are allowed — one per
+/// model the application serves.
 /// </remarks>
 public interface IDatabaseApplicationBuilder
 {
@@ -60,7 +63,8 @@ public interface IDatabaseApplicationBuilder
     IDatabaseApplicationBuilder AddServer(Func<IDatabaseApplicationContext, IDatabaseServer> configure);
 
     /// <summary>
-    /// Builds the database application from the registered engines and servers.
+    /// Builds the database application from the registered engines, lifecycle services,
+    /// and servers.
     /// </summary>
     /// <returns>The composed application, ready to start.</returns>
     /// <exception cref="InvalidOperationException">The application has already been built.</exception>

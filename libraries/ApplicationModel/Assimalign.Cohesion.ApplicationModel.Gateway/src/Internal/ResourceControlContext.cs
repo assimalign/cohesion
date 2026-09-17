@@ -11,26 +11,47 @@ internal sealed class ResourceControlContext : IResourceControlContext
     private readonly IResourceArtifact _artifact;
 
     public ResourceControlContext(
-        IApplicationResource resource,
+        IApplicationResourceDescriptor descriptor,
         IApplicationModel model,
         IApplicationResourceStateManager state,
         IReadOnlyList<IApplicationResource> dependencies,
-        IResourceArtifact artifact)
+        IResourceArtifact artifact,
+        IReadOnlyList<ResourceDependencyObservation> observedDependencies)
     {
-        Resource = resource;
-        Model = model;
-        State = state;
-        Dependencies = dependencies;
-        _artifact = artifact;
+        Descriptor = descriptor ?? throw new ArgumentNullException(nameof(descriptor));
+        Model = model ?? throw new ArgumentNullException(nameof(model));
+        State = state ?? throw new ArgumentNullException(nameof(state));
+        Dependencies = dependencies ?? throw new ArgumentNullException(nameof(dependencies));
+        _artifact = artifact ?? throw new ArgumentNullException(nameof(artifact));
+        ObservedDependencies = observedDependencies
+            ?? throw new ArgumentNullException(nameof(observedDependencies));
+        Inputs = ResourceInputs.Empty;
     }
 
-    public IApplicationResource Resource { get; }
+    public IApplicationResourceDescriptor Descriptor { get; }
+
+    public IApplicationResource Resource => Descriptor.Resource;
+
+    public ResourcePlan Plan => Descriptor.Plan
+        ?? throw new InvalidOperationException(
+            $"Resource '{Resource.Name}' has no realization plan. Build the application model before reconciliation.");
 
     public IApplicationModel Model { get; }
 
     public IApplicationResourceStateManager State { get; }
 
     public IReadOnlyList<IApplicationResource> Dependencies { get; }
+
+    public ResourceInputs Inputs { get; private set; }
+
+    internal ResourceTelemetryInjection? Telemetry { get; set; }
+
+    public IReadOnlyList<ResourceDependencyObservation> ObservedDependencies { get; }
+
+    public void SetInputs(ResourceInputs inputs)
+    {
+        Inputs = inputs ?? throw new ArgumentNullException(nameof(inputs));
+    }
 
     public T GetArtifact<T>()
         where T : class, IResourceArtifact

@@ -45,6 +45,24 @@ public class WebApplicationTerminalFallbackTests
         (await response.Content.ReadAsStringAsync(cancellationToken)).ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Terminal: A plain application should not expose Cohesion control-plane routes")]
+    public async Task Terminal_WhenApplicationIsPlain_ShouldNotExposeControlPlaneRoutes()
+    {
+        using CancellationTokenSource cancellation = new(TestTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = new();
+        using HttpClient client = factory.CreateClient();
+
+        foreach (string path in new[] { "/healthz", "/cohesion/v1/endpoints" })
+        {
+            using HttpResponseMessage response = await client.GetAsync(path, cancellationToken);
+
+            response.StatusCode.ShouldBe(NetHttpStatusCode.NotFound);
+            (await response.Content.ReadAsStringAsync(cancellationToken)).ShouldBeEmpty();
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Terminal: A status a middleware already chose should not be overwritten")]
     public async Task Terminal_WhenMiddlewareChoseStatus_ShouldNotOverwrite()
     {

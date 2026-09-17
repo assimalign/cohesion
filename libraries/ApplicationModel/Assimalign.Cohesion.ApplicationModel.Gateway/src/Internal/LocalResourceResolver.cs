@@ -4,11 +4,10 @@ using System.IO;
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>
-/// Resolves a resource's artifact identity to an executable path adjacent to the orchestrator.
+/// Resolves an apphost or explicitly added executable without falling back to a managed DLL.
 /// </summary>
 /// <remarks>
-/// The .NET SDK emits an apphost named <c>{artifact}.exe</c> on Windows and <c>{artifact}</c>
-/// elsewhere. A <c>dotnet run</c>-against-project development fallback is a planned follow-up.
+/// A <c>dotnet run</c>-against-project development fallback is a planned follow-up.
 /// </remarks>
 internal sealed class LocalResourceResolver
 {
@@ -19,10 +18,23 @@ internal sealed class LocalResourceResolver
         _baseDirectory = baseDirectory;
     }
 
-    public string Resolve(string artifact)
+    public string ResolveAppHost(string appHost)
     {
-        string executableName = OperatingSystem.IsWindows() ? artifact + ".exe" : artifact;
-        string candidate = Path.Combine(_baseDirectory, executableName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(appHost);
+        return ResolvePath(appHost, "apphost");
+    }
+
+    public string ResolveExecutable(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        return ResolvePath(path, "executable");
+    }
+
+    private string ResolvePath(string path, string description)
+    {
+        string candidate = Path.IsPathFullyQualified(path)
+            ? Path.GetFullPath(path)
+            : Path.GetFullPath(Path.Combine(_baseDirectory, path));
 
         if (File.Exists(candidate))
         {
@@ -30,6 +42,7 @@ internal sealed class LocalResourceResolver
         }
 
         throw new FileNotFoundException(
-            $"Could not resolve an executable for artifact '{artifact}'. Expected '{executableName}' in '{_baseDirectory}'.");
+            $"Could not resolve the local resource {description} '{path}'. Expected '{candidate}'.",
+            candidate);
     }
 }

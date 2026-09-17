@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Http.Connections;
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 
 using Shouldly;
@@ -15,6 +18,61 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
 public class HttpServerConfigurationTests
 {
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: Resolves the named Secret mount for each secure protocol")]
+    [InlineData("Https", HttpProtocol.Http11)]
+    [InlineData("Http1s", HttpProtocol.Http11)]
+    [InlineData("Http2s", HttpProtocol.Http20)]
+    public async Task Bind_HttpsProtocols_ShouldUseCertificateMount(string protocol, HttpProtocol expected)
+    {
+        var local = new ResourceContext(environmentName: AppEnvironment.Keys.Local);
+        using X509Certificate2 certificate = local.CreateDevelopmentEndpointCertificate("localhost");
+        using var key = certificate.GetECDsaPrivateKey()!;
+        string pem = certificate.ExportCertificatePem() + "\n" + key.ExportPkcs8PrivateKeyPem();
+        var resource = new ResourceContext(mounts: new Dictionary<string, ResourceMount>
+        {
+            ["https-key"] = ResourceMount.FromBytes(Encoding.UTF8.GetBytes(pem)),
+        });
+        using IDisposable scope = ResourceRuntime.CreateScope(resource);
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Secure:Protocol"] = protocol,
+            ["Http:Endpoints:Secure:Host"] = "localhost",
+            ["Http:Endpoints:Secure:Port"] = "0",
+            ["Http:Endpoints:Secure:Certificate"] = "https-key",
+            ["Http:Limits:MaxRequestBodySize"] = "1024",
+        });
+        var options = new HttpConnectionListenerOptions();
+        var owned = new List<X509Certificate2>();
+        try
+        {
+            HttpServerConfiguration.Bind(configuration, "Http", options, owned.Add);
+            await using HttpConnectionListener listener = new(options);
+            listener.Protocols.ShouldBe(expected);
+            owned[0].Thumbprint.ShouldBe(certificate.Thumbprint);
+        }
+        finally
+        {
+            foreach (X509Certificate2 item in owned)
+            {
+                item.Dispose();
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: Missing material names the endpoint and tls mount")]
+    public void Bind_MissingHttpsCertificate_ShouldFailClosed()
+    {
+        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext());
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Secure:Protocol"] = "Https",
+            ["Http:Endpoints:Secure:Port"] = "8443",
+        });
+        InvalidOperationException error = Should.Throw<InvalidOperationException>(() => HttpServerConfiguration.Bind(configuration, "Http", new HttpConnectionListenerOptions()));
+        error.Message.ShouldContain("Secure");
+        error.Message.ShouldContain("tls");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should bind server limits from configuration")]
     public void Bind_ShouldPopulateLimits()
     {

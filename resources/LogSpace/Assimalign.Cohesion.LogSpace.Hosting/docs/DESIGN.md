@@ -1,22 +1,41 @@
-# Assimalign.Cohesion.LogSpace.Hosting Design
+# LogSpace Hosting design
 
-## Design Intent
+## Platform sink and boundaries
 
-`LogSpaceApplication` is the standalone host for the log storage engine resource. Per the Cohesion hosting model, each resource type runs as its own `Host<TContext>` subclass owning its own lifecycle in its own process; this project is that hosting shell, composing the resource's units of work as hosted services.
+Item 31b makes LogSpace the Platform sink for Hosting.Telemetry. The resource root remains contract-only; all composition is in Hosting. OTLP/HTTP JSON logs are accepted, protobuf receives 415 with an OTLP/JSON-only detail. /v1/traces and /v1/metrics are reserved POST routes returning 501 after authentication/content validation: libraries/Logging has no span or instrument primitive, and protobuf is deferred. No gRPC framing or response-trailer support exists in the HTTP server; therefore the SDK otlp endpoint changed from grpc/tcp 4317 to https/tcp 4318, Certificate=tls. query stays https/tcp 8443. Both Public flags remain false: application reachability through observed endpoints is not external exposure.
 
-## Execution model
+## HTTP and TLS
 
-Threading is a per-service decision made by static dispatch from the execution menu defined by `Assimalign.Cohesion.Hosting` (see `libraries/Hosting/Assimalign.Cohesion.Hosting/docs/DESIGN.md`):
+`Local` is the developer-machine environment. `Development` is a deployable environment and requires a mounted certificate even on loopback, as does `Production`. An unset environment still resolves to `Production`.
 
-| Service | Menu member | Why |
-| --- | --- | --- |
-| `SegmentFlushService` | `DedicatedThreadService` (dedicated OS thread) | blocking loop to flush log segments with synchronous file I/O |
-| `IngestEndpointService` | `BackgroundService` (pool-scheduled) | async loop to accept log ingest connections |
+OtlpReceiverEndpointService mirrors LogSpaceControlPlaneEndpointService: parameterless WebApplication.CreateBuilder avoids recursive ambient registration, TryGetEndpointCertificate(endpoint, out leaf, out chain) builds the TLS certificate context, and only loopback Local permits CreateDevelopmentEndpointCertificate fallback. Both listeners fail closed otherwise. One tls Secret mount may back both listeners. Outbound exporters use CreateOutboundTrustValidator and the application trust bundle; there is no blanket certificate bypass.
 
-The engine splits along the blocking/async seam: durability work is synchronous blocking I/O that must own its thread for its whole life (`DedicatedThreadService`), while the endpoint is an async accept loop that belongs on the pool (`BackgroundService`).
+Middleware checks known path, method, authentication and application/json content. Wrong method yields 405/Allow: POST, unknown path 404, malformed JSON 400, missing credential 401/Bearer challenge, wrong audience or scope 403, oversized body 413 and unavailable storage 503. Http.RequestLimits is a private reference. LogSpace owns the one-MiB Content-Length check and bounded streaming read, returning 413 with Connection: close. The listener body cap is disabled because its post-dispatch Http1LimitExceededException currently closes the connection without a 413; header and data-rate transport limits remain in force. No HTTP-area code was changed. JSON uses a depth bound and at most 8192 records per request. Full acceptance returns {"partialSuccess":{}}; queue overflow returns rejectedLogRecords as an int64 string. Traces/metrics have no acceptance path.
 
-## Status and non-goals
+## Authentication and middleware order
 
-- This is a scaffold: service bodies are placeholders that park until the host stops, so the application starts and drains cleanly today. The real loops land with the resource implementation.
-- No builder or DI surface yet; construct `LogSpaceApplication` with `LogSpaceApplicationOptions` directly. A `CreateBuilder` surface can follow the `WebApplication` pattern when the resource matures.
-- The project deliberately references only `Assimalign.Cohesion.Hosting` until the resource library's contracts are ready to wire in.
+The private ES256 verifier is modelled on Web.Hosting.Resources.BootstrapTokenVerifier: issuer=application, key ID/algorithm/signature, required iss/sub/aud/exp/nbf/iat/jti, at most 24-hour lifetime, audience=LogSpace resource name. Ingest additionally requires scope=telemetry and a nonblank subject identifying the emitter; service.name must equal that subject. The gateway uses a distinct (application,sink,emitter) token cache; tokens are not the sink's bootstrap credential.
+
+The query middleware is registered BEFORE UseResourceControlPlane in LogSpaceControlPlaneEndpointService. ResourceControlPlaneMiddleware.InvokeAsync authenticates unknown /cohesion/v1/* paths then returns 404 (Web.Hosting.Resources/src/Internal/ResourceControlPlaneMiddleware.cs:44-59,185-191); it would swallow a later query handler. The earlier LogSpace middleware rejects telemetry-scoped credentials on every namespaced query/management request before forwarding other routes, protecting /stop and /commands despite the unchanged shared verifier. Query accepts only own-name audience with gateway subject and ordinary bootstrap/dev tokens. No cohesion-export audience was added.
+
+## Storage, lifecycle and query
+
+ResourceContext.GetMount("data", ContentRootPath/logs) selects the filesystem store. Receiver threads enqueue immutable records to a channel bounded to 8192 entries and a conservative 64 MiB estimated record budget. SegmentFlushService owns synchronous writes and fsync on its dedicated thread, every 250 ms and on stop; receivers stop before the flush service. Files are append-only logs-YYYYMMDD-NNNN.ndjson, rotated daily or at 16 MiB; each restart opens a fresh lexically ordered segment. Records have t (nanosecond string), sev, sevText, svc, cat, body and attrs. A per-segment .index records first/last timestamps and count; the minimal query currently scans segments instead of relying on this sidecar. IOException/UnauthorizedAccess marks the store unavailable, retaining queued entries for a subsequent flush and yielding 503 rather than stopping the host. Retention and crash-tail repair remain future work.
+
+Queries filter service.name and timestamp, cap limit to 1000, and return bounded NDJSON. Base64 cursors carry segment/line position and a filter fingerprint, with path validation; they grant no authorization. A cursor on the final full page may yield an empty next page. Producer-controlled JSON uses manual JsonDocument validation; stored records and cursors use source-generated LogSpaceJsonContext, without reflection serialization.
+
+R-5 explicitly defers the developer-experience design §8 Database.Embedded storage requirement to the Database MVP embedded-consumption phase; this segment implementation is not a replacement architectural decision. No cross-area Database reference was added.
+
+## Telemetry ordering
+
+The gateway injects only after a same-application LogSpace is Running with an observed otlp endpoint; no self-export is injected. A producer prepared earlier gets no telemetry; a later preparation can receive it, while an already-running process needs restart to read changed environment. No implicit DependsOn was added. Explicit producer.DependsOn(sink) establishes deterministic startup. RemoteReference injection awaits an authenticated named-OTLP resolution contract.
+
+## Non-goals
+
+LogSpace.Telemetry remains empty project scaffolding, distinct from Hosting.Telemetry. Verifier consolidation, inferred telemetry dependencies, retention/archival, protobuf, gRPC, traces and metrics are separate deliverables.
+
+## Concrete composition (T10 / O34)
+
+`LogSpaceApplication.CreateBuilder(args)` returns the public concrete `LogSpaceApplicationBuilder`; its `Build()` returns the public `LogSpaceApplication : Host<LogSpaceApplicationContext>`. The public `LogSpaceApplicationContext` implements `ILogSpaceApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
+
+Background-work registration belongs to the concrete `LogSpaceApplicationBuilder`: `AddService(IHostService)` and `AddService(Func<LogSpaceApplicationContext, IHostService>)`. The factory receives the same concrete context as Web's and Database's AddService, so hosting consumers can use environment, state, and hosted-service members beyond the small root contract. Database's root-level AddServer keeps the interface context. Factories run once per build against the same context retained by the application; the hosted-service snapshot is installed after factory evaluation. Services start in registration order and stop in reverse. No area-owned service abstraction is introduced.

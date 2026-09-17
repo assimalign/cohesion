@@ -1,5 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Rezolvr" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Telemetry" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 	</ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Assimalign.Cohesion.Rezolvr.Hosting.Tests" />
+    <InternalsVisibleTo Include="Assimalign.Cohesion.Rezolvr.Client.Tests" />
+  </ItemGroup>
 </Project>

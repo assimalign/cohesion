@@ -1,0 +1,32 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+
+  <PropertyGroup>
+    <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
+    <CohesionResourceName>inprocess-gateway</CohesionResourceName>
+    <CohesionGateways>InProcess</CohesionGateways>
+    <CohesionGatewayInProcess>true</CohesionGatewayInProcess>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionResourceReference Include="..\GatewaySmokeWeb\GatewaySmokeWeb.csproj" />
+    <CohesionResourceReference Include="..\InProcessNamedEntry\InProcessNamedEntry.csproj" />
+    <CohesionResourceReference Include="..\InProcessNonComposable\InProcessNonComposable.csproj" />
+  </ItemGroup>
+
+  <Target Name="CaptureInProcessEvaluation" BeforeTargets="ResolveProjectReferences">
+    <MakeDir Directories="$(BaseIntermediateOutputPath)" />
+    <WriteLinesToFile
+      File="$(BaseIntermediateOutputPath)inprocess-project-references.txt"
+      Lines="@(ProjectReference->'%(Filename)|%(ReferenceOutputAssembly)|%(OutputItemType)|%(Private)|%(PrivateAssets)|%(ExcludeAssets)')"
+      Overwrite="true" />
+    <WriteLinesToFile
+      File="$(BaseIntermediateOutputPath)inprocess-framework-references.txt"
+      Lines="@(FrameworkReference->'%(Identity)')"
+      Overwrite="true" />
+    <WriteLinesToFile
+      File="$(BaseIntermediateOutputPath)inprocess-properties.txt"
+      Lines="$(CohesionResourceReferencesAreRuntime)|$(ValidateExecutableReferencesMatchSelfContained)|$(SelfContained)|$(RuntimeIdentifier)|$(NETCoreSdkRuntimeIdentifier)"
+      Overwrite="true" />
+  </Target>
+
+</Project>

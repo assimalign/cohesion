@@ -1,0 +1,7 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Database">
+
+  <PropertyGroup>
+    <CohesionApplicationModel>disabled</CohesionApplicationModel>
+  </PropertyGroup>
+
+</Project>

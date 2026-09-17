@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Database.Sql.Catalog — Design
 
 The SQL model's schema authority (area architecture:
-[resources/Database/DESIGN.md](../../DESIGN.md) §3.3). The catalog answers exactly
+[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.3). The catalog answers exactly
 two questions for the planner: *what objects exist* (with stable identities) and
 *what shape are they* — and it must answer identically after any crash.
 
@@ -60,6 +60,13 @@ two questions for the planner: *what objects exist* (with stable identities) and
   reads as version 1 (pre-marker databases); the engine writes the current
   version (3) after upgrading (or at creation, when the space is born on the
   current format).
+- **The applied compiled-schema state lives here** (kind-6 records). The catalog
+  stores the lowercase content hash together with the complete canonical schema
+  document. Documents are strict UTF-8 and chunked into bounded records; replacing
+  all old chunks with all new chunks is one self-committing storage transaction,
+  so reopen observes either complete state. The SQL provisioner verifies both the
+  document/hash pair and the live table/index catalog before treating a repeated
+  apply as a no-op; the marker is never an authority over detected drift.
 
 ## Error model
 
@@ -71,7 +78,9 @@ missing tables/columns, primary-key drops, malformed persisted records).
 - Foreign keys and check constraints (the dialect doesn't parse them yet; the
   record format has room).
 - Views, sequences, permissions (permissions are `Sql.Security`'s feature, #177).
-- Multi-statement DDL atomicity (see self-committing DDL above).
+- Multi-statement DDL atomicity (see self-committing DDL above). The migration
+  layer compensates completed reversible statements on failure; an MVCC bracket
+  spanning catalog and data DDL requires a future catalog batch-transaction seam.
 
 ## AOT posture
 

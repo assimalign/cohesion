@@ -1,0 +1,10 @@
+<Project Sdk="Assimalign.Cohesion.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>StronglyTypedSettingsOptIn</RootNamespace>
+    <CohesionAppSettingsClass>CatalogSettings</CohesionAppSettingsClass>
+  </PropertyGroup>
+
+</Project>

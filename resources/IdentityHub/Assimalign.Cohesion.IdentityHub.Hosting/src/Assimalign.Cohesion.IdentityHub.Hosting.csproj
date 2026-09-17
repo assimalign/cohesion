@@ -1,5 +1,24 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityHub" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Telemetry" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Connections" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Connections.Security" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Http.Connections" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Http.Forms" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel.Token" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 	</ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityHub.Hosting.Tests" />
+    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityHub.Client.Tests" />
+  </ItemGroup>
 </Project>

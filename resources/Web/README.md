@@ -5,16 +5,24 @@ abstractions, the request-pipeline feature libraries, and the hosting runtime th
 what the `Assimalign.Cohesion.Sdk.Web` SDK delivers through the `Assimalign.Cohesion.App.Web`
 shared framework.
 
+The area's architecture record lives in
+[docs/resources/Web/DESIGN.md](../../docs/resources/Web/DESIGN.md), with the orientation piece in
+[docs/resources/Web/OVERVIEW.md](../../docs/resources/Web/OVERVIEW.md); this README is the project
+map and the dependency rule. The full reference graph for every Cohesion assembly is in
+[docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
+
 ## The dependency rule
 
-The area follows one structural rule, adopted 2026-07-10:
+The hosting family follows O34 (owner decision, 2026-09-15):
 
-> **`Assimalign.Cohesion.Web.Hosting` is the runtime module — it is neither referenced by any
-> Web-area library nor references any of them.** Feature libraries may reference the root
-> `Assimalign.Cohesion.Web`, each other, and anything outside the Web area (`Http.*`,
-> `Security.*`, `IdentityModel.*`, …). The one sanctioned exception is
-> `Assimalign.Cohesion.Web.Testing`, which drives the concrete runtime and therefore references
-> the hosting module (documented in its csproj and DESIGN.md).
+> **Roots and feature libraries reference no `Assimalign.Cohesion.Hosting*` library
+> (COHRES004) or Web hosting-family integration (COHRES001).**
+> `Web.Hosting.Resources` and `Web.Hosting.Health` integrate the shared Hosting libraries.
+> They may reference Web features and each other, but never the exact `Web.Hosting`
+> runtime module. The module may reference the Web root and its own hosting family
+> (`Web.Hosting.Resources`, `Web.Hosting.Health`) within its area (COHRES002).
+> `Web.Testing` exempts `Web.Hosting` and `Web.Hosting.Resources` to drive the runtime and its control plane; `Web.ApplicationModel` retains its
+> COHAM001-fenced `Hosting.Resources` reference.
 
 Why the rule exists:
 
@@ -37,7 +45,7 @@ instance of the repo-wide *resource hosting-isolation rule* in
 `resources/<Area>/` ships one `Assimalign.Cohesion.<Area>.Hosting`, no library in the area may
 reference it (`COHRES001`, checked against both the project-reference graph and the resolved
 assembly closure), and the hosting module may directly reference no same-area library except the
-area root (`COHRES002`). A project with a sanctioned, user-approved exception opts out
+area root and its own hosting family (`COHRES002`). A project with a sanctioned, user-approved exception opts out
 per-assembly via the `CohesionHostingIsolationExemptions` property in its own csproj —
 `Web.Testing` declares the standing exemption this way. Test, example, and sample projects are
 exempt — the rule constrains shipped libraries, not harnesses — and every Web project builds in
@@ -45,7 +53,7 @@ CI (`.github/workflows/resource-web.yml`) so the guard executes on each push.
 
 ## Adding a new Web feature library
 
-A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these are updated
+A new `Assimalign.Cohesion.Web.<Feature>` or `Web.Hosting.<Suffix>` project is not done until all of these are updated
 (the working checklist also lives in `.claude/rules/web-area.md`):
 
 1. **csproj** — references per the dependency rule; builder verbs (`Add<Feature>`/`Use<Feature>`)
@@ -55,18 +63,38 @@ A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these
 2. **Framework manifest** — `frameworks/Assimalign.Cohesion.App.props`, `App.Web` group, plus any
    new outside-area transitive dependencies. Validate by packing
    `frameworks/Assimalign.Cohesion.App.Web.Runtime` (hard-fails on unresolvable assemblies).
-3. **Solutions** — `resources/Web/Assimalign.Cohesion.Web.slnx` and the root
+3. **Solutions** — `resources/Web/Assimalign.Cohesion.Web.slnx`,
+   `resources/Assimalign.Cohesion.Resources.slnx`, and the root
    `Assimalign.Cohesion.slnx`.
-4. **CI** — the matrix in `.github/workflows/resource-web.yml`.
+4. **CI and inventory** — the matrix in `.github/workflows/resource-web.yml` and
+   `installer/scripts/modules/CohesionPackaging.psm1`; both lists include each packable project.
 5. **Docs** — `docs/OVERVIEW.md` + `docs/DESIGN.md` (plus `docs/Assembly/` as the public API
    stabilizes), and a row in the project map below.
+
+The runtime consumes the root and its hosting family; feature libraries remain rooted in Web. Arrows show references.
+
+```mermaid
+flowchart LR
+    Host["Web.Hosting"] --> Root["Web"]
+    Host --> Resources["Web.Hosting.Resources"]
+    Resources --> Root
+    Resources --> HR["Hosting.Resources"]
+    Resources --> HH["Hosting.Health"]
+    Resources --> JWT["IdentityModel.Token.JsonWebToken"]
+    Adapter["Web.Hosting.Health"] --> Health["Web.Health"]
+    Adapter --> HH
+    Health --> Root
+    Feature["Web feature libraries"] --> Root
+```
 
 ## Project map
 
 | Project | Role |
 | --- | --- |
 | `Assimalign.Cohesion.Web` | The root: pipeline and composition abstractions (`IWebApplication*`, `WebApplicationMiddleware`) every library builds against |
-| `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, server, builder-time DI/config/logging composition |
+| `Assimalign.Cohesion.Web.Hosting.Resources` | Single resource control-plane terminal, ES256 bootstrap verification, and deferred stop; consumed by `Web.Hosting` and `Database.Hosting` (O35) |
+| `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, server, concrete-builder `AddService`, builder-time DI/config/logging composition |
+| `Assimalign.Cohesion.Web.Hosting.Health` | Adapts `Hosting.Health` contributors onto the `Web.Health` builder; consumed privately by `Database.Hosting` |
 | `Assimalign.Cohesion.Web.Routing` | Router, route patterns/constraints, endpoint metadata bag, link generation |
 | `Assimalign.Cohesion.Web.Api` | Endpoint mapping over the router: plain `Map`/`MapGet` terminal middleware plus source-generated typed-delegate binding (`(int id, IHttpContext) => ...` — route/query/header/body/form + injections, 400/415 outcomes); the interceptor generator lives in `analyzers/Assimalign.Cohesion.SourceGeneration.Web` |
 | `Assimalign.Cohesion.Web.Serialization` | The content-serialization registry: media-type-keyed request-reader/response-writer halves, `AddJsonSerialization` over a source-generated resolver (AOT), and the `ReadContentAsync`/`WriteContentAsync` call sites |
@@ -87,14 +115,19 @@ A new `Assimalign.Cohesion.Web.<Feature>` project is not done until all of these
 | `Assimalign.Cohesion.Web.Caching` | Server-owned output caching: `UseOutputCache` serves cacheable GET/HEAD responses from an async, tag-aware store without invoking the endpoint (base + named policies, per-endpoint sealed metadata resolved at the router match, a cache key that honors the response's own `Vary`, `Age` on hit); cache-or-bypass rides the #755 typed `Cache-Control` primitives (no-store/private/`Set-Cookie`/non-200/authenticated bypass); default in-memory store over `Caching.InMemory` with SizeLimit accounting and tag eviction, distributed backends deferred to `IOutputCacheStore` adapters. Register ahead of `UseResponseCompression` so a stored variant is never mis-served across `Accept-Encoding` |
 | `Assimalign.Cohesion.Web.Diagnostics` | HTTP request/response logging middleware (field flags, allowlist redaction, bounded body capture) + the W3C/NCSA access-log file provider riding `Assimalign.Cohesion.Logging` |
 | `Assimalign.Cohesion.Web.Testing` | In-memory test factory for the runtime (sanctioned Web.Hosting reference) |
-| `Assimalign.Cohesion.Web.ApplicationModel` | Placeholder awaiting the ApplicationModel Phase-4 rebuild |
+| `Assimalign.Cohesion.Web.ApplicationModel` | Declarative Web resource model and the enabled resource's default control-plane factory |
 
 Layering: L3 platform. Everything here builds on the L1 protocol stack (`libraries/Http`,
-`libraries/Connections`, `libraries/Security`). The L2 runtime/composition libraries
-(`libraries/Hosting`, `libraries/DependencyInjection`, `libraries/Configuration`,
-`libraries/Logging`) are consumed by the hosting module and by the `Web.Testing` harness (which
-drives the runtime and resolves the server from its service provider) — never by the feature
-libraries. (`Web.ApplicationModel`'s placeholder csproj still lists L2 references pending its
-Phase-4 rebuild.)
+`libraries/Connections`, `libraries/Security`). The root and feature libraries reference
+no `Assimalign.Cohesion.Hosting*` library. Background work uses the concrete
+`WebApplicationBuilder.AddService` verb in `Web.Hosting`. The broader L2 runtime/composition libraries
+(`libraries/DependencyInjection`, `libraries/Configuration`, `libraries/Logging`) are consumed
+by the hosting module and by the `Web.Testing` harness (which drives the runtime and resolves the
+server from its service provider) — never by feature libraries. `Web.ApplicationModel` references
+only the shared ApplicationModel and
+`Hosting.Resources` contracts; that resource-runtime package brings the plain Hosting lifecycle,
+the `Hosting.Health` contribution contracts, and the Windows-only ProtectedData BCL facade into
+its permitted closure. `Web.Hosting` discovers generated registrations through the
+`Hosting.Resources` `ResourceRuntime`.
 
 Per-project documentation lives in each project's `docs/OVERVIEW.md` and `docs/DESIGN.md`.

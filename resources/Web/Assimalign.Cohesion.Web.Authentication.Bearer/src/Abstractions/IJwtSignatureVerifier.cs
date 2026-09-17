@@ -3,10 +3,9 @@ using System;
 namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 
 /// <summary>
-/// Verifies the signature of a JSON Web Token. This is the keyed cryptographic seam the bearer
-/// handler consumes: the IdentityModel JSON Web Token package deliberately validates only the
-/// document-level rules (issuer, audience, lifetime, algorithm) and leaves signature verification
-/// to a key-holding component — this interface is that component.
+/// Verifies the signature of a JSON Web Token for the bearer handler. This Web-specific
+/// compatibility seam is retained so existing bearer configuration remains source-compatible;
+/// its built-in RSA and ECDSA factories adapt the reusable IdentityModel signature verifiers.
 /// </summary>
 /// <remarks>
 /// Implementations are keyed by concrete key material (an HMAC secret, an RSA or ECDSA public key),

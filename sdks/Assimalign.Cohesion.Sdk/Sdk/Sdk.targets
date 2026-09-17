@@ -1,7 +1,24 @@
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" >
-    <!-- <Import Project="..\Targets\Assimalign.Cohesion.Sdk.Common.targets"/> -->
+	<PropertyGroup>
+		<_CohesionImageSelfContainedInput>$(SelfContained)</_CohesionImageSelfContainedInput>
+		<_CohesionImagePublishSelfContainedInput>$(PublishSelfContained)</_CohesionImagePublishSelfContainedInput>
+		<_CohesionImageRuntimeIdentifierInput>$(RuntimeIdentifier)</_CohesionImageRuntimeIdentifierInput>
+	</PropertyGroup>
+	<!--
+		Enabled resource executables use one Development runtime posture on every
+		host. Set these defaults after the consumer project has been evaluated but
+		before Microsoft.NET.Sdk imports its target-time RID and apphost logic.
+	-->
+	<PropertyGroup Condition="'$(Configuration)' == 'Debug' and '$(CohesionApplicationModel)' == 'enabled'">
+		<SelfContained Condition="'$(SelfContained)' == ''">true</SelfContained>
+		<RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>
+		<ValidateExecutableReferencesMatchSelfContained Condition="'$(ValidateExecutableReferencesMatchSelfContained)' == ''">false</ValidateExecutableReferencesMatchSelfContained>
+	</PropertyGroup>
+
     <Import Sdk="Microsoft.NET.Sdk" Project="Sdk.targets" />
+    <Import Project="..\Targets\Assimalign.Cohesion.Sdk.PinValidation.targets" />
     <Import Project="..\Targets\Assimalign.Cohesion.Sdk.StronglyTypedSettings.targets" />
+	<Import Project="..\Targets\Assimalign.Cohesion.Sdk.ApplicationModel.Build.targets" />
     <Import Project="..\Targets\Assimalign.Cohesion.Sdk.NameOnly.ProjectReference.targets" />
 
 </Project>

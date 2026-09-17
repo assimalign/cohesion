@@ -16,4 +16,6 @@
 	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
 		<FrameworkReference Include="Assimalign.Cohesion.App.EmailHub" />
 	</ItemGroup>
+
+	<Import Project="..\Targets\Sdk.EmailHub.props" />
 </Project>

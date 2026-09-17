@@ -18,7 +18,10 @@ internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionL
     private readonly Queue<MultiplexedConnection> _connections = new();
     private readonly Queue<TaskCompletionSource<MultiplexedConnection>> _waiters = new();
     private readonly Lock _lock = new();
+    private readonly TaskCompletionSource<object?> _waitingForConnection = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConnectionCapabilities _capabilities;
+    private EndPoint _endPoint = new IPEndPoint(IPAddress.Loopback, 16000);
+    private int _acceptCount;
 
     public TestMultiplexedConnectionListener(params MultiplexedConnection[] connections)
         : this(capabilities: null, connections)
@@ -41,9 +44,24 @@ internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionL
 
     public bool IsDisposed { get; private set; }
 
-    public override EndPoint EndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 16000);
+    public int BindCount { get; private set; }
+
+    public int AcceptCount => Volatile.Read(ref _acceptCount);
+
+    public Task WaitingForConnection => _waitingForConnection.Task;
+
+    public EndPoint? EndPointAfterBind { get; set; }
+
+    public override EndPoint EndPoint => _endPoint;
 
     public override ConnectionCapabilities Capabilities => _capabilities;
+
+    public override ValueTask BindAsync(CancellationToken cancellationToken = default)
+    {
+        BindCount++;
+        _endPoint = EndPointAfterBind ?? _endPoint;
+        return ValueTask.CompletedTask;
+    }
 
     public void Enqueue(MultiplexedConnection connection)
     {
@@ -65,6 +83,8 @@ internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionL
     {
         lock (_lock)
         {
+            Interlocked.Increment(ref _acceptCount);
+
             if (_connections.Count > 0)
             {
                 return ValueTask.FromResult(_connections.Dequeue());
@@ -82,6 +102,7 @@ internal sealed class TestMultiplexedConnectionListener : MultiplexedConnectionL
             }
 
             _waiters.Enqueue(waiter);
+            _waitingForConnection.TrySetResult(null);
 
             return new ValueTask<MultiplexedConnection>(waiter.Task);
         }

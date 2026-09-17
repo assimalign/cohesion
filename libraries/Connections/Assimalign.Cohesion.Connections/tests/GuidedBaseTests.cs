@@ -14,6 +14,21 @@ public class GuidedBaseTests
 {
     private static readonly EndPoint TestEndPoint = new IPEndPoint(IPAddress.Loopback, 16000);
 
+    [Fact(DisplayName = "Cohesion Test [Connections] - BindAsync: Guided listener base should forward through interface calls")]
+    public async Task BindAsync_OnConnectionListenerBase_ShouldForwardThroughInterfaceCall()
+    {
+        // Arrange
+        TestConnectionListener listener = new();
+        IConnectionListener viaInterface = listener;
+
+        // Act
+        await listener.BindAsync();
+        await viaInterface.BindAsync();
+
+        // Assert
+        listener.BindCount.ShouldBe(2);
+    }
+
     [Fact]
     public async Task AcceptAsync_OnConnectionListenerBase_ShouldReturnSameInstanceThroughTypedAndInterfaceCalls()
     {

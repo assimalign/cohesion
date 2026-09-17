@@ -1,0 +1,12 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <PropertyGroup>
+    <CohesionApplicationName>platform</CohesionApplicationName>
+    <CohesionGateways>Local;InProcess</CohesionGateways>
+    <CohesionGatewayInProcess>true</CohesionGatewayInProcess>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionResourceReference Include="..\Example.Platform.SecretStore\Example.Platform.SecretStore.csproj" />
+    <CohesionResourceReference Include="..\Example.Platform.ConfigurationStore\Example.Platform.ConfigurationStore.csproj" />
+    <CohesionResourceReference Include="..\Example.Platform.LogSpace\Example.Platform.LogSpace.csproj" />
+  </ItemGroup>
+</Project>

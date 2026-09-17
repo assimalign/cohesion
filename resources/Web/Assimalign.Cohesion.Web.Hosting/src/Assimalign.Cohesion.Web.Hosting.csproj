@@ -1,15 +1,24 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<!-- Web-area dependency rule: the hosting/runtime module references only the root
-	     Assimalign.Cohesion.Web project and non-Web-area libraries. Feature libraries
+	     Assimalign.Cohesion.Web project, its own hosting family (O35), and non-Web-area libraries. Feature libraries
 	     (authentication, routing, results, ...) are NEVER referenced here - the App.Web
 	     shared framework delivers them to applications, and their builder verbs ship in
 	     their own packages. See resources/Web/README.md. -->
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting.Resources" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Telemetry" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration.CommandLine" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration.EnvironmentVariables" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration.Json" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Physical" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.RequestLimits" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />

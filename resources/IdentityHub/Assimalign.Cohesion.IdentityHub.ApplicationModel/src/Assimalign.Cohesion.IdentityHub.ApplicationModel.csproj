@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<!-- Enforce the strict ApplicationModel dependency closure (COHAM001). -->
+		<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+	</ItemGroup>
+</Project>

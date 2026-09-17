@@ -1,36 +1,58 @@
 using System;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.LoadBalancer;
 
 namespace Assimalign.Cohesion.LoadBalancer.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.LoadBalancer.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the load balancer resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Hosts a LoadBalancer application and its ordered service lifecycle.
 /// </summary>
-public sealed class LoadBalancerApplication : Host<LoadBalancerApplicationContext>
+public sealed class LoadBalancerApplication : Host<LoadBalancerApplicationContext>, ILoadBalancerApplication
 {
     private readonly LoadBalancerApplicationContext _context;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="LoadBalancerApplication"/> class.
-    /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public LoadBalancerApplication(LoadBalancerApplicationOptions options) : base(options)
+    internal LoadBalancerApplication(
+        LoadBalancerApplicationOptions options,
+        LoadBalancerApplicationContext context)
+        : base(options)
     {
-        ArgumentNullException.ThrowIfNull(options);
-
-        _context = new LoadBalancerApplicationContext(options, new IHostService[]
-        {
-            new ProxyDataPlaneService(),
-        });
+        _context = context;
     }
 
     /// <summary>
-    /// Gets the application context.
+    /// Gets the concrete application context.
     /// </summary>
     public override LoadBalancerApplicationContext Context => _context;
+
+    ILoadBalancerApplicationContext ILoadBalancerApplication.Context => _context;
+
+    Task ILoadBalancerApplication.StartAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StartAsync(cancellationToken);
+
+    Task ILoadBalancerApplication.StopAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StopAsync(cancellationToken);
+
+    /// <summary>
+    /// Creates a builder for a load balancer application.
+    /// </summary>
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the load balancer application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static LoadBalancerApplicationBuilder CreateBuilder(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(LoadBalancerApplication).Assembly);
+    }
+
+    internal static LoadBalancerApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new LoadBalancerApplicationBuilder(args, resourceAssembly);
+    }
 }

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<PackageId>Assimalign.Cohesion.Sdk.Gateway</PackageId>
+		<OutDir>$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Tasks</OutDir>
+		<IsAotCompatible>true</IsAotCompatible>
+		<EnablePreviewFeatures>false</EnablePreviewFeatures>
+		<DefineConstants>$(DefineConstants);COHESION_GATEWAY_TASKS</DefineConstants>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.Build" ExcludeAssets="runtime" />
+		<CohesionPackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" />
+		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" ExcludeAssets="runtime" />
+	</ItemGroup>
+	<ItemGroup>
+		<Compile Include="..\..\..\Assimalign.Cohesion.Sdk\Tasks\src\Internal\Utilities\CohesionIdentifier.cs"
+			Link="Tasks\Internal\CohesionIdentifier.cs" />
+		<Compile Include="..\..\..\Assimalign.Cohesion.Sdk\Tasks\src\Tasks\Resources\ImageIndexFile.cs" Link="Tasks\ImageIndexFile.cs" />
+		<Compile Include="..\..\..\Assimalign.Cohesion.Sdk\Tasks\src\Tasks\Resources\ResourceFileWriter.cs" Link="Tasks\ResourceFileWriter.cs" />
+	</ItemGroup>
+</Project>

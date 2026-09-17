@@ -1,37 +1,58 @@
 using System;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.MediaHub;
 
 namespace Assimalign.Cohesion.MediaHub.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.MediaHub.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the media hub resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Hosts a MediaHub application and its ordered service lifecycle.
 /// </summary>
-public sealed class MediaHubApplication : Host<MediaHubApplicationContext>
+public sealed class MediaHubApplication : Host<MediaHubApplicationContext>, IMediaHubApplication
 {
     private readonly MediaHubApplicationContext _context;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="MediaHubApplication"/> class.
-    /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public MediaHubApplication(MediaHubApplicationOptions options) : base(options)
+    internal MediaHubApplication(
+        MediaHubApplicationOptions options,
+        MediaHubApplicationContext context)
+        : base(options)
     {
-        ArgumentNullException.ThrowIfNull(options);
-
-        _context = new MediaHubApplicationContext(options, new IHostService[]
-        {
-            new ContentIoService(),
-            new StreamingEndpointService(),
-        });
+        _context = context;
     }
 
     /// <summary>
-    /// Gets the application context.
+    /// Gets the concrete application context.
     /// </summary>
     public override MediaHubApplicationContext Context => _context;
+
+    IMediaHubApplicationContext IMediaHubApplication.Context => _context;
+
+    Task IMediaHubApplication.StartAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StartAsync(cancellationToken);
+
+    Task IMediaHubApplication.StopAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StopAsync(cancellationToken);
+
+    /// <summary>
+    /// Creates a builder for a media hub application.
+    /// </summary>
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the media hub application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static MediaHubApplicationBuilder CreateBuilder(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(MediaHubApplication).Assembly);
+    }
+
+    internal static MediaHubApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+        return new MediaHubApplicationBuilder(args, resourceAssembly);
+    }
 }

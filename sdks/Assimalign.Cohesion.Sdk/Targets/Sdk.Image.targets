@@ -1,0 +1,92 @@
+<Project>
+  <UsingTask TaskName="Assimalign.Cohesion.Sdk.Tasks.CohesionResolveImagePublish" AssemblyFile="../Tasks/Assimalign.Cohesion.Sdk.Tasks.dll" Runtime="NET" />
+  <UsingTask TaskName="Assimalign.Cohesion.Sdk.Tasks.CohesionForwardImagePublish" AssemblyFile="../Tasks/Assimalign.Cohesion.Sdk.Tasks.dll" Runtime="NET" />
+  <UsingTask TaskName="Assimalign.Cohesion.Sdk.Tasks.CohesionVerifyImageDigest" AssemblyFile="../Tasks/Assimalign.Cohesion.Sdk.Tasks.dll" Runtime="NET" />
+  <UsingTask TaskName="Assimalign.Cohesion.Sdk.Tasks.CohesionWriteImageIndex" AssemblyFile="../Tasks/Assimalign.Cohesion.Sdk.Tasks.dll" Runtime="NET" />
+  <UsingTask TaskName="Assimalign.Cohesion.Sdk.Tasks.CohesionImageFingerprint" AssemblyFile="../Tasks/Assimalign.Cohesion.Sdk.Tasks.dll" Runtime="NET" />
+  <UsingTask TaskName="Assimalign.Cohesion.Sdk.Tasks.CohesionPrepareImagePackage" AssemblyFile="../Tasks/Assimalign.Cohesion.Sdk.Tasks.dll" Runtime="NET" />
+
+  <PropertyGroup>
+    <CohesionContainerRepository Condition="'$(CohesionContainerRepository)' == '' and '$(CohesionOrganization)' != ''">$(CohesionOrganization)/$(_CohesionResolvedResourceName)</CohesionContainerRepository>
+    <CohesionContainerBaseImage Condition="'$(CohesionContainerBaseImage)' == ''">auto</CohesionContainerBaseImage>
+    <CohesionContainerArchiveOutputPath Condition="'$(CohesionContainerArchiveOutputPath)' == ''">$(IntermediateOutputPath)cohesion/images/$(_CohesionResolvedResourceName).tar</CohesionContainerArchiveOutputPath>
+    <CohesionContainerPush Condition="'$(CohesionContainerPush)' == ''">false</CohesionContainerPush>
+    <CohesionImageAot Condition="'$(CohesionImageAot)' == ''">auto</CohesionImageAot>
+    <CohesionImageFreshness Condition="'$(CohesionImageFreshness)' == ''">Rebuild</CohesionImageFreshness>
+    <CohesionBuildResourceContainersDependsOn>$(CohesionBuildResourceContainersDependsOn);_CohesionPublishResourceImage</CohesionBuildResourceContainersDependsOn>
+  </PropertyGroup>
+
+  <!-- This guard also applies to raw PublishContainer; repository validation is opt-in only. -->
+  <Target Name="CohesionValidateContainerRuntime" BeforeTargets="PublishContainer;_PublishSingleContainer" Condition="'$(_CohesionResourceEnabled)' == 'true'">
+    <Error Condition="'$(SelfContained)' != 'true' or '$(PublishSelfContained)' == 'false'" Code="COHSDK005" File="$(MSBuildProjectFullPath)"
+      Text="A framework-dependent PublishContainer cannot start: Cohesion shared frameworks are NuGet Ref/Runtime packs and are absent from MCR base images. Publish self-contained; the Cohesion runtime base image is a later deliverable." />
+  </Target>
+
+  <Target Name="_CohesionResolveImage" DependsOnTargets="CohesionValidateApplicationModel">
+    <Error Condition="'$(_CohesionResourceEnabled)' != 'true'" Text="CohesionPublishImage requires CohesionApplicationModel=enabled." />
+    <Error Condition="'$(CohesionImageFreshness)' != 'Rebuild' and '$(CohesionImageFreshness)' != 'Pinned'" Text="CohesionImageFreshness must be Rebuild or Pinned." />
+    <Error Condition="'$(CohesionImageFreshness)' == 'Pinned'" Text="Pinned images are consumed from manifest packages by the gateway CohesionPublishImages gather; a source project uses Rebuild." />
+    <Error Condition="'$(CohesionContainerPush)' != 'true' and '$(CohesionContainerPush)' != 'false'" Text="CohesionContainerPush must be true or false." />
+    <Error Condition="'$(_CohesionImageSelfContainedInput)' == 'false' or '$(_CohesionImagePublishSelfContainedInput)' == 'false'" Code="COHSDK005" Text="Cohesion PublishContainer requires SelfContained=true; MCR images do not contain Cohesion shared frameworks." />
+    <Error Condition="'$(CohesionImageAot)' != 'auto' and '$(CohesionImageAot)' != 'true' and '$(CohesionImageAot)' != 'false'" Text="CohesionImageAot must be auto, true, or false." />
+    <PropertyGroup>
+      <_CohesionImageRid>linux-x64</_CohesionImageRid>
+      <_CohesionImageRid Condition="'$(_CohesionImageRuntimeIdentifierInput)' != ''">$(_CohesionImageRuntimeIdentifierInput)</_CohesionImageRid>
+      <_CohesionImageFullPath>$([System.IO.Path]::GetFullPath('$(CohesionImageManifestPath)', '$(MSBuildProjectDirectory)'))</_CohesionImageFullPath>
+      <_CohesionArchiveFullPath>$([System.IO.Path]::GetFullPath('$(CohesionContainerArchiveOutputPath)', '$(MSBuildProjectDirectory)'))</_CohesionArchiveFullPath>
+    </PropertyGroup>
+    <CohesionResolveImagePublish Configuration="$(Configuration)" Aot="$(CohesionImageAot)" ProjectPath="$(MSBuildProjectFullPath)"
+      RuntimeIdentifier="$(_CohesionImageRid)" Repository="$(CohesionContainerRepository)" Registry="$(CohesionContainerRegistry)"
+      Push="$(CohesionContainerPush)" ImagePath="$(_CohesionImageFullPath)" ArchivePath="$(_CohesionArchiveFullPath)"
+      BaseImage="$(CohesionContainerBaseImage)" InContainer="$([System.String]::Equals('$(_CohesionImageInContainer)', 'true', System.StringComparison.OrdinalIgnoreCase))" >
+      <Output TaskParameter="PublishAot" PropertyName="_CohesionImagePublishAot" />
+      <Output TaskParameter="ResolvedBaseImage" PropertyName="_CohesionImageBase" />
+      <Output TaskParameter="RegistryAuthority" PropertyName="_CohesionImageRegistry" />
+      <Output TaskParameter="ForwardToContainer" PropertyName="_CohesionImageForward" />
+    </CohesionResolveImagePublish>
+    <PropertyGroup>
+      <_CohesionImageArchiveSink Condition="'$(CohesionContainerPush)' != 'true'">$(_CohesionArchiveFullPath)</_CohesionImageArchiveSink>
+      <_CohesionImageProperties>Configuration=$(Configuration);RuntimeIdentifier=$(_CohesionImageRid);RuntimeIdentifiers=;ContainerRuntimeIdentifiers=;ContainerRuntimeIdentifier=$(_CohesionImageRid);SelfContained=true;PublishSelfContained=true;PublishAot=$(_CohesionImagePublishAot);EnableSdkContainerSupport=true;ContainerImageFormat=OCI;ContainerRepository=$(CohesionContainerRepository);ContainerRegistry=$(_CohesionImageRegistry);ContainerArchiveOutputPath=$(_CohesionImageArchiveSink);ContainerBaseImage=$(_CohesionImageBase);ContainerImageTags=$(Version);ContainerImageTag=;PublishProfile=;WebPublishMethod=;_CohesionImageBuild=true;CohesionImageManifestPath=$(_CohesionImageFullPath);CohesionContainerArchiveOutputPath=$(_CohesionArchiveFullPath);CohesionContainerRepository=$(CohesionContainerRepository);CohesionContainerBaseImage=$(_CohesionImageBase);CohesionContainerPush=$(CohesionContainerPush);CohesionImageAot=$(CohesionImageAot);Version=$(Version)</_CohesionImageProperties>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="CohesionPublishImage" DependsOnTargets="_CohesionResolveImage;$(CohesionBuildResourceContainersDependsOn)" Returns="@(_CohesionPublishedImage)">
+    <ItemGroup><_CohesionPublishedImage Include="$(_CohesionImageFullPath)" ProjectFullPath="$(MSBuildProjectFullPath)" /></ItemGroup>
+  </Target>
+
+  <Target Name="_CohesionPublishResourceImage">
+    <!-- dotnet publish restores with the same global properties in a fresh evaluation, including after an outer host-RID publish. -->
+    <CohesionForwardImagePublish InContainer="$(_CohesionImageForward)" Configuration="$(Configuration)" ProjectPath="$(MSBuildProjectFullPath)" Properties="$(_CohesionImageProperties)" />
+  </Target>
+
+  <Target Name="_CohesionPrepareImagePayload" BeforeTargets="Publish" Condition="'$(_CohesionImageBuild)' == 'true'">
+    <ItemGroup>
+      <ContainerLabel Include="org.cohesion.resource" Value="$(_CohesionResolvedResourceName)" />
+      <ContainerLabel Include="org.cohesion.kind" Value="$(_CohesionResolvedResourceKind)" />
+      <ContainerPort Include="%(CohesionEndpoint.ContainerPort)" Type="%(CohesionEndpoint.Protocol)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="_CohesionCheckImageFreshness" DependsOnTargets="Publish" Condition="'$(_CohesionImageBuild)' == 'true'">
+    <ItemGroup>
+      <_CohesionImageInput Include="@(ResolvedFileToPublish);$(CohesionResourceManifestPath);$(MSBuildProjectFullPath);$(MSBuildAllProjects)" />
+    </ItemGroup>
+    <CohesionImageFingerprint Files="@(_CohesionImageInput)" ImagePath="$(CohesionImageManifestPath)"
+      Options="$(Configuration)|$(RuntimeIdentifier)|$(PublishAot)|$(SelfContained)|$(ContainerRepository)|$(ContainerRegistry)|$(ContainerArchiveOutputPath)|$(ContainerBaseImage)|$(ContainerImageTags)|$(ContainerImageFormat)|$(ContainerUser)|$(ContainerWorkingDirectory)|@(ContainerLabel->'%(Identity)=%(Value)')|@(ContainerPort->'%(Identity)/%(Type)')|@(ContainerEnvironmentVariable->'%(Identity)=%(Value)')|@(ContainerEntrypoint)|@(ContainerEntrypointArgs)|@(ContainerAppCommand)|@(ContainerAppCommandArgs)|@(ContainerDefaultArgs)">
+      <Output TaskParameter="Fingerprint" PropertyName="_CohesionImageInputHash" />
+      <Output TaskParameter="IsCurrent" PropertyName="_CohesionImageIsCurrent" />
+    </CohesionImageFingerprint>
+  </Target>
+
+  <Target Name="_CohesionPublishImagePayload" DependsOnTargets="_CohesionCheckImageFreshness">
+    <Message Condition="'$(_CohesionImageIsCurrent)' == 'true'" Importance="High" Text="Cohesion image is current; skipping CreateNewImage (Rebuild)." />
+    <!-- One call, one sink, one shipped digest. Never republish to create a second sink. -->
+    <CallTarget Condition="'$(_CohesionImageIsCurrent)' != 'true'" Targets="PublishContainer" />
+  </Target>
+
+  <Target Name="_CohesionRecordPublishedImage" AfterTargets="_PublishSingleContainer" Condition="'$(_CohesionImageBuild)' == 'true'">
+    <CohesionVerifyImageDigest Digest="$(GeneratedContainerDigest)" ArchivePath="$(ContainerArchiveOutputPath)" RegistryDigest="$(GeneratedContainerDigest)" />
+    <CohesionWriteImageIndex OutputPath="$(CohesionImageManifestPath)" Resource="$(_CohesionResolvedResourceName)" Repository="$(ContainerRepository)"
+      Registry="$(ContainerRegistry)" Tag="$(Version)" Digest="$(GeneratedContainerDigest)" Aot="$(PublishAot)" BaseImage="$(ContainerBaseImage)" ArchivePath="$(ContainerArchiveOutputPath)" Fingerprint="$(_CohesionImageInputHash)" />
+  </Target>
+</Project>

@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<PackageId>Assimalign.Cohesion.Sdk.Database</PackageId>
+		<OutDir>$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Tasks</OutDir>
+		<!-- The Database root currently exposes its schema contract as preview API. -->
+		<EnablePreviewFeatures>true</EnablePreviewFeatures>
+		<IsAotCompatible>true</IsAotCompatible>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.Build" ExcludeAssets="runtime" />
+		<CohesionPackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" />
+		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" ExcludeAssets="runtime" />
+		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+	</ItemGroup>
+</Project>

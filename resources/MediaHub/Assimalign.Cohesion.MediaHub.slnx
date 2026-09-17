@@ -7,21 +7,56 @@
 	<Folder Name="/MediaHub/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub/" />
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub/docs/">
+		<File Path="Assimalign.Cohesion.MediaHub/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.MediaHub/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub/docs/Assembly/Assimalign.Cohesion.MediaHub/IMediaHubApplication/">
+		<File Path="Assimalign.Cohesion.MediaHub/docs/Assembly/Assimalign.Cohesion.MediaHub/IMediaHubApplication/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub/docs/Assembly/Assimalign.Cohesion.MediaHub/IMediaHubApplicationBuilder/">
+		<File Path="Assimalign.Cohesion.MediaHub/docs/Assembly/Assimalign.Cohesion.MediaHub/IMediaHubApplicationBuilder/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub/src/">
 		<Project Path="Assimalign.Cohesion.MediaHub/src/Assimalign.Cohesion.MediaHub.csproj" />
 	</Folder>
-	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/" />
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/">
+		<File Path="Assimalign.Cohesion.MediaHub.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/docs/">
 		<File Path="Assimalign.Cohesion.MediaHub.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.MediaHub.Hosting/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/docs/Assembly/Assimalign.Cohesion.MediaHub.Hosting/MediaHubApplication/">
+		<File Path="Assimalign.Cohesion.MediaHub.Hosting/docs/Assembly/Assimalign.Cohesion.MediaHub.Hosting/MediaHubApplication/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.MediaHub.Hosting/src/Assimalign.Cohesion.MediaHub.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/tests/">
+		<Project Path="Assimalign.Cohesion.MediaHub.Hosting/tests/Assimalign.Cohesion.MediaHub.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/MediaHub/refs/" >
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/">
+		<File Path="Assimalign.Cohesion.MediaHub.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/docs/">
+		<File Path="Assimalign.Cohesion.MediaHub.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.MediaHub.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/src/">
+		<Project Path="Assimalign.Cohesion.MediaHub.ApplicationModel/src/Assimalign.Cohesion.MediaHub.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/tests/">
+		<Project Path="Assimalign.Cohesion.MediaHub.ApplicationModel/tests/Assimalign.Cohesion.MediaHub.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.MediaHub.ApplicationModel/">
+		<File Path="Assimalign.Cohesion.MediaHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.MediaHub.ApplicationModel/OVERVIEW.md" />
 	</Folder>
 </Solution>

@@ -16,4 +16,6 @@
 	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
 		<FrameworkReference Include="Assimalign.Cohesion.App.SecretStore" />
 	</ItemGroup>
+
+	<Import Project="..\Targets\Sdk.SecretStore.props" />
 </Project>

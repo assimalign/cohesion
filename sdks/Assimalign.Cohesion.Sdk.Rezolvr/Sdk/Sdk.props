@@ -16,4 +16,6 @@
 	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
 		<FrameworkReference Include="Assimalign.Cohesion.App.Rezolvr" />
 	</ItemGroup>
+
+	<Import Project="..\Targets\Sdk.Rezolvr.props" />
 </Project>

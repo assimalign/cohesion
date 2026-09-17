@@ -1,0 +1,30 @@
+<Project>
+  <UsingTask TaskName="Assimalign.Cohesion.Sdk.Gateway.Tasks.CohesionGatherImageIndexes" AssemblyFile="../Tasks/Assimalign.Cohesion.Sdk.Gateway.Tasks.dll" Runtime="NET" />
+  <Target Name="CohesionPublishImages" DependsOnTargets="CohesionResolveResourceReferences" Returns="@(_CohesionApplicationImageIndex)">
+    <ItemGroup>
+      <_CohesionImageGateway Include="$(CohesionGateways)" />
+      <_CohesionImageOtherGateway Include="@(_CohesionImageGateway)" Condition="'%(_CohesionImageGateway.Identity)' != 'InProcess'" />
+      <_CohesionImageProjectCandidate Include="@(_CohesionResourceProjectReference->'%(FullPath)');@(_CohesionReferencedManifest->'%(ProjectFullPath)')" Exclude="$(MSBuildProjectFullPath)" />
+    </ItemGroup>
+    <RemoveDuplicates Inputs="@(_CohesionImageProjectCandidate)">
+      <Output TaskParameter="Filtered" ItemName="_CohesionImageProjects" />
+    </RemoveDuplicates>
+    <PropertyGroup>
+      <!-- Selected/active alone is insufficient: mixed sets need an ArtifactRef.Self entry per member. -->
+      <_CohesionGatewayOnlyInProcess>false</_CohesionGatewayOnlyInProcess>
+      <_CohesionGatewayOnlyInProcess Condition="'$(_CohesionGatewayInProcessActive)' == 'true' and '@(_CohesionImageOtherGateway)' == ''">true</_CohesionGatewayOnlyInProcess>
+    </PropertyGroup>
+    <MSBuild Projects="@(_CohesionImageProjects)" Targets="CohesionPublishImage" BuildInParallel="false"
+      RemoveProperties="OutDir;PublishDir;CohesionImageManifestPath;CohesionContainerArchiveOutputPath;CohesionContainerRepository;PublishAot;RuntimeIdentifier;SelfContained"
+      Condition="'$(_CohesionGatewayOnlyInProcess)' != 'true' and '@(_CohesionImageProjects)' != ''">
+      <Output TaskParameter="TargetOutputs" ItemName="_CohesionMemberImages" />
+    </MSBuild>
+    <CallTarget Targets="CohesionPublishImage" Condition="'$(_CohesionGatewayInProcessActive)' == 'true'">
+      <Output TaskParameter="TargetOutputs" ItemName="_CohesionCompositeImage" />
+    </CallTarget>
+    <CohesionGatherImageIndexes Application="$(CohesionApplicationName)" OutputPath="$(PublishDir)application.images.json" ProjectDirectory="$(MSBuildProjectDirectory)"
+      ResourceReferences="@(CohesionResourceReference)" ProjectImages="@(_CohesionMemberImages)"
+      PackageManifests="@(CohesionResourceManifest->WithMetadataValue('IsSelf', 'false'))" CompositeImage="@(_CohesionCompositeImage)" OnlyComposite="$(_CohesionGatewayOnlyInProcess)" />
+    <ItemGroup><_CohesionApplicationImageIndex Include="$(PublishDir)application.images.json" /></ItemGroup>
+  </Target>
+</Project>

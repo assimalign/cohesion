@@ -22,9 +22,12 @@ public interface IWebApplicationContext
     IEnumerable <IWebApplicationMiddleware> Middleware { get; }
 
     /// <summary>
-    /// A collection of servers that are hosting the web application. This allows for multiple servers to be used for 
-    /// load balancing or other purposes, and provides a way to access information about each server, such as its configuration and status.
+    /// Gets the application servers in lifecycle registration order.
     /// </summary>
+    /// <remarks>
+    /// The collection exposes the original Web server instances even when the Hosting runtime
+    /// uses an internal adapter to participate in its host lifecycle.
+    /// </remarks>
     IEnumerable<IWebApplicationServer> Servers { get; }
 
     /// <summary>

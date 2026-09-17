@@ -1,0 +1,18 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.LogSpace">
+  <!-- The platform telemetry sink: an ordinary executable whose Program.cs composes ingestion, storage and query in C#.
+       Resources emit through *.Hosting when COHESION_TELEMETRY_ENDPOINT is set.
+       Sdk.LogSpace defaults: endpoint `otlp` (https 4318, private), endpoint `query` (https 8443, private), mount `data` (Volume, 10Gi), StatefulSet. -->
+  <PropertyGroup>
+    <CohesionResourceName>platform-logspace</CohesionResourceName>
+    <!-- Opt-in to orchestration. Enabled: Sdk.LogSpace generates resource.json (the manifest), Resource.g.cs (typed accessors:
+         Resource.Endpoints/Mounts/Settings/References over the ambient ResourceContext) and ResourceControlPlane.g.cs (the
+         LogSpace default control plane — readiness, health, observed endpoints, stop, LogSpace commands — owned by
+         LogSpace.ApplicationModel). Disabled (the default): a plain executable that no gateway can reference. -->
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionSetting Include="LogSpace:Retention" Type="TimeSpan" Default="30.00:00:00" />
+    <CohesionMount Update="data" Size="200Gi" />                                <!-- overrides the Sdk.LogSpace 10Gi default; a manifest fact the gateway's plan turns into a volume claim -->
+    <CohesionResourceReference Include="..\Example.Platform.SecretStore\Example.Platform.SecretStore.csproj" />
+  </ItemGroup>
+</Project>

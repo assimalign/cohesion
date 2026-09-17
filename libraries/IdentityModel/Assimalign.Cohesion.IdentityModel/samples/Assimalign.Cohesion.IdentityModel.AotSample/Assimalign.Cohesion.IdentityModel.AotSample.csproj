@@ -9,10 +9,10 @@
         compilation while exercising the family surfaces; (2) point-in-time — the project is
         published with PublishAot and RUN to record the evidence the family docs reference:
 
-            dotnet publish libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/samples/Assimalign.Cohesion.IdentityModel.AotSample/Assimalign.Cohesion.IdentityModel.AotSample.csproj -c Release -r win-x64
+            dotnet publish libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/samples/Assimalign.Cohesion.IdentityModel.AotSample/Assimalign.Cohesion.IdentityModel.AotSample.csproj -c Release -r win-arm64
 
-        (On LongPathsEnabled=0 machines, run from a short path — the main checkout or a
-        subst-mapped drive — because ILC intermediate paths are long.)
+        (Use the publishing host's RID. On LongPathsEnabled=0 machines, run from a short path —
+        the main checkout or a subst-mapped drive — because ILC intermediate paths are long.)
     -->
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>

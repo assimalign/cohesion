@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Example.AppB.Api": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "COHESION_ENVIRONMENT": "Local"
+      }
+    }
+  }
+}

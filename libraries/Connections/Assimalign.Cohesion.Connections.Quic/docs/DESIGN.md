@@ -21,7 +21,7 @@ correct for the protocols that run over it.
 
 | Type | Visibility | Role |
 | --- | --- | --- |
-| `QuicConnectionListener` | `public sealed` | Binds a `QuicListener`; `AcceptAsync` yields server-side connections. Created via async `CreateAsync` (binding is inherently async — no constructor). |
+| `QuicConnectionListener` | `public sealed` | Constructed unbound from options; async `BindAsync` acquires the endpoint and `AcceptAsync` yields server-side connections. `CreateAsync` remains the construct-and-bind convenience. |
 | `QuicConnectionFactory` | `public sealed` | Dials outbound connections; `ConnectAsync` yields client-side connections. |
 | `QuicConnectionListenerOptions` / `QuicConnectionFactoryOptions` | `public sealed` | Endpoint, TLS/ALPN, stream limits, pipe buffer sizes, default error codes. Both default ALPN to HTTP/3 (see "Error model"). |
 | `QuicMultiplexedConnection` | `public sealed` | One QUIC connection; `AcceptStreamAsync` / `OpenStreamAsync` surface streams as `Connection`s and track them for teardown. |
@@ -57,6 +57,10 @@ it, then immediately fall back to the `IMultiplexedConnection` /
 
 Connections are live when produced; there is no separate open step.
 Teardown has two paths:
+
+The listener itself has an explicit lifecycle: construction captures configuration without opening a
+socket, `BindAsync` asynchronously acquires the endpoint and is idempotent while active, and
+`DisposeAsync` releases the endpoint terminally. Restart creates a new listener.
 
 - **`DisposeAsync` (graceful)** — wire-visible ordering is load-bearing:
   1. **Bidirectional streams complete first.** Their write halves carry

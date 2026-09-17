@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <PackAsTool>true</PackAsTool>
+        <ToolCommandName>cohesion</ToolCommandName>
+        <PackageId>Assimalign.Cohesion.Cli</PackageId>
+        <IsAotCompatible>true</IsAotCompatible>
+        <RootNamespace>Assimalign.Cohesion.Cli</RootNamespace>
+        <Description>Thin command-line wrappers for Cohesion applications and developer workflows.</Description>
+    </PropertyGroup>
+    <ItemGroup>
+        <CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
+        <InternalsVisibleTo Include="Assimalign.Cohesion.Cli.Tests" />
+    </ItemGroup>
+</Project>

@@ -21,6 +21,12 @@ internal sealed class RecordingStateManager : IApplicationResourceStateManager
 
     public event EventHandler<ResourceStateChangedEventArgs>? StateChanged;
 
+    public IReadOnlyList<ResourceCommandObservation> GetCommandObservations(ResourceId id) => [];
+
+    public void SetCommandObservation(ResourceId id, ResourceCommandObservation observation) { }
+
+    public void RemoveCommandObservation(ResourceId id, string owner, string commandId) { }
+
     public ResourceLifecycle GetState(ResourceId id)
     {
         lock (_gate)

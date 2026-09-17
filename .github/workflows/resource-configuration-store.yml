@@ -15,7 +15,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: [
-            'Assimalign.Cohesion.ConfigurationStore'
+            'Assimalign.Cohesion.ConfigurationStore',
+            'Assimalign.Cohesion.ConfigurationStore.ApplicationModel',
+            'Assimalign.Cohesion.ConfigurationStore.Client',
+            'Assimalign.Cohesion.ConfigurationStore.Hosting'
         ]
     steps:
       - uses: actions/checkout@v4

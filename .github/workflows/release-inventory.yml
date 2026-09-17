@@ -7,26 +7,46 @@
 # six weeks ago and never added it to the inventory.
 #
 # So it runs here too, on the pull request that causes the drift. No SDK, no restore: the guard
-# reads csproj and workflow files as text, so the whole job is a checkout and one pwsh call.
+# reads csproj and workflow files as text, so the job stays checkout plus PowerShell-only checks.
+#
+# The generated dependency graph (docs/DEPENDENCIES.md) is checked in the same job for the same
+# reason and off the same trigger set: it is derived from the csprojs by a text-only read, and the
+# moment to catch a stale copy is the change that added or removed the reference.
 name: Release Inventory
 
 on:
   push:
     paths:
+      - '.github/actions/**'
       - '.github/workflows/*.yml'
       - 'installer/scripts/**'
-      - 'libraries/**/*.csproj'
-      - 'resources/**/*.csproj'
-      - 'sdks/**/*.csproj'
-      - 'frameworks/**/*.csproj'
+      - 'Directory.Build.props'
+      - 'libraries/**'
+      - 'resources/**'
+      - 'sdks/**'
+      - 'frameworks/**'
+      - 'analyzers/**'
+      - 'tooling/**'
+      - 'extensions/**'
+      - 'build/scripts/**'
+      - 'samples/**'
+      - 'docs/DEPENDENCIES.md'
   pull_request:
     paths:
+      - '.github/actions/**'
       - '.github/workflows/*.yml'
       - 'installer/scripts/**'
-      - 'libraries/**/*.csproj'
-      - 'resources/**/*.csproj'
-      - 'sdks/**/*.csproj'
-      - 'frameworks/**/*.csproj'
+      - 'Directory.Build.props'
+      - 'libraries/**'
+      - 'resources/**'
+      - 'sdks/**'
+      - 'frameworks/**'
+      - 'analyzers/**'
+      - 'tooling/**'
+      - 'extensions/**'
+      - 'build/scripts/**'
+      - 'samples/**'
+      - 'docs/DEPENDENCIES.md'
   workflow_dispatch:
 
 permissions:
@@ -41,6 +61,19 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Test release packaging policy
+        shell: pwsh
+        run: Invoke-Pester ./installer/scripts/modules/tests -CI
+
+      - name: Assert the dependency graph matches the project files
+        shell: pwsh
+        run: |
+          # docs/DEPENDENCIES.md is generated from the csprojs. -Check regenerates in memory and
+          # fails when the committed copy disagrees, so a reference added or removed without
+          # rerunning the generator is a red pull request rather than a silently stale document.
+          # Rule: .claude/rules/documentation.md, "The dependency graph is generated".
+          ./build/scripts/Update-CohesionDependencyGraph.ps1 -Check
 
       - name: Assert the inventory matches the repository and CI
         shell: pwsh

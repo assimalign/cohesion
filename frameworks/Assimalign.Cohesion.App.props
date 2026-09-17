@@ -95,10 +95,19 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Physical" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.IsolatedStorage" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.FileSystem.Aggregate" />
+        <!-- Opt-in resource SDKs emit Hosting.Resources runtime calls from the shared
+             base generator, so both resource siblings travel with Hosting in the base
+             ref/runtime inventory. Generic area hosting uses these contracts for its
+             registered control plane and readiness contribution. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting.Health" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting.Resources" />
+        <!-- The telemetry sibling travels with base App for every runtime composition root, outside guarded ApplicationModel closures. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Hosting.Telemetry" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Debug" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Logging.Console" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenTelemetry" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectPool" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ObjectValidation" />
@@ -128,12 +137,6 @@
         <CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration" />
         <!-- Projects [assembly: ComponentIntegration] declarations into consuming-compilation extension verbs. -->
         <CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
-
-        <!-- WIP / not yet building - uncomment as each library comes online:
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApplicationModel" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.OpenTelemetry" />
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Security" />
-        -->
     </ItemGroup>
 
     <!-- ================================================================
@@ -148,7 +151,8 @@
          (Web-area dependency rule: resources/Web/README.md).
 
          Exclusions: Web.Testing (test harness, not runtime) and
-         Web.ApplicationModel (awaiting its Phase-4 rebuild; no sources).
+         Web.ApplicationModel (NuGet-only; Sdk.Web injects it only for an
+         orchestration-enabled executable).
          ================================================================ -->
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Web'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Web" />
@@ -171,6 +175,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Health" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.HostFiltering" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting.Health" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.HttpsPolicy" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.ProblemDetails" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Query" />
@@ -271,29 +277,20 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Catalog" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Client" />
 
-        <!-- Orchestration manifest (declarative plane; references no runtime). -->
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.ApplicationModel" />
-
-        <!-- Outside-area transitive dependency the base App framework does not yet
-             carry: the manifest's public surface (AddDatabase, DatabaseResource) exposes
-             ApplicationModel types, so it must be on the Ref pack or consumers hit CS0012.
-             When ApplicationModel graduates into the base App framework (it is WIP-
-             commented there), remove it here to avoid double delivery. Connections/
-             Hosting/Core the server, client, and host close over are already delivered
-             by the base App framework. -->
-        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApplicationModel" />
-
         <!--
             Deliberately EXCLUDED from the MVP framework:
-            - Database.Application - the standalone host EXECUTABLE (the artifact
-              DatabaseResource declares). Frameworks deliver libraries to
-              applications; the executable ships as a deployment artifact
-              (published binary / container image), never through a framework.
+            - Database.Testing - the packaged resource-program test harness. It
+              drives Database.Hosting under a test-scoped ResourceContext but is
+              tooling for tests, never part of an application's runtime closure.
+            - Database.SampleHost - the non-packable real-process E2E resource
+              executable under the repository-root samples/ tree; never shipped.
             - The Documents/Graph/Blob/Cache model families - engine scaffolds
               without shipping surface yet. (KeyValuePair graduated into the
               shipping set 2026-07-14; its still-source-less satellites -
               KeyValuePair.Replication and KeyValuePair.Security - stay excluded
               until they ship.)
+            - Database.ApplicationModel - NuGet-only orchestration and default-control-plane
+              package, injected by Sdk.Database only when CohesionApplicationModel=enabled.
             - Database.Memory - empty in-memory-strategy placeholder (no sources).
             - Database.Replication, Database.Sql.Replication, Database.Sql.Security
               - post-MVP contracts-only/empty shells (replication / #177). Add each
@@ -304,12 +301,25 @@
             pack but NOT listed on its Ref pack - consumers of Sdk.Database never
             see these in IntelliSense, but the host resolves them at run time.
 
-            Pairs with <CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
-            in resources/Database/.../Assimalign.Cohesion.Database.csproj: the library
-            uses Web internally without exposing it in its .nupkg's .nuspec, and the
-            framework Runtime pack carries Web.dll so the host can resolve it.
+            Pairs with the Database area's private Web references: the runtime pack
+            carries the HTTP control-plane implementation without exposing it through
+            the Database reference pack.
         -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Health" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Health" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Routing" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
     </ItemGroup>
 
     <!-- ================================================================
@@ -321,81 +331,328 @@
          ================================================================ -->
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.ApiManager'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.ApiManager" />
-        <!-- Add resources/ApiManager/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApiManager" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApiManager.Hosting" />
+
+        <!-- ApiManager.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.ConfigurationStore'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.ConfigurationStore" />
-        <!-- Add resources/ConfigurationStore/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ConfigurationStore" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ConfigurationStore.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.EmailHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.EmailHub" />
-        <!-- Add resources/EmailHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EmailHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EmailHub.Hosting" />
+
+        <!-- EmailHub.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.EventHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.EventHub" />
-        <!-- Add resources/EventHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EventHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EventHub.Hosting" />
+
+        <!-- EventHub.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.IdentityHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.IdentityHub" />
-        <!-- Add resources/IdentityHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub.Models" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel" />
+
+        <!-- IdentityHub.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Forms" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.IoTHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.IoTHub" />
-        <!-- Add resources/IoTHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IoTHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IoTHub.Hosting" />
+
+        <!-- IoTHub.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.LoadBalancer'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.LoadBalancer" />
-        <!-- Add resources/LoadBalancer/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LoadBalancer" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LoadBalancer.Hosting" />
+
+        <!-- LoadBalancer.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.LogSpace'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.LogSpace" />
-        <!-- Add resources/LogSpace/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LogSpace" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LogSpace.Hosting" />
+
+        <!-- LogSpace.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.MediaHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.MediaHub" />
-        <!-- Add resources/MediaHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MediaHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MediaHub.Hosting" />
+
+        <!-- MediaHub.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.MessageHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.MessageHub" />
-        <!-- Add resources/MessageHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MessageHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MessageHub.Hosting" />
+
+        <!-- MessageHub.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.NatGateway'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.NatGateway" />
-        <!-- Add resources/NatGateway/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NatGateway" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NatGateway.Hosting" />
+
+        <!-- NatGateway.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.NotificationHub'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.NotificationHub" />
-        <!-- Add resources/NotificationHub/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NotificationHub" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NotificationHub.Hosting" />
+
+        <!-- NotificationHub.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Rezolvr'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Rezolvr" />
-        <!-- Add resources/Rezolvr/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Rezolvr" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Rezolvr.Hosting" />
+
+        <!-- Rezolvr.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Scheduler'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Scheduler" />
-        <!-- Add resources/Scheduler/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Cron" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Timer" />
+
+        <!-- Scheduler.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.SecretStore'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.SecretStore" />
-        <!-- Add resources/SecretStore/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.SecretStore" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.SecretStore.Hosting" />
+
+        <!-- SecretStore.ApplicationModel is NuGet-only and is injected by Sdk.SecretStore
+             for orchestration-enabled executables, matching the signed section 2 contract. -->
+
+        <!-- SecretStore.Hosting serves its private HTTP/TLS control plane and verifies
+             bootstrap JWTs without exposing those implementation types in the area ref pack. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Security.DataProtection" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.VpnGateway'">
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.VpnGateway" />
-        <!-- Add resources/VpnGateway/* projects here as they come online. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.VpnGateway" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.VpnGateway.Hosting" />
+
+        <!-- VpnGateway.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
     </ItemGroup>
 </Project>

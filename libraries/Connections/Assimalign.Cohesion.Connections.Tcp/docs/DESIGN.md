@@ -30,17 +30,22 @@ pool block size, IO-queue schedulers, read/write buffer thresholds) comes from
 
 ## Endpoint Handling (the bind switch)
 
-`TcpConnectionListener` binds lazily on the first `AcceptAsync`, and the endpoint form selects the bind
-strategy:
+`TcpConnectionListener.BindAsync` acquires the endpoint explicitly and is idempotent while the listener
+is active. `AcceptAsync` invokes it when necessary for backward compatibility, but hosts bind before
+starting accept loops so startup does not complete until the endpoint is owned. The endpoint form
+selects the bind strategy:
 
 | Endpoint | Socket | Bind behavior |
 |---|---|---|
 | `IPEndPoint` | `Stream`/`Tcp`, `DualMode` when `IPv6Any` | `Bind` + `Listen` |
+| `DnsEndPoint` | `Stream`/`Tcp`, IPv4 or dual-mode IPv6 selected by the platform | Factory-only: resolve and connect |
 | `UnixDomainSocketEndPoint` | `Stream`/`Unspecified` | delete stale socket file → `Bind` + `Listen` |
 | `FileHandleEndPoint` | adopt the inherited descriptor | **no** `Bind`/`Listen` — already listening |
 
 The factory (`TcpConnectionFactory`) uses the same switch to construct the outbound socket, then
-`ConnectAsync`.
+`ConnectAsync`. A `DnsEndPoint` has `AddressFamily.Unspecified`; its factory branch therefore uses the
+address-family-selecting socket constructor so DNS names and socket-facing URI hosts can resolve to
+IPv4 or IPv6 without attempting to construct an unspecified-family socket.
 
 ### Unix domain socket file lifecycle
 
@@ -96,7 +101,8 @@ transport security) are identical for both families — only the protocol identi
 - Socket reset/abort conditions are classified by `SocketHelper` and surfaced through the
   `ConnectionException` family (`ConnectionResetException` for resets) so consumers catch one hierarchy.
 - The listener tracks live accepted connections and disposes them on `DisposeAsync`, then disposes its
-  per-IO-queue pipe options.
+  per-IO-queue pipe options. Disposal also releases the listening endpoint and is terminal; restart uses
+  a newly constructed listener.
 
 ## AOT Posture
 

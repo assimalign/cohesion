@@ -4,6 +4,42 @@ The connection layer of the Cohesion networking stack: the contracts for accepti
 establishing, layering, and using network connections, plus the concrete drivers that implement
 them.
 
+## Project map
+
+An arrow means "references": `Connections.Tcp --> Connections` reads
+`Assimalign.Cohesion.Connections.Tcp` references `Assimalign.Cohesion.Connections`.
+
+```mermaid
+flowchart LR
+    P0["Connections — area root"]
+    P1["Connections.InMemory"]
+    P2["Connections.NamedPipes"]
+    P3["Connections.Quic"]
+    P4["Connections.Security"]
+    P5["Connections.Tcp"]
+    P6["Connections.Udp"]
+    CORE["Assimalign.Cohesion.Core — L1"]
+    P0 --> CORE
+    P1 --> P0
+    P1 --> CORE
+    P2 --> P0
+    P2 --> CORE
+    P3 --> P0
+    P3 --> CORE
+    P4 --> P0
+    P4 --> CORE
+    P5 --> P0
+    P5 --> CORE
+    P6 --> P0
+    P6 --> CORE
+```
+
+Solid edges are the references this area permits; the dependency arrow always points from the
+consumer to what it consumes.
+
+The full reference graph for every Cohesion assembly, including the exact external dependencies
+collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
+
 ## Purpose
 
 Everything that produces or consumes a network byte channel goes through this area. The
@@ -31,6 +67,10 @@ This area is the lowest networking layer (L1 in the repo's layering model): it d
 by protocol identity. Direction is structural — servers hold listeners, clients hold factories —
 and connection transformations compose at establishment via `listener.Use(layer)` /
 `factory.Use(layer)`.
+
+Listeners acquire their configured endpoints explicitly through `BindAsync`. Binding is idempotent
+while a listener is active; `DisposeAsync` releases the endpoint and terminally ends that listener
+instance. A later host start creates and binds a new listener rather than reusing a disposed one.
 
 ## Dependencies
 

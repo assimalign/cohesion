@@ -2,11 +2,13 @@
 	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector"/>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
 	</ItemGroup>
 	<ItemGroup>
-		<Using Include="Xunit" />
+		<None Update="Fixtures\plans\*.json" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 </Project>

@@ -16,7 +16,9 @@
 	<Folder Name="/resources/ApiManager/Assimalign.Cohesion.ApiManager/src/">
 		<Project Path="ApiManager/Assimalign.Cohesion.ApiManager/src/Assimalign.Cohesion.ApiManager.csproj" />
 	</Folder>
-	<Folder Name="/resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/" />
+	<Folder Name="/resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/">
+		<File Path="ApiManager/Assimalign.Cohesion.ApiManager.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/docs/">
 		<File Path="ApiManager/Assimalign.Cohesion.ApiManager.Hosting/docs/DESIGN.md" />
 		<File Path="ApiManager/Assimalign.Cohesion.ApiManager.Hosting/docs/OVERVIEW.md" />
@@ -37,6 +39,43 @@
 	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/tests/">
 		<Project Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/tests/Assimalign.Cohesion.ConfigurationStore.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/">
+		<File Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/src/">
+		<Project Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/src/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/tests/">
+		<Project Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/tests/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/">
+		<File Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/README.md" />
+	</Folder>
+	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/docs/">
+		<File Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/docs/DESIGN.md" />
+		<File Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.Client/">
+		<File Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.Client/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.Client/ClientCredential/">
+		<File Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.Client/ClientCredential/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.Client/ConfigurationStoreClient/">
+		<File Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.Client/ConfigurationStoreClient/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.Client/IConfigurationStoreClient/">
+		<File Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.Client/IConfigurationStoreClient/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.Client/ResourceCommand/">
+		<File Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.Client/ResourceCommand/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/src/">
+		<Project Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/src/Assimalign.Cohesion.ConfigurationStore.Client.csproj" />
+	</Folder>
+	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/tests/">
+		<Project Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/tests/Assimalign.Cohesion.ConfigurationStore.Client.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/" />
 	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/docs/">
 		<File Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/docs/DESIGN.md" />
@@ -46,11 +85,10 @@
 		<Project Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/src/Assimalign.Cohesion.ConfigurationStore.Hosting.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/">
-		<File Path="Database/DESIGN.md" />
+		<File Path="../docs/resources/Database/DESIGN.md" />
 		<File Path="Database/Directory.Build.props" />
 		<File Path="Database/Directory.Build.targets" />
 		<File Path="Database/README.md" />
-		<File Path="Database/solution.ps1" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database/docs/">
@@ -60,16 +98,8 @@
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database/src/Assimalign.Cohesion.Database.csproj" />
 	</Folder>
-	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Application/" />
-	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Application/docs/">
-		<File Path="Database/Assimalign.Cohesion.Database.Application/docs/DESIGN.md" />
-		<File Path="Database/Assimalign.Cohesion.Database.Application/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Application/src/">
-		<Project Path="Database/Assimalign.Cohesion.Database.Application/src/Assimalign.Cohesion.Database.Application.csproj" />
-	</Folder>
-	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Application/tests/">
-		<Project Path="Database/Assimalign.Cohesion.Database.Application/tests/Assimalign.Cohesion.Database.Application.Tests.csproj" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database/tests/Assimalign.Cohesion.Database.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.ApplicationModel/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.ApplicationModel/docs/">
@@ -81,6 +111,20 @@
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.ApplicationModel/tests/">
 		<Project Path="Database/Assimalign.Cohesion.Database.ApplicationModel/tests/Assimalign.Cohesion.Database.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Testing/">
+		<File Path="Database/Assimalign.Cohesion.Database.Testing/README.md" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Testing/docs/">
+		<File Path="Database/Assimalign.Cohesion.Database.Testing/docs/DESIGN.md" />
+		<File Path="Database/Assimalign.Cohesion.Database.Testing/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Testing/src/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Testing/src/Assimalign.Cohesion.Database.Testing.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Testing/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Testing/tests/Assimalign.Cohesion.Database.Testing.Tests.csproj" />
+		<Project Path="Database/Assimalign.Cohesion.Database.Testing/tests/Assimalign.Cohesion.Database.Testing.TestHost.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Blob/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Blob/src/">
@@ -544,7 +588,9 @@
 	<Folder Name="/resources/EmailHub/Assimalign.Cohesion.EmailHub/tests/">
 		<Project Path="EmailHub/Assimalign.Cohesion.EmailHub/tests/Assimalign.Cohesion.EmailHub.Tests.csproj" />
 	</Folder>
-	<Folder Name="/resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting/" />
+	<Folder Name="/resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting/">
+		<File Path="EmailHub/Assimalign.Cohesion.EmailHub.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting/docs/">
 		<File Path="EmailHub/Assimalign.Cohesion.EmailHub.Hosting/docs/DESIGN.md" />
 		<File Path="EmailHub/Assimalign.Cohesion.EmailHub.Hosting/docs/OVERVIEW.md" />
@@ -560,7 +606,9 @@
 	<Folder Name="/resources/EventHub/Assimalign.Cohesion.EventHub/src/">
 		<Project Path="EventHub/Assimalign.Cohesion.EventHub/src/Assimalign.Cohesion.EventHub.csproj" />
 	</Folder>
-	<Folder Name="/resources/EventHub/Assimalign.Cohesion.EventHub.Hosting/" />
+	<Folder Name="/resources/EventHub/Assimalign.Cohesion.EventHub.Hosting/">
+		<File Path="EventHub/Assimalign.Cohesion.EventHub.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/resources/EventHub/Assimalign.Cohesion.EventHub.Hosting/docs/">
 		<File Path="EventHub/Assimalign.Cohesion.EventHub.Hosting/docs/DESIGN.md" />
 		<File Path="EventHub/Assimalign.Cohesion.EventHub.Hosting/docs/OVERVIEW.md" />
@@ -577,8 +625,27 @@
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/">
 		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub/docs/DESIGN.md" />
 	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/Assembly/Assimalign.Cohesion.IdentityHub/IdentityHubClientOptions/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub/docs/Assembly/Assimalign.Cohesion.IdentityHub/IdentityHubClientOptions/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub/src/">
 		<Project Path="IdentityHub/Assimalign.Cohesion.IdentityHub/src/Assimalign.Cohesion.IdentityHub.csproj" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/DESIGN.md" />
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/src/">
+		<Project Path="IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/src/Assimalign.Cohesion.IdentityHub.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/tests/">
+		<Project Path="IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/tests/Assimalign.Cohesion.IdentityHub.ApplicationModel.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/" />
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/docs/">
@@ -588,9 +655,19 @@
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/src/">
 		<Project Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/src/Assimalign.Cohesion.IdentityHub.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/tests/">
+		<Project Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/tests/Assimalign.Cohesion.IdentityHub.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/" />
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/docs/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Models/docs/DESIGN.md" />
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Models/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/src/">
 		<Project Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Models/src/Assimalign.Cohesion.IdentityHub.Models.csproj" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/tests/">
+		<Project Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Models/tests/Assimalign.Cohesion.IdentityHub.Models.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/IoTHub/">
 		<File Path="IoTHub/Directory.Build.props" />
@@ -600,7 +677,9 @@
 	<Folder Name="/resources/IoTHub/Assimalign.Cohesion.IoTHub/src/">
 		<Project Path="IoTHub/Assimalign.Cohesion.IoTHub/src/Assimalign.Cohesion.IoTHub.csproj" />
 	</Folder>
-	<Folder Name="/resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/" />
+	<Folder Name="/resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/">
+		<File Path="IoTHub/Assimalign.Cohesion.IoTHub.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting/docs/">
 		<File Path="IoTHub/Assimalign.Cohesion.IoTHub.Hosting/docs/DESIGN.md" />
 		<File Path="IoTHub/Assimalign.Cohesion.IoTHub.Hosting/docs/OVERVIEW.md" />
@@ -616,7 +695,9 @@
 	<Folder Name="/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer/src/">
 		<Project Path="LoadBalancer/Assimalign.Cohesion.LoadBalancer/src/Assimalign.Cohesion.LoadBalancer.csproj" />
 	</Folder>
-	<Folder Name="/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/" />
+	<Folder Name="/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/">
+		<File Path="LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/docs/">
 		<File Path="LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/docs/DESIGN.md" />
 		<File Path="LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/docs/OVERVIEW.md" />
@@ -632,7 +713,9 @@
 	<Folder Name="/resources/LogSpace/Assimalign.Cohesion.LogSpace/src/">
 		<Project Path="LogSpace/Assimalign.Cohesion.LogSpace/src/Assimalign.Cohesion.LogSpace.csproj" />
 	</Folder>
-	<Folder Name="/resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/" />
+	<Folder Name="/resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/">
+		<File Path="LogSpace/Assimalign.Cohesion.LogSpace.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/docs/">
 		<File Path="LogSpace/Assimalign.Cohesion.LogSpace.Hosting/docs/DESIGN.md" />
 		<File Path="LogSpace/Assimalign.Cohesion.LogSpace.Hosting/docs/OVERVIEW.md" />
@@ -652,7 +735,9 @@
 	<Folder Name="/resources/MediaHub/Assimalign.Cohesion.MediaHub/src/">
 		<Project Path="MediaHub/Assimalign.Cohesion.MediaHub/src/Assimalign.Cohesion.MediaHub.csproj" />
 	</Folder>
-	<Folder Name="/resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/" />
+	<Folder Name="/resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/">
+		<File Path="MediaHub/Assimalign.Cohesion.MediaHub.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting/docs/">
 		<File Path="MediaHub/Assimalign.Cohesion.MediaHub.Hosting/docs/DESIGN.md" />
 		<File Path="MediaHub/Assimalign.Cohesion.MediaHub.Hosting/docs/OVERVIEW.md" />
@@ -677,7 +762,9 @@
 	<Folder Name="/resources/MessageHub/Assimalign.Cohesion.MessageHub.Client/tests/">
 		<Project Path="MessageHub/Assimalign.Cohesion.MessageHub.Client/tests/Assimalign.Cohesion.MessageHub.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting/" />
+	<Folder Name="/resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting/">
+		<File Path="MessageHub/Assimalign.Cohesion.MessageHub.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting/docs/">
 		<File Path="MessageHub/Assimalign.Cohesion.MessageHub.Hosting/docs/DESIGN.md" />
 		<File Path="MessageHub/Assimalign.Cohesion.MessageHub.Hosting/docs/OVERVIEW.md" />
@@ -698,7 +785,9 @@
 	<Folder Name="/resources/NatGateway/Assimalign.Cohesion.NatGateway/tests/">
 		<Project Path="NatGateway/Assimalign.Cohesion.NatGateway/tests/Assimalign.Cohesion.NatGateway.Tests.csproj" />
 	</Folder>
-	<Folder Name="/resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting/" />
+	<Folder Name="/resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting/">
+		<File Path="NatGateway/Assimalign.Cohesion.NatGateway.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting/docs/">
 		<File Path="NatGateway/Assimalign.Cohesion.NatGateway.Hosting/docs/DESIGN.md" />
 		<File Path="NatGateway/Assimalign.Cohesion.NatGateway.Hosting/docs/OVERVIEW.md" />
@@ -723,7 +812,9 @@
 	<Folder Name="/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Client/tests/">
 		<Project Path="NotificationHub/Assimalign.Cohesion.NotificationHub.Client/tests/Assimalign.Cohesion.NotificationHub.Client.Tests.csproj" />
 	</Folder>
-	<Folder Name="/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/" />
+	<Folder Name="/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/">
+		<File Path="NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/docs/">
 		<File Path="NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/docs/DESIGN.md" />
 		<File Path="NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting/docs/OVERVIEW.md" />
@@ -744,7 +835,9 @@
 	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr/tests/">
 		<Project Path="Rezolvr/Assimalign.Cohesion.Rezolvr/tests/Assimalign.Cohesion.Rezolvr.Tests.csproj" />
 	</Folder>
-	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/" />
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/">
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/docs/">
 		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/docs/DESIGN.md" />
 		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/docs/OVERVIEW.md" />
@@ -765,8 +858,28 @@
 	<Folder Name="/resources/Scheduler/Assimalign.Cohesion.Scheduler/tests/">
 		<Project Path="Scheduler/Assimalign.Cohesion.Scheduler/tests/Assimalign.Cohesion.Scheduler.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/">
+		<File Path="Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/docs/">
+		<File Path="Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Scheduler.ApplicationModel/">
+		<File Path="Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Scheduler.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/src/">
+		<Project Path="Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/src/Assimalign.Cohesion.Scheduler.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/tests/">
+		<Project Path="Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/tests/Assimalign.Cohesion.Scheduler.ApplicationModel.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/">
 		<File Path="Scheduler/Assimalign.Cohesion.Scheduler.Cron/README.md" />
+	</Folder>
+	<Folder Name="/resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/docs/">
+		<File Path="Scheduler/Assimalign.Cohesion.Scheduler.Cron/docs/DESIGN.md" />
+		<File Path="Scheduler/Assimalign.Cohesion.Scheduler.Cron/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron/src/">
 		<Project Path="Scheduler/Assimalign.Cohesion.Scheduler.Cron/src/Assimalign.Cohesion.Scheduler.Cron.csproj" />
@@ -786,6 +899,10 @@
 	<Folder Name="/resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/">
 		<File Path="Scheduler/Assimalign.Cohesion.Scheduler.Timer/README.md" />
 	</Folder>
+	<Folder Name="/resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/docs/">
+		<File Path="Scheduler/Assimalign.Cohesion.Scheduler.Timer/docs/DESIGN.md" />
+		<File Path="Scheduler/Assimalign.Cohesion.Scheduler.Timer/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer/src/">
 		<Project Path="Scheduler/Assimalign.Cohesion.Scheduler.Timer/src/Assimalign.Cohesion.Scheduler.Timer.csproj" />
 	</Folder>
@@ -796,12 +913,71 @@
 		<File Path="SecretStore/Directory.Build.props" />
 		<File Path="SecretStore/Directory.Build.targets" />
 	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/DESIGN.md" />
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/ISecretStoreResourceDescriptor/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/ISecretStoreResourceDescriptor/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResource/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResource/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceControlPlane/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceControlPlane/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceExtensions/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceExtensions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceOptions/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceOptions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/src/">
+		<Project Path="SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/src/Assimalign.Cohesion.SecretStore.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/tests/">
+		<Project Path="SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/tests/Assimalign.Cohesion.SecretStore.ApplicationModel.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore/" />
 	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore/src/">
 		<Project Path="SecretStore/Assimalign.Cohesion.SecretStore/src/Assimalign.Cohesion.SecretStore.csproj" />
 	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore/docs/Assembly/Assimalign.Cohesion.SecretStore/CertificateAuthorityOptions/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore/docs/Assembly/Assimalign.Cohesion.SecretStore/CertificateAuthorityOptions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore/docs/Assembly/Assimalign.Cohesion.SecretStore/ISecretStore/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore/docs/Assembly/Assimalign.Cohesion.SecretStore/ISecretStore/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore/tests/">
+		<Project Path="SecretStore/Assimalign.Cohesion.SecretStore/tests/Assimalign.Cohesion.SecretStore.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/">
 		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.Client/README.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/DESIGN.md" />
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ClientCredential/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ClientCredential/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ISecretStoreClient/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ISecretStoreClient/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ResourceCommand/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ResourceCommand/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/SecretStoreClient/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/SecretStoreClient/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/src/">
 		<Project Path="SecretStore/Assimalign.Cohesion.SecretStore.Client/src/Assimalign.Cohesion.SecretStore.Client.csproj" />
@@ -817,11 +993,16 @@
 	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/src/">
 		<Project Path="SecretStore/Assimalign.Cohesion.SecretStore.Hosting/src/Assimalign.Cohesion.SecretStore.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/tests/">
+		<Project Path="SecretStore/Assimalign.Cohesion.SecretStore.Hosting/tests/Assimalign.Cohesion.SecretStore.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/VpnGateway/">
 		<File Path="VpnGateway/Directory.Build.props" />
 		<File Path="VpnGateway/Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/" />
+	<Folder Name="/resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/">
+		<File Path="VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/docs/">
 		<File Path="VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/docs/DESIGN.md" />
 		<File Path="VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/docs/OVERVIEW.md" />
@@ -1376,5 +1557,297 @@
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Streaming/src/Assimalign.Cohesion.Http.Streaming.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Sessions/src/Assimalign.Cohesion.Http.Sessions.csproj" />
 		<Project Path="../libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/src/Assimalign.Cohesion.FileSystem.InMemory.csproj" />
+	</Folder>
+	<Folder Name="/resources/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/">
+		<File Path="ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/docs/">
+		<File Path="ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/docs/DESIGN.md" />
+		<File Path="ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/src/">
+		<Project Path="ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/src/Assimalign.Cohesion.ApiManager.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/tests/">
+		<Project Path="ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/tests/Assimalign.Cohesion.ApiManager.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/docs/Assembly/Assimalign.Cohesion.ApiManager.ApplicationModel/">
+		<File Path="ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/docs/Assembly/Assimalign.Cohesion.ApiManager.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel/">
+		<File Path="EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel/docs/">
+		<File Path="EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel/docs/DESIGN.md" />
+		<File Path="EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel/src/">
+		<Project Path="EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel/src/Assimalign.Cohesion.EmailHub.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel/tests/">
+		<Project Path="EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel/tests/Assimalign.Cohesion.EmailHub.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.EmailHub.ApplicationModel/">
+		<File Path="EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.EmailHub.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/">
+		<File Path="EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/docs/">
+		<File Path="EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/docs/DESIGN.md" />
+		<File Path="EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/src/">
+		<Project Path="EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/src/Assimalign.Cohesion.EventHub.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/tests/">
+		<Project Path="EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/tests/Assimalign.Cohesion.EventHub.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.EventHub.ApplicationModel/">
+		<File Path="EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.EventHub.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/">
+		<File Path="IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/docs/">
+		<File Path="IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/docs/DESIGN.md" />
+		<File Path="IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/src/">
+		<Project Path="IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/src/Assimalign.Cohesion.IoTHub.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/tests/">
+		<Project Path="IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/tests/Assimalign.Cohesion.IoTHub.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IoTHub.ApplicationModel/">
+		<File Path="IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IoTHub.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/">
+		<File Path="LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/">
+		<File Path="LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/DESIGN.md" />
+		<File Path="LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/src/">
+		<Project Path="LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/src/Assimalign.Cohesion.LoadBalancer.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/tests/">
+		<Project Path="LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/tests/Assimalign.Cohesion.LoadBalancer.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/Assembly/Assimalign.Cohesion.LoadBalancer.ApplicationModel/">
+		<File Path="LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/Assembly/Assimalign.Cohesion.LoadBalancer.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/">
+		<File Path="LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/docs/">
+		<File Path="LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/docs/DESIGN.md" />
+		<File Path="LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/src/">
+		<Project Path="LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/src/Assimalign.Cohesion.LogSpace.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/tests/">
+		<Project Path="LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/tests/Assimalign.Cohesion.LogSpace.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/docs/Assembly/Assimalign.Cohesion.LogSpace.ApplicationModel/">
+		<File Path="LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/docs/Assembly/Assimalign.Cohesion.LogSpace.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/">
+		<File Path="MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/docs/">
+		<File Path="MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/docs/DESIGN.md" />
+		<File Path="MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/src/">
+		<Project Path="MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/src/Assimalign.Cohesion.MediaHub.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/tests/">
+		<Project Path="MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/tests/Assimalign.Cohesion.MediaHub.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.MediaHub.ApplicationModel/">
+		<File Path="MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.MediaHub.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/">
+		<File Path="MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/docs/">
+		<File Path="MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/docs/DESIGN.md" />
+		<File Path="MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/src/">
+		<Project Path="MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/src/Assimalign.Cohesion.MessageHub.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/tests/">
+		<Project Path="MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/tests/Assimalign.Cohesion.MessageHub.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.MessageHub.ApplicationModel/">
+		<File Path="MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.MessageHub.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel/">
+		<File Path="NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel/docs/">
+		<File Path="NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel/docs/DESIGN.md" />
+		<File Path="NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel/src/">
+		<Project Path="NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel/src/Assimalign.Cohesion.NatGateway.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel/tests/">
+		<Project Path="NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel/tests/Assimalign.Cohesion.NatGateway.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel/docs/Assembly/Assimalign.Cohesion.NatGateway.ApplicationModel/">
+		<File Path="NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel/docs/Assembly/Assimalign.Cohesion.NatGateway.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/">
+		<File Path="NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/docs/">
+		<File Path="NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/docs/DESIGN.md" />
+		<File Path="NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/src/">
+		<Project Path="NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/src/Assimalign.Cohesion.NotificationHub.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/tests/">
+		<Project Path="NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/tests/Assimalign.Cohesion.NotificationHub.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.NotificationHub.ApplicationModel/">
+		<File Path="NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.NotificationHub.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/">
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/">
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/src/">
+		<Project Path="Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/src/Assimalign.Cohesion.Rezolvr.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/tests/">
+		<Project Path="Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/tests/Assimalign.Cohesion.Rezolvr.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/">
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/">
+		<File Path="VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/resources/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/">
+		<File Path="VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/DESIGN.md" />
+		<File Path="VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/src/">
+		<Project Path="VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/src/Assimalign.Cohesion.VpnGateway.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/resources/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/tests/">
+		<Project Path="VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/tests/Assimalign.Cohesion.VpnGateway.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/Assembly/Assimalign.Cohesion.VpnGateway.ApplicationModel/">
+		<File Path="VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/Assembly/Assimalign.Cohesion.VpnGateway.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Health/">
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Health/README.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Health/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Health/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Health/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Health/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.Health/src/Assimalign.Cohesion.Web.Hosting.Health.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Health/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.Health/tests/Assimalign.Cohesion.Web.Hosting.Health.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/">
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/README.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/src/Assimalign.Cohesion.Web.Hosting.Resources.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/tests/Assimalign.Cohesion.Web.Hosting.Resources.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Client/README.md" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/DESIGN.md" />
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/src/">
+		<Project Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Client/src/Assimalign.Cohesion.IdentityHub.Client.csproj" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/tests/">
+		<Project Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Client/tests/Assimalign.Cohesion.IdentityHub.Client.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/IdentityHubCommandClient/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/IdentityHubCommandClient/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/IIdentityHubCommandClient/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/IIdentityHubCommandClient/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/ResourceCommand/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/ResourceCommand/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/ResourceCommandObservation/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/ResourceCommandObservation/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/">
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.Client/README.md" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/">
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/DESIGN.md" />
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/src/">
+		<Project Path="Rezolvr/Assimalign.Cohesion.Rezolvr.Client/src/Assimalign.Cohesion.Rezolvr.Client.csproj" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/tests/">
+		<Project Path="Rezolvr/Assimalign.Cohesion.Rezolvr.Client/tests/Assimalign.Cohesion.Rezolvr.Client.Tests.csproj" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/IRezolvrCommandClient/">
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/IRezolvrCommandClient/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/">
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/ResourceCommand/">
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/ResourceCommand/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/ResourceCommandObservation/">
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/ResourceCommandObservation/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/RezolvrCommandClient/">
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.Client/docs/Assembly/Assimalign.Cohesion.Rezolvr.Client/RezolvrCommandClient/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/RezolvrResourceCommandExtensions/">
+		<File Path="Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/RezolvrResourceCommandExtensions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceCommandExtensions/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.SecretStore.ApplicationModel/SecretStoreResourceCommandExtensions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IdentityHubResourceCommandExtensions/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IdentityHubResourceCommandExtensions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/ConfigurationStoreResourceCommandExtensions/">
+		<File Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/ConfigurationStoreResourceCommandExtensions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IIdentityHubResourceDescriptor/">
+		<File Path="IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IIdentityHubResourceDescriptor/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ResourceCommandObservation/">
+		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ResourceCommandObservation/OVERVIEW.md" />
 	</Folder>
 </Solution>

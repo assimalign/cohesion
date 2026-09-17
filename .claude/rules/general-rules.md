@@ -251,7 +251,7 @@ The interface remains the canonical public surface; concrete types derive from t
 
 ## Service composition
 
-Nested host composition is intentional in this repo. Use the hosting abstractions rather than ad hoc orchestration when touching service composition. Preserve the L1/L2/L3 layering model and the service-root dependency style already established in the repo (L1 = foundation libraries and SDK/tooling, L2 = application runtime and composition, L3 = service platforms; see `docs/DELIVERY_ROADMAP.md`).
+Nested host composition is intentional in this repo. Use the hosting abstractions rather than ad hoc orchestration when touching service composition. Preserve the L1/L2/L3 layering model and the service-root dependency style already established in the repo (L1 = foundation libraries and SDK/tooling, L2 = application runtime and composition, L3 = service platforms; see `docs/programs/DELIVERY_ROADMAP.md`).
 
 ## Async / await
 

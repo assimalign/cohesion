@@ -16,4 +16,6 @@
 	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
 		<FrameworkReference Include="Assimalign.Cohesion.App.Scheduler" />
 	</ItemGroup>
+
+	<Import Project="..\Targets\Sdk.Scheduler.props" />
 </Project>

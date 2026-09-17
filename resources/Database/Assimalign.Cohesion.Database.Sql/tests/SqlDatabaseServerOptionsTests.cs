@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 
 using Shouldly;
 using Xunit;
@@ -37,5 +38,35 @@ public class SqlDatabaseServerOptionsTests
 
         // Act / Assert: null engine.
         Should.Throw<ArgumentNullException>(() => SqlDatabaseServer.Create(null!, new SqlDatabaseServerOptions { Listener = listener }));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server: Resource endpoint binding configures a TCP listener")]
+    public async System.Threading.Tasks.Task Listen_WithResourceEndpoint_ShouldConfigureTcpListener()
+    {
+        // Arrange
+        var options = new SqlDatabaseServerOptions();
+        var endpoint = new Uri("cohesion-db://127.0.0.1:5740");
+
+        // Act
+        SqlDatabaseServerOptions result = options.Listen(endpoint);
+
+        // Assert
+        result.ShouldBeSameAs(options);
+        result.Listener.ShouldNotBeNull();
+        result.Listener.EndPoint.ShouldBe(new IPEndPoint(IPAddress.Loopback, 5740));
+        await result.Listener.DisposeAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Server: Resource endpoint binding rejects a null address")]
+    public void Listen_WithNullResourceEndpoint_ShouldRejectAddress()
+    {
+        // Arrange
+        var options = new SqlDatabaseServerOptions();
+
+        // Act
+        Action action = () => options.Listen((Uri)null!);
+
+        // Assert
+        Should.Throw<ArgumentNullException>(action).ParamName.ShouldBe("endpoint");
     }
 }

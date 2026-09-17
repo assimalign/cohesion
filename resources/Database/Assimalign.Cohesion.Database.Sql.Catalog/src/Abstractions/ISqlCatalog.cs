@@ -22,6 +22,12 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 public interface ISqlCatalog
 {
     /// <summary>
+    /// Gets the canonical compiled schema most recently applied to this database,
+    /// or <see langword="null"/> when no schema has been recorded.
+    /// </summary>
+    SqlCatalogSchemaState? SchemaState { get; }
+
+    /// <summary>
     /// Gets every table in the catalog.
     /// </summary>
     IReadOnlyList<SqlCatalogTable> Tables { get; }
@@ -156,4 +162,12 @@ public interface ISqlCatalog
     /// <param name="version">The format version to persist.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     ValueTask SetRecordSpaceFormatVersionAsync(int version, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persists the canonical compiled schema most recently applied to this database.
+    /// The state is replaced atomically in one self-committing catalog transaction.
+    /// </summary>
+    /// <param name="state">The applied schema state to persist.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    ValueTask SaveSchemaStateAsync(SqlCatalogSchemaState state, CancellationToken cancellationToken = default);
 }

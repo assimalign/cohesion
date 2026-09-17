@@ -1,0 +1,14 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+
+  <PropertyGroup>
+    <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
+    <CohesionResourceName>inprocess-transitive-gateway</CohesionResourceName>
+    <CohesionGateways>InProcess</CohesionGateways>
+    <CohesionGatewayInProcess>true</CohesionGatewayInProcess>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionResourceReference Include="..\GatewaySmokeWeb\GatewaySmokeWeb.csproj" />
+  </ItemGroup>
+
+</Project>

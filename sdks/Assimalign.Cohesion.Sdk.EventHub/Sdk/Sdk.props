@@ -16,4 +16,6 @@
 	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
 		<FrameworkReference Include="Assimalign.Cohesion.App.EventHub" />
 	</ItemGroup>
+
+	<Import Project="..\Targets\Sdk.EventHub.props" />
 </Project>

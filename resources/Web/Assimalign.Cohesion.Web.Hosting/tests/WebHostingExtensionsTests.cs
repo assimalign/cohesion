@@ -106,8 +106,8 @@ public class WebHostingExtensionsTests
         await using HttpConnectionListener listener = new(options);
 
         // Act
-        // The accept loop binds the wrapped TCP listener lazily on its first accept, so the
-        // client connect is retried until the loop is listening on the configured endpoint.
+        // The compatibility AcceptOrListenAsync path binds before it starts its transport accept
+        // loop; hosted servers call the same bind explicitly from StartAsync.
         Task<HttpConnection> acceptTask = listener.AcceptOrListenAsync(cancellation.Token);
 
         using Socket client = await ConnectWithRetryAsync(endPoint, cancellation.Token);

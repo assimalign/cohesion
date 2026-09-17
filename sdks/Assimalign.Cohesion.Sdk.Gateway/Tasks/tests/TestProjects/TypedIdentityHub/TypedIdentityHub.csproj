@@ -1,0 +1,8 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.IdentityHub">
+  <PropertyGroup>
+    <RootNamespace>TypedIdentityHub</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>gateway-smoke</CohesionApplication>
+    <CohesionResourceName>typed-identity</CohesionResourceName>
+  </PropertyGroup>
+</Project>

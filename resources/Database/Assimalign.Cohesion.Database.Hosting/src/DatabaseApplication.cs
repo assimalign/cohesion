@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Database.Hosting.Internal;
 
 /// <summary>
 /// The standalone hosting application for the database resource. Composition-only:
@@ -22,9 +22,9 @@ using Assimalign.Cohesion.Database.Hosting.Internal;
 /// the servers start last and drain first. Engines take no part in the lifecycle:
 /// they are data machines — operational from creation, durably flushed and closed
 /// by whichever composition root created and disposes them. Compose an application
-/// through <see cref="CreateBuilder()"/> (the builder-first surface — model
-/// packages register engines and servers on the root's
-/// <see cref="IDatabaseApplicationBuilder"/> seam) or construct it directly from
+/// through <see cref="CreateBuilder()"/> (the builder-first surface: model packages
+/// register engines and servers on the root's <see cref="IDatabaseApplicationBuilder"/>
+/// seam, while composition roots register lifecycle services there) or construct it directly from
 /// fully populated <see cref="DatabaseApplicationOptions"/>.
 /// </remarks>
 public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDatabaseApplication
@@ -36,12 +36,17 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
     /// </summary>
     /// <param name="options">The application options.</param>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Concurrent service start or stop was enabled. Database applications require ordered
+    /// lifecycle execution to preserve provisioning-before-accept and drain-before-stop.
+    /// </exception>
     public DatabaseApplication(DatabaseApplicationOptions options)
         : this(options, options is null ? null! : new DatabaseApplicationContext(options))
     {
     }
 
-    internal DatabaseApplication(DatabaseApplicationOptions options, DatabaseApplicationContext context) : base(options)
+    internal DatabaseApplication(DatabaseApplicationOptions options, DatabaseApplicationContext context)
+        : base(CreateHostOptionsSnapshot(options))
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(context);
@@ -63,8 +68,34 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
             services.Add(new DatabaseServerHostService(server));
         }
 
+        context.FreezeRegistries(options.Engines, options.Servers);
         context.SetHostedServices(services);
         _context = context;
+    }
+
+    private static DatabaseApplicationOptions CreateHostOptionsSnapshot(DatabaseApplicationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (options.StartServicesConcurrently || options.StopServicesConcurrently)
+        {
+            throw new InvalidOperationException(
+                "Database applications require sequential service start and stop so provisioning " +
+                "precedes accept and servers drain before additional services stop.");
+        }
+
+        // Host<TContext> reads its options at StartAsync/StopAsync time. Snapshot the lifecycle
+        // values so a caller retaining the mutable builder options cannot enable concurrency
+        // after Build and bypass Database's ordering invariant.
+        return new DatabaseApplicationOptions
+        {
+            Environment = options.Environment,
+            ContentRootPath = options.ContentRootPath,
+            StartupTimeout = options.StartupTimeout,
+            ShutdownTimeout = options.ShutdownTimeout,
+            StartServicesConcurrently = false,
+            StopServicesConcurrently = false,
+        };
     }
 
     /// <summary>
@@ -75,13 +106,29 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
     /// <summary>
     /// Creates a builder for composing a database application — the entry point of
     /// the area's builder pattern (mirrors <c>WebApplication.CreateBuilder()</c>).
-    /// Model packages register their engines and servers on the returned builder
-    /// through the root's <see cref="IDatabaseApplicationBuilder"/> seam.
+    /// Model packages register their engines and servers on the returned root
+    /// <see cref="IDatabaseApplicationBuilder"/> seam; composition roots register lifecycle
+    /// services on that same seam.
     /// </summary>
     /// <returns>A new application builder over default options.</returns>
     public static DatabaseApplicationBuilder CreateBuilder()
     {
         return CreateBuilder(new DatabaseApplicationOptions());
+    }
+
+    /// <summary>
+    /// Creates a database application builder that honors an enabled resource's generated
+    /// control-plane registration and ambient invocation context.
+    /// </summary>
+    /// <param name="args">The application command-line arguments.</param>
+    /// <returns>A new database application builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is null.</exception>
+    public static DatabaseApplicationBuilder CreateBuilder(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(DatabaseApplication).Assembly;
+        return new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), resourceAssembly);
     }
 
     /// <summary>

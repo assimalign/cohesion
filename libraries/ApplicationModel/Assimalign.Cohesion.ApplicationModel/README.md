@@ -1,139 +1,153 @@
-This is a rough design  implementation I'm looking at
+# Assimalign.Cohesion.ApplicationModel
 
+Core-only contracts for declaring a Cohesion application, producing a portable realization
+model, importing resources owned by another application, and composing several application
+models through one gateway. The package contains no hosting, transport, configuration, or
+platform implementation and remains NativeAOT-safe.
 
+The gateway SDK records its build-selected identity as
+`[assembly: CohesionApplication("appa")]` for build and tooling inspection. This metadata is
+descriptive only: generated `Gateway.CreateBuilder(args)` passes the same name directly to
+`Application.CreateBuilder(ApplicationName, args)`, and runtime code does not reflect the attribute.
 
-## Dependency Graph 
-```text
-┌ Assimalign.Cohesion.{Libraries}
-├ Assimalign.Cohesion.ApplicationModel
-├───── Assimalign.Cohesion.ApplicationModel.Gateway
-├───── Assimalign.Cohesion.ApplicationModel.Gateway.{Platform}
-└────┬ Assimalign.Cohesion.{Resource}
-     ├ Assimalign.Cohesion.{Resource}.{Feature}
-     ├ Assimalign.Cohesion.{Resource}.Application
-     └ Assimalign.Cohesion.{Resource}.ApplicationModel
-```
+`Local` is the developer-machine environment. `Development`, `Staging`, and `Production` use
+strict deployed behavior. Local and InProcess gateways default to Local only when the environment
+was omitted from both command-line options and process variables; explicit values always win.
 
-`Assimalign.Cohesion.{Libraries}`
-> - Represents the base libraries for building resources.
-
----
-
-`Assimalign.Cohesion.ApplicationModel`
-> - The base abstraction for the application model
-
----
-
-`Assimalign.Cohesion.ApplicationModel.Gateway`
-> - Represents a deployable application which is an orchestrator for handling container deployments
-> - Default implementation will be for local development
-
----
-
-`Assimalign.Cohesion.ApplicationModel.Gateway.{Platform}`
-> - Represents a target orchestrator for specific platform such as: local (built in), kubernetes, docker, etc.
-
----
-
-`Assimalign.Cohesion.{Resource}`
-> - Represents the base abstraction for the resource implementation
-> - No hard dependencies on either the `ApplicationModel` or `Libraries`
-
----
-
-`Assimalign.Cohesion.{Resource}.{Feature}`
-> - Feature extending the functionality on the base abstraction
-
-! Issue - How to add features without relying on the `Assimalign.Cohesion.{Resource}.Application`
-
----
-
-`Assimalign.Cohesion.{Resource}.Application`
-> - Pulls together all the resources into a single executable
-> - Can be used as a standalone application and does not have dependency on the application model
-
-
-**Notes**
-1. Migrate any project such as `Assimalign.Cohesion.{Resource}.Hosting` to a `Assimalign.Cohesion.{Resource}.Application` project
-
----
-
-`Assimalign.Cohesion.{Resource}.ApplicationModel`
-> - Generates a Metadata/manifest for Application Model Gateway to orchestrate the deployment
-> - Tells the Gateway where to pull the application code and push to
-> - The manifest generation should be generic so that any platform gateway can handle the deployment orchestration
-> - Should have a custom code generation task within the Cohesion MSBuild SDK Targets that generates an object that can be used in gateway orchestration via extension method. Look at the code example below.
-
----
-
-## Scenario
-Real world scenario startup
-
-External Dependencies
-- Container Registry
-- Source Control
-- Platform (Hardware, Public IP, Networking)
-
-Internal Dependencies
-1. DNS Server
-2. Identity Server
-3. Database
-4. Web App
-5. EventHub
-6. MessageHub
-7. ..etc
+## Build and run one model
 
 ```csharp
-IApplicationBuilder builder = Application.CreateBuilder();
+IApplicationBuilder builder = Application
+    .CreateBuilder(ApplicationName.Parse("appa"), args)
+    .UseGateway(gateway);
 
-IApplicationResourceDescriptor dns = builder.AddDns("");
+var identityDeclaration = new ExternalResourceDeclaration(
+    "identity-hub",
+    ApplicationName.Parse("identity"),
+    ["https"],
+    optional: false,
+    manifest: identityManifest);
+IApplicationResourceDescriptor identity = builder.RemoteReference(
+    identityDeclaration,
+    remote => remote.File("imports/identity/export.json"));
 
-IApplicationResourceDescriptor identityHub = builder.AddIdentityHub("IdentityHub")
-     .DependsOn(dns);
+IApplicationResourceDescriptor api = builder.AddResource(apiManifest);
+api.DependsOn(identity);
 
-IApplicationResourceDescriptor adminWebApp = builder.AddWebApp("Administration")
-     .DependsOn(identity);
-
-IApplicationResourceDescriptor usersWebApp = builder.AddWebApp("Users")
-     .DependsOn(identity);
-
-IApplicationResourceDescriptor admin = builder.AddWebApp("Employees")
-     .DependsOn(identity);
-
-IApplication app = builder.Build();
-
-app.UseK8s()
-
-await app.RunAsync();
+await builder.Build().RunAsync();
 ```
 
-Unlike .NET Aspire, Cohesion will utilize the gateway to orchestrate the project publishing. The idea is similar to Kubernetes for managing container deployments. In essence the gateway get's packaged with the manifests of all the services
+`ExternalResourceDeclaration` is the immutable build-produced description of a boundary
+crossing: owner application, consumed endpoint names, optionality, the embedded target manifest,
+and (when available) its same-application manifest closure. It also carries canonical manifest
+and closure hashes. `RemoteReference(...)` adds or rebinds that declaration as an ordinary graph
+node and returns its `IApplicationResourceDescriptor`; a manifest-less overload accepts a name.
+Because that overload intentionally has no build-time owner or hash, its selected file/gateway is
+the authority and resolution validates the named resource against that export's embedded model.
 
+The base package supplies code bindings for:
 
+- `Gateway(Uri|string)` — resolve an application export through `IControlPlaneClient`.
+- `Endpoint(name, Uri|string)` — use one or more static endpoints.
+- `File(path)` — read an `ApplicationExportDocument` from disk.
+- `Bind(IExternalResourceResolver)` — attach a platform or application-provided resolver.
 
+Runtime binding precedence is deterministic: command-line `--external` wins over process
+environment, process environment wins over the C# `RemoteReference` binding, and an external with
+none of those bindings uses the unresolved resolver. Supported command-line forms are
+`name=<endpoint>=<url>`, `name=<url>` when the declaration consumes at most one endpoint,
+`name=file:<path>`, and `name=gateway:<url>`. Process environment uses
+`Cohesion__External__<name>__File`, `...__Gateway`, or
+`...__Endpoints__<endpoint>`; colon-separated aliases are accepted too.
 
-One of the main benefits code-first place where you declare your application’s services and their relationships. Instead of managing scattered configuration files, you describe the architecture in code 
+`Gateway(...)` is only a typed binding in this package. A caller or gateway supplies an
+`IControlPlaneClient`; `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` provides the
+shipped authenticated HTTP client and endpoint host.
+Platform-specific bindings such as Kubernetes import are contributed outside this package.
 
-I'm liking the plan but let's walk through some architecture scenarios, and see if our design holds up. The main 
+## External lifecycle
 
-## Scenario 1
+`IExternalResourceResolver.ResolveAsync` returns an immutable `ExternalResourceResolution` with
+observed endpoints and, when known, the provider's manifest hash and export schema version. The
+gateway base owns the lifecycle policy:
 
-```mermaid
-architecture-beta
-    group hub(cloud)[Hub]
-    group identity(cloud)[Identity]
-    group erpcore_dev(cloud)[ERP Core DEV]
-    group erpcore_stg(cloud)[ERP Core STG]
-    group erpcore_prd(cloud)[ERP Core PRD]
+- resolved with every referenced endpoint -> `Running` and the endpoints become observable;
+- optional and unresolved -> `Skipped`;
+- required and unresolved -> remains `Starting` until its readiness budget expires, then reports
+  `Failed`, aborts startup, and blocks dependents;
+- resolved without a referenced endpoint -> `Failed`, with expected/observed hashes and schema
+  versions in the diagnostic;
+- a changed manifest hash or reported export schema version with compatible referenced endpoints -> `Running` with a
+  `ManifestDrift` warning, never a readiness failure.
 
-     service server_dns[DNS] in hub
+Resolution is part of each reconcile pass. Stopping or deleting an external only detaches the
+local observation; it does not mutate the application that owns the resource.
 
+## Local realization
 
-     service identity_server(server)[Identity Server] in identity
-     service identity_db(database)[Identity Database] in identity
+`--realize <external>` changes a declared external back into locally realized resources only when
+the selected environment is `Local` and the selected gateway identity is `local`,
+`inprocess`, or `docker`. The declaration must include its manifest. Realization walks the
+reachable same-application manifests in the embedded closure; crossings from that closure into a
+different application remain external. The realized resources retain their owning application
+name for runtime naming while joining the current gateway's process set. Other environments and
+gateway identities reject `--realize` during `Build()`.
 
-     identity_server:B --> T:identity_db
+## Portable documents
 
-   
+`ApplicationModelDocument` (`cohesion/model/v1`) serializes the immutable graph: application,
+environment, gateway/owner intent, run mode, flags, dependencies, manifests, platform-neutral
+plans, and each external's declaration, embedded closure, realization state, and portable
+static/file/gateway binding. `--mode describe` writes this document without contacting the
+selected gateway. An arbitrary resolver supplied with `Bind(...)` is intentionally serialized as
+unbound; its platform integration must bind it again in the importing gateway. Static, file, and
+gateway bindings round-trip without that loss.
 
+`ApplicationExportDocument` (`schemaVersion: 1`) adds the application version, optional public
+JWK, canonical manifest hashes, observed internal/public endpoint addresses, and the complete
+portable model. `Create`, `Parse`, `Load`, `Save`, and `ToModel` validate the document and use the
+package's source-generated JSON context. `export.json` is the conventional filename; this
+contract library does not choose a storage location or serve it over HTTP.
+
+## Compose an application set
+
+```csharp
+IApplicationSet set = Application.CreateSet(sharedGateway, args)
+    .AddApplication(new ApplicationDeclaration(
+        ApplicationName.Parse("identity"),
+        ApplicationModelResolvers.ControlPlane(
+            "Identity.Gateway.exe",
+            "imports/identity/export.json")))
+    .AddApplication(new ApplicationDeclaration(
+        ApplicationName.Parse("appa"),
+        ApplicationModelResolvers.File("imports/appa/export.json")));
+
+await set.RunAsync();
 ```
+
+An application set resolves every member at run start in declaration order, verifies that each
+resolver returned the declared application, applies command-line/environment external overrides,
+then sends the ordered models to one `IMultiModelApplicationGateway`. `ControlPlane(...)` invokes
+the member executable with `--mode describe` in Local and reads its exported model in other
+environments. `Executable`, `File`, and `Gateway` resolvers are also available directly.
+
+When an imported external targets another member of the same set, an
+`IApplicationSetExternalResourceResolver` resolves it directly from the shared gateway session's
+observed state. The external falls back to its configured resolver only while that sibling is not
+observable, avoiding a round trip through the sibling gateway's control plane.
+
+For Local `--realize`, executable resolution first describes each member, then re-describes
+only members that declare the requested external. File/control-plane imports accept the request
+only when their exported model already records that external as realized; the set validates every
+requested name once across all members.
+
+The set supports `Run`, `Apply`, `Teardown`, `Describe`, and `Render`. Describe writes one JSON
+array containing every member model in declaration order without invoking the shared gateway.
+Render dispatches the complete collection through `IApplicationGatewayRenderer` and never contacts
+the target platform. The shared gateway owns one lifecycle session and must isolate state by
+`(application, resource)` so equal resource names/identifiers in different models cannot collide.
+This package defines that composition seam; SDK-generated
+`Applications.<Name>` and HTTP control-plane composition are supplied by the Gateway SDK and
+`...Gateway.ControlPlane`; Kubernetes export/import remains a platform integration.
+
+See [docs/DESIGN.md](docs/DESIGN.md) for lifecycle rationale and package boundaries.

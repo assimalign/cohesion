@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+	</ItemGroup>
+	<ItemGroup>
+		<InternalsVisibleTo Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests" />
+	</ItemGroup>
+	<ItemGroup>
+		<None
+			Include="..\buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.props"
+			Pack="true"
+			PackagePath="buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.props" />
+	</ItemGroup>
+</Project>

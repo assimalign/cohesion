@@ -14,6 +14,12 @@
 
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.TestHost" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="TestHost/**/*.cs" />
+    <None Update="Fixtures\plans\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

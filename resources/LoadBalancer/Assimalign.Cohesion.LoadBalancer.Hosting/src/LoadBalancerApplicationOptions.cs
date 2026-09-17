@@ -1,10 +1,7 @@
-namespace Assimalign.Cohesion.LoadBalancer.Hosting;
-
 using Assimalign.Cohesion.Hosting;
 
-/// <summary>
-/// Options for <see cref="LoadBalancerApplication"/>.
-/// </summary>
-public sealed class LoadBalancerApplicationOptions : HostOptions<LoadBalancerApplicationContext>
+namespace Assimalign.Cohesion.LoadBalancer.Hosting;
+
+internal sealed class LoadBalancerApplicationOptions : HostOptions<LoadBalancerApplicationContext>
 {
 }

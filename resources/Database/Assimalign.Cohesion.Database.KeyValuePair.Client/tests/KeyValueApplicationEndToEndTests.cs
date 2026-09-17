@@ -24,10 +24,9 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Tests;
 /// key-value client, including restart recovery over the real file sets.
 /// </summary>
 /// <remarks>
-/// The <c>Database.Application</c> executable stays SQL-only — multi-model host
-/// composition (one process fronting several model servers) is a later
-/// deliverable; this suite composes the key-value application in-test the same
-/// way that executable composes the SQL one.
+/// Resource executables compose their model servers explicitly. This suite keeps
+/// key-value coverage in the model package while exercising that same application
+/// composition path.
 /// </remarks>
 public sealed class KeyValueApplicationEndToEndTests : IDisposable
 {

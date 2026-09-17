@@ -399,7 +399,7 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
         {
             return await _engine.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
         }
-        catch (DatabaseException)
+        catch (DatabaseNotFoundException)
         {
             // The engine has no database by that name.
         }

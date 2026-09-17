@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Http;
 
 using Shouldly;
+using Xunit;
 
 using HttpMethod = Assimalign.Cohesion.Http.HttpMethod;
 

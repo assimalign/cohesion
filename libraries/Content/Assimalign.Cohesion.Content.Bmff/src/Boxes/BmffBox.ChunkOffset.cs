@@ -6,6 +6,8 @@ using System.Text;
 using System.Threading.Tasks;
 using static System.Buffers.Binary.BinaryPrimitives;
 
+using Assimalign.IO;
+
 namespace Assimalign.Cohesion.Files.Bmff;
 
 [DebuggerDisplay("Bmff Box: Chunk Offset (stco)")]

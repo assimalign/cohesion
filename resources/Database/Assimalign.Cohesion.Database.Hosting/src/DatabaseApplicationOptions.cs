@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
@@ -19,9 +20,14 @@ using Assimalign.Cohesion.Hosting;
 /// the model packages (for example <c>SqlDatabaseServer</c> via the
 /// <c>AddSqlServer</c> builder verb in <c>Assimalign.Cohesion.Database.Sql</c>) or
 /// directly by the composition root, and assigned here.
+/// The inherited concurrent start and stop switches are unsupported: a database application
+/// requires sequential lifecycle execution to preserve provisioning-before-accept and
+/// drain-before-service-stop.
 /// </remarks>
 public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplicationContext>
 {
+    internal FileSystemPath? ContentRootPath { get; set; }
+
     /// <summary>
     /// Gets the engines this application holds as server-less, embedded
     /// registrations (exposed through
@@ -39,8 +45,10 @@ public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplication
     public IList<IDatabaseServer> Servers { get; } = new List<IDatabaseServer>();
 
     /// <summary>
-    /// Gets the additional host services composed ahead of the servers. They start
-    /// before the servers and stop after the servers have drained.
+    /// Gets the additional host services composed ahead of the servers, including
+    /// services registered through <see cref="DatabaseApplicationBuilder.AddService(IHostService)"/>.
+    /// They start in registration order before the servers and stop in reverse
+    /// registration order after the servers have drained.
     /// </summary>
     public IList<IHostService> Services { get; } = new List<IHostService>();
 }

@@ -1,0 +1,22 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <!--
+    The single-cluster shared gateway: ONE gateway instance over N applications / N namespaces (one client, one informer,
+    one registry, state keyed by (namespace, resource)). Lives in cohesion-system in-cluster and is the sole production
+    owner of every namespace it applies (cohesion.io/owner). It references the area gateway projects; Sdk.Gateway generates
+    Applications.<Name> for each, and the set obtains every member's model through that gateway's own control plane
+    (`mode describe` locally, the exported model in-cluster). The per-area gateways still run alone in Local.
+  -->
+  <PropertyGroup>
+    <CohesionApplicationName>cohesion-system</CohesionApplicationName>
+    <CohesionIsApplicationSet>true</CohesionIsApplicationSet>
+    <CohesionGateways>Local</CohesionGateways>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionResourceReference Include="..\..\Platform\Example.Platform.Gateway\Example.Platform.Gateway.csproj" />
+    <CohesionResourceReference Include="..\..\Identity\Example.Identity.Gateway\Example.Identity.Gateway.csproj" />
+    <CohesionResourceReference Include="..\..\Networking\Example.Networking.Gateway\Example.Networking.Gateway.csproj" />
+    <CohesionResourceReference Include="..\..\Zones\AppA\Example.AppA.Gateway\Example.AppA.Gateway.csproj" />
+    <CohesionResourceReference Include="..\..\Zones\AppB\Example.AppB.Gateway\Example.AppB.Gateway.csproj" />
+    <CohesionResourceReference Include="..\..\Zones\AppC\Example.AppC.Gateway\Example.AppC.Gateway.csproj" />
+  </ItemGroup>
+</Project>

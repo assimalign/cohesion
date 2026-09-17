@@ -50,6 +50,29 @@ public static class ApplicationModelExtensions
 
             return ordered;
         }
+
+        /// <summary>
+        /// Refuses a target already owned by another application gateway unless adoption was
+        /// explicitly requested for this invocation.
+        /// </summary>
+        /// <param name="observedOwner">The owner currently recorded on the target, or <see langword="null"/> when unowned.</param>
+        /// <exception cref="InvalidOperationException">
+        /// <paramref name="observedOwner"/> differs from <see cref="IApplicationModel.Owner"/>
+        /// and adoption was not requested.
+        /// </exception>
+        public void AssertOwner(string? observedOwner)
+        {
+            if (string.IsNullOrWhiteSpace(observedOwner) ||
+                string.Equals(observedOwner, model.Owner, StringComparison.Ordinal) ||
+                model.Adopt)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"Target is owned by '{observedOwner}', but this gateway expects '{model.Owner}'. " +
+                "Refusing to take ownership; pass --adopt to adopt the existing target explicitly.");
+        }
     }
 
     // Depth-first post-order with cycle detection. 1 == on the current stack, 2 == emitted.

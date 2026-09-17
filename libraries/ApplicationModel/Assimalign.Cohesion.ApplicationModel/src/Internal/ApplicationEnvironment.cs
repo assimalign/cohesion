@@ -4,32 +4,41 @@ namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
 /// The default <see cref="IApplicationEnvironment"/>, resolved from the host process
-/// environment variables <c>COHESION_ENVIRONMENT</c> or <c>DOTNET_ENVIRONMENT</c>,
-/// defaulting to <c>Production</c>.
+/// by <see cref="AppEnvironment"/>.
 /// </summary>
 internal sealed class ApplicationEnvironment : IApplicationEnvironment
 {
-    private const string DevelopmentEnvironment = "Development";
-
-    public ApplicationEnvironment(EnvironmentName name, bool isDevelopment)
+    public ApplicationEnvironment(EnvironmentName name, bool isLocal, bool isDevelopment)
     {
         Name = name;
+        IsLocal = isLocal;
         IsDevelopment = isDevelopment;
     }
 
     public EnvironmentName Name { get; }
 
+    public bool IsLocal { get; }
+
     public bool IsDevelopment { get; }
 
     public static ApplicationEnvironment FromHost()
     {
-        string name =
-            Environment.GetEnvironmentVariable("COHESION_ENVIRONMENT")
-            ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
-            ?? "Production";
+        // Preserve Core's raw host value until the selected gateway can apply its default.
+        return Create(AppEnvironment.GetEnvironmentName());
+    }
 
-        bool isDevelopment = string.Equals(name, DevelopmentEnvironment, StringComparison.OrdinalIgnoreCase);
+    public static ApplicationEnvironment FromName(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        return new ApplicationEnvironment(name, isDevelopment);
+        return Create(name);
+    }
+
+    private static ApplicationEnvironment Create(string name)
+    {
+        bool isLocal = string.Equals(name, AppEnvironment.Keys.Local, StringComparison.OrdinalIgnoreCase);
+        bool isDevelopment = string.Equals(name, AppEnvironment.Keys.Development, StringComparison.OrdinalIgnoreCase);
+
+        return new ApplicationEnvironment(name, isLocal, isDevelopment);
     }
 }

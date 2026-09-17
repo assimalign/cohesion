@@ -1,0 +1,33 @@
+name: Cohesion CLI
+on:
+  push:
+    paths:
+      - 'tooling/Cli/**'
+      - 'build/**'
+      - '.github/workflows/tooling-cli.yml'
+  pull_request:
+    paths:
+      - 'tooling/Cli/**'
+      - 'build/**'
+      - '.github/workflows/tooling-cli.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: [ 'Assimalign.Cohesion.Cli' ]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        name: "Checkout: ${{ matrix.projects }}"
+      - uses: ./.github/actions/build
+        name: "Running Build & Tests: ${{ matrix.projects }}"
+        with:
+          area: 'tooling'
+          category: 'Cli'
+          project: ${{ matrix.projects }}

@@ -7,22 +7,57 @@
 	<Folder Name="/LoadBalancer/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer/" />
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer/docs/">
+		<File Path="Assimalign.Cohesion.LoadBalancer/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.LoadBalancer/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer/docs/Assembly/Assimalign.Cohesion.LoadBalancer/ILoadBalancerApplication/">
+		<File Path="Assimalign.Cohesion.LoadBalancer/docs/Assembly/Assimalign.Cohesion.LoadBalancer/ILoadBalancerApplication/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer/docs/Assembly/Assimalign.Cohesion.LoadBalancer/ILoadBalancerApplicationBuilder/">
+		<File Path="Assimalign.Cohesion.LoadBalancer/docs/Assembly/Assimalign.Cohesion.LoadBalancer/ILoadBalancerApplicationBuilder/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer/src/">
 		<Project Path="Assimalign.Cohesion.LoadBalancer/src/Assimalign.Cohesion.LoadBalancer.csproj" />
 	</Folder>
-	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/" />
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/">
+		<File Path="Assimalign.Cohesion.LoadBalancer.Hosting/README.md" />
+	</Folder>
 	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/docs/">
 		<File Path="Assimalign.Cohesion.LoadBalancer.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.LoadBalancer.Hosting/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/docs/Assembly/Assimalign.Cohesion.LoadBalancer.Hosting/LoadBalancerApplication/">
+		<File Path="Assimalign.Cohesion.LoadBalancer.Hosting/docs/Assembly/Assimalign.Cohesion.LoadBalancer.Hosting/LoadBalancerApplication/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.LoadBalancer.Hosting/src/Assimalign.Cohesion.LoadBalancer.Hosting.csproj" />
+	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting/tests/">
+		<Project Path="Assimalign.Cohesion.LoadBalancer.Hosting/tests/Assimalign.Cohesion.LoadBalancer.Hosting.Tests.csproj" />
 	</Folder>
 	<Folder Name="/LoadBalancer/refs/" >
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
+	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/">
+		<File Path="Assimalign.Cohesion.LoadBalancer.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/">
+		<File Path="Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/src/">
+		<Project Path="Assimalign.Cohesion.LoadBalancer.ApplicationModel/src/Assimalign.Cohesion.LoadBalancer.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/tests/">
+		<Project Path="Assimalign.Cohesion.LoadBalancer.ApplicationModel/tests/Assimalign.Cohesion.LoadBalancer.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/Assembly/Assimalign.Cohesion.LoadBalancer.ApplicationModel/">
+		<File Path="Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/Assembly/Assimalign.Cohesion.LoadBalancer.ApplicationModel/OVERVIEW.md" />
 	</Folder>
 </Solution>

@@ -157,8 +157,8 @@ public class WebTlsHostingIntegrationTests
             return Task.CompletedTask;
         });
 
-        // Resolve and drive the default server directly. StartAsync launches the accept loop; the
-        // TCP listener binds lazily on the first accept, so the client send is retried until bound.
+        // Resolve and drive the default server directly. StartAsync awaits the TCP bind before it
+        // launches the accept loop, so returning here means the endpoint is ready for the client.
         IWebApplicationServer server = app.Context.ServiceProvider.GetRequiredService<IWebApplicationServer>();
         await server.StartAsync(cancellationToken);
 

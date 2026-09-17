@@ -9,7 +9,7 @@ the `IAuthenticationHandler` implementation of the scheme model in
 request re-validates the caller-supplied token, so the handler is *not* an
 `IAuthenticationSignInHandler` (there is no session to establish).
 
-## Why it consumes IdentityModel rather than embedding crypto
+## Why it consumes IdentityModel rather than owning JWT crypto
 
 The document-level validation &mdash; issuer, audience, lifetime,
 algorithm allow-list, `none`-rejection, `crit`/`b64` header rules &mdash;
@@ -19,27 +19,26 @@ contracts). The bearer handler does not re-implement any of it. This keeps
 one JWT/JOSE implementation in the repo and lets the handler stay a thin
 policy layer.
 
-IdentityModel deliberately stops short of **signature verification** &mdash;
-its `JsonWebToken.Validate` explicitly does *not* check the signature,
-exposing `SigningInput` and `Parts` as the seam for "a Security-layer
-component." This package *is* that component.
+`JsonWebToken.Validate` deliberately remains document-only and does *not* check the signature.
+Design item 25b (`#970`) moved the reusable RSA/ECDSA verifier behind that raw
+`SigningInput`/`Parts` seam into IdentityModel's JWT package so headless resources do not acquire
+a Web dependency. Bearer keeps the orchestration and its public compatibility seam.
 
 ## The signature-verification seam
 
-`IJwtSignatureVerifier` is the keyed seam: `CanVerify(alg, kid)` +
-`Verify(alg, signingInput, signature)`. Built-in implementations wrap BCL
-primitives:
+`IJwtSignatureVerifier` is Bearer's stable keyed seam: `CanVerify(alg, kid)` +
+`Verify(alg, signingInput, signature)`. Its factories provide:
 
 - **HMAC** (`HS256/384/512`) &mdash; `HMACSHA*.HashData`, compared in fixed
   time via `CryptographicOperations.FixedTimeEquals`.
-- **RSA** (`RS*` PKCS#1 and `PS*` PSS) &mdash; `RSA.VerifyData` with the
-  padding selected from `alg`.
-- **ECDSA** (`ES256/384/512`) &mdash; `ECDsa.VerifyData` with
-  `DSASignatureFormat.IeeeP1363FixedFieldConcatenation`, because JWS carries
-  the signature as the raw `r‖s` concatenation, not DER.
+- **RSA** (`RS*` PKCS#1 and `PS*` PSS) &mdash; a thin adapter over
+  `JsonWebTokenSignatureVerifier.CreateRsa` in IdentityModel.
+- **ECDSA** (`ES256/384/512`) &mdash; a thin adapter over
+  `JsonWebTokenSignatureVerifier.CreateEcdsa`, including named-curve and P1363-length binding.
 
-`JwtSignatureVerifier.CreateHmac/CreateRsa/CreateEcdsa` are the public
-factories; the concrete verifiers stay internal.
+`JwtSignatureVerifier.CreateHmac/CreateRsa/CreateEcdsa` remain the public Bearer factories; the
+adapter and all concrete verifiers stay internal. This preserves configured applications while
+making the asymmetric primitive available below Web.
 
 **Algorithm-confusion defense is structural.** Because a verifier is bound
 to concrete key material, its accepted algorithms are bounded by its key
@@ -91,8 +90,9 @@ never redirects, so it needs no endpoint-metadata check.
 ## AOT posture
 
 `<IsAotCompatible>true</IsAotCompatible>` is inherited. No reflection: JSON
-parsing lives in IdentityModel's source-gen-friendly parser, signature
-verification is BCL crypto, and base64url is `System.Buffers.Text.Base64Url`.
+parsing and asymmetric signature verification live in IdentityModel's reflection-free JWT
+implementation, Web-local HMAC verification uses BCL one-shot APIs, and base64url is
+`System.Buffers.Text.Base64Url`.
 
 ## Non-goals
 

@@ -1,0 +1,110 @@
+<Project>
+	<UsingTask
+		TaskName="Assimalign.Cohesion.Sdk.Gateway.Tasks.CohesionCreateResourceVerbs"
+		AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.Gateway.Tasks.dll"
+		Runtime="NET" />
+
+	<PropertyGroup>
+		<!-- The base SDK defaults OutputType to Exe. -->
+		<IsAotCompatible>true</IsAotCompatible>
+		<CohesionApplicationModel>enabled</CohesionApplicationModel>
+		<CohesionResourceKind>Composite</CohesionResourceKind>
+		<CohesionResourceApplicationModel>Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane</CohesionResourceApplicationModel>
+		<CohesionResourceComposable>true</CohesionResourceComposable>
+		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">admin</CohesionControlPlaneEndpoint>
+		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
+		<CohesionGatewayAdminPort Condition="'$(CohesionGatewayAdminPort)' == ''">8082</CohesionGatewayAdminPort>
+		<CohesionWorkloadKind Condition="'$(CohesionWorkloadKind)' == ''">Deployment</CohesionWorkloadKind>
+		<CohesionGateways Condition="'$(CohesionGateways)' == ''">Local</CohesionGateways>
+		<CohesionPlatformsVersion Condition="'$(CohesionPlatformsVersion)' == ''">$(CohesionVersion)</CohesionPlatformsVersion>
+		<CohesionGatewayAot Condition="'$(CohesionGatewayAot)' == ''">auto</CohesionGatewayAot>
+		<CohesionGatewayInProcess Condition="'$(CohesionGatewayInProcess)' == ''">false</CohesionGatewayInProcess>
+		<CohesionSkipResourceApplicationModelReference>true</CohesionSkipResourceApplicationModelReference>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<CohesionEndpoint Include="admin" Scheme="http" ContainerPort="$(CohesionGatewayAdminPort)" Public="false" />
+		<CohesionProbe Include="readiness" Endpoint="admin" Http="/readyz" />
+		<CohesionProbe Include="liveness" Endpoint="admin" Http="/livez" />
+
+		<!-- Typed planners: Web, Database, ConfigurationStore, SecretStore, IdentityHub, Rezolvr, and LogSpace. -->
+		<CohesionGatewayResourceKind Include="Web">
+			<ApplicationModel>Assimalign.Cohesion.Web.ApplicationModel</ApplicationModel>
+			<OptionsType>global::Assimalign.Cohesion.Web.ApplicationModel.WebResourceOptions</OptionsType>
+			<DescriptorType>global::Assimalign.Cohesion.Web.ApplicationModel.IWebResourceDescriptor</DescriptorType>
+			<AddMethod>global::Assimalign.Cohesion.Web.ApplicationModel.WebResourceExtensions.AddWeb</AddMethod>
+		</CohesionGatewayResourceKind>
+		<CohesionGatewayResourceKind Include="Database">
+			<ApplicationModel>Assimalign.Cohesion.Database.ApplicationModel</ApplicationModel>
+			<OptionsType>global::Assimalign.Cohesion.Database.ApplicationModel.DatabaseResourceOptions</OptionsType>
+			<DescriptorType>global::Assimalign.Cohesion.Database.ApplicationModel.IDatabaseResourceDescriptor</DescriptorType>
+			<AddMethod>global::Assimalign.Cohesion.Database.ApplicationModel.DatabaseResourceExtensions.AddDatabase</AddMethod>
+		</CohesionGatewayResourceKind>
+
+		<CohesionGatewayResourceKind Include="ConfigurationStore">
+			<ApplicationModel>Assimalign.Cohesion.ConfigurationStore.ApplicationModel</ApplicationModel>
+			<OptionsType>global::Assimalign.Cohesion.ConfigurationStore.ApplicationModel.ConfigurationStoreResourceOptions</OptionsType>
+			<DescriptorType>global::Assimalign.Cohesion.ConfigurationStore.ApplicationModel.IConfigurationStoreResourceDescriptor</DescriptorType>
+			<AddMethod>global::Assimalign.Cohesion.ConfigurationStore.ApplicationModel.ConfigurationStoreResourceExtensions.AddConfigurationStore</AddMethod>
+		</CohesionGatewayResourceKind>
+
+		<CohesionGatewayResourceKind Include="SecretStore">
+			<ApplicationModel>Assimalign.Cohesion.SecretStore.ApplicationModel</ApplicationModel>
+			<OptionsType>global::Assimalign.Cohesion.SecretStore.ApplicationModel.SecretStoreResourceOptions</OptionsType>
+			<DescriptorType>global::Assimalign.Cohesion.SecretStore.ApplicationModel.ISecretStoreResourceDescriptor</DescriptorType>
+			<AddMethod>global::Assimalign.Cohesion.SecretStore.ApplicationModel.SecretStoreResourceExtensions.AddSecretStore</AddMethod>
+		</CohesionGatewayResourceKind>
+		<CohesionGatewayResourceKind Include="IdentityHub">
+			<ApplicationModel>Assimalign.Cohesion.IdentityHub.ApplicationModel</ApplicationModel>
+			<OptionsType>global::Assimalign.Cohesion.IdentityHub.ApplicationModel.IdentityHubResourceOptions</OptionsType>
+			<DescriptorType>global::Assimalign.Cohesion.IdentityHub.ApplicationModel.IIdentityHubResourceDescriptor</DescriptorType>
+			<AddMethod>global::Assimalign.Cohesion.IdentityHub.ApplicationModel.IdentityHubResourceExtensions.AddIdentityHub</AddMethod>
+		</CohesionGatewayResourceKind>
+		<CohesionGatewayResourceKind Include="Rezolvr">
+			<ApplicationModel>Assimalign.Cohesion.Rezolvr.ApplicationModel</ApplicationModel>
+			<OptionsType>global::Assimalign.Cohesion.Rezolvr.ApplicationModel.RezolvrResourceOptions</OptionsType>
+			<DescriptorType>global::Assimalign.Cohesion.Rezolvr.ApplicationModel.IRezolvrResourceDescriptor</DescriptorType>
+			<AddMethod>global::Assimalign.Cohesion.Rezolvr.ApplicationModel.RezolvrResourceExtensions.AddRezolvr</AddMethod>
+		</CohesionGatewayResourceKind>
+		<CohesionGatewayResourceKind Include="LogSpace">
+			<ApplicationModel>Assimalign.Cohesion.LogSpace.ApplicationModel</ApplicationModel>
+			<OptionsType>global::Assimalign.Cohesion.LogSpace.ApplicationModel.LogSpaceResourceOptions</OptionsType>
+			<DescriptorType>global::Assimalign.Cohesion.LogSpace.ApplicationModel.ILogSpaceResourceDescriptor</DescriptorType>
+			<AddMethod>global::Assimalign.Cohesion.LogSpace.ApplicationModel.LogSpaceResourceExtensions.AddLogSpace</AddMethod>
+		</CohesionGatewayResourceKind>
+
+		<!-- Mount-source and command target kind to gateway-side client package map. -->
+		<CohesionGatewayClientKind Include="ConfigurationStore" PackageId="Assimalign.Cohesion.ConfigurationStore.Client" />
+		<CohesionGatewayClientKind Include="Database" PackageId="Assimalign.Cohesion.Database.Client" />
+		<CohesionGatewayClientKind Include="IdentityHub" PackageId="Assimalign.Cohesion.IdentityHub.Client" />
+		<CohesionGatewayClientKind Include="Rezolvr" PackageId="Assimalign.Cohesion.Rezolvr.Client" />
+		<CohesionGatewayClientKind Include="SecretStore" PackageId="Assimalign.Cohesion.SecretStore.Client" />
+
+		<!-- Provider-name to package-id map. Only the selected names are restored. -->
+		<CohesionGatewayPackage Include="Local" PackageId="Assimalign.Cohesion.ApplicationModel.Gateway" Version="$(CohesionVersion)" />
+		<CohesionGatewayPackage Include="InProcess" PackageId="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" Version="$(CohesionVersion)" />
+		<CohesionGatewayPackage Include="Docker" PackageId="Assimalign.Cohesion.ApplicationModel.Gateway.Docker" Version="$(CohesionPlatformsVersion)" />
+		<CohesionGatewayPackage Include="Kubernetes" PackageId="Assimalign.Cohesion.ApplicationModel.Gateway.Kubernetes" Version="$(CohesionPlatformsVersion)" />
+	</ItemGroup>
+
+	<!-- Core orchestration packages are always present. -->
+	<ItemGroup>
+		<_CohesionGatewayApplicationModelProject Include="$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel\src\Assimalign.Cohesion.ApplicationModel.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel\src\Assimalign.Cohesion.ApplicationModel.csproj')" />
+		<_CohesionGatewayRuntimeProject Include="$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway\src\Assimalign.Cohesion.ApplicationModel.Gateway.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway\src\Assimalign.Cohesion.ApplicationModel.Gateway.csproj')" />
+		<_CohesionGatewayResourceHostingProject Include="$(CohesionRepositoryDirectory)libraries\Hosting\Assimalign.Cohesion.Hosting.Resources\src\Assimalign.Cohesion.Hosting.Resources.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\Hosting\Assimalign.Cohesion.Hosting.Resources\src\Assimalign.Cohesion.Hosting.Resources.csproj')" />
+		<_CohesionGatewayConnectionsProject Include="$(CohesionRepositoryDirectory)libraries\Connections\Assimalign.Cohesion.Connections\src\Assimalign.Cohesion.Connections.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\Connections\Assimalign.Cohesion.Connections\src\Assimalign.Cohesion.Connections.csproj')" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" ProjectPath="@(_CohesionGatewayApplicationModelProject)" Condition="'@(_CohesionGatewayApplicationModelProject)' != ''" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" ProjectPath="@(_CohesionGatewayRuntimeProject)" Condition="'@(_CohesionGatewayRuntimeProject)' != ''" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" ProjectPath="@(_CohesionGatewayResourceHostingProject)" Condition="'@(_CohesionGatewayResourceHostingProject)' != ''" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" ProjectPath="@(_CohesionGatewayConnectionsProject)" Condition="'@(_CohesionGatewayConnectionsProject)' != ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayApplicationModelProject)' == ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayRuntimeProject)' == ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.Hosting.Resources" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayResourceHostingProject)' == ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.Connections" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayConnectionsProject)' == ''" />
+	</ItemGroup>
+
+	<!-- Repository builds consume Local's provider contribution through the same file the package ships. -->
+	<Import
+		Project="$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway\buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.props"
+		Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway\buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.props')" />
+</Project>

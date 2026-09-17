@@ -5,28 +5,86 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// The default <see cref="IApplication"/>. <see cref="RunAsync"/> starts the gateway, blocks
-/// until cancellation, then stops the gateway within a bounded shutdown window — mirroring the
-/// <c>Host&lt;TContext&gt;.RunAsync</c> pattern (a linked token source plus a task-completion
-/// source completed on cancellation).
+/// The default <see cref="IApplication"/>. It dispatches the model's run mode; ordinary Run
+/// starts the gateway, blocks until cancellation, then lets the gateway apply its per-resource
+/// shutdown budgets, while Describe writes the model without gateway contact.
 /// </summary>
 internal sealed class CohesionApplication : IApplication
 {
-    private static readonly TimeSpan DefaultShutdownTimeout = TimeSpan.FromSeconds(30);
-
     private readonly IApplicationGateway _gateway;
-    private readonly TimeSpan _shutdownTimeout;
+    private readonly TimeSpan? _shutdownTimeout;
+    private readonly GatewayCommand? _command;
 
-    public CohesionApplication(IApplicationModel model, IApplicationGateway gateway, TimeSpan? shutdownTimeout = null)
+    public CohesionApplication(
+        IApplicationModel model,
+        IApplicationGateway gateway,
+        TimeSpan? shutdownTimeout = null,
+        GatewayCommand? command = null)
     {
         Model = model ?? throw new ArgumentNullException(nameof(model));
         _gateway = gateway ?? throw new ArgumentNullException(nameof(gateway));
-        _shutdownTimeout = shutdownTimeout ?? DefaultShutdownTimeout;
+        _shutdownTimeout = shutdownTimeout;
+        _command = command;
     }
 
     public IApplicationModel Model { get; }
 
-    public async Task RunAsync(CancellationToken cancellationToken = default)
+    public Task RunAsync(CancellationToken cancellationToken = default)
+    {
+        return Model.RunMode switch
+        {
+            GatewayRunMode.Run => RunCoreAsync(cancellationToken),
+            GatewayRunMode.Apply => _gateway.ReconcileAsync(Model, cancellationToken),
+            GatewayRunMode.Teardown => _gateway.UninstallAsync(Model, cancellationToken),
+            GatewayRunMode.Describe => ApplicationModelDocumentWriter.WriteAsync(Model, cancellationToken),
+            GatewayRunMode.Render => RenderAsync(cancellationToken),
+            GatewayRunMode.Bootstrap => BootstrapAsync(cancellationToken),
+            GatewayRunMode.TrustIssue or GatewayRunMode.TrustAdd => RunCommandAsync(cancellationToken),
+            _ => throw new NotSupportedException(
+                $"Gateway run mode '{Model.RunMode}' is not implemented until its platform execution/compiler support is available. No gateway operation was attempted."),
+        };
+    }
+
+    private Task RenderAsync(CancellationToken cancellationToken)
+    {
+        if (_gateway is not IApplicationGatewayRenderer renderer)
+        {
+            throw new NotSupportedException(
+                $"Gateway '{_gateway.Name}' does not implement render mode.");
+        }
+
+        return renderer.RenderAsync([Model], Console.Out, cancellationToken);
+    }
+
+    private Task BootstrapAsync(CancellationToken cancellationToken)
+    {
+        if (_gateway is not IApplicationGatewayBootstrapper bootstrapper)
+        {
+            throw new NotSupportedException(
+                $"Gateway '{_gateway.Name}' does not implement bootstrap mode.");
+        }
+
+        return bootstrapper.BootstrapAsync([Model], Console.Out, cancellationToken);
+    }
+
+    private Task RunCommandAsync(CancellationToken cancellationToken)
+    {
+        if (_command is null)
+        {
+            throw new InvalidOperationException(
+                $"Gateway run mode '{Model.RunMode}' has no validated command arguments.");
+        }
+
+        if (_gateway is not IApplicationGatewayCommandHandler handler)
+        {
+            throw new NotSupportedException(
+                $"Gateway '{_gateway.Name}' does not implement command mode '{Model.RunMode}'.");
+        }
+
+        return handler.ExecuteCommandAsync(Model, _command, cancellationToken);
+    }
+
+    private async Task RunCoreAsync(CancellationToken cancellationToken)
     {
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -35,11 +93,30 @@ internal sealed class CohesionApplication : IApplication
             static state => ((TaskCompletionSource)state!).TrySetResult(),
             stopped);
 
-        await _gateway.StartAsync(Model, cancellation.Token).ConfigureAwait(false);
+        try
+        {
+            await _gateway.StartAsync(Model, cancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            await StopGatewayAsync().ConfigureAwait(false);
+            return;
+        }
 
         await stopped.Task.ConfigureAwait(false);
+        await StopGatewayAsync().ConfigureAwait(false);
+    }
 
-        using var shutdown = new CancellationTokenSource(_shutdownTimeout);
-        await _gateway.StopAsync(shutdown.Token).ConfigureAwait(false);
+    private async Task StopGatewayAsync()
+    {
+        if (_shutdownTimeout is TimeSpan shutdownTimeout)
+        {
+            using var shutdown = new CancellationTokenSource(shutdownTimeout);
+            await _gateway.StopAsync(shutdown.Token).ConfigureAwait(false);
+        }
+        else
+        {
+            await _gateway.StopAsync(CancellationToken.None).ConfigureAwait(false);
+        }
     }
 }

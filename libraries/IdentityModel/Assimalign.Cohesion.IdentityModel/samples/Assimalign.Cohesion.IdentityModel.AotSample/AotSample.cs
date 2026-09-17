@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Text;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Text;
 
 using Assimalign.Cohesion.IdentityModel;
@@ -16,8 +17,8 @@ namespace Assimalign.Cohesion.IdentityModel.AotSample;
 /// <summary>
 /// Exercises the representative surfaces of every IdentityModel family assembly under
 /// NativeAOT: the typed claim-value model (the family's trim-safe substitute for reflection),
-/// the JWT compact-parse path (the family's only wire-format parser — reflection-free
-/// <c>System.Text.Json</c> readers plus <c>Base64Url</c> and one-shot SHA-2 hashing), both
+/// the JWT compact parse/write/signature paths (reflection-free <c>System.Text.Json</c>
+/// readers/writers plus <c>Base64Url</c> and one-shot SHA-2/ECDSA operations), both
 /// protocol contract branches, both token documents, and the cross-protocol canonicalization
 /// seam. Deterministic output; a non-zero exit means a check failed. SAML XML parsing is out
 /// of scope because no XML parser exists in the family yet — when one lands, this smoke
@@ -37,6 +38,7 @@ internal static class AotSample
         {
             CheckClaimValueKinds();
             CheckJwtParseAndValidate();
+            CheckJwtWriteAndVerify();
             CheckSamlTokenValidate();
             CheckCrossProtocolCanonicalization();
 
@@ -103,6 +105,46 @@ internal static class AotSample
         });
         Require(result.Succeeded, "JWT validation (incl. at_hash spec vector) succeeds");
         Console.WriteLine("OK: JWT parse + validate (at_hash spec vector)");
+    }
+
+    private static void CheckJwtWriteAndVerify()
+    {
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var descriptor = new TokenJwt.JsonWebTokenDescriptor
+        {
+            Id = "bootstrap-1",
+            Issuer = "https://gateway.example.com",
+            IssuedAt = Now,
+            ExpiresAt = Now.AddHours(1),
+        };
+        descriptor.Audiences.Add("secret-store");
+
+        TokenJwt.IJsonWebTokenWriter writer = TokenJwt.JsonWebTokenWriter.CreateEs256(key, "gateway-key-1");
+        var token = TokenJwt.JsonWebToken.Parse(writer.Write(descriptor));
+        TokenJwt.IJsonWebTokenSignatureVerifier verifier =
+            TokenJwt.JsonWebTokenSignatureVerifier.CreateEcdsa(key, "gateway-key-1");
+        byte[] signingInput = Encoding.ASCII.GetBytes(token.SigningInput!);
+        byte[] signature = Base64Url.DecodeFromChars(token.Parts!.Signature);
+
+        Require(
+            verifier.CanVerify(token.Algorithm!, token.Header.KeyId) &&
+            verifier.Verify(token.Algorithm!, signingInput, signature),
+            "ES256 JWT writes and verifies");
+        Require(token.Id == "bootstrap-1", "written JWT jti projects onto Id");
+
+        using RSA rsa = RSA.Create(2048);
+        byte[] rsaSigningInput = Encoding.ASCII.GetBytes("eyJhbGciOiJSUzI1NiJ9.e30");
+        byte[] rsaSignature = rsa.SignData(
+            rsaSigningInput,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        TokenJwt.IJsonWebTokenSignatureVerifier rsaVerifier =
+            TokenJwt.JsonWebTokenSignatureVerifier.CreateRsa(rsa);
+        Require(
+            rsaVerifier.CanVerify(TokenJwt.JoseAlgorithms.RS256, keyId: null) &&
+            rsaVerifier.Verify(TokenJwt.JoseAlgorithms.RS256, rsaSigningInput, rsaSignature),
+            "RS256 JWT signature verifies");
+        Console.WriteLine("OK: JWT ES256 write + ECDSA/RSA verify");
     }
 
     private static void CheckSamlTokenValidate()

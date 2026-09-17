@@ -1,0 +1,10 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <PropertyGroup>
+    <CohesionApplicationName>identity</CohesionApplicationName>
+    <CohesionGateways>Local;InProcess</CohesionGateways>
+    <CohesionGatewayInProcess>true</CohesionGatewayInProcess>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionResourceReference Include="..\Example.Identity.IdentityHub\Example.Identity.IdentityHub.csproj" />
+  </ItemGroup>
+</Project>

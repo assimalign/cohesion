@@ -88,7 +88,20 @@ non-goals).
 many accepted HTTP connections may buffer before the per-listener accept
 loops wait for `AcceptOrListenAsync` to drain them.
 
-### Accept loops and the live-connection model
+### Bind lifecycle, accept loops, and the live-connection model
+
+`HttpConnectionListener.BindAsync` is the explicit resource-acquisition boundary. It awaits
+`BindAsync` on every registered stream and multiplexed transport before it completes, and it does
+not start any accept loop. Binding is idempotent. If a later transport fails to bind, the aggregate
+releases every materialized listener and rethrows the original failure, so host startup cannot
+leave a partially bound endpoint set behind. `DisposeAsync` is the symmetric release boundary and
+is terminal for that listener instance; an in-process restart constructs a fresh host and listener.
+
+`AcceptOrListenAsync` retains a compatibility fallback that invokes `BindAsync` before starting the
+accept loops. Hosted servers still call `BindAsync` explicitly from their awaited `StartAsync`, so a
+resource is never reported started while its endpoint remains unbound. Alt-Svc is computed only
+after all transports bind, allowing an HTTP/3 listener configured with port zero to advertise its
+actual assigned port.
 
 `HttpConnectionListener` runs one accept loop per registered listener.
 The HTTP/1.1 and HTTP/2 loops do `IConnection connection = await

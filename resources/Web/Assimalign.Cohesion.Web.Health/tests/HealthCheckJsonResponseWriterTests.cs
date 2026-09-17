@@ -7,6 +7,7 @@ using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Health.Internal;
 
 using Shouldly;
+using Xunit;
 
 using HttpMethod = Assimalign.Cohesion.Http.HttpMethod;
 

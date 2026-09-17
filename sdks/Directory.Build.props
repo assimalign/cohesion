@@ -1,5 +1,19 @@
 <Project>
 	<Import Project="..\Directory.Build.props" />
+
+	<!--
+	    The SDK family root - sdks/Assimalign.Cohesion.Sdk[.Domain]/ - resolved from the
+	    project's own location rather than assumed. Every project in a family lives exactly
+	    two levels below it (Tasks/src, Tasks/tests, Tasks/docs), so one expression serves
+	    them all. Directory.Build.targets packs Sdk/ and Targets/ relative to THIS, not to
+	    $(MSBuildProjectDirectory)\.. - that older form silently packed an SDK with no Sdk/
+	    or Targets/ folder the moment a project moved a level, which is exactly what the
+	    Tasks/src layout did.
+	-->
+	<PropertyGroup>
+		<CohesionSdkRootDirectory>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..'))\</CohesionSdkRootDirectory>
+	</PropertyGroup>
+
 	<!-- Shared package properties -->
 	<PropertyGroup>
 		<TargetFramework>$(TargetFrameworkForSdks)</TargetFramework>

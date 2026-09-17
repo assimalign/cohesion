@@ -1,0 +1,7 @@
+<Project>
+	<Import Project="$(MSBuildThisFileDirectory)..\..\..\Directory.Build.props" />
+	<PropertyGroup Condition="'$(MSBuildProjectName)' == 'Assimalign.Cohesion.Database.Testing.TestHost'">
+		<BaseIntermediateOutputPath>$(MSBuildProjectDirectory)\obj\TestHost\</BaseIntermediateOutputPath>
+		<BaseOutputPath>$(MSBuildProjectDirectory)\bin\TestHost\</BaseOutputPath>
+	</PropertyGroup>
+</Project>

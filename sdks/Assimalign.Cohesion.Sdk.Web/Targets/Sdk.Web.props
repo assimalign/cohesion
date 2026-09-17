@@ -1,3 +1,23 @@
 <Project>
-    
+	<!--
+		Area orchestration defaults use Include so a consuming project can override
+		a named item with Update, for example:
+		<CohesionEndpoint Update="http" Public="true" />.
+		The resource's domain composition remains in its Program.cs.
+	-->
+	<PropertyGroup>
+		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.Web.ApplicationModel</CohesionResourceApplicationModel>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.Web.ApplicationModel.WebResourceControlPlane</CohesionResourceControlPlaneType>
+		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">Web</CohesionResourceKind>
+		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">http</CohesionControlPlaneEndpoint>
+		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
+		<CohesionWorkloadKind Condition="'$(CohesionWorkloadKind)' == ''">Deployment</CohesionWorkloadKind>
+		<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<CohesionEndpoint Include="http" Scheme="http" ContainerPort="8080" Public="false" />
+		<CohesionProbe Include="readiness" Endpoint="http" Http="/readyz" />
+		<CohesionProbe Include="liveness" Endpoint="http" Http="/livez" />
+	</ItemGroup>
 </Project>

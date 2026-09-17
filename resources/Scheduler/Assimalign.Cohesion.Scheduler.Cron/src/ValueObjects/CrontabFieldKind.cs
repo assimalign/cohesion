@@ -1,12 +1,22 @@
-﻿namespace System;
+namespace Assimalign.Cohesion.Scheduler.Cron;
 
-/// <inheritdoc/>
+/// <summary>
+/// Identifies one field in a five-field cron expression.
+/// </summary>
 public enum CrontabFieldKind
 {
-    Second = 0, // Keep in order of appearance in expression
-    Minute = 1,
-    Hour = 2,
-    DayOfMonth = 3,
-    Month = 4,
-    DayOfWeek = 5
+    /// <summary>The minute field.</summary>
+    Minute,
+
+    /// <summary>The hour field.</summary>
+    Hour,
+
+    /// <summary>The day-of-month field.</summary>
+    DayOfMonth,
+
+    /// <summary>The month field.</summary>
+    Month,
+
+    /// <summary>The day-of-week field.</summary>
+    DayOfWeek,
 }

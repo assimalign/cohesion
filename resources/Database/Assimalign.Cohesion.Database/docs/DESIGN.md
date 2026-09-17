@@ -1,10 +1,10 @@
 # Assimalign.Cohesion.Database — Design
 
-The area root (architecture: [resources/Database/DESIGN.md](../../DESIGN.md)).
+The area root (architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)).
 Everything here must be true for *all five* data models — anything model-specific
 belongs in a model package. The root's job is to make engines substitutable at the
 seams the platform builds on: the server serves any engine, the hosting layer
-starts any engine, a client result looks the same regardless of the engine that
+composes any engine, a client result looks the same regardless of the engine that
 produced it.
 
 The root is also the area's **rollup**: it references every child root — the
@@ -70,8 +70,9 @@ surface. Child roots never reference the root.
   lifecycle enum to three observational conditions: `Running` (from creation),
   `Faulted` (a background-worker fault was recorded; the engine keeps serving —
   grouped commits self-help, checkpoints just stop truncating — but the owner
-  should learn it runs degraded), `Disposed`. The health seam (#168) reads this
-  surface; nothing drives transitions from outside.
+  should learn it runs degraded), `Disposed`. The default control-plane health
+  aggregate delivered by #973 reads this surface; nothing drives transitions
+  from outside.
 - **The application exposes its composition through `IDatabaseApplicationContext`,
   and the context is plural** (owner direction, 2026-07-13 — the Database
   instance of the Web area's `IWebApplicationContext` pattern, converged with
@@ -164,19 +165,23 @@ surface. Child roots never reference the root.
   cost accepted; wire parity held by the protocol contract and per-model E2Es —
   the preserved prediction-vs-evidence table lives in the area DESIGN §3.10).
   The contracts stay here for the same COHRES001 reason as before: feature
-  libraries (quotas #167, health #168, a future `Database.Testing`) must be
+  libraries (quotas #167, health, `Database.Testing`) must be
   able to name the server without referencing any runtime. The context shape
   (`Context` = engine + sessions) mirrors the application context pattern —
   observational composition on a context, lifecycle on the owning object.
 - **The application builder is a root seam; the implementation is not** (owner
   direction, 2026-07-13). `IDatabaseApplicationBuilder`/`IDatabaseApplication`
   live here so **model packages register their engines and servers without
-  knowing the hosting layer**: `Database.Sql` ships `AddSqlDatabase(...)` and
+  knowing the hosting implementation**: `Database.Sql` ships `AddSqlDatabase(...)` and
   `AddSqlServer(...)` as `extension(IDatabaseApplicationBuilder)` members and
   never references `Database.Hosting` (COHRES001 intact); the hosting module
   ships the implementation (`DatabaseApplicationBuilder`) and the creation
-  entry point (`DatabaseApplication.CreateBuilder()`). Multiple `AddServer`
-  registrations are allowed — servers are per-model. This mirrors the Web area exactly
+  entry point (`DatabaseApplication.CreateBuilder()`). The concrete
+  `DatabaseApplicationBuilder.AddService` in `Database.Hosting` accepts plain Hosting
+  service instances and context factories; those services start before servers and
+  stop after them in reverse order. The root references no hosting library and
+  exposes no service-registration verb (O34). Multiple `AddServer` registrations are
+  allowed — servers are per-model. This mirrors the Web area exactly
   (`IWebApplicationBuilder` in the `Web` root, `WebApplication.CreateBuilder()`
   in `Web.Hosting`, `AddAuthentication` in `Web.Authentication`) — and the
   pattern is the **cross-area expectation**: every area root provides
@@ -185,6 +190,25 @@ surface. Child roots never reference the root.
   alternative — a builder type in the hosting module — would force every model
   package that wants a registration verb to reference the composition surface,
   which is precisely what the hosting-isolation rule forbids.
+- **The C# schema is one retained root model, not a second build-only language**
+  (#973, compiled by #859). `IDatabaseSchema` and `IDatabaseSchemaBuilder`
+  describe custom types, tables and key-value collections (columns/fields,
+  keys, indexes, and relational references), functions, triggers,
+  database-scoped principals, model extensions, and the explicit destructive
+  migration opt-in. `DatabaseSchemaCompiler.Compile` validates and lowers that
+  declaration into the immutable, dialect-bound `CompiledSchema` contract.
+  Its source-generated canonical JSON and SHA-256 `Hash` are shared by runtime
+  provisioning and `Sdk.Database` build tooling; malformed documents surface
+  typed, declaration-naming validation errors. `SchemaMigrationPlanner` diffs
+  supported table/collection shapes in deterministic dependency order and
+  refuses destructive operations unless the desired declaration opted in.
+  Metadata dimensions without a shipped statement surface fail explicitly
+  instead of producing an empty, falsely converged plan. Keeping the vocabulary
+  in the root lets customer `Program.cs`, hosting, model engines, and build
+  tooling share the declaration without making a model package reference
+  `Database.Hosting`; the rejected alternatives were administrative wire verbs
+  and a parallel declarative source format, both of which would violate the
+  area's code-first principle.
 - **`ProtocolVersion` lives in `Database.Protocol`, and the root consumes it.**
   The struct is wire vocabulary, so it lives with the wire implementation —
   `ProtocolVersion.Current` ("the version this assembly implements") is a plain
@@ -202,9 +226,12 @@ the root for **the contract root and everything built *above* it**: the model
 engines and their satellites (`SqlCatalogException`, engine-thrown
 `DatabaseException`s), the client core (`DatabaseClientException`,
 `SqlClientException`), the server, and `Database.Embedded`.
-The root defines three semantic subtypes, each because the distinction is part
-of the session contract: `DatabaseParseException` (fix-the-text vs.
-fix-the-data — the wire's `ParseFailure`), and the retryable-abort pair
+The root defines four semantic subtypes, each because the distinction is part
+of a public contract: `DatabaseNotFoundException` is the exact absence signal
+from `IDatabaseEngine.OpenDatabaseAsync` (so provisioning and server binding do
+not confuse an operational failure with a missing database),
+`DatabaseParseException` distinguishes fix-the-text from fix-the-data failures
+(the wire's `ParseFailure`), and the retryable-abort pair
 `DatabaseTransactionAbortedException` / `DatabaseTransactionDeadlockException`
 (the model-boundary surface of the transaction kernel's aborts: a write-write
 conflict or deadlock victim is retryable by construction, and in-process
@@ -249,13 +276,18 @@ as `DatabaseException`, so the inversion changed no live wire mapping.
 
 ## AOT posture
 
-Contracts, enums, and value objects only — no reflection, no serialization.
+Contracts, enums, value objects, and statically constructed schema declarations only. The schema
+builder and compiler inspect the typed expression-tree nodes supplied directly by the caller but
+never compile an expression, scan an assembly, or dynamically load code. Compiled-schema JSON uses
+a source-generated context; function and trigger expressions are lowered to a deterministic,
+allowlisted syntax tree and are never activated by the compiler.
 
 ## Non-goals
 
 - No connection/network concepts (that is the per-model server machinery in
   the model packages — `SqlDatabaseServer` in `Database.Sql` — and
   `Database.Client`).
-- No DI or configuration surface (that is `Database.Hosting`'s seam alone).
+- No DI, configuration, or `Assimalign.Cohesion.Hosting*` reference. Background-work
+  registration and hosting implementation remain in `Database.Hosting` (O34).
 - No model-specific request or result types — models subclass the
   `Database.Execution` family in their own packages.

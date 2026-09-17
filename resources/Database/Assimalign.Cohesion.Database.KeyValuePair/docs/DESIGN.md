@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
 The key-value engine (area architecture:
-[resources/Database/DESIGN.md](../../DESIGN.md) §3.3, generality report §3.10):
+[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.3, generality report §3.10):
 an ordered key space over the shared kernel, and the **second model engine** —
 built deliberately as the proof that the kernel is model-general, not SQL-shaped.
 
@@ -133,8 +133,12 @@ Model-specific wire surface (binary command frames, if measurement ever demands
 them) grows here, in this copy, without touching any other model. The machinery
 design record (composition seam, state machine, error taxonomy, two-phase stop)
 is documented in `Database.Sql`'s DESIGN.md server section, whose decisions
-this copy currently mirrors; when this copy diverges, this section records the
-divergence.
+this copy currently mirrors. In particular, `StartAsync` awaits the configured
+listener's `BindAsync` before starting the accept loop or returning; bind
+failure terminally disposes the listener. `StopAsync` cancels accept, drains
+sessions, then terminally disposes the listener. Stop is terminal, so restart
+symmetry composes a fresh server and listener rather than reusing the disposed
+pair. When this copy diverges, this section records the divergence.
 
 ## Engine-owned background workers
 
@@ -165,6 +169,7 @@ re-bootstrapping on the next open.
 ## Error model
 
 `DatabaseException` (area root) for misuse and model errors;
+`DatabaseNotFoundException` for an open request whose storage does not exist;
 `DatabaseParseException` for grammar violations (→ `ParseFailure` on the wire);
 `DatabaseTransactionAbortedException`/`DatabaseTransactionDeadlockException`
 (retryable) for MVCC conflicts — kernel exceptions are translated at the model

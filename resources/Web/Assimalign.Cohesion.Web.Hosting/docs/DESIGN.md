@@ -11,8 +11,8 @@ nothing resolves services per request.
 2026-07-10, recorded in `resources/Web/README.md`): no Web feature library
 references this package — a feature that did would drag the DI/configuration
 composition surface into every consumer — and this package references **no**
-Web feature library, only the root `Assimalign.Cohesion.Web` abstractions and
-non-Web infrastructure. Applications still see the whole Web family because the
+Web feature library. It references the root `Assimalign.Cohesion.Web` abstractions,
+its own hosting family under O35, and non-Web infrastructure. Applications still see the whole Web family because the
 `App.Web` shared framework (via `Sdk.Web`) delivers every Web assembly; builder
 verbs ship with their features (`AddAuthentication` moved to
 `Web.Authentication`, `AddCookie`/`AddJwtBearer` to their handler packages) and
@@ -23,6 +23,15 @@ This document focuses on the piece with the most load-bearing runtime behaviour:
 `WebApplicationServer`, the default `IWebApplicationServer`. Its dispatch model
 and stop semantics are the contract the rest of the Web middleware stack builds
 on, so they are recorded here rather than left to be re-derived from the code.
+
+The Web runtime references the public response-completion contract and the shared terminal; the terminal depends only on the Web root within this area.
+
+```mermaid
+flowchart LR
+    Runtime["Web.Hosting"] --> Root["Web"]
+    Runtime --> Terminal["Web.Hosting.Resources"]
+    Terminal --> Root
+```
 
 ## Design intent
 
@@ -41,27 +50,63 @@ Three properties fall out of that intent and shape the whole implementation:
 - **Shutdown is deterministic.** Stopping the server drains what is in flight and
   releases every resource, without leaving an unobserved exception behind.
 
+## Application lifecycle composition
+
+The concrete `WebApplicationBuilder.AddService` verb registers application lifecycle
+services independently of server registration. At `Build`, `WebApplicationBuilder`
+invokes each deferred service factory exactly once against the final
+`WebApplicationContext` and freezes the resulting services in registration order.
+`WebApplicationContext.HostedServices` enumerates that snapshot before the DI-owned
+server-service registrations, including the constructor-reserved default-server slot.
+
+The Web host rejects concurrent service start or stop, so this two-phase enumeration is
+the lifecycle guarantee: every application service starts before any Web server, services
+preserve their own registration order, and reverse host shutdown drains every server
+before stopping application services. Keeping the application-service snapshot outside
+the server's DI registry is intentional; otherwise the default server, registered when
+the concrete builder is constructed, would precede later `AddService` calls and violate
+the public contract.
+
 ## Server dispatch model
 
 ```
-StartAsync ──> AcceptLoopAsync (one stored Task)
-                  │  (optional) await a concurrency slot
-                  ├─ await listener.AcceptOrListenAsync
-                  └─ dispatch ─> ServeConnectionAsync (one tracked Task per connection)
-                                    await using connection
-                                      OpenAsync
-                                      await foreach ReceiveAsync
-                                        pipeline.ExecuteAsync ─> SendAsync ─> dispose exchange
-                                      dispose context
-                                    (connection disposed by await using)
+StartAsync ──> await listener.BindAsync ──> AcceptLoopAsync (one stored Task)
+                                             │  (optional) await a concurrency slot
+                                             ├─ await listener.AcceptOrListenAsync
+                                             └─ dispatch ─> ServeConnectionAsync (one tracked Task per connection)
+                                                               await using connection
+                                                                 OpenAsync
+                                                                 await foreach ReceiveAsync
+                                                                   pipeline.ExecuteAsync ─> SendAsync ─> dispose exchange
+                                                                 dispose context
+                                                               (connection disposed by await using)
 ```
 
-**One accept loop, one task per connection.** `StartAsync` schedules a single
-accept loop as a stored `Task` and returns immediately (the host-service contract
-uses the start token only to abort startup, which completes synchronously here).
-The loop accepts a connection and *hands it off* to `ServeConnectionAsync` on its
-own `Task`, then loops straight back to accept the next one. The loop never awaits
-a connection's service.
+**Bind before Started.** `StartAsync` first awaits the aggregate HTTP listener's
+`BindAsync`. Only after every transport endpoint is bound does it schedule the
+stored accept-loop task and return. A bind failure is surfaced as
+`HostStartupException`, preserving the transport exception as its inner exception;
+the `ResourceHost` from `Hosting.Resources` can therefore classify typed
+configuration/dependency causes as
+exit 64/69 and other pre-ready bind failures as exit 70. The default server is
+registered as both `IWebApplicationServer` and `IHostService`, resolving to the
+same singleton, so the host lifecycle actually drives this boundary. When an
+application registers only a custom server and supplies no default-listener
+configuration, the reserved default host-service slot is inert; it does not start an
+empty aggregate alongside the custom server.
+
+The root `IWebApplicationBuilder.AddServer` overloads accept servers that know nothing
+about Hosting. `Web.Hosting` registers one internal `IHostService` adapter per server;
+the adapter delegates start/stop while `WebApplicationContext.Servers` unwraps it back to
+the original Web contract object. The adapter is registered only as a host service, so it
+cannot replace the default server's `IWebApplicationServer` singleton. Consequently a
+configured default and a custom server each start exactly once, in registration order,
+and stop in reverse order. The factory overload is a singleton registration and receives
+the final application context.
+
+**One accept loop, one task per connection.** The loop accepts a connection and
+*hands it off* to `ServeConnectionAsync` on its own `Task`, then loops straight
+back to accept the next one. The loop never awaits a connection's service.
 
 **Why this is the whole point.** The previous implementation queued one
 `async void` thread-pool work item that accepted a connection and then
@@ -166,12 +211,14 @@ internal state.
    surfacing an unobserved `OperationCanceledException` or any other escaped
    exception.
 4. **Dispose the listener**, then the shutdown token source and (if present) the
-   concurrency semaphore.
+   concurrency semaphore. Listener disposal runs from a `finally`, including when
+   the caller's drain token expires, so `StopAsync` never completes with the port
+   still owned by this server.
 
-Cancelling before starting, or stopping twice, is a safe no-op guarded by
-interlocked flags. The drain budget is owned by the caller's host lifecycle
-(`Host<TContext>.StopAsync` applies `ShutdownTimeout`); the server does not
-impose its own.
+Cancelling before starting, or stopping twice, is safe and idempotent. The drain
+budget is owned by the caller's host lifecycle (`Host<TContext>.StopAsync` applies
+`ShutdownTimeout`); the server honors that token while awaiting its loops but
+still performs listener release.
 
 **Cancellation is drain, not force-kill of in-progress requests.** A single token
 governs both "stop accepting" and "unblock in-flight connections." Idle
@@ -300,6 +347,74 @@ surface at once. The broader server/runtime shape (per-connection dispatch,
 error isolation, graceful stop) is being reworked under issue #762; this file
 currently captures only the design decisions that are settled.
 
+## Enabled-resource control plane
+
+`WebApplication.CreateBuilder(args)` uses the process entry assembly for standalone execution
+and honors its generated `Hosting.Resources` `ResourceRuntime` registration. During an
+in-process resource invocation, the ambient invocation's logical member assembly takes
+precedence; no caller-stack reflection is required. When enabled, the builder
+binds the ambient `http` endpoint, aggregates `AddHealthCheck` registrations and
+DI-registered `Hosting.Health` `IHealthContributor`s, observes ambient endpoints, and attaches
+the built host for graceful stop. A fixed terminal layer wraps the final resolved
+pipeline — including a pipeline supplied through `IWebApplicationBuilder.AddPipeline` —
+so it always runs before user dispatch. It serves `/healthz`, `/readyz`, and `/livez`
+plus their `/cohesion/v1/healthz`, `/cohesion/v1/readyz`, and
+`/cohesion/v1/livez` aliases, together with `/cohesion/v1/endpoints`,
+`/cohesion/v1/stop`, and `/cohesion/v1/commands`.
+
+The default server installs the public Web-root `IWebResponseCompletionFeature` contract
+with an internal implementation on each exchange.
+The stop terminal uses it to register the host shutdown signal, returns `202 Accepted`,
+and lets the server invoke that signal only after `SendAsync` has written the response.
+This keeps the control-plane route terminal while preventing server cancellation from
+racing delivery of its own acknowledgement.
+
+The terminal is shared from `Web.Hosting.Resources` (O35); the private copy is deleted.
+Gateway-managed contexts require an ES256 bootstrap JWT for every `/cohesion/v1/*` route:
+application issuer, gateway subject, resource audience, key id, signature, required claims,
+and at most 24 hours of lifetime. Invalid tokens return 401 with a Bearer challenge; a valid
+token for another audience returns 403 without a challenge. Bare probes remain public.
+No gateway name means unauthenticated routes, even when the context carries a credential.
+
+Build validates managed identity and the public P-256 trust key only when an ambient http/https
+listener is bound. A managed control plane without a listener still builds. The pipeline factory
+captures the observed http/https port lazily once; if it is unknown, the wrapper forwards to user
+dispatch without calling the terminal. The shared terminal itself treats null as no port gate,
+which preserves filler behavior. A known port gates all paths, including bare probes.
+
+This module consumes the plain `Hosting` lifecycle plus the opt-in `Hosting.Resources`
+runtime/control-plane and `Hosting.Health` contribution contracts. It never references
+`Web.ApplicationModel` or `Web.Health`, preserving COHRES002. The no-argument and options
+overloads remain plain applications: they install no control-plane terminal, so the ordinary
+bodyless-404 fallback handles those paths.
+
+## Default application configuration
+
+`WebApplication.CreateBuilder(args)` composes the application configuration in
+increasing precedence order:
+
+1. optional `appsettings.json`;
+2. optional `appsettings.{Environment}.json`;
+3. process environment variables prefixed with `COHESION_CONFIG__` (the prefix is
+   removed and double underscores become configuration path separators);
+4. command-line arguments.
+
+The environment file name remains generic: `Local` selects `appsettings.Local.json`,
+and `Development` selects `appsettings.Development.json`. `Local` denotes a developer
+machine; `Development` denotes a deployable environment. Neither file is an alias for
+the other, and the unset environment default remains `Production`.
+
+The JSON files resolve from the ambient `Hosting.Resources`
+`ResourceContext.ContentRootPath` for an
+enabled resource and from `AppContext.BaseDirectory` otherwise. An in-process
+gateway supplies settings directly on that ambient `ResourceContext`, rather than
+mutating process-wide environment variables. The builder folds those settings into
+the deployment-setting layer before the caller's command-line arguments, so the
+same keys work in process and out of process while explicit arguments retain the
+highest precedence. The implementation uses only Cohesion's JSON, environment, and
+command-line configuration providers; it adds no reflection binder or
+`Microsoft.Extensions.*` dependency.
+
 ## Configuration-bound server limits and endpoints
 
 ### What it is
@@ -364,12 +479,12 @@ The binding is deliberately **not** reflection-based:
   **not** resolved at bind time — a hostname that is not one of those is an
   error, because binding-time DNS is an I/O surprise the composition root should
   not hide.
-- **Endpoint protocol.** `Http1` (default) or `Http2`; anything else throws.
+- **Endpoint protocol.** `Http1` (default), `Http2`, `Https`/`Http1s`, or `Http2s`; anything else throws. TLS endpoints use `Certificate` to name a Secret mount.
 
 ### Scope boundary
 
-`UseConfiguration` binds endpoints and the HTTP/1.1 server limits only. TLS
-composition, HTTP/3 registration, and the connection-dispatch rewrite are
+`UseConfiguration` binds HTTP and HTTPS endpoints and their protocol-specific server limits.
+HTTP/3 registration and the connection-dispatch rewrite are
 separate concerns (the latter under #762). Data-rate limits are deferred with
 the transport's streaming-body rework.
 
@@ -543,36 +658,27 @@ protocols to TLS 1.3 when the caller leaves them unset (a caller-supplied list i
 preserved unmodified); the `TlsServerOptions` overload applies those defaults
 eagerly to the passed options so a later read observes them, matching `UseHttp2s`.
 
-### Async materialization — why a deferred factory that blocks once
+### Async binding without sync-over-async
 
-The stream-protocol sugar composes a *synchronous* listener factory
-(`() => TcpConnectionListener.Create(...)`), but binding a QUIC listener is
-asynchronous (`QuicConnectionListener.CreateAsync`). That mismatch is what the earlier
-`WebHostingExtensions` remarks recorded as the reason h3 had no callback overload.
-
-Rather than push an async shape up through the whole registration surface (and the
-synchronous `IWebApplicationServer` DI factory that resolves it), the h3 members reuse
-the transport's existing synchronous deferred-factory seam
-(`HttpConnectionListenerOptions.UseHttp3(Func<IMultiplexedConnectionListener>)`) and
-supply a factory that **materializes the QUIC listener at server start** — inside the
-`HttpConnectionListener` constructor, which the default server resolves lazily — and
-**blocks once** on the async bind there. The block is offloaded to the thread pool
-(`Task.Run(() => CreateAsync(...).AsTask()).GetAwaiter().GetResult()`) so no captured
-`SynchronizationContext` can deadlock it — the same sync-over-async bridge the
-connection primitives use (`DuplexPipeStream`, the request-body streams). Listener
-creation therefore happens at start, never at configuration time: the callback is not
-even invoked until the listener materializes, which a registration-time defer test pins.
+The registration surface remains synchronous: its deferred factory constructs an
+*unbound* `QuicConnectionListener` and returns it immediately. Resource acquisition
+does not occur in the factory or in the `HttpConnectionListener` constructor. The
+aggregate listener's asynchronous `BindAsync` awaits the QUIC driver's asynchronous
+bind from `WebApplicationServer.StartAsync`, alongside every configured stream
+listener. This removes the previous sync-over-async bridge and makes TCP and QUIC obey
+the same explicit start/release lifecycle. The callback is still deferred until the
+HTTP listener materializes, so configuration time remains resource-free.
 
 ### Platform posture
 
 `System.Net.Quic` is available only on Windows, Linux, and macOS, and only when the
-platform ships a usable QUIC implementation (for example libmsquic). The h3 members —
-and the private materialization helper — are annotated
+platform ships a usable QUIC implementation (for example libmsquic). The h3 members
+are annotated
 `[SupportedOSPlatform("windows"/"linux"/"macos")]` to match the QUIC driver, so a call
 site on another OS is flagged by the platform-compatibility analyzer. At run time, when
-the platform lacks QUIC support (`QuicListener.IsSupported` is `false`), materialization
-throws `PlatformNotSupportedException` **at start**, propagated straight from
-`QuicConnectionListener.CreateAsync`. The tests gate on `QuicListener.IsSupported` and
+the platform lacks QUIC support (`QuicListener.IsSupported` is `false`), awaited binding
+throws `PlatformNotSupportedException` **at start**, propagated from
+`QuicConnectionListener.BindAsync`. The tests gate on `QuicListener.IsSupported` and
 assert the bind on supported platforms or the `PlatformNotSupportedException` otherwise,
 so a CI machine without QUIC never hard-fails.
 
@@ -604,7 +710,23 @@ server-side dispatch observation.
 
 ### AOT posture
 
-No reflection, no runtime codegen. Registration is plain delegate wiring; the ALPN/TLS
-defaults are list/enum assignments; materialization is `Task.Run` +
-`GetAwaiter().GetResult()` over `QuicConnectionListener.CreateAsync`.
-`IsAotCompatible=true` holds with no special handling.
+No reflection, no runtime codegen, and no sync-over-async bridge. Registration is plain
+delegate wiring; the ALPN/TLS defaults are list/enum assignments; awaited transport
+binding uses ordinary `ValueTask` APIs. `IsAotCompatible=true` holds with no special
+handling.
+
+## HTTPS endpoint certificate contract (31t)
+
+The enabled resource's `http` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged. Ambient binding tries http and then https by endpoint name, admitting both URI schemes. Manual Http:Endpoints configuration also accepts Protocol Https/Http1s/Http2s and Certificate as a mount name. Server.UseConfiguration remains opt-in and is not wired by default.
+
+## Optional telemetry (31b)
+
+The registered resource constructor calls ResourceTelemetry.Configure using the invocation snapshot. With no gateway or telemetry endpoint, existing providers and hosted services are unchanged. When enabled, the shared Hosting.Telemetry sibling adds OTLP/HTTP JSON logging and a service registered before producers; reverse StopAsync drains producers before a flush bounded by five seconds and the host shutdown token. Logging remains composed only in Hosting. See libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md for ordering and protocol limits.
+
+## Hosting family (O34)
+
+The root contracts and feature libraries reference no `Assimalign.Cohesion.Hosting*`
+library. `Web.Hosting.Resources` and `Web.Hosting.Health` own reusable hosting
+integration. They never reference this runtime module. COHRES002 still permits this
+module to reference only the Web root, so its internal control-plane terminal stays
+independent of `Web.Hosting.Resources`; consolidation is the 31f follow-up.

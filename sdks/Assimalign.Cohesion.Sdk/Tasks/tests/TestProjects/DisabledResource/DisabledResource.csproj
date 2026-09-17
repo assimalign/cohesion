@@ -1,0 +1,19 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
+
+  <PropertyGroup>
+    <Nullable>disable</Nullable>
+    <CohesionApplicationModel>disabled</CohesionApplicationModel>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionCommand Include="web.custom" />
+  </ItemGroup>
+
+  <Target Name="CaptureSdkDefaults" AfterTargets="Build">
+    <WriteLinesToFile
+      File="$(BaseIntermediateOutputPath)sdk-defaults.txt"
+      Lines="$(OutputType)|$(TargetFramework)|$(LangVersion)|$(EnablePreviewFeatures)|$(ImplicitUsings)|$(Nullable)|$(IsAotCompatible)"
+      Overwrite="true" />
+  </Target>
+
+</Project>

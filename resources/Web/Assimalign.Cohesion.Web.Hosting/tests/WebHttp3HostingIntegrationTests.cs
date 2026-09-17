@@ -96,8 +96,8 @@ public class WebHttp3HostingIntegrationTests
             return Task.CompletedTask;
         });
 
-        // Resolving the server materializes the QUIC listener (the deferred factory blocks once on the
-        // async bind here); StartAsync then launches the accept loop.
+        // Resolving the server materializes an unbound QUIC listener. StartAsync awaits its
+        // asynchronous bind and only then launches the accept loop.
         IWebApplicationServer server = app.Context.ServiceProvider.GetRequiredService<IWebApplicationServer>();
         await server.StartAsync(cancellationToken);
 

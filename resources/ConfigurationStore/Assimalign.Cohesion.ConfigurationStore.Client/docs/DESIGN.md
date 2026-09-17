@@ -1,0 +1,89 @@
+# Assimalign.Cohesion.ConfigurationStore.Client Design
+
+## Design intent
+
+The client is the narrow gateway-side protocol boundary for ConfigurationStore. It reads named
+configuration namespaces and submits control-plane commands without exposing or depending on the
+store's hosting implementation. This keeps a gateway from acquiring a transitive dependency on
+`Assimalign.Cohesion.ConfigurationStore.Hosting`.
+
+## Dependency boundary
+
+The package references only `Assimalign.Cohesion.Core`, solely for the Cohesion endpoint guard on
+`System.Uri`. The guard requires an absolute, host-bearing URI with a port from 1 through 65535 and
+rejects user information, query strings, and fragments. HTTP transport, authentication headers,
+and JSON processing use BCL APIs. The package deliberately does not depend on the ConfigurationStore
+area root, Hosting, DependencyInjection, Web, or ApplicationModel.
+
+`ResourceCommand` and `ClientCredential` are package-local contracts. Their shapes match the store
+protocol while avoiding a dependency on a runtime assembly merely to send a request.
+
+## Public surface
+
+`IConfigurationStoreClient` is the consumer contract. It lists namespace names, reads a named
+namespace, and submits commands. `ConfigurationStoreClient.Create` validates that its endpoint uses
+HTTP or HTTPS and returns an internal implementation. Client creation performs no network I/O.
+
+The caller supplies an opaque `ClientCredential`. The client does not inspect JWT claims, load token
+files, refresh credentials, or expose the token through formatting. It attaches the value as a Bearer
+credential for every request.
+
+## Wire protocol
+
+The first protocol version has three operations:
+
+| Operation | Request | Successful response |
+| --- | --- | --- |
+| List namespaces | `GET /cohesion/v1/namespaces` | A direct JSON array of namespace-name strings |
+| Read namespace | `GET /cohesion/v1/namespaces?name=<escaped-name>` | A direct JSON object with string or `null` values |
+| Submit command | `POST /cohesion/v1/commands` | Any success status with no required response body |
+
+The endpoint's existing base path is prepended to every route. Namespace lookup names are
+query-escaped and otherwise treated as opaque values. Listing preserves the server's array order and
+duplicates. Command bodies use camel-case JSON and include the id, kind, owner, key, and
+base64-encoded payload properties.
+
+## Transport and ownership
+
+The two-argument factories share a process-lifetime `HttpMessageInvoker` backed by
+`SocketsHttpHandler`, with redirects and cookies disabled. Creating clients is synchronous and
+performs no I/O. Both `Create` and
+`CreateForControlPlane(Uri controlPlaneAddress, ClientCredential credential, HttpMessageInvoker transport)`
+accept a caller-owned transport, including its TLS trust policy. The latter preserves the exact
+manifest control-plane path for command delivery. The client never owns or disposes the supplied
+transport; the caller retains it until requests finish, then disposes it. Trust discovery and
+protected-file reading stay outside this Core-only package.
+
+## Errors and cancellation
+
+Blank namespace names and invalid endpoint schemes fail before transport use. HTTP failures retain
+the BCL `HttpRequestException` shape through `EnsureSuccessStatusCode`. Invalid, empty, or JSON `null`
+namespace-list and namespace-value documents fail with `JsonException`. Cancellation tokens flow
+unchanged through send and content-read operations.
+
+## AOT posture
+
+All command serialization, namespace-list deserialization, and namespace-value deserialization use
+`ConfigurationStoreClientJsonContext`, an internal `JsonSerializerContext`. No reflection-based
+serializer overload, runtime assembly scan, or dynamic code generation is used. The project inherits
+the repository's `net10.0`, trimming, and NativeAOT settings.
+
+## Non-goals
+
+- Hosting or implementing ConfigurationStore endpoints.
+- Discovering endpoints or credentials from process state.
+- Parsing, validating, or refreshing the opaque Bearer credential.
+- Following redirects or retrying failed requests.
+- Providing dependency-injection registration or shared-framework delivery.
+
+
+## Declarative command delivery
+
+ObserveCommandAsync and DeleteCommandAsync return ResourceCommandObservation (Status and Detail),
+including structured provider refusals from non-success HTTP statuses. Existing SendCommandAsync
+retains its Task and EnsureSuccessStatusCode behavior. CreateForControlPlane accepts the full manifest
+control-plane URI and makes those observation methods append only /commands, including custom paths.
+The ordinary Create factory continues appending the existing /cohesion/v1 routes to its resource
+endpoint base path. JSON parsing is explicit and transport cancellation remains caller-controlled.
+
+The existing custom-transport Create overload is public for gateway-supplied TLS trust. The caller owns the HttpMessageInvoker and must retain it until requests complete, then dispose it. The client remains Core-only and does not discover trust or read protected files.
