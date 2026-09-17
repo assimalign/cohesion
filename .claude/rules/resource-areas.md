@@ -84,10 +84,10 @@ projects outside `resources/` are untouched). Violations fail the build:
 - `COHRES004` applies automatically outside the hosting family, the area's exact `Testing`
   package, and assemblies ending in `.ApplicationModel`. It rejects the base Hosting library
   and every `Hosting.*` sibling in both layers.
-- Test (`tests/`), example (`examples/`), and sample (`samples/`) projects are automatically
-  excluded from these guards — the rule constrains shipped libraries, not harnesses. This
-  path-based exclusion applies to COHRES001–004 and COHAM001; everything else in an area is
-  guarded regardless of folder layout. It is distinct from holding an explicit
+- Test (`tests/`), example (`examples/`), sample (`samples/`), and fixture (`fixtures/`) projects
+  are automatically excluded from these guards — the rule constrains shipped libraries, not
+  harnesses. This path-based exclusion applies to COHRES001–004 and COHAM001; everything else in an
+  area is guarded regardless of folder layout. It is distinct from holding an explicit
   `CohesionHostingIsolationExemptions` waiver.
 
 ## Opting out — `CohesionHostingIsolationExemptions`
@@ -145,19 +145,48 @@ Orchestration is an opt-in build behavior on that executable:
   references the area's runtime.
 
 An SDK consumer is the composition root and may reference `<Area>.Hosting`; it is not a shipped
-resource-area library governed as an exemption holder. In-repo executable acceptance fixtures
-belong under the **repository-root `samples/` tree** — one folder per fixture, named for its
-project (`samples/Assimalign.Cohesion.Database.SampleHost/`) — are non-packable, and exercise
-their real `Program.cs`. No `resources/<Area>/samples/` folder: a sample is a consumer of an
-area, not a member of it, and putting it outside `resources/` means the COHRES001–004 guards
-(which key off the `/resources/` path segment) never see it at all, rather than seeing it and
-excluding it by name. `samples/Directory.Build.props` supplies the TFM that
-`resources/Directory.Build.props` no longer reaches, `build/Targets/Build.References.Projects.targets`
-indexes `samples/**` so area test projects still resolve fixtures by name through
-`CohesionProjectReference`, and the owning area's CI workflow carries the fixture's new path in
-both its `paths:` trigger filter and its build step. `<Area>.Testing` invokes that program under a test-scoped
-`Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.CreateScope(...)` and remains the area's
-sole explicit exemption holder.
+resource-area library governed as an exemption holder. `<Area>.Testing` invokes that program under
+a test-scoped `Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.CreateScope(...)` and remains
+the area's sole explicit exemption holder.
+
+### Executable acceptance fixtures live in `fixtures/`, beside the project that drives them
+
+An in-repo executable acceptance fixture — a real `Program.cs` built from source that a test
+project launches — belongs in a **`fixtures/` folder inside the owning project**, a sibling of
+`src/`, `tests/`, and `docs/`, one folder per fixture named for its project:
+
+```
+resources/Database/Assimalign.Cohesion.Database.Testing/
+├── src/
+├── tests/
+├── docs/
+└── fixtures/
+    └── Assimalign.Cohesion.Database.SampleHost/
+```
+
+The owner is whichever project's tests the fixture exists for, and the name says which: the Web
+area's `Assimalign.Cohesion.Web.Testing.TestHost` lives under `Web.Testing`, and the Gateway's two
+resource fixtures live under `ApplicationModel.Gateway`, not in the areas whose runtimes they
+happen to compose.
+
+- **Fixtures are not samples.** A sample demonstrates the product to a reader; a fixture is a test
+  input that must compile from source against the current tree. Consumer-facing examples live in
+  the separate `cohesion-examples` repository — see *Examples live in `cohesion-examples`* below.
+- **Non-packable, always.** Set `IsPackable=false` in the fixture's csproj.
+- **The guards exempt `fixtures/` by path**, on the same terms as `tests/`: a fixture composes the
+  very `<Area>.Hosting` runtime module the area's own libraries may not touch, which is the whole
+  point of it. The exclusion is in `build/Targets/Build.Rules.targets` alongside
+  `tests|examples|samples`, and it applies to COHRES001–004 and COHAM001.
+- **No wiring needed.** `fixtures/` sits under `libraries/` or `resources/`, both of which
+  `build/Targets/Build.References.Projects.targets` already indexes, so a test project resolves the
+  fixture by name through `CohesionProjectReference` — and both trees' `Directory.Build.props`
+  already supply the TFM.
+- **A relative path inside a fixture changes depth when it moves.** The Database fixture's
+  `NuGet.Config` points at `_out/packages` relatively and
+  `installer/scripts/modules/tests/CohesionReleasePolicy.Tests.ps1` reads that file by path; check
+  both when relocating one.
+- **The owning area's CI workflow carries the fixture path** in its `paths:` trigger filter, so a
+  change to the fixture still builds the area that depends on it.
 
 ## What every area is expected to provide
 

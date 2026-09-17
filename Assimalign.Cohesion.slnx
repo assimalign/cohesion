@@ -3028,13 +3028,13 @@
 	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ResourceCommandObservation/">
 		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ResourceCommandObservation/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/samples/Assimalign.Cohesion.Database.SampleHost/">
-		<Project Path="samples/Assimalign.Cohesion.Database.SampleHost/Assimalign.Cohesion.Database.SampleHost.csproj" />
-		<File Path="samples/Assimalign.Cohesion.Database.SampleHost/README.md" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost/Assimalign.Cohesion.Database.SampleHost.csproj" />
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost/README.md" />
 	</Folder>
-	<Folder Name="/samples/Assimalign.Cohesion.Web.HttpsHost/">
-		<Project Path="samples/Assimalign.Cohesion.Web.HttpsHost/Assimalign.Cohesion.Web.HttpsHost.csproj" />
-		<File Path="samples/Assimalign.Cohesion.Web.HttpsHost/README.md" />
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/">
+		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/Assimalign.Cohesion.Web.HttpsHost.csproj" />
+		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/README.md" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/">
 		<File Path="libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/README.md" />
@@ -3065,8 +3065,8 @@
 	<Folder Name="/cohesion/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/Assembly/Assimalign.Cohesion.OpenTelemetry/">
 		<File Path="libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/Assembly/Assimalign.Cohesion.OpenTelemetry/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/samples/Assimalign.Cohesion.LogSpace.SinkHost/">
-		<Project Path="samples/Assimalign.Cohesion.LogSpace.SinkHost/Assimalign.Cohesion.LogSpace.SinkHost.csproj" />
-		<File Path="samples/Assimalign.Cohesion.LogSpace.SinkHost/README.md" />
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost/">
+		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost/Assimalign.Cohesion.LogSpace.SinkHost.csproj" />
+		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost/README.md" />
 	</Folder>
 </Solution>

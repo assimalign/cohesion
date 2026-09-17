@@ -23,10 +23,10 @@ The `Assimalign.Cohesion.` prefix is stripped from node labels; tables carry the
 | | Count |
 | --- | --- |
 | Projects indexed | 636 |
-| Shipped library/resource projects | 239 |
+| Shipped library/resource projects | 243 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 572 |
+| Declared project references | 583 |
 
 ## Area roll-up
 
@@ -88,7 +88,7 @@ direction that matters — no shipped project under `resources/**` may reference
 | Area | References |
 | --- | --- |
 | `libraries/Amqp` | libraries/Connections, libraries/Core |
-| `libraries/ApplicationModel` | libraries/Connections, libraries/Core, libraries/Hosting, libraries/Http, libraries/IdentityModel, libraries/Security, resources/ConfigurationStore, resources/Database, resources/IdentityHub, resources/Rezolvr, resources/SecretStore, resources/Web |
+| `libraries/ApplicationModel` | libraries/Connections, libraries/Core, libraries/Hosting, libraries/Http, libraries/IdentityModel, libraries/Security, resources/ConfigurationStore, resources/Database, resources/IdentityHub, resources/LogSpace, resources/Rezolvr, resources/SecretStore, resources/Web |
 | `libraries/Cache` | libraries/Core |
 | `libraries/Configuration` | libraries/Core, libraries/FileSystem |
 | `libraries/Connections` | libraries/Core |
@@ -125,7 +125,7 @@ direction that matters — no shipped project under `resources/**` may reference
 | `resources/Scheduler` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/Hosting, libraries/Http, libraries/IdentityModel, resources/Web |
 | `resources/SecretStore` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/Hosting, libraries/Http, libraries/IdentityModel, libraries/Security, resources/Web |
 | `resources/VpnGateway` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/Hosting, libraries/Http, resources/Web |
-| `resources/Web` | libraries/ApplicationModel, libraries/Cache, libraries/Configuration, libraries/Connections, libraries/DependencyInjection, libraries/FileSystem, libraries/Hosting, libraries/Http, libraries/IdentityModel, libraries/Logging, libraries/Security |
+| `resources/Web` | libraries/ApplicationModel, libraries/Cache, libraries/Configuration, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/FileSystem, libraries/Hosting, libraries/Http, libraries/IdentityModel, libraries/Logging, libraries/Security |
 
 ## Areas
 
@@ -140,7 +140,7 @@ direction that matters — no shipped project under `resources/**` may reference
 
 ### `libraries/ApplicationModel`
 
-4 shipped projects.
+6 shipped projects.
 
 Intra-area references:
 
@@ -150,6 +150,8 @@ flowchart LR
     N1["ApplicationModel.Gateway"]
     N2["ApplicationModel.Gateway.ControlPlane"]
     N3["ApplicationModel.Gateway.InProcess"]
+    N4["LogSpace.SinkHost"]
+    N5["Web.HttpsHost"]
     N1 --> N0
     N2 --> N0
     N2 --> N1
@@ -163,6 +165,8 @@ flowchart LR
 | `Assimalign.Cohesion.ApplicationModel.Gateway` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.ConfigurationStore.Client`<br>`Assimalign.Cohesion.Database.Client`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.IdentityHub.Client`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Rezolvr.Client`<br>`Assimalign.Cohesion.SecretStore.Client`<br>`Assimalign.Cohesion.Security.DataProtection` | — | `System.Security.Cryptography.ProtectedData` |
 | `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.ApplicationModel.Gateway`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web.Routing` | — | — |
 | `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.ApplicationModel.Gateway`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Resources` | — | — |
+| `Assimalign.Cohesion.LogSpace.SinkHost` | `Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.LogSpace.Hosting` | — | — |
+| `Assimalign.Cohesion.Web.HttpsHost` | `Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
 ### `libraries/Cache`
 
@@ -633,7 +637,7 @@ flowchart LR
 
 ### `resources/Database`
 
-54 shipped projects.
+55 shipped projects.
 
 _More than twelve projects: the table below is the area's graph (see the node ceiling in `.claude/rules/documentation.md`)._
 
@@ -681,6 +685,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Database.Memory` | — | — | — |
 | `Assimalign.Cohesion.Database.Protocol` | — | — | — |
 | `Assimalign.Cohesion.Database.Replication` | `Assimalign.Cohesion.Database.Storage` | — | — |
+| `Assimalign.Cohesion.Database.SampleHost` | — | — | — |
 | `Assimalign.Cohesion.Database.Security` | — | — | — |
 | `Assimalign.Cohesion.Database.Sql` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Sql.Catalog`<br>`Assimalign.Cohesion.Database.Sql.Language`<br>`Assimalign.Cohesion.Database.Sql.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Types` | — | — |
 | `Assimalign.Cohesion.Database.Sql.Catalog` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Indexing`<br>`Assimalign.Cohesion.Database.Sql.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Types` | — | — |
@@ -996,7 +1001,7 @@ flowchart LR
 
 ### `resources/Web`
 
-30 shipped projects.
+31 shipped projects.
 
 _More than twelve projects: the table below is the area's graph (see the node ceiling in `.claude/rules/documentation.md`)._
 
@@ -1032,6 +1037,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Web.Sessions` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Cookies`<br>`Assimalign.Cohesion.Http.Sessions`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Web` | — | — |
 | `Assimalign.Cohesion.Web.StaticFiles` | `Assimalign.Cohesion.FileSystem`<br>`Assimalign.Cohesion.FileSystem.Physical`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web` | — | — |
 | `Assimalign.Cohesion.Web.Testing` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.InMemory`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
+| `Assimalign.Cohesion.Web.Testing.TestHost` | `Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
 ## Most-referenced assemblies
 
@@ -1068,26 +1074,22 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 
 ## Harnesses
 
-296 test, sample, and example projects are indexed for fan-in but excluded from the
+292 test, sample, and example projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
 | Kind | Count |
 | --- | --- |
 | `examples/` | 5 |
-| `samples/` | 13 |
+| `samples/` | 9 |
 | `tests/` | 278 |
 
 Samples, which live in the repository-root `samples/` tree:
 
 | Sample | Path | References |
 | --- | --- | --- |
-| `Assimalign.Cohesion.Database.SampleHost` | `samples/Assimalign.Cohesion.Database.SampleHost/Assimalign.Cohesion.Database.SampleHost.csproj` | _(SDK-delivered)_ |
 | `Assimalign.Cohesion.IdentityModel.AotSample` | `libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/samples/Assimalign.Cohesion.IdentityModel.AotSample/Assimalign.Cohesion.IdentityModel.AotSample.csproj` | `Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Protocols`<br>`Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect`<br>`Assimalign.Cohesion.IdentityModel.Protocols.Saml`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.IdentityModel.Token.Saml` |
-| `Assimalign.Cohesion.LogSpace.SinkHost` | `samples/Assimalign.Cohesion.LogSpace.SinkHost/Assimalign.Cohesion.LogSpace.SinkHost.csproj` | `Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.LogSpace.Hosting` |
 | `Assimalign.Cohesion.ObjectMapping.AotSample` | `libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/samples/Assimalign.Cohesion.ObjectMapping.AotSample/Assimalign.Cohesion.ObjectMapping.AotSample.csproj` | `Assimalign.Cohesion.ObjectMapping` |
-| `Assimalign.Cohesion.Web.HttpsHost` | `samples/Assimalign.Cohesion.Web.HttpsHost/Assimalign.Cohesion.Web.HttpsHost.csproj` | `Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Web.Hosting` |
-| `Assimalign.Cohesion.Web.Testing.TestHost` | `samples/Assimalign.Cohesion.Web.TestHost/Assimalign.Cohesion.Web.Testing.TestHost.csproj` | `Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` |
 | `Database` | `sdks/Assimalign.Cohesion.Sdk.Gateway/samples/GatewaySmoke/Database/Database.csproj` | _(SDK-delivered)_ |
 | `Gateway` | `sdks/Assimalign.Cohesion.Sdk.Gateway/samples/GatewaySmoke/Gateway/Gateway.csproj` | _(SDK-delivered)_ |
 | `SdkSmoke.Analyzer` | `samples/SdkSmoke/SdkSmoke.Analyzer/SdkSmoke.Analyzer.csproj` | _(SDK-delivered)_ |

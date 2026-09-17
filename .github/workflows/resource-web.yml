@@ -2,11 +2,11 @@ name: Web
 on:
   push:
     paths:
+      # Covers Web.Testing/fixtures/Assimalign.Cohesion.Web.TestHost. The HttpsHost fixture is
+      # listed separately because it belongs to the Gateway's tests, not to this area
+      # (.claude/rules/resource-areas.md) — the Web runtime it composes is still this area's.
       - 'resources/Web/**'
-      # The area's sample apphosts live in the repository-root samples/ tree
-      # (.claude/rules/resource-areas.md); they are still this area's fixtures.
-      - 'samples/Assimalign.Cohesion.Web.HttpsHost/**'
-      - 'samples/Assimalign.Cohesion.Web.TestHost/**'
+      - 'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/**'
       - '.github/workflows/resource-web.yml'        # When Pipeline File Changes
 
 permissions:
@@ -77,4 +77,4 @@ jobs:
         with:
           global-json-file: global.json
       - run: dotnet build build/Tasks -c Release
-      - run: dotnet build samples/${{ matrix.projects }}/${{ matrix.projects }}.csproj -c Release
+      - run: dotnet build libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/${{ matrix.projects }}/${{ matrix.projects }}.csproj -c Release

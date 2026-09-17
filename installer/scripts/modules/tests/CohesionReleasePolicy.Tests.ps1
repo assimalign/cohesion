@@ -242,7 +242,7 @@ Describe 'Cohesion release policy wiring' {
 
     It 'keeps the Database SDK consumer on the package-backed local source' {
         [xml]$nuget = Get-Content -LiteralPath (
-            Join-Path $repositoryDirectory 'samples/Assimalign.Cohesion.Database.SampleHost/NuGet.Config') -Raw
+            Join-Path $repositoryDirectory 'resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost/NuGet.Config') -Raw
         $localSource = @($nuget.configuration.packageSourceMapping.packageSource |
             Where-Object key -EQ 'cohesion-local')[0]
         $localPatterns = @($localSource.package | ForEach-Object { $_.pattern })

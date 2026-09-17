@@ -42,7 +42,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 - `Assimalign.Cohesion.LogSpace` defines the public area-root application and builder contracts.
 - `Assimalign.Cohesion.LogSpace.Hosting` owns HTTPS ingest/query, scoped-token verification, mounted segments and host lifecycle.
-- `<repo>/samples/Assimalign.Cohesion.LogSpace.SinkHost` is the real executable used by LocalGateway acceptance tests.
+- `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost` is the real executable used by LocalGateway acceptance tests.
 - `Assimalign.Cohesion.LogSpace.Telemetry` reserves the area-specific telemetry integration surface and is currently project scaffolding.
 
 - `Assimalign.Cohesion.LogSpace.ApplicationModel` supplies the typed manifest, planner, descriptor, and default control-plane factory as a NuGet-only package.

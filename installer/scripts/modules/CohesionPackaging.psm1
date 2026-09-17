@@ -54,7 +54,7 @@ Set-StrictMode -Version 3.0
 # Shipping libraries and resources, as '<area>/<category>/<project>'. The triple is what
 # .github/actions/build takes as inputs, so this list doubles as the release validation matrix.
 #
-# Deliberately absent: samples/Assimalign.Cohesion.Database.SampleHost. It is
+# Deliberately absent: resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost. It is
 # built through Database.Testing's E2E project reference but carries <IsPackable>false</IsPackable>;
 # the real resource apphost is a test fixture, never a shipped package. Database.Testing itself is
 # shipped so customer test projects can invoke their own resource Program under an ambient scope.

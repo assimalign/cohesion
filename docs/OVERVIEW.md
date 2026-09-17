@@ -50,9 +50,9 @@ The orchestration clients above are distinct from the existing area clients:
 These are non-packable consumers with real `Program.cs` entry points:
 
 - `samples/SdkSmoke/`: `SdkSmoke.Analyzer`, `SdkSmoke.App`, `SdkSmoke.Database`, and `SdkSmoke.Web`.
-- `samples/Assimalign.Cohesion.Database.SampleHost`.
-- `samples/Assimalign.Cohesion.Web.HttpsHost` and `Assimalign.Cohesion.Web.TestHost`.
-- `samples/Assimalign.Cohesion.LogSpace.SinkHost` (item 31b).
+- `resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost`.
+- `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost` and `Assimalign.Cohesion.Web.TestHost`.
+- `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost` (item 31b).
 
 The [runtime contract](RUNTIME_CONTRACT.md), [Hosting.Telemetry design](../libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md),
 and [OpenTelemetry design](../libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/DESIGN.md)

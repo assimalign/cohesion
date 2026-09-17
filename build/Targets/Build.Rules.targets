@@ -125,19 +125,25 @@
 		     may not match the on-disk name). -->
 		<_CohesionAreaPrefixLower Condition="'$(_CohesionResourceArea)' != ''">$(_CohesionAreaRootProject.ToLowerInvariant()).</_CohesionAreaPrefixLower>
 
-		<!-- Library projects only: tests/, examples/, and samples/ trees are harnesses. -->
+		<!-- Library projects only: tests/, examples/, samples/, and fixtures/ trees are harnesses.
+
+		     fixtures/ holds the executable acceptance fixtures a test project drives - a real
+		     Program.cs built from source, which by construction composes the very runtime module
+		     the area's own libraries may not touch. It is a test input, so it is exempt on the
+		     same terms as tests/ itself. See .claude/rules/resource-areas.md. -->
 		<_CohesionHostingRuleApplies>false</_CohesionHostingRuleApplies>
 		<_CohesionHostingRuleApplies Condition="'$(_CohesionResourceArea)' != ''
 		                                        AND '$([System.IO.Path]::GetFileName($(MSBuildProjectDirectory)))' != 'tests'
 		                                        AND !$(MSBuildProjectDirectory.Contains('examples'))
-		                                        AND !$(MSBuildProjectDirectory.Contains('samples'))">true</_CohesionHostingRuleApplies>
+		                                        AND !$(MSBuildProjectDirectory.Contains('samples'))
+		                                        AND !$(MSBuildProjectDirectory.Contains('fixtures'))">true</_CohesionHostingRuleApplies>
 
 		<!-- Shared scope for the ApplicationModel and gateway-boundary rules. Match
 		     harness names as complete path segments, case-insensitively. -->
 		<_CohesionResourceProjectDirectoryNormalized>$(MSBuildProjectDirectory.Replace('\', '/'))</_CohesionResourceProjectDirectoryNormalized>
 		<_CohesionResourceBoundaryRulesApply>false</_CohesionResourceBoundaryRulesApply>
 		<_CohesionResourceBoundaryRulesApply Condition="'$(_CohesionResourceArea)' != ''
-		                                               AND !$([System.Text.RegularExpressions.Regex]::IsMatch('$(_CohesionResourceProjectDirectoryNormalized)', '(?i)(^|/)(tests|examples|samples)(/|$)'))">true</_CohesionResourceBoundaryRulesApply>
+		                                               AND !$([System.Text.RegularExpressions.Regex]::IsMatch('$(_CohesionResourceProjectDirectoryNormalized)', '(?i)(^|/)(tests|examples|samples|fixtures)(/|$)'))">true</_CohesionResourceBoundaryRulesApply>
 
 		<!-- COHAM001 is deliberately opt-in while existing ApplicationModel projects
 		     are brought onto the strict closure one at a time. -->
