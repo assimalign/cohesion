@@ -36,10 +36,10 @@ using Assimalign.Cohesion.Database.Storage;
 /// storage.FlushChanges();
 /// </code>
 /// </example>
-public sealed class DocumentStorage : Assimalign.Cohesion.Database.Storage.Storage
+public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
     private DocumentStorage(StorageStream data, StorageStream journal, StorageStream backup)
-        : base(data, journal, backup) { }
+        : base(data, journal, backup) => Records = new DocumentTransactionRecordSpace(this);
 
     /// <inheritdoc />
     public override StorageModel Model => StorageModel.Document;

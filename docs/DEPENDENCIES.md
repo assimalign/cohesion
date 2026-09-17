@@ -22,11 +22,11 @@ The `Assimalign.Cohesion.` prefix is stripped from node labels; tables carry the
 
 | | Count |
 | --- | --- |
-| Projects indexed | 651 |
-| Shipped library/resource projects | 247 |
+| Projects indexed | 652 |
+| Shipped library/resource projects | 248 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 597 |
+| Declared project references | 608 |
 
 ## Ambiguous project names
 
@@ -651,7 +651,7 @@ flowchart LR
 
 ### `resources/Database`
 
-59 shipped projects.
+60 shipped projects.
 
 _More than twelve projects: the table below is the area's graph (see the node ceiling in `.claude/rules/documentation.md`)._
 
@@ -673,13 +673,14 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Database.Cache.Storage` | — | — | — |
 | `Assimalign.Cohesion.Database.Cache.Tests` | — | — | — |
 | `Assimalign.Cohesion.Database.Client` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Protocol`<br>`Assimalign.Cohesion.Database.Types` | — | — |
-| `Assimalign.Cohesion.Database.Documents` | `Assimalign.Cohesion.Database` | — | — |
-| `Assimalign.Cohesion.Database.Documents.Catalog` | — | — | — |
+| `Assimalign.Cohesion.Database.Documents` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Documents.Catalog`<br>`Assimalign.Cohesion.Database.Documents.Language`<br>`Assimalign.Cohesion.Database.Documents.Storage` | — | — |
+| `Assimalign.Cohesion.Database.Documents.Catalog` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Documents.Storage`<br>`Assimalign.Cohesion.Database.Indexing`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions`<br>`Assimalign.Cohesion.Database.Types` | — | — |
 | `Assimalign.Cohesion.Database.Documents.Client` | — | — | — |
 | `Assimalign.Cohesion.Database.Documents.Language` | `Assimalign.Cohesion.Database.Language` | — | — |
+| `Assimalign.Cohesion.Database.Documents.RecoveryFixture` | `Assimalign.Cohesion.Database.Documents` | — | — |
 | `Assimalign.Cohesion.Database.Documents.Replication` | — | — | — |
 | `Assimalign.Cohesion.Database.Documents.Security` | — | — | — |
-| `Assimalign.Cohesion.Database.Documents.Storage` | `Assimalign.Cohesion.Database.Storage` | — | — |
+| `Assimalign.Cohesion.Database.Documents.Storage` | `Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions` | — | — |
 | `Assimalign.Cohesion.Database.Embedded` | `Assimalign.Cohesion.Database` | — | — |
 | `Assimalign.Cohesion.Database.Execution` | `Assimalign.Cohesion.Database.Language`<br>`Assimalign.Cohesion.Database.Types` | — | — |
 | `Assimalign.Cohesion.Database.Governance` | — | — | — |
@@ -1078,15 +1079,15 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.Hosting.Health` | 28 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.Database.Hosting.Tests, … |
 | `Assimalign.Cohesion.Hosting.Telemetry` | 19 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.EmailHub.Hosting, … |
 | `Assimalign.Cohesion.Http.Streaming` | 17 | Assimalign.Cohesion.Http.Connections.Tests, Assimalign.Cohesion.Http.ServerSentEvents, Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse, Assimalign.Cohesion.Http.ServerSentEvents.Tests, … |
+| `Assimalign.Cohesion.Database` | 16 | Assimalign.Cohesion.Database.Blob, Assimalign.Cohesion.Database.Blob.Catalog, Assimalign.Cohesion.Database.Client, Assimalign.Cohesion.Database.Documents, … |
+| `Assimalign.Cohesion.Database.Storage` | 16 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob, Assimalign.Cohesion.Database.Blob.Catalog, Assimalign.Cohesion.Database.Blob.Storage, … |
 | `Assimalign.Cohesion.Web.Testing` | 16 | Assimalign.Cohesion.Web.Api.Tests, Assimalign.Cohesion.Web.Caching.Tests, Assimalign.Cohesion.Web.Compression.Tests, Assimalign.Cohesion.Web.Diagnostics.Tests, … |
-| `Assimalign.Cohesion.Database` | 15 | Assimalign.Cohesion.Database.Blob, Assimalign.Cohesion.Database.Blob.Catalog, Assimalign.Cohesion.Database.Client, Assimalign.Cohesion.Database.Documents, … |
-| `Assimalign.Cohesion.Database.Storage` | 15 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob, Assimalign.Cohesion.Database.Blob.Catalog, Assimalign.Cohesion.Database.Blob.Storage, … |
 | `Assimalign.Cohesion.IdentityModel` | 15 | Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub, Assimalign.Cohesion.IdentityHub.Hosting, … |
 | `Assimalign.Cohesion.Web.Hosting.Resources` | 15 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.EmailHub.Hosting, Assimalign.Cohesion.EventHub.Hosting, … |
 | `Assimalign.Cohesion.Connections.InMemory` | 14 | Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory.Tests, Assimalign.Cohesion.Connections.Security.Tests, Assimalign.Cohesion.Connections.Tests, … |
+| `Assimalign.Cohesion.Database.Types` | 14 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Client, Assimalign.Cohesion.Database.Documents.Catalog, Assimalign.Cohesion.Database.Execution, … |
 | `Assimalign.Cohesion.FileSystem` | 14 | Assimalign.Cohesion.Configuration.FileSystem, Assimalign.Cohesion.Configuration.FileSystem.Tests, Assimalign.Cohesion.Configuration.Ini.Tests, Assimalign.Cohesion.Configuration.Json.Tests, … |
 | `Assimalign.Cohesion.Web.Routing` | 14 | Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.SourceGeneration.WebTests, Assimalign.Cohesion.Web.Api, Assimalign.Cohesion.Web.Api.Tests, … |
-| `Assimalign.Cohesion.Database.Types` | 13 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Client, Assimalign.Cohesion.Database.Execution, Assimalign.Cohesion.Database.Indexing, … |
 | `Assimalign.Cohesion.IdentityModel.Token` | 13 | Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub.Hosting, Assimalign.Cohesion.IdentityHub.Hosting.Tests, Assimalign.Cohesion.IdentityModel.AotSample, … |
 | `Assimalign.Cohesion.Configuration` | 10 | Assimalign.Cohesion.Configuration.CommandLine, Assimalign.Cohesion.Configuration.EnvironmentVariables, Assimalign.Cohesion.Configuration.FileSystem, Assimalign.Cohesion.Configuration.FileSystem.Tests, … |
 

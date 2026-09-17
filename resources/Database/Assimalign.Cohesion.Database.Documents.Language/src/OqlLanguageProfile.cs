@@ -13,7 +13,7 @@ public static class OqlLanguageProfile
         // Query
         "SELECT", "FROM", "WHERE",
         "ORDER", "BY", "GROUP", "HAVING",
-        "DISTINCT", "ALL", "AS",
+        "DISTINCT", "ALL", "AS", "ASC", "DESC",
         // Logical
         "AND", "OR", "NOT",
         // Predicates
@@ -51,10 +51,6 @@ public static class OqlLanguageProfile
         OqlClauses.GroupBy,
         OqlClauses.Having,
         OqlClauses.OrderBy,
-        OqlClauses.Define,
-        OqlClauses.Element,
-        OqlClauses.Flatten,
-        OqlClauses.Subquery,
     ];
 
     /// <summary>Gets the OQL language profile used by document-model query consumers.</summary>

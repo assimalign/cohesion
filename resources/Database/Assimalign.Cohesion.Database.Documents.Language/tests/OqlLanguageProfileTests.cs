@@ -24,10 +24,6 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.GroupBy)]
     [InlineData(OqlClauses.Having)]
     [InlineData(OqlClauses.OrderBy)]
-    [InlineData(OqlClauses.Define)]
-    [InlineData(OqlClauses.Element)]
-    [InlineData(OqlClauses.Flatten)]
-    [InlineData(OqlClauses.Subquery)]
     public void Instance_DeclaredClause_IsSupported(string clause)
     {
         OqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();
@@ -36,6 +32,16 @@ public class OqlLanguageProfileTests
     [Fact]
     public void Instance_LowercaseClause_IsSupported()
     {
-        OqlLanguageProfile.Instance.Supports("flatten").ShouldBeTrue();
+        OqlLanguageProfile.Instance.Supports("select").ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData(OqlClauses.Define)]
+    [InlineData(OqlClauses.Element)]
+    [InlineData(OqlClauses.Flatten)]
+    [InlineData(OqlClauses.Subquery)]
+    public void Instance_UnimplementedClause_IsNotSupported(string clause)
+    {
+        OqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();
     }
 }
