@@ -1569,11 +1569,14 @@
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Client/tests/Assimalign.Cohesion.Database.Documents.Client.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Language/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Language/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Language/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Language/src/Assimalign.Cohesion.Database.Documents.Language.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Language/tests/">
-		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Language/tests/Assimalign.Cohesion.Database.Language.Oql.Tests.csproj" />
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Documents.Language/tests/Assimalign.Cohesion.Database.Documents.Language.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Replication/" />
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Documents.Replication/src/">
@@ -1639,11 +1642,14 @@
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Client/tests/Assimalign.Cohesion.Database.Graph.Client.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Language/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Language/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Language/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Language/src/Assimalign.Cohesion.Database.Graph.Language.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Language/tests/">
-		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Language/tests/Assimalign.Cohesion.Database.Graph.Language.csproj" />
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Language/tests/Assimalign.Cohesion.Database.Graph.Language.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Replication/" />
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Replication/src/">
@@ -1744,6 +1750,9 @@
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage/tests/Assimalign.Cohesion.Database.KeyValuePair.Storage.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Language/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Language/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Language/docs/DESIGN.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Language/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Language/src/Assimalign.Cohesion.Database.Language.csproj" />
 	</Folder>

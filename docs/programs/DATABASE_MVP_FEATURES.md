@@ -18,7 +18,7 @@ Measured from source, not from the plan. Line counts are production code (`src/`
 
 | Engine | Production code | Tests | Verdict |
 |---|---|---|---|
-| **SQL** | ~14,300 lines across engine, language, catalog, client, storage | ~6,900 | **Working.** Parses, plans, executes, indexes, serves over the wire, MVCC-correct. |
+| **SQL** | ~14,300 lines across engine, language, catalog, client, storage | ~6,900 | **Working, with a narrower language than it appeared.** Plans, executes, indexes, serves over the wire, MVCC-correct. But the parser implements **21 of its 48 declared clauses** — no transaction control, no referential integrity, no set operations, no CTEs. See feature B2. |
 | **Key-Value** | ~6,500 lines across engine, client, catalog, storage | ~2,700 | **Working.** Storage, commands, server, client all landed. |
 | **Documents** | ~500 lines — root contracts, a 62-line language stub, a 150-line storage stub | ~780 | **Not built.** No parser, no planner, no engine. |
 | **Graph** | ~350 lines — root contracts and an 86-line language stub | ~6 | **Not built.** Also blocked: the query standard was never chosen. |
@@ -74,7 +74,55 @@ Structural fixes that must land before engine work, because every engine inherit
 | # | Feature | What it means | Status | Work items |
 |---|---|---|---|---|
 | **B1** | **Each model opts into the clauses it supports** | The shared language package today hands every model the same lexer and a flat keyword list. B1 adds a capability profile: a model declares which clauses it accepts, and anything outside the profile produces a precise "not supported by this model" diagnostic instead of a generic parse failure. | `NEW` | file new |
-| **B2** | **A published, complete SQL surface** | The declared dialect gets scoped to a stated MVP line and filled in: joins, subqueries, `CASE`, set operations, `GROUP BY`/`HAVING`, window basics, CTEs, `LIMIT`/`OFFSET`, plus a documented builtin-function set. Today keywords are recognized ahead of parser support, so some accepted tokens do nothing. | `PARTIAL` | #172, #173, #174 |
+| **B2** | **A published, complete SQL surface** | **The gap is far larger than it looked — feature B1 measured it: the parser implements 21 of its 48 declared clauses.** See the table below for exactly what is missing. Before B1 these keywords lexed fine and then failed downstream as generic syntax errors, which is why the hole went unnoticed. | `PARTIAL` | #172, #173, #174 |
+
+> **What the SQL surface actually supports (measured 2026-09-17, after B1).**
+>
+> **Supported (21):** `SELECT` `INSERT` `UPDATE` `DELETE` `CREATE TABLE` `CREATE INDEX`
+> `ALTER TABLE` `DROP TABLE` `DROP INDEX` `FROM` `JOIN` `WHERE` `GROUP BY` `HAVING` `ORDER BY`
+> `LIMIT` `OFFSET` `VALUES` subqueries `CASE` `CAST`
+>
+> **Not implemented (27):**
+>
+> | Group | Missing |
+> |---|---|
+> | **Transaction control** | `BEGIN` · `COMMIT` · `ROLLBACK` · `TRANSACTION` |
+> | **Referential integrity** | `FOREIGN KEY` · `REFERENCES` · `CHECK` · `UNIQUE` constraint · `CONSTRAINT` · `CASCADE` · `RESTRICT` |
+> | **Set operations** | `UNION` · `INTERSECT` · `EXCEPT` |
+> | **CTEs** | `WITH` · `RECURSIVE` |
+> | **Window functions** | `OVER` · `PARTITION BY` · `WINDOW` |
+> | **Views** | `CREATE VIEW` · `DROP VIEW` |
+> | **Joins** | `NATURAL` · `USING` |
+> | **Other** | `TOP` · `ALL` · `FETCH` · `RETURNING` |
+>
+> **The two that matter most for calling SQL an MVP engine:**
+>
+> 1. **No transaction control in the language.** The engine has full MVCC — snapshot isolation,
+>    write-conflict detection, deadlock surfacing — but a client connected over the wire cannot
+>    write `BEGIN; … COMMIT;`. Transactions are reachable only from the in-process C# session API.
+> 2. **No referential integrity.** No foreign keys, no check constraints, no unique constraints.
+>    The catalog and planner have no notion of them.
+>
+> Neither is a language-only fix: transaction control needs statement-to-session binding in the
+> engine, and constraints need catalog persistence, planner awareness, and enforcement on the write
+> path. **B2 is therefore an engine feature with a language surface, not parser work** — that is how
+> it is scoped and estimated from here.
+>
+> **Decided 2026-09-17: B2 is promoted ahead of the Graph engine.** A SQL engine that cannot be
+> driven transactionally over its own wire protocol is a weaker MVP than a missing fifth model, and
+> Graph is the least proven of the three remaining engines. New order: Blob → Documents → B2 → Graph.
+>
+> **B2's transaction-control scope this pass is `BEGIN` / `COMMIT` / `ROLLBACK` only** — parsed,
+> bound to a session-scoped transaction, driving the existing MVCC coordinator. Savepoints and
+> isolation-level syntax are **B7**, deferred. They are deferred, *not* ignored: B2's design must
+> leave room for both so adding them later is additive rather than a rewrite. Concretely, the
+> statement-to-session binding must not assume one flat transaction scope per session (savepoints
+> need nested undo scopes), and the session's transaction state must carry an isolation level as a
+> value the coordinator already understands rather than hard-coding the default.
+
+| # | Feature | What it means | Status | Work items |
+|---|---|---|---|---|
+| **B7** | **Savepoints and isolation-level syntax** | `SAVEPOINT` / `RELEASE` / `ROLLBACK TO`, and `SET TRANSACTION ISOLATION LEVEL`. The MVCC substrate already models isolation levels, so that half has something real behind it; savepoints need nested undo scopes that do not exist yet. **Deferred, with B2 required to leave room for it.** | `DEFERRED` | file new |
 | **B3** | **OQL — the document query language** | Grammar, AST, diagnostics, and a conformance corpus for querying documents. Nothing exists today beyond a 62-line stub. | `OPEN` | #181, #182, #183 |
 | **B4** | **GQL — the graph query language** | Requires choosing the standard first (ISO GQL is the plan's recommendation). Then grammar, AST, diagnostics, conformance plan. | `OPEN` | **#193 (decision)**, #194, #195 |
 | ~~**B5**~~ | ~~**A language server per query language**~~ | **Deferred** — editor tooling, not engine capability. An LSP built against grammars still in motion is rework. Revisit once OQL and GQL stabilize. | `DEFERRED` | — |
@@ -196,11 +244,15 @@ Not forgotten — deferred by your rules 4 and 7, and by prior program decisions
 2. **Phase 2 — Blob engine (D6).** Simplest of the three; proves the ownership and introspection
    pattern end to end with no query language in the way.
 3. **Phase 3 — Document engine (D5) + OQL (B3).** The largest build.
-4. **Phase 4 — Graph engine (D7) + GQL (B4).** Now unblocked by the ISO GQL decision.
-5. **Phase 5 — fills.** SQL system objects (C1), SQL dialect completion (B2), SQL security (D2),
-   key-value TTL and security (D4), backup/restore (E1).
-6. **Phase 6 — object mapping (Theme F).** Last, because every mapper sits on a client that Phases
-   2–4 create. Order within it: F1 and F2 (core + generator) → F3 (SQL, the one true ORM and the
+4. **Phase 4 — SQL transaction control and referential integrity (B2).** *Promoted ahead of Graph
+   on 2026-09-17*, once B1 measured the real language gap. `BEGIN`/`COMMIT`/`ROLLBACK` bound to
+   session-scoped transactions, plus foreign keys, check and unique constraints with catalog
+   persistence, planner awareness, and write-path enforcement. Design must leave room for **B7**.
+5. **Phase 5 — Graph engine (D7) + GQL (B4).** Unblocked by the ISO GQL decision.
+6. **Phase 6 — fills.** SQL system objects (C1), SQL security (D2), key-value TTL and security
+   (D4), backup/restore (E1), remaining SQL clauses (set operations, CTEs, views, window functions).
+7. **Phase 7 — object mapping (Theme F).** Last, because every mapper sits on a client that Phases
+   2–5 create. Order within it: F1 and F2 (core + generator) → F3 (SQL, the one true ORM and the
    proving ground for the generator) → F4, F5, F6.
 
 **E2 (shared MVCC extraction, #918) lands inside Phase 1**, before three new engines each grow

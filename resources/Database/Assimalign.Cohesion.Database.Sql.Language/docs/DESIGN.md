@@ -10,7 +10,10 @@ Parse the declared dialect into a stable, fully-typed AST that planners, catalog
 tooling, and the SDK schema compiler can rely on. "Declared" is the operative word:
 [DIALECT.md](DIALECT.md) is a contract, not aspiration — the parser, the matrix,
 and the conformance corpus change together, and anything outside the matrix fails
-loudly (`SQL0002`) instead of half-parsing.
+loudly instead of half-parsing. `SqlLanguageProfile.Instance` is the executable
+contract: it owns the SQL keyword/function tables and opts into only the clauses
+the parser implements today. Recognized clauses outside that set produce the shared
+`COHDBL001` model-specific diagnostic; `SQL0002` remains the unknown-command diagnostic.
 
 ## Why-this-not-that decisions
 
@@ -42,7 +45,15 @@ loudly (`SQL0002`) instead of half-parsing.
   their own copies.
 - **Recognized-but-unsupported tokens stay in the lexer tables.** `UNION`, `WITH`,
   window functions and transaction-control keywords are lexed so diagnostics can
-  say "unsupported" precisely rather than mis-parsing them as identifiers.
+  say "unsupported" precisely rather than mis-parsing them as identifiers. Gateable
+  names live in `SqlClauses`; supported names are present in `SqlLanguageProfile`,
+  while reserved future clauses such as set operations, CTEs, windows, `FETCH`,
+  `RETURNING`, `TOP`, unsupported join forms, table constraints, views, and
+  transaction control remain absent. `ParseCore` scans a copy of its configured
+  lexer before recursive descent and attaches the first rejected clause to the
+  statement, so analyzers observe `COHDBL001` with the token location and the `SQL`
+  surface name. An actually unknown leading command still receives `SQL0002`, even
+  when a later recognized token is also unsupported.
 
 ## Namespace note
 
@@ -52,9 +63,10 @@ rename happened before external consumers existed.
 
 ## Non-goals (current dialect)
 
-Set operations, CTEs, window functions, `MERGE`, `RETURNING`, transaction-control
-statements (session/protocol concern), and cost-hint syntax. Each is an additive
-dialect extension when its engine feature lands.
+Set operations, CTEs, window functions, views, unimplemented table constraints,
+`MERGE`, `RETURNING`, transaction-control statements (session/protocol concern),
+and cost-hint syntax. Each is an additive dialect extension when its engine feature
+lands.
 
 ## AOT posture
 

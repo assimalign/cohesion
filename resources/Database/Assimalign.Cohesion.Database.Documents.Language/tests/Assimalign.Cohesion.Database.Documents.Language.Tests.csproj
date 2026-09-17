@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
@@ -8,6 +8,7 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="NUlid" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Language.Gql" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Language" />
 	</ItemGroup>
 </Project>

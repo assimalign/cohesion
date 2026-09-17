@@ -1,18 +1,14 @@
-using System;
 using Assimalign.Cohesion.Database.Language;
 
-namespace Assimalign.Cohesion.Database.Language.Oql;
+namespace Assimalign.Cohesion.Database.Documents.Language;
 
 /// <summary>
-/// Provides the keyword and function vocabularies for the Object Query Language (OQL).
-/// Based on the ODMG OQL specification.
+/// Provides the lexical vocabulary and clause capabilities for the Object Query Language (OQL).
 /// </summary>
-public static class OqlLanguage
+/// <remarks>The vocabulary is based on the ODMG OQL specification.</remarks>
+public static class OqlLanguageProfile
 {
-    /// <summary>
-    /// OQL reserved keywords.
-    /// </summary>
-    public static readonly string[] Keywords =
+    private static readonly string[] Keywords =
     [
         // Query
         "SELECT", "FROM", "WHERE",
@@ -36,10 +32,7 @@ public static class OqlLanguage
         "TYPEOF",
     ];
 
-    /// <summary>
-    /// Common OQL built-in functions.
-    /// </summary>
-    public static readonly string[] Functions =
+    private static readonly string[] Functions =
     [
         // Aggregate
         "COUNT", "SUM", "AVG", "MIN", "MAX",
@@ -50,13 +43,24 @@ public static class OqlLanguage
         "LISTTOSET", "UNIQUE",
     ];
 
-    /// <summary>
-    /// Creates a <see cref="TokenLexerOptions"/> configured for OQL.
-    /// </summary>
-    public static TokenLexerOptions CreateLexerOptions() => new()
-    {
-        Keywords = Keywords,
-        Functions = Functions,
-        IsCaseSensitive = false,
-    };
+    private static readonly string[] Clauses =
+    [
+        OqlClauses.Select,
+        OqlClauses.From,
+        OqlClauses.Where,
+        OqlClauses.GroupBy,
+        OqlClauses.Having,
+        OqlClauses.OrderBy,
+        OqlClauses.Define,
+        OqlClauses.Element,
+        OqlClauses.Flatten,
+        OqlClauses.Subquery,
+    ];
+
+    /// <summary>Gets the OQL language profile used by document-model query consumers.</summary>
+    public static QueryLanguageProfile Instance { get; } = new(
+        "OQL",
+        Keywords,
+        Functions,
+        Clauses);
 }

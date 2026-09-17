@@ -22,11 +22,17 @@ for planners and tooling).
 | `DROP TABLE` | Supported | `IF EXISTS` |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
-| `UNION` / `INTERSECT` / `EXCEPT` | Recognized, not supported | keywords lexed; statement composition rejected |
-| `WITH` (CTEs) | Recognized, not supported | |
-| Window functions / `OVER` | Recognized, not supported | function names lexed |
-| `BEGIN` / `COMMIT` / `ROLLBACK` | Recognized, not supported | transaction control is a session/protocol concern, not statement text, in the MVP |
-| `MERGE`, `TRUNCATE`, `CREATE VIEW`, `GRANT` | Not in the dialect | `SQL0002` |
+| `TOP` / `SELECT ALL` / `FETCH` | Recognized, not supported | row-limit and select modifiers rejected with `COHDBL001` |
+| DML `RETURNING` | Recognized, not supported | rejected with `COHDBL001` |
+| `NATURAL JOIN` / `JOIN ... USING` | Recognized, not supported | rejected with `COHDBL001` |
+| `UNION` / `INTERSECT` / `EXCEPT` | Recognized, not supported | keywords lexed; rejected with `COHDBL001` |
+| `WITH` / `WITH RECURSIVE` (CTEs) | Recognized, not supported | rejected with `COHDBL001` |
+| Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `COHDBL001` |
+| `CREATE VIEW` / `DROP VIEW` | Recognized, not supported | rejected with `COHDBL001` |
+| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Recognized, not supported | `UNIQUE` remains supported for `CREATE UNIQUE INDEX`; constraint forms report `COHDBL001` |
+| `CASCADE` / `RESTRICT` referential actions | Recognized, not supported | rejected with `COHDBL001` |
+| `BEGIN` / `COMMIT` / `ROLLBACK` / `TRANSACTION` | Recognized, not supported | transaction control is a session/protocol concern; rejected with `COHDBL001` |
+| `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
 
 ## Expressions
 
@@ -83,8 +89,9 @@ function names are lexed but not supported (see the statement matrix).
 
 | Code | Severity | Meaning |
 |---|---|---|
+| `COHDBL001` | Error | Recognized clause is not supported by the SQL model surface |
 | `SQL0001` | Error | Empty query text |
-| `SQL0002` | Error | Unknown or unsupported command |
+| `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
 | `SQL0100` | Information | Statement does not end with `;` |
 
 Positions are absolute character offsets into the statement text; line/column

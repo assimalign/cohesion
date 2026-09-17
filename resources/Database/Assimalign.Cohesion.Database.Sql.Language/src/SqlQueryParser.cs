@@ -24,7 +24,7 @@ public sealed partial class SqlQueryParser : QueryParser
     }
 
     /// <inheritdoc />
-    protected override TokenLexerOptions Options => TokenLexerOptions.Sql;
+    protected override QueryLanguageProfile Profile => SqlLanguageProfile.Instance;
 
     /// <inheritdoc />
     public override QueryStatement Parse(ReadOnlySpan<char> query)
@@ -48,6 +48,10 @@ public sealed partial class SqlQueryParser : QueryParser
         _sawSemicolon = false;
         _lastTokenEnd = 0;
 
+        bool hasUnsupportedClause =
+            TryFindUnsupportedClause(lexer, out string unsupportedClause, out Location unsupportedLocation) &&
+            !Supports(unsupportedClause);
+
         // Advance to the first non-comment token
         if (!AdvancePastComments(ref lexer))
         {
@@ -66,6 +70,7 @@ public sealed partial class SqlQueryParser : QueryParser
         }
 
         int firstTokenPosition = lexer.Current.Position;
+        string firstToken = CurrentText(ref lexer);
         TrackToken(ref lexer);
         SqlQueryExpression expression;
 
@@ -116,10 +121,23 @@ public sealed partial class SqlQueryParser : QueryParser
             ConsumeRemaining(ref lexer);
         }
 
+        // A supported expression parser may deliberately stop at a clause outside
+        // this profile. Consume the rest only to retain terminator tracking.
+        if (hasUnsupportedClause && !IsAtEnd(ref lexer))
+        {
+            ConsumeRemaining(ref lexer);
+        }
+
         var statement = new SqlQueryStatement(expression);
 
+        if (hasUnsupportedClause)
+        {
+            RequireClause(statement, unsupportedClause, unsupportedLocation);
+        }
+
         // Check for unknown command
-        if (expression.CommandType == SqlQueryCommandType.Unknown)
+        if (expression.CommandType == SqlQueryCommandType.Unknown &&
+            (!hasUnsupportedClause || !IsUnsupportedClauseStart(firstToken)))
         {
             statement.AddDiagnostic(new Diagnostic
             {
@@ -272,11 +290,205 @@ public sealed partial class SqlQueryParser : QueryParser
                value.Equals("ORDER", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("LIMIT", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("OFFSET", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("FETCH", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("UNION", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("INTERSECT", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("EXCEPT", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("WINDOW", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("OVER", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("PARTITION", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("INTO", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("USING", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("RETURNING", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryFindUnsupportedClause(
+        TokenLexer lexer,
+        out string clause,
+        out Location location)
+    {
+        Location? pendingCte = null;
+        string? previousToken = null;
+        int previousPosition = 0;
+
+        while (lexer.MoveNext())
+        {
+            if (lexer.Current.Type == TokenType.Comment)
+            {
+                continue;
+            }
+
+            if (lexer.Current.Type == TokenType.Semicolon)
+            {
+                break;
+            }
+
+            string token = CurrentText(ref lexer);
+            var tokenLocation = Location.Create(
+                1,
+                1,
+                lexer.Current.Position,
+                lexer.Current.Position + lexer.Current.Value.Length);
+
+            // WITH RECURSIVE is one unsupported construct. Prefer the more
+            // specific token so callers can distinguish it from an ordinary CTE.
+            if (pendingCte is not null)
+            {
+                if (token.Equals(SqlClauses.Recursive, StringComparison.OrdinalIgnoreCase))
+                {
+                    clause = SqlClauses.Recursive;
+                    location = tokenLocation;
+                }
+                else
+                {
+                    clause = SqlClauses.Cte;
+                    location = pendingCte;
+                }
+
+                return true;
+            }
+
+            if (token.Equals(SqlClauses.Cte, StringComparison.OrdinalIgnoreCase))
+            {
+                pendingCte = tokenLocation;
+                continue;
+            }
+
+            if (lexer.Current.Type == TokenType.Keyword)
+            {
+                bool isCreateView =
+                    previousToken?.Equals("CREATE", StringComparison.OrdinalIgnoreCase) == true;
+                bool isDropView =
+                    previousToken?.Equals("DROP", StringComparison.OrdinalIgnoreCase) == true;
+
+                if (token.Equals("VIEW", StringComparison.OrdinalIgnoreCase) &&
+                    (isCreateView || isDropView))
+                {
+                    clause = isCreateView
+                        ? SqlClauses.CreateView
+                        : SqlClauses.DropView;
+                    location = Location.Create(
+                        1,
+                        1,
+                        previousPosition,
+                        lexer.Current.Position + lexer.Current.Value.Length);
+                    return true;
+                }
+
+                if (token.Equals("FOREIGN", StringComparison.OrdinalIgnoreCase) &&
+                    TryPeekToken(lexer, out string foreignKeyToken, out int nextTokenEnd) &&
+                    foreignKeyToken.Equals("KEY", StringComparison.OrdinalIgnoreCase))
+                {
+                    clause = SqlClauses.ForeignKey;
+                    location = Location.Create(1, 1, lexer.Current.Position, nextTokenEnd);
+                    return true;
+                }
+
+                if (token.Equals(SqlClauses.UniqueConstraint, StringComparison.OrdinalIgnoreCase))
+                {
+                    bool isCreateUniqueIndex =
+                        previousToken?.Equals("CREATE", StringComparison.OrdinalIgnoreCase) == true &&
+                        TryPeekToken(lexer, out string uniqueIndexToken, out _) &&
+                        uniqueIndexToken.Equals("INDEX", StringComparison.OrdinalIgnoreCase);
+
+                    if (!isCreateUniqueIndex)
+                    {
+                        clause = SqlClauses.UniqueConstraint;
+                        location = tokenLocation;
+                        return true;
+                    }
+                }
+
+                if (token.Equals(SqlClauses.All, StringComparison.OrdinalIgnoreCase) &&
+                    previousToken?.Equals(SqlClauses.Select, StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    clause = SqlClauses.All;
+                    location = tokenLocation;
+                    return true;
+                }
+
+                if (TryGetUnsupportedClause(token, out clause))
+                {
+                    location = tokenLocation;
+                    return true;
+                }
+            }
+
+            previousToken = token;
+            previousPosition = lexer.Current.Position;
+        }
+
+        if (pendingCte is not null)
+        {
+            clause = SqlClauses.Cte;
+            location = pendingCte;
+            return true;
+        }
+
+        clause = string.Empty;
+        location = null!;
+        return false;
+    }
+
+    private static bool TryGetUnsupportedClause(string token, out string clause)
+    {
+        clause = token.ToUpperInvariant() switch
+        {
+            "UNION" => SqlClauses.SetOperation,
+            "INTERSECT" => SqlClauses.Intersect,
+            "EXCEPT" => SqlClauses.Except,
+            "RECURSIVE" => SqlClauses.Recursive,
+            "WINDOW" => SqlClauses.Window,
+            "FETCH" => SqlClauses.Fetch,
+            "OVER" => SqlClauses.Over,
+            "PARTITION" => SqlClauses.Partition,
+            "RETURNING" => SqlClauses.Returning,
+            "TOP" => SqlClauses.Top,
+            "NATURAL" => SqlClauses.Natural,
+            "USING" => SqlClauses.Using,
+            "CONSTRAINT" => SqlClauses.Constraint,
+            "REFERENCES" => SqlClauses.References,
+            "CHECK" => SqlClauses.Check,
+            "CASCADE" => SqlClauses.Cascade,
+            "RESTRICT" => SqlClauses.Restrict,
+            "BEGIN" => SqlClauses.Begin,
+            "COMMIT" => SqlClauses.Commit,
+            "ROLLBACK" => SqlClauses.Rollback,
+            "TRANSACTION" => SqlClauses.Transaction,
+            _ => string.Empty,
+        };
+
+        return clause.Length > 0;
+    }
+
+    private static bool IsUnsupportedClauseStart(string token) =>
+        token.Equals(SqlClauses.Cte, StringComparison.OrdinalIgnoreCase) ||
+        token.Equals(SqlClauses.All, StringComparison.OrdinalIgnoreCase) ||
+        token.Equals(SqlClauses.UniqueConstraint, StringComparison.OrdinalIgnoreCase) ||
+        TryGetUnsupportedClause(token, out _);
+
+    private static bool TryPeekToken(TokenLexer lexer, out string token, out int tokenEnd)
+    {
+        while (lexer.MoveNext())
+        {
+            if (lexer.Current.Type == TokenType.Comment)
+            {
+                continue;
+            }
+
+            if (lexer.Current.Type == TokenType.Semicolon)
+            {
+                break;
+            }
+
+            token = CurrentText(ref lexer);
+            tokenEnd = lexer.Current.Position + lexer.Current.Value.Length;
+            return true;
+        }
+
+        token = string.Empty;
+        tokenEnd = 0;
+        return false;
     }
 
     private void TrackToken(ref TokenLexer lexer)

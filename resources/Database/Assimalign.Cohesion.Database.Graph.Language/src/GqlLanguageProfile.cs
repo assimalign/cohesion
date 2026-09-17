@@ -1,18 +1,14 @@
-using System;
 using Assimalign.Cohesion.Database.Language;
 
-namespace Assimalign.Cohesion.Database.Language.Gql;
+namespace Assimalign.Cohesion.Database.Graph.Language;
 
 /// <summary>
-/// Provides the keyword and function vocabularies for the Graph Query Language (GQL).
-/// Aligned with the ISO/IEC 39075 GQL standard.
+/// Provides the lexical vocabulary and clause capabilities for the Graph Query Language (GQL).
 /// </summary>
-public static class GqlLanguage
+/// <remarks>The vocabulary remains aligned with the ISO/IEC 39075 GQL standard.</remarks>
+public static class GqlLanguageProfile
 {
-    /// <summary>
-    /// GQL reserved keywords.
-    /// </summary>
-    public static readonly string[] Keywords =
+    private static readonly string[] Keywords =
     [
         // Pattern matching
         "MATCH", "OPTIONAL", "MANDATORY",
@@ -46,10 +42,7 @@ public static class GqlLanguage
         "CALL", "YIELD", "FILTER",
     ];
 
-    /// <summary>
-    /// Common GQL built-in functions.
-    /// </summary>
-    public static readonly string[] Functions =
+    private static readonly string[] Functions =
     [
         // Aggregate
         "count", "sum", "avg", "min", "max", "collect",
@@ -74,13 +67,40 @@ public static class GqlLanguage
         "point", "distance",
     ];
 
-    /// <summary>
-    /// Creates a <see cref="TokenLexerOptions"/> configured for GQL.
-    /// </summary>
-    public static TokenLexerOptions CreateLexerOptions() => new()
-    {
-        Keywords = Keywords,
-        Functions = Functions,
-        IsCaseSensitive = false,
-    };
+    private static readonly string[] Clauses =
+    [
+        GqlClauses.Match,
+        GqlClauses.OptionalMatch,
+        GqlClauses.MandatoryMatch,
+        GqlClauses.Return,
+        GqlClauses.With,
+        GqlClauses.Create,
+        GqlClauses.Insert,
+        GqlClauses.Delete,
+        GqlClauses.DetachDelete,
+        GqlClauses.Set,
+        GqlClauses.Remove,
+        GqlClauses.Merge,
+        GqlClauses.Where,
+        GqlClauses.OrderBy,
+        GqlClauses.Limit,
+        GqlClauses.Offset,
+        GqlClauses.Skip,
+        GqlClauses.Let,
+        GqlClauses.Unwind,
+        GqlClauses.Foreach,
+        GqlClauses.SetOperation,
+        GqlClauses.Case,
+        GqlClauses.Call,
+        GqlClauses.Yield,
+        GqlClauses.Filter,
+        GqlClauses.ShortestPath,
+    ];
+
+    /// <summary>Gets the ISO GQL language profile used by graph-model query consumers.</summary>
+    public static QueryLanguageProfile Instance { get; } = new(
+        "GQL",
+        Keywords,
+        Functions,
+        Clauses);
 }
