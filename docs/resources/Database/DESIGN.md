@@ -288,6 +288,19 @@ The KeyValuePair engine was built as the deliberate test of R3's premise — tha
 
 **Verdict:** the kernel held. No `IDatabaseEngine`/`IDatabaseSession`/storage/transaction/index contract needed changing to build a non-SQL model in the kernel's inverse composition shape; the wire protocol and the server machinery needed literally nothing. The gap the exercise found is a *missing extraction*, not a wrong abstraction — the kernel's pieces are general, and the thing that isn't shared yet (#918) is machinery both models already run identically.
 
+**#918 resolution (Phase 1 / Run 3):** the per-database composition now lives in
+the existing `Database.Transactions` child root as `TransactionCoordinator` and
+`RecordSpaceVersionStore`. Both engines compose these types; their private
+coordinator/version-store copies are removed. `ITransactionRecordSpace` keeps
+record access and location encoding in each engine, while `IRecordVersionIndex`
+lets Indexing supply stamp-checked undo without a reverse Transactions → Indexing
+dependency. `RecordVersionStamp` owns the 16-byte little-endian writer/deleter
+prefix used by both record codecs; the contract and recovery ordering are
+documented in `Database.Transactions/docs/DESIGN.md`. Existing public interfaces,
+snapshot/conflict semantics, and model-specific index recovery remain unchanged.
+This closes gaps 1 and 2 above for the shared record-space composition; the
+historical bring-up findings are retained as the extraction evidence.
+
 #### The server-core extraction evidence (preserved record) and the final placement outcome
 
 Building `KeyValueDatabaseServer` fired the extraction trigger the decision log

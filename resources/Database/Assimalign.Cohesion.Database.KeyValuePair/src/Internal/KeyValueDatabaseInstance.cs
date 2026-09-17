@@ -10,6 +10,7 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
@@ -25,7 +26,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     private readonly KeyValueStorage _storage;
     private readonly KeyValueStorage _catalogStorage;
     private readonly IKeyValueCatalog _catalog;
-    private readonly KeyValueTransactionCoordinator _coordinator;
+    private readonly TransactionCoordinator _coordinator;
     private readonly IIndexManager _indexManager;
     private readonly IIndex _primaryIndex;
     private bool _disposed;
@@ -37,7 +38,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         _storage = storage;
         _catalogStorage = catalogStorage;
         _catalog = KeyValueCatalog.Open(catalogStorage);
-        _coordinator = new KeyValueTransactionCoordinator(storage);
+        _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new KeyValueTransactionRecordSpace(storage));
 
         if (_catalog.EntrySpaceFormatVersion > KeyValueRecordCodec.EntrySpaceFormatVersion)
         {
@@ -54,7 +55,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         _indexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = storage,
-            TransactionSource = _coordinator,
+            TransactionSource = new StatementTransactionSource(_coordinator),
             LockManager = _coordinator.LockManager,
             ExistingIndexes = _catalog.GetIndexRegistrations(),
         });
@@ -167,7 +168,7 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     /// Gets the database's transaction coordinator (the MVCC composition sessions
     /// bind to), for the engine's background workers and tests.
     /// </summary>
-    internal KeyValueTransactionCoordinator Coordinator => _coordinator;
+    internal TransactionCoordinator Coordinator => _coordinator;
 
     /// <summary>
     /// Persists the index manager's current registrations when they drifted from
@@ -367,6 +368,25 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         SaveIndexRegistrationsIfChanged();
         await _storage.DisposeAsync().ConfigureAwait(false);
         await _catalogStorage.DisposeAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Keeps the area's pairing error at the engine boundary while the shared
+    /// coordinator owns the current statement bracket.
+    /// </summary>
+    private sealed class StatementTransactionSource(TransactionCoordinator coordinator) : IStorageTransactionSource
+    {
+        /// <inheritdoc />
+        public IStorageTransaction GetStorageTransaction(ITransactionContext context)
+        {
+            if (coordinator.TryGetStorageTransaction(context, out var transaction))
+            {
+                return transaction;
+            }
+
+            throw new DatabaseException(
+                $"Transaction {context.Sequence} has no statement bracket applying on this database.");
+        }
     }
 
     private void ThrowIfDisposed()

@@ -83,11 +83,13 @@ internal sealed class KeyValueOperationExecutor
 
     private readonly KeyValueStorage _storage;
     private readonly IIndex _primaryIndex;
+    private readonly RecordVersionIndex _primaryIndexVersions;
 
     internal KeyValueOperationExecutor(KeyValueStorage storage, IIndex primaryIndex)
     {
         _storage = storage;
         _primaryIndex = primaryIndex;
+        _primaryIndexVersions = new RecordVersionIndex(primaryIndex);
     }
 
     /// <summary>
@@ -209,7 +211,7 @@ internal sealed class KeyValueOperationExecutor
 
                 ulong reference = KeyValueRecordLocation.Pack(pageId, slotIndex);
                 await _primaryIndex.InsertAsync(context.Transaction, indexKey, reference, cancellationToken).ConfigureAwait(false);
-                context.Coordinator.VersionStore.RecordIndexEntryCreated(context.Transaction.Sequence, _primaryIndex, indexKey, reference);
+                context.Coordinator.VersionStore.RecordIndexEntryCreated(context.Transaction.Sequence, _primaryIndexVersions, indexKey.Encoded, reference);
 
                 return true;
             }, durable: false, cancellationToken).ConfigureAwait(false);
@@ -389,7 +391,7 @@ internal sealed class KeyValueOperationExecutor
     private async ValueTask TombstoneIndexEntryAsync(KeyValueStatementContext context, IndexKey indexKey, ulong entryReference, CancellationToken cancellationToken)
     {
         await _primaryIndex.DeleteAsync(context.Transaction, indexKey, entryReference, cancellationToken).ConfigureAwait(false);
-        context.Coordinator.VersionStore.RecordIndexEntryTombstoned(context.Transaction.Sequence, _primaryIndex, indexKey, entryReference);
+        context.Coordinator.VersionStore.RecordIndexEntryTombstoned(context.Transaction.Sequence, _primaryIndexVersions, indexKey.Encoded, entryReference);
     }
 
     private static KeyValueMaterializedResultSet NotApplied(long? currentETag)

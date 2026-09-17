@@ -80,6 +80,17 @@ transaction context — they run where no statement bracket exists:
   unique-key lock in its own lock phase and rely on the lock manager's
   same-owner re-grant when the tree acquires it again internally.
 
+### Shared record-version undo binding (#918)
+
+`RecordVersionIndex` implements the new `Database.Transactions.IRecordVersionIndex`
+contract by forwarding encoded key bytes to the existing `IIndex.EraseAsync`
+and `ClearDeleterAsync` operations. Engines supply this bridge to the shared
+`RecordSpaceVersionStore` ledger. Index key construction and stamp verification
+remain in Indexing; Transactions needs no Indexing or area-root reference, and
+the existing `IIndex` and `IStorageTransactionSource` interfaces are unchanged.
+Open-time index scrubbing still uses `IIndexManager.PurgeWritersAsync` between
+the coordinator's record scrub and its final checkpoint.
+
 ## Entry references are opaque `ulong`s
 
 The index maps keys to entry references the owning storage layer understands (page address, row id, node id). Making the reference generic (`IIndex<TReference>`) would infect every cursor and page layout with a type parameter for zero runtime benefit — models already own both sides of the mapping.

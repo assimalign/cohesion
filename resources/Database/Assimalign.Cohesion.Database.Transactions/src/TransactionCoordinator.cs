@@ -1,41 +1,59 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
+namespace Assimalign.Cohesion.Database.Transactions;
 
-using Assimalign.Cohesion.Database.Indexing;
-using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
 /// The per-database MVCC composition (area DESIGN §3.8): one
 /// <see cref="ITransactionManager"/> + <see cref="ILockManager"/> +
-/// <see cref="KeyValueVersionStore"/> over the database's data storage, with the
-/// manager's transaction log bound to the storage's write-ahead journal. The
-/// coordinator owns the sequence-space unification (the manager allocates from
-/// the storage's counter, so the journal carries one sequence namespace), the
-/// per-statement physical brackets and their apply gate, the pairing seam
-/// (<see cref="IStorageTransactionSource"/> resolves a context's current
-/// statement bracket), and the checkpoint interlock that keeps truncation
-/// classification-safe while logical transactions are in flight.
+/// <see cref="RecordSpaceVersionStore"/> over the database's data storage,
+/// with the manager's transaction log bound to the storage's write-ahead
+/// journal. The coordinator owns the sequence-space unification (the manager
+/// allocates from the storage's counter, so the journal carries one sequence
+/// namespace), the per-statement physical brackets and their apply gate, the
+/// pairing seam (<c>IStorageTransactionSource</c> resolves a context's
+/// current statement bracket), and the checkpoint interlock that keeps
+/// truncation classification-safe while logical transactions are in flight.
 /// </summary>
 /// <remarks>
-/// Adapted from the SQL engine's per-database coordinator — the composition is
-/// deliberately identical (one coordinator per database, per-statement brackets
-/// under a per-database apply gate, journal-gated lifecycle appends). That the
-/// second model needed a near-verbatim copy is recorded as a kernel gap in the
-/// area DESIGN's generality report: the per-database MVCC composition is
-/// model-agnostic machinery that wants a kernel home.
+/// <para>
+/// Scope decision: one coordinator (and therefore one manager, lock manager,
+/// and version store) <b>per database</b>, not per engine — the journal-bound
+/// transaction log, recovery analysis, and the prune bound are all properties
+/// of one database's journal and record space, and a per-engine manager would
+/// couple unrelated databases' snapshot horizons.
+/// </para>
+/// <para>
+/// <b>The bracket model (per-statement, §3.8's migration path):</b> the
+/// physical WAL bracket is per <em>statement</em>, not per transaction — a
+/// statement's page mutations open a bracket under the apply gate, commit it
+/// (non-durably; the transaction's own commit record owns durability through
+/// journal ordering) and release its page locks at statement end. Page-grain
+/// contention therefore never outlives a statement, and the apply gate — one
+/// writer statement applies at a time per database — removes it entirely as a
+/// user-visible conflict surface: model locks (acquired <em>before</em> the gate,
+/// never inside it) are the only conflict arbiter. The cost accepted: physical
+/// write application is serialized per database; the alternative (concurrent
+/// appliers with page-conflict retry loops) reintroduced unbounded retry and
+/// gate-invisible deadlocks between page and row waits. Transaction rollback is
+/// consequently <em>logical</em>: the version store's ledger undoes the
+/// writer's stamps (statement-level failures still revert physically via the
+/// statement bracket, and crash recovery scrubs unproven writers from the
+/// record space at open).
+/// </para>
 /// </remarks>
-internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource, IAsyncDisposable
+public sealed class TransactionCoordinator : IAsyncDisposable
 {
-    private readonly KeyValueStorage _storage;
+    private readonly IStorage _storage;
+    private readonly IStorageJournal _journal;
     private readonly ITransactionManager _manager;
     private readonly ILockManager _lockManager;
-    private readonly KeyValueVersionStore _versionStore;
+    private readonly RecordSpaceVersionStore _versionStore;
     private readonly GatedJournalLog _log;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
     private readonly Dictionary<ulong, IStorageTransaction> _statementBrackets = new();
@@ -43,14 +61,29 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
     private readonly object _sync = new();
     private TransactionSequence _recoveredSequenceFloor;
 
-    internal KeyValueTransactionCoordinator(KeyValueStorage storage)
+    /// <summary>
+    /// Creates the MVCC composition for one database's storage and stamped record space.
+    /// </summary>
+    /// <param name="storage">The storage owning physical brackets and the sequence allocator.</param>
+    /// <param name="journal">The same storage's write-ahead journal.</param>
+    /// <param name="records">The engine's record access and location encoding.</param>
+    /// <remarks>
+    /// The caller retains ownership of storage and journal. On reopen, attach model
+    /// indexes, call <see cref="AnalyzeAndScrub"/>, scrub those indexes with its plan,
+    /// and call <see cref="CompleteRecovery"/> before admitting any sessions.
+    /// </remarks>
+    public TransactionCoordinator(IStorage storage, IStorageJournal journal, ITransactionRecordSpace records)
     {
+        ArgumentNullException.ThrowIfNull(storage);
+        ArgumentNullException.ThrowIfNull(journal);
+        ArgumentNullException.ThrowIfNull(records);
         _storage = storage;
+        _journal = journal;
 
         // Fully qualified: the coordinator's LockManager property shadows the
         // factory class name inside this scope.
         _lockManager = Transactions.LockManager.Create();
-        _versionStore = new KeyValueVersionStore(storage, _applyGate);
+        _versionStore = new RecordSpaceVersionStore(storage, records, _applyGate);
         _log = new GatedJournalLog(this);
         _manager = TransactionManager.Create(
             _log,
@@ -62,24 +95,24 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
     /// <summary>
     /// Gets the transaction manager sessions begin their contexts on.
     /// </summary>
-    internal ITransactionManager Manager => _manager;
+    public ITransactionManager Manager => _manager;
 
     /// <summary>
-    /// Gets the lock manager arbitrating key-grain write conflicts.
+    /// Gets the lock manager arbitrating the engine's write conflicts.
     /// </summary>
-    internal ILockManager LockManager => _lockManager;
+    public ILockManager LockManager => _lockManager;
 
     /// <summary>
-    /// Gets the version store: the ledger over the entry record space that makes
+    /// Gets the version store: the ledger over the record space that makes
     /// logical undo and version pruning executable.
     /// </summary>
-    internal KeyValueVersionStore VersionStore => _versionStore;
+    public RecordSpaceVersionStore VersionStore => _versionStore;
 
     /// <summary>
     /// Gets the number of statement brackets currently applying (test
     /// observability; zero whenever no statement is mid-apply).
     /// </summary>
-    internal int PairedTransactionCount
+    public int PairedTransactionCount
     {
         get
         {
@@ -94,7 +127,7 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
     /// Gets the currently open transaction contexts (for the maintenance
     /// workers' safe prune bound).
     /// </summary>
-    internal IReadOnlyList<ITransactionContext> GetOpenContexts()
+    public IReadOnlyList<ITransactionContext> GetOpenContexts()
     {
         lock (_sync)
         {
@@ -102,26 +135,24 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Resolves the context's current statement bracket for model index and catalog mutations.
+    /// </summary>
+    /// <param name="context">The logical transaction whose statement is applying.</param>
+    /// <param name="transaction">The current bracket, or null when no statement is applying.</param>
+    /// <returns>True when the context has a registered statement bracket.</returns>
     /// <remarks>
-    /// Resolves the context's <em>current statement bracket</em>: primary-index
-    /// mutations made on the transaction's behalf ride the same statement-scoped
-    /// write-ahead bracket as its entry mutations.
+    /// An engine adapts this method to its storage-transaction pairing contract and
+    /// supplies its own exception vocabulary when a bracket is missing.
     /// </remarks>
-    public IStorageTransaction GetStorageTransaction(ITransactionContext context)
+    public bool TryGetStorageTransaction(ITransactionContext context, [NotNullWhen(true)] out IStorageTransaction? transaction)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         lock (_sync)
         {
-            if (_statementBrackets.TryGetValue(context.Sequence.Value, out var bracket))
-            {
-                return bracket;
-            }
+            return _statementBrackets.TryGetValue(context.Sequence.Value, out transaction);
         }
-
-        throw new DatabaseException(
-            $"Transaction {context.Sequence} has no statement bracket applying on this database.");
     }
 
     /// <summary>
@@ -133,7 +164,7 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
     /// <param name="isolationLevel">The isolation level the transaction runs under.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The transaction context.</returns>
-    internal async ValueTask<ITransactionContext> BeginAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
+    public async ValueTask<ITransactionContext> BeginAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default)
     {
         var context = await _manager.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
 
@@ -155,7 +186,7 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
     /// <param name="context">The transaction to commit.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <exception cref="TransactionAbortedException">The transaction was aborted instead of committed.</exception>
-    internal async ValueTask CommitAsync(ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask CommitAsync(ITransactionContext context, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -171,12 +202,11 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
     /// <summary>
     /// Rolls the transaction back through the manager: the version store's
     /// ledger physically undoes the writer's stamps (created versions deleted,
-    /// tombstones cleared, index mirrors erased/restored), the abort record is
-    /// appended, and locks release.
+    /// tombstones cleared), the abort record is appended, and locks release.
     /// </summary>
     /// <param name="context">The transaction to roll back.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    internal async ValueTask RollbackAsync(ITransactionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask RollbackAsync(ITransactionContext context, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -192,24 +222,46 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
     /// Applies a statement's physical mutations: acquires the apply gate (one
     /// writer statement applies at a time — page conflicts cannot exist), opens
     /// the statement's storage bracket, registers it as the context's current
-    /// bracket for the pairing seam, runs the apply, and commits the bracket.
-    /// Any failure rolls the statement bracket back physically — the statement
-    /// never half-applies. <b>Invariant: nothing awaited inside the gate may
-    /// actually wait</b> — the executor pre-acquires the key lock before the
-    /// gate, so the primary index's internal acquisition is a same-owner
-    /// re-grant that completes synchronously.
+    /// bracket for the pairing seam, runs the apply, and commits the bracket
+    /// non-durably (the transaction's commit record owns durability). Any
+    /// failure rolls the statement bracket back physically — the statement
+    /// never half-applies.
+    /// </summary>
+    /// <typeparam name="T">The apply result type.</typeparam>
+    /// <param name="context">The transaction the statement belongs to.</param>
+    /// <param name="apply">The physical mutations, given the statement bracket.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The apply result.</returns>
+    public ValueTask<T> ApplyStatementAsync<T>(
+        ITransactionContext context,
+        Func<IStorageTransaction, T> apply,
+        CancellationToken cancellationToken = default)
+        => ApplyStatementAsync(context, bracket => new ValueTask<T>(apply(bracket)), durable: false, cancellationToken);
+
+    /// <summary>
+    /// The asynchronous form of the statement apply, for statement bodies that
+    /// drive index maintenance (index mutations are asynchronous surfaces).
+    /// <b>Invariant: nothing awaited inside the gate may actually wait.</b> The
+    /// only awaits index maintenance performs are unique-key lock acquisitions,
+    /// and the executor pre-acquires every unique key lock in its lock phase —
+    /// before the gate — so the index's internal acquisition is a same-owner
+    /// re-grant that completes synchronously. A genuine wait inside the gate
+    /// would be invisible to the lock manager's deadlock detection (the recorded
+    /// page-conflict-fallback lesson).
     /// </summary>
     /// <typeparam name="T">The apply result type.</typeparam>
     /// <param name="context">The transaction the statement belongs to.</param>
     /// <param name="apply">The physical mutations, given the statement bracket.</param>
     /// <param name="durable">
-    /// When true the bracket commits durably (the self-committing bootstrap/DDL
-    /// posture — the primary-index creation at database birth). When false the
-    /// transaction's commit record owns durability (the command posture).
+    /// When true the bracket commits durably — the self-committing DDL posture
+    /// (an index build must not be provable-after-crash only through a user
+    /// transaction's later commit record, because its registration in the
+    /// catalog file set commits independently). When false the transaction's
+    /// commit record owns durability (the DML statement posture).
     /// </param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The apply result.</returns>
-    internal async ValueTask<T> ApplyStatementAsync<T>(
+    public async ValueTask<T> ApplyStatementAsync<T>(
         ITransactionContext context,
         Func<IStorageTransaction, ValueTask<T>> apply,
         bool durable = false,
@@ -262,15 +314,15 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
     /// open-time form of <see cref="IVersionStore.PurgeWriterAsync"/> — one pass
     /// instead of one scan per writer, because the in-memory ledger died with
     /// the process), seeds the prunable set with surviving committed tombstones,
-    /// and anchors the prune bound. The caller scrubs the primary index with the
-    /// returned plan, then calls <see cref="CompleteRecovery"/> — the checkpoint
-    /// must come last because the truncation destroys the lifecycle records
-    /// classification reads.
+    /// and anchors the prune bound. The caller scrubs any structures of its own
+    /// (secondary indexes) with the returned plan, then calls
+    /// <see cref="CompleteRecovery"/> — the checkpoint must come last because
+    /// the truncation destroys the lifecycle records classification reads.
     /// </summary>
     /// <returns>The recovery classification, for the caller's own scrub passes.</returns>
-    internal TransactionRecoveryPlan AnalyzeAndScrub()
+    public TransactionRecoveryPlan AnalyzeAndScrub()
     {
-        var plan = TransactionRecovery.Analyze(_storage.WriteAheadJournal);
+        var plan = TransactionRecovery.Analyze(_journal);
 
         _versionStore.ScrubRecovered(plan.Aborted);
 
@@ -284,11 +336,11 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
     }
 
     /// <summary>
-    /// Completes open-time recovery: starts the journal clean (the deferred
-    /// open-time checkpoint — see <c>IKeyValueStorageStrategy.OpenStorage</c>).
-    /// No logical transactions exist yet, so the active list is empty.
+    /// Completes open-time recovery: starts the journal clean with the
+    /// open-time checkpoint deferred by the engine. No
+    /// logical transactions exist yet, so the active list is empty.
     /// </summary>
-    internal void CompleteRecovery()
+    public void CompleteRecovery()
     {
         _storage.Checkpoint();
     }
@@ -301,7 +353,7 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
     /// recovery classification stays sound.
     /// </summary>
     /// <exception cref="StorageTransactionException">A storage-level bracket is still active.</exception>
-    internal void Checkpoint() => _log.CheckpointUnderGate(_storage);
+    public void Checkpoint() => _log.CheckpointUnderGate(_storage);
 
     /// <summary>
     /// Runs one maintenance pass for the version-purge worker: retries any
@@ -312,7 +364,7 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
     /// </summary>
     /// <param name="cancellationToken">Cancels the pass.</param>
     /// <returns>The number of versions physically reclaimed or undone.</returns>
-    internal long RunVersionPurgePass(CancellationToken cancellationToken)
+    public long RunVersionPurgePass(CancellationToken cancellationToken)
     {
         long total = 0;
 
@@ -402,11 +454,11 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
     /// </summary>
     private sealed class GatedJournalLog : ITransactionLog
     {
-        private readonly KeyValueTransactionCoordinator _coordinator;
+        private readonly TransactionCoordinator _coordinator;
         private readonly HashSet<long> _activeSequences = new();
         private readonly object _gate = new();
 
-        internal GatedJournalLog(KeyValueTransactionCoordinator coordinator)
+        internal GatedJournalLog(TransactionCoordinator coordinator)
         {
             _coordinator = coordinator;
         }
@@ -417,7 +469,7 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
 
             lock (_gate)
             {
-                _coordinator._storage.WriteAheadJournal.AppendBegin((long)sequence.Value);
+                _coordinator._journal.AppendBegin((long)sequence.Value);
                 _activeSequences.Add((long)sequence.Value);
             }
 
@@ -431,7 +483,7 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
             long lsn;
             lock (_gate)
             {
-                lsn = _coordinator._storage.WriteAheadJournal.AppendCommit((long)sequence.Value);
+                lsn = _coordinator._journal.AppendCommit((long)sequence.Value);
                 _activeSequences.Remove((long)sequence.Value);
             }
 
@@ -440,7 +492,7 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
             // an already-durable LSN is a no-op. By journal ordering this flush
             // also covers every statement bracket the transaction committed
             // non-durably.
-            _coordinator._storage.WriteAheadJournal.EnsureDurable(lsn);
+            _coordinator._journal.EnsureDurable(lsn);
             return default;
         }
 
@@ -450,7 +502,7 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
 
             lock (_gate)
             {
-                _coordinator._storage.WriteAheadJournal.AppendRollback((long)sequence.Value);
+                _coordinator._journal.AppendRollback((long)sequence.Value);
                 _activeSequences.Remove((long)sequence.Value);
             }
 
@@ -462,7 +514,7 @@ internal sealed class KeyValueTransactionCoordinator : IStorageTransactionSource
         /// the append gate, so no lifecycle record can land between the capture
         /// and the truncation.
         /// </summary>
-        internal void CheckpointUnderGate(KeyValueStorage storage)
+        internal void CheckpointUnderGate(IStorage storage)
         {
             lock (_gate)
             {

@@ -170,10 +170,11 @@ for this engine, and ordinary `ISqlCatalog.CreateTableAsync` stays ad-hoc.
 - **Transactions (MVCC session binding, §3.8).** Every statement — explicit
   transaction or auto-commit — runs under an `ITransactionContext` from the
   database's transaction manager, whose sequences come from the storage's own
-  counter (one namespace). The per-database `SqlTransactionCoordinator` owns
+  counter (one namespace). The shared `Database.Transactions.TransactionCoordinator` owns
   the composition (manager + lock manager + record-space version store +
-  journal-bound log) and implements `IStorageTransactionSource` — the pairing
-  seam now resolves a context's *current statement bracket*. Commit flows
+  journal-bound log). The instance's thin `IStorageTransactionSource` adapter
+  resolves a context's *current statement bracket* and retains the engine's
+  `DatabaseException` for a missing pairing. Commit flows
   through the manager: its journal-bound log appends the commit record and
   awaits durability (which, by journal ordering, also covers every statement
   bracket the transaction committed non-durably); rollback is **logical** —
@@ -196,6 +197,16 @@ for this engine, and ordinary `ISqlCatalog.CreateTableAsync` stays ad-hoc.
   sequences. DDL flows to the catalog, which self-commits on its own storage
   (see the catalog DESIGN.md for why DDL-in-DML is out of MVP scope), and
   interlocks with row writers through table-grain intent locks (below).
+- **Shared record-space composition (#918).** `SqlTransactionRecordSpace`
+  supplies row reads, transactional updates/deletes, and the existing packed
+  location codec to `RecordSpaceVersionStore` in `Database.Transactions`.
+  `SqlRowCodec` retains SQL tuple encoding and legacy-format migration, while
+  its stamp operations delegate to the shared `RecordVersionStamp` contract
+  ([layout](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#record-stamp-prefix-the-16-byte-contract)).
+  `RecordVersionIndex` in Indexing binds each live secondary index to the
+  shared undo ledger. Recovery ordering is unchanged: re-attach indexes,
+  analyze and scrub records, scrub indexes with the same classification, then
+  complete the deferred checkpoint before the existing format upgrades.
 - **Write statements execute in two phases; the physical bracket is per
   statement (§3.8's migration path).** Phase one — no physical bracket: scan
   through the statement snapshot, collect targets, acquire an IntentExclusive

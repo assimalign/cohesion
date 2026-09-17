@@ -1,5 +1,4 @@
 using System;
-using System.Buffers.Binary;
 
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
@@ -28,7 +27,7 @@ internal static class KeyValueRecordCodec
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.
     /// </summary>
-    internal const int StampHeaderSize = 16;
+    internal const int StampHeaderSize = RecordVersionStamp.HeaderSize;
 
     /// <summary>
     /// Encodes an entry record stamped with its writing transaction's sequence.
@@ -41,7 +40,7 @@ internal static class KeyValueRecordCodec
 
         byte[] payload = payloadWriter.ToArray();
         var record = new byte[StampHeaderSize + payload.Length];
-        BinaryPrimitives.WriteUInt64LittleEndian(record.AsSpan(0, 8), writer.Value);
+        RecordVersionStamp.WriteWriter(record, writer);
         // Deleter starts at zero (no visible delete); bytes are already zeroed.
         payload.CopyTo(record.AsSpan(StampHeaderSize));
         return record;
@@ -51,11 +50,7 @@ internal static class KeyValueRecordCodec
     /// Reads the version stamps from a stamped record.
     /// </summary>
     internal static (TransactionSequence Writer, TransactionSequence Deleter) ReadStamps(ReadOnlySpan<byte> record)
-    {
-        return (
-            new TransactionSequence(BinaryPrimitives.ReadUInt64LittleEndian(record.Slice(0, 8))),
-            new TransactionSequence(BinaryPrimitives.ReadUInt64LittleEndian(record.Slice(8, 8))));
-    }
+        => RecordVersionStamp.ReadStamps(record);
 
     /// <summary>
     /// Returns a same-length copy of a stamped record with the deleter stamp set —
@@ -63,22 +58,14 @@ internal static class KeyValueRecordCodec
     /// place: a delete can never relocate a record.
     /// </summary>
     internal static byte[] WithDeleter(ReadOnlySpan<byte> record, TransactionSequence deleter)
-    {
-        var tombstoned = record.ToArray();
-        BinaryPrimitives.WriteUInt64LittleEndian(tombstoned.AsSpan(8, 8), deleter.Value);
-        return tombstoned;
-    }
+        => RecordVersionStamp.WithDeleter(record, deleter);
 
     /// <summary>
     /// Returns a same-length copy of a stamped record with the deleter stamp
     /// cleared — the logical undo of a tombstone.
     /// </summary>
     internal static byte[] WithoutDeleter(ReadOnlySpan<byte> record)
-    {
-        var restored = record.ToArray();
-        restored.AsSpan(8, 8).Clear();
-        return restored;
-    }
+        => RecordVersionStamp.WithoutDeleter(record);
 
     /// <summary>
     /// Decodes a stamped record's key and value; returns false when the record is

@@ -15,7 +15,7 @@ internal readonly struct SqlStatementContext
 {
     internal SqlStatementContext(
         ITransactionContext transaction,
-        SqlTransactionCoordinator coordinator,
+        TransactionCoordinator coordinator,
         string? provisioningSchema = null)
     {
         Transaction = transaction;
@@ -33,7 +33,7 @@ internal readonly struct SqlStatementContext
     /// <summary>
     /// Gets the database's transaction coordinator.
     /// </summary>
-    internal SqlTransactionCoordinator Coordinator { get; }
+    internal TransactionCoordinator Coordinator { get; }
 
     /// <summary>
     /// Gets the visibility snapshot for the whole statement.

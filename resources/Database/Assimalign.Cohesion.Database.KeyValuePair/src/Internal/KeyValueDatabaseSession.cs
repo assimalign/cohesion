@@ -16,13 +16,13 @@ using Assimalign.Cohesion.Database.Transactions;
 /// </summary>
 internal sealed class KeyValueDatabaseSession : IDatabaseSession
 {
-    private readonly KeyValueTransactionCoordinator _coordinator;
+    private readonly TransactionCoordinator _coordinator;
     private readonly KeyValueOperationExecutor _executor;
 
     private KeyValueDatabaseTransaction? _transaction;
     private SessionState _state;
 
-    internal KeyValueDatabaseSession(IKeyValueDatabase database, KeyValueTransactionCoordinator coordinator, KeyValueOperationExecutor executor)
+    internal KeyValueDatabaseSession(IKeyValueDatabase database, TransactionCoordinator coordinator, KeyValueOperationExecutor executor)
     {
         Database = database;
         _coordinator = coordinator;

@@ -3,43 +3,29 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
+namespace Assimalign.Cohesion.Database.Transactions;
 
-using Assimalign.Cohesion.Database.Indexing;
-using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
-/// The key-value engine's <see cref="IVersionStore"/>, implemented over the entry
-/// record space itself (the contract's intended shape: "model storage layers
-/// implement this over their page layouts"). Version payloads live in the record
-/// space — a put over an existing key tombstones the old version in place and
-/// inserts the new one — so the store holds no copies: it is the <b>ledger</b> of
-/// each writer's physical effects (created versions, tombstoned versions, and
-/// their primary-index mirrors), which is what makes logical undo
-/// (<see cref="PurgeWriterAsync"/>) and space reclamation (<see cref="PruneAsync"/>)
-/// executable.
+/// Tracks physical record and index effects over a record space whose versions
+/// carry the shared 16-byte writer/deleter stamp prefix. Payloads remain in the
+/// record space; the ledger supplies logical undo and safe space reclamation.
 /// </summary>
-/// <remarks>
-/// Adapted from the SQL engine's record-space version store — the mechanics are
-/// deliberately identical (same stamp discipline, same ledger duties). That the
-/// second model needed a near-verbatim copy is recorded as a kernel gap in the
-/// area DESIGN's generality report: the record-space version store is
-/// model-agnostic machinery that wants a kernel home.
-/// </remarks>
-internal sealed class KeyValueVersionStore : IVersionStore
+public sealed class RecordSpaceVersionStore : IVersionStore
 {
-    private readonly KeyValueStorage _storage;
+    private readonly IStorage _storage;
+    private readonly ITransactionRecordSpace _records;
     private readonly SemaphoreSlim _applyGate;
     private readonly Dictionary<ulong, List<LedgerEntry>> _ledger = new();
     private readonly List<PrunableVersion> _prunable = new();
     private readonly HashSet<ulong> _pendingAbortedPurges = new();
     private readonly object _sync = new();
 
-    internal KeyValueVersionStore(KeyValueStorage storage, SemaphoreSlim applyGate)
+    internal RecordSpaceVersionStore(IStorage storage, ITransactionRecordSpace records, SemaphoreSlim applyGate)
     {
         _storage = storage;
+        _records = records;
         _applyGate = applyGate;
     }
 
@@ -47,7 +33,7 @@ internal sealed class KeyValueVersionStore : IVersionStore
     /// Gets the number of in-flight ledger entries plus retained prunable
     /// versions (test observability: "version-store size").
     /// </summary>
-    internal int TrackedVersionCount
+    public int TrackedVersionCount
     {
         get
         {
@@ -69,7 +55,7 @@ internal sealed class KeyValueVersionStore : IVersionStore
     /// Gets the writers whose abort-time undo did not complete and is retried
     /// by the version-purge worker.
     /// </summary>
-    internal IReadOnlyCollection<ulong> PendingAbortedPurges
+    public IReadOnlyCollection<ulong> PendingAbortedPurges
     {
         get
         {
@@ -82,33 +68,48 @@ internal sealed class KeyValueVersionStore : IVersionStore
 
     /// <summary>
     /// Records that <paramref name="writer"/> created the version at the given
-    /// location (a put's new version). Called inside the statement's apply bracket.
+    /// location (an insert or an update's new version). Called inside the
+    /// statement's apply bracket.
     /// </summary>
-    internal void RecordCreated(TransactionSequence writer, PageId pageId, int slotIndex)
-        => Record(writer, new LedgerEntry(LedgerEntryKind.Created, KeyValueRecordLocation.Pack(pageId, slotIndex)));
+    /// <param name="writer">The transaction creating the version.</param>
+    /// <param name="pageId">The page containing the version.</param>
+    /// <param name="slotIndex">The version's slot within the page.</param>
+    public void RecordCreated(TransactionSequence writer, PageId pageId, int slotIndex)
+        => Record(writer, new LedgerEntry(LedgerEntryKind.Created, _records.PackLocation(pageId, slotIndex)));
 
     /// <summary>
     /// Records that <paramref name="writer"/> tombstoned the version at the
-    /// given location (a delete, or the old version of a put-over-existing).
+    /// given location (a delete, or the old version of an update).
     /// </summary>
-    internal void RecordTombstoned(TransactionSequence writer, PageId pageId, int slotIndex)
-        => Record(writer, new LedgerEntry(LedgerEntryKind.Tombstoned, KeyValueRecordLocation.Pack(pageId, slotIndex)));
+    /// <param name="writer">The transaction tombstoning the version.</param>
+    /// <param name="pageId">The page containing the version.</param>
+    /// <param name="slotIndex">The version's slot within the page.</param>
+    public void RecordTombstoned(TransactionSequence writer, PageId pageId, int slotIndex)
+        => Record(writer, new LedgerEntry(LedgerEntryKind.Tombstoned, _records.PackLocation(pageId, slotIndex)));
 
     /// <summary>
-    /// Records that <paramref name="writer"/> inserted a primary-index entry — the
+    /// Records that <paramref name="writer"/> inserted an index entry — the
     /// index-side mirror of <see cref="RecordCreated"/>, so a logical rollback
     /// physically erases the aborted writer's entries from the index too.
     /// </summary>
-    internal void RecordIndexEntryCreated(TransactionSequence writer, IIndex index, IndexKey key, ulong entryReference)
-        => Record(writer, new LedgerEntry(LedgerEntryKind.IndexEntryCreated, entryReference, index, key.Encoded.ToArray()));
+    /// <param name="writer">The transaction creating the index entry.</param>
+    /// <param name="index">The index's stamp-verified undo adapter.</param>
+    /// <param name="key">The encoded key; a private copy is retained for undo.</param>
+    /// <param name="entryReference">The index entry's record reference.</param>
+    public void RecordIndexEntryCreated(TransactionSequence writer, IRecordVersionIndex index, ReadOnlyMemory<byte> key, ulong entryReference)
+        => Record(writer, new LedgerEntry(LedgerEntryKind.IndexEntryCreated, entryReference, index, key.ToArray()));
 
     /// <summary>
-    /// Records that <paramref name="writer"/> tombstoned a primary-index entry —
+    /// Records that <paramref name="writer"/> tombstoned an index entry —
     /// the index-side mirror of <see cref="RecordTombstoned"/>, so a logical
     /// rollback restores the entry's deleter stamp.
     /// </summary>
-    internal void RecordIndexEntryTombstoned(TransactionSequence writer, IIndex index, IndexKey key, ulong entryReference)
-        => Record(writer, new LedgerEntry(LedgerEntryKind.IndexEntryTombstoned, entryReference, index, key.Encoded.ToArray()));
+    /// <param name="writer">The transaction tombstoning the index entry.</param>
+    /// <param name="index">The index's stamp-verified undo adapter.</param>
+    /// <param name="key">The encoded key; a private copy is retained for undo.</param>
+    /// <param name="entryReference">The index entry's record reference.</param>
+    public void RecordIndexEntryTombstoned(TransactionSequence writer, IRecordVersionIndex index, ReadOnlyMemory<byte> key, ulong entryReference)
+        => Record(writer, new LedgerEntry(LedgerEntryKind.IndexEntryTombstoned, entryReference, index, key.ToArray()));
 
     /// <summary>
     /// Completes a committed writer's ledger: created versions are permanent
@@ -151,12 +152,12 @@ internal sealed class KeyValueVersionStore : IVersionStore
         ArgumentNullException.ThrowIfNull(snapshot);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var (pageId, slotIndex) = KeyValueRecordLocation.Unpack(entryId);
+        var (pageId, slotIndex) = _records.UnpackLocation(entryId);
 
         ReadOnlyMemory<byte> record;
         try
         {
-            record = _storage.ReadEntry(pageId, slotIndex);
+            record = _records.Read(pageId, slotIndex);
         }
         catch (StorageException)
         {
@@ -168,12 +169,12 @@ internal sealed class KeyValueVersionStore : IVersionStore
             return new ValueTask<ReadOnlyMemory<byte>?>((ReadOnlyMemory<byte>?)null);
         }
 
-        if (record.Length < KeyValueRecordCodec.StampHeaderSize)
+        if (record.Length < RecordVersionStamp.HeaderSize)
         {
             return new ValueTask<ReadOnlyMemory<byte>?>((ReadOnlyMemory<byte>?)null);
         }
 
-        var (writer, deleter) = KeyValueRecordCodec.ReadStamps(record.Span);
+        var (writer, deleter) = RecordVersionStamp.ReadStamps(record.Span);
 
         bool visible = snapshot.IsVisible(writer)
             && (deleter == TransactionSequence.None || !snapshot.IsVisible(deleter));
@@ -211,11 +212,11 @@ internal sealed class KeyValueVersionStore : IVersionStore
 
             foreach (var candidate in candidates)
             {
-                var (pageId, slotIndex) = KeyValueRecordLocation.Unpack(candidate.Location);
+                var (pageId, slotIndex) = _records.UnpackLocation(candidate.Location);
 
                 if (TryReadStamps(pageId, slotIndex, out _, out var deleter) && deleter.Value == candidate.Deleter)
                 {
-                    _storage.DeleteEntry(bracket, pageId, slotIndex);
+                    _records.Delete(bracket, pageId, slotIndex);
                     pruned++;
                 }
             }
@@ -302,8 +303,7 @@ internal sealed class KeyValueVersionStore : IVersionStore
     /// one stamped — the in-memory ledger died with the previous process, so the
     /// record space itself is the source of targets. Also seeds the prunable set
     /// with the committed tombstones the pass encounters, so pre-restart garbage
-    /// is reclaimed by the purge worker. The caller scrubs the primary index
-    /// separately (<c>IIndexManager.PurgeWritersAsync</c>).
+    /// is reclaimed by the purge worker. The caller scrubs indexes separately through its model-specific index manager.
     /// </summary>
     /// <param name="aborted">The sequences the journal cannot prove committed.</param>
     /// <returns>The number of versions physically undone.</returns>
@@ -319,12 +319,12 @@ internal sealed class KeyValueVersionStore : IVersionStore
             {
                 var unit = iterator.Current;
 
-                if (unit.Data.Length < KeyValueRecordCodec.StampHeaderSize)
+                if (unit.Data.Length < RecordVersionStamp.HeaderSize)
                 {
                     continue;
                 }
 
-                var (writer, deleter) = KeyValueRecordCodec.ReadStamps(unit.Data.Span);
+                var (writer, deleter) = RecordVersionStamp.ReadStamps(unit.Data.Span);
 
                 if (writer != TransactionSequence.None && aborted.Contains(writer))
                 {
@@ -336,13 +336,13 @@ internal sealed class KeyValueVersionStore : IVersionStore
                 {
                     if (aborted.Contains(deleter))
                     {
-                        tombstoneClears.Add((unit.PageId, unit.SlotIndex, KeyValueRecordCodec.WithoutDeleter(unit.Data.Span)));
+                        tombstoneClears.Add((unit.PageId, unit.SlotIndex, RecordVersionStamp.WithoutDeleter(unit.Data.Span)));
                     }
                     else
                     {
                         // A committed tombstone from before the restart: eligible
                         // for pruning once the bound passes its deleter.
-                        prunable.Add(new PrunableVersion(deleter.Value, KeyValueRecordLocation.Pack(unit.PageId, unit.SlotIndex)));
+                        prunable.Add(new PrunableVersion(deleter.Value, _records.PackLocation(unit.PageId, unit.SlotIndex)));
                     }
                 }
             }
@@ -354,12 +354,12 @@ internal sealed class KeyValueVersionStore : IVersionStore
 
             foreach (var (pageId, slotIndex) in deletions)
             {
-                _storage.DeleteEntry(bracket, pageId, slotIndex);
+                _records.Delete(bracket, pageId, slotIndex);
             }
 
             foreach (var (pageId, slotIndex, restored) in tombstoneClears)
             {
-                _storage.UpdateEntry(bracket, pageId, slotIndex, restored);
+                _records.Update(bracket, pageId, slotIndex, restored);
             }
 
             bracket.Commit();
@@ -384,14 +384,14 @@ internal sealed class KeyValueVersionStore : IVersionStore
 
             foreach (var entry in entries)
             {
-                var (pageId, slotIndex) = KeyValueRecordLocation.Unpack(entry.Location);
+                var (pageId, slotIndex) = _records.UnpackLocation(entry.Location);
 
                 switch (entry.Kind)
                 {
                     case LedgerEntryKind.Created:
                         if (TryReadStamps(pageId, slotIndex, out var createdWriter, out _) && createdWriter == writer)
                         {
-                            _storage.DeleteEntry(bracket, pageId, slotIndex);
+                            _records.Delete(bracket, pageId, slotIndex);
                             removed++;
                         }
 
@@ -400,8 +400,8 @@ internal sealed class KeyValueVersionStore : IVersionStore
                     case LedgerEntryKind.Tombstoned:
                         if (TryReadStamps(pageId, slotIndex, out _, out var deleter) && deleter == writer)
                         {
-                            var record = _storage.ReadEntry(pageId, slotIndex);
-                            _storage.UpdateEntry(bracket, pageId, slotIndex, KeyValueRecordCodec.WithoutDeleter(record.Span));
+                            var record = _records.Read(pageId, slotIndex);
+                            _records.Update(bracket, pageId, slotIndex, RecordVersionStamp.WithoutDeleter(record.Span));
                             removed++;
                         }
 
@@ -411,12 +411,12 @@ internal sealed class KeyValueVersionStore : IVersionStore
                         // Physical erase of the aborted insert's entry: both index
                         // ops verify the recorded stamp before acting, so a stale
                         // ledger entry is a no-op, never a misdelete.
-                        await entry.Index!.EraseAsync(bracket, new IndexKey(entry.Key), entry.Location, writer, cancellationToken).ConfigureAwait(false);
+                        await entry.Index!.EraseAsync(bracket, entry.Key, entry.Location, writer, cancellationToken).ConfigureAwait(false);
                         removed++;
                         break;
 
                     case LedgerEntryKind.IndexEntryTombstoned:
-                        await entry.Index!.ClearDeleterAsync(bracket, new IndexKey(entry.Key), entry.Location, writer, cancellationToken).ConfigureAwait(false);
+                        await entry.Index!.ClearDeleterAsync(bracket, entry.Key, entry.Location, writer, cancellationToken).ConfigureAwait(false);
                         removed++;
                         break;
                 }
@@ -457,7 +457,7 @@ internal sealed class KeyValueVersionStore : IVersionStore
         ReadOnlyMemory<byte> record;
         try
         {
-            record = _storage.ReadEntry(pageId, slotIndex);
+            record = _records.Read(pageId, slotIndex);
         }
         catch (StorageException)
         {
@@ -471,12 +471,12 @@ internal sealed class KeyValueVersionStore : IVersionStore
             return false;
         }
 
-        if (record.Length < KeyValueRecordCodec.StampHeaderSize)
+        if (record.Length < RecordVersionStamp.HeaderSize)
         {
             return false;
         }
 
-        (writer, deleter) = KeyValueRecordCodec.ReadStamps(record.Span);
+        (writer, deleter) = RecordVersionStamp.ReadStamps(record.Span);
         return true;
     }
 
@@ -491,7 +491,7 @@ internal sealed class KeyValueVersionStore : IVersionStore
     private readonly record struct LedgerEntry(
         LedgerEntryKind Kind,
         ulong Location,
-        IIndex? Index = null,
+        IRecordVersionIndex? Index = null,
         byte[]? Key = null);
 
     private readonly record struct PrunableVersion(ulong Deleter, ulong Location);

@@ -23,7 +23,8 @@ whoever owns both vocabularies — the model engines' session/transaction
 implementations above the root (the same place `IQueryTransactionScope` in
 `Execution` puts its engine adaptation, the area's standing cycle-avoidance
 shape). `Storage` is the one reference (child-to-child): the journal/page
-substrate the implementations bind to.
+substrate the implementations bind to. The per-database composition below adds
+no project or package dependency, including no dependency on Indexing.
 
 ## Identity vs. ordering: `TransactionId` vs. `TransactionSequence`
 
@@ -57,9 +58,10 @@ context begun on a different manager instance (identity check, not just type che
 **The sequence allocator (why an external hook and not a seed).** An engine that
 pairs manager transactions with storage brackets passes the storage's own
 allocator (`IStorage.ReserveTransactionSequence`) so both layers share **one
-sequence namespace** — the paired bracket adopts the manager's sequence, its
-commit record proves the logical transaction at recovery, and internally
-sequenced storage brackets can never collide with manager assignments. The
+sequence namespace**. The per-database composition uses separately sequenced
+physical statement brackets; only the logical transaction's own commit proves
+its writer stamp committed. Internally sequenced storage brackets can never
+collide with manager assignments. The
 alternative — seeding the manager once at open and letting two counters run —
 was rejected because any storage-side allocation after the seed (an auto-commit
 record bracket) reintroduces collisions. The allocator is invoked *inside* the
@@ -96,7 +98,7 @@ work items under #862). The integration kept this package exactly as shaped:
 
 - The **model engine session** binds the root's `IDatabaseTransaction` to an
   `ITransactionContext` from a per-database `ITransactionManager` — the binding
-  lives above both vocabularies (`SqlTransactionCoordinator` in `Database.Sql`),
+  lives above both vocabularies (the SQL and KeyValuePair session/transaction adapters),
   per this document's "child root" section; nothing here learned about the area
   contracts. Kernel aborts cross the model boundary wrapped in the root's
   `DatabaseTransactionAbortedException`.
@@ -110,14 +112,14 @@ work items under #862). The integration kept this package exactly as shaped:
   storage brackets are the physical WAL brackets beneath the manager (their
   commit records ride the same journal; the manager's commit record owns
   durability through journal ordering). `IStorageTransactionSource` (in
-  `Database.Indexing`) is the pairing seam the engine's coordinator implements —
+  `Database.Indexing`) is the pairing seam the engine adapts from the shared coordinator —
   resolving a context's current statement bracket. Recovery drives the
   version store's aborted-writer purge from `TransactionRecovery.Analyze` at
   every database open — and `Analyze` reads the active-sequence list out of
   checkpoint records, so classification survives journal truncation beneath
   in-flight transactions.
-- The engine implements `IVersionStore` over its own record space (the
-  contract's intended shape — the in-memory store remains for tests and
+- The shared `RecordSpaceVersionStore` implements `IVersionStore` over the engine's
+  record access adapter (the in-memory store remains for tests and
   embedded working state): row versions live in data pages as stamped records,
   and the store is the *ledger* of each writer's effects, which is what makes
   `PurgeWriterAsync` a physical logical-undo and `PruneAsync` a physical
@@ -132,6 +134,100 @@ work items under #862). The integration kept this package exactly as shaped:
   can trail a live snapshot's view (see the Sql DESIGN.md for the recorded
   bound decision). With that, all four §3.8 steps are implemented.
 
+## Shared per-database composition (#918)
+
+`TransactionCoordinator(storage, journal, records)` owns one manager, lock manager,
+record-space version store, gated transaction log, and statement apply semaphore
+per database. Pass the journal belonging to that same storage. The caller owns
+the storage/journal lifetime and disposes the coordinator before closing them.
+SQL and KeyValuePair use this composition directly; there is no engine-specific
+copy of its ledger, recovery, prune-bound, or journal-gate mechanics.
+
+The seam follows the executable differences between the original implementations:
+
+- `ITransactionRecordSpace` supplies read/update/delete and physical location
+  packing/unpacking. The storage's existing unit iterator scans the stamped
+  records. SQL retains its object-id/column tuple and row APIs; KeyValuePair
+  retains its key/value tuple and entry APIs. Their current location encoding is
+  `(pageId << 16) | (ushort)slotIndex`, but the ledger treats it as an opaque identity.
+- `IRecordVersionIndex` supplies stamp-checked erase and clear-deleter operations
+  over encoded key bytes. Indexing's `RecordVersionIndex` adapts `IIndex` to this
+  new contract. Indexing already references Transactions; the reverse reference
+  would form a cycle. The ledger copies keys at registration, keeps index undo
+  in the same physical bracket as record undo, and retries the same entries on
+  failure. No member was added to any existing interface.
+- The engine adapts `TryGetStorageTransaction` to the existing Indexing pairing
+  seam, retaining its `DatabaseException` when no statement bracket exists.
+  Transactions never references the area root or its exceptions.
+
+`RecordSpaceVersionStore` is a ledger over actual records, not a second payload
+store. Logical rollback deletes created versions and clears tombstones only
+when their current stamps match the recorded writer. A failed physical statement
+can leave stale ledger entries; missing/reverted slots remain harmless through
+the original `StorageException`/`ArgumentOutOfRangeException` handling and stamp
+rechecks. Committed tombstones enter the prunable set. Pruning requires
+`deleter < safeBound` and rechecks the current deleter before deleting. Index
+undo stays in recorded order, including its original accounting semantics.
+
+### Record stamp prefix: the 16-byte contract
+
+Every record supplied by the adapter starts with this prefix. `RecordVersionStamp`
+owns its encoding and the two engines' codecs delegate their stamp operations to it.
+
+| Offset | Size | Encoding | Meaning |
+|---|---|---|---|
+| 0 | 8 bytes | unsigned 64-bit, little-endian | Writer `TransactionSequence.Value` |
+| 8 | 8 bytes | unsigned 64-bit, little-endian | Deleter `TransactionSequence.Value` |
+| 16 | remaining bytes | engine-defined | Payload, left untouched by stamp helpers |
+
+Writer zero denotes bootstrap/migrated data visible to every snapshot; deleter
+zero means no deletion. A nonzero deleter is a tombstone, not physical removal.
+Visibility is exactly `snapshot.IsVisible(writer) && (deleter == None ||
+!snapshot.IsVisible(deleter))`. Setting or clearing a deleter produces a copy of
+the same length and changes only bytes 8–15, so stamp changes cannot relocate a
+record. Short records (less than 16 bytes) are ignored by store visibility,
+undo, and recovery scans as before; the low-level helpers require a complete
+prefix. Payload interpretation and legacy format upgrades remain engine policy.
+B+Tree entries retain their own physical layout and existing stamp implementation.
+
+### Recovery and checkpoint interlock
+
+The ordering is deliberately the same as in both original engines:
+
+1. Open storage with its automatic open-time checkpoint deferred, allowing
+   physical WAL recovery without discarding logical transaction classification.
+2. Attach the engine's persisted indexes.
+3. `AnalyzeAndScrub` analyzes the recovered journal once, removes records created
+   by unproven writers, clears their tombstones, and seeds surviving committed
+   tombstones for pruning. It then reserves a storage sequence as the recovered
+   floor, above every pre-restart stamp.
+4. The engine scrubs its attached indexes with that same plan in a durable
+   storage bracket.
+5. `CompleteRecovery` checkpoints last, before sessions can begin. Truncating
+   earlier would erase the lifecycle records needed to classify index entries.
+
+During normal operation, begin/commit/abort appends and changes to the log's
+active-sequence set share one monitor with checkpoint capture and truncation.
+A begin cannot land between capturing the checkpoint's active list and truncating
+the journal. Commit appends and removes its active sequence under that monitor,
+then calls `EnsureDurable` outside it; a checkpoint that truncates first has
+already durably flushed the outcome. The manager keeps the transaction active
+until durability completes. This ordering has not been replaced with an
+independent manager-table snapshot.
+
+Statement apply, logical undo, and pruning share one semaphore. Engine conflict
+locks are acquired before statement apply, keeping genuine lock waits outside
+that semaphore and visible to deadlock detection. Statement brackets commit
+non-durably unless the caller selects the existing durable DDL/bootstrap path;
+the logical commit makes earlier statement records durable by journal ordering.
+Open-time scrub remains ungated because no sessions exist yet.
+
+The safe prune bound starts at `max(manager.OldestActive, recoveredSequenceFloor)`
+and is reduced to every open context's `Snapshot.Minimum`. A snapshot captured
+while an older writer was active can retain a floor below the current oldest
+active transaction, so using only the manager's bound would reclaim visible data.
+The purge pass retries failed abort undo before pruning, exactly as before.
+
 ## Non-goals
 
 - No distributed transactions / two-phase commit — single-node ACID first.
@@ -140,4 +236,6 @@ work items under #862). The integration kept this package exactly as shaped:
 
 ## AOT posture
 
-Pure contracts and value objects; `FrozenSet<ulong>` for the active set. No reflection, no codegen.
+Static composition, contracts and value objects; `FrozenSet<ulong>` for the active
+set. The shared composition and engine adapters use ordinary calls and BCL
+synchronization. No reflection, dynamic code generation, or `Microsoft.Extensions.*`.

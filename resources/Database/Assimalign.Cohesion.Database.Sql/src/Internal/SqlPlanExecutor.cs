@@ -41,7 +41,10 @@ internal sealed class SqlPlanExecutor
     /// A registered index paired with its live tree and resolved key ordinals —
     /// what one statement's maintenance loop works with.
     /// </summary>
-    private readonly record struct SqlLiveIndex(SqlCatalogIndex Metadata, IIndex Index, int[] KeyOrdinals);
+    private readonly record struct SqlLiveIndex(SqlCatalogIndex Metadata, IIndex Index, int[] KeyOrdinals)
+    {
+        internal RecordVersionIndex Versions { get; } = new(Index);
+    }
 
     internal async Task<QueryResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
@@ -280,7 +283,7 @@ internal sealed class SqlPlanExecutor
                 foreach (var (record, values) in rows)
                 {
                     var (pageId, slotIndex) = _storage.InsertRow(bracket, plan.Table.ObjectId, record);
-                    statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, plan.Table.ObjectId, pageId, slotIndex);
+                    statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, pageId, slotIndex);
 
                     await InsertIndexEntriesAsync(
                         statement, indexes, plan.Table, values, SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
@@ -353,12 +356,12 @@ internal sealed class SqlPlanExecutor
                     // sequence. The index entries mirror the row versions exactly:
                     // the old location's entries get the same deleter, the new
                     // location gets fresh entries with the same writer.
-                    TombstoneVersion(statement, bracket, plan.Table.ObjectId, pageId, slotIndex);
+                    TombstoneVersion(statement, bracket, pageId, slotIndex);
                     await TombstoneIndexEntriesAsync(
                         statement, indexes, plan.Table, oldValues, SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
 
                     var location = _storage.InsertRow(bracket, plan.Table.ObjectId, newVersion);
-                    statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, plan.Table.ObjectId, location.PageId, location.SlotIndex);
+                    statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(
                         statement, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
                 }
@@ -408,7 +411,7 @@ internal sealed class SqlPlanExecutor
                 // the row until the purge worker reclaims versions below every
                 // live snapshot's horizon. The index entries mirror the row
                 // version's deleter stamp.
-                TombstoneVersion(statement, bracket, plan.Table.ObjectId, pageId, slotIndex);
+                TombstoneVersion(statement, bracket, pageId, slotIndex);
                 await TombstoneIndexEntriesAsync(
                     statement, indexes, plan.Table, values, SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
             }
@@ -597,7 +600,7 @@ internal sealed class SqlPlanExecutor
         {
             var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
             await liveIndex.Index.InsertAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
-            statement.Coordinator.VersionStore.RecordIndexEntryCreated(statement.Transaction.Sequence, liveIndex.Index, key, entryReference);
+            statement.Coordinator.VersionStore.RecordIndexEntryCreated(statement.Transaction.Sequence, liveIndex.Versions, key.Encoded, entryReference);
         }
     }
 
@@ -618,7 +621,7 @@ internal sealed class SqlPlanExecutor
         {
             var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
             await liveIndex.Index.DeleteAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
-            statement.Coordinator.VersionStore.RecordIndexEntryTombstoned(statement.Transaction.Sequence, liveIndex.Index, key, entryReference);
+            statement.Coordinator.VersionStore.RecordIndexEntryTombstoned(statement.Transaction.Sequence, liveIndex.Versions, key.Encoded, entryReference);
         }
     }
 
@@ -665,12 +668,12 @@ internal sealed class SqlPlanExecutor
     /// the same-length in-place tombstone write — and records it in the
     /// version-store ledger for logical undo and pruning.
     /// </summary>
-    private void TombstoneVersion(SqlStatementContext statement, IStorageTransaction bracket, ulong objectId, PageId pageId, int slotIndex)
+    private void TombstoneVersion(SqlStatementContext statement, IStorageTransaction bracket, PageId pageId, int slotIndex)
     {
         var current = _storage.ReadRow(pageId, slotIndex);
         byte[] tombstoned = SqlRowCodec.WithDeleter(current.Span, statement.Transaction.Sequence);
         _storage.UpdateRow(bracket, pageId, slotIndex, tombstoned);
-        statement.Coordinator.VersionStore.RecordTombstoned(statement.Transaction.Sequence, objectId, pageId, slotIndex);
+        statement.Coordinator.VersionStore.RecordTombstoned(statement.Transaction.Sequence, pageId, slotIndex);
     }
 
     // ── DDL ────────────────────────────────────────────────────────────

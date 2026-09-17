@@ -78,7 +78,7 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
     exception storm on a hot upsert path) or folding conflicts into
     `applied=false` (hides real contention and breaks retry semantics).
 - **Transactions.** Identical binding to the SQL engine's (§3.8): per-database
-  `KeyValueTransactionCoordinator` (manager + lock manager + record-space
+  `Database.Transactions.TransactionCoordinator` (manager + lock manager + record-space
   version store + gated journal-bound log, one sequence namespace with storage),
   explicit transactions and auto-commit both ride manager contexts, `Snapshot`
   default / `ReadCommitted` per-command refresh / `Serializable` rejected,
@@ -175,15 +175,24 @@ re-bootstrapping on the next open.
 (retryable) for MVCC conflicts — kernel exceptions are translated at the model
 boundary, never leaked raw.
 
-## Known duplication (recorded kernel gaps — see area DESIGN §3.10)
+## Shared MVCC composition (#918 — area DESIGN §3.10)
 
-`KeyValueTransactionCoordinator`, `KeyValueVersionStore`, and the stamp half of
-`KeyValueRecordCodec` are near-verbatim adaptations of their SQL counterparts:
-the per-database MVCC composition proved model-agnostic in mechanics but has no
-kernel home yet, so the second model paid a copy. Extracting it is filed work —
-#918 (the area generality report §3.10 carries the evidence). The copies are deliberate
-(hacking a premature kernel package into shape mid-bring-up would have risked
-the SQL engine's stability for a refactor the third model can validate instead).
+`TransactionCoordinator` and `RecordSpaceVersionStore` now live in the existing
+`Database.Transactions` child root. `KeyValueTransactionRecordSpace` supplies
+entry reads, transactional updates/deletes, and the existing packed location
+codec. `KeyValueRecordCodec` retains key/value payload encoding and delegates
+stamp operations to `RecordVersionStamp`; the shared
+[16-byte layout](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#record-stamp-prefix-the-16-byte-contract)
+is the contract for subsequent models. The instance's thin
+`IStorageTransactionSource` adapter retains the engine's `DatabaseException`
+for a missing statement bracket; Indexing's `RecordVersionIndex` binds the
+primary index to the shared undo ledger without a reverse dependency.
+
+Recovery ordering is unchanged: re-attach the primary index, analyze and scrub
+records, scrub the index with the same classification, then complete the
+deferred checkpoint before ensuring the primary index exists. The coordinator
+retains the same journal append/checkpoint gate, statement apply gate, and
+snapshot-based safe prune bound as the extracted copies.
 
 ## Non-goals (current cut)
 

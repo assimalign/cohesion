@@ -16,7 +16,7 @@ using Assimalign.Cohesion.Database.Transactions;
 /// </summary>
 internal sealed class SqlDatabaseSession : IDatabaseSession
 {
-    private readonly SqlTransactionCoordinator _coordinator;
+    private readonly TransactionCoordinator _coordinator;
     private readonly SqlQueryExecutor _executor;
     private readonly string? _provisioningSchema;
 
@@ -26,7 +26,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
 
     internal SqlDatabaseSession(
         ISqlDatabase database,
-        SqlTransactionCoordinator coordinator,
+        TransactionCoordinator coordinator,
         SqlQueryExecutor executor,
         string? provisioningSchema = null)
     {
