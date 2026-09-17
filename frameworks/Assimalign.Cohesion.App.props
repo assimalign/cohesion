@@ -290,6 +290,12 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Documents.Catalog" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Documents.Storage" />
 
+        <!-- The Graph engine, ISO GQL subset, definition catalog, and adjacency storage. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Language" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Catalog" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Storage" />
+
         <!--
             Deliberately EXCLUDED from the MVP framework:
             - Database.Testing - the packaged resource-program test harness. It
@@ -297,7 +303,7 @@
               tooling for tests, never part of an application's runtime closure.
             - Database.SampleHost - the non-packable real-process E2E resource
               executable under the repository-root samples/ tree; never shipped.
-            - The Graph/Cache model families - engine scaffolds
+            - The Cache model family - engine scaffolds
               without shipping surface yet. (KeyValuePair graduated into the
               shipping set 2026-07-14; its still-source-less satellites -
               KeyValuePair.Replication and KeyValuePair.Security - stay excluded
@@ -306,6 +312,8 @@
               satellites; the Blob engine, catalog, and storage ship above.
             - Documents.Client, Documents.Replication, and Documents.Security -
               deferred satellites; the Documents query and storage engine ships above.
+            - Graph.Client, Graph.Replication, and Graph.Security - deferred satellites;
+              the Graph engine, GQL subset, catalog, and adjacency storage ship above.
             - Database.ApplicationModel - NuGet-only orchestration and default-control-plane
               package, injected by Sdk.Database only when CohesionApplicationModel=enabled.
             - Database.Memory - empty in-memory-strategy placeholder (no sources).

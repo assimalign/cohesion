@@ -1646,10 +1646,21 @@
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Governance/src/Assimalign.Cohesion.Database.Governance.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Graph/docs/DESIGN.md" />
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Graph/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph/src/Assimalign.Cohesion.Database.Graph.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph/tests/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph/tests/Assimalign.Cohesion.Database.Graph.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/docs/DESIGN.md" />
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Catalog/src/Assimalign.Cohesion.Database.Graph.Catalog.csproj" />
 	</Folder>
@@ -1665,6 +1676,7 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Language/" />
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Language/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Graph.Language/docs/OVERVIEW.md" />
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Language/src/">
@@ -1689,6 +1701,10 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Storage/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Graph.Storage/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Storage/docs/">
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Graph.Storage/docs/DESIGN.md" />
+		<File Path="resources/Database/Assimalign.Cohesion.Database.Graph.Storage/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Graph.Storage/src/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Graph.Storage/src/Assimalign.Cohesion.Database.Graph.Storage.csproj" />

@@ -113,7 +113,10 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 | Documents language | `Assimalign.Cohesion.Database.Documents.Language` | Declared OQL query/index-DDL subset, AST, diagnostics, and conformance corpus |
 | Documents catalog | `Assimalign.Cohesion.Database.Documents.Catalog` | Versioned collections, document metadata, and eagerly maintained shared B+Tree indexes |
 | Documents storage | `Assimalign.Cohesion.Database.Documents.Storage` | UTF-8 JSON serialization and stamped chunk chains over shared storage and transactions |
-| Graph | `Assimalign.Cohesion.Database.Graph` | Query standard selection (#193) gates language work |
+| Graph | `Assimalign.Cohesion.Database.Graph` | Durable graph engine, bounded traversal planning/execution, database-bound sessions, and root-builder composition |
+| Graph language | `Assimalign.Cohesion.Database.Graph.Language` | Executable ISO/IEC 39075 GQL subset, pattern AST, diagnostics, and conformance corpus |
+| Graph storage | `Assimalign.Cohesion.Database.Graph.Storage` | Versioned nodes and relationships, durable endpoint adjacency, and shared B+Tree property indexes |
+| Graph catalog | `Assimalign.Cohesion.Database.Graph.Catalog` | Snapshot-visible labels, relationship types, property keys, indexes, and schema ownership enforcement |
 | Blob | `Assimalign.Cohesion.Database.Blob` | Streaming blob and container API, database-bound sessions, engine lifecycle, and ownership enforcement over the shared kernel; no `.Language` project; wire client remains deferred |
 | Blob storage | `Assimalign.Cohesion.Database.Blob.Storage` | Chunk chains backed by shared pages, WAL, recovery, and transactions; incremental stream reads and writes |
 | Blob catalog | `Assimalign.Cohesion.Database.Blob.Catalog` | Durable containers, ownership markers, and per-blob metadata for name/prefix listing |

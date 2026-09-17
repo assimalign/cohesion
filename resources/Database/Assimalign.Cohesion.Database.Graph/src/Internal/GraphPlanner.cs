@@ -1,0 +1,117 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Assimalign.Cohesion.Database.Graph.Language;
+using Assimalign.Cohesion.Database.Transactions;
+
+namespace Assimalign.Cohesion.Database.Graph.Internal;
+
+internal sealed record GraphAnchor(int NodeIndex, string? Label, string? Property, object? Value);
+internal sealed record GraphPathPlan(GqlPathPattern Pattern, GraphAnchor Anchor);
+internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphPathPlan> Matches);
+
+internal sealed class GraphPlanner(GraphDatabaseInstance database, TransactionSnapshot snapshot)
+{
+    internal GraphPlan Plan(GqlQueryExpression query)
+    {
+        var variables = new Dictionary<string, bool>(StringComparer.Ordinal);
+        var paths = new List<GraphPathPlan>();
+        foreach (var path in query.Matches)
+        {
+            Validate(path, creating: false);
+            paths.Add(new GraphPathPlan(path, ChooseAnchor(path, query.Predicate)));
+        }
+        ValidateExpression(query.Predicate);
+        foreach (var path in query.Creates) { Validate(path, creating: true); }
+        foreach (var variable in query.DeleteVariables) { RequireVariable(variable); }
+        foreach (var projection in query.Projections) { RequireVariable(projection.Variable); }
+        if (query.Matches.Count == 0 && query.Creates.Count == 0)
+        { throw new DatabaseException("COHDBG001: A graph statement requires a match or insertion pattern."); }
+        if (query.Creates.Count != 0 && query.DeleteVariables.Count != 0)
+        { throw new DatabaseException("COHDBG001: Insertion and deletion cannot share a statement."); }
+        if (query.DeleteVariables.Count != 0 && query.Projections.Count != 0)
+        { throw new DatabaseException("COHDBG001: Deletion cannot be followed by projection in this subset."); }
+        return new GraphPlan(query, paths);
+
+        void Validate(GqlPathPattern path, bool creating)
+        {
+            if (path.Nodes.Count == 0 || path.Relationships.Count != path.Nodes.Count - 1 || path.Relationships.Count > 64)
+            { throw new DatabaseException("COHDBG001: A finite path requires one more node than relationships and at most 64 hops."); }
+            foreach (var node in path.Nodes)
+            {
+                Bind(node.Variable, relationship: false);
+                foreach (string label in node.Labels)
+                {
+                    if (!creating && database.Catalog.FindLabel(label, snapshot) is null)
+                    { throw new DatabaseException($"COHDBG002: Unknown label '{label}'."); }
+                }
+            }
+            foreach (var relationship in path.Relationships)
+            {
+                Bind(relationship.Variable, relationship: true);
+                if (!Enum.IsDefined(relationship.Direction) || creating && (relationship.Type is null || relationship.Direction == GqlPatternDirection.Undirected))
+                { throw new DatabaseException("COHDBG001: Inserted relationships require a type and a directed pattern."); }
+                if (!creating && relationship.Type is { } type && database.Catalog.FindRelationshipType(type, snapshot) is null)
+                { throw new DatabaseException($"COHDBG002: Unknown relationship type '{type}'."); }
+            }
+        }
+        void Bind(string? variable, bool relationship)
+        {
+            if (variable is null) { return; }
+            if (variables.TryGetValue(variable, out bool previous) && previous != relationship)
+            { throw new DatabaseException($"COHDBG003: Variable '{variable}' has incompatible node and relationship bindings."); }
+            variables[variable] = relationship;
+        }
+        void RequireVariable(string variable)
+        {
+            if (!variables.ContainsKey(variable)) { throw new DatabaseException($"COHDBG001: Variable '{variable}' is not bound."); }
+        }
+        void ValidateExpression(GqlExpression? expression, int depth = 0)
+        {
+            if (depth > 256) { throw new DatabaseException("COHDBG001: Predicate nesting exceeds 256 levels."); }
+            switch (expression)
+            {
+                case null or GqlLiteralExpression: return;
+                case GqlPropertyExpression property: RequireVariable(property.Variable); return;
+                case GqlBinaryExpression binary when binary.Operator is "AND" or "=" or "<>" or "!=" or "<" or "<=" or ">" or ">=":
+                    ValidateExpression(binary.Left, depth + 1); ValidateExpression(binary.Right, depth + 1); return;
+                default: throw new DatabaseException("COHDBG001: Unsupported graph predicate.");
+            }
+        }
+    }
+
+    private GraphAnchor ChooseAnchor(GqlPathPattern path, GqlExpression? predicate)
+    {
+        for (int i = 0; i < path.Nodes.Count; i++)
+        {
+            var node = path.Nodes[i];
+            foreach (string label in node.Labels)
+            {
+                var values = node.Properties.Concat(Equalities(predicate, node.Variable));
+                foreach (var value in values)
+                {
+                    if (value.Value is not null && database.Store.HasIndex(label, value.Key, snapshot))
+                    { return new GraphAnchor(i, label, value.Key, value.Value); }
+                }
+            }
+        }
+        return new GraphAnchor(0, path.Nodes[0].Labels.FirstOrDefault(), null, null);
+    }
+
+    private static IEnumerable<KeyValuePair<string, object?>> Equalities(GqlExpression? expression, string? variable)
+    {
+        if (expression is not GqlBinaryExpression binary) { yield break; }
+        if (binary.Operator == "AND")
+        {
+            foreach (var item in Equalities(binary.Left, variable)) { yield return item; }
+            foreach (var item in Equalities(binary.Right, variable)) { yield return item; }
+        }
+        if (binary.Operator == "=")
+        {
+            if (binary.Left is GqlPropertyExpression left && left.Variable == variable && binary.Right is GqlLiteralExpression right)
+            { yield return new(left.Property, right.Value); }
+            if (binary.Right is GqlPropertyExpression property && property.Variable == variable && binary.Left is GqlLiteralExpression literal)
+            { yield return new(property.Property, literal.Value); }
+        }
+    }
+}

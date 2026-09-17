@@ -16,22 +16,17 @@ public class GqlLanguageProfileTests
         profile.Language.ShouldBe("GQL");
         profile.IsCaseSensitive.ShouldBeFalse();
         profile.Keywords.ToArray().ShouldContain("MATCH");
-        profile.Functions.ToArray().ShouldContain("elementId");
+        profile.Functions.ToArray().ShouldBeEmpty();
     }
 
     [Theory]
     [InlineData(GqlClauses.Match)]
-    [InlineData(GqlClauses.OptionalMatch)]
-    [InlineData(GqlClauses.MandatoryMatch)]
     [InlineData(GqlClauses.Return)]
     [InlineData(GqlClauses.Create)]
     [InlineData(GqlClauses.Insert)]
     [InlineData(GqlClauses.Delete)]
-    [InlineData(GqlClauses.Merge)]
+    [InlineData(GqlClauses.DetachDelete)]
     [InlineData(GqlClauses.Where)]
-    [InlineData(GqlClauses.OrderBy)]
-    [InlineData(GqlClauses.SetOperation)]
-    [InlineData(GqlClauses.Call)]
     public void Instance_DeclaredClause_IsSupported(string clause)
     {
         GqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();
@@ -40,14 +35,14 @@ public class GqlLanguageProfileTests
     [Fact]
     public void Instance_LowercaseClause_IsSupported()
     {
-        GqlLanguageProfile.Instance.Supports("optional match").ShouldBeTrue();
+        GqlLanguageProfile.Instance.Supports("detach delete").ShouldBeTrue();
     }
 
     [Fact]
     public void ToLexerOptions_PreservesGqlTokenClassification()
     {
         var lexer = new TokenLexer(
-            "match COUNT",
+            "match RETURN",
             GqlLanguageProfile.Instance.ToLexerOptions());
         var tokenTypes = new List<TokenType>();
 
@@ -56,6 +51,26 @@ public class GqlLanguageProfileTests
             tokenTypes.Add(token.Type);
         }
 
-        tokenTypes.ShouldBe([TokenType.Keyword, TokenType.Function]);
+        tokenTypes.ShouldBe([TokenType.Keyword, TokenType.Keyword]);
+    }
+
+    [Fact]
+    public void Profile_AdvertisesOnlyExecutableClauses()
+    {
+        GqlLanguageProfile.Instance.Clauses.ShouldBe([
+            GqlClauses.Match, GqlClauses.Return, GqlClauses.Create, GqlClauses.Insert,
+            GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where]);
+    }
+
+    [Theory]
+    [InlineData(GqlClauses.OptionalMatch)]
+    [InlineData(GqlClauses.MandatoryMatch)]
+    [InlineData(GqlClauses.Merge)]
+    [InlineData(GqlClauses.OrderBy)]
+    [InlineData(GqlClauses.SetOperation)]
+    [InlineData(GqlClauses.Call)]
+    public void FutureClauses_AreNotAdvertised(string clause)
+    {
+        GqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();
     }
 }
