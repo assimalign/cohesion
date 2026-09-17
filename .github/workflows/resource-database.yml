@@ -3,7 +3,8 @@ on:
   push:
     paths:
       # Covers Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost, the area's
-      # acceptance fixture, which now sits inside the project whose tests drive it.
+      # acceptance fixture, and Database.Blob/fixtures/Assimalign.Cohesion.Database.Blob.StreamingFixture.
+      # Fixtures sit inside the projects whose tests drive them.
       - 'resources/Database/**'
       - '.github/actions/build/**'
       - '.github/workflows/resource-database.yml'        # When Pipeline File Changes
@@ -20,13 +21,17 @@ jobs:
         # Every delivered Database project is listed so the area's dependency-rule guard
         # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
         # each of them - most importantly Database.Hosting, which nothing else pulls in
-        # transitively. The as-yet source-less model scaffolds (Documents/Graph/Blob/
-        # Cache, plus KeyValuePair.Replication/.Security) and the post-MVP contract
+        # transitively. The as-yet source-less model scaffolds (Documents/Graph/
+        # Cache, plus Blob.Client/.Replication/.Security and
+        # KeyValuePair.Replication/.Security) and the post-MVP contract
         # shells (Replication, Sql.Replication, Sql.Security, Memory) are
         # excluded until they ship.
         projects: [
             'Assimalign.Cohesion.Database',
             'Assimalign.Cohesion.Database.ApplicationModel',
+            'Assimalign.Cohesion.Database.Blob',
+            'Assimalign.Cohesion.Database.Blob.Catalog',
+            'Assimalign.Cohesion.Database.Blob.Storage',
             'Assimalign.Cohesion.Database.Client',
             'Assimalign.Cohesion.Database.Embedded',
             'Assimalign.Cohesion.Database.Execution',

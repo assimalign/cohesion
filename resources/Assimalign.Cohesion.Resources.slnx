@@ -127,8 +127,14 @@
 		<Project Path="Database/Assimalign.Cohesion.Database.Testing/tests/Assimalign.Cohesion.Database.Testing.TestHost.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Blob/" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Blob/fixtures/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Blob/fixtures/Assimalign.Cohesion.Database.Blob.StreamingFixture/Assimalign.Cohesion.Database.Blob.StreamingFixture.csproj" />
+	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Blob/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Blob/src/Assimalign.Cohesion.Database.Blob.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Blob/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Blob/tests/Assimalign.Cohesion.Database.Blob.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Blob.Catalog/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Blob.Catalog/src/">

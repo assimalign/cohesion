@@ -13,6 +13,10 @@ The shared ACID substrate for every Cohesion database engine: MVCC visibility sn
 - `IVersionStore` — the version-chain contract model storage layers implement
 - `TransactionAbortedException` — an independent exception root (inherits `Exception`, not `DatabaseException`)
 
+The coordinator's record ledger supports streamed model records: logical rollback,
+pruning, and recovery scrub use bounded physical mutation batches, while lifecycle
+analysis streams the shared journal instead of retaining page-image payloads.
+
 ## Dependencies
 
 - `Assimalign.Cohesion.Database.Storage` (child-to-child: the journal/page substrate the implementations bind to)

@@ -269,6 +269,29 @@ revalidated on open; it is flushed but never journaled. Page allocation is likew
 not undone on rollback — a page allocated by an aborted transaction is restored to
 its empty initialized image and leaks safely until reused.
 
+## Empty pages and streaming journal recovery
+
+Deleting the last live record in a data page retypes it as `Free` inside the
+physical bracket and registers a pending free, exactly as an owner-chain release
+does. The allocator and owner directory change only after commit. Rollback restores
+the original page image and keeps its owner membership. Inserts check page type
+and owner before reusing a current-write-page hint, including a hint to a page
+pending release in the same bracket. Iterators release a pin before skipping a
+page that was freed during a scan.
+
+`StorageJournal.ReadSequential` holds the synchronous append lock for the lifetime
+of an enumeration and yields one validated frame at a time. Callers consume it on
+one thread without awaiting or mutating the journal; early disposal restores the
+underlying stream position and releases the lock. `ReadAll` preserves its existing
+materialized API. Journal initialization also uses streaming enumeration.
+
+Physical recovery uses three streaming passes: classify committed sequences,
+retain the winning relevant LSN per page, then replay only those images. The winner
+remains the last committed after-image or uncommitted before-image in WAL order,
+preserving existing undo/redo semantics and torn-tail handling. The replay memory
+cost is transaction/page identities plus one page image, not the journal payload
+size. This permits Blob journals larger than available memory to reopen.
+
 ## Error model
 
 `StorageException` is the area root for this library. `StorageIOException` (stream and

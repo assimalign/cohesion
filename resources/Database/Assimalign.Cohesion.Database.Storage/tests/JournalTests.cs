@@ -13,6 +13,27 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 /// </summary>
 public sealed class JournalTests
 {
+    [Fact]
+    public void ReadSequential_EarlyDisposalRestoresPositionAndAllowsNextAppend()
+    {
+        using var stream = new MemoryStream();
+        using var journal = new StreamJournal(stream, leaveOpen: true);
+        journal.AppendBegin(7);
+        journal.AppendOperation(7, new byte[8192]);
+        journal.AppendCommit(7);
+        long position = stream.Position;
+
+        using (var records = journal.ReadSequential().GetEnumerator())
+        {
+            records.MoveNext().ShouldBeTrue();
+            records.Current.Type.ShouldBe(JournalRecordType.BeginTransaction);
+            stream.Position.ShouldBeLessThan(stream.Length);
+        }
+        stream.Position.ShouldBe(position);
+        journal.AppendBegin(8).ShouldBe(4);
+        journal.ReadSequential().Select(record => record.Lsn).ShouldBe(new long[] { 1, 2, 3, 4 });
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - Journal: LSNs are sequential and records round-trip in order")]
     public void Journal_AppendedRecords_ShouldRoundTripInLsnOrder()
     {

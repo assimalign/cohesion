@@ -204,6 +204,21 @@ snapshot-based safe prune bound as the extracted copies.
 - Multi-key atomic batches, `Serializable` isolation, secondary value indexes,
   index compaction (the stub worker's future body).
 
+## Database scope conformance (A5)
+
+Each session captures one database instance and its operation executor.
+`IKeyValueDatabase` validates that instance identity before all five typed
+operations, including deferred scan enumeration. Typed requests carry no database
+selector; key bytes are data even when they resemble qualified names. The text
+grammar has no database selector or server administration verb. Database lifecycle
+operations belong to the host-owned engine.
+
+`KeyValueDatabaseScopeTests` mirrors the SQL/Blob guard: two databases contain
+the same key with different values, attempts to pass a foreign session fail,
+commands cannot select another database, and attempted server/database commands
+leave the binding and engine inventory unchanged. The tests use public execution
+behavior without reflection.
+
 ## AOT posture
 
 No reflection, no runtime codegen: byte spans, the shared tuple codec, and

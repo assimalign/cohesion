@@ -69,7 +69,6 @@ public sealed class StreamJournal : StorageJournal
     /// <inheritdoc />
     protected override IEnumerable<ReadOnlyMemory<byte>> ReadFrames()
     {
-        var frames = new List<ReadOnlyMemory<byte>>();
         long originalPosition = _stream.Position;
 
         try
@@ -107,10 +106,8 @@ public sealed class StreamJournal : StorageJournal
                     break;
                 }
 
-                frames.Add(body);
+                yield return body;
             }
-
-            return frames;
         }
         finally
         {

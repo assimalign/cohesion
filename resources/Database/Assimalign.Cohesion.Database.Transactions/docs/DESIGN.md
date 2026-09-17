@@ -222,6 +222,20 @@ non-durably unless the caller selects the existing durable DDL/bootstrap path;
 the logical commit makes earlier statement records durable by journal ordering.
 Open-time scrub remains ungated because no sessions exist yet.
 
+Logical undo, pruning, and recovery scrub apply at most 64 record/index mutations
+per physical bracket. A blob transaction can contain many thousands of chunks;
+retaining every touched page's before-image in one undo bracket would otherwise
+buffer the entire object. Each batch commits before the next begins. Stamp checks
+make retries idempotent even when earlier batches committed before a later batch
+failed: the full ledger is requeued, already-undone versions are skipped, and the
+remaining work completes. Recovery scrub keeps at most 64 replacement payloads in
+memory. The ledger and prune candidates still scale with record count.
+
+Transaction recovery consumes `StorageJournal.ReadSequential` for the shared
+journal implementation and falls back to the existing `IStorageJournal.ReadAll`
+contract for custom journals. This changes no public interface. Only sequence
+classification survives iteration; physical page-image payloads are not retained.
+
 The safe prune bound starts at `max(manager.OldestActive, recoveredSequenceFloor)`
 and is reduced to every open context's `Snapshot.Minimum`. A snapshot captured
 while an older writer was active can retain a floor below the current oldest

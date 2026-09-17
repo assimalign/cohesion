@@ -192,6 +192,9 @@ $script:CohesionReleaseLibrary = @(
     # resources/Database
     'resources/Database/Assimalign.Cohesion.Database'
     'resources/Database/Assimalign.Cohesion.Database.ApplicationModel'
+    'resources/Database/Assimalign.Cohesion.Database.Blob'
+    'resources/Database/Assimalign.Cohesion.Database.Blob.Catalog'
+    'resources/Database/Assimalign.Cohesion.Database.Blob.Storage'
     'resources/Database/Assimalign.Cohesion.Database.Client'
     'resources/Database/Assimalign.Cohesion.Database.Embedded'
     'resources/Database/Assimalign.Cohesion.Database.Execution'
@@ -440,8 +443,6 @@ $script:CohesionCiMatrixExclusion = [ordered]@{
     'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Generation/src/Assimalign.Cohesion.OpenApi.Generation.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Integration/src/Assimalign.Cohesion.OpenApi.Integration.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Versioning/src/Assimalign.Cohesion.OpenApi.Versioning.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
-    'resources/Database/Assimalign.Cohesion.Database.Blob.Storage/src/Assimalign.Cohesion.Database.Blob.Storage.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
-    'resources/Database/Assimalign.Cohesion.Database.Blob/src/Assimalign.Cohesion.Database.Blob.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'resources/Database/Assimalign.Cohesion.Database.Cache/src/Assimalign.Cohesion.Database.Cache.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'resources/Database/Assimalign.Cohesion.Database.Cache/src/Assimalign.Cohesion.Database.Cache.Tests.csproj' = 'Stray duplicate csproj shares the Cache source directory; cleanup or an explicit packability fix is outside #944.'
     'resources/Database/Assimalign.Cohesion.Database.Documents.Language/src/Assimalign.Cohesion.Database.Documents.Language.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'

@@ -2,5 +2,9 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Transactions" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Storage" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Catalog" />
+		<InternalsVisibleTo Include="Assimalign.Cohesion.Database.Blob.Tests" />
 	</ItemGroup>
 </Project>

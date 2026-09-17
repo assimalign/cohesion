@@ -592,6 +592,19 @@ and secondary indexes — DDL, write-path maintenance, and planner seek
 adoption — were non-goals of earlier cuts and are now delivered; see "The MVCC
 integration", "Secondary indexes", and the access-path bullets above.)
 
+## Database scope conformance (A5)
+
+Each session captures one database instance and its catalog/executor. Table
+qualification selects a schema inside that catalog; it cannot select another
+database or a server object. Database creation, enumeration, and deletion belong
+to the host-owned `IDatabaseEngine`, not to SQL session execution.
+
+`SqlDatabaseScopeTests` guards this boundary using two databases with the same
+table name and different values. Text and typed requests cannot read or mutate
+the other database, and attempted `USE`, database DDL, database enumeration, and
+server shutdown leave the binding and engine inventory unchanged. These are
+behavioral tests; they do not use reflection or widen the session contract.
+
 ## AOT posture
 
 Interpretive evaluation over the AST — no expression compilation, no reflection.

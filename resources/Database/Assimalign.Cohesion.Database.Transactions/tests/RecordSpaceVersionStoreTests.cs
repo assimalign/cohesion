@@ -17,6 +17,38 @@ using Assimalign.Cohesion.Database.Storage;
 /// </summary>
 public class RecordSpaceVersionStoreTests
 {
+    [Fact]
+    public async Task PurgeWriter_FailureAfterCommittedBatches_RetriesIdempotently()
+    {
+        using var storage = new RecordStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        for (int index = 0; index < 130; index++)
+        {
+            await coordinator.ApplyStatementAsync(writer, bracket =>
+            {
+                var bytes = new byte[8000];
+                RecordVersionStamp.WriteWriter(bytes, writer.Sequence);
+                var (page, slot) = storage.Insert(bracket, bytes);
+                coordinator.VersionStore.RecordCreated(writer.Sequence, page, slot);
+                return true;
+            });
+        }
+        var failing = new FailingIndex();
+        coordinator.VersionStore.RecordIndexEntryTombstoned(writer.Sequence, failing, new byte[] { 1 }, 0);
+
+        await Should.ThrowAsync<IOException>(() => coordinator.VersionStore.PurgeWriterAsync(writer.Sequence).AsTask());
+        CountRecords(storage).ShouldBe(2);
+        storage.PageManager.FreePageCount.ShouldBe(128);
+        coordinator.VersionStore.PendingAbortedPurges.ShouldContain(writer.Sequence.Value);
+
+        (await coordinator.VersionStore.PurgeWriterAsync(writer.Sequence)).ShouldBe(3);
+        CountRecords(storage).ShouldBe(0);
+        storage.PageManager.FreePageCount.ShouldBe(130);
+        coordinator.VersionStore.PendingAbortedPurges.ShouldBeEmpty();
+        await coordinator.RollbackAsync(writer);
+    }
+
     /// <summary>
     /// An index failure rolls record changes back and preserves copied ledger keys for retry.
     /// </summary>

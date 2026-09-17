@@ -14,6 +14,9 @@ using Assimalign.Cohesion.Database.Storage;
 /// </summary>
 public sealed class RecordSpaceVersionStore : IVersionStore
 {
+    // A logical transaction can span a streamed object larger than RAM. Physical
+    // undo/reclamation must bound retained page before-images independently of it.
+    private const int MutationBatchSize = 64;
     private readonly IStorage _storage;
     private readonly ITransactionRecordSpace _records;
     private readonly SemaphoreSlim _applyGate;
@@ -208,20 +211,23 @@ public sealed class RecordSpaceVersionStore : IVersionStore
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var bracket = _storage.BeginTransaction();
-
-            foreach (var candidate in candidates)
+            for (int offset = 0; offset < candidates.Count; offset += MutationBatchSize)
             {
-                var (pageId, slotIndex) = _records.UnpackLocation(candidate.Location);
-
-                if (TryReadStamps(pageId, slotIndex, out _, out var deleter) && deleter.Value == candidate.Deleter)
+                cancellationToken.ThrowIfCancellationRequested();
+                using var bracket = _storage.BeginTransaction();
+                int end = Math.Min(offset + MutationBatchSize, candidates.Count);
+                for (int index = offset; index < end; index++)
                 {
-                    _records.Delete(bracket, pageId, slotIndex);
-                    pruned++;
+                    var candidate = candidates[index];
+                    var (pageId, slotIndex) = _records.UnpackLocation(candidate.Location);
+                    if (TryReadStamps(pageId, slotIndex, out _, out var deleter) && deleter.Value == candidate.Deleter)
+                    {
+                        _records.Delete(bracket, pageId, slotIndex);
+                        pruned++;
+                    }
                 }
+                bracket.Commit();
             }
-
-            bracket.Commit();
         }
         finally
         {
@@ -230,7 +236,8 @@ public sealed class RecordSpaceVersionStore : IVersionStore
 
         lock (_sync)
         {
-            _prunable.RemoveAll(version => candidates.Contains(version));
+            var removed = new HashSet<PrunableVersion>(candidates);
+            _prunable.RemoveAll(removed.Contains);
         }
 
         return pruned;
@@ -309,9 +316,33 @@ public sealed class RecordSpaceVersionStore : IVersionStore
     /// <returns>The number of versions physically undone.</returns>
     internal long ScrubRecovered(IReadOnlySet<TransactionSequence> aborted)
     {
-        var deletions = new List<(PageId PageId, int SlotIndex)>();
-        var tombstoneClears = new List<(PageId PageId, int SlotIndex, byte[] Restored)>();
+        var mutations = new List<(PageId PageId, int SlotIndex, byte[]? Restored)>(MutationBatchSize);
         var prunable = new List<PrunableVersion>();
+        long changed = 0;
+
+        void ApplyBatch()
+        {
+            if (mutations.Count == 0)
+            {
+                return;
+            }
+
+            using var bracket = _storage.BeginTransaction();
+            foreach (var (pageId, slotIndex, restored) in mutations)
+            {
+                if (restored is null)
+                {
+                    _records.Delete(bracket, pageId, slotIndex);
+                }
+                else
+                {
+                    _records.Update(bracket, pageId, slotIndex, restored);
+                }
+            }
+            bracket.Commit();
+            changed += mutations.Count;
+            mutations.Clear();
+        }
 
         using (var iterator = _storage.GetUnitIterator())
         {
@@ -328,7 +359,12 @@ public sealed class RecordSpaceVersionStore : IVersionStore
 
                 if (writer != TransactionSequence.None && aborted.Contains(writer))
                 {
-                    deletions.Add((unit.PageId, unit.SlotIndex));
+                    mutations.Add((unit.PageId, unit.SlotIndex, null));
+                    if (mutations.Count == MutationBatchSize)
+                    {
+                        ApplyBatch();
+                    }
+
                     continue;
                 }
 
@@ -336,7 +372,11 @@ public sealed class RecordSpaceVersionStore : IVersionStore
                 {
                     if (aborted.Contains(deleter))
                     {
-                        tombstoneClears.Add((unit.PageId, unit.SlotIndex, RecordVersionStamp.WithoutDeleter(unit.Data.Span)));
+                        mutations.Add((unit.PageId, unit.SlotIndex, RecordVersionStamp.WithoutDeleter(unit.Data.Span)));
+                        if (mutations.Count == MutationBatchSize)
+                        {
+                            ApplyBatch();
+                        }
                     }
                     else
                     {
@@ -348,29 +388,14 @@ public sealed class RecordSpaceVersionStore : IVersionStore
             }
         }
 
-        if (deletions.Count > 0 || tombstoneClears.Count > 0)
-        {
-            using var bracket = _storage.BeginTransaction();
-
-            foreach (var (pageId, slotIndex) in deletions)
-            {
-                _records.Delete(bracket, pageId, slotIndex);
-            }
-
-            foreach (var (pageId, slotIndex, restored) in tombstoneClears)
-            {
-                _records.Update(bracket, pageId, slotIndex, restored);
-            }
-
-            bracket.Commit();
-        }
+        ApplyBatch();
 
         lock (_sync)
         {
             _prunable.AddRange(prunable);
         }
 
-        return deletions.Count + tombstoneClears.Count;
+        return changed;
     }
 
     private async ValueTask<long> UndoAsync(TransactionSequence writer, List<LedgerEntry> entries, CancellationToken cancellationToken)
@@ -380,52 +405,56 @@ public sealed class RecordSpaceVersionStore : IVersionStore
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var bracket = _storage.BeginTransaction();
-
-            foreach (var entry in entries)
+            for (int offset = 0; offset < entries.Count; offset += MutationBatchSize)
             {
-                var (pageId, slotIndex) = _records.UnpackLocation(entry.Location);
-
-                switch (entry.Kind)
+                cancellationToken.ThrowIfCancellationRequested();
+                using var bracket = _storage.BeginTransaction();
+                int end = Math.Min(offset + MutationBatchSize, entries.Count);
+                for (int index = offset; index < end; index++)
                 {
-                    case LedgerEntryKind.Created:
-                        if (TryReadStamps(pageId, slotIndex, out var createdWriter, out _) && createdWriter == writer)
-                        {
-                            _records.Delete(bracket, pageId, slotIndex);
+                    var entry = entries[index];
+                    var (pageId, slotIndex) = _records.UnpackLocation(entry.Location);
+
+                    switch (entry.Kind)
+                    {
+                        case LedgerEntryKind.Created:
+                            if (TryReadStamps(pageId, slotIndex, out var createdWriter, out _) && createdWriter == writer)
+                            {
+                                _records.Delete(bracket, pageId, slotIndex);
+                                removed++;
+                            }
+
+                            break;
+
+                        case LedgerEntryKind.Tombstoned:
+                            if (TryReadStamps(pageId, slotIndex, out _, out var deleter) && deleter == writer)
+                            {
+                                var record = _records.Read(pageId, slotIndex);
+                                _records.Update(bracket, pageId, slotIndex, RecordVersionStamp.WithoutDeleter(record.Span));
+                                removed++;
+                            }
+
+                            break;
+
+                        case LedgerEntryKind.IndexEntryCreated:
+                            // Physical erase of the aborted insert's entry: both index
+                            // ops verify the recorded stamp before acting, so a stale
+                            // ledger entry is a no-op, never a misdelete.
+                            await entry.Index!.EraseAsync(bracket, entry.Key, entry.Location, writer, cancellationToken).ConfigureAwait(false);
                             removed++;
-                        }
+                            break;
 
-                        break;
-
-                    case LedgerEntryKind.Tombstoned:
-                        if (TryReadStamps(pageId, slotIndex, out _, out var deleter) && deleter == writer)
-                        {
-                            var record = _records.Read(pageId, slotIndex);
-                            _records.Update(bracket, pageId, slotIndex, RecordVersionStamp.WithoutDeleter(record.Span));
+                        case LedgerEntryKind.IndexEntryTombstoned:
+                            await entry.Index!.ClearDeleterAsync(bracket, entry.Key, entry.Location, writer, cancellationToken).ConfigureAwait(false);
                             removed++;
-                        }
-
-                        break;
-
-                    case LedgerEntryKind.IndexEntryCreated:
-                        // Physical erase of the aborted insert's entry: both index
-                        // ops verify the recorded stamp before acting, so a stale
-                        // ledger entry is a no-op, never a misdelete.
-                        await entry.Index!.EraseAsync(bracket, entry.Key, entry.Location, writer, cancellationToken).ConfigureAwait(false);
-                        removed++;
-                        break;
-
-                    case LedgerEntryKind.IndexEntryTombstoned:
-                        await entry.Index!.ClearDeleterAsync(bracket, entry.Key, entry.Location, writer, cancellationToken).ConfigureAwait(false);
-                        removed++;
-                        break;
+                            break;
+                    }
                 }
-            }
 
-            // Durability rides the transaction's abort record (or any later
-            // durable record): a crash before that re-runs the same undo from
-            // recovery analysis.
-            bracket.Commit(awaitDurability: false);
+                // Undo remains idempotent across batches: every mutation checks
+                // stamps, so retry/recovery can repeat already committed batches.
+                bracket.Commit(awaitDurability: false);
+            }
         }
         finally
         {

@@ -111,7 +111,10 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 | SQL schema | `Assimalign.Cohesion.Database.Sql.Schema` | Thin SQL schema declarations, compiled relational object shapes, canonical serialization, validation, and migration planning; shared by SQL and SDK Tasks, with direct references only to the area root and `Database.Types` |
 | Documents | `Assimalign.Cohesion.Database.Documents` | OQL-based language contract |
 | Graph | `Assimalign.Cohesion.Database.Graph` | Query standard selection (#193) gates language work |
-| Blob | `Assimalign.Cohesion.Database.Blob` | API-driven; no `.Language` project |
+| Blob | `Assimalign.Cohesion.Database.Blob` | Streaming blob and container API, database-bound sessions, engine lifecycle, and ownership enforcement over the shared kernel; no `.Language` project; wire client remains deferred |
+| Blob storage | `Assimalign.Cohesion.Database.Blob.Storage` | Chunk chains backed by shared pages, WAL, recovery, and transactions; incremental stream reads and writes |
+| Blob catalog | `Assimalign.Cohesion.Database.Blob.Catalog` | Durable containers, ownership markers, and per-blob metadata for name/prefix listing |
+| Blob streaming fixture | `Assimalign.Cohesion.Database.Blob.StreamingFixture` | Non-packable process fixture under `Blob/fixtures/`, exercised by Blob tests to verify bounded-memory streams and crash recovery |
 | KeyValuePair | `Assimalign.Cohesion.Database.KeyValuePair` | **Delivered** — ordered key space on the shared kernel (index-primary composition, etag CAS) and the model's wire-protocol server (`KeyValueDatabaseServer`); command grammar in `docs/COMMANDS.md`; no `.Language` project |
 | Cache | `Assimalign.Cohesion.Database.Cache` | Post-MVP; deferred behind KeyValuePair |
 

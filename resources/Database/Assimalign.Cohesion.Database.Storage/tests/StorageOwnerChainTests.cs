@@ -47,6 +47,9 @@ public sealed class StorageOwnerChainTests
         public (PageId PageId, int SlotIndex) Insert(IStorageTransaction transaction, ulong ownerId, byte[] data)
             => InsertRecord(transaction, ownerId, data);
 
+        public void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex)
+            => DeleteRecord(transaction, pageId, slotIndex);
+
         public string[] ScanText(ulong ownerId)
         {
             var results = new System.Collections.Generic.List<string>();
@@ -60,6 +63,45 @@ public sealed class StorageOwnerChainTests
     }
 
     private static byte[] Text(string value) => Encoding.UTF8.GetBytes(value);
+
+    [Fact]
+    public void DeleteFinalSlot_ReleasesPageOnlyAtCommitAndRollbackRestoresOwner()
+    {
+        using var storage = ChainStorage.Create(new CrashSimulationStream(), new CrashSimulationStream());
+        (PageId PageId, int SlotIndex) location;
+        using (var transaction = storage.BeginTransaction())
+        {
+            location = storage.Insert(transaction, 7, Text("retained"));
+            transaction.Commit();
+        }
+
+        using (var rollback = storage.BeginTransaction())
+        {
+            storage.Delete(rollback, location.PageId, location.SlotIndex);
+            storage.FreeSpaceMap.IsAllocated(location.PageId).ShouldBeTrue();
+            rollback.Rollback();
+        }
+        storage.ScanText(7).ShouldBe(new[] { "retained" });
+        storage.GetOwnerPages(7).ShouldContain(location.PageId);
+
+        using (var deleting = storage.BeginTransaction())
+        {
+            storage.Delete(deleting, location.PageId, location.SlotIndex);
+            storage.FreeSpaceMap.IsAllocated(location.PageId).ShouldBeTrue();
+            deleting.Commit();
+        }
+        storage.FreeSpaceMap.IsAllocated(location.PageId).ShouldBeFalse();
+        storage.GetOwnerPages(7).ShouldBeEmpty();
+
+        using (var inserting = storage.BeginTransaction())
+        {
+            var reused = storage.Insert(inserting, 9, Text("replacement"));
+            reused.PageId.ShouldBe(location.PageId);
+            inserting.Commit();
+        }
+        storage.ScanText(7).ShouldBeEmpty();
+        storage.ScanText(9).ShouldBe(new[] { "replacement" });
+    }
 
     /// <summary>
     /// Fills the owner's chain with enough records to span several pages.

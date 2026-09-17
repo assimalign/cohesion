@@ -150,6 +150,26 @@ public abstract class StorageJournal : IStorageJournal
         }
     }
 
+    /// <summary>Enumerates journal records without retaining page-image payloads from earlier records.</summary>
+    /// <returns>The verifiable records in append order, ending at the first torn frame.</returns>
+    /// <remarks>
+    /// Enumeration holds the journal's synchronous append lock until disposed. Consume it
+    /// synchronously on one thread, and do not append, checkpoint, or await within the loop.
+    /// Recovery uses this path so a journal larger than available memory can be replayed.
+    /// </remarks>
+    public IEnumerable<JournalRecord> ReadSequential()
+    {
+        ThrowIfDisposed();
+        EnsureInitialized();
+        lock (_syncRoot)
+        {
+            foreach (var record in ReadRecordsCore())
+            {
+                yield return record;
+            }
+        }
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -210,7 +230,15 @@ public abstract class StorageJournal : IStorageJournal
     private IReadOnlyList<JournalRecord> ReadAllCore()
     {
         var records = new List<JournalRecord>();
+        foreach (var record in ReadRecordsCore())
+        {
+            records.Add(record);
+        }
+        return records;
+    }
 
+    private IEnumerable<JournalRecord> ReadRecordsCore()
+    {
         foreach (var frame in ReadFrames())
         {
             var body = frame.Span;
@@ -226,10 +254,8 @@ public abstract class StorageJournal : IStorageJournal
             long pageId = BinaryPrimitives.ReadInt64LittleEndian(body[18..]);
             var payload = frame[BodyHeaderSize..];
 
-            records.Add(new JournalRecord(lsn, transactionSequence, type, (PageId)pageId, payload));
+            yield return new JournalRecord(lsn, transactionSequence, type, (PageId)pageId, payload);
         }
-
-        return records;
     }
 
     private void EnsureInitialized()
@@ -248,12 +274,11 @@ public abstract class StorageJournal : IStorageJournal
 
             _initialized = true;
 
-            var records = ReadAllCore();
-            if (records.Count > 0)
+            foreach (var record in ReadRecordsCore())
             {
-                _lastLsn = records[^1].Lsn;
-                _durableLsn = _lastLsn;
+                _lastLsn = record.Lsn;
             }
+            _durableLsn = _lastLsn;
         }
     }
 

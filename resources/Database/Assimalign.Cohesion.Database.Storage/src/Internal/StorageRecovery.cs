@@ -35,18 +35,15 @@ internal static class StorageRecovery
     /// </summary>
     internal static long Run(StorageStream data, IStorageJournal journal)
     {
-        var records = journal.ReadAll();
-
         long maxSequence = 0;
-
-        if (records.Count == 0)
-        {
-            return maxSequence;
-        }
 
         var committed = new HashSet<long>();
 
-        foreach (var record in records)
+        IEnumerable<JournalRecord> ReadRecords() => journal is StorageJournal streaming
+            ? streaming.ReadSequential()
+            : journal.ReadAll();
+
+        foreach (var record in ReadRecords())
         {
             if (record.TransactionSequence > maxSequence)
             {
@@ -59,10 +56,10 @@ internal static class StorageRecovery
             }
         }
 
-        // Last relevant image per page wins (records are in LSN order).
-        var winners = new Dictionary<long, JournalRecord>();
-
-        foreach (var record in records)
+        // Keep only each winning image's LSN, never its payload. Recovery memory
+        // follows page/transaction identities, not the size of stored content.
+        var winners = new Dictionary<long, long>();
+        foreach (var record in ReadRecords())
         {
             bool relevant = record.Type switch
             {
@@ -73,7 +70,7 @@ internal static class StorageRecovery
 
             if (relevant && record.Payload.Length == Page.Size)
             {
-                winners[(long)record.PageId] = record;
+                winners[(long)record.PageId] = record.Lsn;
             }
         }
 
@@ -84,8 +81,13 @@ internal static class StorageRecovery
 
         var diskBuffer = new byte[Page.Size];
 
-        foreach (var (pageId, record) in winners)
+        foreach (var record in ReadRecords())
         {
+            long pageId = (long)record.PageId;
+            if (!winners.TryGetValue(pageId, out long winnerLsn) || winnerLsn != record.Lsn)
+            {
+                continue;
+            }
             var image = record.Payload;
 
             // After-images stamp their record LSN; before-images restore the

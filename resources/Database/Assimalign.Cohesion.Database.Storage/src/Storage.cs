@@ -565,7 +565,7 @@ public abstract class Storage : IStorage
     }
 
     /// <summary>
-    /// Deletes a record within a storage transaction by marking the slot as deleted.
+    /// Deletes a record within a storage transaction and releases its page when no live slots remain.
     /// </summary>
     /// <param name="transaction">The owning storage transaction.</param>
     /// <param name="pageId">The page containing the record.</param>
@@ -579,6 +579,25 @@ public abstract class Storage : IStorage
         var slotted = new SlottedPage(handle.Page);
         slotted.DeleteSlot(slotIndex);
         handle.MarkDirty();
+
+        for (int index = 0; index < slotted.SlotCount; index++)
+        {
+            if (slotted.GetSlotLength(index) != 0)
+            {
+                return;
+            }
+        }
+
+        // Reclaim through the same commit-time free path as FreeOwnerPages.
+        // Until commit the allocator cannot reuse the page, and rollback restores
+        // the complete before-image and leaves its owner directory intact.
+        var page = handle.Page;
+        ulong pageOwner = page.OwnerId;
+        page.AsBodySpan().Clear();
+        page.Type = PageType.Free;
+        page.OwnerId = 0;
+        slotted.Initialize();
+        owner.RegisterPendingFree((long)pageId, pageOwner);
     }
 
     /// <summary>
