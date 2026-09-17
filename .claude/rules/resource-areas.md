@@ -146,8 +146,16 @@ Orchestration is an opt-in build behavior on that executable:
 
 An SDK consumer is the composition root and may reference `<Area>.Hosting`; it is not a shipped
 resource-area library governed as an exemption holder. In-repo executable acceptance fixtures
-belong under an automatically excluded `samples/` path, are non-packable, and exercise their
-real `Program.cs`. `<Area>.Testing` invokes that program under a test-scoped
+belong under the **repository-root `samples/` tree** — one folder per fixture, named for its
+project (`samples/Assimalign.Cohesion.Database.SampleHost/`) — are non-packable, and exercise
+their real `Program.cs`. No `resources/<Area>/samples/` folder: a sample is a consumer of an
+area, not a member of it, and putting it outside `resources/` means the COHRES001–004 guards
+(which key off the `/resources/` path segment) never see it at all, rather than seeing it and
+excluding it by name. `samples/Directory.Build.props` supplies the TFM that
+`resources/Directory.Build.props` no longer reaches, `build/Targets/Build.References.Projects.targets`
+indexes `samples/**` so area test projects still resolve fixtures by name through
+`CohesionProjectReference`, and the owning area's CI workflow carries the fixture's new path in
+both its `paths:` trigger filter and its build step. `<Area>.Testing` invokes that program under a test-scoped
 `Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.CreateScope(...)` and remains the area's
 sole explicit exemption holder.
 

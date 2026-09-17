@@ -84,10 +84,10 @@ Cohesion is a mono repository that contains all the source code, extensions, and
 | `./sdks`        | MSBuild SDK projects (`Assimalign.Cohesion.Sdk[.Domain]`).                                                  |
 | `./tooling`     | Developer tooling (`cohesion` CLI, dev scripts, `dotnet new` templates in `templates/`).                    |
 
-The delivery waves below reflect the dependency order of the foundation libraries (see [docs/DELIVERY_ROADMAP.md](docs/DELIVERY_ROADMAP.md) for the full plan):
+The delivery waves below reflect the dependency order of the foundation libraries (see [docs/programs/DELIVERY_ROADMAP.md](docs/programs/DELIVERY_ROADMAP.md) for the full plan):
 
 ```mermaid
-graph TD
+flowchart TD
     subgraph W1["Wave 1: Anchors"]
         Core["Core L01.01.06"]
         Security["Security L01.01.18"]

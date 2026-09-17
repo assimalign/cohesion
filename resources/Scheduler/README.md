@@ -4,6 +4,43 @@ Scheduler is the L3 Cohesion resource for declaring jobs and binding them to tri
 
 Jobs are declarations, not one-shot work: AddJob creates a dormant job. AddCronSchedule and AddTimerSchedule bind that job to a provider. An unbound job never executes.
 
+## Project map
+
+An arrow means "references": `Scheduler.Hosting --> Scheduler` reads
+`Scheduler.Hosting` references `Assimalign.Cohesion.Scheduler`.
+
+```mermaid
+flowchart LR
+    P0["Scheduler — area root"]
+    P1["Scheduler.ApplicationModel"]
+    P2["Scheduler.Cron"]
+    P3["Scheduler.Hosting — runtime module"]
+    P4["Scheduler.Timer"]
+    CORE["Assimalign.Cohesion.Core — L1"]
+    HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
+    APPMODEL["Assimalign.Cohesion.ApplicationModel — L2"]
+    PRIV["other areas, referenced privately"]
+    P0 --> CORE
+    P1 --> APPMODEL
+    P1 --> HOSTFAM
+    P2 --> P0
+    P3 --> HOSTFAM
+    P3 --> P0
+    P3 -->|"private"| PRIV
+    P4 --> P0
+    P1 -.->|"COHRES001 ✗"| P3
+```
+
+Solid edges are the references this area permits. The dotted edge is the one `COHRES001`
+rejects: **no library in the area may reference its own `Scheduler.Hosting` runtime
+module**, and the declarative `.ApplicationModel` package in particular never does — generated
+code in an opted-in consumer executable joins the two sides at run time through
+`Assimalign.Cohesion.Hosting.Resources.ResourceRuntime` instead. The area root and its feature
+libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
+
+The full reference graph for every Cohesion assembly, including the exact external dependencies
+collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
+
 ## Projects
 
 - Assimalign.Cohesion.Scheduler contains the public application, job, schedule, provider, and context contracts.

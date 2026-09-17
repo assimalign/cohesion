@@ -3,6 +3,9 @@ on:
   push:
     paths:
       - 'resources/Database/**'
+      # The area's sample apphost lives in the repository-root samples/ tree
+      # (.claude/rules/resource-areas.md); it is still this area's fixture.
+      - 'samples/Assimalign.Cohesion.Database.SampleHost/**'
       - '.github/actions/build/**'
       - '.github/workflows/resource-database.yml'        # When Pipeline File Changes
 
@@ -45,7 +48,7 @@ jobs:
             'Assimalign.Cohesion.Database.KeyValuePair.Catalog',
             'Assimalign.Cohesion.Database.KeyValuePair.Client',
             'Assimalign.Cohesion.Database.ApplicationModel',
-            # Its test project carries the non-packable samples/.../Database.SampleHost
+            # Its test project carries the non-packable samples/Assimalign.Cohesion.Database.SampleHost
             # reference, so the real SDK-consumer apphost is built and exercised here.
             'Assimalign.Cohesion.Database.Testing',
             'Assimalign.Cohesion.Database.Governance'

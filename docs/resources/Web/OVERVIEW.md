@@ -5,6 +5,6 @@ Web.Hosting.Resources adds reusable resource-management middleware to the Web ho
 Web.Hosting.Health adapts Hosting.Health contributors onto Web.Health's builder. Web.Health
 retains the health model and HTTP endpoints without a hosting-library reference.
 
-- [Area project map](../README.md)
-- [Control-plane overview](../Assimalign.Cohesion.Web.Hosting.Resources/docs/OVERVIEW.md)
-- [Control-plane design](../Assimalign.Cohesion.Web.Hosting.Resources/docs/DESIGN.md)
+- [Area project map](../../../resources/Web/README.md)
+- [Control-plane overview](../../../resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/OVERVIEW.md)
+- [Control-plane design](../../../resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/DESIGN.md)

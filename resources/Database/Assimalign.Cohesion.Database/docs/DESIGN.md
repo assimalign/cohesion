@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Database — Design
 
-The area root (architecture: [resources/Database/DESIGN.md](../../DESIGN.md)).
+The area root (architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)).
 Everything here must be true for *all five* data models — anything model-specific
 belongs in a model package. The root's job is to make engines substitutable at the
 seams the platform builds on: the server serves any engine, the hosting layer

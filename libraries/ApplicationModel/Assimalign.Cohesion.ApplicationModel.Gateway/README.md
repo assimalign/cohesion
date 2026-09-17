@@ -31,6 +31,6 @@ await builder.Build().RunAsync();
 ```
 
 See the [package design](docs/DESIGN.md), [overview](docs/OVERVIEW.md), and
-[ApplicationModel design v3](../DESIGN.md) for ownership and current limitations.
-The [realization plan](../../../docs/REALIZATION_PLAN.md) and
+[ApplicationModel design v3](../../../docs/libraries/ApplicationModel/DESIGN.md) for ownership and current limitations.
+The [realization plan](../../../docs/programs/REALIZATION_PLAN.md) and
 [runtime contract](../../../docs/RUNTIME_CONTRACT.md) own the wire contracts.

@@ -84,14 +84,14 @@ Use issue dependencies to encode the real execution path in GitHub:
 ## Nested Service Composition
 
 - The public composition model is the concrete `<Area>.Hosting` builder's `AddService` verb (O34; root contracts reference no hosting library) over nestable `IHost` (item 9, `51045965`; design note `4ef29290`). `HostToServiceWrapper.cs` and `HostExtensions.cs` in `libraries/Hosting/Assimalign.Cohesion.Hosting/src/` are the underlying host-as-service plumbing.
-- `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` realizes composite members through their real application entry points (item 24, `a03cfcf8`); its [package design](../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md) owns the lifecycle and resource-context contract.
+- `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` realizes composite members through their real application entry points (item 24, `a03cfcf8`); its [package design](../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md) owns the lifecycle and resource-context contract.
 - The built layers are L1 foundation plus SDK/tooling; L2 application runtime and composition (`ApplicationModel`, the gateway family, and `Hosting`); and L3 the 18 service platforms.
 - Service dependencies remain explicit graph relationships; the composite's platform-neutral plan belongs to the base ApplicationModel planner.
 
 ## WBS Title Scheme and Backlog Dispositions
 
-- [Workflow rules](../.claude/rules/workflow.md) define `[<wbs>] <title>` in Project #13: area epic `L01.01.NN`, feature `L01.01.NN.MM`, task `L01.01.NN.MM.PP`.
-- The initiative table's `[L3.x]` titles are legacy display names, mapped to WBS ids by the [developer-experience design](DEVELOPER_EXPERIENCE_DESIGN.md) §10 issue map; retain those table rows as historical scheduling context.
+- [Workflow rules](../../.claude/rules/workflow.md) define `[<wbs>] <title>` in Project #13: area epic `L01.01.NN`, feature `L01.01.NN.MM`, task `L01.01.NN.MM.PP`.
+- The initiative table's `[L3.x]` titles are legacy display names, mapped to WBS ids by the [developer-experience design](../DEVELOPER_EXPERIENCE_DESIGN.md) §10 issue map; retain those table rows as historical scheduling context.
 - Program epics #17/#18/#19 and #130–#132 are superseded by that design and its §13 `[R]` decisions.
 - Item 41's remaining dispositions were already applied in GitHub during the 2026-09-07 review: #23/#139–#141 delivered; #21 re-titled "InProcess gateway"; #304 maps to item 9; #305 satisfied; #306/#307 folded into item 9. This records that review; it does not perform backlog mutations.
 

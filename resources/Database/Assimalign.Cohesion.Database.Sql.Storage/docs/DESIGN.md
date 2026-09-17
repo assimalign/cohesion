@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Database.Sql.Storage — Design
 
 The SQL model's *storage layout* project (area architecture:
-[resources/Database/DESIGN.md](../../DESIGN.md) §3.3 — every model brings a layout,
+[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.3 — every model brings a layout,
 never its own paging/WAL). This library is deliberately thin: `SqlStorage` derives
 from the kernel's `Storage` base and re-exposes the protected record operations as a
 public row-oriented surface. All hard invariants (write-ahead ordering, recovery

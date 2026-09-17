@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.ApplicationModel.Gateway — DESIGN
 
 > Layer-2a of the ApplicationModel stack: the **control-plane base** plus the default
-> **LocalGateway**. The [ApplicationModel area design v3](../../DESIGN.md) connects the
+> **LocalGateway**. The [ApplicationModel area design v3](../../../../docs/libraries/ApplicationModel/DESIGN.md) connects the
 > declarative contracts, SDK image pipeline and platform-owned compilers; the
 > [portable contract package design](../../Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md)
 > owns the shared model. The signed developer-experience design remains the direction of record.

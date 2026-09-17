@@ -4,9 +4,9 @@ Repository-level documentation for the Cohesion mono repository. Coding standard
 
 **Go To**
 
-- [Delivery Roadmap](./DELIVERY_ROADMAP.md) — delivery waves, initiative sequencing, and the L1/L2/L3 layering model
+- [Delivery Roadmap](./programs/DELIVERY_ROADMAP.md) — delivery waves, initiative sequencing, and the L1/L2/L3 layering model
 - [Service Layer Design](./SERVICE_LAYER_DESIGN.md) — high-level design for each service under `resources/`
-- [Service Story Requirements](./SERVICE_STORY_REQUIREMENTS.md) — implementation requirements for service-level backlog stories
+- [Service Story Requirements](./programs/SERVICE_STORY_REQUIREMENTS.md) — implementation requirements for service-level backlog stories
 - [Developer Experience Design](./DEVELOPER_EXPERIENCE_DESIGN.md) — authoritative gateway, discovery, trust, and application-set contracts
 - Build
   - [Cohesion Custom MSBuild Items](./build/MSBUILD_COHESION_PROPS.md) — `CohesionProjectReference`, `CohesionPackageReference`, code generation
@@ -23,7 +23,7 @@ plan-driven gateway lifecycle, and the hosting-free authenticated gateway contro
 ## Landed package and area map
 
 The layers are L1 foundation and SDK/tooling, L2 application runtime and composition, and
-L3 service platforms. The [ApplicationModel design v3](../libraries/ApplicationModel/DESIGN.md)
+L3 service platforms. The [ApplicationModel design v3](./libraries/ApplicationModel/DESIGN.md)
 connects the packages to the signed direction and records the build-out decisions.
 
 | Family | Packages and responsibility |
@@ -50,9 +50,9 @@ The orchestration clients above are distinct from the existing area clients:
 These are non-packable consumers with real `Program.cs` entry points:
 
 - `samples/SdkSmoke/`: `SdkSmoke.Analyzer`, `SdkSmoke.App`, `SdkSmoke.Database`, and `SdkSmoke.Web`.
-- `resources/Database/samples/Assimalign.Cohesion.Database.SampleHost`.
-- `resources/Web/samples/Assimalign.Cohesion.Web.HttpsHost` and `Assimalign.Cohesion.Web.TestHost`.
-- `resources/LogSpace/samples/Assimalign.Cohesion.LogSpace.SinkHost` (item 31b).
+- `samples/Assimalign.Cohesion.Database.SampleHost`.
+- `samples/Assimalign.Cohesion.Web.HttpsHost` and `Assimalign.Cohesion.Web.TestHost`.
+- `samples/Assimalign.Cohesion.LogSpace.SinkHost` (item 31b).
 
 The [runtime contract](RUNTIME_CONTRACT.md), [Hosting.Telemetry design](../libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md),
 and [OpenTelemetry design](../libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/DESIGN.md)

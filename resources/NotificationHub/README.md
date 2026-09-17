@@ -4,6 +4,40 @@ NotificationHub is the L3 messaging service platform intended to manage subscrip
 
 The host supports enabled-resource control planes; domain services remain fillers pending the area program.
 
+## Project map
+
+An arrow means "references": `NotificationHub.Hosting --> NotificationHub` reads
+`NotificationHub.Hosting` references `Assimalign.Cohesion.NotificationHub`.
+
+```mermaid
+flowchart LR
+    P0["NotificationHub — area root"]
+    P1["NotificationHub.ApplicationModel"]
+    P2["NotificationHub.Client"]
+    P3["NotificationHub.Hosting — runtime module"]
+    CORE["Assimalign.Cohesion.Core — L1"]
+    HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
+    APPMODEL["Assimalign.Cohesion.ApplicationModel — L2"]
+    PRIV["other areas, referenced privately"]
+    P0 --> CORE
+    P1 --> APPMODEL
+    P1 --> HOSTFAM
+    P3 --> HOSTFAM
+    P3 --> P0
+    P3 -->|"private"| PRIV
+    P1 -.->|"COHRES001 ✗"| P3
+```
+
+Solid edges are the references this area permits. The dotted edge is the one `COHRES001`
+rejects: **no library in the area may reference its own `NotificationHub.Hosting` runtime
+module**, and the declarative `.ApplicationModel` package in particular never does — generated
+code in an opted-in consumer executable joins the two sides at run time through
+`Assimalign.Cohesion.Hosting.Resources.ResourceRuntime` instead. The area root and its feature
+libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
+
+The full reference graph for every Cohesion assembly, including the exact external dependencies
+collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
+
 ## Projects
 
 - `Assimalign.Cohesion.NotificationHub` defines the public area-root application and builder contracts alongside the existing notification-hub abstraction.

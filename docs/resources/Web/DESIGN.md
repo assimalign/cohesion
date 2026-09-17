@@ -7,7 +7,7 @@ The integration is public in App.Web and private in each generic resource framew
 Web.Hosting.Health integrates Hosting.Health contributors with the independent Web.Health model.
 Database.Hosting consumes it privately for admin health checks, retaining its readiness-only accepting gate.
 
-See [the package design](../Assimalign.Cohesion.Web.Hosting.Resources/docs/DESIGN.md) for the exact protocol and the public response-completion contract.
+See [the package design](../../../resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/DESIGN.md) for the exact protocol and the public response-completion contract.
 
 Both runtimes consume the control-plane integration, and the integration depends on the Web root without a reverse runtime reference.
 

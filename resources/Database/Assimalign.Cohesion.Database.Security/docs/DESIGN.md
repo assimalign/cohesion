@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Database.Security — Design
 
 Security contracts shared by all five models (area architecture:
-[resources/Database/DESIGN.md](../../DESIGN.md)). This project stays a leaf of
+[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)). This project stays a leaf of
 contracts: mechanisms (key storage, token validation, credential stores) belong
 to implementations composed by the host, never here.
 

@@ -283,7 +283,7 @@
               drives Database.Hosting under a test-scoped ResourceContext but is
               tooling for tests, never part of an application's runtime closure.
             - Database.SampleHost - the non-packable real-process E2E resource
-              executable under resources/Database/samples; never shipped.
+              executable under the repository-root samples/ tree; never shipped.
             - The Documents/Graph/Blob/Cache model families - engine scaffolds
               without shipping surface yet. (KeyValuePair graduated into the
               shipping set 2026-07-14; its still-source-less satellites -

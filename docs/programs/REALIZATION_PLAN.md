@@ -240,7 +240,7 @@ There is exactly one exposure for each public endpoint and none for a private en
 | workload kind | The exact O30 `ReadinessGate` above. |
 | compiler hints | Empty map. |
 
-The checked-in [`KindMatrixTests` fixtures](../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/tests/Fixtures/plans/README.md)
+The checked-in [`KindMatrixTests` fixtures](../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/tests/Fixtures/plans/README.md)
 pin representative Web, Database, generic Volume, DaemonSet, and Job outputs. These fixtures are
 the contract set vendored into `cohesion-platforms`, allowing every platform compiler to run the
 same conformance inputs without loading a resource-area assembly.

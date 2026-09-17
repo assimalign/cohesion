@@ -5,6 +5,12 @@ abstractions, the request-pipeline feature libraries, and the hosting runtime th
 what the `Assimalign.Cohesion.Sdk.Web` SDK delivers through the `Assimalign.Cohesion.App.Web`
 shared framework.
 
+The area's architecture record lives in
+[docs/resources/Web/DESIGN.md](../../docs/resources/Web/DESIGN.md), with the orientation piece in
+[docs/resources/Web/OVERVIEW.md](../../docs/resources/Web/OVERVIEW.md); this README is the project
+map and the dependency rule. The full reference graph for every Cohesion assembly is in
+[docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
+
 ## The dependency rule
 
 The hosting family follows O34 (owner decision, 2026-09-15):

@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Database.Client — Design
 
 The client half of the #852 spine (area architecture:
-[resources/Database/DESIGN.md](../../DESIGN.md)): one model-agnostic protocol
+[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)): one model-agnostic protocol
 client the five per-model clients wrap, exactly mirroring the one
 model-agnostic server. Model semantics live in the statement text and the
 per-model packages; this project owns everything that is true for all of them —

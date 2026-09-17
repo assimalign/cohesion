@@ -101,7 +101,7 @@ or duplicates runtime implementation.
 ## Real-process verification
 
 The package's own tests also build
-`samples/Assimalign.Cohesion.Database.SampleHost` through the real
+`<repo>/samples/Assimalign.Cohesion.Database.SampleHost` through the real
 `Assimalign.Cohesion.Sdk.Database` with `CohesionApplicationModel=enabled`. The test reference
 uses `ReferenceOutputAssembly=false`, loads `obj/.../cohesion/resource.json`, and asks
 `LocalGateway` to launch the manifest's apphost. The test reads the gateway's stable

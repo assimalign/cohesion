@@ -12,6 +12,32 @@ the abstract-class form lets the base type own `IDisposable` +
 Concrete clients inherit from `DnsClient`, override `QueryAsync` plus an
 optional `DisposeCore` hook, and get the rest for free.
 
+## Project map
+
+An arrow means "references": `Dns.Client --> Dns` reads
+`Assimalign.Cohesion.Dns.Client` references `Assimalign.Cohesion.Dns`.
+
+```mermaid
+flowchart LR
+    P0["Dns — area root"]
+    P1["Dns.Client"]
+    P2["Dns.Client.Doh"]
+    P3["Dns.Client.Doq"]
+    P4["Dns.Client.Dot"]
+    CORE["Assimalign.Cohesion.Core — L1"]
+    P0 --> CORE
+    P1 --> P0
+    P2 --> P1
+    P3 --> P1
+    P4 --> P1
+```
+
+Solid edges are the references this area permits; the dependency arrow always points from the
+consumer to what it consumes.
+
+The full reference graph for every Cohesion assembly, including the exact external dependencies
+collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
+
 ## Packages
 
 | Package | Role | Status |

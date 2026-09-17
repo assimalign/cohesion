@@ -85,7 +85,7 @@
 		<Project Path="ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/src/Assimalign.Cohesion.ConfigurationStore.Hosting.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/">
-		<File Path="Database/DESIGN.md" />
+		<File Path="../docs/resources/Database/DESIGN.md" />
 		<File Path="Database/Directory.Build.props" />
 		<File Path="Database/Directory.Build.targets" />
 		<File Path="Database/README.md" />
@@ -125,10 +125,6 @@
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Testing/tests/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Testing/tests/Assimalign.Cohesion.Database.Testing.Tests.csproj" />
 		<Project Path="Database/Assimalign.Cohesion.Database.Testing/tests/Assimalign.Cohesion.Database.Testing.TestHost.csproj" />
-	</Folder>
-	<Folder Name="/resources/Database/samples/Assimalign.Cohesion.Database.SampleHost/">
-		<File Path="Database/samples/Assimalign.Cohesion.Database.SampleHost/README.md" />
-		<Project Path="Database/samples/Assimalign.Cohesion.Database.SampleHost/Assimalign.Cohesion.Database.SampleHost.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Blob/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Blob/src/">
@@ -1854,7 +1850,4 @@
 	<Folder Name="/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ResourceCommandObservation/">
 		<File Path="SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ResourceCommandObservation/OVERVIEW.md" />
 	</Folder>
-  <Folder Name="/samples/Assimalign.Cohesion.Web.HttpsHost/">
-    <Project Path="Web/samples/Assimalign.Cohesion.Web.HttpsHost/Assimalign.Cohesion.Web.HttpsHost.csproj" />
-  </Folder>
 </Solution>

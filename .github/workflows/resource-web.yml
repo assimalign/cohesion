@@ -3,6 +3,10 @@ on:
   push:
     paths:
       - 'resources/Web/**'
+      # The area's sample apphosts live in the repository-root samples/ tree
+      # (.claude/rules/resource-areas.md); they are still this area's fixtures.
+      - 'samples/Assimalign.Cohesion.Web.HttpsHost/**'
+      - 'samples/Assimalign.Cohesion.Web.TestHost/**'
       - '.github/workflows/resource-web.yml'        # When Pipeline File Changes
 
 permissions:
@@ -73,4 +77,4 @@ jobs:
         with:
           global-json-file: global.json
       - run: dotnet build build/Tasks -c Release
-      - run: dotnet build resources/Web/samples/${{ matrix.projects }}/${{ matrix.projects }}.csproj -c Release
+      - run: dotnet build samples/${{ matrix.projects }}/${{ matrix.projects }}.csproj -c Release

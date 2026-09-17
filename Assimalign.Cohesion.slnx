@@ -91,16 +91,35 @@
 		<Project Path="build/Tasks/Assimalign.Cohesion.Build.Tasks.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/docs/">
-		<File Path="docs/DELIVERY_ROADMAP.md" />
+		<File Path="docs/DEPENDENCIES.md" />
+		<File Path="docs/DEVELOPER_EXPERIENCE_DESIGN.md" />
 		<File Path="docs/OVERVIEW.md" />
 		<File Path="docs/REFERENCES.md" />
+		<File Path="docs/RUNTIME_CONTRACT.md" />
 		<File Path="docs/SERVICE_LAYER_DESIGN.md" />
-		<File Path="docs/SERVICE_STORY_REQUIREMENTS.md" />
+		<File Path="docs/VERSIONING.md" />
 	</Folder>
 	<Folder Name="/cohesion/docs/build/">
 		<File Path="docs/build/MSBUILD_COHESION_PROPS.md" />
 		<File Path="docs/build/MSBUILD_COMMON_PROPS.md" />
 		<File Path="docs/build/MSBUILD_COMMON_TARGETS.md" />
+	</Folder>
+	<Folder Name="/cohesion/docs/libraries/ApplicationModel/">
+		<File Path="docs/libraries/ApplicationModel/DESIGN.md" />
+	</Folder>
+	<Folder Name="/cohesion/docs/programs/">
+		<File Path="docs/programs/DATABASE_PROGRAM_PLAN.md" />
+		<File Path="docs/programs/DELIVERY_ROADMAP.md" />
+		<File Path="docs/programs/HTTP_WEB_PROGRAM_PLAN.md" />
+		<File Path="docs/programs/REALIZATION_PLAN.md" />
+		<File Path="docs/programs/SERVICE_STORY_REQUIREMENTS.md" />
+	</Folder>
+	<Folder Name="/cohesion/docs/resources/Database/">
+		<File Path="docs/resources/Database/DESIGN.md" />
+	</Folder>
+	<Folder Name="/cohesion/docs/resources/Web/">
+		<File Path="docs/resources/Web/DESIGN.md" />
+		<File Path="docs/resources/Web/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/cohesion/docs/versioning/">
 		<File Path="docs/versioning/VERSIONING.md" />
@@ -3009,9 +3028,14 @@
 	<Folder Name="/cohesion/resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ResourceCommandObservation/">
 		<File Path="resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/docs/Assembly/Assimalign.Cohesion.SecretStore.Client/ResourceCommandObservation/OVERVIEW.md" />
 	</Folder>
-  <Folder Name="/samples/Assimalign.Cohesion.Web.HttpsHost/">
-    <Project Path="resources/Web/samples/Assimalign.Cohesion.Web.HttpsHost/Assimalign.Cohesion.Web.HttpsHost.csproj" />
-  </Folder>
+	<Folder Name="/samples/Assimalign.Cohesion.Database.SampleHost/">
+		<Project Path="samples/Assimalign.Cohesion.Database.SampleHost/Assimalign.Cohesion.Database.SampleHost.csproj" />
+		<File Path="samples/Assimalign.Cohesion.Database.SampleHost/README.md" />
+	</Folder>
+	<Folder Name="/samples/Assimalign.Cohesion.Web.HttpsHost/">
+		<Project Path="samples/Assimalign.Cohesion.Web.HttpsHost/Assimalign.Cohesion.Web.HttpsHost.csproj" />
+		<File Path="samples/Assimalign.Cohesion.Web.HttpsHost/README.md" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/">
 		<File Path="libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/README.md" />
 	</Folder>
@@ -3041,8 +3065,8 @@
 	<Folder Name="/cohesion/libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/Assembly/Assimalign.Cohesion.OpenTelemetry/">
 		<File Path="libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/Assembly/Assimalign.Cohesion.OpenTelemetry/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/cohesion/resources/LogSpace/samples/Assimalign.Cohesion.LogSpace.SinkHost/">
-		<Project Path="resources/LogSpace/samples/Assimalign.Cohesion.LogSpace.SinkHost/Assimalign.Cohesion.LogSpace.SinkHost.csproj" />
-		<File Path="resources/LogSpace/samples/Assimalign.Cohesion.LogSpace.SinkHost/README.md" />
+	<Folder Name="/samples/Assimalign.Cohesion.LogSpace.SinkHost/">
+		<Project Path="samples/Assimalign.Cohesion.LogSpace.SinkHost/Assimalign.Cohesion.LogSpace.SinkHost.csproj" />
+		<File Path="samples/Assimalign.Cohesion.LogSpace.SinkHost/README.md" />
 	</Folder>
 </Solution>

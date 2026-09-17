@@ -3,7 +3,7 @@
 > This is the per-library design record for the **Layer 1** ApplicationModel
 > contract package. The current cross-package direction of record is
 > [`DEVELOPER_EXPERIENCE_DESIGN.md`](../../../../docs/DEVELOPER_EXPERIENCE_DESIGN.md);
-> the [ApplicationModel area design v3](../../DESIGN.md) summarises the family. Read this file
+> the [ApplicationModel area design v3](../../../../docs/libraries/ApplicationModel/DESIGN.md) summarises the family. Read this file
 > for the contracts that are implemented in this package and why they have this shape.
 
 ## What this library is

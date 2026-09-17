@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
-The SQL engine (area architecture: [resources/Database/DESIGN.md](../../DESIGN.md)
+The SQL engine (area architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)
 §3.3): parse (`Sql.Language`) → plan (`SqlPlanner`) → execute (`SqlPlanExecutor`)
 against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
 

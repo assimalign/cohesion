@@ -1,7 +1,7 @@
 # ApplicationModel — Design v3
 
 > **Status: implemented library-family design, 2026-09-14.** This file is the
-> ApplicationModel library's design. The signed [developer-experience design](../../docs/DEVELOPER_EXPERIENCE_DESIGN.md)
+> ApplicationModel library's design. The signed [developer-experience design](../../DEVELOPER_EXPERIENCE_DESIGN.md)
 > is the direction of record and wins on every conflict. This v3 replaces v2.1;
 > it does not establish a competing authority. Detailed contracts belong to the
 > linked package designs, realization plan, and runtime contract. `[R]` retains
@@ -27,16 +27,16 @@ endpoints and mounts, refuses Job members, and preserves the `Certificate="publi
 sentinel while prefixing named member certificates. The **base-owned composite planner**
 produces its plan; no area planner owns Composite. `InProcessPlanController` compiles
 the supported in-process subset, as defined by the
-[InProcess package design](Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md).
+[InProcess package design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md).
 
 ## 2. Package ownership
 
 | Package | Responsibility and owning design |
 |---|---|
-| `Assimalign.Cohesion.ApplicationModel` | Portable graph, manifest, planning, application-set, external-reference and control-plane contracts; [package design](Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md). |
-| `Assimalign.Cohesion.ApplicationModel.Gateway` | Shared plan-driven lifecycle, Local realization, observed state, input resolution and telemetry injection; [package design](Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md). |
-| `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` | Real entry-point invocation under isolated ambient contexts, explicit admission and member lifecycle; [package design](Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md) (item 24, `a03cfcf8`). |
-| `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` | Authenticated discovery, observed views, commands and federation endpoints; [package design](Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/DESIGN.md) (item 23a, `1a5cce67`). |
+| `Assimalign.Cohesion.ApplicationModel` | Portable graph, manifest, planning, application-set, external-reference and control-plane contracts; [package design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md). |
+| `Assimalign.Cohesion.ApplicationModel.Gateway` | Shared plan-driven lifecycle, Local realization, observed state, input resolution and telemetry injection; [package design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md). |
+| `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` | Real entry-point invocation under isolated ambient contexts, explicit admission and member lifecycle; [package design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md) (item 24, `a03cfcf8`). |
+| `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` | Authenticated discovery, observed views, commands and federation endpoints; [package design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/DESIGN.md) (item 23a, `1a5cce67`). |
 
 Kubernetes and Docker gateway packages live in **cohesion-platforms**. Their compiler
 implementations and platform dependencies are owned there. There is no Kubernetes
@@ -44,9 +44,9 @@ package, `KubernetesClient` dependency, or platform AOT carve-out in this reposi
 
 ## 3. Contract ownership and reading order
 
-Read the signed direction first, then the [realization-plan contract](../../docs/REALIZATION_PLAN.md)
+Read the signed direction first, then the [realization-plan contract](../../programs/REALIZATION_PLAN.md)
 for `cohesion/plan/v1`, per-platform semantics, spec-versus-hint treatment, and O30 gates.
-The [runtime contract](../../docs/RUNTIME_CONTRACT.md) owns the frozen `COHESION_*`
+The [runtime contract](../../RUNTIME_CONTRACT.md) owns the frozen `COHESION_*`
 surface, including certificates and telemetry. Package designs own lifecycle details;
 this document links to them instead of defining a second contract.
 
@@ -68,7 +68,7 @@ is internal; there is no separate public mutable-collection contract.
 ### 4.3 Manifests and plans
 
 The SDK emits facts in `resource.json`; planners compute `ResourcePlan` at application
-`Build()`, with validation before realization. The [plan document](../../docs/REALIZATION_PLAN.md)
+`Build()`, with validation before realization. The [plan document](../../programs/REALIZATION_PLAN.md)
 owns the IR and planner rules. The manifest still carries `MaxReplicas`, while the plan
 does not; that compiler-side validation gap remains open as B13.
 
@@ -92,15 +92,15 @@ image build boundary without inventing runtime compilation.
 
 `IApplicationSet` coordinates multiple named applications; `ExternalResourceDeclaration`
 and `RemoteReference` represent application boundaries without importing foreign runtime
-assemblies. The [base package design](Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md)
+assemblies. The [base package design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md)
 owns those contracts (items 23/38c, `45e36dba`, `63975fcc`), and the ControlPlane design
 owns authenticated remote discovery.
 
 ### 4.8 Commands
 
 Commands are declared on descriptors, scheduled by the gateway and authorized by the
-provider control plane; the [base package](Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md)
-and [ControlPlane package](Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/DESIGN.md)
+provider control plane; the [base package](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md)
+and [ControlPlane package](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/DESIGN.md)
 own the contracts (items 23b/31c, `529d600b`, `81570328`). Landed wire kinds use
 `<area>.<verb-noun-kebab>` and manifest `commands` remains a string array (B1–B5).
 
@@ -111,7 +111,7 @@ own the contracts (items 23b/31c, `529d600b`, `81570328`). Landed wire kinds use
 Controllers reconcile a planned resource and do not own the readiness wait. Explicit
 registration through `ApplicationGatewayOptions.Controllers`, including the Local
 plan controller, replaces reflective controller discovery; see the
-[Gateway design](Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md).
+[Gateway design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md).
 
 ### 5.2 Observed state **[R]**
 
@@ -136,8 +136,8 @@ satisfy initial readiness, and a later Degraded observation never re-gates alrea
 dependents. `InitialReadinessTerminals` remains a test-fixture name; production reads
 `plan.Workload.Gate.Terminals` and `plan.Workload.Gate.Satisfying`.
 
-The [O30 gate contract](../../docs/REALIZATION_PLAN.md) and
-[Gateway lifecycle design](Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md)
+The [O30 gate contract](../../programs/REALIZATION_PLAN.md) and
+[Gateway lifecycle design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md)
 own precise workload and reconciliation semantics. Platform observation, apply-conflict
 handling and shutdown are compiler/controller concerns; they are not Kubernetes-specific
 requirements imposed on every gateway by the base algorithm.
@@ -151,19 +151,19 @@ cohesion-platforms rule 9 and the platform's realization contract.
 ## 6. Inputs, discovery and runtime capabilities
 
 Protected Secret/Configuration inputs resolve gateway-side through the thin store clients
-before mounting; the [Gateway design](Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md)
+before mounting; the [Gateway design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md)
 owns that boundary (`656f6325`, `280cc8c5`). Cross-resource discovery injects the observed
 view (`c61e2059`), while federation uses the ControlPlane or export documents.
 
 The certificate contract is already recorded in the signed design §5/O32 (`be26ff46`):
 readers accept key-second/key-last bundles and self-signed roots, newly issued bundles
 put the PKCS#8 key last, and validation is per endpoint with **no all-or-nothing certificate
-invariant**. The [runtime contract](../../docs/RUNTIME_CONTRACT.md) owns its carriers.
+invariant**. The [runtime contract](../../RUNTIME_CONTRACT.md) owns its carriers.
 Enrollment at the two named client seams remains deferred (B8).
 
 Telemetry (`acc951aa`) is owned by the
-[Hosting.Telemetry design](../Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md),
-[OpenTelemetry design](../OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/DESIGN.md),
+[Hosting.Telemetry design](../../../libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md),
+[OpenTelemetry design](../../../libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/DESIGN.md),
 the Gateway and InProcess designs, and the runtime contract: they define scoped log-export
 credentials, injection eligibility, protocol support, and shutdown. B18–B29 record the
 delivered limitations without replacing those contracts.
@@ -175,7 +175,7 @@ delivered limitations without replacing those contracts.
 This repository owns platform-neutral `ResourcePlan` (`cohesion/plan/v1`); one compiler
 per platform in cohesion-platforms consumes it. Platform gateways **never reference
 `<Area>.ApplicationModel`**, per COHRES003 and platforms rule 3. The
-[realization-plan document](../../docs/REALIZATION_PLAN.md) owns workload topology and
+[realization-plan document](../../programs/REALIZATION_PLAN.md) owns workload topology and
 spec-versus-hint handling; there is no universal single-Deployment controller.
 
 ### 7.2 Landed image contract
@@ -236,7 +236,7 @@ surfaces use the contracts owned by the base package design.
 At the closing-pass baseline `67bbcf4b`, `resources/` has **18 areas**, **143 `src/`
 projects**, and **18 guarded `*.ApplicationModel` packages**, each with its own planner,
 typed resource and default-control-plane factory. `IApplicationResource` is implemented;
-the old "implemented nowhere" inventory is obsolete. The [repository overview](../../docs/OVERVIEW.md)
+the old "implemented nowhere" inventory is obsolete. The [repository overview](../../OVERVIEW.md)
 lists the seven real hosts and eleven generic hosts, including LogSpace's item-31b promotion.
 
 ### 9.1 Root and features
@@ -262,7 +262,7 @@ contract/factory**. Its direct Cohesion references are `ApplicationModel` and
 These packages and `<Area>.Client` packages are **NuGet-only**, injected by
 `Sdk.<Area>` / `Sdk.Gateway`, never members of `App.<Area>`. Generated consumer code
 registers the default control plane through `ResourceRuntime` when orchestration is
-enabled. The [resource-area rule](../../.claude/rules/resource-areas.md) owns enforcement.
+enabled. The [resource-area rule](../../../.claude/rules/resource-areas.md) owns enforcement.
 
 ## 10. Consumer Program.cs: the Composite
 
@@ -292,7 +292,7 @@ Projects use `CohesionProjectReference` / `CohesionPackageReference`, central pa
 versions, public XML documentation, and NativeAOT-compatible implementations. DI,
 configuration and logging integration belongs at the `*.Hosting` seam. The strict
 declarative guard is not a blanket ban on the transitive plain-host contracts brought
-by `Hosting.Resources`; the [build-system rule](../../.claude/rules/build-system.md)
+by `Hosting.Resources`; the [build-system rule](../../../.claude/rules/build-system.md)
 lists the exact permitted closure.
 
 ## 12. Verification boundaries

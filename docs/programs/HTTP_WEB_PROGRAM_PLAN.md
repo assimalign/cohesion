@@ -32,7 +32,7 @@ Reference **by issue number + this file path**, and let the plan tell the sessio
 ```
 Work GitHub issue #NNNN in assimalign/cohesion.
 
-Before coding, read docs/HTTP_WEB_PROGRAM_PLAN.md — follow the Session Protocol
+Before coding, read docs/programs/HTTP_WEB_PROGRAM_PLAN.md — follow the Session Protocol
 in §1, confirm the issue is unblocked per §4, and honor the lane guardrails in §3.
 Follow the repo coding rules (auto-loaded from .claude/rules). Branch, implement to the
 issue's acceptance criteria, and open a PR that closes it. Do not edit the plan file —
@@ -43,7 +43,7 @@ stop and tell me which prerequisite is outstanding.
 ```
 
 **Variations:**
-- *Let the session choose:* replace the first line with `Pick the highest-priority unblocked issue from Stage <N>, Lane <X> in docs/HTTP_WEB_PROGRAM_PLAN.md and work it.` Good when you don't want to micromanage ordering.
+- *Let the session choose:* replace the first line with `Pick the highest-priority unblocked issue from Stage <N>, Lane <X> in docs/programs/HTTP_WEB_PROGRAM_PLAN.md and work it.` Good when you don't want to micromanage ordering.
 - *A primitive that many things wait on* (e.g. #771, #762): add `This is a fan-out prerequisite — several issues are blocked on it (see §4), so keep the public surface conservative and get the DESIGN.md right.`
 - *Kicking off several in parallel:* open one session per issue, each with the template above and a **different** issue number, only choosing issues that are (a) unblocked and (b) in different lanes. Send them at once.
 
@@ -224,5 +224,5 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
 
 - **Epics:** Http `#314` (L01.01.11) · Net/Connections `#324` (L01.01.14) · Security `#325` (L01.01.18) · Hosting `#313` (L01.01.10) · Web Platform `#6` → Runtime/Pipeline `#24`/`#25`/`#26`, API/Tooling `#27`, Routing `#28`, Security/Browser `#2`/`#3`/`#30`.
 - **Skills/rules:** coding rules auto-load from `.claude/rules/` · `cohesion-work-items` skill (file scope-creep, emit PR close blocks).
-- **Canonical rules:** `.claude/rules/` (auto-loaded). **Roadmap context:** `docs/DELIVERY_ROADMAP.md`.
+- **Canonical rules:** `.claude/rules/` (auto-loaded). **Roadmap context:** `docs/programs/DELIVERY_ROADMAP.md`.
 - **This program's north star:** assemble the Web resource by wiring the `libraries/Http` stack into `resources/Web`; once assembled, the next major effort is pulling the new ApplicationModel design together (`libraries/ApplicationModel/DESIGN.md`).

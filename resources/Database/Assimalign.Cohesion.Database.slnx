@@ -44,9 +44,6 @@
 		<Project Path="Assimalign.Cohesion.Database.Testing/tests/Assimalign.Cohesion.Database.Testing.Tests.csproj" />
 		<Project Path="Assimalign.Cohesion.Database.Testing/tests/Assimalign.Cohesion.Database.Testing.TestHost.csproj" />
 	</Folder>
-	<Folder Name="/Database/Samples/Assimalign.Cohesion.Database.SampleHost/">
-		<Project Path="samples/Assimalign.Cohesion.Database.SampleHost/Assimalign.Cohesion.Database.SampleHost.csproj" />
-	</Folder>
 	<Folder Name="/Database/Models/Blob/Assimalign.Cohesion.Database.Blob/" />
 	<Folder Name="/Database/Models/Blob/Assimalign.Cohesion.Database.Blob/src/">
 		<Project Path="Assimalign.Cohesion.Database.Blob/src/Assimalign.Cohesion.Database.Blob.csproj" />

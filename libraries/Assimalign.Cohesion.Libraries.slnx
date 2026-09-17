@@ -33,7 +33,7 @@
 		<Project Path="Amqp/Assimalign.Cohesion.Amqp.Connections/tests/Assimalign.Cohesion.Amqp.Connections.Tests.csproj" />
 	</Folder>
 	<Folder Name="/libraries/ApplicationModel/">
-		<File Path="ApplicationModel/DESIGN.md" />
+		<File Path="../docs/libraries/ApplicationModel/DESIGN.md" />
 		<File Path="ApplicationModel/Directory.Build.props" />
 		<File Path="ApplicationModel/Directory.Build.targets" />
 	</Folder>

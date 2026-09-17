@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
-The SQL front-end (area architecture: [resources/Database/DESIGN.md](../../DESIGN.md)
+The SQL front-end (area architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)
 §3.3). The dialect is deliberately fundamental — basic SQL, declared precisely —
 and structured to be extended without churning what exists (open/closed).
 

@@ -632,7 +632,4 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Resources/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Hosting.Resources/tests/Assimalign.Cohesion.Web.Hosting.Resources.Tests.csproj" />
 	</Folder>
-  <Folder Name="/samples/Assimalign.Cohesion.Web.HttpsHost/">
-    <Project Path="samples/Assimalign.Cohesion.Web.HttpsHost/Assimalign.Cohesion.Web.HttpsHost.csproj" />
-  </Folder>
 </Solution>

@@ -26,4 +26,4 @@ The foundation libraries (L1) of the Cohesion framework. Everything under this f
 | `Resilience` | Resilience pipeline (retry, circuit breaking, timeouts). |
 | `Security` | TLS, certificate management, and cryptographic helpers. |
 
-For how these areas sequence into delivery waves and how L1 relates to the L2 (application runtime and composition) and L3 (service platform) layers, see [docs/DELIVERY_ROADMAP.md](../docs/DELIVERY_ROADMAP.md) and the dependency graph in the [repo README](../README.md).
+For how these areas sequence into delivery waves and how L1 relates to the L2 (application runtime and composition) and L3 (service platform) layers, see [docs/programs/DELIVERY_ROADMAP.md](../docs/programs/DELIVERY_ROADMAP.md) and the dependency graph in the [repo README](../README.md).

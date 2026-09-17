@@ -3,6 +3,9 @@ on:
   push:
     paths:
       - "resources/LogSpace/**"
+      # The area's sample apphost lives in the repository-root samples/ tree
+      # (.claude/rules/resource-areas.md); it is still this area's fixture.
+      - "samples/Assimalign.Cohesion.LogSpace.SinkHost/**"
       - ".github/workflows/resource-log-space.yml" # When Pipeline File Changes
 
 permissions:
@@ -38,4 +41,4 @@ jobs:
         with:
           global-json-file: global.json
       - run: dotnet build build/Tasks -c Release
-      - run: dotnet build resources/LogSpace/samples/${{ matrix.projects }}/${{ matrix.projects }}.csproj -c Release
+      - run: dotnet build samples/${{ matrix.projects }}/${{ matrix.projects }}.csproj -c Release

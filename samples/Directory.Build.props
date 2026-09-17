@@ -1,0 +1,21 @@
+<Project>
+	<Import Project="..\Directory.Build.props" />
+
+	<!--
+	    Samples are harnesses, not shipped libraries: in-repo executable acceptance
+	    fixtures that exercise a real Program.cs (see .claude/rules/resource-areas.md).
+	    They live here rather than under resources/<Area>/samples so that no shipped
+	    area folder carries a non-shipping project, and so the COHRES001-004
+	    hosting-isolation guards - which key off the /resources/ path segment - never
+	    apply to them at all.
+
+	    resources/Directory.Build.props supplies the TFM to everything under
+	    resources/; that chain does not reach here, so samples declare their own.
+	    Cohesion-SDK samples set TargetFramework conditionally in
+	    Assimalign.Cohesion.Sdk.Defaults.props and keep this value.
+	-->
+	<PropertyGroup>
+		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+</Project>

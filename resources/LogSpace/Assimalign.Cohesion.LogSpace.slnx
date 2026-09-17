@@ -63,8 +63,4 @@
 	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/docs/Assembly/Assimalign.Cohesion.LogSpace.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.LogSpace.ApplicationModel/docs/Assembly/Assimalign.Cohesion.LogSpace.ApplicationModel/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/LogSpace/samples/Assimalign.Cohesion.LogSpace.SinkHost/">
-		<Project Path="samples/Assimalign.Cohesion.LogSpace.SinkHost/Assimalign.Cohesion.LogSpace.SinkHost.csproj" />
-		<File Path="samples/Assimalign.Cohesion.LogSpace.SinkHost/README.md" />
-	</Folder>
 </Solution>

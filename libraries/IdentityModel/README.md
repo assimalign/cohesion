@@ -5,6 +5,34 @@ resource under `resources/*` that authenticates a caller — and IdentityHub
 itself — depends on this family for one normalized identity surface instead of
 inventing service-local identity types.
 
+## Project map
+
+An arrow means "references": `IdentityModel.Token --> IdentityModel` reads
+`Assimalign.Cohesion.IdentityModel.Token` references `Assimalign.Cohesion.IdentityModel`.
+
+```mermaid
+flowchart LR
+    P0["IdentityModel — area root"]
+    P1["IdentityModel.Protocols"]
+    P2["IdentityModel.Protocols.OpenIdConnect"]
+    P3["IdentityModel.Protocols.Saml"]
+    P4["IdentityModel.Token"]
+    P5["IdentityModel.Token.JsonWebToken"]
+    P6["IdentityModel.Token.Saml"]
+    P1 --> P0
+    P2 --> P1
+    P3 --> P1
+    P4 --> P0
+    P5 --> P4
+    P6 --> P4
+```
+
+Solid edges are the references this area permits; the dependency arrow always points from the
+consumer to what it consumes.
+
+The full reference graph for every Cohesion assembly, including the exact external dependencies
+collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
+
 ## Projects
 
 | Project | Role |
@@ -19,7 +47,7 @@ inventing service-local identity types.
 
 ## Layering
 
-IdentityModel is an L1 foundation library family (see `docs/DELIVERY_ROADMAP.md`
+IdentityModel is an L1 foundation library family (see `docs/programs/DELIVERY_ROADMAP.md`
 for the layering model). It sits below every service platform: L2 runtime
 composition and L3 service platforms (IdentityHub, Web, Database, …) consume
 these contracts; nothing in this family depends on hosting, transport, or

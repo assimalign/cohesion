@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Database.Sql.Catalog — Design
 
 The SQL model's schema authority (area architecture:
-[resources/Database/DESIGN.md](../../DESIGN.md) §3.3). The catalog answers exactly
+[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.3). The catalog answers exactly
 two questions for the planner: *what objects exist* (with stable identities) and
 *what shape are they* — and it must answer identically after any crash.
 

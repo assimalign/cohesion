@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
 The key-value engine (area architecture:
-[resources/Database/DESIGN.md](../../DESIGN.md) §3.3, generality report §3.10):
+[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.3, generality report §3.10):
 an ordered key space over the shared kernel, and the **second model engine** —
 built deliberately as the proof that the kernel is model-general, not SQL-shaped.
 

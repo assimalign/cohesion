@@ -28,7 +28,7 @@ The safe unit of work is **one GitHub issue = one session = one branch = one PR*
 ```
 Work GitHub issue #NNNN in assimalign/cohesion.
 
-Before coding, read docs/DATABASE_PROGRAM_PLAN.md — follow the Session Protocol in §1,
+Before coding, read docs/programs/DATABASE_PROGRAM_PLAN.md — follow the Session Protocol in §1,
 confirm the issue is unblocked per §4, and honor the lane guardrails in §3. Read
 resources/Database/DESIGN.md for the architecture and follow the repo coding
 rules (.claude/rules). Branch, implement to the issue's acceptance criteria, and open a PR that closes it.
