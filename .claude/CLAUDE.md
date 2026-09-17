@@ -17,7 +17,7 @@ The rules in `.claude/rules/` are the canonical coding standard for this repo. T
 - `assets/` — shared repo assets: the `cohesion.config` JSON schemas and `branding/` (NuGet package icon, imported from the branding repo)
 - `installer/` — WiX MSI source plus dev and release scripts (`Install-Local.ps1`, `Get-CohesionVersion.ps1`, `New-CohesionDomainScaffold.ps1`, `Pack-Release.ps1`, `Get-ReleaseMatrix.ps1`, and `modules/CohesionPackaging.psm1` — the authoritative release inventory)
 - `extensions/` and `tooling/` — developer tooling and integration surfaces
-- `samples/` — every in-repo executable fixture and SDK-consumer smoke project, one folder per project, non-packable. Areas hold no `samples/` folder of their own
+- `samples/` — the package-only SDK-consumer smoke tree, moving to the `cohesion-examples` companion repo. Executable acceptance fixtures are **not** here: each lives in a `fixtures/` folder inside the project whose tests drive it. AOT guard projects stay in their library's own `samples/`. See `.claude/rules/workflow.md` and `resource-areas.md`
 - `docs/` — all repository-, program-, and **area**-level documentation. `docs/programs/` holds dated plans and roadmaps; `docs/resources/<Area>/` and `docs/libraries/<Area>/` mirror the repo root and hold each area's architecture record; `docs/DEPENDENCIES.md` is the generated reference graph. Area `README.md` files stay in the area; per-project `docs/` stay beside `src/`. Layout and rationale: `.claude/rules/documentation.md`
 
 ## Build & test

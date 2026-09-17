@@ -170,8 +170,9 @@ resource fixtures live under `ApplicationModel.Gateway`, not in the areas whose 
 happen to compose.
 
 - **Fixtures are not samples.** A sample demonstrates the product to a reader; a fixture is a test
-  input that must compile from source against the current tree. Consumer-facing examples live in
-  the separate `cohesion-examples` repository — see *Examples live in `cohesion-examples`* below.
+  input that must compile from source against the current tree. Consumer-facing examples and
+  package-only smoke consumers live in the separate `cohesion-examples` repository; clone it when
+  it is missing rather than recreating its content here (`workflow.md`, *Companion repositories*).
 - **Non-packable, always.** Set `IsPackable=false` in the fixture's csproj.
 - **The guards exempt `fixtures/` by path**, on the same terms as `tests/`: a fixture composes the
   very `<Area>.Hosting` runtime module the area's own libraries may not touch, which is the whole
