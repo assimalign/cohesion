@@ -248,10 +248,37 @@ Adding a public API to the producer *purely* to serve one consumer is not a way 
 is the one-off accretion the abstraction rule above already rejects. If none of the three options
 fits, the boundary itself is wrong: raise it rather than granting visibility.
 
-**Pre-existing non-test grants remain** in several libraries (`Database.Sql.Catalog`,
-`Database.Sql.Storage`, the `KeyValuePair` equivalents, `Connections`, `Http`, `Http.Sessions`,
-`IdentityModel`, `ApplicationModel.Gateway`). They predate this rule and are not a precedent for
-new ones; removing them is separate, deliberate work.
+**Pre-existing grants remain: 18 shipped-to-shipped grants across 11 files**, measured
+2026-09-18. They predate this rule and are not a precedent for new ones; removing them is
+separate, deliberate work.
+
+| Granting assembly | Grants to |
+| --- | --- |
+| `Connections` | `Connections.Tcp`, `.Quic`, `.NamedPipes` |
+| `Http` | `Web.Routing` |
+| `Http.Sessions` | `Web.Sessions` |
+| `IdentityModel` | `IdentityModel.Protocols`, `.Protocols.OpenIdConnect`, `.Protocols.Saml` |
+| `IdentityModel.Protocols` | `.Protocols.OpenIdConnect`, `.Protocols.Saml` |
+| `ObjectValidation` | `ObjectValidation.Configurable`, `.Configurable.Json`, `.Configurable.Xml` |
+| `ApplicationModel.Gateway` | `ApplicationModel.Gateway.InProcess` |
+| `Database.Sql.Catalog` | `Database.Sql` |
+| `Database.Sql.Storage` | `Database.Sql` |
+| `Database.KeyValuePair.Catalog` | `Database.KeyValuePair` |
+| `Database.KeyValuePair.Storage` | `Database.KeyValuePair` |
+
+To re-measure, exclude `obj/` and `bin/` and everything targeting a `*.Tests` assembly:
+
+```bash
+grep -rn "InternalsVisibleTo" --include=*.cs --include=*.csproj . \
+  | grep -vE "[/\\\\](obj|bin)[/\\\\]" | grep -vE '\.Tests"|\.Tests" />|\.Tests,'
+```
+
+A **fourth** pattern exists and is deliberately not counted above: four hosting projects grant to
+*another project's* test assembly (`IdentityHub.Hosting` → `IdentityHub.Client.Tests`, and the
+same in `Rezolvr.Hosting`, `SecretStore.Hosting`, `ApplicationModel.Gateway`). Those are test-only
+and do not widen a shipped boundary, but they do reach past a project's own tests. Prefer a
+project's own test assembly; if a sibling's tests genuinely need the internals, that is worth
+questioning on the same terms as the rest of this section.
 
 ## Interface-first with a guided abstract base
 
