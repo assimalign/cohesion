@@ -10,7 +10,7 @@ enumerates the profile and fails if any advertised clause lacks a passing case.
 
 ## Statement matrix
 
-Phase 17 measures **32 of 49 declared clauses** against the live SQL engine.
+Phase 18 measures **33 of 49 declared clauses** against the live SQL engine.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
 Phase 14 restores `CAST` with actual conversion, type metadata, and wire execution
@@ -19,9 +19,11 @@ an `ON` predicate, including server/client execution (#1019). Phase 16 restores
 `GROUP BY` and `HAVING`, including aggregation over the supported inner join
 and server/client execution (#1020). Phase 17 adds executable column and expression
 `COLLATE`, including persisted defaults, collation-aware index seeks, grouping,
-uniqueness, and server/client execution (#1025).
+uniqueness, and server/client execution (#1025). Phase 18 restores `SUBQUERY`
+for uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries and
+adds transactional `INSERT ... SELECT`, with server/client execution (#1021).
 
-The **17 excluded clauses** are `SUBQUERY` plus set operations (`UNION`,
+The **16 excluded clauses** are set operations (`UNION`,
 `INTERSECT`, `EXCEPT`), CTEs (`WITH`, `RECURSIVE`), window clauses (`WINDOW`,
 `OVER`, `PARTITION`), views (`CREATE VIEW`, `DROP VIEW`), `NATURAL`, `USING`,
 `TOP`, `ALL`, `FETCH`, and `RETURNING`. Counts describe named clauses, not
@@ -30,7 +32,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | Statement | Status | Notes |
 |---|---|---|
 | `SELECT` | Supported subset, measured | One stored table or virtual system relation, or a two stored-table `INNER JOIN ... ON`; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
-| `INSERT` / `VALUES` | Supported subset, measured | Optional column list and multi-row literal/scalar `VALUES`; `INSERT ... SELECT` reports `COHDBL001` (#1021). |
+| `INSERT` / `VALUES` | Supported subset, measured | Optional column list, multi-row literal/scalar `VALUES`, and transactional `INSERT ... SELECT` with the same destination coercion, defaults, and constraints. Subqueries inside `VALUES` are excluded; use `INSERT ... SELECT`. |
 | `UPDATE` | Supported | multi-column `SET`, `WHERE` |
 | `DELETE` | Supported | optional `WHERE` |
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
@@ -44,7 +46,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` | Supported subset, measured | Two stored-table `INNER JOIN ... ON` or bare `JOIN ... ON`, with index assistance where the mandatory equality predicate matches an applicable secondary-index prefix. `LEFT [OUTER]`, `RIGHT [OUTER]`, `FULL [OUTER]`, `CROSS`, additional joins beyond two tables, joins without `ON`, comma joins, and joins of virtual system relations report `COHDBL001`. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported two-table inner joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
-| Subqueries / `INSERT ... SELECT` | Recognized, not supported | Scalar, `IN`/`NOT IN`, `EXISTS`/`NOT EXISTS`, derived-table, correlated, and insert-source queries report `COHDBL001` (#1021). Literal `IN` lists remain supported. |
+| Subqueries / `INSERT ... SELECT` | Supported subset, measured | Uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries in supported SELECT expressions, plus transactional insert-source queries. All use the outer statement snapshot; nesting is limited to 32 subquery levels. Correlated queries, derived tables, quantified comparisons, subqueries in UPDATE/DELETE, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET expressions report `COHDBL001`. See the subquery contract below. |
 | `TOP` / `SELECT ALL` / `FETCH` | Recognized, not supported | row-limit and select modifiers rejected with `COHDBL001` |
 | DML `RETURNING` | Recognized, not supported | rejected with `COHDBL001` |
 | `NATURAL JOIN` / `JOIN ... USING` | Recognized, not supported | rejected with `COHDBL001` |
@@ -209,6 +211,54 @@ functions and clauses, and ordered-set `WITHIN GROUP` aggregates are excluded
 and report `COHDBL001`. Top-level `SELECT DISTINCT` remains available. These
 boundaries do not add named clauses to the 49-clause denominator.
 
+## Subqueries and query-source inserts (#1021)
+
+Subqueries are separate planned queries whose results are materialized before
+the containing relational plan executes. Supported forms are uncorrelated
+`IN (SELECT ...)`, `NOT IN (SELECT ...)`, `EXISTS (SELECT ...)`,
+`NOT EXISTS (SELECT ...)`, and scalar `(SELECT ...)` expressions. They compose
+with the supported SELECT projection, WHERE, INNER JOIN/ON, GROUP BY/HAVING,
+ORDER BY, LIMIT, and OFFSET surface, including nested queries and wire execution.
+Each SELECT still requires a FROM relation. Scalar and IN queries must return
+exactly one column; EXISTS accepts any valid select list.
+
+| Form | Result semantics |
+|---|---|
+| `IN` | TRUE for an equal non-NULL member. Without a match, a NULL member or a NULL operand against a nonempty result yields UNKNOWN. Empty results produce FALSE, even for a NULL operand. |
+| `NOT IN` | FALSE for an equal non-NULL member. A NULL-containing result produces UNKNOWN for otherwise nonmatching operands, so WHERE retains no rows. An empty result produces TRUE, including for a NULL operand. |
+| `EXISTS` / `NOT EXISTS` | Test whether the result has any rows; projected NULLs count as rows. Empty results produce FALSE / TRUE. |
+| Scalar subquery | One row supplies its value, no rows supply NULL, and more than one row raises a cardinality error. An arbitrary first row is never selected. |
+
+Every child query uses the containing statement's MVCC snapshot and transaction
+context; it never creates another read view. Inner and outer stored rows
+therefore observe the same instant. A child that reads a virtual system relation
+uses the statement's catalog snapshot. Materialization retains the output type
+and collation, including NULL and empty scalar results.
+
+`INSERT ... SELECT` maps the result columns to the specified destination list,
+or to all destination columns when the list is omitted. Planning validates the
+column count and declared type compatibility even when the source returns no
+rows. Destination coercion and the literal-insert path enforce defaults for
+omitted columns, nullability, CHECK, primary/unique keys, and foreign keys for
+every selected row. Any failure leaves none of the statement's rows inserted.
+Reading from the destination table is supported: the entire source is
+materialized under the statement snapshot before inserts begin, so newly
+inserted rows cannot feed back into the source query.
+
+Correlation is excluded with `COHDBL001`: a nested column must bind to that
+query's local FROM/JOIN scope. The parser diagnoses explicit outer qualifiers;
+catalog binding rejects unresolved local columns, including unqualified outer
+references. Local aliases may shadow outer aliases. Query nesting permits at
+most **32 expression-subquery levels** below the top-level SELECT (or INSERT's
+source SELECT); level 33 reports `COHDBL001` before recursive parsing continues.
+
+`ANY`/`ALL`/`SOME` quantified comparisons, derived tables in FROM or JOIN, CTEs,
+lateral joins, and subqueries in UPDATE/DELETE, INSERT VALUES, CHECK/DEFAULT,
+or LIMIT/OFFSET expressions remain excluded with `COHDBL001`. Ordinary numeric
+LIMIT/OFFSET clauses on queries containing subqueries do execute. CHECK remains
+a deterministic row-local expression and still rejects every subquery form.
+These subset boundaries do not add named clauses to the 49-clause denominator.
+
 ## System-view matrix (C1)
 
 The SQL engine exposes the following virtual relations through ordinary `SELECT`,
@@ -276,7 +326,7 @@ Precedence, low to high: `OR` < `AND` < `NOT` < comparison (`=`, `<>`, `<`, `>`,
 primary. Executable primary forms include literals, parameters (`@name`, `$1`),
 column references, supported function calls, simple/searched `CASE`, and
 parenthesized expressions and `CAST` within the conversion contract below.
-Subqueries retain syntax trees for tooling but carry `COHDBL001` and cannot execute.
+Uncorrelated scalar subqueries and subquery predicates execute within the contract above.
 SQL aggregates follow the grouping and aggregate contract below. `~` is parsed but not evaluated; it is outside the
 executable scalar subset.
 

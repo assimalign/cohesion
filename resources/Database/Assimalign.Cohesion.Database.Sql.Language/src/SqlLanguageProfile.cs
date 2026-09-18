@@ -83,6 +83,7 @@ public static class SqlLanguageProfile
         SqlClauses.Limit,
         SqlClauses.Offset,
         SqlClauses.Values,
+        SqlClauses.Subquery,
         SqlClauses.Case,
         SqlClauses.Cast,
         SqlClauses.Collate,

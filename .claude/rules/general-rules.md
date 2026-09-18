@@ -224,6 +224,35 @@ namespace Assimalign.Cohesion.Database;
 4. **Nested types:** match outer type visibility unless explicitly different.
 5. **Before introducing a new abstraction, check whether one already exists** in the same service root or shared library. Placeholder folders and placeholder projects are not final architecture boundaries — add projects when needed to preserve modularity and clean dependency flow.
 
+### `InternalsVisibleTo` is for tests
+
+A shipped library grants `InternalsVisibleTo` only to its own **test** assembly. Do not add a
+grant between two shipped libraries.
+
+Wanting one means a consumer needs a capability the producer does not expose. The grant does not
+supply that capability — it hides the question, and every later reader has to reconstruct which of
+the producer's internals are load-bearing for whom. Resolve it at the design level instead:
+
+- **Give the producer a public seam** for what the consumer legitimately needs, and keep the rest
+  internal. This is the resolution of record for the host's run wrapper
+  (`DEVELOPER_EXPERIENCE_DESIGN.md` R6: `IHostRunner`/`IHostRun`/`IHostRunObserver`, explicitly
+  "no `InternalsVisibleTo`").
+- **Move the work to the package that owns the type.** If the consumer is manipulating the
+  producer's data structures, the operation usually belongs on the producer's side of the line.
+- **Restructure so the consumer does not need it** — often the smallest change of the three.
+  Precedent: `Database.Sql` reconstructed `Database.Sql.Language`'s AST nodes to substitute
+  subquery results, which needed their internal constructors. Resolving each subquery by node
+  identity at evaluation time removed the reconstruction, the grant, and a whole rewriter class.
+
+Adding a public API to the producer *purely* to serve one consumer is not a way around this — that
+is the one-off accretion the abstraction rule above already rejects. If none of the three options
+fits, the boundary itself is wrong: raise it rather than granting visibility.
+
+**Pre-existing non-test grants remain** in several libraries (`Database.Sql.Catalog`,
+`Database.Sql.Storage`, the `KeyValuePair` equivalents, `Connections`, `Http`, `Http.Sessions`,
+`IdentityModel`, `ApplicationModel.Gateway`). They predate this rule and are not a precedent for
+new ones; removing them is separate, deliberate work.
+
 ## Interface-first with a guided abstract base
 
 Public APIs stay interface-first — the interface is the contract consumers depend on. Where implementers benefit from guidance, also ship a **public `abstract` base class that explicitly implements the interface** and forwards each member to a strongly-typed `abstract`/`virtual` member:

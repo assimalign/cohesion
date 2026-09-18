@@ -165,7 +165,7 @@ public sealed partial class SqlQueryParser
                 // Check if it's a subquery: IN (SELECT ...)
                 if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
                 {
-                    var subquery = ParseSelect(ref lexer);
+                    var subquery = ParseSubquery(ref lexer);
                     if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
                     {
                         Advance(ref lexer);
@@ -423,7 +423,7 @@ public sealed partial class SqlQueryParser
             // Subquery: (SELECT ...)
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
             {
-                var subSelect = ParseSelect(ref lexer);
+                var subSelect = ParseSubquery(ref lexer);
                 if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
                 {
                     Advance(ref lexer);
@@ -641,7 +641,7 @@ public sealed partial class SqlQueryParser
         SqlSelectExpression? subquery = null;
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
         {
-            subquery = ParseSelect(ref lexer);
+            subquery = ParseSubquery(ref lexer);
         }
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)

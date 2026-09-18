@@ -48,6 +48,8 @@ public sealed partial class SqlQueryParser : QueryParser
     {
         _sawSemicolon = false;
         _lastTokenEnd = 0;
+        _subqueryDepth = 0;
+        _paginationDepth = 0;
         _parseDiagnostics.Clear();
 
         bool hasUnsupportedClause =
@@ -368,7 +370,9 @@ public sealed partial class SqlQueryParser : QueryParser
         string? pendingExecutionClause = null;
         Location? pendingExecutionLocation = null;
         string? previousToken = null;
+        string? previousPreviousToken = null;
         string? firstToken = null;
+        bool insertValues = false;
         int previousPosition = 0;
 
         while (lexer.MoveNext())
@@ -390,6 +394,17 @@ public sealed partial class SqlQueryParser : QueryParser
                 1,
                 lexer.Current.Position,
                 lexer.Current.Position + lexer.Current.Value.Length);
+
+            if (TryFindUnsupportedSubqueryForm(lexer, firstToken, previousToken,
+                previousPreviousToken, insertValues, out clause))
+            {
+                location = tokenLocation;
+                return true;
+            }
+
+            insertValues |= lexer.Current.Type == TokenType.Keyword &&
+                firstToken.Equals("INSERT", StringComparison.OrdinalIgnoreCase) &&
+                token.Equals("VALUES", StringComparison.OrdinalIgnoreCase);
 
             if (token.Equals("COLLATION", StringComparison.OrdinalIgnoreCase) &&
                 previousToken?.Equals("CREATE", StringComparison.OrdinalIgnoreCase) == true)
@@ -495,24 +510,9 @@ public sealed partial class SqlQueryParser : QueryParser
                     return true;
                 }
 
-                // Subqueries have syntax trees but no executor support (#1021).
-                // JOIN shape restrictions are checked while parsing each SELECT, so
-                // a supported JOIN cannot hide a later unsupported query clause.
-                if (pendingExecutionClause is null)
-                {
-                    if (token.Equals("SELECT", StringComparison.OrdinalIgnoreCase) && previousToken is not null)
-                    {
-                        // A SELECT after the leading command is a nested query or INSERT ... SELECT.
-                        pendingExecutionClause = SqlClauses.Subquery;
-                    }
-
-                    if (pendingExecutionClause is not null)
-                    {
-                        pendingExecutionLocation = tokenLocation;
-                    }
-                }
             }
 
+            previousPreviousToken = previousToken;
             previousToken = token;
             previousPosition = lexer.Current.Position;
         }

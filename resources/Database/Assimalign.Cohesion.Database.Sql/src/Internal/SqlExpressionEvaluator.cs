@@ -23,11 +23,19 @@ internal sealed class SqlExpressionEvaluator
     private readonly Collation _defaultCollation;
     private readonly IReadOnlyDictionary<SqlExpression, SqlExpression>? _expressionSources;
 
+    /// <summary>
+    /// Values materialized by the enclosing subquery plan, keyed by the slot the planner
+    /// left in the expression tree. Resolved here rather than substituted into a rebuilt
+    /// tree, so the executor never reconstructs the language package's AST nodes.
+    /// </summary>
+    private readonly IReadOnlyDictionary<SqlExpression, SqlExpression[]>? _subqueryValues;
+
     internal SqlExpressionEvaluator(IReadOnlyList<SqlCatalogColumn> columns, IReadOnlyDictionary<string, object?>? parameters,
         IReadOnlyList<SqlTableBinding>? bindings = null,
         IReadOnlyDictionary<SqlExpression, int>? valueOrdinals = null,
         Collation? defaultCollation = null,
-        IReadOnlyDictionary<SqlExpression, SqlExpression>? expressionSources = null)
+        IReadOnlyDictionary<SqlExpression, SqlExpression>? expressionSources = null,
+        IReadOnlyDictionary<SqlExpression, SqlExpression[]>? subqueryValues = null)
     {
         _columns = columns;
         _parameters = parameters;
@@ -35,6 +43,7 @@ internal sealed class SqlExpressionEvaluator
         _valueOrdinals = valueOrdinals;
         _defaultCollation = defaultCollation ?? Collation.Binary;
         _expressionSources = expressionSources;
+        _subqueryValues = subqueryValues;
     }
 
     /// <summary>
@@ -62,6 +71,8 @@ internal sealed class SqlExpressionEvaluator
 
         return expression switch
         {
+            SqlConstantExpression constant => constant.Value,
+            SqlSubqueryExpression or SqlExistsExpression => Evaluate(ResolveSubquery(expression)[0], row),
             SqlLiteralExpression literal => EvaluateLiteral(literal),
             SqlColumnReferenceExpression column => row[ResolveColumn(column)],
             SqlParameterExpression parameter => ResolveParameter(parameter),
@@ -134,6 +145,17 @@ internal sealed class SqlExpressionEvaluator
 
     private (Collation? Collation, int Priority) FindCollation(SqlExpression? expression)
     {
+        // A materialized subquery carries its child column's collation on each value.
+        if (expression is SqlSubqueryExpression or SqlExistsExpression or SqlInExpression { Subquery: not null }
+            && _subqueryValues is not null && _subqueryValues.TryGetValue(expression, out var materialized)
+            && materialized.Length > 0)
+        {
+            return FindCollation(materialized[0]);
+        }
+        if (expression is SqlConstantExpression { Collation: not null } constant)
+        {
+            return (constant.Collation, 2);
+        }
         if (expression is not null && _expressionSources is not null
             && _expressionSources.TryGetValue(expression, out var source))
         {
@@ -329,11 +351,33 @@ internal sealed class SqlExpressionEvaluator
         return expression.IsNegated ? !between : between;
     }
 
+    /// <summary>
+    /// Resolves the values a subquery slot stands for. A slot reaching evaluation without
+    /// its plan having materialized it is an executor bug, not a user error.
+    /// </summary>
+    private SqlExpression[] ResolveSubquery(SqlExpression source)
+    {
+        if (_subqueryValues is null || !_subqueryValues.TryGetValue(source, out var values))
+        {
+            throw new DatabaseException("A subquery must be materialized by its plan before scalar evaluation.");
+        }
+
+        return values;
+    }
+
     private object? EvaluateIn(SqlInExpression expression, object?[] row)
     {
-        if (expression.Values is null)
+        // A subquery contributes its whole result set as the candidate list, resolved
+        // before the empty-set rule below applies: IN over a subquery that returned no
+        // rows is an empty set, not a one-value set.
+        IReadOnlyList<SqlExpression> candidates = expression.Subquery is not null
+            ? ResolveSubquery(expression)
+            : expression.Values ?? throw new DatabaseException("An IN query requires a value list or a subquery.");
+
+        // Membership of an empty set is FALSE, even for a NULL left operand.
+        if (candidates.Count == 0)
         {
-            throw new DatabaseException("IN subqueries are not supported by the executor yet.");
+            return expression.IsNegated;
         }
 
         object? value = Evaluate(expression.Operand, row);
@@ -344,7 +388,7 @@ internal sealed class SqlExpressionEvaluator
         }
 
         bool hasUnknown = false;
-        foreach (var candidate in expression.Values)
+        foreach (var candidate in candidates)
         {
             object? candidateValue = Evaluate(candidate, row);
 

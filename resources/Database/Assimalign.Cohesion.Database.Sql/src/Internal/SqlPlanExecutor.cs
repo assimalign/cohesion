@@ -30,6 +30,12 @@ internal sealed partial class SqlPlanExecutor
     private readonly IIndexManager _indexManager;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
+    /// <summary>
+    /// Values materialized by the enclosing subquery plan, scoped to the input plan it
+    /// wraps. Null outside a subquery plan; saved and restored around nesting.
+    /// </summary>
+    private IReadOnlyDictionary<SqlExpression, SqlExpression[]>? _subqueryValues;
+
     internal SqlPlanExecutor(SqlStorage storage, ISqlCatalog catalog, IIndexManager indexManager, IReadOnlyDictionary<string, object?>? parameters)
     {
         _storage = storage;
@@ -51,6 +57,10 @@ internal sealed partial class SqlPlanExecutor
     {
         switch (plan)
         {
+            case SqlSubqueryPlan subquery:
+                return await ExecuteSubqueryAsync(subquery, statement, cancellationToken).ConfigureAwait(false);
+            case SqlInsertSelectPlan insertSelect:
+                return await ExecuteInsertSelectAsync(insertSelect, statement, cancellationToken).ConfigureAwait(false);
             case SqlGroupPlan group:
                 return await ExecuteGroupAsync(group, statement, cancellationToken).ConfigureAwait(false);
             case SqlSystemViewPlan systemView:
@@ -90,7 +100,7 @@ internal sealed partial class SqlPlanExecutor
 
     private QueryResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
+        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
         var matches = new List<object?[]>();
 
         // The access path narrows the candidate set; the full WHERE stays the
@@ -130,7 +140,7 @@ internal sealed partial class SqlPlanExecutor
                 var projection = projections[i];
                 output[i] = projection.ColumnOrdinal is int ordinal
                     ? row[ordinal]
-                    : evaluator.Evaluate(projection.Expression!, row);
+                    : NormalizeGroupValue(evaluator.Evaluate(projection.Expression!, row), projection.Type);
             }
 
             projected.Add(output);
@@ -158,7 +168,7 @@ internal sealed partial class SqlPlanExecutor
             columns[i] = new QueryColumn
             {
                 Name = projections[i].Name, Ordinal = i, Type = projections[i].Type,
-                IsNullable = projections[i].Expression is SqlCastExpression,
+                IsNullable = projections[i].Expression is not null,
             };
         }
 
@@ -235,75 +245,14 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<QueryResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        await AcquireOutgoingReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
-        await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
-            LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
-        EnsureCurrentDefinition(plan.Table);
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
-        var indexes = GetLiveIndexes(plan.Table);
-        var rows = new List<(byte[] Record, object?[] Values)>();
-
+        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        var values = new List<object?[]>(plan.Rows.Count);
         foreach (var valueRow in plan.Rows)
         {
-            var values = new object?[plan.Table.Columns.Count];
-            var assigned = new bool[plan.Table.Columns.Count];
-
-            for (int i = 0; i < plan.TargetOrdinals.Count; i++)
-            {
-                int ordinal = plan.TargetOrdinals[i];
-                values[ordinal] = CoerceForColumn(evaluator.Evaluate(valueRow[i], Array.Empty<object?>()), plan.Table.Columns[ordinal]);
-                assigned[ordinal] = true;
-            }
-
-            for (int ordinal = 0; ordinal < values.Length; ordinal++)
-            {
-                if (!assigned[ordinal])
-                {
-                    values[ordinal] = ResolveDefault(plan.Table.Columns[ordinal]);
-                }
-            }
-
-            rows.Add((SqlRowCodec.Encode(plan.Table.ObjectId, plan.Table.Columns, values, statement.Transaction.Sequence), values));
+            cancellationToken.ThrowIfCancellationRequested();
+            values.Add(valueRow.Select(expression => evaluator.Evaluate(expression, Array.Empty<object?>())).ToArray());
         }
-
-        // Inserts need no row locks of their own (the rows do not exist yet); the
-        // intent lock taken above coordinates with table-grain DDL, and every
-        // unique key the statement will touch is locked below — before the apply
-        // gate — per the lock-ordering rule. Foreign keys add one class between
-        // the two: a shared lock on each matched parent row, so a concurrent
-        // parent delete cannot admit an orphan.
-        var references = new List<SqlParentReference>();
-        ValidateRows(plan.Table, rows.Select(row => row.Values).ToList(), statement, cancellationToken, references: references);
-        await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
-
-        var uniqueKeyHashes = new List<ulong>();
-        foreach (var (_, values) in rows)
-        {
-            CollectUniqueKeyHashes(indexes, plan.Table, values, uniqueKeyHashes);
-        }
-
-        await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
-
-        try
-        {
-            return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
-            {
-                foreach (var (record, values) in rows)
-                {
-                    var (pageId, slotIndex) = _storage.InsertRow(bracket, plan.Table.ObjectId, record);
-                    statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, pageId, slotIndex);
-
-                    await InsertIndexEntriesAsync(
-                        statement, indexes, plan.Table, values, SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
-                }
-
-                return (QueryResult)new SqlQueryResult(QueryResultStatus.Success, rows.Count);
-            }, durable: false, cancellationToken).ConfigureAwait(false);
-        }
-        catch (IndexUniqueViolationException exception)
-        {
-            throw TranslateUniqueViolation(plan.Table, exception);
-        }
+        return await ExecuteInsertRowsAsync(plan.Table, plan.TargetOrdinals, values, statement, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<QueryResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -313,7 +262,7 @@ internal sealed partial class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
+        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
         var indexes = GetLiveIndexes(plan.Table);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
 
@@ -420,7 +369,7 @@ internal sealed partial class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
+        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
         var targets = Scan(plan.Table, statement, cancellationToken).Where(row => evaluator.Matches(plan.Where, row.Values)).ToList();
 
         // Lock the directly targeted rows as one sorted batch before the cascade

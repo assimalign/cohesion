@@ -250,7 +250,7 @@ internal sealed partial class SqlPlanExecutor
         var columns = table.Columns.Where(column => !string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)).ToArray();
         foreach (var check in table.Constraints.Where(c => c.Kind == SqlCatalogConstraintKind.Check))
         {
-            SqlPlanner.ValidateExpression(ParseCheck(check.CheckExpression!), new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation));
+            SqlPlanner.ValidateExpression(ParseCheck(check.CheckExpression!), new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues));
         }
     }
 }

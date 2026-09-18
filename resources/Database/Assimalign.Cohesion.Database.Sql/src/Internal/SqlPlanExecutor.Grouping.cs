@@ -22,7 +22,7 @@ internal sealed partial class SqlPlanExecutor
     {
         await using var input = (QueryResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
         var sourceEvaluator = new SqlExpressionEvaluator(plan.SourceColumns, _parameters, plan.Bindings,
-            defaultCollation: _catalog.DefaultCollation);
+            defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
         var groups = new Dictionary<object?[], AggregateState[]>(new GroupKeyComparer(
             plan.Keys.Select(expression => sourceEvaluator.ResolveCollation(expression)).ToArray()));
         if (plan.Keys.Count == 0)
@@ -55,7 +55,7 @@ internal sealed partial class SqlPlanExecutor
         var aliasSources = plan.ValueOrdinals.Where(pair => pair.Value >= projectionStart)
             .ToDictionary(pair => pair.Key, pair => plan.Projections[pair.Value - projectionStart].Expression!);
         var evaluator = new SqlExpressionEvaluator(plan.SourceColumns, _parameters, plan.Bindings, plan.ValueOrdinals,
-            _catalog.DefaultCollation, aliasSources);
+            _catalog.DefaultCollation, aliasSources, _subqueryValues);
         var matches = new List<object?[]>();
         foreach (var (key, states) in groups)
         {

@@ -50,6 +50,10 @@ internal sealed partial class SqlPlanner
     }
 
     private SqlPlan PlanSelect(SqlSelectExpression select)
+        => PlanSubqueries(select);
+
+    /// <summary>Binds a SELECT whose subqueries have already been lowered to value slots.</summary>
+    private SqlPlan PlanSelectCore(SqlSelectExpression select)
     {
         if (select.From is null)
         {
@@ -62,11 +66,13 @@ internal sealed partial class SqlPlanner
         var bindings = select.Joins.Count > 0 ? BindJoin(select, table!) : null;
         var columns = bindings is null ? systemView?.Columns ?? table!.Columns
             : bindings.SelectMany(binding => binding.Table.Columns).ToArray();
-        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings, defaultCollation: _catalog.DefaultCollation);
+        var evaluatorBindings = bindings ?? (_subqueryDepth > 0 && table is not null
+            ? new[] { new SqlTableBinding(table, select.From, 0) } : null);
+        var evaluator = new SqlExpressionEvaluator(columns, _parameters, evaluatorBindings, defaultCollation: _catalog.DefaultCollation);
 
         if (bindings is not null)
         {
-            ValidateExpression(select.Joins[0].Condition!, evaluator);
+            ValidateExpression(select.Joins[0].Condition!, evaluator, _subqueryTypes);
         }
 
         if (select.Where is not null && ContainsAggregate(select.Where))
@@ -103,22 +109,21 @@ internal sealed partial class SqlPlanner
             }
             else
             {
-                ValidateExpression(column.Expression, evaluator);
+                ValidateExpression(column.Expression, evaluator, _subqueryTypes);
                 projections.Add(new SqlProjection(
                     column.Alias ?? $"column{projections.Count + 1}", null, column.Expression,
-                    column.Expression is SqlCollateExpression ? GroupExpressionType(column.Expression, columns, evaluator)
-                        : column.Expression is SqlCastExpression cast ? cast.TargetTypeInfo!.Type : DatabaseType.Null));
+                    GroupExpressionType(column.Expression, columns, evaluator)));
             }
         }
 
         if (select.Where is not null)
         {
-            ValidateExpression(select.Where, evaluator);
+            ValidateExpression(select.Where, evaluator, _subqueryTypes);
         }
 
         foreach (var orderBy in select.OrderBy)
         {
-            ValidateExpression(orderBy.Expression, evaluator);
+            ValidateExpression(orderBy.Expression, evaluator, _subqueryTypes);
         }
 
         if (bindings is not null)
@@ -491,16 +496,11 @@ internal sealed partial class SqlPlanner
         return Children(expression).Any(ReferencesAnyColumn);
     }
 
-    private SqlInsertPlan PlanInsert(SqlInsertExpression insert)
+    private SqlPlan PlanInsert(SqlInsertExpression insert)
     {
-        if (insert.SelectSource is not null)
+        if (insert.SelectSource is null && (insert.Values is null || insert.Values.Count == 0))
         {
-            throw new DatabaseException("INSERT ... SELECT is not supported by the executor yet.");
-        }
-
-        if (insert.Values is null || insert.Values.Count == 0)
-        {
-            throw new DatabaseException("INSERT requires a VALUES list.");
+            throw new DatabaseException("INSERT requires a VALUES list or SELECT source.");
         }
 
         var table = ResolveTable(insert.Table);
@@ -517,12 +517,21 @@ internal sealed partial class SqlPlanner
             foreach (string name in insert.Columns)
             {
                 int ordinal = FindColumnOrdinal(table, name);
+                if (ordinals.Contains(ordinal))
+                {
+                    throw new DatabaseException($"INSERT target column '{name}' is specified more than once.");
+                }
                 ordinals.Add(ordinal);
             }
             targetOrdinals = ordinals;
         }
 
-        foreach (var row in insert.Values)
+        if (insert.SelectSource is not null)
+        {
+            return PlanInsertSelect(table, targetOrdinals, insert.SelectSource);
+        }
+
+        foreach (var row in insert.Values!)
         {
             if (row.Count != targetOrdinals.Count)
             {
@@ -531,7 +540,7 @@ internal sealed partial class SqlPlanner
             }
         }
 
-        return new SqlInsertPlan(table, targetOrdinals, insert.Values);
+        return new SqlInsertPlan(table, targetOrdinals, insert.Values!);
     }
 
     private SqlUpdatePlan PlanUpdate(SqlUpdateExpression update)
@@ -788,8 +797,22 @@ internal sealed partial class SqlPlanner
         };
     }
 
-    internal static void ValidateExpression(SqlExpression expression, SqlExpressionEvaluator evaluator)
+    /// <summary>
+    /// Checks an expression the planner is about to bind.
+    /// </summary>
+    /// <param name="expression">The expression to validate.</param>
+    /// <param name="evaluator">The evaluator resolving column references.</param>
+    /// <param name="boundSubqueries">
+    /// Subquery nodes this statement has already bound to child plans. A subquery outside
+    /// that set sits in a position that does not run <see cref="PlanSubqueries"/> — an
+    /// UPDATE, DELETE, VALUES, CHECK, DEFAULT or LIMIT expression — and is rejected. Null
+    /// rejects every subquery, which is what the constraint validators want.
+    /// </param>
+    /// <exception cref="DatabaseException">The expression cannot be planned.</exception>
+    internal static void ValidateExpression(SqlExpression expression, SqlExpressionEvaluator evaluator,
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries = null)
     {
+        bool isBound = boundSubqueries is not null && boundSubqueries.ContainsKey(expression);
         switch (expression)
         {
             case SqlCollateExpression collate:
@@ -797,18 +820,24 @@ internal sealed partial class SqlPlanner
                 break;
             case SqlCastExpression { TargetTypeInfo: null } cast:
                 throw new DatabaseException($"CAST target '{cast.TargetType}' has not been resolved.");
-            case SqlSubqueryExpression or SqlExistsExpression:
-                throw new DatabaseException("Subqueries are not supported by the executor yet.");
+            case SqlSubqueryExpression or SqlExistsExpression when !isBound:
+                throw new DatabaseException("COHDBL001: Subqueries are supported only in SELECT expressions and INSERT ... SELECT.");
             case SqlColumnReferenceExpression reference:
                 evaluator.ResolveColumn(reference); // throws for unknown columns at plan time
                 break;
-            case SqlInExpression { Values: null }:
-                throw new DatabaseException("IN subqueries are not supported by the executor yet.");
+            case SqlInExpression { Values: null } when !isBound:
+                throw new DatabaseException("COHDBL001: IN subqueries are supported only in SELECT expressions and INSERT ... SELECT.");
+        }
+
+        // A bound subquery is its own scope, already planned and validated on its own terms.
+        if (isBound && expression is SqlSubqueryExpression or SqlExistsExpression)
+        {
+            return;
         }
 
         foreach (var child in Children(expression))
         {
-            ValidateExpression(child, evaluator);
+            ValidateExpression(child, evaluator, boundSubqueries);
         }
     }
 

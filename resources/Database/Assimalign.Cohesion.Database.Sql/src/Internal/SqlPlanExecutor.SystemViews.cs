@@ -15,7 +15,7 @@ internal sealed partial class SqlPlanExecutor
 {
     private QueryResult ExecuteSystemView(SqlSystemViewPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = new SqlExpressionEvaluator(plan.View.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
+        var evaluator = new SqlExpressionEvaluator(plan.View.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
         var matches = new List<object?[]>();
         statement.Metrics.AccessPath = "system-view";
 
@@ -45,7 +45,7 @@ internal sealed partial class SqlPlanExecutor
                 var projection = plan.Projections[i];
                 output[i] = projection.ColumnOrdinal is int ordinal
                     ? row[ordinal]
-                    : evaluator.Evaluate(projection.Expression!, row);
+                    : NormalizeGroupValue(evaluator.Evaluate(projection.Expression!, row), projection.Type);
             }
             projected.Add(output);
         }

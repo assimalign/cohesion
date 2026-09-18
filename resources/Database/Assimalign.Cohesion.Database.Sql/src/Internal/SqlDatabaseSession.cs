@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -296,8 +297,35 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     // Explicit Snapshot transactions capture at BEGIN even if their first metadata
     // SELECT comes later; read committed and auto-commit capture at statement start.
     private SqlCatalogSnapshot? CaptureSystemViewSnapshot(QueryRequest request)
-        => request is SqlQueryRequest { Statement.SqlExpression: SqlSelectExpression { From: { } from } } &&
-            SqlSystemViews.Find(from) is not null ? _executor.CaptureCatalogSnapshot() : null;
+        => request is SqlQueryRequest sql && UsesSystemView(sql.Statement.SqlExpression)
+            ? _executor.CaptureCatalogSnapshot() : null;
+
+    /// <summary>Captures metadata once for nested SELECTs and INSERT sources as well as the outer relation.</summary>
+    private static bool UsesSystemView(SqlQueryExpression query)
+    {
+        if (query is SqlInsertExpression { SelectSource: not null } insert)
+        {
+            return UsesSystemView(insert.SelectSource);
+        }
+        if (query is not SqlSelectExpression select)
+        {
+            return false;
+        }
+        return select.From is not null && SqlSystemViews.Find(select.From) is not null
+            || select.Columns.Any(column => UsesSystemViewExpression(column.Expression))
+            || select.Joins.Any(join => UsesSystemViewExpression(join.Condition))
+            || UsesSystemViewExpression(select.Where) || select.GroupBy.Any(UsesSystemViewExpression)
+            || UsesSystemViewExpression(select.Having) || select.OrderBy.Any(order => UsesSystemViewExpression(order.Expression));
+    }
+
+    private static bool UsesSystemViewExpression(SqlExpression? expression) => expression switch
+    {
+        null => false,
+        SqlSubqueryExpression scalar => UsesSystemView(scalar.Select),
+        SqlExistsExpression exists => UsesSystemView(exists.Subquery),
+        SqlInExpression { Subquery: not null } member => UsesSystemView(member.Subquery) || UsesSystemViewExpression(member.Operand),
+        _ => SqlPlanner.Children(expression).Any(UsesSystemViewExpression),
+    };
 
     private sealed record SqlTransactionScope(
         SqlDatabaseTransaction Transaction, IsolationLevel IsolationLevel, SqlCatalogSnapshot? CatalogSnapshot);

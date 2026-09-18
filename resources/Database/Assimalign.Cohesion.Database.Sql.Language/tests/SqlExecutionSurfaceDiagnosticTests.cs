@@ -92,21 +92,31 @@ public class SqlExecutionSurfaceDiagnosticTests
     [InlineData(SqlClauses.Subquery, "SELECT * FROM t WHERE EXISTS (SELECT id FROM u);", "SELECT")]
     [InlineData(SqlClauses.Subquery, "SELECT * FROM t WHERE NOT EXISTS (SELECT id FROM u);", "SELECT")]
     [InlineData(SqlClauses.Subquery, "SELECT (SELECT id FROM u) FROM t;", "SELECT")]
-    [InlineData(SqlClauses.Subquery, "SELECT * FROM (SELECT id FROM u) derived;", "SELECT")]
     [InlineData(SqlClauses.Subquery, "INSERT INTO t (id) SELECT id FROM u;", "SELECT")]
-    [InlineData(SqlClauses.Subquery, "UPDATE t SET id = (SELECT id FROM u);", "SELECT")]
-    [InlineData(SqlClauses.Subquery, "DELETE FROM t WHERE id IN (SELECT id FROM u);", "SELECT")]
     [InlineData(SqlClauses.Subquery, "SELECT t.id FROM t JOIN u ON t.id = u.id WHERE u.id IN (SELECT id FROM v);", "SELECT")]
     [InlineData(SqlClauses.Subquery, "SELECT id FROM t GROUP BY id HAVING id IN (SELECT id FROM u);", "SELECT")]
-    public void Parse_ClauseAwaitingExecution_ReportsModelDiagnostic(string clause, string sql, string locationText)
+    public void Parse_ExecutableSubquery_ReportsNoError(string clause, string sql, string locationText)
     {
-        SqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();
+        SqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();
+        sql.ShouldContain(locationText);
+
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+
+        statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Subquery: Reports retained execution boundaries")]
+    [InlineData("SELECT * FROM (SELECT id FROM u) derived;", "derived-table SUBQUERY", "SELECT")]
+    [InlineData("UPDATE t SET id = (SELECT id FROM u);", "SUBQUERY in UPDATE", "SELECT")]
+    [InlineData("DELETE FROM t WHERE id IN (SELECT id FROM u);", "SUBQUERY in DELETE", "SELECT")]
+    public void Parse_UnsupportedSubquery_ReportsModelDiagnostic(string sql, string form, string locationText)
+    {
 
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
         var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
-        diagnostic.Message.ShouldBe($"The {clause} clause is not supported by the SQL surface of this database model.");
+        diagnostic.Message!.ShouldContain(form);
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(locationText);
         statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
     }

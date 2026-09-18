@@ -59,15 +59,15 @@ public class SqlLanguageProfileTests
 
     [Theory]
     [InlineData(SqlClauses.Subquery, "SELECT * FROM t WHERE id IN (SELECT id FROM u);")]
-    public void Parse_ClauseAwaitingExecution_IsNotDeclaredAndReportsDiagnostic(string clause, string sql)
+    public void Parse_ExecutableSubquery_IsDeclaredAndReportsNoError(string clause, string sql)
     {
-        // This case previously asserted parser-only support; execution remains MVP work (#1021).
-        SqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();
+        // Executable forms are also measured by the live SQL conformance suite (#1021).
+        SqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();
 
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
-        statement.Diagnostics.ShouldContain(diagnostic =>
-            diagnostic.Code == "COHDBL001" && diagnostic.Severity == DiagnosticSeverity.Error);
+        statement.Diagnostics.ShouldNotContain(diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Error);
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Profile advertises only executable join types")]

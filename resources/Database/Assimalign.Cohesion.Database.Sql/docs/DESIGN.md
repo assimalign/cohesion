@@ -4,6 +4,42 @@ The SQL engine (area architecture: [resources/Database/DESIGN.md](../../../../do
 §3.3): parse (`Sql.Language`) → plan (`SqlPlanner`) → execute (`SqlPlanExecutor`)
 against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
 
+## Subquery and insert-source operators (#1021)
+
+`SqlPlanner.Subqueries.cs` binds each uncorrelated child SELECT in its own local
+scope and lowers its use sites to typed slots. `SqlSubqueryPlan` owns those child
+plans and the enclosing relation plan. `SqlPlanExecutor.Subqueries.cs` executes
+each child with the enclosing `SqlStatementContext`, materializes its results,
+and substitutes typed constants or an IN value list before running the enclosing
+plan. Expression evaluation never opens a query, session, transaction, or read
+view. The memoized expression rewrite preserves grouping's expression-ordinal
+bindings, including subqueries in HAVING and aggregate arguments.
+
+Scalar children require one output column and at most one row; an empty result
+is a typed null. IN children require one column and preserve SQL three-valued
+membership, including unknown for nonmatches against a null-containing set and
+false for membership in an empty set. EXISTS tests row existence. Output types
+and string collations cross the materialization boundary. Nested system-view
+queries trigger one statement catalog capture, just like outer system views.
+
+`SqlInsertSelectPlan` holds the destination binding and a query source. Its
+executor reads the entire source before staging any destination writes, so
+self-inserts read the original statement snapshot exactly once. Source width and
+declared type compatibility are validated before execution, including empty
+sources; value conversions use the literal insert rules. Both insert forms call
+the same preparation, default/nullability/CHECK/FK/UNIQUE validation, locking,
+index maintenance and transactional apply path.
+
+Correlation is deliberately excluded: qualified outer references receive
+`COHDBL001` in language validation, and catalog binding rejects any nested column
+that cannot resolve in its local scope. Parsing and planning enforce at most 32
+subquery levels. UPDATE/DELETE, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
+subqueries, quantified comparisons, derived tables, CTEs and lateral joins remain
+outside the profile. SELECT continues to require FROM. Internal friend access
+from the language assembly permits AST lowering without extending public
+interfaces. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
+for the exact supported forms and semantics.
+
 ## Compiled-schema provisioning
 
 `ISqlDatabase` implements the root `IDatabaseSchemaProvisioner` seam. Before a

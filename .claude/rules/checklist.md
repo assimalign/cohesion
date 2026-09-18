@@ -34,6 +34,7 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] New public APIs are interfaces, with internal implementations (unless a documented deviation applies — see the exception protocol in `deviations.md`)
 - [ ] Public APIs have complete XML documentation (`<summary>`, `<param>`, `<returns>`, `<exception>`)
 - [ ] Internal types are `internal`, not `public`
+- [ ] No new `InternalsVisibleTo` between two shipped libraries — tests only (see `general-rules.md`)
 - [ ] No global usings or `<Using Include="..." />` items in csproj files
 - [ ] Using directives ordered: System, third-party, Cohesion, blank line before code
 - [ ] Code follows the existing patterns established in its category/area

@@ -353,7 +353,7 @@ internal sealed partial class SqlPlanExecutor
             if (constraint.Kind == SqlCatalogConstraintKind.Check)
             {
                 var expression = ParseCheck(constraint.CheckExpression!);
-                var evaluator = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation);
+                var evaluator = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
                 foreach (var row in rows)
                 {
                     // SQL UNKNOWN satisfies CHECK; only FALSE rejects a row.
@@ -588,7 +588,7 @@ internal sealed partial class SqlPlanExecutor
             if (definition.Kind == SqlConstraintKind.Check)
             {
                 var expression = definition.CheckExpression ?? ParseCheck(definition.CheckExpressionText!);
-                SqlPlanner.ValidateExpression(expression, new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation));
+                SqlPlanner.ValidateExpression(expression, new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues));
                 ValidateCheckSyntax(expression, table, requireBoolean: true);
                 result.Add(new SqlCatalogConstraint(name, SqlCatalogConstraintKind.Check, definition.Columns,
                     checkExpression: definition.CheckExpressionText));
@@ -642,7 +642,8 @@ internal sealed partial class SqlPlanExecutor
     }
     private static void ValidateCheckSyntax(SqlExpression expression, SqlCatalogTable table, bool requireBoolean)
     {
-        if (expression is SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlCastExpression or SqlStarExpression)
+        if (expression is SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlCastExpression or SqlStarExpression
+            or SqlInExpression { Subquery: not null })
         {
             throw new DatabaseException("CHECK requires deterministic row expressions without parameters, subqueries, or casts.");
         }

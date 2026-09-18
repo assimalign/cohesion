@@ -134,7 +134,7 @@ public sealed partial class SqlQueryParser
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "LIMIT"))
         {
             Advance(ref lexer);
-            limit = ParseExpression(ref lexer);
+            limit = ParsePaginationExpression(ref lexer);
         }
 
         // OFFSET
@@ -142,7 +142,7 @@ public sealed partial class SqlQueryParser
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "OFFSET"))
         {
             Advance(ref lexer);
-            offset = ParseExpression(ref lexer);
+            offset = ParsePaginationExpression(ref lexer);
         }
 
         // Consume trailing semicolon (don't advance past it so ParseCore picks it up)

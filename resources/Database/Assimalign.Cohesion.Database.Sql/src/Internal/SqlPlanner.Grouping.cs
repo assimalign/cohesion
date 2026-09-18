@@ -21,11 +21,11 @@ internal sealed partial class SqlPlanner
             {
                 throw new DatabaseException("Aggregate functions are not allowed in GROUP BY.");
             }
-            ValidateExpression(key, evaluator);
+            ValidateExpression(key, evaluator, _subqueryTypes);
         }
         if (select.Where is not null)
         {
-            ValidateExpression(select.Where, evaluator);
+            ValidateExpression(select.Where, evaluator, _subqueryTypes);
         }
 
         var aggregates = new List<SqlFunctionCallExpression>();
@@ -100,7 +100,7 @@ internal sealed partial class SqlPlanner
                 }
                 if (argument is not SqlStarExpression)
                 {
-                    ValidateExpression(argument, evaluator);
+                    ValidateExpression(argument, evaluator, _subqueryTypes);
                 }
                 if (call.FunctionName.ToUpperInvariant() is "SUM" or "AVG")
                 {
@@ -137,7 +137,7 @@ internal sealed partial class SqlPlanner
             {
                 throw new DatabaseException("SELECT * is not allowed in a grouped query; project GROUP BY expressions or aggregate functions.");
             }
-            ValidateExpression(expression, evaluator);
+            ValidateExpression(expression, evaluator, _subqueryTypes);
             foreach (var child in Children(expression))
             {
                 Bind(child);
@@ -153,10 +153,14 @@ internal sealed partial class SqlPlanner
     /// Compares expression structure after column binding. Qualified and bare
     /// references to the same column match; different operators never do.
     /// </summary>
-    private static bool SameGroupExpression(SqlExpression left, SqlExpression right, SqlExpressionEvaluator evaluator)
+    private bool SameGroupExpression(SqlExpression left, SqlExpression right, SqlExpressionEvaluator evaluator)
     {
         bool same = (left, right) switch
         {
+            // Two subqueries are the same group key only when they are the same node;
+            // structurally identical children do not make separate queries one key.
+            (SqlSubqueryExpression a, SqlSubqueryExpression b) => ReferenceEquals(a, b),
+            (SqlExistsExpression a, SqlExistsExpression b) => ReferenceEquals(a, b),
             (SqlColumnReferenceExpression a, SqlColumnReferenceExpression b) => evaluator.ResolveColumn(a) == evaluator.ResolveColumn(b),
             (SqlLiteralExpression a, SqlLiteralExpression b) => a.LiteralType == b.LiteralType && a.Value == b.Value,
             (SqlParameterExpression a, SqlParameterExpression b) => a.ParameterName == b.ParameterName,
@@ -176,22 +180,25 @@ internal sealed partial class SqlPlanner
                 && (a.ElseResult is null) == (b.ElseResult is null) && a.WhenClauses.Count == b.WhenClauses.Count,
             _ => false,
         };
-        return same && Children(left).SequenceEqual(Children(right), new GroupExpressionComparer(evaluator));
+        return same && Children(left).SequenceEqual(Children(right), new GroupExpressionComparer(this, evaluator));
     }
 
     /// <summary>Structural equality is used for binding only, without expression hashing.</summary>
-    private sealed class GroupExpressionComparer(SqlExpressionEvaluator evaluator) : IEqualityComparer<SqlExpression>
+    private sealed class GroupExpressionComparer(SqlPlanner planner, SqlExpressionEvaluator evaluator) : IEqualityComparer<SqlExpression>
     {
         public bool Equals(SqlExpression? left, SqlExpression? right)
-            => left is not null && right is not null && SameGroupExpression(left, right, evaluator);
+            => left is not null && right is not null && planner.SameGroupExpression(left, right, evaluator);
         public int GetHashCode(SqlExpression expression) => 0;
     }
 
     /// <summary>Declares aggregate result types even when no source rows exist.</summary>
-    private static DatabaseType GroupExpressionType(SqlExpression expression, IReadOnlyList<SqlCatalogColumn> columns,
+    private DatabaseType GroupExpressionType(SqlExpression expression, IReadOnlyList<SqlCatalogColumn> columns,
         SqlExpressionEvaluator evaluator) => expression switch
     {
         SqlColumnReferenceExpression column => columns[evaluator.ResolveColumn(column)].Type.Type,
+        SqlSubqueryExpression or SqlExistsExpression or SqlInExpression { Subquery: not null }
+            when _subqueryTypes.TryGetValue(expression, out var subqueryType) => subqueryType,
+        SqlConstantExpression constant => constant.Type,
         SqlCollateExpression collate => GroupExpressionType(collate.Operand, columns, evaluator),
         SqlCastExpression cast => cast.TargetTypeInfo!.Type,
         SqlParameterExpression parameter => GroupValueType(evaluator.Evaluate(parameter, [])),
