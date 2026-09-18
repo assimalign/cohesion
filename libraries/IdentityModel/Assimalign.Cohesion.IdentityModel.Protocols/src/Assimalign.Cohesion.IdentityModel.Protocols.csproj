@@ -9,7 +9,6 @@
     <!-- Protocol contract branches build on these abstractions and share the internal
          endpoint-validation helper. Add each new protocol assembly here. -->
     <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect" />
-    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.Saml" />
     <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.Tests" />
   </ItemGroup>
 </Project>
