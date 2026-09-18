@@ -18,13 +18,16 @@ internal sealed class SqlExpressionEvaluator
     private readonly IReadOnlyList<SqlCatalogColumn> _columns;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
     private readonly IReadOnlyList<SqlTableBinding>? _bindings;
+    private readonly IReadOnlyDictionary<SqlExpression, int>? _valueOrdinals;
 
     internal SqlExpressionEvaluator(IReadOnlyList<SqlCatalogColumn> columns, IReadOnlyDictionary<string, object?>? parameters,
-        IReadOnlyList<SqlTableBinding>? bindings = null)
+        IReadOnlyList<SqlTableBinding>? bindings = null,
+        IReadOnlyDictionary<SqlExpression, int>? valueOrdinals = null)
     {
         _columns = columns;
         _parameters = parameters;
         _bindings = bindings;
+        _valueOrdinals = valueOrdinals;
     }
 
     /// <summary>
@@ -43,6 +46,13 @@ internal sealed class SqlExpressionEvaluator
 
     internal object? Evaluate(SqlExpression expression, object?[] row)
     {
+        // A grouping plan binds complete key expressions and aggregate calls
+        // to result slots; scalar expressions compose over those values.
+        if (_valueOrdinals is not null && _valueOrdinals.TryGetValue(expression, out int ordinal))
+        {
+            return row[ordinal];
+        }
+
         return expression switch
         {
             SqlLiteralExpression literal => EvaluateLiteral(literal),

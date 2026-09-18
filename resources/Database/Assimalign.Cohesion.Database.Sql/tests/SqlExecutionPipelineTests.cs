@@ -336,14 +336,14 @@ public class SqlExecutionPipelineTests : IDisposable
         joined[1].ShouldBe(new object?[] { 2L, "Grace", 45, 2L, "Grace", 45 });
         joined[2].ShouldBe(new object?[] { 3L, "Alan", 41, 3L, "Alan", 41 });
 
-        // GROUP BY remains a profile diagnostic (#1020).
-        (await Should.ThrowAsync<DatabaseParseException>(async () =>
-            await Sql(session, "SELECT age FROM users GROUP BY age;")))
-            .Message.ShouldBe("SQL parse error COHDBL001: The GROUP BY clause is not supported by the SQL surface of this database model.");
-
-        (await Should.ThrowAsync<DatabaseException>(async () =>
-            await Sql(session, "SELECT SUM(age) FROM users;")))
-            .Message.ShouldContain("Aggregate", Case.Sensitive);
+        // The former unsupported GROUP BY and SUM cases now execute (#1020).
+        var grouped = await Rows(session, "SELECT age FROM users GROUP BY age ORDER BY age;");
+        grouped.Count.ShouldBe(3);
+        grouped[0].ShouldBe(new object?[] { 36 });
+        grouped[1].ShouldBe(new object?[] { 41 });
+        grouped[2].ShouldBe(new object?[] { 45 });
+        (await Rows(session, "SELECT SUM(age) FROM users;"))
+            .ShouldHaveSingleItem().ShouldBe(new object?[] { 122m });
 
         (await Should.ThrowAsync<DatabaseException>(async () =>
             await Sql(session, "SELECT * FROM missing_table;")))

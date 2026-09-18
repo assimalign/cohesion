@@ -29,12 +29,6 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        if (plan.IsCountStar)
-        {
-            var countColumns = new[] { new QueryColumn { Name = plan.Projections[0].Name, Ordinal = 0, Type = DatabaseType.Int64 } };
-            return new SqlMaterializedResultSet(countColumns, new List<object?[]> { new object?[] { (long)matches.Count } });
-        }
-
         // Match stored-table SELECT semantics: sort against the whole relation,
         // project, remove duplicate projected rows, and finally apply the window.
         if (plan.OrderBy.Count > 0)

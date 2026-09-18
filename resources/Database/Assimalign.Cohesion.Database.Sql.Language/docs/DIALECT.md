@@ -10,14 +10,16 @@ enumerates the profile and fails if any advertised clause lacks a passing case.
 
 ## Statement matrix
 
-Phase 15 measures **29 of 48 declared clauses** against the live SQL engine.
+Phase 16 measures **31 of 48 declared clauses** against the live SQL engine.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
 Phase 14 restores `CAST` with actual conversion, type metadata, and wire execution
 coverage (#1022). Phase 15 restores `JOIN` for two stored-table inner joins with
-an `ON` predicate, including server/client execution (#1019).
+an `ON` predicate, including server/client execution (#1019). Phase 16 restores
+`GROUP BY` and `HAVING`, including aggregation over the supported inner join
+and server/client execution (#1020).
 
-The **19 excluded clauses** are `GROUP BY`, `HAVING`, and `SUBQUERY` plus set operations (`UNION`,
+The **17 excluded clauses** are `SUBQUERY` plus set operations (`UNION`,
 `INTERSECT`, `EXCEPT`), CTEs (`WITH`, `RECURSIVE`), window clauses (`WINDOW`,
 `OVER`, `PARTITION`), views (`CREATE VIEW`, `DROP VIEW`), `NATURAL`, `USING`,
 `TOP`, `ALL`, `FETCH`, and `RETURNING`. Counts describe named clauses, not
@@ -25,7 +27,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
-| `SELECT` | Supported subset, measured | One stored table or virtual system relation, or a two stored-table `INNER JOIN ... ON`; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. The only aggregate shape is a lone `COUNT(*)`, optionally aliased and filtered; `COUNT(column)`, `COUNT(DISTINCT ...)`, `SUM`/`AVG`/`MIN`/`MAX`, and mixed/nested aggregate projections do not execute (#1020). `SELECT` without `FROM` is rejected by the planner. |
+| `SELECT` | Supported subset, measured | One stored table or virtual system relation, or a two stored-table `INNER JOIN ... ON`; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, grouping, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, and `MAX` execute in grouped and ungrouped queries. See the aggregate contract below. `SELECT` without `FROM` is rejected by the planner. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list and multi-row literal/scalar `VALUES`; `INSERT ... SELECT` reports `COHDBL001` (#1021). |
 | `UPDATE` | Supported | multi-column `SET`, `WHERE` |
 | `DELETE` | Supported | optional `WHERE` |
@@ -35,10 +37,10 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
 | `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
-| `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys with ASC/DESC execute. Projection aliases are not resolved and produce an unknown-column error. Integer keys are evaluated as constants, **not select-list ordinals**; `ORDER BY 1 DESC` does not sort by the first projection. Alias/ordinal ordering remains MVP work (#1024). |
+| `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys with ASC/DESC execute. Grouped/aggregate queries also accept aggregate expressions and standalone projection aliases. Other projection aliases, including aliases nested inside ordering expressions, are not resolved. Integer keys are evaluated as constants, **not select-list ordinals**; `ORDER BY 1 DESC` does not sort by the first projection. General alias/ordinal ordering remains MVP work (#1024). |
 | `CAST` | Supported subset, measured | Exact signed integer, decimal, boolean, and string conversions in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
 | `JOIN` | Supported subset, measured | Two stored-table `INNER JOIN ... ON` or bare `JOIN ... ON`, with index assistance where the mandatory equality predicate matches an applicable secondary-index prefix. `LEFT [OUTER]`, `RIGHT [OUTER]`, `FULL [OUTER]`, `CROSS`, additional joins beyond two tables, joins without `ON`, comma joins, and joins of virtual system relations report `COHDBL001`. See the precise contract below. |
-| `GROUP BY` / `HAVING` | Recognized, not supported | `COHDBL001`; grouping and broader aggregates remain #1020. |
+| `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported two-table inner joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
 | Subqueries / `INSERT ... SELECT` | Recognized, not supported | Scalar, `IN`/`NOT IN`, `EXISTS`/`NOT EXISTS`, derived-table, correlated, and insert-source queries report `COHDBL001` (#1021). Literal `IN` lists remain supported. |
 | `TOP` / `SELECT ALL` / `FETCH` | Recognized, not supported | row-limit and select modifiers rejected with `COHDBL001` |
 | DML `RETURNING` | Recognized, not supported | rejected with `COHDBL001` |
@@ -69,8 +71,8 @@ FROM usr.Users INNER JOIN usr.UsersProfile ON usr.Users.Id = usr.UsersProfile.Us
 `ON` evaluates for each candidate pair under the same statement MVCC snapshot
 for both inputs. Only TRUE matches; FALSE and UNKNOWN do not. Matching pairs
 preserve multiplicity, and an empty input produces no joined rows. The result
-composes with the existing scalar projections, `WHERE`, `DISTINCT`, `ORDER BY`,
-`LIMIT`, and `OFFSET` surface. Without `ORDER BY`, row order is unspecified;
+composes with scalar projections, `WHERE`, `DISTINCT`, `GROUP BY`, `HAVING`,
+aggregates, `ORDER BY`, `LIMIT`, and `OFFSET`. Without `ORDER BY`, row order is unspecified;
 callers requiring stable paging must provide a sufficient ordering key.
 
 Column references can be unqualified, table/alias-qualified, or schema/table-qualified.
@@ -103,6 +105,64 @@ comma joins, and joins beyond two tables do not execute and report `COHDBL001`.
 Joins involving `INFORMATION_SCHEMA` or `COHESION_SCHEMA` are also excluded.
 No outer-join null-extension behavior is advertised. These are explicit
 ISO/IEC 9075 subset boundaries, not additional named clauses in the 48-clause count.
+
+## Grouping and aggregate functions (#1020)
+
+Grouping is a separate execution stage over a stored table, a virtual system
+relation, or the supported two-table `INNER JOIN ... ON`. `WHERE` first filters
+individual input rows. `GROUP BY` then forms one row per distinct tuple of one
+or more scalar expressions. Aggregate functions consume the surviving rows in
+each group; `HAVING` filters the completed groups and retains only TRUE results.
+`ORDER BY`, `LIMIT`, and `OFFSET` operate on the resulting groups. This order
+applies equally through `SqlDatabaseServer` and the SQL client.
+
+`COUNT(*)`, `COUNT(expr)`, `SUM(expr)`, `AVG(expr)`, `MIN(expr)`, and `MAX(expr)`
+work with and without `GROUP BY`, including multiple aggregate projections and
+scalar expressions containing aggregate results. A column reference outside
+an aggregate must be a grouping expression, or part of an expression derived
+from grouped columns. An ungrouped source column in a projection, `HAVING`, or
+`ORDER BY` is a planning error, even when the input is empty; the executor never
+chooses an arbitrary row's value. Aggregate arguments cannot contain another
+aggregate, and aggregates cannot occur in `WHERE`, `JOIN ... ON`, or `GROUP BY`.
+
+| Aggregate | NULL and empty-input behavior | Result type |
+|---|---|---|
+| `COUNT(*)` | Counts every input row, including rows containing only NULLs. Empty input returns zero. | Nonnullable `Int64` |
+| `COUNT(expr)` | Counts only non-NULL evaluated arguments. All-NULL or empty input returns zero. | Nonnullable `Int64` |
+| `SUM(expr)` | Ignores NULL arguments. All-NULL or empty input returns NULL. | Nullable `Decimal` |
+| `AVG(expr)` | Ignores NULL arguments in both the sum and divisor. All-NULL or empty input returns NULL. | Nullable `Decimal`, including integer input |
+| `MIN(expr)` / `MAX(expr)` | Ignore NULL arguments. All-NULL or empty input returns NULL. | Nullable argument type |
+
+An ungrouped aggregate has one implicit group, so an empty input produces one
+row containing the zero/NULL results above, subject to `HAVING` and pagination.
+An explicit `GROUP BY` over empty input produces no groups and no result rows.
+NULL grouping keys compare equal for grouping. Strings currently group with
+ordinal, case-sensitive equality; per-column collation metadata and collation
+execution are pending, so case-insensitive grouping is not advertised.
+
+`SUM` and `AVG` accept signed integers, Decimal, Float32, and Float64. Numeric
+arguments are converted to `System.Decimal` before accumulation; approximate
+inputs follow the runtime floating-point-to-Decimal conversion. Non-numeric
+arguments, non-finite approximate values, and numeric overflow are errors.
+`SUM` always returns Decimal. `AVG` divides the Decimal sum by the non-NULL
+Int64 count using `System.Decimal` division: the nearest representable Decimal,
+with midpoint ties rounded to even and up to 28 fractional digits. Thus integer
+inputs 2 and 5 have Decimal average 3.5; integer truncation is never used.
+Neither operation promises an arbitrary-precision result or fixed output scale.
+The in-process and wire result metadata use the same base types as these values.
+Numeric `CASE`/`COALESCE` alternatives in grouped projections use a common
+numeric result type; incompatible nonnumeric alternatives are planning errors.
+
+Aggregate expressions and standalone output aliases can be used as `ORDER BY`
+keys in grouped/aggregate queries. Aliases inside larger ordering expressions,
+aliases in `GROUP BY` or `HAVING`, and select-list ordinal ordering are outside
+this subset; use the source/grouping expression or repeat the aggregate.
+
+`DISTINCT` and explicit `ALL` inside aggregates, aggregate `FILTER`, in-aggregate
+`ORDER BY`, empty grouping sets (`GROUP BY ()`), `GROUPING SETS`, `ROLLUP`, `CUBE`, `GROUPING`/`GROUPING_ID`, window
+functions and clauses, and ordered-set `WITHIN GROUP` aggregates are excluded
+and report `COHDBL001`. Top-level `SELECT DISTINCT` remains available. These
+boundaries do not add named clauses to the 48-clause denominator.
 
 ## System-view matrix (C1)
 
@@ -143,8 +203,8 @@ Unknown or inapplicable values are null; `CHARACTER_OCTET_LENGTH` is null becaus
 the catalog stores no character-set byte bound. `COLUMN_DEFAULT` is SQL literal
 text, including escaped quotes for string defaults, or null when absent.
 
-Projection, aliases, parameters, `WHERE`, `ORDER BY`, `DISTINCT`, a lone
-`COUNT(*)`, `LIMIT`, and `OFFSET` follow the engine's existing SELECT surface.
+Projection, aliases, parameters, `WHERE`, `ORDER BY`, `DISTINCT`, aggregation,
+`LIMIT`, and `OFFSET` follow the engine's existing SELECT surface.
 The supported subsets above apply equally to these relations. A client
 can issue, for example:
 
@@ -171,8 +231,8 @@ Precedence, low to high: `OR` < `AND` < `NOT` < comparison (`=`, `<>`, `<`, `>`,
 primary. Executable primary forms include literals, parameters (`@name`, `$1`),
 column references, supported function calls, simple/searched `CASE`, and
 parenthesized expressions and `CAST` within the conversion contract below.
-Subqueries retain syntax trees for tooling but carry `COHDBL001` and cannot execute. SQL aggregate support is limited to a
-lone `COUNT(*)` projection. `~` is parsed but not evaluated; it is outside the
+Subqueries retain syntax trees for tooling but carry `COHDBL001` and cannot execute.
+SQL aggregates follow the grouping and aggregate contract below. `~` is parsed but not evaluated; it is outside the
 executable scalar subset.
 
 ## Literals
@@ -272,7 +332,8 @@ storage coercion; nested arithmetic therefore sees the converted numeric value.
 
 The profile's function list is lexical vocabulary, not an execution claim and
 not part of the 48-clause denominator. Executable scalar functions are `COALESCE`,
-`UPPER`, `LOWER`, `LENGTH`, and `ABS`; aggregate support is only a lone `COUNT(*)`.
+`UPPER`, `LOWER`, `LENGTH`, and `ABS`; supported aggregates are `COUNT`, `SUM`,
+`AVG`, `MIN`, and `MAX`, under the contract below.
 Other parsed calls can still fail in planning/evaluation and must not be inferred
 to work from a supported `SELECT`. Recognized names include aggregates `COUNT`,
 `SUM`, `AVG`, `MIN`, `MAX`; null handling `COALESCE`, `NULLIF`; strings `TRIM`,
@@ -288,7 +349,7 @@ function names are lexed but not supported (see the statement matrix).
 | `COHDBL001` | Error | Recognized clause is not supported by the SQL model surface |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed transaction-control, JOIN, CAST, or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, or constraint/DDL syntax |
 | `SQL0004` | Error | Unknown CAST target type |
 | `SQL0005` | Error | Unsupported CAST target or invalid target parameters |
 | `SQL0100` | Information | Statement does not end with `;` |

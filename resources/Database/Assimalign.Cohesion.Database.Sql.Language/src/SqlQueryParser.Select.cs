@@ -72,12 +72,26 @@ public sealed partial class SqlQueryParser
             {
                 Advance(ref lexer);
             }
-
-            groupBy.Add(ParseExpression(ref lexer));
-            while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
+            else
             {
+                AddSyntaxDiagnostic(ref lexer, "Expected BY after GROUP.");
+            }
+
+            while (true)
+            {
+                if (IsAtEnd(ref lexer) || lexer.Current.Type is TokenType.Semicolon or TokenType.RightParen or TokenType.Comma ||
+                    IsStatementBoundaryKeyword(ref lexer))
+                {
+                    AddSyntaxDiagnostic(ref lexer, "Expected a grouping expression after GROUP BY or ','.");
+                    break;
+                }
+
+                groupBy.Add(ParseGroupingExpression(ref lexer));
+                if (IsAtEnd(ref lexer) || lexer.Current.Type != TokenType.Comma)
+                {
+                    break;
+                }
                 Advance(ref lexer);
-                groupBy.Add(ParseExpression(ref lexer));
             }
         }
 
@@ -86,7 +100,15 @@ public sealed partial class SqlQueryParser
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "HAVING"))
         {
             Advance(ref lexer);
-            having = ParseExpression(ref lexer);
+            if (IsAtEnd(ref lexer) || lexer.Current.Type is TokenType.Semicolon or TokenType.RightParen ||
+                IsStatementBoundaryKeyword(ref lexer))
+            {
+                AddSyntaxDiagnostic(ref lexer, "Expected a predicate after HAVING.");
+            }
+            else
+            {
+                having = ParseExpression(ref lexer);
+            }
         }
 
         // ORDER BY

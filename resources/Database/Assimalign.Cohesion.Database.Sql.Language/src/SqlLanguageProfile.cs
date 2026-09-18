@@ -77,6 +77,8 @@ public static class SqlLanguageProfile
         SqlClauses.From,
         SqlClauses.Join,
         SqlClauses.Where,
+        SqlClauses.GroupBy,
+        SqlClauses.Having,
         SqlClauses.OrderBy,
         SqlClauses.Limit,
         SqlClauses.Offset,

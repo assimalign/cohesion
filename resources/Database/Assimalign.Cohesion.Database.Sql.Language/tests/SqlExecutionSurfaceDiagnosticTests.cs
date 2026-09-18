@@ -70,11 +70,23 @@ public class SqlExecutionSurfaceDiagnosticTests
         statement.Diagnostics.ShouldContain(item => item.Code == "SQL0003");
     }
 
-    [Theory]
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Grouping: Restores executable grouping clauses")]
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;", "GROUP BY")]
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t group /* trivia */ by id;", "group /* trivia */ by")]
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id HAVING COUNT(*) > 0;", "GROUP BY")]
     [InlineData(SqlClauses.Having, "SELECT id FROM t HAVING id > 0;", "HAVING")]
+    [InlineData(SqlClauses.GroupBy, "SELECT t.id FROM t JOIN u ON t.id = u.id GROUP BY t.id;", "GROUP BY")]
+    public void Parse_GroupingClause_ReportsNoError(string clause, string sql, string clauseText)
+    {
+        SqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();
+        sql.ShouldContain(clauseText);
+
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+
+        statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Theory]
     [InlineData(SqlClauses.Subquery, "SELECT * FROM t WHERE id IN (SELECT id FROM u);", "SELECT")]
     [InlineData(SqlClauses.Subquery, "SELECT * FROM t WHERE id NOT IN (SELECT id FROM u);", "SELECT")]
     [InlineData(SqlClauses.Subquery, "SELECT * FROM t WHERE EXISTS (SELECT id FROM u);", "SELECT")]
@@ -84,8 +96,8 @@ public class SqlExecutionSurfaceDiagnosticTests
     [InlineData(SqlClauses.Subquery, "INSERT INTO t (id) SELECT id FROM u;", "SELECT")]
     [InlineData(SqlClauses.Subquery, "UPDATE t SET id = (SELECT id FROM u);", "SELECT")]
     [InlineData(SqlClauses.Subquery, "DELETE FROM t WHERE id IN (SELECT id FROM u);", "SELECT")]
-    [InlineData(SqlClauses.GroupBy, "SELECT t.id FROM t JOIN u ON t.id = u.id GROUP BY t.id;", "GROUP BY")]
     [InlineData(SqlClauses.Subquery, "SELECT t.id FROM t JOIN u ON t.id = u.id WHERE u.id IN (SELECT id FROM v);", "SELECT")]
+    [InlineData(SqlClauses.Subquery, "SELECT id FROM t GROUP BY id HAVING id IN (SELECT id FROM u);", "SELECT")]
     public void Parse_ClauseAwaitingExecution_ReportsModelDiagnostic(string clause, string sql, string locationText)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();

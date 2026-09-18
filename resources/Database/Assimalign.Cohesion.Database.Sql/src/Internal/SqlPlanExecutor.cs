@@ -51,6 +51,8 @@ internal sealed partial class SqlPlanExecutor
     {
         switch (plan)
         {
+            case SqlGroupPlan group:
+                return await ExecuteGroupAsync(group, statement, cancellationToken).ConfigureAwait(false);
             case SqlSystemViewPlan systemView:
                 return ExecuteSystemView(systemView, statement, cancellationToken);
             case SqlSelectPlan select:
@@ -103,20 +105,14 @@ internal sealed partial class SqlPlanExecutor
         }
 
         return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-            plan.IsDistinct, plan.IsCountStar, evaluator);
+            plan.IsDistinct, evaluator);
     }
 
     /// <summary>Applies the common SELECT projection, ordering, distinctness and window.</summary>
     private static QueryResult MaterializeSelect(List<object?[]> matches, IReadOnlyList<SqlProjection> projections,
         IReadOnlyList<SqlOrderByColumn> orderBy, long? limit, long? offset,
-        bool isDistinct, bool isCountStar, SqlExpressionEvaluator evaluator)
+        bool isDistinct, SqlExpressionEvaluator evaluator)
     {
-        if (isCountStar)
-        {
-            var countColumns = new[] { new QueryColumn { Name = projections[0].Name, Ordinal = 0, Type = DatabaseType.Int64 } };
-            return new SqlMaterializedResultSet(countColumns, new List<object?[]> { new object?[] { (long)matches.Count } });
-        }
-
         // ORDER BY before projection so sort keys may reference any table column.
         if (orderBy.Count > 0)
         {
@@ -169,7 +165,8 @@ internal sealed partial class SqlPlanExecutor
         return new SqlMaterializedResultSet(columns, window.ToList());
     }
 
-    private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlOrderByColumn> orderBy, SqlExpressionEvaluator evaluator)
+    private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlOrderByColumn> orderBy,
+        SqlExpressionEvaluator evaluator, Comparison<object>? comparison = null)
     {
         // Precompute sort keys; OrderBy is a stable sort, satisfying determinism.
         var keyed = rows.Select(row => (Row: row, Keys: orderBy.Select(o => evaluator.Evaluate(o.Expression, row)).ToArray()));
@@ -197,12 +194,12 @@ internal sealed partial class SqlPlanExecutor
 
         return ordered!.Select(x => x.Row).ToList();
 
-        static int CompareNullable(object? left, object? right) => (left, right) switch
+        int CompareNullable(object? left, object? right) => (left, right) switch
         {
             (null, null) => 0,
             (null, _) => -1, // nulls first
             (_, null) => 1,
-            _ => SqlExpressionEvaluator.Compare(left, right),
+            _ => (comparison ?? SqlExpressionEvaluator.Compare)(left, right),
         };
     }
 

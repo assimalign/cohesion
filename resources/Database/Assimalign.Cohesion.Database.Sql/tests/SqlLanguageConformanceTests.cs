@@ -85,9 +85,9 @@ public sealed class SqlLanguageConformanceTests
         (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0].ShouldBe(expected);
     }
 
-    /// <summary>Records aggregate exclusions separately from the passing SELECT capability case.</summary>
-    /// <param name="projection">An aggregate projection outside the currently executable subset.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - SELECT: aggregate execution is limited to a lone COUNT star")]
+    /// <summary>Reverses the aggregate audit exclusions with verified values and rejects ungrouped columns.</summary>
+    /// <param name="projection">An aggregate projection from the original unsupported-forms audit.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - SELECT: audited aggregate forms execute and ungrouped columns fail")]
     [InlineData("COUNT(age)")]
     [InlineData("SUM(age)")]
     [InlineData("AVG(age)")]
@@ -95,17 +95,33 @@ public sealed class SqlLanguageConformanceTests
     [InlineData("MAX(age)")]
     [InlineData("COUNT(*), id")]
     [InlineData("COUNT(*) + 1")]
-    public async Task Select_UnsupportedAggregateForms_ShouldExposeMeasuredBoundary(string projection)
+    public async Task Select_AuditedAggregateForms_ShouldExecuteWithGroupingValidation(string projection)
     {
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-aggregate" });
         var database = await engine.CreateDatabaseAsync("audit");
-        await using var session = await database.CreateSessionAsync();
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in Seed) { await ExecuteAsync(session, setup); }
         (await RowsAsync(session, "SELECT COUNT(*) FROM t WHERE age > 40;")).ShouldHaveSingleItem()[0].ShouldBe(2L);
         string sql = $"SELECT {projection} FROM t;";
         new SqlQueryParser().Parse(sql).Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
-        error.Message.ShouldBe("Aggregate functions (other than a lone COUNT(*)) are not supported by the executor yet.");
+        if (projection == "COUNT(*), id")
+        {
+            var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
+            error.Message.ShouldContain("id", Case.Sensitive);
+            error.Message.ShouldContain("GROUP BY", Case.Sensitive);
+            return;
+        }
+        object expected = projection switch
+        {
+            "COUNT(age)" => 3L,
+            "SUM(age)" => 122m,
+            "AVG(age)" => 122m / 3m,
+            "MIN(age)" => 36,
+            "MAX(age)" => 45,
+            "COUNT(*) + 1" => 4L,
+            _ => throw new InvalidOperationException($"Missing expected value for {projection}."),
+        };
+        (await RowsAsync(session, sql)).ShouldHaveSingleItem()[0].ShouldBe(expected);
     }
 
     private static void RequireExecutionCases(IEnumerable<string> clauses, IReadOnlyDictionary<string, ExecutionCase> cases)
@@ -148,6 +164,10 @@ public sealed class SqlLanguageConformanceTests
             async (_, result) => CheckRows(await ReadRowsAsync(result), [["Ada", "ada@example.test"], ["Alan", "alan@example.test"]])),
         [SqlClauses.Where] = Query("SELECT id FROM t WHERE age > 40 AND name LIKE 'G%' ORDER BY id;", expression => expression is SqlSelectExpression { Where: not null },
             [[2]]),
+        [SqlClauses.GroupBy] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t GROUP BY age > 40 ORDER BY age > 40;",
+            expression => expression is SqlSelectExpression { GroupBy.Count: 1 }, [[false, 1L, 36m], [true, 2L, 86m]]),
+        [SqlClauses.Having] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t WHERE age > 35 GROUP BY age > 40 HAVING SUM(age) > 50;",
+            expression => expression is SqlSelectExpression { Having: not null }, [[true, 2L, 86m]]),
         [SqlClauses.OrderBy] = Query("SELECT id FROM t ORDER BY age DESC, id ASC;", expression => expression is SqlSelectExpression { OrderBy.Count: 2 },
             [[2], [3], [1]]),
         [SqlClauses.Limit] = Query("SELECT id FROM t ORDER BY id LIMIT 2;", expression => expression is SqlSelectExpression { Limit: not null },

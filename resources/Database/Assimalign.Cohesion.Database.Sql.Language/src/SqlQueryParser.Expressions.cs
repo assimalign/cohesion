@@ -545,6 +545,14 @@ public sealed partial class SqlQueryParser
 
         var args = new List<SqlExpression>();
 
+        if (IsAggregateFunction(name) && (IsKeyword(ref lexer, "DISTINCT") || IsKeyword(ref lexer, "ALL")))
+        {
+            string modifier = CurrentText(ref lexer).ToUpperInvariant();
+            AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + modifier.Length,
+                $"The {modifier} modifier inside SQL aggregate functions is not supported.");
+            Advance(ref lexer);
+        }
+
         if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
         {
             // Handle COUNT(*) and similar
@@ -562,6 +570,12 @@ public sealed partial class SqlQueryParser
                     args.Add(ParseExpression(ref lexer));
                 }
             }
+        }
+
+        if (IsAggregateFunction(name) && IsKeyword(ref lexer, "ORDER"))
+        {
+            AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length,
+                "ORDER BY inside SQL aggregate functions is not supported.");
         }
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)

@@ -27,6 +27,8 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.From, "SELECT * FROM t;")]
     [InlineData(SqlClauses.Join, "SELECT * FROM t JOIN u ON t.id = u.id;")]
     [InlineData(SqlClauses.Where, "SELECT * FROM t WHERE id = 1;")]
+    [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;")]
+    [InlineData(SqlClauses.Having, "SELECT id FROM t GROUP BY id HAVING COUNT(*) > 0;")]
     [InlineData(SqlClauses.OrderBy, "SELECT * FROM t ORDER BY id;")]
     [InlineData(SqlClauses.Limit, "SELECT * FROM t LIMIT 1;")]
     [InlineData(SqlClauses.Offset, "SELECT * FROM t LIMIT 1 OFFSET 1;")]
@@ -55,12 +57,10 @@ public class SqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;")]
-    [InlineData(SqlClauses.Having, "SELECT id FROM t GROUP BY id HAVING COUNT(*) > 0;")]
     [InlineData(SqlClauses.Subquery, "SELECT * FROM t WHERE id IN (SELECT id FROM u);")]
     public void Parse_ClauseAwaitingExecution_IsNotDeclaredAndReportsDiagnostic(string clause, string sql)
     {
-        // These cases previously asserted parser-only support; execution is MVP work (#1020-#1021).
+        // This case previously asserted parser-only support; execution remains MVP work (#1021).
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();
 
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);

@@ -13,6 +13,24 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal abstract record SqlPlan;
 
+/// <summary>
+/// Groups the filtered rows of an input plan. Bound value ordinals address the
+/// group keys and aggregate results, never an arbitrary representative row.
+/// </summary>
+internal sealed record SqlGroupPlan(
+    SqlPlan Input,
+    IReadOnlyList<SqlCatalogColumn> SourceColumns,
+    IReadOnlyList<SqlTableBinding>? Bindings,
+    IReadOnlyList<SqlExpression> Keys,
+    IReadOnlyList<SqlFunctionCallExpression> Aggregates,
+    IReadOnlyDictionary<SqlExpression, int> ValueOrdinals,
+    IReadOnlyList<SqlProjection> Projections,
+    SqlExpression? Having,
+    IReadOnlyList<SqlOrderByColumn> OrderBy,
+    long? Limit,
+    long? Offset,
+    bool IsDistinct) : SqlPlan;
+
 /// <summary>One projected output column of a SELECT.</summary>
 /// <param name="Name">The output column name (alias, column name, or a synthesized name).</param>
 /// <param name="ColumnOrdinal">The source column ordinal for pass-through projections; null for computed ones.</param>
@@ -28,7 +46,6 @@ internal sealed record SqlSelectPlan(
     long? Limit,
     long? Offset,
     bool IsDistinct,
-    bool IsCountStar,
     SqlAccessPath Access) : SqlPlan;
 
 /// <summary>A stored relation's identity and position in a joined row.</summary>
@@ -48,7 +65,6 @@ internal sealed record SqlJoinPlan(
     long? Limit,
     long? Offset,
     bool IsDistinct,
-    bool IsCountStar,
     SqlJoinIndexPath? Access) : SqlPlan;
 
 /// <summary>
@@ -68,8 +84,7 @@ internal sealed record SqlSystemViewPlan(
     IReadOnlyList<SqlOrderByColumn> OrderBy,
     long? Limit,
     long? Offset,
-    bool IsDistinct,
-    bool IsCountStar) : SqlPlan;
+    bool IsDistinct) : SqlPlan;
 
 /// <summary>
 /// How a SELECT reaches its table's rows — the seek node the thin IR gained when

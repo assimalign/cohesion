@@ -51,11 +51,6 @@ internal sealed partial class SqlPlanner
 
     private SqlPlan PlanSelect(SqlSelectExpression select)
     {
-        if (select.GroupBy.Count > 0 || select.Having is not null)
-        {
-            throw new DatabaseException("GROUP BY / HAVING are not supported by the executor yet.");
-        }
-
         if (select.From is null)
         {
             throw new DatabaseException("SELECT requires a FROM table.");
@@ -74,48 +69,44 @@ internal sealed partial class SqlPlanner
             ValidateExpression(select.Joins[0].Condition!, evaluator);
         }
 
-        // Lone COUNT(*) is the one aggregate the executor supports.
-        bool isCountStar =
-            select.Columns.Count == 1 &&
-            select.Columns[0].Expression is SqlFunctionCallExpression { Arguments.Count: 1 } call &&
-            string.Equals(call.FunctionName, "COUNT", StringComparison.OrdinalIgnoreCase) &&
-            call.Arguments[0] is SqlStarExpression;
+        if (select.Where is not null && ContainsAggregate(select.Where))
+        {
+            throw new DatabaseException("Aggregate functions are not allowed in WHERE; use HAVING to filter groups.");
+        }
+        if (bindings is not null && ContainsAggregate(select.Joins[0].Condition!))
+        {
+            throw new DatabaseException("Aggregate functions are not allowed in JOIN ON.");
+        }
+
+        if (select.GroupBy.Count > 0 || select.Having is not null
+            || select.Columns.Any(column => ContainsAggregate(column.Expression))
+            || select.OrderBy.Any(order => ContainsAggregate(order.Expression)))
+        {
+            return PlanGroup(select, table, systemView, columns, bindings, evaluator);
+        }
 
         var projections = new List<SqlProjection>();
-
-        if (isCountStar)
+        foreach (var column in select.Columns)
         {
-            projections.Add(new SqlProjection(select.Columns[0].Alias ?? "count", null, null, DatabaseType.Int64));
-        }
-        else
-        {
-            foreach (var column in select.Columns)
+            if (column.Expression is SqlStarExpression)
             {
-                if (ContainsAggregate(column.Expression))
+                for (int i = 0; i < columns.Count; i++)
                 {
-                    throw new DatabaseException("Aggregate functions (other than a lone COUNT(*)) are not supported by the executor yet.");
+                    projections.Add(new SqlProjection(columns[i].Name, i, null, columns[i].Type.Type));
                 }
-
-                if (column.Expression is SqlStarExpression)
-                {
-                    for (int i = 0; i < columns.Count; i++)
-                    {
-                        projections.Add(new SqlProjection(columns[i].Name, i, null, columns[i].Type.Type));
-                    }
-                }
-                else if (column.Expression is SqlColumnReferenceExpression reference)
-                {
-                    int ordinal = evaluator.ResolveColumn(reference);
-                    projections.Add(new SqlProjection(
-                        column.Alias ?? columns[ordinal].Name, ordinal, null, columns[ordinal].Type.Type));
-                }
-                else
-                {
-                    ValidateExpression(column.Expression, evaluator);
-                    projections.Add(new SqlProjection(
-                        column.Alias ?? $"column{projections.Count + 1}", null, column.Expression,
-                        column.Expression is SqlCastExpression cast ? cast.TargetTypeInfo!.Type : DatabaseType.Null));
-                }
+            }
+            else if (column.Expression is SqlColumnReferenceExpression reference)
+            {
+                int ordinal = evaluator.ResolveColumn(reference);
+                projections.Add(new SqlProjection(
+                    column.Alias ?? columns[ordinal].Name, ordinal, null, columns[ordinal].Type.Type));
+            }
+            else
+            {
+                ValidateExpression(column.Expression, evaluator);
+                projections.Add(new SqlProjection(
+                    column.Alias ?? $"column{projections.Count + 1}", null, column.Expression,
+                    column.Expression is SqlCastExpression cast ? cast.TargetTypeInfo!.Type : DatabaseType.Null));
             }
         }
 
@@ -133,7 +124,7 @@ internal sealed partial class SqlPlanner
         {
             return new SqlJoinPlan(bindings, columns, select.Joins[0].Condition!, projections,
                 select.Where, select.OrderBy, EvaluateCount(select.Limit, "LIMIT"),
-                EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct, isCountStar,
+                EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct,
                 SelectJoinAccessPath(bindings, select.Joins[0].Condition!, evaluator));
         }
 
@@ -141,7 +132,7 @@ internal sealed partial class SqlPlanner
         {
             return new SqlSystemViewPlan(systemView, projections, select.Where, select.OrderBy,
                 EvaluateCount(select.Limit, "LIMIT"), EvaluateCount(select.Offset, "OFFSET"),
-                select.IsDistinct, isCountStar);
+                select.IsDistinct);
         }
 
         return new SqlSelectPlan(
@@ -152,7 +143,6 @@ internal sealed partial class SqlPlanner
             EvaluateCount(select.Limit, "LIMIT"),
             EvaluateCount(select.Offset, "OFFSET"),
             select.IsDistinct,
-            isCountStar,
             SelectAccessPath(table!, select.Where));
     }
 

@@ -389,6 +389,20 @@ public sealed partial class SqlQueryParser : QueryParser
                 lexer.Current.Position,
                 lexer.Current.Position + lexer.Current.Value.Length);
 
+            if (TryGetUnsupportedAggregateClause(lexer, out clause, out int aggregateEnd))
+            {
+                location = Location.Create(1, 1, lexer.Current.Position, aggregateEnd);
+                return true;
+            }
+
+            // Preserve the more specific OVER/PARTITION diagnostic when one follows
+            // a window function, while rejecting bare window-function calls too.
+            if (pendingExecutionClause is null && IsWindowFunctionCall(lexer))
+            {
+                pendingExecutionClause = $"window function {token.ToUpperInvariant()}";
+                pendingExecutionLocation = tokenLocation;
+            }
+
             // WITH RECURSIVE is one unsupported construct. Prefer the more
             // specific token so callers can distinguish it from an ordinary CTE.
             if (pendingCte is not null)
@@ -456,22 +470,12 @@ public sealed partial class SqlQueryParser : QueryParser
                     return true;
                 }
 
-                // These shapes have syntax trees but no executor support (#1020-#1021).
+                // Subqueries have syntax trees but no executor support (#1021).
                 // JOIN shape restrictions are checked while parsing each SELECT, so
                 // a supported JOIN cannot hide a later unsupported query clause.
                 if (pendingExecutionClause is null)
                 {
-                    if (token.Equals("BY", StringComparison.OrdinalIgnoreCase) &&
-                             previousToken?.Equals("GROUP", StringComparison.OrdinalIgnoreCase) == true)
-                    {
-                        pendingExecutionClause = SqlClauses.GroupBy;
-                        tokenLocation = Location.Create(1, 1, previousPosition, lexer.Current.Position + lexer.Current.Value.Length);
-                    }
-                    else if (token.Equals("HAVING", StringComparison.OrdinalIgnoreCase))
-                    {
-                        pendingExecutionClause = SqlClauses.Having;
-                    }
-                    else if (token.Equals("SELECT", StringComparison.OrdinalIgnoreCase) && previousToken is not null)
+                    if (token.Equals("SELECT", StringComparison.OrdinalIgnoreCase) && previousToken is not null)
                     {
                         // A SELECT after the leading command is a nested query or INSERT ... SELECT.
                         pendingExecutionClause = SqlClauses.Subquery;
