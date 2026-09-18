@@ -84,15 +84,15 @@ public class DatabaseKeyEncodingTests
             value => Encode(w => w.AppendString(value, Collation.Binary)));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Types] - Encoding: invariant-collated strings order linguistically")]
-    public void AppendString_InvariantCollation_ShouldOrderLinguistically()
+    [Fact(DisplayName = "Cohesion Test [Database.Types] - Encoding: legacy invariant collation is not index-backed")]
+    public void AppendString_InvariantCollation_ShouldRejectWithoutChangingWriter()
     {
-        var values = new[] { "apple", "Apple", "banana", "cherry" };
-        var expected = values.OrderBy(x => x, StringComparer.InvariantCulture).ToArray();
+        var writer = new DatabaseKeyWriter().AppendInt32(42);
+        byte[] original = writer.ToArray();
 
-        AssertStrictlyAscending(
-            expected,
-            value => Encode(w => w.AppendString(value, Collation.Invariant)));
+        Should.Throw<DatabaseTypeException>(() => writer.AppendString("apple", Collation.Invariant))
+            .Message.ShouldContain("not index-backed", Case.Sensitive);
+        writer.ToArray().ShouldBe(original);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Types] - Encoding: string prefix relationships survive encoding")]
@@ -190,7 +190,7 @@ public class DatabaseKeyEncodingTests
             .AppendFloat64(-2.5)
             .AppendDecimal(-1234.5678m)
             .AppendString("héllo   wörld", Collation.Binary)
-            .AppendString("Invariant Text", Collation.Invariant)
+            .AppendString("Canonical Text", Collation.CaseInsensitive)
             .AppendBinary(new byte[] { 0x00, 0x01, 0xFF, 0x00 })
             .AppendDate(new DateOnly(2026, 7, 11))
             .AppendTime(new TimeOnly(23, 45, 12))
@@ -212,8 +212,8 @@ public class DatabaseKeyEncodingTests
         reader.ReadDecimal().ShouldBe(-1234.5678m);
         reader.ReadString(out var binaryCollation).ShouldBe("héllo   wörld");
         binaryCollation.ShouldBeSameAs(Collation.Binary);
-        reader.ReadString(out var invariantCollation).ShouldBe("Invariant Text");
-        invariantCollation.ShouldBeSameAs(Collation.Invariant);
+        reader.ReadString(out var foldedCollation).ShouldBe("canonical text");
+        foldedCollation.ShouldBeSameAs(Collation.CaseInsensitive);
         reader.ReadBinary().ShouldBe(new byte[] { 0x00, 0x01, 0xFF, 0x00 });
         reader.ReadDate().ShouldBe(new DateOnly(2026, 7, 11));
         reader.ReadTime().ShouldBe(new TimeOnly(23, 45, 12));

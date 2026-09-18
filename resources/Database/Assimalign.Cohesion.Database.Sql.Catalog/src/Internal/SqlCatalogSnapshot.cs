@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 /// <summary>
@@ -14,14 +16,17 @@ internal sealed class SqlCatalogSnapshot
 
     private readonly IReadOnlyDictionary<ulong, IReadOnlyList<SqlCatalogIndex>> _indexes;
 
-    internal SqlCatalogSnapshot(IEnumerable<SqlCatalogTable> tables, IEnumerable<SqlCatalogIndex> indexes)
+    internal SqlCatalogSnapshot(IEnumerable<SqlCatalogTable> tables, IEnumerable<SqlCatalogIndex> indexes, Collation? defaultCollation = null)
     {
+        DefaultCollation = defaultCollation ?? Collation.Binary;
         Tables = Array.AsReadOnly(tables.ToArray());
         _indexes = indexes.GroupBy(index => index.TableObjectId).ToDictionary(
             group => group.Key, group => (IReadOnlyList<SqlCatalogIndex>)Array.AsReadOnly(group.ToArray()));
     }
 
     internal IReadOnlyList<SqlCatalogTable> Tables { get; }
+
+    internal Collation DefaultCollation { get; }
 
     internal IReadOnlyList<SqlCatalogIndex> GetIndexes(ulong objectId)
         => _indexes.TryGetValue(objectId, out var indexes) ? indexes : Array.Empty<SqlCatalogIndex>();

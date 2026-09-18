@@ -90,7 +90,7 @@ internal sealed partial class SqlPlanExecutor
 
     private QueryResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
+        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
         var matches = new List<object?[]>();
 
         // The access path narrows the candidate set; the full WHERE stays the
@@ -138,7 +138,7 @@ internal sealed partial class SqlPlanExecutor
 
         if (isDistinct)
         {
-            projected = Deduplicate(projected);
+            projected = Deduplicate(projected, projections, evaluator);
         }
 
         // OFFSET / LIMIT.
@@ -166,7 +166,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlOrderByColumn> orderBy,
-        SqlExpressionEvaluator evaluator, Comparison<object>? comparison = null)
+        SqlExpressionEvaluator evaluator)
     {
         // Precompute sort keys; OrderBy is a stable sort, satisfying determinism.
         var keyed = rows.Select(row => (Row: row, Keys: orderBy.Select(o => evaluator.Evaluate(o.Expression, row)).ToArray()));
@@ -176,7 +176,14 @@ internal sealed partial class SqlPlanExecutor
         for (int i = 0; i < orderBy.Count; i++)
         {
             int index = i;
-            var comparer = Comparer<object?>.Create(CompareNullable);
+            var collation = evaluator.ResolveCollation(orderBy[index].Expression);
+            var comparer = Comparer<object?>.Create((left, right) => (left, right) switch
+            {
+                (null, null) => 0,
+                (null, _) => -1,
+                (_, null) => 1,
+                _ => CompareGroupValues(left, right, collation),
+            });
 
             if (ordered is null)
             {
@@ -194,35 +201,13 @@ internal sealed partial class SqlPlanExecutor
 
         return ordered!.Select(x => x.Row).ToList();
 
-        int CompareNullable(object? left, object? right) => (left, right) switch
-        {
-            (null, null) => 0,
-            (null, _) => -1, // nulls first
-            (_, null) => 1,
-            _ => (comparison ?? SqlExpressionEvaluator.Compare)(left, right),
-        };
     }
 
-    private static List<object?[]> Deduplicate(List<object?[]> rows)
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var result = new List<object?[]>(rows.Count);
-
-        foreach (var row in rows)
-        {
-            // A textual key is sufficient for dedup: values are typed scalars with
-            // invariant, prefix-free formatting per field.
-            string key = string.Join('\u0001', row.Select(static v =>
-                v is null ? "" : $"{v.GetType().Name}:{Convert.ToString(v, CultureInfo.InvariantCulture)}"));
-
-            if (seen.Add(key))
-            {
-                result.Add(row);
-            }
-        }
-
-        return result;
-    }
+    /// <summary>Hashes each projected string with exactly the collation used for its equality.</summary>
+    private static List<object?[]> Deduplicate(List<object?[]> rows, IReadOnlyList<SqlProjection> projections,
+        SqlExpressionEvaluator evaluator)
+        => rows.Distinct(new GroupKeyComparer(projections.Select(projection => projection.ColumnOrdinal is int ordinal
+            ? evaluator.ResolveColumnCollation(ordinal) : evaluator.ResolveCollation(projection.Expression)).ToArray())).ToList();
 
     // ── DML ────────────────────────────────────────────────────────────
     //
@@ -254,7 +239,7 @@ internal sealed partial class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
+        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
         var indexes = GetLiveIndexes(plan.Table);
         var rows = new List<(byte[] Record, object?[] Values)>();
 
@@ -328,7 +313,7 @@ internal sealed partial class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
+        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
         var indexes = GetLiveIndexes(plan.Table);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
 
@@ -435,7 +420,7 @@ internal sealed partial class SqlPlanExecutor
         await statement.Coordinator.LockManager.AcquireAsync(statement.Transaction.Sequence, LockResource.Object(plan.Table.ObjectId),
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(plan.Table);
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters);
+        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
         var targets = Scan(plan.Table, statement, cancellationToken).Where(row => evaluator.Matches(plan.Where, row.Values)).ToList();
 
         // Lock the directly targeted rows as one sorted batch before the cascade
@@ -574,16 +559,17 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>
     /// Builds an index key from a row's values: one order-preserving component
-    /// per key column, encoded exactly like the row payload encodes the value
+    /// per key column, transformed under the column's effective collation
     /// (null components participate — nulls sort first and count as key values).
     /// </summary>
-    private static IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
+    private IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
     {
         var writer = new DatabaseKeyWriter();
 
         foreach (int ordinal in keyOrdinals)
         {
-            SqlRowCodec.AppendValue(writer, table.Columns[ordinal].Type.Type, values[ordinal]);
+            SqlRowCodec.AppendValue(writer, table.Columns[ordinal].Type.Type, values[ordinal],
+                table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
         }
 
         return IndexKey.From(writer);
@@ -592,7 +578,7 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>
     /// Collects the key-lock hashes a row contributes on every unique index.
     /// </summary>
-    private static void CollectUniqueKeyHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes)
+    private void CollectUniqueKeyHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes)
     {
         foreach (var liveIndex in indexes)
         {
@@ -1204,14 +1190,15 @@ internal sealed partial class SqlPlanExecutor
     /// order-preservation: every composite key starting with prefix P sorts in
     /// [P, successor(P)), where successor increments the last non-0xFF byte.
     /// </summary>
-    private static IndexKeyRange BuildSeekRange(SqlCatalogTable table, SqlIndexSeekPath seek)
+    private IndexKeyRange BuildSeekRange(SqlCatalogTable table, SqlIndexSeekPath seek)
     {
         var prefixWriter = new DatabaseKeyWriter();
 
         for (int i = 0; i < seek.EqualityValues.Count; i++)
         {
             int ordinal = FindColumnOrdinal(table, seek.Index.ColumnNames[i]);
-            SqlRowCodec.AppendValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i]);
+            SqlRowCodec.AppendValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i],
+                table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
         }
 
         byte[] prefix = prefixWriter.ToArray();
@@ -1227,6 +1214,7 @@ internal sealed partial class SqlPlanExecutor
 
         int rangeOrdinal = FindColumnOrdinal(table, seek.Index.ColumnNames[seek.EqualityValues.Count]);
         var rangeType = table.Columns[rangeOrdinal].Type.Type;
+        var rangeCollation = table.Columns[rangeOrdinal].Collation ?? _catalog.DefaultCollation;
 
         IndexKey? start = seek.EqualityValues.Count > 0 ? new IndexKey(prefix) : null;
         bool startInclusive = true;
@@ -1235,7 +1223,7 @@ internal sealed partial class SqlPlanExecutor
 
         if (seek.Lower is { } lower)
         {
-            byte[] lowerKey = AppendComponent(prefix, rangeType, lower.Value);
+            byte[] lowerKey = AppendComponent(prefix, rangeType, lower.Value, rangeCollation);
 
             // Exclusive lower: skip every composite key whose range component
             // equals the bound — start at the bound's prefix successor.
@@ -1247,7 +1235,7 @@ internal sealed partial class SqlPlanExecutor
 
         if (seek.Upper is { } upper)
         {
-            byte[] upperKey = AppendComponent(prefix, rangeType, upper.Value);
+            byte[] upperKey = AppendComponent(prefix, rangeType, upper.Value, rangeCollation);
 
             // Inclusive upper: admit every composite key whose range component
             // equals the bound — end (exclusively) at the bound's successor.
@@ -1260,10 +1248,10 @@ internal sealed partial class SqlPlanExecutor
         return new IndexKeyRange(start, end, startInclusive, endInclusive);
     }
 
-    private static byte[] AppendComponent(byte[] prefix, DatabaseType type, object? value)
+    private static byte[] AppendComponent(byte[] prefix, DatabaseType type, object? value, Collation collation)
     {
         var writer = new DatabaseKeyWriter();
-        SqlRowCodec.AppendValue(writer, type, value);
+        SqlRowCodec.AppendValue(writer, type, value, collation);
         byte[] component = writer.ToArray();
 
         var combined = new byte[prefix.Length + component.Length];

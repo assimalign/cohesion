@@ -220,10 +220,9 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   bound, then uniqueness, then name — deterministic), extended by range bounds
   on the next key column. **Range sargability is a type matrix**: only types
   whose evaluator comparison order provably equals the key codec's byte order
-  (integers, decimal, floats, boolean, temporal types) get range seeks;
-  strings are equality-only (`Collation.Binary` is code-point order, which
-  diverges from ordinal UTF-16 comparison for astral planes — the #854
-  lesson), as are Guid/binary/json. Everything else — `OR` at the top level,
+  (integers, decimal, floats, boolean, temporal types and strings under matching
+  byte-expressible collations) get range seeks; Guid/binary/json remain equality-only.
+  String predicates with expression/index collation mismatch scan. Everything else — `OR` at the top level,
   computed columns, column-to-column comparisons, null comparands — falls
   back to the per-object scan. **The full WHERE always remains the residual
   predicate**, re-evaluated on every fetched row, so access-path selection
@@ -960,3 +959,23 @@ statement's affected count. The packet view below shows that complete fixed-widt
 packet-beta
 0-63: "Affected count (i64, big-endian)"
 ```
+
+
+## Collation (Phase 17, #1025)
+
+The [approved collation design](../../../../docs/programs/COLLATION_DESIGN.md)
+now executes across comparisons/LIKE, sorting, grouping and DISTINCT, and all unique
+index writes/locks/seeks. Binary is the database default. The concrete engine
+creation overload accepts a different default, which is persisted independently
+from nullable column overrides. Column and expression `COLLATE` use pinned Unicode
+17.0 byte transforms; original row spelling is preserved. Innermost explicit
+expression overrides take precedence over column overrides and database defaults.
+
+B+Tree keys, seek bounds, unique-key locks and backfill duplicate detection share
+the same encoding. Expression overrides that differ from the indexed column scan.
+Legacy Invariant is scan-only; new indexes and indexed constraints reject it clearly.
+Grouping and DISTINCT use the effective collation for both equality and hashing.
+Foreign-key string columns require equal effective collations so forward and reverse
+checks agree. Default changes after table creation reject until index rebuild support
+exists. Other model defaults are unaffected. See the design for the legacy
+CompareInfo compatibility escalation and #1026 linguistic-collation boundary.

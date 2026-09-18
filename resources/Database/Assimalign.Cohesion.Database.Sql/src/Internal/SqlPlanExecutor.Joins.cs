@@ -26,7 +26,7 @@ internal sealed partial class SqlPlanExecutor
             EnsureCurrentDefinition(binding.Table);
         }
 
-        var evaluator = new SqlExpressionEvaluator(plan.Columns, _parameters, plan.Bindings);
+        var evaluator = new SqlExpressionEvaluator(plan.Columns, _parameters, plan.Bindings, defaultCollation: _catalog.DefaultCollation);
         var matches = new List<object?[]>();
         foreach (var row in EnumerateJoinRows(plan, statement, cancellationToken))
         {

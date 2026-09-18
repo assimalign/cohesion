@@ -15,7 +15,7 @@ internal sealed partial class SqlPlanExecutor
 {
     private QueryResult ExecuteSystemView(SqlSystemViewPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = new SqlExpressionEvaluator(plan.View.Columns, _parameters);
+        var evaluator = new SqlExpressionEvaluator(plan.View.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
         var matches = new List<object?[]>();
         statement.Metrics.AccessPath = "system-view";
 
@@ -52,7 +52,7 @@ internal sealed partial class SqlPlanExecutor
 
         if (plan.IsDistinct)
         {
-            projected = Deduplicate(projected);
+            projected = Deduplicate(projected, plan.Projections, evaluator);
         }
 
         IEnumerable<object?[]> window = projected;

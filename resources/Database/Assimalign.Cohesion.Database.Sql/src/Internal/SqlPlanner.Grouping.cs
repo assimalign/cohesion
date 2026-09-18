@@ -164,6 +164,7 @@ internal sealed partial class SqlPlanner
             (SqlBinaryExpression a, SqlBinaryExpression b) => a.Operator == b.Operator,
             (SqlUnaryExpression a, SqlUnaryExpression b) => a.Operator == b.Operator,
             (SqlFunctionCallExpression a, SqlFunctionCallExpression b) => a.FunctionName.Equals(b.FunctionName, StringComparison.OrdinalIgnoreCase),
+            (SqlCollateExpression a, SqlCollateExpression b) => Collation.FromName(a.CollationName) == Collation.FromName(b.CollationName),
             (SqlCastExpression a, SqlCastExpression b) => a.TargetTypeInfo?.Type == b.TargetTypeInfo?.Type
                 && a.TargetTypeInfo?.MaxLength == b.TargetTypeInfo?.MaxLength
                 && a.TargetTypeInfo?.Precision == b.TargetTypeInfo?.Precision && a.TargetTypeInfo?.Scale == b.TargetTypeInfo?.Scale,
@@ -191,6 +192,7 @@ internal sealed partial class SqlPlanner
         SqlExpressionEvaluator evaluator) => expression switch
     {
         SqlColumnReferenceExpression column => columns[evaluator.ResolveColumn(column)].Type.Type,
+        SqlCollateExpression collate => GroupExpressionType(collate.Operand, columns, evaluator),
         SqlCastExpression cast => cast.TargetTypeInfo!.Type,
         SqlParameterExpression parameter => GroupValueType(evaluator.Evaluate(parameter, [])),
         SqlLiteralExpression literal => literal.LiteralType switch

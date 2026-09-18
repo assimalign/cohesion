@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Sql;
 
 using Assimalign.Cohesion.Database.Sql.Storage;
+using Assimalign.Cohesion.Database.Types;
 
 using Internal;
 
@@ -141,8 +142,18 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
 
     /// <inheritdoc />
     public ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default)
+        => CreateDatabaseAsync(name, Collation.Binary, cancellationToken);
+
+    /// <summary>Creates a database with a persisted default string collation.</summary>
+    /// <param name="name">The database name.</param>
+    /// <param name="defaultCollation">The collation inherited by columns without an override.</param>
+    /// <param name="cancellationToken">Cancellation token for creation.</param>
+    /// <returns>The created database.</returns>
+    public ValueTask<IDatabase> CreateDatabaseAsync(string name, Collation defaultCollation, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(defaultCollation);
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -170,7 +181,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                 catalogStorage = _strategy.CreateStorage(name + CatalogSuffix);
                 ConfigureStorage(catalogStorage, name + CatalogSuffix);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
-                var database = new SqlDatabaseInstance(name, this, storage, catalogStorage);
+                var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, defaultCollation: defaultCollation);
                 _databases[name] = database;
                 return new ValueTask<IDatabase>(database);
             }

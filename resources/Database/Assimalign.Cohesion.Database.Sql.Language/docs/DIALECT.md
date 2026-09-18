@@ -10,14 +10,16 @@ enumerates the profile and fails if any advertised clause lacks a passing case.
 
 ## Statement matrix
 
-Phase 16 measures **31 of 48 declared clauses** against the live SQL engine.
+Phase 17 measures **32 of 49 declared clauses** against the live SQL engine.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
 Phase 14 restores `CAST` with actual conversion, type metadata, and wire execution
 coverage (#1022). Phase 15 restores `JOIN` for two stored-table inner joins with
 an `ON` predicate, including server/client execution (#1019). Phase 16 restores
 `GROUP BY` and `HAVING`, including aggregation over the supported inner join
-and server/client execution (#1020).
+and server/client execution (#1020). Phase 17 adds executable column and expression
+`COLLATE`, including persisted defaults, collation-aware index seeks, grouping,
+uniqueness, and server/client execution (#1025).
 
 The **17 excluded clauses** are `SUBQUERY` plus set operations (`UNION`,
 `INTERSECT`, `EXCEPT`), CTEs (`WITH`, `RECURSIVE`), window clauses (`WINDOW`,
@@ -31,7 +33,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list and multi-row literal/scalar `VALUES`; `INSERT ... SELECT` reports `COHDBL001` (#1021). |
 | `UPDATE` | Supported | multi-column `SET`, `WHERE` |
 | `DELETE` | Supported | optional `WHERE` |
-| `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
+| `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
 | `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. ADD COLUMN without a default preserves old rows with null in the new nullable column; literal defaults apply to subsequent inserts only. Existing rows are **not backfilled** with the literal default. Nonliteral ADD COLUMN defaults are silently discarded for both old and new rows; this form is not supported. These measured default gaps remain MVP work (#1023). |
 | `DROP TABLE` | Supported | `IF EXISTS` |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
@@ -39,6 +41,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
 | `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys with ASC/DESC execute. Grouped/aggregate queries also accept aggregate expressions and standalone projection aliases. Other projection aliases, including aliases nested inside ordering expressions, are not resolved. Integer keys are evaluated as constants, **not select-list ordinals**; `ORDER BY 1 DESC` does not sort by the first projection. General alias/ordinal ordering remains MVP work (#1024). |
 | `CAST` | Supported subset, measured | Exact signed integer, decimal, boolean, and string conversions in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
+| `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` | Supported subset, measured | Two stored-table `INNER JOIN ... ON` or bare `JOIN ... ON`, with index assistance where the mandatory equality predicate matches an applicable secondary-index prefix. `LEFT [OUTER]`, `RIGHT [OUTER]`, `FULL [OUTER]`, `CROSS`, additional joins beyond two tables, joins without `ON`, comma joins, and joins of virtual system relations report `COHDBL001`. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported two-table inner joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` aggregate modifiers, grouping extensions, windows, and ordered-set aggregates report `COHDBL001`. |
 | Subqueries / `INSERT ... SELECT` | Recognized, not supported | Scalar, `IN`/`NOT IN`, `EXISTS`/`NOT EXISTS`, derived-table, correlated, and insert-source queries report `COHDBL001` (#1021). Literal `IN` lists remain supported. |
@@ -54,6 +57,47 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
+
+## Collation (#1025)
+
+String comparisons resolve from the database default, overridden by a column's
+declared `COLLATE`, overridden by an expression `COLLATE`. Nested expression
+overrides resolve innermost first. A database without a configured default uses
+`binary`. Column metadata and the database default survive restart. The default
+is established when the database is created and is fixed for its lifetime;
+opening a populated database under a different default is rejected, because
+existing index keys are encoded through the collation they inherited. There is
+no session override.
+
+```sql
+CREATE TABLE people (name TEXT COLLATE case_insensitive UNIQUE);
+SELECT name FROM people WHERE name = 'alice';
+SELECT name FROM people WHERE name = 'Alice' COLLATE binary;
+```
+
+`binary` compares Unicode code points using unchanged UTF-8 bytes.
+`case_insensitive` applies invariant Unicode simple case folding, then compares
+UTF-8 bytes. `case_accent_insensitive` canonically decomposes Unicode text,
+removes combining marks, applies the same fold, then compares UTF-8 bytes.
+These transforms are culture-independent and do not use `CompareInfo`.
+Collation changes comparison rules, never the stored or returned spelling.
+
+`WHERE` comparisons, `LIKE`, `ORDER BY`, `GROUP BY`, `DISTINCT`, and `UNIQUE`
+use the effective collation. Grouping and distinct keys use matching equality
+and hash rules. A case-insensitive unique column rejects a second spelling that
+folds to an existing key; its enforcing index uses the same transform. A seek
+is eligible only when the predicate and index use matching, index-backed
+collations. An explicit override that differs from the index uses a scan.
+
+Compatibility `invariant` is **not index-backed**: its linguistic comparison
+cannot be represented by the supported byte transforms. Predicates using it
+scan even when another collation has an index on the column; declaring an index
+or index-backed constraint under `invariant` is rejected.
+
+Unknown names, culture-aware collations, user-defined `CREATE COLLATION`,
+session overrides, and collation-aware full-text indexes report `COHDBL001` or
+an explicit execution error. Full linguistic collation is deferred to #1026.
+SQL defaults do not apply to Documents, Graph, Key-Value, or Blob comparisons.
 
 ## Joins (#1019)
 
@@ -104,7 +148,7 @@ LEFT, RIGHT, and FULL outer joins, CROSS joins, NATURAL joins, USING, absent ON,
 comma joins, and joins beyond two tables do not execute and report `COHDBL001`.
 Joins involving `INFORMATION_SCHEMA` or `COHESION_SCHEMA` are also excluded.
 No outer-join null-extension behavior is advertised. These are explicit
-ISO/IEC 9075 subset boundaries, not additional named clauses in the 48-clause count.
+ISO/IEC 9075 subset boundaries, not additional named clauses in the 49-clause count.
 
 ## Grouping and aggregate functions (#1020)
 
@@ -136,9 +180,10 @@ aggregate, and aggregates cannot occur in `WHERE`, `JOIN ... ON`, or `GROUP BY`.
 An ungrouped aggregate has one implicit group, so an empty input produces one
 row containing the zero/NULL results above, subject to `HAVING` and pagination.
 An explicit `GROUP BY` over empty input produces no groups and no result rows.
-NULL grouping keys compare equal for grouping. Strings currently group with
-ordinal, case-sensitive equality; per-column collation metadata and collation
-execution are pending, so case-insensitive grouping is not advertised.
+NULL grouping keys compare equal for grouping. String grouping equality and
+hashing use the same effective collation. Binary groups keep `Alice` and `alice`
+distinct; case-insensitive groups combine them while preserving a member's
+original spelling in the result.
 
 `SUM` and `AVG` accept signed integers, Decimal, Float32, and Float64. Numeric
 arguments are converted to `System.Decimal` before accumulation; approximate
@@ -162,7 +207,7 @@ this subset; use the source/grouping expression or repeat the aggregate.
 `ORDER BY`, empty grouping sets (`GROUP BY ()`), `GROUPING SETS`, `ROLLUP`, `CUBE`, `GROUPING`/`GROUPING_ID`, window
 functions and clauses, and ordered-set `WITHIN GROUP` aggregates are excluded
 and report `COHDBL001`. Top-level `SELECT DISTINCT` remains available. These
-boundaries do not add named clauses to the 48-clause denominator.
+boundaries do not add named clauses to the 49-clause denominator.
 
 ## System-view matrix (C1)
 
@@ -331,7 +376,7 @@ storage coercion; nested arithmetic therefore sees the converted numeric value.
 ## Builtin functions
 
 The profile's function list is lexical vocabulary, not an execution claim and
-not part of the 48-clause denominator. Executable scalar functions are `COALESCE`,
+not part of the 49-clause denominator. Executable scalar functions are `COALESCE`,
 `UPPER`, `LOWER`, `LENGTH`, and `ABS`; supported aggregates are `COUNT`, `SUM`,
 `AVG`, `MIN`, and `MAX`, under the contract below.
 Other parsed calls can still fail in planning/evaluation and must not be inferred
@@ -349,7 +394,7 @@ function names are lexed but not supported (see the statement matrix).
 | `COHDBL001` | Error | Recognized clause is not supported by the SQL model surface |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | Error | Unknown CAST target type |
 | `SQL0005` | Error | Unsupported CAST target or invalid target parameters |
 | `SQL0100` | Information | Statement does not end with `;` |

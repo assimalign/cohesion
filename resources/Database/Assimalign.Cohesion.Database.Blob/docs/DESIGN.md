@@ -1,5 +1,14 @@
 # Blob engine design
 
+## String comparison and collation (#1025)
+
+Blob remains ordinal-only. Container and blob names, equality, sorted listings,
+and prefix filtering use case-sensitive .NET ordinal string rules, with no case
+or accent folding. Administrative database lookup remains ordinal-ignore-case.
+Blob content is opaque bytes and is never linguistically compared. SQL database
+defaults and column/expression `COLLATE` have no effect on names, metadata, or
+content; configurable blob-name collation is deferred.
+
 ## Composition and lifetime
 
 The engine owns one Blob.Storage file set, one TransactionCoordinator, and one Blob.Catalog

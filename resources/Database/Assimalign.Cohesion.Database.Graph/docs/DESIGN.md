@@ -1,5 +1,15 @@
 # Graph engine design
 
+## String comparison and collation (#1025)
+
+Graph remains ordinal-only. String property predicates use case-sensitive .NET
+ordinal (UTF-16 code-unit) comparison; property index keys encode the same order.
+Labels, edge types, property keys, and query variable bindings retain ordinal,
+case-sensitive identity. Administrative database lookup remains
+ordinal-ignore-case. SQL database defaults and `COLLATE` overrides do not apply
+to GQL or graph storage. Configurable graph collation is deferred; no case or
+accent folding is applied to stored labels or property values.
+
 ## Composition and frozen contracts
 
 The fifth database engine follows Documents' parser/planner/executor composition and Blob's

@@ -136,10 +136,10 @@ internal static class SqlRowCodec
 
     /// <summary>
     /// Appends one typed value as a self-describing, order-preserving component —
-    /// shared by the row payload encoder and the index-key builder, so a key
-    /// component always encodes exactly like the row value it indexes.
+    /// shared by row and index encoding. Rows preserve original strings under
+    /// Binary; index callers supply the column's effective collation.
     /// </summary>
-    internal static void AppendValue(DatabaseKeyWriter writer, DatabaseType type, object? value)
+    internal static void AppendValue(DatabaseKeyWriter writer, DatabaseType type, object? value, Collation? collation = null)
     {
         if (value is null)
         {
@@ -157,7 +157,7 @@ internal static class SqlRowCodec
             case DatabaseType.Float32: writer.AppendFloat32((float)value); break;
             case DatabaseType.Float64: writer.AppendFloat64((double)value); break;
             case DatabaseType.Decimal: writer.AppendDecimal((decimal)value); break;
-            case DatabaseType.String or DatabaseType.Json: writer.AppendString((string)value, Collation.Binary); break;
+            case DatabaseType.String or DatabaseType.Json: writer.AppendString((string)value, collation ?? Collation.Binary); break;
             case DatabaseType.Binary or DatabaseType.JsonBinary: writer.AppendBinary((byte[])value); break;
             case DatabaseType.Date: writer.AppendDate((DateOnly)value); break;
             case DatabaseType.Time: writer.AppendTime((TimeOnly)value); break;

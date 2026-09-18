@@ -1,5 +1,16 @@
 # Documents engine design
 
+## String comparison and collation (#1025)
+
+Documents remains ordinal-only. OQL string predicates, ordering, grouping, and
+distinct comparisons use case-sensitive .NET ordinal (UTF-16 code-unit) order.
+String index keys encode that same order, including supplementary characters;
+they do not inherit SQL's UTF-8 collation transforms. Collection names, document
+IDs, JSON property names, and prefix listings are also ordinal and case-sensitive.
+Administrative database lookup remains ordinal-ignore-case. SQL database defaults,
+column collations, and expression `COLLATE` have no effect on this model.
+Configurable document collation is deferred; stored text retains its original form.
+
 ## Intent and composition
 
 Documents combines the Blob engine's lifecycle, session transaction, worker, and

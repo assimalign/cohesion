@@ -42,7 +42,7 @@ internal sealed partial class SqlPlanner
     private SqlJoinIndexPath? SelectJoinAccessPath(
         IReadOnlyList<SqlTableBinding> bindings, SqlExpression condition, SqlExpressionEvaluator evaluator)
     {
-        var equalities = new List<(int Left, int Right)>();
+        var equalities = new List<(int Left, int Right, Collation Collation)>();
         CollectJoinEqualities(condition, evaluator, equalities);
         SqlJoinIndexPath? best = null;
 
@@ -65,7 +65,10 @@ internal sealed partial class SqlPlanner
                         int local = candidate - outerBinding.Offset;
                         if (local >= 0 && local < outerBinding.Table.Columns.Count
                             && CanSeekJoinEquality(innerBinding.Table.Columns[innerOrdinal].Type.Type,
-                                outerBinding.Table.Columns[local].Type.Type))
+                                outerBinding.Table.Columns[local].Type.Type)
+                            && (innerBinding.Table.Columns[innerOrdinal].Type.Type is not (DatabaseType.String or DatabaseType.Json)
+                                || equality.Collation.IsIndexBacked
+                                    && equality.Collation == (innerBinding.Table.Columns[innerOrdinal].Collation ?? _catalog.DefaultCollation)))
                         {
                             outerOrdinal = local;
                             break;
@@ -100,17 +103,18 @@ internal sealed partial class SqlPlanner
 
     /// <summary>Collects only mandatory column equalities, never OR alternatives.</summary>
     private static void CollectJoinEqualities(SqlExpression expression, SqlExpressionEvaluator evaluator,
-        List<(int Left, int Right)> equalities)
+        List<(int Left, int Right, Collation Collation)> equalities)
     {
         if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.And } conjunction)
         {
             CollectJoinEqualities(conjunction.Left, evaluator, equalities);
             CollectJoinEqualities(conjunction.Right, evaluator, equalities);
         }
-        else if (expression is SqlBinaryExpression
-            { Operator: SqlBinaryOperator.Equal, Left: SqlColumnReferenceExpression left, Right: SqlColumnReferenceExpression right })
+        else if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.Equal } binary
+            && UnwrapCollation(binary.Left) is SqlColumnReferenceExpression left
+            && UnwrapCollation(binary.Right) is SqlColumnReferenceExpression right)
         {
-            equalities.Add((evaluator.ResolveColumn(left), evaluator.ResolveColumn(right)));
+            equalities.Add((evaluator.ResolveColumn(left), evaluator.ResolveColumn(right), evaluator.ResolveCollation(binary.Left, binary.Right)));
         }
     }
 

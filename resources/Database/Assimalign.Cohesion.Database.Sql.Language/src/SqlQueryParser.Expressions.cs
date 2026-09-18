@@ -20,7 +20,8 @@ public sealed partial class SqlQueryParser
     //                            | [NOT] LIKE ...)?
     //   ParseAddition           → ParseMultiplication ((+|-||) ParseMultiplication)*
     //   ParseMultiplication     → ParseUnary ((*|/|%) ParseUnary)*
-    //   ParseUnary              → (-|~)? ParsePrimary
+    //   ParseUnary              → (-|~)? ParseCollate
+    //   ParseCollate            → ParsePrimary (COLLATE name)*
     //   ParsePrimary            → literal | column_ref | param | function(...)
     //                            | (expr) | (SELECT ...) | CASE | CAST | EXISTS | *
 
@@ -199,7 +200,7 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var pattern = ParsePrimary(ref lexer);
+            var pattern = ParseCollate(ref lexer);
             return new SqlLikeExpression(left, pattern, notBefore, Location.Create(1, 1, pos, pos));
         }
 
@@ -302,7 +303,7 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var operand = ParsePrimary(ref lexer);
+            var operand = ParseCollate(ref lexer);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.Negate,
                 Location.Create(1, 1, pos, pos));
         }
@@ -311,12 +312,12 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var operand = ParsePrimary(ref lexer);
+            var operand = ParseCollate(ref lexer);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.BitwiseNot,
                 Location.Create(1, 1, pos, pos));
         }
 
-        return ParsePrimary(ref lexer);
+        return ParseCollate(ref lexer);
     }
 
     private SqlExpression ParsePrimary(ref TokenLexer lexer)

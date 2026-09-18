@@ -26,6 +26,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     private const int recordSpaceFormatKind = 4;
     private const int indexRecordKind = 5;
     private const int schemaStateRecordKind = 6;
+    private const int defaultCollationRecordKind = 7;
     private const int schemaStateChunkSize = 3 * 1024;
 
     private static readonly Encoding StrictUtf8 = new UTF8Encoding(
@@ -38,9 +39,11 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     private readonly object _sync = new();
     private ulong _nextObjectId = 1;
     private int _recordSpaceFormatVersion = 1;
+    private Collation _defaultCollation = Collation.Binary;
     private (PageId PageId, int SlotIndex)? _counterLocation;
     private (PageId PageId, int SlotIndex)? _registrationsLocation;
     private (PageId PageId, int SlotIndex)? _formatLocation;
+    private (PageId PageId, int SlotIndex)? _defaultCollationLocation;
     private List<(PageId PageId, int SlotIndex)> _schemaStateLocations = [];
     private IReadOnlyList<BTreeIndexRegistration> _registrations = Array.Empty<BTreeIndexRegistration>();
     private SqlCatalogSchemaState? _schemaState;
@@ -50,10 +53,14 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         _storage = storage;
     }
 
-    internal static DefaultSqlCatalog Open(SqlStorage storage)
+    internal static DefaultSqlCatalog Open(SqlStorage storage, Collation? defaultCollation = null)
     {
         var catalog = new DefaultSqlCatalog(storage);
         catalog.Load();
+        if (defaultCollation is not null)
+        {
+            catalog.InitializeDefaultCollation(defaultCollation);
+        }
         return catalog;
     }
 
@@ -61,7 +68,50 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     {
         lock (_sync)
         {
-            return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index));
+            return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation);
+        }
+    }
+
+    /// <inheritdoc />
+    public Collation DefaultCollation
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _defaultCollation;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Establishes the database default collation at open time. Only a catalog with no
+    /// tables can adopt a different default: an existing table's index keys are encoded
+    /// through the collation it inherited, so changing it would invalidate them.
+    /// </summary>
+    /// <param name="collation">The database default collation.</param>
+    /// <exception cref="SqlCatalogException">The catalog contains tables and the default would change.</exception>
+    private void InitializeDefaultCollation(Collation collation)
+    {
+        ArgumentNullException.ThrowIfNull(collation);
+        lock (_sync)
+        {
+            if (collation.Id == _defaultCollation.Id)
+            {
+                return;
+            }
+            if (_tables.Count > 0)
+            {
+                throw new SqlCatalogException("The database default collation cannot change after tables are created; existing index keys depend on it.");
+            }
+
+            var writer = new DatabaseKeyWriter();
+            writer.AppendInt32(defaultCollationRecordKind).AppendInt8((sbyte)collation.Id);
+            using var transaction = _storage.BeginTransaction();
+            var location = UpsertRecord(transaction, _defaultCollationLocation, writer.ToArray());
+            transaction.Commit();
+            _defaultCollationLocation = location;
+            _defaultCollation = collation;
         }
     }
 
@@ -589,6 +639,15 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                         (unit.PageId, unit.SlotIndex)));
                     break;
 
+                case defaultCollationRecordKind:
+                    _defaultCollation = Collation.FromId((byte)reader.ReadInt8());
+                    if (!reader.IsAtEnd)
+                    {
+                        throw new SqlCatalogException("The persisted default collation contains trailing values.");
+                    }
+                    _defaultCollationLocation = (unit.PageId, unit.SlotIndex);
+                    break;
+
                 default:
                     throw new SqlCatalogException($"Malformed catalog record of kind {kind}.");
             }
@@ -735,7 +794,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
 
         AppendOwnership(ref writer, table.Owner, table.OwningSchema);
         // Versioned trailing extension; old records end after keys or ownership.
-        writer.AppendInt32(1).AppendInt32(table.Constraints.Count);
+        writer.AppendInt32(2).AppendInt32(table.Constraints.Count);
         foreach (SqlCatalogConstraint constraint in table.Constraints)
         {
             writer.AppendString(constraint.Name, Collation.Binary)
@@ -754,6 +813,10 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
             }
             AppendOptionalString(ref writer, constraint.CheckExpression);
             writer.AppendInt8((sbyte)constraint.OnDelete);
+        }
+        foreach (var column in table.Columns)
+        {
+            writer.AppendInt32(column.Collation?.Id ?? -1);
         }
         return writer.ToArray();
     }
@@ -808,7 +871,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         if (!reader.IsAtEnd)
         {
             int version = reader.ReadInt32();
-            if (version != 1)
+            if (version is not (1 or 2))
             {
                 throw new SqlCatalogException($"Unsupported table-constraint metadata version {version}.");
             }
@@ -835,6 +898,20 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                 catch (ArgumentException exception)
                 {
                     throw new SqlCatalogException($"The persisted constraint '{constraintName}' is invalid: {exception.Message}");
+                }
+            }
+            if (version >= 2)
+            {
+                for (int index = 0; index < columns.Count; index++)
+                {
+                    int id = reader.ReadInt32();
+                    if (id < -1 || id > byte.MaxValue)
+                    {
+                        throw new SqlCatalogException($"The persisted column collation identifier {id} is invalid.");
+                    }
+                    var column = columns[index];
+                    columns[index] = new SqlCatalogColumn(column.Name, column.Type, column.IsNullable,
+                        column.DefaultLiteral, id < 0 ? null : Collation.FromId((byte)id));
                 }
             }
         }

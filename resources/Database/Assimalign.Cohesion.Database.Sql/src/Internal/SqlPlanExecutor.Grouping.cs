@@ -21,8 +21,10 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken)
     {
         await using var input = (QueryResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
-        var sourceEvaluator = new SqlExpressionEvaluator(plan.SourceColumns, _parameters, plan.Bindings);
-        var groups = new Dictionary<object?[], AggregateState[]>(GroupKeyComparer.Instance);
+        var sourceEvaluator = new SqlExpressionEvaluator(plan.SourceColumns, _parameters, plan.Bindings,
+            defaultCollation: _catalog.DefaultCollation);
+        var groups = new Dictionary<object?[], AggregateState[]>(new GroupKeyComparer(
+            plan.Keys.Select(expression => sourceEvaluator.ResolveCollation(expression)).ToArray()));
         if (plan.Keys.Count == 0)
         {
             // The implicit global group exists even on empty input.
@@ -49,9 +51,12 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        var evaluator = new SqlExpressionEvaluator(plan.SourceColumns, _parameters, plan.Bindings, plan.ValueOrdinals);
-        var matches = new List<object?[]>();
         int projectionStart = plan.Keys.Count + plan.Aggregates.Count;
+        var aliasSources = plan.ValueOrdinals.Where(pair => pair.Value >= projectionStart)
+            .ToDictionary(pair => pair.Key, pair => plan.Projections[pair.Value - projectionStart].Expression!);
+        var evaluator = new SqlExpressionEvaluator(plan.SourceColumns, _parameters, plan.Bindings, plan.ValueOrdinals,
+            _catalog.DefaultCollation, aliasSources);
+        var matches = new List<object?[]>();
         foreach (var (key, states) in groups)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -74,12 +79,12 @@ internal sealed partial class SqlPlanExecutor
         }
         if (plan.OrderBy.Count > 0)
         {
-            matches = SortRows(matches, plan.OrderBy, evaluator, CompareGroupValues);
+            matches = SortRows(matches, plan.OrderBy, evaluator);
         }
         var projected = matches.Select(row => row[projectionStart..]).ToList();
         if (plan.IsDistinct)
         {
-            projected = projected.Distinct(GroupKeyComparer.Instance).ToList();
+            projected = Deduplicate(projected, plan.Projections, evaluator);
         }
         IEnumerable<object?[]> window = projected;
         if (plan.Offset is long skip)
@@ -100,14 +105,15 @@ internal sealed partial class SqlPlanExecutor
         }).ToArray();
         return new SqlMaterializedResultSet(columns, window.ToList());
 
-        AggregateState[] CreateStates() => plan.Aggregates.Select(call => new AggregateState(call.FunctionName)).ToArray();
+        AggregateState[] CreateStates() => plan.Aggregates.Select(call => new AggregateState(call.FunctionName,
+            sourceEvaluator.ResolveCollation(call.Arguments[0]))).ToArray();
     }
 
     /// <summary>
     /// All five aggregates skip NULL operands. COUNT(*) supplies a non-null
     /// sentinel for each row. SUM/AVG accumulate decimal; MIN/MAX retain values.
     /// </summary>
-    private sealed class AggregateState(string function)
+    private sealed class AggregateState(string function, Collation collation)
     {
         private readonly string _function = function.ToUpperInvariant();
         private long _count;
@@ -134,13 +140,13 @@ internal sealed partial class SqlPlanExecutor
                         _sum = checked(_sum + Convert.ToDecimal(value, CultureInfo.InvariantCulture));
                         break;
                     case "MIN":
-                        if (_extreme is null || CompareGroupValues(value, _extreme) < 0)
+                        if (_extreme is null || CompareGroupValues(value, _extreme, collation) < 0)
                         {
                             _extreme = value;
                         }
                         break;
                     case "MAX":
-                        if (_extreme is null || CompareGroupValues(value, _extreme) > 0)
+                        if (_extreme is null || CompareGroupValues(value, _extreme, collation) > 0)
                         {
                             _extreme = value;
                         }
@@ -165,10 +171,8 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>Uses SQL comparison equality, with NULL keys in one group and binary values by content.</summary>
-    private sealed class GroupKeyComparer : IEqualityComparer<object?[]>
+    private sealed class GroupKeyComparer(IReadOnlyList<Collation> collations) : IEqualityComparer<object?[]>
     {
-        internal static GroupKeyComparer Instance { get; } = new();
-
         public bool Equals(object?[]? left, object?[]? right)
         {
             if (left is null || right is null || left.Length != right.Length)
@@ -177,7 +181,8 @@ internal sealed partial class SqlPlanExecutor
             }
             for (int i = 0; i < left.Length; i++)
             {
-                if (left[i] is null ? right[i] is not null : right[i] is null || CompareGroupValues(left[i]!, right[i]!) != 0)
+                if (left[i] is null ? right[i] is not null : right[i] is null
+                    || CompareGroupValues(left[i]!, right[i]!, collations[i]) != 0)
                 {
                     return false;
                 }
@@ -188,8 +193,9 @@ internal sealed partial class SqlPlanExecutor
         public int GetHashCode(object?[] values)
         {
             var hash = new HashCode();
-            foreach (var value in values)
+            for (int i = 0; i < values.Length; i++)
             {
+                var value = values[i];
                 switch (value)
                 {
                     case sbyte or short or int or long or float or double or decimal:
@@ -202,9 +208,7 @@ internal sealed partial class SqlPlanExecutor
                         }
                         break;
                     case string text:
-                        // Current SQL catalog has binary strings only. Keep this
-                        // aligned with evaluator equality when column collations land.
-                        hash.Add(text, StringComparer.Ordinal);
+                        hash.Add(collations[i].GetHashCode(text));
                         break;
                     default:
                         hash.Add(value);
@@ -216,7 +220,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>Compares aggregate/group values using the existing SQL value ordering.</summary>
-    private static int CompareGroupValues(object left, object right)
+    private static int CompareGroupValues(object left, object right, Collation? collation = null)
     {
         if (left is byte[] a && right is byte[] b)
         {
@@ -235,7 +239,7 @@ internal sealed partial class SqlPlanExecutor
                 _ => throw new DatabaseException("Invalid numeric grouping key."),
             };
         }
-        return SqlExpressionEvaluator.Compare(left, right);
+        return SqlExpressionEvaluator.Compare(left, right, collation);
     }
 
     /// <summary>

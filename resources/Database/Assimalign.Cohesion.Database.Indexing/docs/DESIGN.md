@@ -10,6 +10,14 @@ Every model needs ordered lookups: SQL secondary indexes, document indexes, grap
 
 This is the same design center as FoundationDB tuples and MySQL/InnoDB memcmp-able keys: one dumb, fast comparator at the bottom, all type intelligence pushed to encoding.
 
+`IndexKey.FromString(value, collation)` delegates to the shared writer. `Binary`,
+`CaseInsensitive`, and `CaseAccentInsensitive` produce deterministic transformed
+UTF-8 keys. Equivalent spellings have identical bytes, equality, content hashes,
+and unique-lock identities; original spelling never breaks a collation tie.
+`Invariant` is explicitly not index-backed and key construction rejects it. The
+owning model must resolve index collation and seek eligibility; the B+Tree itself
+continues to compare raw bytes.
+
 ## The B+Tree implementation
 
 `BTreeIndexManager.Create(options)` composes B+Trees over `PageType.Index` pages —

@@ -368,6 +368,7 @@ public sealed partial class SqlQueryParser : QueryParser
         string? pendingExecutionClause = null;
         Location? pendingExecutionLocation = null;
         string? previousToken = null;
+        string? firstToken = null;
         int previousPosition = 0;
 
         while (lexer.MoveNext())
@@ -383,11 +384,35 @@ public sealed partial class SqlQueryParser : QueryParser
             }
 
             string token = CurrentText(ref lexer);
+            firstToken ??= token;
             var tokenLocation = Location.Create(
                 1,
                 1,
                 lexer.Current.Position,
                 lexer.Current.Position + lexer.Current.Value.Length);
+
+            if (token.Equals("COLLATION", StringComparison.OrdinalIgnoreCase) &&
+                previousToken?.Equals("CREATE", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                clause = "user-defined collations (CREATE COLLATION)";
+                location = tokenLocation;
+                return true;
+            }
+            if (firstToken.Equals("SET", StringComparison.OrdinalIgnoreCase) &&
+                (token.Equals("COLLATION", StringComparison.OrdinalIgnoreCase) ||
+                 token.Equals("COLLATE", StringComparison.OrdinalIgnoreCase)))
+            {
+                clause = "per-session collation overrides";
+                location = tokenLocation;
+                return true;
+            }
+            if (token.Equals("FULLTEXT", StringComparison.OrdinalIgnoreCase) &&
+                previousToken?.Equals("CREATE", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                clause = "collation-aware full-text indexes";
+                location = tokenLocation;
+                return true;
+            }
 
             if (TryGetUnsupportedAggregateClause(lexer, out clause, out int aggregateEnd))
             {

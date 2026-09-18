@@ -35,6 +35,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Values, "INSERT INTO t (id) VALUES (1);")]
     [InlineData(SqlClauses.Case, "SELECT CASE WHEN id = 1 THEN 'one' ELSE 'other' END FROM t;")]
     [InlineData(SqlClauses.Cast, "SELECT CAST('42' AS INT) FROM t;")]
+    [InlineData(SqlClauses.Collate, "SELECT name FROM t WHERE name = 'Alice' COLLATE case_insensitive;")]
     [InlineData(SqlClauses.Constraint, "CREATE TABLE t (id INT, CONSTRAINT ck CHECK (id > 0));")]
     [InlineData(SqlClauses.ForeignKey, "CREATE TABLE t (parent_id INT, FOREIGN KEY (parent_id) REFERENCES parent(id));")]
     [InlineData(SqlClauses.References, "CREATE TABLE t (parent_id INT REFERENCES parent(id));")]

@@ -230,6 +230,7 @@ public sealed partial class SqlQueryParser
         bool isNullable = true;
         bool isPrimaryKey = false;
         SqlExpression? defaultValue = null;
+        string? collationName = null;
         var constraints = new List<SqlConstraintDefinition>();
 
         while (!IsAtEnd(ref lexer) &&
@@ -237,7 +238,16 @@ public sealed partial class SqlQueryParser
                lexer.Current.Type != TokenType.RightParen &&
                lexer.Current.Type != TokenType.Semicolon)
         {
-            if (IsKeyword(ref lexer, "NOT"))
+            if (IsKeyword(ref lexer, "COLLATE"))
+            {
+                if (collationName is not null)
+                {
+                    AddSyntaxDiagnostic(ref lexer, "A column may declare only one COLLATE clause.");
+                }
+                Advance(ref lexer);
+                collationName = ParseCollationName(ref lexer);
+            }
+            else if (IsKeyword(ref lexer, "NOT"))
             {
                 Advance(ref lexer);
                 if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "NULL"))
@@ -272,7 +282,7 @@ public sealed partial class SqlQueryParser
             }
         }
 
-        return new SqlColumnDefinition(columnName, dataType, isNullable, isPrimaryKey, defaultValue, constraints);
+        return new SqlColumnDefinition(columnName, dataType, isNullable, isPrimaryKey, defaultValue, constraints, collationName);
     }
 
     private SqlAlterTableExpression ParseAlterTable(ref TokenLexer lexer)

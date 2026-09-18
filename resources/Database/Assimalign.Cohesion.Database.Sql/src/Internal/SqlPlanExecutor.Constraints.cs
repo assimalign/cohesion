@@ -298,7 +298,8 @@ internal sealed partial class SqlPlanExecutor
             candidates = Scan(table, statement, cancellationToken, snapshot);
         }
         int[] ordinals = columns.Select(column => FindColumnOrdinal(table, column)).ToArray();
-        return candidates.Where(row => ordinals.Select((ordinal, i) => ValuesEqual(row.Values[ordinal], keys[i])).All(equal => equal));
+        return candidates.Where(row => ordinals.Select((ordinal, i) => ValuesEqual(row.Values[ordinal], keys[i],
+            table.Columns[ordinal].Collation ?? _catalog.DefaultCollation)).All(equal => equal));
     }
 
     private static bool SameConstraintColumns(IReadOnlyList<string> left, IReadOnlyList<string> right)
@@ -319,8 +320,8 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private static bool ValuesEqual(object? left, object? right)
-        => left is null || right is null ? left is null && right is null : SqlExpressionEvaluator.Compare(left, right) == 0;
+    private static bool ValuesEqual(object? left, object? right, Collation? collation = null)
+        => left is null || right is null ? left is null && right is null : SqlExpressionEvaluator.Compare(left, right, collation) == 0;
 
     private static object? SafeValue(object?[] values)
         => values.Length == 1 && values[0] is byte or sbyte or short or ushort or int or uint or long or ulong or decimal or float or double or bool
@@ -352,7 +353,7 @@ internal sealed partial class SqlPlanExecutor
             if (constraint.Kind == SqlCatalogConstraintKind.Check)
             {
                 var expression = ParseCheck(constraint.CheckExpression!);
-                var evaluator = new SqlExpressionEvaluator(table.Columns, null);
+                var evaluator = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation);
                 foreach (var row in rows)
                 {
                     // SQL UNKNOWN satisfies CHECK; only FALSE rejects a row.
@@ -390,7 +391,8 @@ internal sealed partial class SqlPlanExecutor
                 }
 
                 bool selfMatch = parent.ObjectId == table.ObjectId && rows.Any(candidate =>
-                    constraint.ReferencedColumns!.Select((column, i) => ValuesEqual(candidate[FindColumnOrdinal(table, column)], keys[i])).All(equal => equal));
+                    constraint.ReferencedColumns!.Select((column, i) => ValuesEqual(candidate[FindColumnOrdinal(table, column)], keys[i],
+                        table.Columns[FindColumnOrdinal(table, column)].Collation ?? _catalog.DefaultCollation)).All(equal => equal));
                 if (selfMatch)
                 {
                     continue;
@@ -428,7 +430,8 @@ internal sealed partial class SqlPlanExecutor
             {
                 continue;
             }
-            bool changed = constraint.ReferencedColumns!.Select((column, i) => !ValuesEqual(newValues[FindColumnOrdinal(table, column)], keys[i])).Any(value => value);
+            bool changed = constraint.ReferencedColumns!.Select((column, i) => !ValuesEqual(newValues[FindColumnOrdinal(table, column)], keys[i],
+                table.Columns[FindColumnOrdinal(table, column)].Collation ?? _catalog.DefaultCollation)).Any(value => value);
             if (changed && FindConstraintRows(child, constraint.Columns, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
             {
                 throw Violation(child, constraint, keys);
@@ -585,7 +588,7 @@ internal sealed partial class SqlPlanExecutor
             if (definition.Kind == SqlConstraintKind.Check)
             {
                 var expression = definition.CheckExpression ?? ParseCheck(definition.CheckExpressionText!);
-                SqlPlanner.ValidateExpression(expression, new SqlExpressionEvaluator(table.Columns, null));
+                SqlPlanner.ValidateExpression(expression, new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation));
                 ValidateCheckSyntax(expression, table, requireBoolean: true);
                 result.Add(new SqlCatalogConstraint(name, SqlCatalogConstraintKind.Check, definition.Columns,
                     checkExpression: definition.CheckExpressionText));
@@ -616,6 +619,12 @@ internal sealed partial class SqlPlanExecutor
                 if (table.Columns[childOrdinal].Type.Type != parent.Columns[parentOrdinal].Type.Type)
                 {
                     throw new DatabaseException($"FOREIGN KEY '{name}' requires matching column types.");
+                }
+                if (table.Columns[childOrdinal].Type.Type == DatabaseType.String
+                    && (table.Columns[childOrdinal].Collation ?? _catalog.DefaultCollation)
+                        != (parent.Columns[parentOrdinal].Collation ?? _catalog.DefaultCollation))
+                {
+                    throw new DatabaseException($"FOREIGN KEY '{name}' requires matching column collations.");
                 }
             }
             bool unique = (self && SameConstraintColumns(parent.PrimaryKeyColumns, definition.ReferencedColumns)) ||

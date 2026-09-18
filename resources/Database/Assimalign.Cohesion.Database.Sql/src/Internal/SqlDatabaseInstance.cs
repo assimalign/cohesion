@@ -28,13 +28,16 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     private readonly SqlSchemaProvisioner _schemaProvisioner;
     private bool _disposed;
 
-    internal SqlDatabaseInstance(string name, IDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage, bool recover = false)
+    internal SqlDatabaseInstance(string name, IDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage,
+        bool recover = false, Collation? defaultCollation = null)
     {
         Name = name;
         Engine = engine;
         _storage = storage;
         _catalogStorage = catalogStorage;
-        _catalog = SqlCatalog.Open(catalogStorage);
+        _catalog = defaultCollation is null
+            ? SqlCatalog.Open(catalogStorage)
+            : SqlCatalog.Open(catalogStorage, defaultCollation);
         _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new SqlTransactionRecordSpace(storage));
 
         // Re-attach the persisted secondary indexes before recovery: the

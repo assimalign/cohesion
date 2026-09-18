@@ -16,7 +16,7 @@ public static class SqlLanguageProfile
         "CREATE", "DROP", "ALTER", "TABLE", "INDEX", "VIEW", "IF",
         "ADD", "COLUMN",
         "PRIMARY", "KEY", "FOREIGN", "REFERENCES",
-        "CONSTRAINT", "DEFAULT", "CHECK", "UNIQUE",
+        "CONSTRAINT", "DEFAULT", "CHECK", "UNIQUE", "COLLATE",
         "CASCADE", "RESTRICT",
         // Joins
         "JOIN", "LEFT", "RIGHT", "INNER", "OUTER",
@@ -85,6 +85,7 @@ public static class SqlLanguageProfile
         SqlClauses.Values,
         SqlClauses.Case,
         SqlClauses.Cast,
+        SqlClauses.Collate,
         SqlClauses.Constraint,
         SqlClauses.ForeignKey,
         SqlClauses.References,

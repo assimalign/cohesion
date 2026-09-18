@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
@@ -31,6 +32,27 @@ public static class SqlCatalog
     {
         ArgumentNullException.ThrowIfNull(storage);
         return DefaultSqlCatalog.Open(storage);
+    }
+
+    /// <summary>
+    /// Opens the catalog and establishes its database default string collation.
+    /// </summary>
+    /// <param name="storage">The dedicated catalog storage file set.</param>
+    /// <param name="defaultCollation">
+    /// The database default collation, adopted only by an empty catalog. Reopening a
+    /// populated catalog keeps its persisted default, so the value is fixed for the
+    /// lifetime of the database.
+    /// </param>
+    /// <returns>The catalog.</returns>
+    /// <exception cref="SqlCatalogException">
+    /// The catalog already contains tables under a different default. Their index keys
+    /// are encoded through the collation they inherited, so it cannot be changed.
+    /// </exception>
+    public static ISqlCatalog Open(SqlStorage storage, Collation defaultCollation)
+    {
+        ArgumentNullException.ThrowIfNull(storage);
+        ArgumentNullException.ThrowIfNull(defaultCollation);
+        return DefaultSqlCatalog.Open(storage, defaultCollation);
     }
 
     internal static SqlCatalogSnapshot CaptureSnapshot(ISqlCatalog catalog)

@@ -15,8 +15,10 @@ public sealed class SqlColumnDefinition
     /// <param name="isNullable">Whether the column allows NULL values.</param>
     /// <param name="isPrimaryKey">Whether the column is a primary key.</param>
     /// <param name="defaultValue">The default value expression, if any.</param>
+    /// <param name="constraints">The normalized column constraints.</param>
+    /// <param name="collationName">The declared collation name, or null to inherit the database default.</param>
     internal SqlColumnDefinition(string columnName, string dataType, bool isNullable, bool isPrimaryKey, SqlExpression? defaultValue,
-        IReadOnlyList<SqlConstraintDefinition>? constraints = null)
+        IReadOnlyList<SqlConstraintDefinition>? constraints = null, string? collationName = null)
     {
         ColumnName = columnName;
         DataType = dataType;
@@ -24,6 +26,7 @@ public sealed class SqlColumnDefinition
         IsPrimaryKey = isPrimaryKey;
         DefaultValue = defaultValue;
         Constraints = constraints ?? [];
+        CollationName = collationName;
     }
 
     /// <summary>
@@ -53,4 +56,7 @@ public sealed class SqlColumnDefinition
 
     /// <summary>Gets normalized constraints declared on this column.</summary>
     public IReadOnlyList<SqlConstraintDefinition> Constraints { get; }
+
+    /// <summary>Gets the declared collation name, or null to inherit the database default.</summary>
+    public string? CollationName { get; }
 }

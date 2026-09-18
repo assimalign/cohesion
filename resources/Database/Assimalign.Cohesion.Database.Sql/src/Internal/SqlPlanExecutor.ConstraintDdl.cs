@@ -79,6 +79,19 @@ internal sealed partial class SqlPlanExecutor
             indexes.Add(new SqlCatalogIndex(table.ObjectId, $"PrimaryKey_{table.Name}", table.PrimaryKeyColumns, true, table.Owner, table.OwningSchema, isPrimaryKey: true));
         }
 
+        foreach (var metadata in indexes)
+        {
+            foreach (string name in metadata.ColumnNames)
+            {
+                var column = table.Columns[FindColumnOrdinal(table, name)];
+                if (column.Type.Type is Types.DatabaseType.String or Types.DatabaseType.Json
+                    && !(column.Collation ?? _catalog.DefaultCollation).IsIndexBacked)
+                {
+                    throw new DatabaseException($"Collation 'invariant' is not index-backed; column '{name}' cannot have an index or indexed constraint.");
+                }
+            }
+        }
+
         var created = new List<string>();
         try
         {
@@ -141,7 +154,7 @@ internal sealed partial class SqlPlanExecutor
         constraints = BindConstraints(plan.Table, [plan.Constraint]);
         var primary = plan.Constraint.Kind == SqlConstraintKind.PrimaryKey ? plan.Constraint.Columns : plan.Table.PrimaryKeyColumns;
         var columns = plan.Table.Columns.Select(column => primary.Contains(column.Name, StringComparer.OrdinalIgnoreCase)
-            ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral) : column).ToArray();
+            ? new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation) : column).ToArray();
         var replacement = new SqlCatalogTable(plan.Table.ObjectId, plan.Table.Schema, plan.Table.Name, columns,
             primary, plan.Table.Owner, plan.Table.OwningSchema, plan.Table.Constraints.Concat(constraints).ToArray());
         var rows = Scan(plan.Table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
@@ -237,7 +250,7 @@ internal sealed partial class SqlPlanExecutor
         var columns = table.Columns.Where(column => !string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)).ToArray();
         foreach (var check in table.Constraints.Where(c => c.Kind == SqlCatalogConstraintKind.Check))
         {
-            SqlPlanner.ValidateExpression(ParseCheck(check.CheckExpression!), new SqlExpressionEvaluator(columns, null));
+            SqlPlanner.ValidateExpression(ParseCheck(check.CheckExpression!), new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation));
         }
     }
 }

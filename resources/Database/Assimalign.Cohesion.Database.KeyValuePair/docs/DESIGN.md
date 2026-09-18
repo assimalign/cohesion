@@ -5,6 +5,16 @@ The key-value engine (area architecture:
 an ordered key space over the shared kernel, and the **second model engine** —
 built deliberately as the proof that the kernel is model-general, not SQL-shaped.
 
+## String comparison and collation (#1025)
+
+Key-Value remains binary-only for user data: keys and values are opaque bytes,
+and key equality, ordering, uniqueness, and prefix ranges use unsigned
+lexicographic byte comparison. Text supplied as a key is compared in its encoded
+form without case or accent folding. Command keywords and administrative database
+lookup remain ordinal-ignore-case; those identifier rules do not transform user
+keys. SQL database defaults and column/expression `COLLATE` have no effect on
+this model. Configurable text collation is deferred.
+
 ## Design intent
 
 Compose kernel pieces, never re-implement them — and compose them in a

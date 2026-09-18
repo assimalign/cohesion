@@ -5,6 +5,32 @@ The SQL model's schema authority (area architecture:
 two questions for the planner: *what objects exist* (with stable identities) and
 *what shape are they* — and it must answer identically after any crash.
 
+## Collation metadata (#1025)
+
+`SqlCatalogColumn.Collation` is an optional string-column override. Null inherits
+`ISqlCatalog.DefaultCollation`, which is Binary when no default record exists.
+The default is persisted in a dedicated kind-7 catalog record and captured in
+immutable statement snapshots.
+
+`DefaultCollation` is read-only on the contract. The default is established when
+the catalog is opened — `SqlCatalog.Open(storage, defaultCollation)` — and is
+fixed for the lifetime of the database, because every index key on a column that
+inherited it is encoded through that collation's byte transform. Opening an
+already-populated catalog under a different default is rejected; reopening under
+the same one, or with no default supplied, keeps the persisted value.
+
+Making this creation-time state rather than a mutator is deliberate: a setter on
+the contract would tell every implementer the value is changeable and then guard
+that promise at runtime, which is the kind of one-off bridging API the repo's
+abstraction rule exists to keep off interfaces.
+
+Table metadata extension version 2 appends one collation identifier per column
+after the existing constraints. Version-1 and pre-extension records still read
+with null column overrides and the Binary database fallback. Column additions,
+drops, and restart preserve explicit overrides. An index inherits its key
+columns' effective collations; the SQL engine verifies index eligibility and
+uses those same transforms for uniqueness enforcement.
+
 ## Why-this-not-that decisions
 
 - **A dedicated catalog storage file set** — not catalog rows mixed into the data

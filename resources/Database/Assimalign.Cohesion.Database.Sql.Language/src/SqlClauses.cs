@@ -78,6 +78,9 @@ public static class SqlClauses
     /// <summary>A <c>CAST</c> expression.</summary>
     public const string Cast = "CAST";
 
+    /// <summary>A column or expression <c>COLLATE</c> override.</summary>
+    public const string Collate = "COLLATE";
+
     /// <summary>A recursive common-table expression.</summary>
     public const string Recursive = "RECURSIVE";
 

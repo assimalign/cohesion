@@ -5,6 +5,7 @@ using System.Linq;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -19,15 +20,21 @@ internal sealed class SqlExpressionEvaluator
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
     private readonly IReadOnlyList<SqlTableBinding>? _bindings;
     private readonly IReadOnlyDictionary<SqlExpression, int>? _valueOrdinals;
+    private readonly Collation _defaultCollation;
+    private readonly IReadOnlyDictionary<SqlExpression, SqlExpression>? _expressionSources;
 
     internal SqlExpressionEvaluator(IReadOnlyList<SqlCatalogColumn> columns, IReadOnlyDictionary<string, object?>? parameters,
         IReadOnlyList<SqlTableBinding>? bindings = null,
-        IReadOnlyDictionary<SqlExpression, int>? valueOrdinals = null)
+        IReadOnlyDictionary<SqlExpression, int>? valueOrdinals = null,
+        Collation? defaultCollation = null,
+        IReadOnlyDictionary<SqlExpression, SqlExpression>? expressionSources = null)
     {
         _columns = columns;
         _parameters = parameters;
         _bindings = bindings;
         _valueOrdinals = valueOrdinals;
+        _defaultCollation = defaultCollation ?? Collation.Binary;
+        _expressionSources = expressionSources;
     }
 
     /// <summary>
@@ -67,6 +74,7 @@ internal sealed class SqlExpressionEvaluator
             SqlCaseExpression caseExpression => EvaluateCase(caseExpression, row),
             SqlFunctionCallExpression function => EvaluateFunction(function, row),
             SqlCastExpression cast => EvaluateCast(cast, row),
+            SqlCollateExpression collate => Evaluate(collate.Operand, row),
             _ => throw new DatabaseException($"Expression '{expression.GetType().Name}' is not supported by the executor yet."),
         };
     }
@@ -111,6 +119,54 @@ internal sealed class SqlExpressionEvaluator
         }
 
         throw new DatabaseException($"Unknown column '{column.ColumnName}'.");
+    }
+
+    /// <summary>Resolves explicit expression, column, then database collation in that order.</summary>
+    internal Collation ResolveCollation(SqlExpression? expression, SqlExpression? other = null)
+    {
+        var first = FindCollation(expression);
+        var second = FindCollation(other);
+        return (second.Priority > first.Priority ? second.Collation : first.Collation) ?? _defaultCollation;
+    }
+
+    /// <summary>Resolves a directly projected column against the database default.</summary>
+    internal Collation ResolveColumnCollation(int ordinal) => _columns[ordinal].Collation ?? _defaultCollation;
+
+    private (Collation? Collation, int Priority) FindCollation(SqlExpression? expression)
+    {
+        if (expression is not null && _expressionSources is not null
+            && _expressionSources.TryGetValue(expression, out var source))
+        {
+            return FindCollation(source);
+        }
+        if (expression is SqlCollateExpression collate)
+        {
+            var inner = FindCollation(collate.Operand);
+            return inner.Priority == 3 ? inner : (Collation.FromName(collate.CollationName), 3);
+        }
+        if (expression is SqlColumnReferenceExpression column)
+        {
+            int ordinal = ResolveColumn(column);
+            return (ResolveColumnCollation(ordinal), _columns[ordinal].Collation is null ? 1 : 2);
+        }
+        (Collation? Collation, int Priority) best = (null, 0);
+        if (expression is not null)
+        {
+            // CASE conditions select a result; their collation does not describe that result.
+            var children = expression is SqlCaseExpression conditional
+                ? conditional.WhenClauses.Select(clause => clause.Result).Concat(
+                    conditional.ElseResult is null ? [] : new[] { conditional.ElseResult })
+                : SqlPlanner.Children(expression);
+            foreach (var child in children)
+            {
+                var candidate = FindCollation(child);
+                if (candidate.Priority > best.Priority)
+                {
+                    best = candidate;
+                }
+            }
+        }
+        return best;
     }
 
     /// <summary>An alias replaces the base relation name within the join scope.</summary>
@@ -204,14 +260,16 @@ internal sealed class SqlExpressionEvaluator
             return null; // SQL null propagation
         }
 
+        var collation = ResolveCollation(binary.Left, binary.Right);
+
         return binary.Operator switch
         {
-            SqlBinaryOperator.Equal => Compare(leftValue, rightValue) == 0,
-            SqlBinaryOperator.NotEqual => Compare(leftValue, rightValue) != 0,
-            SqlBinaryOperator.LessThan => Compare(leftValue, rightValue) < 0,
-            SqlBinaryOperator.GreaterThan => Compare(leftValue, rightValue) > 0,
-            SqlBinaryOperator.LessOrEqual => Compare(leftValue, rightValue) <= 0,
-            SqlBinaryOperator.GreaterOrEqual => Compare(leftValue, rightValue) >= 0,
+            SqlBinaryOperator.Equal => Compare(leftValue, rightValue, collation) == 0,
+            SqlBinaryOperator.NotEqual => Compare(leftValue, rightValue, collation) != 0,
+            SqlBinaryOperator.LessThan => Compare(leftValue, rightValue, collation) < 0,
+            SqlBinaryOperator.GreaterThan => Compare(leftValue, rightValue, collation) > 0,
+            SqlBinaryOperator.LessOrEqual => Compare(leftValue, rightValue, collation) <= 0,
+            SqlBinaryOperator.GreaterOrEqual => Compare(leftValue, rightValue, collation) >= 0,
             SqlBinaryOperator.Add => Arithmetic(leftValue, rightValue, static (a, b) => a + b, static (a, b) => a + b),
             SqlBinaryOperator.Subtract => Arithmetic(leftValue, rightValue, static (a, b) => a - b, static (a, b) => a - b),
             SqlBinaryOperator.Multiply => Arithmetic(leftValue, rightValue, static (a, b) => a * b, static (a, b) => a * b),
@@ -266,7 +324,8 @@ internal sealed class SqlExpressionEvaluator
             return null;
         }
 
-        bool between = Compare(value, lower) >= 0 && Compare(value, upper) <= 0;
+        bool between = Compare(value, lower, ResolveCollation(expression.Operand, expression.Low)) >= 0
+            && Compare(value, upper, ResolveCollation(expression.Operand, expression.High)) <= 0;
         return expression.IsNegated ? !between : between;
     }
 
@@ -293,7 +352,7 @@ internal sealed class SqlExpressionEvaluator
             {
                 hasUnknown = true;
             }
-            else if (Compare(value, candidateValue) == 0)
+            else if (Compare(value, candidateValue, ResolveCollation(expression.Operand, candidate)) == 0)
             {
                 return !expression.IsNegated;
             }
@@ -316,7 +375,8 @@ internal sealed class SqlExpressionEvaluator
 
         bool matches = LikeMatches(
             Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
-            Convert.ToString(pattern, CultureInfo.InvariantCulture) ?? string.Empty);
+            Convert.ToString(pattern, CultureInfo.InvariantCulture) ?? string.Empty,
+            ResolveCollation(expression.Operand, expression.Pattern));
 
         return expression.IsNegated ? !matches : matches;
     }
@@ -338,7 +398,8 @@ internal sealed class SqlExpressionEvaluator
             {
                 object? candidate = Evaluate(when.Condition, row);
 
-                if (input is not null && candidate is not null && Compare(input, candidate) == 0)
+                if (input is not null && candidate is not null && Compare(input, candidate,
+                    ResolveCollation(expression.Input, when.Condition)) == 0)
                 {
                     return Evaluate(when.Result, row);
                 }
@@ -391,9 +452,9 @@ internal sealed class SqlExpressionEvaluator
 
     /// <summary>
     /// Compares two non-null values with numeric promotion (integers and floats
-    /// promote to decimal/double) and ordinal string comparison.
+    /// promote to decimal/double) and the resolved string collation.
     /// </summary>
-    internal static int Compare(object left, object right)
+    internal static int Compare(object left, object right, Collation? collation = null)
     {
         if (TryToNumber(left, out decimal leftNumber) && TryToNumber(right, out decimal rightNumber))
         {
@@ -402,7 +463,7 @@ internal sealed class SqlExpressionEvaluator
 
         if (left is string leftText && right is string rightText)
         {
-            return Types.Collation.Binary.Compare(leftText, rightText);
+            return (collation ?? Collation.Binary).Compare(leftText, rightText);
         }
 
         if (left is bool leftFlag && right is bool rightFlag)
@@ -455,10 +516,17 @@ internal sealed class SqlExpressionEvaluator
     }
 
     /// <summary>
-    /// SQL LIKE with <c>%</c> (any run) and <c>_</c> (any one character), ordinal.
+    /// SQL LIKE with <c>%</c> (any run) and <c>_</c> (any one character), using the effective collation.
     /// </summary>
-    internal static bool LikeMatches(string input, string pattern)
+    internal static bool LikeMatches(string input, string pattern, Collation? collation = null)
     {
+        collation ??= Collation.Binary;
+        if (!collation.IsIndexBacked)
+        {
+            return LikeMatchesLegacy(input, pattern, collation);
+        }
+        input = collation.Normalize(input);
+        pattern = collation.Normalize(pattern);
         return Matches(input.AsSpan(), pattern.AsSpan());
 
         static bool Matches(ReadOnlySpan<char> input, ReadOnlySpan<char> pattern)
@@ -479,6 +547,10 @@ internal sealed class SqlExpressionEvaluator
 
                     for (int i = 0; i <= input.Length; i++)
                     {
+                        if (i > 0 && i < input.Length && char.IsLowSurrogate(input[i]) && char.IsHighSurrogate(input[i - 1]))
+                        {
+                            continue;
+                        }
                         if (Matches(input[i..], rest))
                         {
                             return true;
@@ -498,11 +570,48 @@ internal sealed class SqlExpressionEvaluator
                     return false;
                 }
 
-                input = input[1..];
+                int consumed = token == '_' && input.Length > 1
+                    && char.IsHighSurrogate(input[0]) && char.IsLowSurrogate(input[1]) ? 2 : 1;
+                input = input[consumed..];
                 pattern = pattern[1..];
             }
 
             return input.IsEmpty;
         }
+    }
+
+    /// <summary>Compatibility matching uses comparisons, never index keys, for legacy linguistic ordering.</summary>
+    private static bool LikeMatchesLegacy(string input, string pattern, Collation collation)
+    {
+        if (pattern.Length == 0)
+        {
+            return input.Length == 0;
+        }
+        if (pattern[0] == '%')
+        {
+            for (int i = 0; i <= input.Length; i++)
+            {
+                if (LikeMatchesLegacy(input[i..], pattern[1..], collation))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (pattern[0] == '_')
+        {
+            return input.Length > 0 && LikeMatchesLegacy(input[1..], pattern[1..], collation);
+        }
+        int length = pattern.IndexOfAny(['%', '_']);
+        length = length < 0 ? pattern.Length : length;
+        for (int i = 0; i <= input.Length; i++)
+        {
+            if (collation.Compare(input[..i], pattern[..length]) == 0
+                && LikeMatchesLegacy(input[i..], pattern[length..], collation))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }
