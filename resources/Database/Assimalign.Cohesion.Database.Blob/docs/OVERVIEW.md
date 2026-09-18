@@ -44,18 +44,35 @@ Disposing a session aborts its pending work. Blob has no statement or query lang
 `ExecuteAsync` rejects commands, including database switching and server administration.
 Creating and dropping logical databases remains the host-side engine API.
 
+The package also supplies `BlobDatabaseServer`, created with the engine and a
+`BlobDatabaseServerOptions.Listener` implementing `IConnectionListener`. Call
+`StartAsync` to bind and accept, then `StopAsync` to drain and terminally release the
+listener. The composition root retains engine ownership. Startup binds each authenticated
+session to one database; requests identify only containers and objects in that database.
+The default authenticator trusts every principal; configure `Authenticator` for authenticated
+access. Session limits, authentication deadlines, idle eviction, and bounded two-phase shutdown
+are configurable. A non-running engine rejects new sessions and operations.
+
 The package owns the Blob wire message family. Bind a `ProtocolChannel` to `BlobProtocol.Family`
 at the Blob endpoint. `BlobReadMessage` and `BlobWriteMessage` identify an object;
 `BlobProtocolTransfer.SendAsync` and `ReceiveAsync` copy its content using at most one 64 KiB
 chunk in flight, with a receiver acknowledgement after each destination write. The helpers
 accept non-seekable streams and unknown lengths. The caller supplies the shared handshake,
-request dispatch, authentication, and upload publication. They are protocol building blocks
-for the separate Blob client and server work, not a connection-owning client.
+request dispatch, authentication, and upload publication when using the helpers directly.
+The server supplies those responsibilities. The separate
+[Blob.Client](../../Assimalign.Cohesion.Database.Blob.Client/docs/OVERVIEW.md) package provides
+stream upload/download and typed delete, property, and prefix-listing operations over the shared
+Database.Client connection. An upload is acknowledged only after complete content validation and
+transaction commit. Cancellation, disconnect, malformed completion, or engine failure before
+commit rolls back, preserving the previous object. A connection loss after commit but before its
+acknowledgement leaves the caller uncertain whether publication succeeded. Verify properties
+before retrying when that distinction matters.
 
-Dependencies are the Database root, Database.Protocol, Blob.Storage, Blob.Catalog,
+Dependencies are Connections, the Database root, Database.Protocol, Blob.Storage, Blob.Catalog,
 Database.Storage, and Database.Transactions. The implementation targets .NET 10, Preview C#, and NativeAOT without
-reflection or Microsoft.Extensions packages. Wire clients, security, replication, hosting
-integration, and compiled-schema provisioning are outside this package's current scope.
+reflection or Microsoft.Extensions packages. It references no concrete transport. Transport
+construction belongs to the composition root; security policy beyond the supplied authenticator,
+replication, hosting integration, and compiled-schema provisioning remain outside this package.
 
 See [DESIGN.md](DESIGN.md), the [storage format](../../Assimalign.Cohesion.Database.Blob.Storage/docs/DESIGN.md),
 and the [catalog format](../../Assimalign.Cohesion.Database.Blob.Catalog/docs/DESIGN.md).

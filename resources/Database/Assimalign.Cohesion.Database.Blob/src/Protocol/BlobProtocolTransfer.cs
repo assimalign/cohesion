@@ -32,13 +32,34 @@ public static class BlobProtocolTransfer
         CancellationToken cancellationToken = default)
     {
         ValidateChannel(channel);
+        return await SendAsync(channel.Reader, channel.Writer, source, metadata, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Sends content through the frame endpoints of an exclusive Blob exchange.</summary>
+    /// <param name="reader">The Blob-bound frame reader.</param>
+    /// <param name="writer">The Blob-bound frame writer.</param>
+    /// <param name="source">The caller-owned readable source.</param>
+    /// <param name="metadata">The expected length and content type.</param>
+    /// <param name="cancellationToken">Cancellation token for the entire transfer.</param>
+    /// <returns>The verified actual byte count.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentException">The source is not readable.</exception>
+    /// <exception cref="ProtocolException">The metadata, length or acknowledgement is invalid.</exception>
+    /// <exception cref="OperationCanceledException">The transfer is canceled.</exception>
+    /// <remarks>The caller must hold exclusive access to both endpoints for the entire transfer.</remarks>
+    public static async ValueTask<long> SendAsync(
+        IProtocolFrameReader reader, IProtocolFrameWriter writer, Stream source,
+        BlobTransferStartMessage metadata, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(metadata);
         if (!source.CanRead)
         {
             throw new ArgumentException("The content stream must be readable.", nameof(source));
         }
-        await WriteAsync(channel, BlobProtocolMessageType.TransferStart, metadata.Encode(), cancellationToken).ConfigureAwait(false);
+        await WriteAsync(writer, BlobProtocolMessageType.TransferStart, metadata.Encode(), cancellationToken).ConfigureAwait(false);
         var buffer = new byte[BlobProtocol.MaxChunkLength];
         long total = 0;
         while (true)
@@ -49,9 +70,9 @@ public static class BlobProtocolTransfer
                 break;
             }
             total = AddLength(total, read, metadata.Length);
-            await channel.Writer.WriteFrameAsync(new BlobChunkMessage(buffer.AsMemory(0, read)).ToFrame(), cancellationToken).ConfigureAwait(false);
-            await channel.Writer.FlushAsync(cancellationToken).ConfigureAwait(false);
-            ProtocolFrame acknowledgement = await ReadAsync(channel, cancellationToken).ConfigureAwait(false);
+            await writer.WriteFrameAsync(new BlobChunkMessage(buffer.AsMemory(0, read)).ToFrame(), cancellationToken).ConfigureAwait(false);
+            await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            ProtocolFrame acknowledgement = await ReadAsync(reader, cancellationToken).ConfigureAwait(false);
             if (acknowledgement.Type != (ProtocolMessageType)BlobProtocolMessageType.ChunkAcknowledgement ||
                 BlobChunkAcknowledgementMessage.Decode(acknowledgement.Payload.Span).Length != total)
             {
@@ -62,7 +83,7 @@ public static class BlobProtocolTransfer
         {
             throw new ProtocolException("The Blob source ended before its declared length.");
         }
-        await WriteAsync(channel, BlobProtocolMessageType.TransferComplete,
+        await WriteAsync(writer, BlobProtocolMessageType.TransferComplete,
             new BlobTransferCompleteMessage(total).Encode(), cancellationToken).ConfigureAwait(false);
         return total;
     }
@@ -86,28 +107,79 @@ public static class BlobProtocolTransfer
         CancellationToken cancellationToken = default)
     {
         ValidateChannel(channel);
+        return await ReceiveAsync(channel.Reader, channel.Writer, destination, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Receives a transfer through the frame endpoints of an exclusive Blob exchange.</summary>
+    /// <param name="reader">The Blob-bound frame reader.</param>
+    /// <param name="writer">The Blob-bound frame writer.</param>
+    /// <param name="destination">The caller-owned writable destination.</param>
+    /// <param name="cancellationToken">Cancellation token for the entire transfer.</param>
+    /// <returns>The metadata with the verified actual byte count.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentException">The destination is not writable.</exception>
+    /// <exception cref="ProtocolException">The transfer is malformed, truncated or terminated by an error.</exception>
+    /// <exception cref="OperationCanceledException">The transfer is canceled.</exception>
+    public static async ValueTask<BlobTransferStartMessage> ReceiveAsync(
+        IProtocolFrameReader reader, IProtocolFrameWriter writer, Stream destination,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(destination);
         if (!destination.CanWrite)
         {
             throw new ArgumentException("The content stream must be writable.", nameof(destination));
         }
-        ProtocolFrame start = await ReadAsync(channel, cancellationToken).ConfigureAwait(false);
+        ProtocolFrame start = await ReadAsync(reader, cancellationToken).ConfigureAwait(false);
         if (start.Type != (ProtocolMessageType)BlobProtocolMessageType.TransferStart)
         {
             throw new ProtocolException("A Blob transfer must begin with TransferStart.");
         }
         BlobTransferStartMessage metadata = BlobTransferStartMessage.Decode(start.Payload.Span);
+        return await ReceiveAsync(reader, writer, destination, metadata, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Receives chunks after the caller has consumed and validated TransferStart.</summary>
+    /// <param name="reader">The Blob-bound frame reader positioned after TransferStart.</param>
+    /// <param name="writer">The Blob-bound frame writer.</param>
+    /// <param name="destination">The caller-owned writable destination opened using the metadata.</param>
+    /// <param name="metadata">The already decoded TransferStart metadata.</param>
+    /// <param name="cancellationToken">Cancellation token for the remaining transfer.</param>
+    /// <returns>The metadata with the verified actual byte count.</returns>
+    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
+    /// <exception cref="ArgumentException">The destination is not writable.</exception>
+    /// <exception cref="ProtocolException">The transfer metadata or content is invalid.</exception>
+    /// <exception cref="OperationCanceledException">The transfer is canceled.</exception>
+    /// <remarks>The caller retains exclusive access and owns rollback, disposal and publication.</remarks>
+    public static async ValueTask<BlobTransferStartMessage> ReceiveAsync(
+        IProtocolFrameReader reader, IProtocolFrameWriter writer, Stream destination,
+        BlobTransferStartMessage metadata, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentNullException.ThrowIfNull(metadata);
+        if (!destination.CanWrite)
+        {
+            throw new ArgumentException("The content stream must be writable.", nameof(destination));
+        }
+        if (metadata.Length < -1)
+        {
+            throw new ProtocolException("A Blob transfer length must be nonnegative or -1.");
+        }
+
         long total = 0;
         while (true)
         {
-            ProtocolFrame frame = await ReadAsync(channel, cancellationToken).ConfigureAwait(false);
+            ProtocolFrame frame = await ReadAsync(reader, cancellationToken).ConfigureAwait(false);
             switch ((BlobProtocolMessageType)frame.Type)
             {
                 case BlobProtocolMessageType.Chunk:
                     BlobChunkMessage chunk = BlobChunkMessage.Decode(frame.Payload);
                     total = AddLength(total, chunk.Content.Length, metadata.Length);
                     await destination.WriteAsync(chunk.Content, cancellationToken).ConfigureAwait(false);
-                    await WriteAsync(channel, BlobProtocolMessageType.ChunkAcknowledgement,
+                    await WriteAsync(writer, BlobProtocolMessageType.ChunkAcknowledgement,
                         new BlobChunkAcknowledgementMessage(total).Encode(), cancellationToken).ConfigureAwait(false);
                     break;
                 case BlobProtocolMessageType.TransferComplete:
@@ -141,9 +213,9 @@ public static class BlobProtocolTransfer
         return total + count;
     }
 
-    private static async ValueTask<ProtocolFrame> ReadAsync(ProtocolChannel channel, CancellationToken cancellationToken)
+    private static async ValueTask<ProtocolFrame> ReadAsync(IProtocolFrameReader reader, CancellationToken cancellationToken)
     {
-        ProtocolFrame? frame = await channel.Reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
+        ProtocolFrame? frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
         if (frame is null)
         {
             throw new ProtocolException("The connection ended before the Blob transfer completed.");
@@ -156,10 +228,10 @@ public static class BlobProtocolTransfer
         return frame.Value;
     }
 
-    private static async ValueTask WriteAsync(ProtocolChannel channel, BlobProtocolMessageType type,
+    private static async ValueTask WriteAsync(IProtocolFrameWriter writer, BlobProtocolMessageType type,
         ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
-        await channel.Writer.WriteFrameAsync(new((ProtocolMessageType)type, payload), cancellationToken).ConfigureAwait(false);
-        await channel.Writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await writer.WriteFrameAsync(new((ProtocolMessageType)type, payload), cancellationToken).ConfigureAwait(false);
+        await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 }

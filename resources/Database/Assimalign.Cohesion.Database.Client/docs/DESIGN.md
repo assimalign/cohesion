@@ -15,9 +15,12 @@ flowchart LR
     SqlClient --> Sql["Database.Sql"]
     KvClient["Database.KeyValuePair.Client"] --> Client
     KvClient --> Kv["Database.KeyValuePair"]
+    BlobClient["Database.Blob.Client"] --> Client
+    BlobClient --> Blob["Database.Blob"]
     Client --> Protocol["Database.Protocol"]
     Sql --> Protocol
     Kv --> Protocol
+    Blob --> Protocol
 ```
 
 | Package | Responsibility |
@@ -26,6 +29,7 @@ flowchart LR
 | Database.Protocol | Framing, shared messages, immutable family binding |
 | Database.Sql.Client | SQL parameter encoding, decoding, and materialization |
 | Database.KeyValuePair.Client | Key-value encoding, decoding, and materialization |
+| Database.Blob.Client | Bounded content streaming and Blob metadata responses |
 | Model packages | Model identifiers and payload codecs |
 
 `DatabaseClientOptions.Family` is mandatory. The pool captures the exact immutable
@@ -36,9 +40,11 @@ exchange through the channel reader and writer. A different family instance is
 rejected before execution, including a family that reuses the same identifier bytes.
 
 The operation returns only after consuming the complete response and must not
-retain or dispose the borrowed reader/writer. SQL and Key-Value materialize;
-a future Blob client can transfer bounded chunks directly to caller-owned streams.
-Neither choice becomes shared policy.
+retain or dispose the borrowed reader/writer. SQL and Key-Value materialize.
+Blob uploads transfer bounded chunks from caller-owned streams. Blob downloads
+keep the exchange active behind a bounded producer/consumer stream until verified
+completion or disposal. Returning that content stream does not complete the shared
+exchange or release its connection. Neither choice becomes shared policy.
 
 ## Lifecycle and errors
 

@@ -1,1 +1,24 @@
-<Project Sdk="Microsoft.NET.Sdk"/>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+    <CohesionPackageReference Include="xunit" />
+    <CohesionPackageReference Include="xunit.runner.visualstudio" />
+    <CohesionPackageReference Include="coverlet.collector" />
+    <CohesionPackageReference Include="Shouldly" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Client" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Client.StreamingFixture" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <Target Name="CopyBlobClientStreamingFixture" AfterTargets="Build">
+    <ItemGroup>
+      <BlobClientStreamingFixtureOutput Include="$(MSBuildThisFileDirectory)..\fixtures\Assimalign.Cohesion.Database.Blob.Client.StreamingFixture\bin\$(Configuration)\$(TargetFramework)\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BlobClientStreamingFixtureOutput)"
+          DestinationFiles="@(BlobClientStreamingFixtureOutput->'$(OutDir)BlobClientStreamingFixture\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

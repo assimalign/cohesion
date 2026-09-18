@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Database.Client — Overview
 
 The shared client core of the Data Platform: the protocol client every per-model
-client (`Sql.Client`, `Documents.Client`, …) builds on. It dials a
+client (`Sql.Client`, `KeyValuePair.Client`, `Blob.Client`, …) builds on. It dials a
 `libraries/Connections` transport, runs the startup/authenticate/ready
 handshake, runs model-owned framed exchanges, and pools authenticated connections.
 
@@ -13,6 +13,8 @@ handshake, runs model-owned framed exchanges, and pools authenticated connection
 - **`IDatabaseConnection`** — one protocol session: `OpenAsync` (handshake) and
   `ExecuteAsync<TResult>(IDatabaseProtocolExchange<TResult>)` returning the model's
   result. The exchange supplies codecs and materialization policy.
+  Streaming Blob downloads keep this exchange active while the caller reads;
+  content stream disposal cancels unfinished work before releasing the rental.
 - **`DatabaseClientOptions.Family`** — the model family fixed for every connection
   in the pool. The exchange must use the exact same family instance.
 - **`DatabaseConnectionSettings`** — typed settings with a minimal `key=value;`

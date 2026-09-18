@@ -15,5 +15,10 @@ public static class BlobProtocol
         (byte)BlobProtocolMessageType.TransferStart,
         (byte)BlobProtocolMessageType.Chunk,
         (byte)BlobProtocolMessageType.TransferComplete,
-        (byte)BlobProtocolMessageType.ChunkAcknowledgement);
+        (byte)BlobProtocolMessageType.ChunkAcknowledgement,
+        (byte)BlobProtocolMessageType.Delete,
+        (byte)BlobProtocolMessageType.GetProperties,
+        (byte)BlobProtocolMessageType.List,
+        (byte)BlobProtocolMessageType.Properties,
+        (byte)BlobProtocolMessageType.OperationComplete);
 }

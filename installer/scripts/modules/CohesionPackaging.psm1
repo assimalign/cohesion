@@ -194,6 +194,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Database/Assimalign.Cohesion.Database.ApplicationModel'
     'resources/Database/Assimalign.Cohesion.Database.Blob'
     'resources/Database/Assimalign.Cohesion.Database.Blob.Catalog'
+    'resources/Database/Assimalign.Cohesion.Database.Blob.Client'
     'resources/Database/Assimalign.Cohesion.Database.Blob.Storage'
     'resources/Database/Assimalign.Cohesion.Database.Client'
     'resources/Database/Assimalign.Cohesion.Database.Documents'

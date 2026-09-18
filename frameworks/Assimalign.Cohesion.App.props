@@ -279,11 +279,12 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Catalog" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Client" />
 
-        <!-- The Blob model family: streaming chunk persistence and metadata
-             catalog over the shared storage and transaction kernel. -->
+        <!-- The Blob model family: streaming chunk persistence, metadata catalog,
+             transport-neutral server, and typed streaming wire client. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Blob" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Blob.Storage" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Blob.Catalog" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Blob.Client" />
 
         <!-- The Documents engine, OQL language, collection catalog, and chunk storage. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Documents" />

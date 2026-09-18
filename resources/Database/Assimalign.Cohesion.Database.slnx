@@ -62,6 +62,13 @@
 		<Project Path="Assimalign.Cohesion.Database.Blob.Catalog/tests/Assimalign.Cohesion.Database.Blob.Catalog.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Database/Models/Blob/Assimalign.Cohesion.Database.Blob.Client/" />
+	<Folder Name="/Database/Models/Blob/Assimalign.Cohesion.Database.Blob.Client/docs/">
+		<File Path="Assimalign.Cohesion.Database.Blob.Client/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Database.Blob.Client/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Database/Models/Blob/Assimalign.Cohesion.Database.Blob.Client/fixtures/">
+		<Project Path="Assimalign.Cohesion.Database.Blob.Client/fixtures/Assimalign.Cohesion.Database.Blob.Client.StreamingFixture/Assimalign.Cohesion.Database.Blob.Client.StreamingFixture.csproj" />
+	</Folder>
 	<Folder Name="/Database/Models/Blob/Assimalign.Cohesion.Database.Blob.Client/src/">
 		<Project Path="Assimalign.Cohesion.Database.Blob.Client/src/Assimalign.Cohesion.Database.Blob.Client.csproj" />
 	</Folder>

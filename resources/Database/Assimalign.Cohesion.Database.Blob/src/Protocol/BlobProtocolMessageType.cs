@@ -20,4 +20,19 @@ public enum BlobProtocolMessageType : byte
 
     /// <summary>Acknowledges the cumulative content count after accepting one chunk.</summary>
     ChunkAcknowledgement = 69,
+
+    /// <summary>Deletes a named object.</summary>
+    Delete = 70,
+
+    /// <summary>Requests the properties of a named object.</summary>
+    GetProperties = 71,
+
+    /// <summary>Requests properties in ordinal name order with an optional prefix.</summary>
+    List = 72,
+
+    /// <summary>Carries the complete properties of one object.</summary>
+    Properties = 73,
+
+    /// <summary>Completes a metadata operation with its result count.</summary>
+    OperationComplete = 74,
 }

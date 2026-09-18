@@ -3,7 +3,7 @@ on:
   push:
     paths:
       # Covers Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost, the area's
-      # acceptance fixture, and Database.Blob/fixtures/Assimalign.Cohesion.Database.Blob.StreamingFixture.
+      # acceptance fixture, and the engine/wire streaming fixtures under Blob and Blob.Client.
       # Fixtures sit inside the projects whose tests drive them.
       - 'resources/Database/**'
       - '.github/actions/build/**'
@@ -23,7 +23,7 @@ jobs:
         # each of them - most importantly Database.Hosting, which nothing else pulls in
         # transitively. The as-yet source-less model scaffolds (Cache, plus
         # Documents.Client/.Replication/.Security, Graph.Client/.Replication/.Security,
-        # Blob.Client/.Replication/.Security and
+        # Blob.Replication/.Security and
         # KeyValuePair.Replication/.Security) and the post-MVP contract
         # shells (Replication, Sql.Replication, Sql.Security, Memory) are
         # excluded until they ship.
@@ -32,6 +32,7 @@ jobs:
             'Assimalign.Cohesion.Database.ApplicationModel',
             'Assimalign.Cohesion.Database.Blob',
             'Assimalign.Cohesion.Database.Blob.Catalog',
+            'Assimalign.Cohesion.Database.Blob.Client',
             'Assimalign.Cohesion.Database.Blob.Storage',
             'Assimalign.Cohesion.Database.Client',
             'Assimalign.Cohesion.Database.Documents',

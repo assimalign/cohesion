@@ -8,9 +8,26 @@ from Key-Value's separate catalog file because a blob's head pointer must have t
 decision as its chunk chain. All paging, CRC checks, page allocation, WAL records, recovery,
 transaction coordination, locks, and version reclamation come from the shared kernels.
 
+The model client depends on the engine-owned message family and the shared connection client;
+the engine server depends only on transport abstractions. These are reference directions.
+
+```mermaid
+flowchart LR
+    Client["Database.Blob.Client"] --> Blob["Database.Blob"]
+    Client --> SharedClient["Database.Client"]
+    Blob --> Protocol["Database.Protocol"]
+    SharedClient --> Protocol
+    Blob --> Connections["Connections"]
+    Blob --> Catalog["Database.Blob.Catalog"]
+    Blob --> Storage["Database.Blob.Storage"]
+    Blob --> Transactions["Database.Transactions"]
+```
+
 | Package | Responsibility |
 | --- | --- |
-| `Assimalign.Cohesion.Database.Blob` | Database/session/container lifetimes, ownership, publication, Blob wire family |
+| `Assimalign.Cohesion.Database.Blob` | Database/session/container lifetimes, ownership, publication, Blob wire family and server |
+| `Assimalign.Cohesion.Database.Blob.Client` | Typed streaming operations over shared connection exchanges |
+| `Assimalign.Cohesion.Connections` | Generic connection and listener contracts; no concrete transport |
 | `Assimalign.Cohesion.Database.Protocol` | Shared framing, handshake, versioning, errors and family-bound channels |
 | `Assimalign.Cohesion.Database.Blob.Catalog` | Metadata versions, directory and ordered listings |
 | `Assimalign.Cohesion.Database.Blob.Storage` | Stream adapters and chunk encoding |
@@ -172,6 +189,30 @@ be nonempty and compare ordinally, case-sensitively. No Unicode normalization is
 | 67 | `Chunk` | Content sender → receiver | 1–65,536 raw content bytes; no inner prefix |
 | 68 | `TransferComplete` | Content sender → receiver, or server → client upload acknowledgement | Int64 actual content byte count, nonnegative |
 | 69 | `ChunkAcknowledgement` | Content receiver → sender | Int64 cumulative accepted content byte count, nonnegative |
+| 70 | `Delete` | Client → server | `text container`, `text name` |
+| 71 | `GetProperties` | Client → server | `text container`, `text name` |
+| 72 | `List` | Client → server | `text container`, `text prefix` (empty selects every object) |
+| 73 | `Properties` | Server → client | `text name`, Int64 nonnegative length, UInt8 content-type presence (0 or 1), optional `text contentType`, UInt64 ETag, Int64 creation UTC ticks, Int64 modification UTC ticks, UInt32 CRC-32 |
+| 74 | `OperationComplete` | Server → client | Int64 nonnegative result count |
+
+Properties timestamps are ticks since 0001-01-01 UTC, limited to the DateTime range.
+Content-type presence distinguishes null from an explicitly empty string. ETags retain all 64 bits.
+Delete returns completion count 0 (absent) or 1 (deleted). Property reads return either completion
+count 0, or one Properties frame followed by completion count 1. Listings emit one Properties
+frame per object in ordinal name order, then completion with the exact object count. An error
+replaces completion; no partial listing is a successfully completed result.
+| 70 | `Delete` | Client → server | `text container`, `text name` |
+| 71 | `GetProperties` | Client → server | `text container`, `text name` |
+| 72 | `List` | Client → server | `text container`, `text prefix` (empty selects every object) |
+| 73 | `Properties` | Server → client | `text name`, Int64 nonnegative length, UInt8 content-type presence (0 or 1), optional `text contentType`, UInt64 ETag, Int64 creation UTC ticks, Int64 modification UTC ticks, UInt32 CRC-32 |
+| 74 | `OperationComplete` | Server → client | Int64 nonnegative result count |
+
+Properties timestamps are ticks since 0001-01-01 UTC, limited to the DateTime range.
+Content-type presence distinguishes null from an explicitly empty string. ETags retain all 64 bits.
+Delete returns completion count 0 (absent) or 1 (deleted). Property reads return either completion
+count 0, or one Properties frame followed by completion count 1. Listings emit one Properties
+frame per object in ordinal name order, then completion with the exact object count. An error
+replaces completion; no partial listing is a successfully completed result.
 
 `Read` returns `TransferStart`, zero or more chunks, and `TransferComplete`. A `Write` request
 is immediately followed by that transfer in the opposite direction. The sender waits for a
@@ -225,8 +266,12 @@ cancels a sender waiting for acknowledgement. Callers should supply cancellation
 `BlobProtocolTransfer` owns only the content sequence. It neither authenticates nor dispatches
 requests, commits destination storage, sends the final publication acknowledgement, closes the
 channel, or disposes caller streams. `ReceiveAsync` returns the content type and verified actual
-length, replacing an initially unknown length. Concrete Blob clients and server dispatch remain
-separate work (#214 and its server integration); no concrete transport is referenced here.
+length, replacing an initially unknown length. Reader/writer overloads consume the shared
+`IDatabaseProtocolExchange` frame endpoints without requiring ownership of its ProtocolChannel.
+The overload accepting pre-read metadata resumes immediately after a validated TransferStart;
+the server uses it to open storage with the declared content type before accepting content.
+The caller must retain exclusive access throughout and discard the exchange after failure.
+No concrete transport is referenced here.
 Public codecs use explicit binary operations and strict UTF-8, with no reflection or object
 serialization. Shared protocol version remains 1.0 because these are first-use Blob endpoint
 messages and SQL/Key-Value payloads and identifiers remain unchanged.
@@ -241,5 +286,58 @@ an acknowledgement. Existing Blob test source files are unchanged.
 
 Names and metadata must fit one kernel record. Streams are sequential and not thread-safe.
 Applications must dispose them; no finalizer commits a forgotten upload. Blob has no query
-language, wire client, security policy, replication, or compiled schema provisioning here.
+language, built-in authorization policy, replication, or compiled schema provisioning here.
 Public interfaces remain unchanged, and the builder verb references only the area root seam.
+
+
+## Server lifecycle and failure semantics
+
+`BlobDatabaseServer` owns one generic `IConnectionListener` and a concurrent session table.
+It follows the SQL/Graph per-model server placement rather than depending on a shared server
+implementation. The engine stays owned by the composition root. Start binds the listener;
+a bind failure attempts listener cleanup and is terminal. Stop and disposal are idempotent;
+restart requires a fresh server and listener. The server context exposes the engine and a
+point-in-time active-session snapshot. Non-running EngineState rejects startup, handshakes,
+newly accepted connections, and new object operations with an unavailable response where possible.
+
+A connection must finish startup and authentication within AuthenticationTimeout. The configured
+authenticator receives the selected database, claimed principal and opaque evidence. Only after
+successful authentication does the server create an engine session. All request handlers access
+`(IBlobDatabase)session.Database`; request payloads cannot switch databases, create/drop them,
+or address another engine. MaxSessions includes connections awaiting authentication. Over-limit
+connections receive Unavailable without becoming sessions. Rejection work is tracked and drained;
+a blocked rejection write is bounded to five seconds and aborts on hard shutdown.
+
+IdleTimeout applies while awaiting the next request, not to an active transfer. Shared Ping/Pong
+is available between requests. Soft shutdown stops acceptance and idle/handshake waits; an active
+exchange may finish, including transaction publication and its acknowledgement. Once
+ShutdownDrainTimeout expires (or the Stop token is canceled after shutdown starts), the server
+cancels active operations and aborts every remaining connection, then awaits cleanup before
+releasing its listener. All three timeout options accept Timeout.InfiniteTimeSpan. An infinite
+shutdown drain intentionally waits indefinitely for active work.
+An unexpected accept-loop failure is rethrown by Stop only after accepted sessions and rejection
+work have drained or been aborted and the listener has been released.
+
+Every upload runs inside an explicit existing engine transaction. After validating TransferStart,
+the server opens the session-bound destination using its content type and overwrite flag. It
+consumes the existing one-chunk-window transfer helper. Only a verified TransferComplete permits
+successful destination disposal and transaction commit. Failures roll back before destination
+disposal, so stream finalization cannot accidentally publish a partial object. New failed objects
+remain absent; failed replacements leave the previous committed object readable. The terminal
+upload acknowledgement is sent only after commit succeeds. Loss of that acknowledgement can
+leave the client uncertain even though the complete object committed; there is no exactly-once
+retry or transfer-resumption guarantee.
+
+Downloads read properties and content in one Snapshot transaction so a concurrent replacement
+cannot mix old metadata with new bytes. Disposal releases the read snapshot. EOF before a valid
+TransferComplete is always failure. Engine/storage errors during an exchange send the shared
+ExecutionFailure error and close the session; protocol violations send ProtocolViolation and
+close it. A broken transport may prevent delivery of the error itself, in which case the client
+still observes premature closure rather than successful EOF. Every failure, caller cancellation,
+or early client stream disposal discards the connection, allowing server lifetime cancellation to
+abort work. Already delivered download bytes are provisional until successful EOF.
+
+The Blob server tests cover all five operations against another database and another server with
+matching names, authenticator evidence, session limits, idle/authentication timeouts, terminal
+lifecycle, engine-state rejection, both drain phases, and a blocked over-limit rejection. The
+client suite supplies in-memory end-to-end failure cases and the constrained-heap wire round trip.
