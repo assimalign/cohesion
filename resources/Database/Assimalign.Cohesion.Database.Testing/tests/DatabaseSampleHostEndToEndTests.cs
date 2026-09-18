@@ -429,7 +429,8 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
             repository,
             "resources",
             "Database",
-            "samples",
+            "Assimalign.Cohesion.Database.Testing",
+            "fixtures",
             "Assimalign.Cohesion.Database.SampleHost",
             "obj",
             configuration,
@@ -455,7 +456,8 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
             FindRepositoryRoot(),
             "resources",
             "Database",
-            "samples",
+            "Assimalign.Cohesion.Database.Testing",
+            "fixtures",
             "Assimalign.Cohesion.Database.SampleHost");
     }
 
