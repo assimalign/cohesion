@@ -147,7 +147,11 @@ internal sealed partial class SqlPlanExecutor
         var columns = new QueryColumn[plan.Projections.Count];
         for (int i = 0; i < plan.Projections.Count; i++)
         {
-            columns[i] = new QueryColumn { Name = plan.Projections[i].Name, Ordinal = i, Type = plan.Projections[i].Type };
+            columns[i] = new QueryColumn
+            {
+                Name = plan.Projections[i].Name, Ordinal = i, Type = plan.Projections[i].Type,
+                IsNullable = plan.Projections[i].Expression is SqlCastExpression,
+            };
         }
 
         return new SqlMaterializedResultSet(columns, window.ToList());

@@ -597,63 +597,6 @@ public sealed partial class SqlQueryParser
             Location.Create(1, 1, pos, pos));
     }
 
-    private SqlExpression ParseCast(ref TokenLexer lexer)
-    {
-        var pos = lexer.Current.Position;
-        // #1022: the evaluator ignores the target type. Diagnose the expression here,
-        // where CAST is syntax, so identifiers and aliases named cast remain valid.
-        if (!Supports(SqlClauses.Cast))
-        {
-            _parseDiagnostics.Add(QueryDiagnostics.UnsupportedClause(SqlClauses.Cast, Profile.Language,
-                Location.Create(1, 1, pos, pos + lexer.Current.Value.Length)));
-        }
-        Advance(ref lexer); // consume CAST
-
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
-        {
-            Advance(ref lexer);
-        }
-
-        var operand = ParseExpression(ref lexer);
-
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "AS"))
-        {
-            Advance(ref lexer);
-        }
-
-        // Parse type name (could be multi-word like VARCHAR(100))
-        string targetType = string.Empty;
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-        {
-            targetType = CurrentText(ref lexer);
-            Advance(ref lexer);
-
-            // Handle parameterized types: VARCHAR(100)
-            if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
-            {
-                targetType += "(";
-                Advance(ref lexer);
-                if (!IsAtEnd(ref lexer))
-                {
-                    targetType += CurrentText(ref lexer);
-                    Advance(ref lexer);
-                }
-                if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-                {
-                    targetType += ")";
-                    Advance(ref lexer);
-                }
-            }
-        }
-
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-        {
-            Advance(ref lexer);
-        }
-
-        return new SqlCastExpression(operand, targetType, Location.Create(1, 1, pos, pos));
-    }
-
     private SqlExpression ParseExists(ref TokenLexer lexer, bool isNegated, int pos)
     {
         Advance(ref lexer); // consume EXISTS

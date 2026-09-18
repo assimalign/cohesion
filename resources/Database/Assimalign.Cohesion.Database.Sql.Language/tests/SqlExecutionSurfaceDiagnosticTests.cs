@@ -30,17 +30,6 @@ public class SqlExecutionSurfaceDiagnosticTests
     [InlineData(SqlClauses.Subquery, "INSERT INTO t (id) SELECT id FROM u;", "SELECT")]
     [InlineData(SqlClauses.Subquery, "UPDATE t SET id = (SELECT id FROM u);", "SELECT")]
     [InlineData(SqlClauses.Subquery, "DELETE FROM t WHERE id IN (SELECT id FROM u);", "SELECT")]
-    // #1022: reject CAST in every scalar context until conversion actually executes.
-    [InlineData(SqlClauses.Cast, "SELECT CAST('42' AS INT) FROM t;", "CAST")]
-    [InlineData(SqlClauses.Cast, "select cast /* trivia */ ('42' as int) from t;", "cast")]
-    [InlineData(SqlClauses.Cast, "SELECT id FROM t WHERE CAST(id AS TEXT) = '1';", "CAST")]
-    [InlineData(SqlClauses.Cast, "SELECT id FROM t ORDER BY CAST(id AS TEXT);", "CAST")]
-    [InlineData(SqlClauses.Cast, "SELECT id FROM t LIMIT CAST('1' AS INT);", "CAST")]
-    [InlineData(SqlClauses.Cast, "INSERT INTO t VALUES (CAST('42' AS INT));", "CAST")]
-    [InlineData(SqlClauses.Cast, "UPDATE t SET id = CAST('42' AS INT);", "CAST")]
-    [InlineData(SqlClauses.Cast, "DELETE FROM t WHERE id = CAST('42' AS INT);", "CAST")]
-    [InlineData(SqlClauses.Cast, "CREATE TABLE t (id INT CHECK (CAST(id AS TEXT) <> ''));", "CAST")]
-    [InlineData(SqlClauses.Cast, "ALTER TABLE t ADD CONSTRAINT ck CHECK (CAST(id AS TEXT) <> '');", "CAST")]
     public void Parse_ClauseAwaitingExecution_ReportsModelDiagnostic(string clause, string sql, string locationText)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();
@@ -52,6 +41,27 @@ public class SqlExecutionSurfaceDiagnosticTests
         diagnostic.Message.ShouldBe($"The {clause} clause is not supported by the SQL surface of this database model.");
         sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(locationText);
         statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - CAST: Accepts supported scalar contexts")]
+    [InlineData("SELECT CAST('42' AS INT) FROM t;")]
+    [InlineData("select cast /* trivia */ ('42' as int) from t;")]
+    [InlineData("SELECT id FROM t WHERE CAST(id AS TEXT) = '1';")]
+    [InlineData("SELECT id FROM t ORDER BY CAST(id AS TEXT);")]
+    [InlineData("SELECT id FROM t LIMIT CAST('1' AS INT);")]
+    [InlineData("INSERT INTO t VALUES (CAST('42' AS INT));")]
+    [InlineData("UPDATE t SET id = CAST('42' AS INT);")]
+    [InlineData("DELETE FROM t WHERE id = CAST('42' AS INT);")]
+    [InlineData("CREATE TABLE t (id INT CHECK (CAST(id AS TEXT) <> ''));")]
+    [InlineData("ALTER TABLE t ADD CONSTRAINT ck CHECK (CAST(id AS TEXT) <> '');")]
+    public void Parse_CastInScalarContext_ReportsNoError(string sql)
+    {
+        // Real conversion is verified by the SQL engine and wire execution suites.
+        SqlLanguageProfile.Instance.Supports(SqlClauses.Cast).ShouldBeTrue();
+
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+
+        statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
     }
 
     [Theory]

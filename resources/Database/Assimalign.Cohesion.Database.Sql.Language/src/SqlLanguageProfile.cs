@@ -81,6 +81,7 @@ public static class SqlLanguageProfile
         SqlClauses.Offset,
         SqlClauses.Values,
         SqlClauses.Case,
+        SqlClauses.Cast,
         SqlClauses.Constraint,
         SqlClauses.ForeignKey,
         SqlClauses.References,

@@ -18,7 +18,7 @@ Measured from source, not from the plan. Line counts are production code (`src/`
 
 | Engine | Production code | Tests | Verdict |
 |---|---|---|---|
-| **SQL** | ~14,300 lines at B1 baseline; B2 extends engine, language, catalog and schema | ~6,900 at B1 baseline; B2 and Phase 13 add acceptance coverage | **Working within a measured subset: 27 of 48 declared clauses.** Phase 13 verifies every advertised clause against a live engine with result/state assertions and a guard against missing execution cases. This is now measured, rather than declared. SQL transactions and referential integrity execute; JOIN (#1019), GROUP BY/HAVING/broader aggregates (#1020), subqueries/`INSERT ... SELECT` (#1021), and CAST (#1022, previously a silent no-op) remain MVP work. B2 and the dialect matrix state partial-support boundaries and the 21 excluded clauses. |
+| **SQL** | ~14,300 lines at B1 baseline; B2 extends engine, language, catalog and schema | ~6,900 at B1 baseline; B2 and Phase 13 add acceptance coverage | **Working within a measured subset: 28 of 48 declared clauses.** Phase 14 verifies every advertised clause against a live engine with result/state assertions and a guard against missing execution cases. This is now measured, rather than declared. SQL transactions and referential integrity execute; JOIN (#1019), GROUP BY/HAVING/broader aggregates (#1020), subqueries/`INSERT ... SELECT` (#1021) remain MVP work; CAST now executes the documented exact scalar subset (#1022). B2 and the dialect matrix state partial-support boundaries and the 20 excluded clauses. |
 | **Key-Value** | ~6,500 lines across engine, client, catalog, storage | ~2,700 | **Working.** Storage, commands, server, client all landed. |
 | **Documents** | engine, OQL parser, planner, chunked storage, catalog | 276 at engine baseline; Phase 13 adds execution conformance | **Working within a measured OQL subset: 8 of 12 declared clauses** *(engine landed `6085bad3`, `a4770b3f`)*. Phase 13 measures every advertised clause through a live engine, including grouping/aggregates/HAVING and `CREATE INDEX` / `DROP INDEX`, and fails CI for an unmapped profile addition. Nested documents, arrays, mixed-shape collections, collection ownership. |
 | **Graph** | engine, GQL parser, traversal planner, adjacency storage, catalog | 189 at engine baseline; Phase 13 adds execution conformance | **Working within a measured GQL subset: 8 of 27 declared clauses** *(engine landed `1092d6b2`)*. The old seven-clause figure omitted the later `SHOW` catalog extension. Phase 13 measures all eight against a live engine and guards against unmapped profile additions. Finite relationship-isomorphic traversal, scalar property/variable projections, conjunctive comparisons, graph creation, `DELETE` / `DETACH DELETE`, and catalog reads; this is not complete ISO/IEC 39075 support. |
@@ -83,22 +83,21 @@ Structural fixes that must land before engine work, because every engine inherit
 | # | Feature | What it means | Status | Work items |
 |---|---|---|---|---|
 | **B1** ✅ | **Each model opts into the clauses it supports** | The shared language package today hands every model the same lexer and a flat keyword list. B1 adds a capability profile: a model declares which clauses it accepts, and anything outside the profile produces a precise "not supported by this model" diagnostic instead of a generic parse failure. | `DONE` | #1002 |
-| **B2** ✅ | **A published, complete SQL surface** | Phase 4 adds wire-accessible `BEGIN` / `COMMIT` / `ROLLBACK`, durable foreign keys with delete cascade/restrict, row checks and unique indexes with concurrent-write enforcement. Phase 13 measures **27/48 clauses** through a live engine; this is now measured rather than declared, with profile-driven execution conformance that fails for a clause without a passing case. The earlier 32/48 included four non-executing query clauses; 28/48 still included a no-op CAST. The remaining language groups and partial-support boundaries below keep the broader feature partial. DDL remains self-committing and is refused inside explicit transactions. | `PARTIAL` (measured Phase 13 execution subset) | #172, #173, #174; catalog constraint portions of #175 / #177; #1019, #1020, #1021, #1022, #1023, #1024 |
+| **B2** ✅ | **A published, complete SQL surface** | Phase 4 adds wire-accessible `BEGIN` / `COMMIT` / `ROLLBACK`, durable foreign keys with delete cascade/restrict, row checks and unique indexes with concurrent-write enforcement. Phase 14 measures **28/48 clauses** through a live engine; this is now measured rather than declared, with profile-driven execution conformance that fails for a clause without a passing case. The former no-op CAST now performs exact conversions with target metadata and server/client coverage (#1022). The remaining language groups and partial-support boundaries below keep the broader feature partial. DDL remains self-committing and is refused inside explicit transactions. | `PARTIAL` (measured Phase 14 execution subset) | #172, #173, #174; catalog constraint portions of #175 / #177; #1019, #1020, #1021, #1022, #1023, #1024 |
 
-> **What the SQL profile executes (measured 2026-09-18, Phase 13).**
+> **What the SQL profile executes (measured 2026-09-18, Phase 14).**
 >
-> **Measured and advertised (27 of 48):** `SELECT` `INSERT` `UPDATE` `DELETE` `CREATE TABLE` `CREATE INDEX`
+> **Measured and advertised (28 of 48):** `SELECT` `INSERT` `UPDATE` `DELETE` `CREATE TABLE` `CREATE INDEX`
 > `ALTER TABLE` `DROP TABLE` `DROP INDEX` `FROM` `WHERE` `ORDER BY`
-> `LIMIT` `OFFSET` `VALUES` `CASE` `BEGIN` `COMMIT` `ROLLBACK`
+> `LIMIT` `OFFSET` `VALUES` `CASE` `CAST` `BEGIN` `COMMIT` `ROLLBACK`
 > `TRANSACTION` `FOREIGN KEY` `REFERENCES` `CHECK` `UNIQUE` constraint `CONSTRAINT`
 > `CASCADE` `RESTRICT`. Each clause has a passing execution case, with exact value,
 > state, or intended semantic-error assertions. A conformance test enumerates the
 > profile and fails if a clause has no case. OQL and GQL have the same guard.
 > The earlier figure of 32 counted `JOIN`, `GROUP BY`, `HAVING`, and subqueries,
-> which parsed but did not execute. Phase 13 also removes `CAST`: it returned the
-> operand unchanged, accepting invalid conversions and unknown target types. All
-> five now produce `COHDBL001` at parse time. MVP work restores them through #1019,
-> #1020, #1021, and #1022.
+> which parsed but did not execute. Phase 13 removed the no-op CAST; Phase 14 restores it after real conversion and wire verification (#1022). The four query clauses still produce `COHDBL001`; #1019–#1021 track them.
+>
+> **CAST boundaries:** signed Int8/Int16/Int32/Int64 and Decimal convert to each other or String; String converts to those numerics, Boolean, or String; Boolean converts to Boolean or String. All other pairs error. Null propagates with target metadata. Invalid text, overflow, fractional-to-integer loss, excess decimal precision/scale, and string overflow error. Decimal uses System.Decimal; p=1..28 and s=0..p. String length counts UTF-16 units; CHAR does not pad. No rounding or truncation. Unknown types are rejected during parsing. DEFAULT/CHECK casts remain rejected; full aliases, text grammar, and wire metadata boundaries are in the dialect matrix.
 >
 > **Partial support is explicit:** SELECT requires one table or system relation;
 > aggregates execute only as a lone `COUNT(*)`, optionally aliased/filtered. Other
@@ -115,7 +114,7 @@ Structural fixes that must land before engine work, because every engine inherit
 > appear in the [SQL dialect matrix](../../resources/Database/Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md)
 > and the Phase 13 audit notes (`_out/phase13-NOTES.md`).
 >
-> **Not advertised (21):**
+> **Not advertised (20):**
 >
 > | Group | Missing |
 > |---|---|
@@ -126,7 +125,6 @@ Structural fixes that must land before engine work, because every engine inherit
 > | **Joins** | `JOIN` · `NATURAL` · `USING` (#1019) |
 > | **Grouping** | `GROUP BY` · `HAVING` (#1020, including aggregate execution) |
 > | **Subqueries** | subqueries (#1021, including `INSERT ... SELECT`) |
-> | **Type conversion** | `CAST` (#1022) |
 > | **Other** | `TOP` · `ALL` · `FETCH` · `RETURNING` |
 >
 > **The two engine gaps closed by Phase 4:**

@@ -10,13 +10,13 @@ enumerates the profile and fails if any advertised clause lacks a passing case.
 
 ## Statement matrix
 
-Phase 13 measures **27 of 48 declared clauses** against the live SQL engine.
+Phase 14 measures **28 of 48 declared clauses** against the live SQL engine.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
-removed in Phase 12e (#1019–#1021), plus `CAST`, removed by this audit (#1022):
-its evaluator returned the operand unchanged even for invalid conversions.
-The intermediate 28/48 figure was a profile declaration, not an execution measurement.
+removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
+Phase 14 restores `CAST` with actual conversion, type metadata, and wire execution
+coverage (#1022). The earlier intermediate 28/48 was only a profile declaration.
 
-The **21 excluded clauses** are those five plus set operations (`UNION`,
+The **20 excluded clauses** are those four query clauses plus set operations (`UNION`,
 `INTERSECT`, `EXCEPT`), CTEs (`WITH`, `RECURSIVE`), window clauses (`WINDOW`,
 `OVER`, `PARTITION`), views (`CREATE VIEW`, `DROP VIEW`), `NATURAL`, `USING`,
 `TOP`, `ALL`, `FETCH`, and `RETURNING`. Counts describe named clauses, not
@@ -35,7 +35,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
 | `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
 | `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys with ASC/DESC execute. Projection aliases are not resolved and produce an unknown-column error. Integer keys are evaluated as constants, **not select-list ordinals**; `ORDER BY 1 DESC` does not sort by the first projection. Alias/ordinal ordering remains MVP work (#1024). |
-| `CAST` | Recognized, not supported | `COHDBL001` in projections, predicates, write expressions, and DDL expressions. The former no-op did not implement conversion or target validation; restore only with real execution (#1022). |
+| `CAST` | Supported subset, measured | Exact signed integer, decimal, boolean, and string conversions in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
 | `JOIN` | Recognized, not supported | Inner, outer, and cross joins report `COHDBL001` (#1019). |
 | `GROUP BY` / `HAVING` | Recognized, not supported | `COHDBL001`; grouping and broader aggregates remain #1020. |
 | Subqueries / `INSERT ... SELECT` | Recognized, not supported | Scalar, `IN`/`NOT IN`, `EXISTS`/`NOT EXISTS`, derived-table, correlated, and insert-source queries report `COHDBL001` (#1021). Literal `IN` lists remain supported. |
@@ -118,8 +118,8 @@ Precedence, low to high: `OR` < `AND` < `NOT` < comparison (`=`, `<>`, `<`, `>`,
 (`+`, `-`, `||`) < multiplicative (`*`, `/`, `%`) < unary (`-`, `~`, `NOT`) <
 primary. Executable primary forms include literals, parameters (`@name`, `$1`),
 column references, supported function calls, simple/searched `CASE`, and
-parenthesized expressions. `CAST` and subqueries retain syntax trees for tooling
-but carry `COHDBL001` and cannot execute. SQL aggregate support is limited to a
+parenthesized expressions and `CAST` within the conversion contract below.
+Subqueries retain syntax trees for tooling but carry `COHDBL001` and cannot execute. SQL aggregate support is limited to a
 lone `COUNT(*)` projection. `~` is parsed but not evaluated; it is outside the
 executable scalar subset.
 
@@ -155,6 +155,67 @@ Coercion rules are an engine concern (planner/executor); the language layer
 guarantees only that declared names resolve to shared type identities so every
 model orders and stores values identically.
 
+## Explicit conversion (`CAST`, #1022)
+
+Targets resolve through `SqlTypeNames` into `DatabaseTypeInfo`; the executor uses
+that shared identity, never a second SQL-name table. All aliases in the type-name
+table for Boolean, Int8, Int16, Int32, Int64, Decimal, and String are accepted.
+The complete non-null source/target pair set is:
+
+| Evaluated source | Allowed targets |
+|---|---|
+| Signed `sbyte`, `short`, `int`, `long`, or `decimal` | Any signed integer width, Decimal, String |
+| String | Any signed integer width, Decimal, Boolean, String |
+| Boolean | Boolean, String |
+
+All other pairs are rejected, including floating-point (`float`/`double`),
+unsigned integers, binary, temporal, GUID and JSON targets. Numeric/boolean
+conversion is not supported. Sources are evaluated values: SQL integer literals
+are Int64 and SQL fractional literals are Decimal; parameters and columns retain
+their runtime types. SQL fractional literals permit exponent and leading decimal
+point syntax (such as `1e2` and `.5`) but must also fit Decimal exactly; literal
+underflow/rounding is rejected before conversion. Insignificant zeros may be
+normalized. Identity conversions in the table still enforce target bounds.
+
+- **Text:** surrounding whitespace is trimmed when reading numbers or booleans.
+  Numeric text must match `[+-]?[0-9]+(\.[0-9]+)?`; grouping, exponent notation,
+  empty strings, and invalid text (including `'abc' AS INT`) are errors. Numeric
+  text must be exactly representable as `System.Decimal` before narrowing.
+  Boolean text accepts case-insensitive `TRUE`/`FALSE` only. String output uses
+  invariant numeric formatting and uppercase `TRUE`/`FALSE`; string-to-string
+  preserves the original text, including whitespace.
+- **NULL:** returns NULL for every supported target, with the target's result
+  type metadata even when every row is null or the result has no rows. Invalid
+  target names/modifiers are still errors with a NULL operand.
+- **Integers:** signed ranges are -128..127, -32768..32767, -2147483648..2147483647,
+  and -9223372036854775808..9223372036854775807. Overflow and nonzero fractional
+  parts are errors; there is no rounding, truncation, wrapping, or zero fallback.
+- **Decimal:** the implementation uses `System.Decimal` (96-bit coefficient,
+  scale 0..28), not arbitrary precision. Bare DECIMAL/NUMERIC has no additional
+  bound. `DECIMAL(p)` means scale 0; `DECIMAL(p,s)` requires `1 <= p <= 28` and
+  `0 <= s <= p`, `abs(value) < 10^(p-s)`, and no nonzero digits beyond scale s.
+  Excess precision/scale errors; trailing fractional zeros may be discarded
+  without changing value. Text too precise for the runtime errors before it can
+  be rounded. The output does not promise padding to the declared scale.
+- **Strings:** all four string aliases permit an optional positive Int32 length
+  n; bare aliases have no CAST length limit. Length counts UTF-16 code units.
+  Longer results error; CHAR/CHARACTER do not pad, and no alias truncates.
+  Integer and Boolean targets take no parameters.
+- **Diagnostics and metadata:** unknown names produce parse error `SQL0004`;
+  recognized unsupported targets and invalid target
+  arguments produce `SQL0005`; malformed CAST syntax produces `SQL0003`. Conversion failures throw `DatabaseException`
+  naming CAST and its target, surfaced as query errors over the wire. The AST
+  retains full `DatabaseTypeInfo`; in-process result columns expose the base
+  `DatabaseType` and conservative nullability. The existing wire/client contract
+  exposes the base type, with a matching boxed runtime value. Neither result
+  contract has length/precision/scale fields; the client has no nullability field.
+
+This is a deliberate ISO/IEC 9075 subset: approximate numerics and other type
+families are excluded; lossy narrowing raises an error, and fixed character
+padding is not implemented. CAST in DEFAULT and CHECK is rejected by planning.
+CAST values in INSERT/UPDATE are converted before the existing destination-column
+storage coercion; nested arithmetic therefore sees the converted numeric value.
+
 ## Builtin functions
 
 The profile's function list is lexical vocabulary, not an execution claim and
@@ -175,7 +236,9 @@ function names are lexed but not supported (see the statement matrix).
 | `COHDBL001` | Error | Recognized clause is not supported by the SQL model surface |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed transaction-control or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed transaction-control, CAST, or constraint/DDL syntax |
+| `SQL0004` | Error | Unknown CAST target type |
+| `SQL0005` | Error | Unsupported CAST target or invalid target parameters |
 | `SQL0100` | Information | Statement does not end with `;` |
 
 Positions are absolute character offsets into the statement text; line/column

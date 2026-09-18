@@ -9,6 +9,7 @@ using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Types;
 
 using Shouldly;
 using Xunit;
@@ -65,24 +66,23 @@ public sealed class SqlLanguageConformanceTests
             .Message.ShouldContain("FUTURE SQL CLAUSE", Case.Sensitive);
     }
 
-    /// <summary>Rejects the cast forms that the audit measured as silently ignoring their target type.</summary>
-    /// <param name="sql">The unsupported conversion to submit through the session text entry point.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: unavailable conversion reports a capability diagnostic")]
-    [InlineData("SELECT CAST('42' AS INT) FROM t;")]
-    [InlineData("SELECT CAST('invalid' AS INT) FROM t;")]
-    [InlineData("SELECT CAST(42 AS TEXT) FROM t;")]
-    [InlineData("SELECT CAST('x' AS unknown_type) FROM t;")]
-    public async Task Cast_UnsupportedConversion_ShouldFailAtParseTime(string sql)
+    /// <summary>Restores the audit's valid conversion cases with target values and metadata.</summary>
+    /// <param name="sql">The conversion to submit through the session text entry point.</param>
+    /// <param name="expected">The expected value, whose runtime type differs from the operand.</param>
+    /// <param name="type">The expected target metadata.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: audited valid conversions execute with target types")]
+    [InlineData("SELECT CAST('42' AS INT) FROM t WHERE id = 1;", 42, DatabaseType.Int32)]
+    [InlineData("SELECT CAST(42 AS TEXT) FROM t WHERE id = 1;", "42", DatabaseType.String)]
+    public async Task Cast_AuditedValidConversion_ShouldReturnTargetValueAndMetadata(string sql, object expected, DatabaseType type)
     {
-        // Restore CAST only when #1022 supplies real conversion, type validation, and wire coverage.
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-cast" });
         var database = await engine.CreateDatabaseAsync("audit");
-        await using var session = await database.CreateSessionAsync();
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         await ExecuteAsync(session, Seed[0]);
         await ExecuteAsync(session, Seed[1]);
-        var error = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
-        error.Message.ShouldContain("COHDBL001", Case.Sensitive);
-        error.Message.ShouldContain("CAST", Case.Sensitive);
+        await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<QueryResultSet>();
+        result.Columns[0].Type.ShouldBe(type);
+        (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0].ShouldBe(expected);
     }
 
     /// <summary>Records aggregate exclusions separately from the passing SELECT capability case.</summary>
@@ -152,6 +152,15 @@ public sealed class SqlLanguageConformanceTests
         [SqlClauses.Case] = Query("SELECT CASE WHEN age > 40 THEN 'senior' ELSE 'junior' END, CASE id WHEN 1 THEN 'first' ELSE 'later' END FROM t ORDER BY id;",
             expression => expression is SqlSelectExpression select && select.Columns.All(column => column.Expression is SqlCaseExpression),
             [["junior", "first"], ["senior", "later"], ["senior", "later"]]),
+        [SqlClauses.Cast] = new("SELECT CAST('42' AS INT), CAST(age AS TEXT) FROM t ORDER BY id;", Seed,
+            expression => expression is SqlSelectExpression select && select.Columns.All(column => column.Expression is SqlCastExpression),
+            async (_, result) =>
+            {
+                var resultSet = result.ShouldBeAssignableTo<QueryResultSet>();
+                resultSet.Columns[0].Type.ShouldBe(DatabaseType.Int32);
+                resultSet.Columns[1].Type.ShouldBe(DatabaseType.String);
+                CheckRows(await ReadRowsAsync(resultSet), [[42, "36"], [42, "45"], [42, "41"]]);
+            }),
         [SqlClauses.Insert] = new("INSERT INTO t (id, name, age) VALUES (4, 'Barbara', 33);", Seed,
             expression => expression is SqlInsertExpression,
             async (session, result) =>

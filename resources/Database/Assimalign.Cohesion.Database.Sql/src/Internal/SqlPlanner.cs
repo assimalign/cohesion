@@ -111,7 +111,8 @@ internal sealed class SqlPlanner
                 {
                     ValidateExpression(column.Expression, evaluator);
                     projections.Add(new SqlProjection(
-                        column.Alias ?? $"column{projections.Count + 1}", null, column.Expression, DatabaseType.Null));
+                        column.Alias ?? $"column{projections.Count + 1}", null, column.Expression,
+                        column.Expression is SqlCastExpression cast ? cast.TargetTypeInfo!.Type : DatabaseType.Null));
                 }
             }
         }
@@ -404,7 +405,15 @@ internal sealed class SqlPlanner
         {
             value = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters)
                 .Evaluate(comparand, Array.Empty<object?>());
-            value = SqlPlanExecutor.CoerceForColumn(value, table.Columns[ordinal]);
+            object? storageValue = SqlPlanExecutor.CoerceForColumn(value, table.Columns[ordinal]);
+            // A rounded bound can exclude qualifying rows before residual evaluation
+            // (e.g. an INT key > CAST('1.5' AS DECIMAL) must still include 2).
+            if (value is not null && storageValue is not null &&
+                SqlExpressionEvaluator.Compare(value, storageValue) != 0)
+            {
+                return;
+            }
+            value = storageValue;
         }
         catch (DatabaseException)
         {
@@ -629,6 +638,12 @@ internal sealed class SqlPlanner
     {
         string schema = alter.Table.SchemaName ?? DefaultSchema;
 
+        if (alter.Action is SqlAlterAddColumnAction { Column.DefaultValue: not null } addition &&
+            ContainsCast(addition.Column.DefaultValue))
+        {
+            throw new DatabaseException("CAST in DEFAULT expressions is not supported; only literal DEFAULT values are supported.");
+        }
+
         return alter.Action switch
         {
             SqlAlterAddColumnAction add => new SqlAddColumnPlan(
@@ -722,6 +737,8 @@ internal sealed class SqlPlanner
 
         return value switch
         {
+            sbyte number when number >= 0 => number,
+            short number when number >= 0 => number,
             long number when number >= 0 => number,
             int number when number >= 0 => number,
             _ => throw new DatabaseException($"{clause} requires a non-negative integer."),
@@ -732,6 +749,8 @@ internal sealed class SqlPlanner
     {
         switch (expression)
         {
+            case SqlCastExpression { TargetTypeInfo: null } cast:
+                throw new DatabaseException($"CAST target '{cast.TargetType}' has not been resolved.");
             case SqlSubqueryExpression or SqlExistsExpression:
                 throw new DatabaseException("Subqueries are not supported by the executor yet.");
             case SqlColumnReferenceExpression reference:
@@ -757,6 +776,10 @@ internal sealed class SqlPlanner
 
         return Children(expression).Any(ContainsAggregate);
     }
+
+    /// <summary>Finds conversions even when wrapped in an unsupported DDL default expression.</summary>
+    private static bool ContainsCast(SqlExpression expression)
+        => expression is SqlCastExpression || Children(expression).Any(ContainsCast);
 
     internal static IEnumerable<SqlExpression> Children(SqlExpression expression)
     {

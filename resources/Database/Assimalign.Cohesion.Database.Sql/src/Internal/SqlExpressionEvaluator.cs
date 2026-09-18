@@ -53,7 +53,7 @@ internal sealed class SqlExpressionEvaluator
             SqlLikeExpression like => EvaluateLike(like, row),
             SqlCaseExpression caseExpression => EvaluateCase(caseExpression, row),
             SqlFunctionCallExpression function => EvaluateFunction(function, row),
-            SqlCastExpression cast => Evaluate(cast.Operand, row), // storage types coerce at write; CAST is a planner hint for now
+            SqlCastExpression cast => EvaluateCast(cast, row),
             _ => throw new DatabaseException($"Expression '{expression.GetType().Name}' is not supported by the executor yet."),
         };
     }
@@ -79,9 +79,22 @@ internal sealed class SqlExpressionEvaluator
             SqlLiteralType.String => literal.Value,
             SqlLiteralType.Boolean => literal.Value.Equals("TRUE", StringComparison.OrdinalIgnoreCase),
             SqlLiteralType.Integer => long.Parse(literal.Value, CultureInfo.InvariantCulture),
-            SqlLiteralType.Float => decimal.Parse(literal.Value, NumberStyles.Float, CultureInfo.InvariantCulture),
+            SqlLiteralType.Float => SqlCastConverter.ParseNumericLiteral(literal.Value),
             _ => throw new DatabaseException($"Literal type {literal.LiteralType} is not supported."),
         };
+    }
+
+    /// <summary>Reports operand range/precision errors in the context of the requested conversion.</summary>
+    private object? EvaluateCast(SqlCastExpression cast, object?[] row)
+    {
+        try
+        {
+            return SqlCastConverter.Convert(Evaluate(cast.Operand, row), cast);
+        }
+        catch (Exception exception) when (exception is FormatException or OverflowException)
+        {
+            throw new DatabaseException($"CAST to {cast.TargetType} failed: operand cannot be represented exactly.", exception);
+        }
     }
 
     private object? ResolveParameter(SqlParameterExpression parameter)
@@ -160,6 +173,8 @@ internal sealed class SqlExpressionEvaluator
         {
             SqlUnaryOperator.Negate => operand switch
             {
+                sbyte value => -(long)value,
+                short value => -(long)value,
                 long value => -value,
                 int value => -(long)value,
                 double value => -value,
@@ -300,6 +315,8 @@ internal sealed class SqlExpressionEvaluator
             "ABS" => single switch
             {
                 null => null,
+                sbyte value => Math.Abs((long)value),
+                short value => Math.Abs((long)value),
                 long value => Math.Abs(value),
                 int value => (long)Math.Abs(value),
                 double value => Math.Abs(value),

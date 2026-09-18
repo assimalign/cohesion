@@ -1,6 +1,9 @@
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public class SqlExpressionParserTests
@@ -215,16 +218,16 @@ public class SqlExpressionParserTests
         caseExpr.WhenClauses.Count.ShouldBe(2);
     }
 
-    [Fact]
-    public void Parse_Cast_RetainsSyntaxAndReportsUnsupportedConversion()
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Language] - CAST: Resolves the conversion target")]
+    public void Parse_Cast_ResolvesTargetType()
     {
-        // #1022: preserve the AST for tooling, but never advertise the evaluator's no-op as a conversion.
-        var statement = (SqlQueryStatement)_parser.Parse("SELECT CAST(x AS INT);");
-        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001");
+        var statement = (SqlQueryStatement)_parser.Parse("SELECT CAST('42' AS INT);");
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         var expr = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns[0].Expression;
         var cast = expr.ShouldBeOfType<SqlCastExpression>();
-        cast.Operand.ShouldBeOfType<SqlColumnReferenceExpression>();
+        cast.Operand.ShouldBeOfType<SqlLiteralExpression>().LiteralType.ShouldBe(SqlLiteralType.String);
         cast.TargetType.ShouldBe("INT");
+        cast.TargetTypeInfo.ShouldNotBeNull().Type.ShouldBe(DatabaseType.Int32);
     }
 
     [Fact]

@@ -6,6 +6,7 @@ using System.Threading;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -73,7 +74,11 @@ internal sealed partial class SqlPlanExecutor
         var columns = new QueryColumn[plan.Projections.Count];
         for (int i = 0; i < plan.Projections.Count; i++)
         {
-            columns[i] = new QueryColumn { Name = plan.Projections[i].Name, Ordinal = i, Type = plan.Projections[i].Type };
+            columns[i] = new QueryColumn
+            {
+                Name = plan.Projections[i].Name, Ordinal = i, Type = plan.Projections[i].Type,
+                IsNullable = plan.Projections[i].Expression is SqlCastExpression,
+            };
         }
         return new SqlMaterializedResultSet(columns, window.ToList());
     }
