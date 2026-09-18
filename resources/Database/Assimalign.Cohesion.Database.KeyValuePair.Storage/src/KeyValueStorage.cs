@@ -36,8 +36,27 @@ public sealed class KeyValueStorage : Assimalign.Cohesion.Database.Storage.Stora
     /// <param name="name">A name for this storage instance (e.g., database name).</param>
     /// <returns>A new <see cref="KeyValueStorage"/> ready for use.</returns>
     public static KeyValueStorage Create(StorageStream data, StorageStream journal, StorageStream backup, string name)
+        => Create(data, journal, backup, name, null);
+
+    /// <summary>Creates storage with an explicit or backing-derived durability policy.</summary>
+    /// <param name="data">The data storage stream.</param>
+    /// <param name="journal">The journal storage stream.</param>
+    /// <param name="backup">The backup storage stream.</param>
+    /// <param name="name">The storage name.</param>
+    /// <param name="durability">The explicit policy, or null to derive it from the backing.</param>
+    /// <returns>The initialized storage.</returns>
+    public static KeyValueStorage Create(StorageStream data, StorageStream journal, StorageStream backup, string name, StorageCommitDurability? durability)
     {
         var storage = new KeyValueStorage(data, journal, backup);
+        try
+        {
+            storage.ConfigureCommitDurability(durability, $"{nameof(KeyValueStorage)} ({name})");
+        }
+        catch
+        {
+            storage.Dispose();
+            throw;
+        }
         storage.InitializeNew((Name)name);
         return storage;
     }
@@ -70,8 +89,27 @@ public sealed class KeyValueStorage : Assimalign.Cohesion.Database.Storage.Stora
     /// </param>
     /// <returns>A <see cref="KeyValueStorage"/> loaded from the streams.</returns>
     public static KeyValueStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen = true)
+        => Open(data, journal, backup, checkpointOnOpen, null);
+
+    /// <summary>Opens storage after resolving durability, before recovery performs any flush.</summary>
+    /// <param name="data">The data storage stream.</param>
+    /// <param name="journal">The journal storage stream.</param>
+    /// <param name="backup">The backup storage stream.</param>
+    /// <param name="checkpointOnOpen">Whether to checkpoint the recovered journal.</param>
+    /// <param name="durability">The explicit policy, or null to derive it from the backing.</param>
+    /// <returns>The opened storage.</returns>
+    public static KeyValueStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen, StorageCommitDurability? durability)
     {
         var storage = new KeyValueStorage(data, journal, backup);
+        try
+        {
+            storage.ConfigureCommitDurability(durability, nameof(KeyValueStorage));
+        }
+        catch
+        {
+            storage.Dispose();
+            throw;
+        }
         storage.OpenExisting(checkpointOnOpen);
         return storage;
     }

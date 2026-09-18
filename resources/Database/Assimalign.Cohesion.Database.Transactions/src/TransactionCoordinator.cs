@@ -492,7 +492,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             // an already-durable LSN is a no-op. By journal ordering this flush
             // also covers every statement bracket the transaction committed
             // non-durably.
-            _coordinator._journal.EnsureDurable(lsn);
+            _coordinator._storage.EnsureCommitDurable(lsn, _coordinator._journal);
             return default;
         }
 

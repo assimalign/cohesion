@@ -92,7 +92,7 @@ public sealed class JournalTests
             () => journal.AppendPageImage(1, (PageId)1L, JournalRecordType.CommitTransaction, new byte[8]));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: EnsureDurable advances the durable LSN")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: unsupported EnsureDurable cannot advance the durable LSN")]
     public void Journal_EnsureDurable_ShouldAdvanceDurableLsn()
     {
         // Arrange
@@ -103,13 +103,14 @@ public sealed class JournalTests
         journal.DurableLsn.ShouldBe(0L);
 
         // Act
-        journal.EnsureDurable(lsn);
+        // #1018: a bare memory stream cannot acknowledge a durable flush.
+        Should.Throw<NotSupportedException>(() => journal.EnsureDurable(lsn));
 
         // Assert
-        journal.DurableLsn.ShouldBeGreaterThanOrEqualTo(lsn);
+        journal.DurableLsn.ShouldBe(0L);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: reopened journal continues LSNs after the last record")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: unsupported durable flush fails before reopening live bytes")]
     public void Journal_Reopen_ShouldContinueLsnSequence()
     {
         // Arrange
@@ -119,7 +120,9 @@ public sealed class JournalTests
         {
             journal.AppendBegin(1);
             journal.AppendCommit(1);
-            journal.Flush(forceDurable: true);
+            // #1018: reopening live bytes does not prove that a memory stream was durable.
+            Should.Throw<NotSupportedException>(() => journal.Flush(forceDurable: true));
+            journal.DurableLsn.ShouldBe(0L);
         }
 
         // Act
@@ -181,7 +184,7 @@ public sealed class JournalTests
         records[0].Type.ShouldBe(JournalRecordType.BeginTransaction);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: checkpoint truncates and LSNs stay monotonic")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: unsupported checkpoint durability fails without acknowledgment")]
     public void Journal_Checkpoint_ShouldTruncateAndPreserveLsnMonotonicity()
     {
         // Arrange
@@ -193,7 +196,9 @@ public sealed class JournalTests
         long lastBefore = journal.LastLsn;
 
         // Act
-        long checkpointLsn = journal.Checkpoint(ReadOnlySpan<long>.Empty);
+        // #1018: checkpoint must fail if its backing cannot honor durability.
+        Should.Throw<NotSupportedException>(() => journal.Checkpoint(ReadOnlySpan<long>.Empty));
+        long checkpointLsn = journal.LastLsn;
         var records = journal.ReadAll();
 
         // Assert: only the checkpoint record remains and its LSN continues the sequence.
@@ -201,10 +206,10 @@ public sealed class JournalTests
         records.Count.ShouldBe(1);
         records[0].Type.ShouldBe(JournalRecordType.Checkpoint);
         records[0].Lsn.ShouldBe(checkpointLsn);
-        journal.DurableLsn.ShouldBe(checkpointLsn);
+        journal.DurableLsn.ShouldBe(0L);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: checkpoint payload carries active transaction sequences")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - Journal: active checkpoint payload does not imply supported durability")]
     public void Journal_Checkpoint_ShouldCarryActiveTransactions()
     {
         // Arrange
@@ -212,7 +217,8 @@ public sealed class JournalTests
         using var journal = new StreamJournal(stream, leaveOpen: true);
 
         // Act
-        journal.Checkpoint(stackalloc long[] { 5L, 9L });
+        // #1018: a correctly encoded checkpoint still needs an explicit durable backing.
+        Should.Throw<NotSupportedException>(() => journal.Checkpoint(new long[] { 5L, 9L }));
         var records = journal.ReadAll();
 
         // Assert
@@ -220,5 +226,6 @@ public sealed class JournalTests
         records[0].Payload.Length.ShouldBe(2 * sizeof(long));
         BitConverter.ToInt64(records[0].Payload.Span).ShouldBe(5L);
         BitConverter.ToInt64(records[0].Payload.Span[8..]).ShouldBe(9L);
+        journal.DurableLsn.ShouldBe(0L);
     }
 }

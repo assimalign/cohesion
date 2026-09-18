@@ -10,8 +10,10 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 public sealed class DocumentApplicationBuilderTests
 {
     [Fact]
-    public async Task Registration_uses_only_root_builder_and_grouped_engine_is_operational()
+    public async Task Registration_uses_only_root_builder_and_grouped_memory_is_rejected()
     {
+        // Pre-#1018 this test asserted successful grouped writes on memory because
+        // durability silently degraded; explicit Grouped must now fail at open.
         var builder = new RecordingBuilder();
         await using var engine = builder.AddDocumentDatabase(options =>
         {
@@ -22,11 +24,9 @@ public sealed class DocumentApplicationBuilderTests
         engine.Name.ShouldBe("registered");
         engine.State.ShouldBe(EngineState.Running);
         engine.Model.ShouldBe(EngineModel.Document);
-        var database = (IDocumentDatabase)await engine.CreateDatabaseAsync("test");
-        var container = await database.CreateCollectionAsync("files");
-        await using var session = await database.CreateSessionAsync();
-        await container.PutAsync(session, "item", "{}"u8.ToArray());
-        (await container.GetAsync(session, "item")).ShouldNotBeNull().Content.ToArray().ShouldBe("{}"u8.ToArray());
+        var failure = await Should.ThrowAsync<NotSupportedException>(async () => await engine.CreateDatabaseAsync("test"));
+        failure.Message.ShouldContain("DocumentStorage (test)");
+        failure.Message.ShouldContain(nameof(StorageCommitDurability.Grouped));
     }
 
     private sealed class RecordingBuilder : IDatabaseApplicationBuilder

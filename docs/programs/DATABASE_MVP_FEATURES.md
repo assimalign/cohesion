@@ -18,7 +18,7 @@ Measured from source, not from the plan. Line counts are production code (`src/`
 
 | Engine | Production code | Tests | Verdict |
 |---|---|---|---|
-| **SQL** | ~14,300 lines at B1 baseline; B2 extends engine, language, catalog and schema | ~6,900 at B1 baseline; B2 adds acceptance coverage | **Working, with transaction control and referential integrity.** B2 raises parser/profile coverage from **21 to 32 of 48 declared clauses**: SQL transactions run through the wire server, and durable foreign keys, checks and unique indexes enforce writes. Set operations, CTEs and the remaining 16 clauses are deferred; parser coverage is not a claim that every parsed query shape executes. See feature B2. |
+| **SQL** | ~14,300 lines at B1 baseline; B2 extends engine, language, catalog and schema | ~6,900 at B1 baseline; B2 adds acceptance coverage | **Working, with transaction control and referential integrity.** The profile advertises **28 of 48 declared clauses**: SQL transactions run through the wire server, and durable foreign keys, checks and unique indexes enforce writes. The earlier figure of 32 counted four clauses that parsed but did not execute. JOIN (#1019), GROUP BY/HAVING/aggregates (#1020), and subqueries/`INSERT ... SELECT` (#1021) remain MVP work; the 20 unsupported clauses are detailed in B2. |
 | **Key-Value** | ~6,500 lines across engine, client, catalog, storage | ~2,700 | **Working.** Storage, commands, server, client all landed. |
 | **Documents** | engine, OQL parser, planner, chunked storage, catalog | 276 | **Working** *(landed `6085bad3`, `a4770b3f`)*. OQL with 8 executable clauses including `CREATE INDEX` / `DROP INDEX` DDL, planner index selection, nested documents, arrays, mixed-shape collections, collection ownership. No wire client. |
 | **Graph** | engine, GQL parser, traversal planner, adjacency storage, catalog | 189 | **Working** *(landed `1092d6b2`)*. ISO/IEC 39075 GQL with 7 executable clauses, relationship-isomorphic cycle termination, indexed multi-hop traversal, `DETACH DELETE`, label/type ownership. No wire client. |
@@ -83,18 +83,21 @@ Structural fixes that must land before engine work, because every engine inherit
 | # | Feature | What it means | Status | Work items |
 |---|---|---|---|---|
 | **B1** ✅ | **Each model opts into the clauses it supports** | The shared language package today hands every model the same lexer and a flat keyword list. B1 adds a capability profile: a model declares which clauses it accepts, and anything outside the profile produces a precise "not supported by this model" diagnostic instead of a generic parse failure. | `DONE` | #1002 |
-| **B2** ✅ | **A published, complete SQL surface** | Phase 4 adds wire-accessible `BEGIN` / `COMMIT` / `ROLLBACK`, durable foreign keys with delete cascade/restrict, row checks and unique indexes with concurrent-write enforcement. Coverage rises from **21/48 to 32/48**; the remaining language groups below keep the broader published-surface feature partial. DDL remains self-committing and is refused inside explicit transactions. | `PARTIAL` (Phase 4 transaction/constraint slice implemented) | #172, #173, #174; catalog constraint portions of #175 / #177 |
+| **B2** ✅ | **A published, complete SQL surface** | Phase 4 adds wire-accessible `BEGIN` / `COMMIT` / `ROLLBACK`, durable foreign keys with delete cascade/restrict, row checks and unique indexes with concurrent-write enforcement. The corrected profile advertises **28/48 clauses**; the earlier 32/48 figure counted four clauses that parsed but did not execute. The remaining language groups below keep the broader published-surface feature partial. DDL remains self-committing and is refused inside explicit transactions. | `PARTIAL` (Phase 4 transaction/constraint slice implemented) | #172, #173, #174; catalog constraint portions of #175 / #177; #1019, #1020, #1021 |
 
-> **What the SQL surface actually supports (measured 2026-09-17, after B2).**
+> **What the SQL profile advertises (corrected 2026-09-18, Phase 12e).**
 >
-> **Supported (32; previously 21 of 48):** `SELECT` `INSERT` `UPDATE` `DELETE` `CREATE TABLE` `CREATE INDEX`
-> `ALTER TABLE` `DROP TABLE` `DROP INDEX` `FROM` `JOIN` `WHERE` `GROUP BY` `HAVING` `ORDER BY`
-> `LIMIT` `OFFSET` `VALUES` subqueries `CASE` `CAST` `BEGIN` `COMMIT` `ROLLBACK`
+> **Advertised (28 of 48):** `SELECT` `INSERT` `UPDATE` `DELETE` `CREATE TABLE` `CREATE INDEX`
+> `ALTER TABLE` `DROP TABLE` `DROP INDEX` `FROM` `WHERE` `ORDER BY`
+> `LIMIT` `OFFSET` `VALUES` `CASE` `CAST` `BEGIN` `COMMIT` `ROLLBACK`
 > `TRANSACTION` `FOREIGN KEY` `REFERENCES` `CHECK` `UNIQUE` constraint `CONSTRAINT`
-> `CASCADE` `RESTRICT`. The eleven additions have engine enforcement; some older
-> parser-supported query shapes remain outside the planner's execution surface.
+> `CASCADE` `RESTRICT`. The earlier figure of 32 counted `JOIN`, `GROUP BY`, `HAVING`,
+> and subqueries, which parsed but did not execute. Those four clauses are now absent
+> from the profile and produce `COHDBL001` at parse time. MVP execution work restores
+> them through #1019 (JOIN), #1020 (GROUP BY/HAVING/aggregates), and #1021 (subqueries
+> and `INSERT ... SELECT`).
 >
-> **Not implemented (16):**
+> **Not advertised (20):**
 >
 > | Group | Missing |
 > |---|---|
@@ -102,7 +105,9 @@ Structural fixes that must land before engine work, because every engine inherit
 > | **CTEs** | `WITH` · `RECURSIVE` |
 > | **Window functions** | `OVER` · `PARTITION BY` · `WINDOW` |
 > | **Views** | `CREATE VIEW` · `DROP VIEW` |
-> | **Joins** | `NATURAL` · `USING` |
+> | **Joins** | `JOIN` · `NATURAL` · `USING` (#1019) |
+> | **Grouping** | `GROUP BY` · `HAVING` (#1020, including aggregate execution) |
+> | **Subqueries** | subqueries (#1021, including `INSERT ... SELECT`) |
 > | **Other** | `TOP` · `ALL` · `FETCH` · `RETURNING` |
 >
 > **The two engine gaps closed by Phase 4:**

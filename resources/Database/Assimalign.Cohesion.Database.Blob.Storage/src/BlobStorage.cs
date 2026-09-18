@@ -29,8 +29,19 @@ public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="name">The logical database name.</param>
     /// <returns>The initialized storage.</returns>
     public static BlobStorage Create(StorageStream data, StorageStream journal, StorageStream backup, string name)
+        => Create(data, journal, backup, name, null);
+
+    /// <summary>Creates a blob file set with durability resolved before initialization.</summary>
+    /// <param name="data">The data stream.</param>
+    /// <param name="journal">The journal stream.</param>
+    /// <param name="backup">The backup stream.</param>
+    /// <param name="name">The logical database name.</param>
+    /// <param name="durability">The requested durability, or null to derive it from the backing store.</param>
+    /// <returns>The initialized storage.</returns>
+    public static BlobStorage Create(StorageStream data, StorageStream journal, StorageStream backup, string name, StorageCommitDurability? durability)
     {
         var storage = new BlobStorage(data, journal, backup);
+        storage.ConfigureCommitDurability(durability, $"{nameof(BlobStorage)} ({name})");
         storage.InitializeNew((Name)name);
         return storage;
     }
@@ -51,8 +62,19 @@ public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="checkpointOnOpen">Whether to checkpoint immediately; engines pass false until logical recovery completes.</param>
     /// <returns>The recovered storage.</returns>
     public static BlobStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen = true)
+        => Open(data, journal, backup, checkpointOnOpen, null);
+
+    /// <summary>Opens a blob file set with durability resolved before recovery.</summary>
+    /// <param name="data">The data stream.</param>
+    /// <param name="journal">The journal stream.</param>
+    /// <param name="backup">The backup stream.</param>
+    /// <param name="checkpointOnOpen">Whether to checkpoint immediately.</param>
+    /// <param name="durability">The requested durability, or null to derive it from the backing store.</param>
+    /// <returns>The recovered storage.</returns>
+    public static BlobStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen, StorageCommitDurability? durability)
     {
         var storage = new BlobStorage(data, journal, backup);
+        storage.ConfigureCommitDurability(durability, nameof(BlobStorage));
         storage.OpenExisting(checkpointOnOpen);
         return storage;
     }

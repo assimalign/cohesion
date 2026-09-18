@@ -8,11 +8,12 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Documents.Storage;
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Documents;
 
 /// <summary>Manages logical document databases and their four maintenance workers.</summary>
-/// <remarks>Creation starts the workers; disposal stops them and durably closes every database.</remarks>
+/// <remarks>Creation starts the workers; disposal stops them and closes every database according to its storage durability.</remarks>
 public sealed class DocumentDatabaseEngine : IDatabaseEngine
 {
     private readonly DocumentDatabaseEngineOptions _options;
@@ -121,8 +122,7 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
             DocumentStorage? storage = null;
             try
             {
-                storage = OpenStorage(directory, name, create);
-                storage.CommitDurability = _options.Durability;
+                storage = OpenStorage(directory, name, create, _options.Durability);
                 storage.GroupCommitWindow = _options.GroupCommitWindow;
                 storage.OnCommitPending = _commitPending.Set;
                 Volatile.Write(ref _storages, [.. _storages, storage]);
@@ -139,16 +139,16 @@ public sealed class DocumentDatabaseEngine : IDatabaseEngine
         }
     }
 
-    private static DocumentStorage OpenStorage(string? directory, string name, bool create)
+    private static DocumentStorage OpenStorage(string? directory, string name, bool create, StorageCommitDurability? durability)
     {
-        Stream? data = null, journal = null, backup = null;
+        StorageStream? data = null, journal = null, backup = null;
         try
         {
             var mode = create ? FileMode.CreateNew : FileMode.Open;
-            data = directory is null ? new MemoryStream() : new FileStream(Path.Combine(directory, "document.dat"), mode, FileAccess.ReadWrite, FileShare.Read);
-            journal = directory is null ? new MemoryStream() : new FileStream(Path.Combine(directory, "document.log"), mode, FileAccess.ReadWrite, FileShare.Read);
-            backup = directory is null ? new MemoryStream() : new FileStream(Path.Combine(directory, "document.bak"), mode, FileAccess.ReadWrite, FileShare.Read);
-            return create ? DocumentStorage.Create(data, journal, backup, name) : DocumentStorage.Open(data, journal, backup, checkpointOnOpen: false);
+            data = directory is null ? StorageStream.FromInMemory() : StorageStream.FromFile(Path.Combine(directory, "document.dat"), mode, FileShare.Read);
+            journal = directory is null ? StorageStream.FromInMemory() : StorageStream.FromFile(Path.Combine(directory, "document.log"), mode, FileShare.Read);
+            backup = directory is null ? StorageStream.FromInMemory() : StorageStream.FromFile(Path.Combine(directory, "document.bak"), mode, FileShare.Read);
+            return create ? DocumentStorage.Create(data, journal, backup, name, durability) : DocumentStorage.Open(data, journal, backup, checkpointOnOpen: false, durability);
         }
         catch { data?.Dispose(); journal?.Dispose(); backup?.Dispose(); throw; }
     }

@@ -80,6 +80,13 @@ public abstract class StorageJournal : IStorageJournal
 
     /// <inheritdoc />
     public long Checkpoint(ReadOnlySpan<long> activeTransactions)
+        => Checkpoint(activeTransactions, forceDurable: true);
+
+    /// <summary>
+    /// Checkpoints with the storage owner's durability policy. Ordinary flushing
+    /// retains truncation and sequence semantics without advancing DurableLsn.
+    /// </summary>
+    internal long Checkpoint(ReadOnlySpan<long> activeTransactions, bool forceDurable)
     {
         ThrowIfDisposed();
         EnsureInitialized();
@@ -97,8 +104,11 @@ public abstract class StorageJournal : IStorageJournal
         {
             TruncateCore();
             long lsn = AppendLocked(0, JournalRecordType.Checkpoint, default, payload);
-            FlushCore(forceDurable: true);
-            _durableLsn = _lastLsn;
+            FlushCore(forceDurable);
+            if (forceDurable)
+            {
+                _durableLsn = _lastLsn;
+            }
             return lsn;
         }
     }
@@ -278,7 +288,9 @@ public abstract class StorageJournal : IStorageJournal
             {
                 _lastLsn = record.Lsn;
             }
-            _durableLsn = _lastLsn;
+            // Reading existing bytes does not prove a durable flush occurred:
+            // a reopened memory store or live OS cache may contain the same bytes.
+            // Only a completed explicit durable flush advances DurableLsn.
         }
     }
 

@@ -10,8 +10,10 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 public sealed class BlobApplicationBuilderTests
 {
     [Fact]
-    public async Task Registration_uses_only_root_builder_and_grouped_engine_is_operational()
+    public async Task Registration_uses_only_root_builder_and_grouped_memory_is_rejected()
     {
+        // Pre-#1018 this test asserted successful grouped writes on memory because
+        // durability silently degraded; explicit Grouped must now fail at open.
         var builder = new RecordingBuilder();
         await using var engine = builder.AddBlobDatabase(options =>
         {
@@ -22,10 +24,9 @@ public sealed class BlobApplicationBuilderTests
         engine.Name.ShouldBe("registered");
         engine.State.ShouldBe(EngineState.Running);
         engine.Model.ShouldBe(EngineModel.Blob);
-        var database = (IBlobDatabase)await engine.CreateDatabaseAsync("test");
-        var container = await database.CreateContainerAsync("files");
-        await BlobEngineTests.Write(container, "item", "grouped"u8.ToArray());
-        (await BlobEngineTests.Read(container, "item")).ShouldBe("grouped"u8.ToArray());
+        var failure = await Should.ThrowAsync<NotSupportedException>(async () => await engine.CreateDatabaseAsync("test"));
+        failure.Message.ShouldContain("BlobStorage (test)");
+        failure.Message.ShouldContain(nameof(StorageCommitDurability.Grouped));
     }
 
     private sealed class RecordingBuilder : IDatabaseApplicationBuilder

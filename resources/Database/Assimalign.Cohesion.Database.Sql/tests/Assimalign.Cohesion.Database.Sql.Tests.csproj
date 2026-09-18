@@ -14,6 +14,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="xunit.runner.json" />
+		<Compile Include="../../fixtures/SimulatedDurableFileHandle.cs" Link="TestObjects/SimulatedDurableFileHandle.cs" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />

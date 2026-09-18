@@ -21,7 +21,8 @@ using Internal;
 /// (write-ahead-log group-commit flusher, page write-back, checkpointer, version
 /// purge, and the index-maintenance stub) are already pumping on dedicated threads
 /// the engine spawned — and disposal is its one lifecycle transition: quiesce the
-/// workers, durably flush and close every open database. Each database is backed
+/// workers, flush each database according to its backing's durability policy and
+/// close it. Each database is backed
 /// by a storage strategy managing two file sets (data and <c>.catalog</c>); the
 /// strategy is file-based when <see cref="KeyValueDatabaseEngineOptions.RootPath"/>
 /// is set and in-memory otherwise. The journal is owned per-database through the
@@ -59,8 +60,8 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
         // the moment the constructor returns (create → use → dispose; no start).
         _strategy = options.StorageStrategy
             ?? (string.IsNullOrWhiteSpace(options.RootPath)
-                ? new InMemoryKeyValueStorageStrategy()
-                : new FileSystemKeyValueStorageStrategy(options.RootPath));
+                ? new InMemoryKeyValueStorageStrategy(options.Durability)
+                : new FileSystemKeyValueStorageStrategy(options.RootPath, options.Durability));
 
         if (!string.IsNullOrWhiteSpace(options.RootPath))
         {
@@ -156,21 +157,35 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
                 throw new DatabaseException($"A database with name '{name}' already exists.");
             }
 
-            var storage = ConfigureStorage(_strategy.CreateStorage(name));
-            var catalogStorage = ConfigureStorage(_strategy.CreateStorage(name + CatalogSuffix));
+            var storage = _strategy.CreateStorage(name);
+            KeyValueStorage? catalogStorage = null;
 
             // Publish the storages to the worker snapshot BEFORE constructing the
             // instance: instance construction itself commits (the primary-index
             // bootstrap, the format marker), and under grouped durability those
             // commits need the flush worker to see the storages or they wait out
             // the whole self-help window.
-            PublishStorageSnapshotLocked(storage, catalogStorage);
-
             try
             {
+                ConfigureStorage(storage, name);
+                catalogStorage = _strategy.CreateStorage(name + CatalogSuffix);
+                ConfigureStorage(catalogStorage, name + CatalogSuffix);
+                PublishStorageSnapshotLocked(storage, catalogStorage);
                 var database = new KeyValueDatabaseInstance(name, this, storage, catalogStorage);
                 _databases[name] = database;
                 return new ValueTask<IDatabase>(database);
+            }
+            catch
+            {
+                try
+                {
+                    storage.Dispose();
+                }
+                finally
+                {
+                    catalogStorage?.Dispose();
+                }
+                throw;
             }
             finally
             {
@@ -201,21 +216,35 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
                 throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
             }
 
-            var storage = ConfigureStorage(_strategy.OpenStorage(name));
-            var catalogStorage = ConfigureStorage(_strategy.StorageExists(name + CatalogSuffix)
-                ? _strategy.OpenStorage(name + CatalogSuffix)
-                : _strategy.CreateStorage(name + CatalogSuffix));
+            var storage = _strategy.OpenStorage(name);
+            KeyValueStorage? catalogStorage = null;
 
             // See CreateDatabaseAsync: instance construction commits (recovery
             // checkpoint, primary-index re-attachment), so the flush worker must
             // see the storages first under grouped durability.
-            PublishStorageSnapshotLocked(storage, catalogStorage);
-
             try
             {
+                ConfigureStorage(storage, name);
+                catalogStorage = _strategy.StorageExists(name + CatalogSuffix)
+                    ? _strategy.OpenStorage(name + CatalogSuffix)
+                    : _strategy.CreateStorage(name + CatalogSuffix);
+                ConfigureStorage(catalogStorage, name + CatalogSuffix);
+                PublishStorageSnapshotLocked(storage, catalogStorage);
                 var database = new KeyValueDatabaseInstance(name, this, storage, catalogStorage, recover: true);
                 _databases[name] = database;
                 return new ValueTask<IDatabase>(database);
+            }
+            catch
+            {
+                try
+                {
+                    storage.Dispose();
+                }
+                finally
+                {
+                    catalogStorage?.Dispose();
+                }
+                throw;
             }
             finally
             {
@@ -304,10 +333,10 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
 
         lock (_syncRoot)
         {
-            // Closing a database durably flushes it: storage disposal checkpoints
+            // Closing a database flushes according to its policy: disposal checkpoints
             // when no transaction is active (clean shutdown) and force-flushes the
-            // journal otherwise, so committed work is on stable storage when
-            // disposal completes.
+            // journal otherwise. Durable policies place committed work on stable
+            // storage before disposal completes.
             foreach (var database in _databases.Values)
             {
                 database.Dispose();
@@ -356,12 +385,11 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
     /// durability policy and wires its commit-pending hook to the engine's flush
     /// worker signal.
     /// </summary>
-    private KeyValueStorage ConfigureStorage(KeyValueStorage storage)
+    private void ConfigureStorage(KeyValueStorage storage, string storageName)
     {
-        storage.CommitDurability = _options.Durability;
+        storage.ConfigureCommitDurability(_options.Durability, $"{_strategy.GetType().Name} ({storageName})");
         storage.GroupCommitWindow = _options.GroupCommitWindow;
         storage.OnCommitPending = _signalCommitPending;
-        return storage;
     }
 
     /// <summary>

@@ -15,14 +15,13 @@ public sealed class BlobDatabaseEngineOptions
     public string? EngineName { get; set; }
 
     /// <summary>
-    /// Gets or sets how commits reach stable storage across every database this
-    /// engine opens. The default, <see cref="StorageCommitDurability.Synchronous"/>,
-    /// flushes the journal durably inside each commit;
-    /// <see cref="StorageCommitDurability.Grouped"/> batches concurrent commits
-    /// behind the engine's write-ahead flush worker so they share one durable flush.
-    /// Both modes acknowledge a commit only after its records are durable.
+    /// Gets or sets how commits reach stable storage. When unset, opening a
+    /// database selects <see cref="StorageCommitDurability.Synchronous"/> for
+    /// durable backing and <see cref="StorageCommitDurability.None"/> otherwise.
+    /// Explicit synchronous or grouped durability requires durable backing;
+    /// an unsupported choice fails before the database becomes operational.
     /// </summary>
-    public StorageCommitDurability Durability { get; set; } = StorageCommitDurability.Synchronous;
+    public StorageCommitDurability? Durability { get; set; }
 
     /// <summary>
     /// Gets or sets the bounded window a grouped commit waits for the flush worker
@@ -32,8 +31,8 @@ public sealed class BlobDatabaseEngineOptions
 
     /// <summary>
     /// Gets or sets the cadence of the engine's checkpoint worker: how often each
-    /// open database's file set (metadata and chunks) are durably flushed and their
-    /// journals truncated.
+    /// open database's file set is flushed according to its durability policy
+    /// and its journal truncated.
     /// </summary>
     public TimeSpan CheckpointInterval { get; set; } = TimeSpan.FromSeconds(30);
 

@@ -55,8 +55,27 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="name">A name for this storage instance (e.g., database name).</param>
     /// <returns>A new <see cref="SqlStorage"/> ready for use.</returns>
     public static SqlStorage Create(StorageStream data, StorageStream journal, StorageStream backup, string name)
+        => Create(data, journal, backup, name, null);
+
+    /// <summary>Creates storage with an explicit or backing-derived durability policy.</summary>
+    /// <param name="data">The data storage stream.</param>
+    /// <param name="journal">The journal storage stream.</param>
+    /// <param name="backup">The backup storage stream.</param>
+    /// <param name="name">The storage name.</param>
+    /// <param name="durability">The explicit policy, or null to derive it from the backing.</param>
+    /// <returns>The initialized storage.</returns>
+    public static SqlStorage Create(StorageStream data, StorageStream journal, StorageStream backup, string name, StorageCommitDurability? durability)
     {
         var storage = new SqlStorage(data, journal, backup);
+        try
+        {
+            storage.ConfigureCommitDurability(durability, $"{nameof(SqlStorage)} ({name})");
+        }
+        catch
+        {
+            storage.Dispose();
+            throw;
+        }
         storage.InitializeNew((Name)name);
         return storage;
     }
@@ -89,8 +108,27 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// </param>
     /// <returns>A <see cref="SqlStorage"/> loaded from the streams.</returns>
     public static SqlStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen = true)
+        => Open(data, journal, backup, checkpointOnOpen, null);
+
+    /// <summary>Opens storage after resolving durability, before recovery performs any flush.</summary>
+    /// <param name="data">The data storage stream.</param>
+    /// <param name="journal">The journal storage stream.</param>
+    /// <param name="backup">The backup storage stream.</param>
+    /// <param name="checkpointOnOpen">Whether to checkpoint the recovered journal.</param>
+    /// <param name="durability">The explicit policy, or null to derive it from the backing.</param>
+    /// <returns>The opened storage.</returns>
+    public static SqlStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen, StorageCommitDurability? durability)
     {
         var storage = new SqlStorage(data, journal, backup);
+        try
+        {
+            storage.ConfigureCommitDurability(durability, nameof(SqlStorage));
+        }
+        catch
+        {
+            storage.Dispose();
+            throw;
+        }
         storage.OpenExisting(checkpointOnOpen);
         return storage;
     }
@@ -117,7 +155,7 @@ public sealed class SqlStorage : Assimalign.Cohesion.Database.Storage.Storage
     internal IStorageJournal WriteAheadJournal => WriteAheadLog;
 
     /// <summary>
-    /// Inserts a row with auto-commit semantics (a single-operation durable transaction).
+    /// Inserts a row with auto-commit semantics using the selected durability policy.
     /// </summary>
     /// <param name="row">The serialized row bytes.</param>
     /// <returns>The page and slot location where the row was written.</returns>

@@ -321,21 +321,22 @@ public class SqlExecutionPipelineTests : IDisposable
 
     // ── Unsupported-feature diagnostics ────────────────────────────────
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Planner: unsupported features fail with precise messages")]
-    public async Task Planner_UnsupportedFeatures_ShouldFailPrecisely()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Parser and planner: unsupported features fail with precise messages")]
+    public async Task ParserAndPlanner_UnsupportedFeatures_ShouldFailPrecisely()
     {
         await using var engine = await CreateEngine();
         var db = await engine.CreateDatabaseAsync("test-db");
         var session = await OpenSeededSessionAsync(db);
         await using var _ = session;
 
-        (await Should.ThrowAsync<DatabaseException>(async () =>
+        // JOIN and GROUP BY moved from planner rejection to profile diagnostics (#1019/#1020).
+        (await Should.ThrowAsync<DatabaseParseException>(async () =>
             await Sql(session, "SELECT * FROM users u INNER JOIN users v ON u.id = v.id;")))
-            .Message.ShouldContain("JOIN", Case.Sensitive);
+            .Message.ShouldBe("SQL parse error COHDBL001: The JOIN clause is not supported by the SQL surface of this database model.");
 
-        (await Should.ThrowAsync<DatabaseException>(async () =>
+        (await Should.ThrowAsync<DatabaseParseException>(async () =>
             await Sql(session, "SELECT age FROM users GROUP BY age;")))
-            .Message.ShouldContain("GROUP BY", Case.Sensitive);
+            .Message.ShouldBe("SQL parse error COHDBL001: The GROUP BY clause is not supported by the SQL surface of this database model.");
 
         (await Should.ThrowAsync<DatabaseException>(async () =>
             await Sql(session, "SELECT SUM(age) FROM users;")))

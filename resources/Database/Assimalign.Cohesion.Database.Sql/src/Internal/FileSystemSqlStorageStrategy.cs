@@ -3,6 +3,7 @@ using System.IO;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Sql.Storage;
+using Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
 /// File-based storage strategy that creates subdirectories under a root path
@@ -11,10 +12,12 @@ using Assimalign.Cohesion.Database.Sql.Storage;
 internal sealed class FileSystemSqlStorageStrategy : ISqlStorageStrategy
 {
     private readonly string _rootPath;
+    private readonly StorageCommitDurability? _durability;
 
-    internal FileSystemSqlStorageStrategy(string rootPath)
+    internal FileSystemSqlStorageStrategy(string rootPath, StorageCommitDurability? durability = null)
     {
         _rootPath = rootPath;
+        _durability = durability;
     }
 
     /// <inheritdoc />
@@ -29,25 +32,33 @@ internal sealed class FileSystemSqlStorageStrategy : ISqlStorageStrategy
 
         Directory.CreateDirectory(dbDirectory);
 
-        var dataStream = new FileStream(
+        var dataStream = StorageStream.FromFile(
             Path.Combine(dbDirectory, $"{databaseName}.dat"),
             FileMode.CreateNew,
-            FileAccess.ReadWrite,
             FileShare.Read);
 
-        var journalStream = new FileStream(
-            Path.Combine(dbDirectory, $"{databaseName}.log"),
-            FileMode.CreateNew,
-            FileAccess.ReadWrite,
-            FileShare.Read);
+        StorageStream? journalStream = null;
+        StorageStream? backupStream = null;
+        try
+        {
+            journalStream = StorageStream.FromFile(
+                Path.Combine(dbDirectory, $"{databaseName}.log"),
+                FileMode.CreateNew,
+                FileShare.Read);
+            backupStream = StorageStream.FromFile(
+                Path.Combine(dbDirectory, $"{databaseName}.bak"),
+                FileMode.CreateNew,
+                FileShare.Read);
 
-        var backupStream = new FileStream(
-            Path.Combine(dbDirectory, $"{databaseName}.bak"),
-            FileMode.CreateNew,
-            FileAccess.ReadWrite,
-            FileShare.Read);
-
-        return SqlStorage.Create(dataStream, journalStream, backupStream, databaseName);
+            return SqlStorage.Create(dataStream, journalStream, backupStream, databaseName, _durability);
+        }
+        catch
+        {
+            backupStream?.Dispose();
+            journalStream?.Dispose();
+            dataStream.Dispose();
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -61,28 +72,35 @@ internal sealed class FileSystemSqlStorageStrategy : ISqlStorageStrategy
             throw new DatabaseException($"Storage for database '{databaseName}' does not exist.");
         }
 
-        var dataStream = new FileStream(
+        var dataStream = StorageStream.FromFile(
             dataFilePath,
             FileMode.Open,
-            FileAccess.ReadWrite,
             FileShare.Read);
 
-        var journalStream = new FileStream(
-            Path.Combine(dbDirectory, $"{databaseName}.log"),
-            FileMode.OpenOrCreate,
-            FileAccess.ReadWrite,
-            FileShare.Read);
+        StorageStream? journalStream = null;
+        StorageStream? backupStream = null;
+        try
+        {
+            journalStream = StorageStream.FromFile(
+                Path.Combine(dbDirectory, $"{databaseName}.log"),
+                FileMode.OpenOrCreate,
+                FileShare.Read);
+            backupStream = StorageStream.FromFile(
+                Path.Combine(dbDirectory, $"{databaseName}.bak"),
+                FileMode.OpenOrCreate,
+                FileShare.Read);
 
-        var backupStream = new FileStream(
-            Path.Combine(dbDirectory, $"{databaseName}.bak"),
-            FileMode.OpenOrCreate,
-            FileAccess.ReadWrite,
-            FileShare.Read);
-
-        // Defer the open-time checkpoint: the engine's transaction coordinator
-        // analyzes the recovered journal (TransactionRecovery.Analyze) before the
-        // truncation destroys its lifecycle records, then checkpoints itself.
-        return SqlStorage.Open(dataStream, journalStream, backupStream, checkpointOnOpen: false);
+            // Defer the open-time checkpoint: the engine's transaction coordinator
+            // analyzes the recovered journal before checkpoint truncates its records.
+            return SqlStorage.Open(dataStream, journalStream, backupStream, checkpointOnOpen: false, _durability);
+        }
+        catch
+        {
+            backupStream?.Dispose();
+            journalStream?.Dispose();
+            dataStream.Dispose();
+            throw;
+        }
     }
 
     /// <inheritdoc />

@@ -11,7 +11,8 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// Mutations made through a transaction are staged in the buffer pool and protected
 /// by the write-ahead log: the first modification of each page journals its before
 /// image, and <see cref="Commit"/> journals the after image of every modified page
-/// followed by a commit record that is durable before the call returns. Data pages
+/// followed by a commit record. Durable storage modes flush that record before the
+/// call returns; non-durable mode makes no persistence promise. Data pages
 /// are <i>not</i> forced to disk at commit — recovery replays committed changes from
 /// the journal (no-force), and uncommitted changes that reached disk early are
 /// undone from before images (steal).
@@ -42,8 +43,8 @@ public interface IStorageTransaction : IDisposable
 
     /// <summary>
     /// Commits the transaction: journals after images of every modified page and a
-    /// commit record, and returns only after the journal is durable up to the
-    /// commit record.
+    /// commit record, then applies the owning storage's durability policy. Durable
+    /// modes return only after the journal is durable up to that commit record.
     /// </summary>
     /// <exception cref="StorageTransactionException">The transaction is not active.</exception>
     void Commit();

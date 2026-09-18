@@ -23,8 +23,19 @@ public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Stora
     /// <param name="checkpointOnOpen">Whether to checkpoint immediately; engines pass false until logical recovery completes.</param>
     /// <returns>The recovered storage.</returns>
     public static DocumentStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen)
+        => Open(data, journal, backup, checkpointOnOpen, null);
+
+    /// <summary>Opens a document file set with durability resolved before recovery.</summary>
+    /// <param name="data">The data stream.</param>
+    /// <param name="journal">The journal stream.</param>
+    /// <param name="backup">The backup stream.</param>
+    /// <param name="checkpointOnOpen">Whether to checkpoint immediately.</param>
+    /// <param name="durability">The requested durability, or null to derive it from the backing store.</param>
+    /// <returns>The recovered storage.</returns>
+    public static DocumentStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen, StorageCommitDurability? durability)
     {
         var storage = new DocumentStorage(data, journal, backup);
+        storage.ConfigureCommitDurability(durability, nameof(DocumentStorage));
         storage.OpenExisting(checkpointOnOpen);
         return storage;
     }

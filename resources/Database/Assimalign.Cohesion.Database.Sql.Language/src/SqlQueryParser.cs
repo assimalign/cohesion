@@ -365,6 +365,8 @@ public sealed partial class SqlQueryParser : QueryParser
         out Location location)
     {
         Location? pendingCte = null;
+        string? pendingExecutionClause = null;
+        Location? pendingExecutionLocation = null;
         string? previousToken = null;
         int previousPosition = 0;
 
@@ -453,6 +455,37 @@ public sealed partial class SqlQueryParser : QueryParser
                     location = tokenLocation;
                     return true;
                 }
+
+                // These shapes have syntax trees but no executor support (#1019-#1021).
+                // Keep scanning so a more specific restriction, such as JOIN ... USING,
+                // retains its existing diagnostic instead of being hidden by JOIN.
+                if (pendingExecutionClause is null)
+                {
+                    if (token.Equals("JOIN", StringComparison.OrdinalIgnoreCase))
+                    {
+                        pendingExecutionClause = SqlClauses.Join;
+                    }
+                    else if (token.Equals("BY", StringComparison.OrdinalIgnoreCase) &&
+                             previousToken?.Equals("GROUP", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        pendingExecutionClause = SqlClauses.GroupBy;
+                        tokenLocation = Location.Create(1, 1, previousPosition, lexer.Current.Position + lexer.Current.Value.Length);
+                    }
+                    else if (token.Equals("HAVING", StringComparison.OrdinalIgnoreCase))
+                    {
+                        pendingExecutionClause = SqlClauses.Having;
+                    }
+                    else if (token.Equals("SELECT", StringComparison.OrdinalIgnoreCase) && previousToken is not null)
+                    {
+                        // A SELECT after the leading command is a nested query or INSERT ... SELECT.
+                        pendingExecutionClause = SqlClauses.Subquery;
+                    }
+
+                    if (pendingExecutionClause is not null)
+                    {
+                        pendingExecutionLocation = tokenLocation;
+                    }
+                }
             }
 
             previousToken = token;
@@ -463,6 +496,13 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             clause = SqlClauses.Cte;
             location = pendingCte;
+            return true;
+        }
+
+        if (pendingExecutionClause is not null)
+        {
+            clause = pendingExecutionClause;
+            location = pendingExecutionLocation!;
             return true;
         }
 

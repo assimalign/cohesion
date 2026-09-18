@@ -16,13 +16,15 @@ public sealed class KeyValueDatabaseEngineOptions
 
     /// <summary>
     /// Gets or sets how commits reach stable storage across every database this
-    /// engine opens. The default, <see cref="StorageCommitDurability.Synchronous"/>,
-    /// flushes the journal durably inside each commit;
-    /// <see cref="StorageCommitDurability.Grouped"/> batches concurrent commits
-    /// behind the engine's write-ahead flush worker so they share one durable flush.
-    /// Both modes acknowledge a commit only after its records are durable.
+    /// engine opens. When unset, each storage file set selects
+    /// <see cref="StorageCommitDurability.Synchronous"/> if its backing supports
+    /// durable flushes, or <see cref="StorageCommitDurability.None"/> otherwise.
+    /// Explicit synchronous or grouped durability requires durable backing and is
+    /// rejected when the database opens if that backing cannot provide it.
+    /// Grouped commits share the engine's write-ahead flush worker; both durable
+    /// modes acknowledge a commit only after its records reach stable storage.
     /// </summary>
-    public StorageCommitDurability Durability { get; set; } = StorageCommitDurability.Synchronous;
+    public StorageCommitDurability? Durability { get; set; }
 
     /// <summary>
     /// Gets or sets the bounded window a grouped commit waits for the flush worker

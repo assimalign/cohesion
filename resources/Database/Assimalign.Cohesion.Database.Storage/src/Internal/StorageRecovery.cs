@@ -33,7 +33,7 @@ internal static class StorageRecovery
     /// Runs recovery and returns the highest transaction sequence observed in the
     /// journal (zero when the journal is empty).
     /// </summary>
-    internal static long Run(StorageStream data, IStorageJournal journal)
+    internal static long Run(StorageStream data, IStorageJournal journal, bool forceDurable)
     {
         long maxSequence = 0;
 
@@ -130,7 +130,7 @@ internal static class StorageRecovery
             data.WritePage((PageId)pageId, buffer);
         }
 
-        data.FlushDurable();
+        data.Flush(durable: forceDurable);
         return maxSequence;
     }
 }

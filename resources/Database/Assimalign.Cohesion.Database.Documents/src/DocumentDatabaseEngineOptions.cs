@@ -15,27 +15,24 @@ public sealed class DocumentDatabaseEngineOptions
     public string? EngineName { get; set; }
 
     /// <summary>
-    /// Gets or sets the underlying storage's physical-commit durability policy.
-    /// The default is <see cref="StorageCommitDurability.Synchronous"/>.
-    /// Document mutations use nondurable physical brackets followed by the shared
-    /// coordinator's synchronous durable logical commit. Logical document commits
-    /// therefore remain synchronous even when this setting is
-    /// <see cref="StorageCommitDurability.Grouped"/>; they do not currently use
-    /// the storage group-commit gate.
+    /// Gets or sets how commits reach stable storage. When unset, opening a
+    /// database selects <see cref="StorageCommitDurability.Synchronous"/> for
+    /// durable backing and <see cref="StorageCommitDurability.None"/> otherwise.
+    /// Explicit synchronous or grouped durability requires durable backing;
+    /// an unsupported choice fails before the database becomes operational.
     /// </summary>
-    public StorageCommitDurability Durability { get; set; } = StorageCommitDurability.Synchronous;
+    public StorageCommitDurability? Durability { get; set; }
 
     /// <summary>
-    /// Gets or sets the underlying storage's physical group-commit wait window
-    /// and the flush worker's wake cadence. Logical document commits flush
-    /// synchronously through the transaction coordinator and do not wait on it.
+    /// Gets or sets the bounded window a grouped commit waits for the flush
+    /// worker before flushing inline, and the flush worker's wake cadence.
     /// </summary>
     public TimeSpan GroupCommitWindow { get; set; } = TimeSpan.FromMilliseconds(5);
 
     /// <summary>
     /// Gets or sets the cadence of the engine's checkpoint worker: how often each
-    /// open database's file set (metadata and chunks) are durably flushed and their
-    /// journals truncated.
+    /// open database's file set is flushed according to its durability policy
+    /// and its journal truncated.
     /// </summary>
     public TimeSpan CheckpointInterval { get; set; } = TimeSpan.FromSeconds(30);
 

@@ -12,8 +12,10 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 public sealed class GraphApplicationBuilderTests
 {
     [Fact]
-    public async Task RootBuilderRegistration_ShouldCreateOperationalGroupedGraphEngine()
+    public async Task RootBuilderRegistration_ShouldRejectGroupedMemoryDatabaseCreation()
     {
+        // Pre-#1018 this test asserted successful grouped writes on memory because
+        // durability silently degraded; explicit Grouped must now fail at open.
         var builder = new RecordingBuilder();
         await using var engine = builder.AddGraphDatabase(options =>
         {
@@ -24,10 +26,9 @@ public sealed class GraphApplicationBuilderTests
         engine.Name.ShouldBe("registered");
         engine.State.ShouldBe(EngineState.Running);
         engine.Model.ShouldBe(EngineModel.Graph);
-        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("test");
-        await using var session = await database.CreateSessionAsync();
-        var node = await database.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["name"] = "Ada" });
-        (await database.GetNodeAsync(session, node.Id)).ShouldNotBeNull().Properties["name"].ShouldBe("Ada");
+        var failure = await Should.ThrowAsync<NotSupportedException>(async () => await engine.CreateDatabaseAsync("test"));
+        failure.Message.ShouldContain("GraphStorage (test)");
+        failure.Message.ShouldContain(nameof(StorageCommitDurability.Grouped));
     }
 
     [Fact]

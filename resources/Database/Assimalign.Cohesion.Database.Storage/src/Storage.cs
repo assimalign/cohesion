@@ -24,9 +24,10 @@ using Assimalign.Cohesion.Database.Storage.Units;
 /// <b>Durability model (steal / no-force).</b> Record mutations run inside an
 /// <see cref="IStorageTransaction"/>: the first touch of a page journals its before
 /// image, commit journals after images plus a commit record and returns once the
-/// journal is durable. Data pages flush lazily — the buffer pool may steal (evict)
-/// dirty pages early because the write-ahead gate guarantees the journal covers
-/// them, and commit never forces data pages. Opening a storage file replays the
+/// journal meets the selected durability policy. Data pages flush lazily — the
+/// buffer pool may steal (evict) dirty pages early because the write-ahead gate
+/// flushes the journal first, durably when required by that policy, and commit
+/// never forces data pages. Opening a storage file replays the
 /// journal: committed work is redone, uncommitted work is undone.
 /// </para>
 /// <para>
@@ -126,9 +127,73 @@ public abstract class Storage : IStorage
     /// inside every commit; <see cref="StorageCommitDurability.Grouped"/> batches
     /// concurrent commits behind one durable flush performed by a flush worker
     /// (see <see cref="FlushPendingCommits"/>). Both modes acknowledge a commit only
-    /// after its records are durable.
+    /// after its records are durable. <see cref="StorageCommitDurability.None"/>
+    /// retains the same commit records without requesting or claiming durability.
     /// </summary>
     public StorageCommitDurability CommitDurability { get; set; } = StorageCommitDurability.Synchronous;
+
+    /// <summary>
+    /// Gets whether both the data and journal handles can flush to durable storage.
+    /// The backup handle does not participate in commit or checkpoint durability.
+    /// </summary>
+    public bool SupportsDurableFlush => Data.SupportsDurableFlush && Journal.SupportsDurableFlush;
+
+    /// <summary>
+    /// Resolves an unset durability choice from the backing handles, or validates
+    /// an explicit choice before an engine begins using this storage.
+    /// </summary>
+    /// <param name="durability">The explicit choice, or null to derive the default.</param>
+    /// <param name="storageName">The store name used in configuration errors.</param>
+    /// <exception cref="NotSupportedException">An explicit durable setting cannot be provided by the backing store.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The setting is not a defined durability mode.</exception>
+    public void ConfigureCommitDurability(StorageCommitDurability? durability, string storageName)
+    {
+        var resolved = durability ?? (SupportsDurableFlush
+            ? StorageCommitDurability.Synchronous
+            : StorageCommitDurability.None);
+
+        if (resolved is not (StorageCommitDurability.Synchronous or StorageCommitDurability.Grouped or StorageCommitDurability.None))
+        {
+            throw new ArgumentOutOfRangeException(nameof(durability), durability, "Unknown commit durability setting.");
+        }
+
+        if (resolved != StorageCommitDurability.None && !SupportsDurableFlush)
+        {
+            throw new NotSupportedException(
+                $"Storage '{storageName}' cannot provide Durability '{resolved}': its backing store does not support durable flush (SupportsDurableFlush = false).");
+        }
+
+        CommitDurability = resolved;
+    }
+
+    /// <summary>
+    /// Applies this storage's durability policy to an already appended commit
+    /// record. Non-durable mode makes no durable request or promise.
+    /// </summary>
+    /// <param name="lsn">The appended commit record's log sequence number.</param>
+    public void EnsureCommitDurable(long lsn)
+    {
+        if (_journal is null)
+        {
+            throw new InvalidOperationException("Storage has not been initialized.");
+        }
+
+        switch (CommitDurability)
+        {
+            case StorageCommitDurability.None:
+                return;
+            case StorageCommitDurability.Grouped:
+                _groupCommitGate.AwaitDurable(lsn, GroupCommitWindow, _journal);
+                return;
+            case StorageCommitDurability.Synchronous:
+                _journal.EnsureDurable(lsn);
+                return;
+            default:
+                throw new InvalidOperationException($"Unknown commit durability setting '{CommitDurability}'.");
+        }
+    }
+
+    void IStorage.EnsureCommitDurable(long lsn, IStorageJournal journal) => EnsureCommitDurable(lsn);
 
     /// <summary>
     /// Gets or sets the bounded window a grouped commit waits for the flush worker
@@ -158,7 +223,7 @@ public abstract class Storage : IStorage
         _id = StorageId.NewId();
         _pageManager = new StoragePageManager(Data, _bufferPool, _freeSpaceMap);
         _journal = new StreamJournal(Journal, leaveOpen: true);
-        _bufferPool.WriteAheadGate = lsn => _journal.EnsureDurable(lsn);
+        _bufferPool.WriteAheadGate = FlushWriteAhead;
 
         // Allocate and write file header (page 0). The file metadata lives in the
         // page body so the page header (id, LSN, checksum) stays intact.
@@ -239,14 +304,14 @@ public abstract class Storage : IStorage
         // Recover before anything reads pages: redo committed changes that never
         // reached the data file, undo stolen uncommitted writes that did.
         _journal = new StreamJournal(Journal, leaveOpen: true);
-        _bufferPool.WriteAheadGate = lsn => _journal.EnsureDurable(lsn);
+        _bufferPool.WriteAheadGate = FlushWriteAhead;
         bool journalHadRecords = _journal.LastLsn > 0;
 
         // Sequence assignment resumes above both the journal's highest observed
         // sequence and the header floor persisted at the last checkpoint — the
         // journal alone is insufficient because checkpoints truncate it while row
         // version stamps persist in data pages.
-        _nextTransactionSequence = Math.Max(StorageRecovery.Run(Data, _journal), sequenceFloor);
+        _nextTransactionSequence = Math.Max(StorageRecovery.Run(Data, _journal, RequiresDurableFlush), sequenceFloor);
 
         // Rebuild the free-space map and the per-owner page directory in one pass
         // over the on-disk page headers. The stream length is the source of truth
@@ -408,10 +473,10 @@ public abstract class Storage : IStorage
 
             UpdateFileHeader();
             _pageManager?.FlushAll();
-            Data.FlushDurable();
-            long? checkpointLsn = _journal?.Checkpoint(activeTransactionSequences);
+            Data.Flush(durable: RequiresDurableFlush);
+            long? checkpointLsn = _journal?.Checkpoint(activeTransactionSequences, forceDurable: RequiresDurableFlush);
 
-            if (checkpointLsn is not null)
+            if (checkpointLsn is not null && RequiresDurableFlush)
             {
                 // Wake any group-commit bookkeeping past the truncation point.
                 _groupCommitGate.PublishDurable(checkpointLsn.Value);
@@ -422,7 +487,7 @@ public abstract class Storage : IStorage
     /// <inheritdoc />
     public bool FlushPendingCommits()
     {
-        if (_journal is null)
+        if (_journal is null || !RequiresDurableFlush)
         {
             return false;
         }
@@ -655,14 +720,14 @@ public abstract class Storage : IStorage
     }
 
     /// <summary>
-    /// Flushes all dirty pages to the underlying data stream, flushes the journal,
-    /// and updates the file header.
+    /// Flushes all dirty pages to the underlying data stream, flushes the journal
+    /// according to the selected durability policy, and updates the file header.
     /// </summary>
     protected unsafe void Flush()
     {
         UpdateFileHeader();
         _pageManager?.FlushAll();
-        _journal?.Flush(forceDurable: true);
+        _journal?.Flush(forceDurable: RequiresDurableFlush);
     }
 
     /// <inheritdoc />
@@ -797,7 +862,7 @@ public abstract class Storage : IStorage
     /// <summary>
     /// Commits a storage transaction: appends after images of every touched page and
     /// a commit record, then — unless the caller owns durability through a later
-    /// record — makes the journal durable before returning.
+    /// record — applies the selected journal durability policy before returning.
     /// </summary>
     internal unsafe void CommitTransaction(StorageTransaction transaction, bool awaitDurability = true)
     {
@@ -822,21 +887,11 @@ public abstract class Storage : IStorage
 
         long commitLsn = _journal!.AppendCommit(transaction.Sequence);
 
-        if (!awaitDurability)
+        if (awaitDurability)
         {
-            // The caller's own later commit record owns durability (the journal
-            // is ordered); the write-ahead gate still covers any stolen page.
-        }
-        else if (CommitDurability == StorageCommitDurability.Grouped)
-        {
-            // Ride the group-commit gate: wait (bounded) for the flush worker's
-            // shared durable flush, self-helping inline if it does not come. The
-            // commit is acknowledged only once the journal is durable either way.
-            _groupCommitGate.AwaitDurable(commitLsn, GroupCommitWindow, _journal);
-        }
-        else
-        {
-            _journal.EnsureDurable(commitLsn);
+            // Durability only controls the flush after the same commit record.
+            // An outer logical commit may own this wait through its later record.
+            EnsureCommitDurable(commitLsn);
         }
 
         // Page releases become effective only now that the commit record exists:
@@ -924,9 +979,10 @@ public abstract class Storage : IStorage
 
     /// <summary>
     /// Flushes state on shutdown: a clean checkpoint when no transactions are active
-    /// (so the next open recovers instantly), otherwise a plain durable flush — the
-    /// write-ahead gate has kept the journal ahead of any stolen page, so recovery
-    /// will undo whatever the abandoned transactions left behind.
+    /// (so the next open recovers instantly), otherwise flushes according to the
+    /// selected durability policy. The write-ahead gate has kept the journal ahead
+    /// of any stolen page, so recovery undoes abandoned transactions in available
+    /// backing bytes. Non-durable mode makes no promise that those bytes survive.
     /// </summary>
     private void ShutdownFlush()
     {
@@ -949,8 +1005,24 @@ public abstract class Storage : IStorage
         {
             UpdateFileHeader();
             _pageManager.FlushAll();
-            Data.FlushDurable();
-            _journal.Flush(forceDurable: true);
+            Data.Flush(durable: RequiresDurableFlush);
+            _journal.Flush(forceDurable: RequiresDurableFlush);
+        }
+    }
+
+    private bool RequiresDurableFlush => CommitDurability != StorageCommitDurability.None;
+
+    private void FlushWriteAhead(long lsn)
+    {
+        if (RequiresDurableFlush)
+        {
+            _journal!.EnsureDurable(lsn);
+        }
+        else
+        {
+            // Preserve journal-before-page write ordering without claiming that
+            // an ordinary flush makes either memory or buffered bytes durable.
+            _journal!.Flush(forceDurable: false);
         }
     }
 

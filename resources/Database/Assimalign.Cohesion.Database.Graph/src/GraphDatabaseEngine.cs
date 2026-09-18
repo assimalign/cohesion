@@ -8,11 +8,12 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Storage;
+using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>Manages logical graph databases and their four maintenance workers.</summary>
-/// <remarks>Creation starts the workers; disposal stops them and durably closes every database.</remarks>
+/// <remarks>Creation starts the workers; disposal stops them and closes every database according to its storage durability.</remarks>
 public sealed class GraphDatabaseEngine : IDatabaseEngine
 {
     private readonly GraphDatabaseEngineOptions _options;
@@ -121,8 +122,7 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
             GraphStorage? storage = null;
             try
             {
-                storage = OpenStorage(directory, name, create);
-                storage.CommitDurability = _options.Durability;
+                storage = OpenStorage(directory, name, create, _options.Durability);
                 storage.GroupCommitWindow = _options.GroupCommitWindow;
                 storage.OnCommitPending = _commitPending.Set;
                 Volatile.Write(ref _storages, [.. _storages, storage]);
@@ -139,16 +139,16 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
         }
     }
 
-    private static GraphStorage OpenStorage(string? directory, string name, bool create)
+    private static GraphStorage OpenStorage(string? directory, string name, bool create, StorageCommitDurability? durability)
     {
-        Stream? data = null, journal = null, backup = null;
+        StorageStream? data = null, journal = null, backup = null;
         try
         {
             var mode = create ? FileMode.CreateNew : FileMode.Open;
-            data = directory is null ? new MemoryStream() : new FileStream(Path.Combine(directory, "graph.dat"), mode, FileAccess.ReadWrite, FileShare.Read);
-            journal = directory is null ? new MemoryStream() : new FileStream(Path.Combine(directory, "graph.log"), mode, FileAccess.ReadWrite, FileShare.Read);
-            backup = directory is null ? new MemoryStream() : new FileStream(Path.Combine(directory, "graph.bak"), mode, FileAccess.ReadWrite, FileShare.Read);
-            return create ? GraphStorage.Create(data, journal, backup, name) : GraphStorage.Open(data, journal, backup, checkpointOnOpen: false);
+            data = directory is null ? StorageStream.FromInMemory() : StorageStream.FromFile(Path.Combine(directory, "graph.dat"), mode, FileShare.Read);
+            journal = directory is null ? StorageStream.FromInMemory() : StorageStream.FromFile(Path.Combine(directory, "graph.log"), mode, FileShare.Read);
+            backup = directory is null ? StorageStream.FromInMemory() : StorageStream.FromFile(Path.Combine(directory, "graph.bak"), mode, FileShare.Read);
+            return create ? GraphStorage.Create(data, journal, backup, name, durability) : GraphStorage.Open(data, journal, backup, checkpointOnOpen: false, durability);
         }
         catch { data?.Dispose(); journal?.Dispose(); backup?.Dispose(); throw; }
     }

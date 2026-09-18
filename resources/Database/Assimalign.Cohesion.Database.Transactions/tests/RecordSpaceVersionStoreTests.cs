@@ -10,6 +10,7 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
 /// Exercises record-space undo through real storage brackets and the shared
@@ -213,7 +214,7 @@ public class RecordSpaceVersionStoreTests
     private sealed class RecordStorage : Assimalign.Cohesion.Database.Storage.Storage, ITransactionRecordSpace
     {
         internal RecordStorage()
-            : base(StorageStream.FromInMemory(), StorageStream.FromInMemory(), StorageStream.FromInMemory())
+            : base(new StorageStream(new SimulatedDurableFileHandle()), new StorageStream(new SimulatedDurableFileHandle()), StorageStream.FromInMemory())
         {
             InitializeNew((Name)"record-version-test");
         }

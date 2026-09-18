@@ -8,6 +8,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Tests;
 
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
@@ -207,7 +208,7 @@ public class TransactionCoordinatorRecoveryTests
         private readonly MemoryStream _journal;
 
         private CoordinatorStorage(MemoryStream data, MemoryStream journal, bool reopen)
-            : base(new StorageStream(data), new StorageStream(journal), new StorageStream(new MemoryStream()))
+            : base(new StorageStream(new SimulatedDurableFileHandle(data)), new StorageStream(new SimulatedDurableFileHandle(journal)), new StorageStream(new MemoryStream()))
         {
             _data = data;
             _journal = journal;

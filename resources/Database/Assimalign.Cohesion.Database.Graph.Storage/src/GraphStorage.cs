@@ -20,8 +20,19 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="data">Data stream.</param><param name="journal">Journal stream.</param><param name="backup">Backup stream.</param><param name="name">Database name.</param>
     /// <returns>The initialized storage.</returns>
     public static GraphStorage Create(StorageStream data, StorageStream journal, StorageStream backup, string name)
+        => Create(data, journal, backup, name, null);
+
+    /// <summary>Creates a graph file set with durability resolved before initialization.</summary>
+    /// <param name="data">The data stream.</param>
+    /// <param name="journal">The journal stream.</param>
+    /// <param name="backup">The backup stream.</param>
+    /// <param name="name">The logical database name.</param>
+    /// <param name="durability">The requested durability, or null to derive it from the backing store.</param>
+    /// <returns>The initialized storage.</returns>
+    public static GraphStorage Create(StorageStream data, StorageStream journal, StorageStream backup, string name, StorageCommitDurability? durability)
     {
         var result = new GraphStorage(data, journal, backup);
+        result.ConfigureCommitDurability(durability, $"{nameof(GraphStorage)} ({name})");
         result.InitializeNew((Name)name);
         return result;
     }
@@ -34,8 +45,19 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="data">Data stream.</param><param name="journal">Journal stream.</param><param name="backup">Backup stream.</param><param name="checkpointOnOpen">Whether to checkpoint immediately.</param>
     /// <returns>The recovered storage.</returns>
     public static GraphStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen = false)
+        => Open(data, journal, backup, checkpointOnOpen, null);
+
+    /// <summary>Opens a graph file set with durability resolved before recovery.</summary>
+    /// <param name="data">The data stream.</param>
+    /// <param name="journal">The journal stream.</param>
+    /// <param name="backup">The backup stream.</param>
+    /// <param name="checkpointOnOpen">Whether to checkpoint immediately.</param>
+    /// <param name="durability">The requested durability, or null to derive it from the backing store.</param>
+    /// <returns>The recovered storage.</returns>
+    public static GraphStorage Open(StorageStream data, StorageStream journal, StorageStream backup, bool checkpointOnOpen, StorageCommitDurability? durability)
     {
         var result = new GraphStorage(data, journal, backup);
+        result.ConfigureCommitDurability(durability, nameof(GraphStorage));
         result.OpenExisting(checkpointOnOpen);
         return result;
     }

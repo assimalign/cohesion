@@ -3,7 +3,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Language;
 
 /// <summary>
-/// Exposes the lexical vocabulary and currently implemented grammar surface of the SQL language.
+/// Exposes the lexical vocabulary and supported clause surface of the SQL model.
 /// </summary>
 public static class SqlLanguageProfile
 {
@@ -75,15 +75,11 @@ public static class SqlLanguageProfile
         SqlClauses.DropTable,
         SqlClauses.DropIndex,
         SqlClauses.From,
-        SqlClauses.Join,
         SqlClauses.Where,
-        SqlClauses.GroupBy,
-        SqlClauses.Having,
         SqlClauses.OrderBy,
         SqlClauses.Limit,
         SqlClauses.Offset,
         SqlClauses.Values,
-        SqlClauses.Subquery,
         SqlClauses.Case,
         SqlClauses.Cast,
         SqlClauses.Constraint,
@@ -100,8 +96,8 @@ public static class SqlLanguageProfile
     ];
 
     /// <summary>
-    /// Gets the SQL language profile. Its clause set contains only grammar implemented by
-    /// <see cref="SqlQueryParser"/> today.
+    /// Gets the SQL language profile. Clauses awaiting execution support are excluded even
+    /// when <see cref="SqlQueryParser"/> can construct their syntax trees.
     /// </summary>
     public static QueryLanguageProfile Instance { get; } = new(
         "SQL",
