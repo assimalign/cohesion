@@ -291,6 +291,20 @@ followed by that many UTF-8 bytes; a negative length is invalid. No padding is p
 | 65 (`Document`) | Server → client | Exactly one complete UTF-8 JSON value occupying the entire payload, with no inner length prefix |
 | 66 (`Complete`) | Server → client | Exactly eight bytes: nonnegative `int64` count of Document frames emitted for this request |
 
+Payload offsets are zero-based and exclude the shared five-byte frame header. For `Execute`, bytes
+0–3 are the signed 32-bit big-endian statement byte length `S`; the `S` UTF-8 statement bytes begin
+at byte 4; bytes `4 + S`–`7 + S` are the signed 32-bit big-endian parameter byte length `P`; and
+the `P` JSON-object bytes begin at byte `8 + S` and consume the rest of the payload. A `Document`
+payload is its complete JSON value from byte 0 through the payload end, without an inner length.
+A `Complete` payload has one exact fixed layout: bytes 0–7 (bits 0–63) are the nonnegative signed
+64-bit result count in big-endian order, and no bytes follow it. The packet view below shows that
+exact fixed `Complete` layout; the variable-length `Execute` and `Document` layouts remain in prose.
+
+```mermaid
+packet-beta
+0-63: "Result count (nonnegative i64, big-endian)"
+```
+
 Parameters are named object members and may themselves contain nested values. An empty parameter
 set is `{}`. A result can be an object, array, string, number, Boolean or null; absent properties
 stay absent. The codec preserves the original bytes, including whitespace and Unicode spelling.

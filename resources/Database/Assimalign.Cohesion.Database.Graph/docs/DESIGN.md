@@ -301,6 +301,33 @@ A Path payload consists of the following fields, with no trailing bytes:
 1. `int32 nodeCount`, followed by `nodeCount` node records in traversal order.
 2. `int32 relationshipCount`, followed by `relationshipCount` relationship records in traversal order.
 
+The other family layouts remain prose-only. `Execute` (5) and `ExecutePaths` (64) share one
+payload: bytes 0–3 hold the signed 32-bit big-endian statement length `S`, the statement starts at
+byte 4, and bytes `4 + S`–`7 + S` hold the signed 32-bit big-endian parameter count. Each parameter
+then starts at some byte `Q` with a signed 32-bit big-endian name length `N` at `Q`, `N` name bytes
+at `Q + 4`, a signed 32-bit big-endian encoded-value length `V` at `Q + 4 + N`, and `V` tuple-codec
+bytes at `Q + 8 + N`. `ResultHeader` (6) starts with its signed 32-bit big-endian column count at
+bytes 0–3; each repeated column has the same four-byte name length and name bytes followed by one
+`DatabaseType` byte. `ResultRow` (7) is self-delimiting tuple components from byte 0 through the
+payload end. The `ResultComplete` (8) encoder emits one signed 64-bit big-endian affected count at
+bytes 0–7. `Transaction` (9) is reserved and has no accepted graph payload. `PathsComplete` (66) is
+exactly a nonnegative signed 64-bit big-endian path count at bytes 0–7 with no trailing bytes.
+
+A valid Path always contains a first node, so its payload has an exact 16-byte fixed prefix. At
+payload-local bytes 0–3 (bits 0–31) is the positive signed 32-bit node count in big-endian order;
+bytes 4–11 (bits 32–95) are the first node's nonzero unsigned 64-bit identity in big-endian order;
+and bytes 12–15 (bits 96–127) are that node's nonnegative signed 32-bit label count in big-endian
+order. Its length-prefixed labels and property map follow, then any remaining node records, the
+relationship count, and the repeated relationship records described below. The packet view below
+shows this exact fixed Path prefix; all variable and repeated tails remain in prose.
+
+```mermaid
+packet-beta
+0-31: "Node count (positive i32, big-endian)"
+32-95: "First node ID (nonzero u64, big-endian)"
+96-127: "First node label count (nonnegative i32, big-endian)"
+```
+
 A node record contains `uint64 id`, `int32 labelCount`, that many label strings, then a property map.
 A relationship record contains `uint64 id`, `uint64 fromNodeId`, `uint64 toNodeId`, relationship-type
 string, then a property map. Identities are nonzero, database-local unsigned integers; their entire

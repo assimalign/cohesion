@@ -936,3 +936,27 @@ scalar component for independent clients. The server binds SqlProtocol.Family
 once on accept, retains wire version 1.0 and the existing bytes, and negotiates
 incompatible majors before authentication. Result materialization belongs to
 Database.Sql.Client. The TCP Listen(Uri) extension lives in the optional Database.Sql.Tcp composition package; this engine references only generic Connections.
+
+Payload offsets are zero-based and exclude the shared five-byte frame header. `Execute` (5)
+starts with a signed 32-bit big-endian statement byte length `S` at bytes 0–3, followed by
+`S` UTF-8 statement bytes at byte 4 and a nonnegative signed 32-bit big-endian parameter
+count at bytes `4 + S`–`7 + S`. Each parameter beginning at byte `Q` has a nonnegative
+signed 32-bit big-endian name length `N` at bytes `Q`–`Q + 3`, `N` UTF-8 name bytes at
+byte `Q + 4`, a nonnegative signed 32-bit big-endian encoded-value length `V` at bytes
+`Q + 4 + N`–`Q + 7 + N`, and `V` self-describing scalar-component bytes at byte
+`Q + 8 + N`. `ResultHeader` (6) starts with a nonnegative signed 32-bit big-endian column
+count at bytes 0–3; each repeated column has the same four-byte name length and UTF-8 name,
+followed immediately by one unsigned `DatabaseType` byte. `ResultRow` (7) concatenates one
+self-describing scalar component per result field from byte 0 through the payload end, with
+no count prefix. `Transaction` (9) is reserved and has no implemented payload; SQL
+transaction commands travel as statement text in `Execute`.
+
+`ResultComplete` (8) is the implemented family's one fixed-width payload. Its encoder emits
+exactly eight bytes: bytes 0–7 (bits 0–63) are the signed 64-bit affected count in big-endian
+order. SQL uses `-1` when the returned row stream is the count and otherwise reports the
+statement's affected count. The packet view below shows that complete fixed-width payload.
+
+```mermaid
+packet-beta
+0-63: "Affected count (i64, big-endian)"
+```

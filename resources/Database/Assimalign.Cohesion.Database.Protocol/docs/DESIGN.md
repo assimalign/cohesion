@@ -27,11 +27,20 @@ continues to own its accept loop and session state machine.
 
 ## Envelope and primitives
 
-Every frame is `u32 payloadLength + u8 type + payload`; lengths exclude the five-byte
-header. Integers are big-endian. Payloads are limited to 16,777,216 bytes. Readers
-check the length before allocation, require the entire declared payload, distinguish
-clean EOF between frames from truncation, and reject oversized declarations. Writers
-apply the same bound. Framing imposes no logical-object buffering or transfer policy.
+Every frame begins with a five-byte header. Header bytes 0–3 (bits 0–31) are the
+unsigned 32-bit payload length in big-endian order, and byte 4 (bits 32–39) is the
+unsigned 8-bit message type. The payload starts at byte 5, and the declared length
+counts only those payload bytes, not the header. Payloads are limited to 16,777,216
+bytes. Readers check the length before allocation, require the entire declared
+payload, distinguish clean EOF between frames from truncation, and reject oversized
+declarations. Writers apply the same bound. Framing imposes no logical-object
+buffering or transfer policy. The packet view below shows the two fixed header fields.
+
+```mermaid
+packet-beta
+0-31: "Payload length (u32, big-endian)"
+32-39: "Message type (u8)"
+```
 
 `ProtocolPayload` provides signed i32/i64, unsigned u16, and strings encoded as
 `i32 UTF8-byte-length + UTF8 bytes`. Negative lengths and out-of-bounds reads fail
@@ -97,7 +106,22 @@ sequenceDiagram
     Client->>Server: Terminate
 ```
 
-Startup is `u16 major + u16 minor + string database + string principal`.
+Startup is `u16 major + u16 minor + string database + string principal`. In its fixed
+prefix, bytes 0–1 (bits 0–15) are the big-endian unsigned 16-bit major version, bytes
+2–3 (bits 16–31) are the big-endian unsigned 16-bit minor version, and bytes 4–7
+(bits 32–63) are the database string's nonnegative big-endian signed 32-bit UTF-8
+byte length `N`. The `N` database bytes start at byte 8; the principal's nonnegative
+big-endian signed 32-bit UTF-8 byte length follows at byte `8 + N`, followed by that
+many principal bytes.
+The packet view below shows the startup payload's fixed eight-byte prefix.
+
+```mermaid
+packet-beta
+0-15: "Major version (u16, big-endian)"
+16-31: "Minor version (u16, big-endian)"
+32-63: "Database UTF-8 byte length N (nonnegative i32, big-endian)"
+```
+
 The existing trust handshake sends an empty Authenticate and AuthenticateResponse;
 authenticators receive response evidence as opaque bytes. Ready is empty in 1.0.
 Ping, Pong, and Terminate have empty payloads. Error is `u16 code + string message`.

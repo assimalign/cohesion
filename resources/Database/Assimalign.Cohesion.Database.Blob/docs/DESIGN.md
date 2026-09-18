@@ -167,8 +167,9 @@ An independent client must connect to a configured Blob endpoint and complete th
 Startup → Authenticate → AuthenticateResponse → Ready exchange before sending a Blob request.
 Startup selects the database; container and object names never select or switch databases.
 
-The shared envelope remains a big-endian UInt32 payload byte count followed by one message-type
-byte, then that many payload bytes. The shared envelope caps payloads at 16 MiB. Blob content
+The shared envelope uses frame bytes 0–3 for a big-endian UInt32 payload byte count, frame byte 4
+for the message type, and frame byte 5 onward for exactly that many payload bytes. The shared
+envelope caps payloads at 16 MiB. Blob content
 instead uses nonempty chunks of at most 65,536 bytes, so an object can exceed both a frame and
 available memory. No object-sized allocation or seeking is needed by either transfer helper.
 The sender retains one reusable 65,536-byte array; the receiver materializes and writes one
@@ -195,17 +196,25 @@ be nonempty and compare ordinally, case-sensitively. No Unicode normalization is
 | 73 | `Properties` | Server → client | `text name`, Int64 nonnegative length, UInt8 content-type presence (0 or 1), optional `text contentType`, UInt64 ETag, Int64 creation UTC ticks, Int64 modification UTC ticks, UInt32 CRC-32 |
 | 74 | `OperationComplete` | Server → client | Int64 nonnegative result count |
 
-Properties timestamps are ticks since 0001-01-01 UTC, limited to the DateTime range.
-Content-type presence distinguishes null from an explicitly empty string. ETags retain all 64 bits.
-Delete returns completion count 0 (absent) or 1 (deleted). Property reads return either completion
-count 0, or one Properties frame followed by completion count 1. Listings emit one Properties
-frame per object in ordinal name order, then completion with the exact object count. An error
-replaces completion; no partial listing is a successfully completed result.
-| 70 | `Delete` | Client → server | `text container`, `text name` |
-| 71 | `GetProperties` | Client → server | `text container`, `text name` |
-| 72 | `List` | Client → server | `text container`, `text prefix` (empty selects every object) |
-| 73 | `Properties` | Server → client | `text name`, Int64 nonnegative length, UInt8 content-type presence (0 or 1), optional `text contentType`, UInt64 ETag, Int64 creation UTC ticks, Int64 modification UTC ticks, UInt32 CRC-32 |
-| 74 | `OperationComplete` | Server → client | Int64 nonnegative result count |
+Payload offsets restart at byte 0 after the shared five-byte frame header. `TransferStart` type 66
+uses payload bytes 0–7 for a signed big-endian Int64 declared length (`-1` for unknown or a
+nonnegative value), bytes 8–11 for a signed big-endian Int32 content-type byte length `N` from 0
+through 65,535, and exactly `N` strict UTF-8 bytes starting at byte 12; its payload is therefore
+exactly `12 + N` bytes. `TransferComplete` type 68 ends after payload byte 7 and uses that same
+eight-byte signed big-endian Int64 slot for a nonnegative actual byte count.
+`ChunkAcknowledgement` type 69 also ends after payload byte 7 and uses the slot for a nonnegative
+cumulative accepted byte count. These decoders reject missing or trailing bytes. `Chunk` type 67
+does not use this integer shape: its whole payload is 1–65,536 raw content bytes at offsets 0
+through `N - 1`, with no inner length prefix.
+
+This packet view shows the fixed transfer-control fields shared by those three control messages and
+the `TransferStart`-only extension; its UTF-8 tail and the raw `Chunk` variant are specified above.
+
+```mermaid
+packet-beta
+0-63: "TransferStart declared / Ack accepted / Complete actual length (i64, big-endian)"
+64-95: "TransferStart only: content-type byte length N (i32, big-endian)"
+```
 
 Properties timestamps are ticks since 0001-01-01 UTC, limited to the DateTime range.
 Content-type presence distinguishes null from an explicitly empty string. ETags retain all 64 bits.
