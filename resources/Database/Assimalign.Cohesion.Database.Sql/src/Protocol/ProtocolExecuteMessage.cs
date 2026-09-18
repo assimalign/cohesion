@@ -66,7 +66,7 @@ public sealed record ProtocolExecuteMessage(string Statement, IReadOnlyDictionar
             string name = ProtocolPayload.ReadString(payload, ref position);
             int length = ProtocolPayload.ReadInt32(payload, ref position);
 
-            if (length < 0 || position + length > payload.Length)
+            if (length < 0 || length > payload.Length - position)
             {
                 throw new ProtocolException("Malformed payload: invalid parameter length.");
             }

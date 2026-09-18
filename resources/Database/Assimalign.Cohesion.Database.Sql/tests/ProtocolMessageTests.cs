@@ -39,4 +39,21 @@ public class ProtocolMessageTests
         Should.Throw<ProtocolException>(() => ProtocolExecuteMessage.Decode(new byte[] { 0, 0, 0, 5, 65 }));
         Should.Throw<ProtocolException>(() => ProtocolResultCompleteMessage.Decode(new byte[] { 1, 2 }));
     }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql] - Protocol: a parameter length that overflows the bounds check is rejected")]
+    public void Decode_ParameterLengthOverflowingTheBoundsCheck_ShouldThrowProtocolException()
+    {
+        // Arrange: empty statement, one parameter, empty name, length = int.MaxValue.
+        // The old guard computed position + length, which wraps negative and passes.
+        byte[] payload =
+        [
+            0x00, 0x00, 0x00, 0x00, // statement: zero-length string
+            0x00, 0x00, 0x00, 0x01, // parameter count: 1
+            0x00, 0x00, 0x00, 0x00, // parameter name: zero-length string
+            0x7F, 0xFF, 0xFF, 0xFF, // parameter length: int.MaxValue
+        ];
+
+        // Act / Assert
+        Should.Throw<ProtocolException>(() => ProtocolExecuteMessage.Decode(payload));
+    }
 }
