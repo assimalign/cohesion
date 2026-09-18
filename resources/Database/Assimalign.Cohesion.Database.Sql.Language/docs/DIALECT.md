@@ -10,13 +10,14 @@ enumerates the profile and fails if any advertised clause lacks a passing case.
 
 ## Statement matrix
 
-Phase 14 measures **28 of 48 declared clauses** against the live SQL engine.
+Phase 15 measures **29 of 48 declared clauses** against the live SQL engine.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
 Phase 14 restores `CAST` with actual conversion, type metadata, and wire execution
-coverage (#1022). The earlier intermediate 28/48 was only a profile declaration.
+coverage (#1022). Phase 15 restores `JOIN` for two stored-table inner joins with
+an `ON` predicate, including server/client execution (#1019).
 
-The **20 excluded clauses** are those four query clauses plus set operations (`UNION`,
+The **19 excluded clauses** are `GROUP BY`, `HAVING`, and `SUBQUERY` plus set operations (`UNION`,
 `INTERSECT`, `EXCEPT`), CTEs (`WITH`, `RECURSIVE`), window clauses (`WINDOW`,
 `OVER`, `PARTITION`), views (`CREATE VIEW`, `DROP VIEW`), `NATURAL`, `USING`,
 `TOP`, `ALL`, `FETCH`, and `RETURNING`. Counts describe named clauses, not
@@ -24,7 +25,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
-| `SELECT` | Supported subset, measured | Single stored table or virtual system relation required; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. The only aggregate shape is a lone `COUNT(*)`, optionally aliased and filtered; `COUNT(column)`, `COUNT(DISTINCT ...)`, `SUM`/`AVG`/`MIN`/`MAX`, and mixed/nested aggregate projections do not execute (#1020). `SELECT` without `FROM` is rejected by the planner. |
+| `SELECT` | Supported subset, measured | One stored table or virtual system relation, or a two stored-table `INNER JOIN ... ON`; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. The only aggregate shape is a lone `COUNT(*)`, optionally aliased and filtered; `COUNT(column)`, `COUNT(DISTINCT ...)`, `SUM`/`AVG`/`MIN`/`MAX`, and mixed/nested aggregate projections do not execute (#1020). `SELECT` without `FROM` is rejected by the planner. |
 | `INSERT` / `VALUES` | Supported subset, measured | Optional column list and multi-row literal/scalar `VALUES`; `INSERT ... SELECT` reports `COHDBL001` (#1021). |
 | `UPDATE` | Supported | multi-column `SET`, `WHERE` |
 | `DELETE` | Supported | optional `WHERE` |
@@ -36,7 +37,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
 | `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys with ASC/DESC execute. Projection aliases are not resolved and produce an unknown-column error. Integer keys are evaluated as constants, **not select-list ordinals**; `ORDER BY 1 DESC` does not sort by the first projection. Alias/ordinal ordering remains MVP work (#1024). |
 | `CAST` | Supported subset, measured | Exact signed integer, decimal, boolean, and string conversions in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
-| `JOIN` | Recognized, not supported | Inner, outer, and cross joins report `COHDBL001` (#1019). |
+| `JOIN` | Supported subset, measured | Two stored-table `INNER JOIN ... ON` or bare `JOIN ... ON`, with index assistance where the mandatory equality predicate matches an applicable secondary-index prefix. `LEFT [OUTER]`, `RIGHT [OUTER]`, `FULL [OUTER]`, `CROSS`, additional joins beyond two tables, joins without `ON`, comma joins, and joins of virtual system relations report `COHDBL001`. See the precise contract below. |
 | `GROUP BY` / `HAVING` | Recognized, not supported | `COHDBL001`; grouping and broader aggregates remain #1020. |
 | Subqueries / `INSERT ... SELECT` | Recognized, not supported | Scalar, `IN`/`NOT IN`, `EXISTS`/`NOT EXISTS`, derived-table, correlated, and insert-source queries report `COHDBL001` (#1021). Literal `IN` lists remain supported. |
 | `TOP` / `SELECT ALL` / `FETCH` | Recognized, not supported | row-limit and select modifiers rejected with `COHDBL001` |
@@ -51,6 +52,57 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
+
+## Joins (#1019)
+
+`SqlClauses.Join` represents the executable subset `INNER JOIN ... ON`, including
+bare `JOIN ... ON`. `SqlLanguageProfile.SupportsJoin` advertises only
+`SqlJoinType.Inner`. A SELECT can join exactly two stored tables; aliases and
+schema-qualified references such as the following execute, including over the
+SQL server/client:
+
+```sql
+SELECT usr.Users.FirstName, usr.Users.LastName, usr.UsersProfile.Email
+FROM usr.Users INNER JOIN usr.UsersProfile ON usr.Users.Id = usr.UsersProfile.UserId
+```
+
+`ON` evaluates for each candidate pair under the same statement MVCC snapshot
+for both inputs. Only TRUE matches; FALSE and UNKNOWN do not. Matching pairs
+preserve multiplicity, and an empty input produces no joined rows. The result
+composes with the existing scalar projections, `WHERE`, `DISTINCT`, `ORDER BY`,
+`LIMIT`, and `OFFSET` surface. Without `ORDER BY`, row order is unspecified;
+callers requiring stable paging must provide a sufficient ordering key.
+
+Column references can be unqualified, table/alias-qualified, or schema/table-qualified.
+An unqualified name present in both inputs is an ambiguous-column error, even
+when the inputs have no rows. Explicit aliases distinguish repeated table inputs.
+Unqualified `*` expands both inputs in FROM-then-JOIN column order. Qualified
+wildcards such as `u.*` and `usr.Users.*` are outside the executable subset and
+report `COHDBL001`.
+
+The planner uses a secondary index on either input when mandatory `ON` equalities
+between columns bind a leading index-key prefix. It prefers the longest prefix,
+then a unique index, then index name, then the right input. It still evaluates
+the complete `ON` predicate after fetching snapshot-visible candidate rows.
+Compatible Boolean, String, Json, Date, Time, TimeSpan, Guid and exact signed
+integer/Decimal key comparisons can use this path. Approximate numeric,
+DateTime, and DateTimeOffset comparisons retain scanning because their evaluator
+equality can be broader than their encoded index keys. Predicates without a
+usable mandatory column equality, including computed keys, keys reachable only
+through disjunctions, and inequalities, use the scan fallback, as do joins
+without an applicable index.
+
+The fallback buffers the right input once: it performs O(L + R) stored-row reads,
+O(L × R) predicate evaluations, and O(R) input buffering for L and R input rows,
+in addition to result and sort storage. Index assistance replaces the indexed
+input scan with probes; performance still depends on key selectivity and result
+multiplicity.
+
+LEFT, RIGHT, and FULL outer joins, CROSS joins, NATURAL joins, USING, absent ON,
+comma joins, and joins beyond two tables do not execute and report `COHDBL001`.
+Joins involving `INFORMATION_SCHEMA` or `COHESION_SCHEMA` are also excluded.
+No outer-join null-extension behavior is advertised. These are explicit
+ISO/IEC 9075 subset boundaries, not additional named clauses in the 48-clause count.
 
 ## System-view matrix (C1)
 
@@ -236,7 +288,7 @@ function names are lexed but not supported (see the statement matrix).
 | `COHDBL001` | Error | Recognized clause is not supported by the SQL model surface |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed transaction-control, CAST, or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed transaction-control, JOIN, CAST, or constraint/DDL syntax |
 | `SQL0004` | Error | Unknown CAST target type |
 | `SQL0005` | Error | Unsupported CAST target or invalid target parameters |
 | `SQL0100` | Information | Statement does not end with `;` |

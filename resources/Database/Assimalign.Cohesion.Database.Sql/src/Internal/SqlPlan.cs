@@ -31,6 +31,35 @@ internal sealed record SqlSelectPlan(
     bool IsCountStar,
     SqlAccessPath Access) : SqlPlan;
 
+/// <summary>A stored relation's identity and position in a joined row.</summary>
+internal sealed record SqlTableBinding(SqlCatalogTable Table, SqlTableReference Reference, int Offset);
+
+/// <summary>
+/// A two-relation inner join. Source columns retain FROM-then-JOIN order even
+/// when the selected index reverses which relation drives the nested loop.
+/// </summary>
+internal sealed record SqlJoinPlan(
+    IReadOnlyList<SqlTableBinding> Bindings,
+    IReadOnlyList<SqlCatalogColumn> Columns,
+    SqlExpression Condition,
+    IReadOnlyList<SqlProjection> Projections,
+    SqlExpression? Where,
+    IReadOnlyList<SqlOrderByColumn> OrderBy,
+    long? Limit,
+    long? Offset,
+    bool IsDistinct,
+    bool IsCountStar,
+    SqlJoinIndexPath? Access) : SqlPlan;
+
+/// <summary>
+/// A correlated equality-prefix seek into one input, with probe ordinals in
+/// the other input's local row. A null path means a buffered nested-loop scan.
+/// </summary>
+internal sealed record SqlJoinIndexPath(
+    int InnerBinding,
+    SqlCatalogIndex Index,
+    IReadOnlyList<int> OuterOrdinals);
+
 /// <summary>A catalog projection with no storage identity or physical access path.</summary>
 internal sealed record SqlSystemViewPlan(
     SqlSystemViewDefinition View,

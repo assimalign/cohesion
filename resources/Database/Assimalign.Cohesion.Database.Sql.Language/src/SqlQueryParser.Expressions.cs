@@ -477,6 +477,10 @@ public sealed partial class SqlQueryParser
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Dot)
         {
             Advance(ref lexer); // consume dot
+            if (lexer.Current.Type == TokenType.Asterisk)
+            {
+                return ParseUnsupportedQualifiedStar(ref lexer, pos);
+            }
             if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
             {
                 string second = CurrentText(ref lexer);
@@ -486,6 +490,10 @@ public sealed partial class SqlQueryParser
                 if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Dot)
                 {
                     Advance(ref lexer);
+                    if (lexer.Current.Type == TokenType.Asterisk)
+                    {
+                        return ParseUnsupportedQualifiedStar(ref lexer, pos);
+                    }
                     if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
                     {
                         string third = CurrentText(ref lexer);
@@ -504,6 +512,15 @@ public sealed partial class SqlQueryParser
         // Simple identifier
         return new SqlColumnReferenceExpression(first, null, null,
             Location.Create(1, 1, pos, pos + first.Length));
+    }
+
+    private SqlStarExpression ParseUnsupportedQualifiedStar(ref TokenLexer lexer, int start)
+    {
+        int end = lexer.Current.Position + 1;
+        AddUnsupportedSurfaceDiagnostic(start, end,
+            "Qualified SQL wildcard projections are not supported; select explicit columns or use unqualified *.");
+        Advance(ref lexer);
+        return new SqlStarExpression(Location.Create(1, 1, start, end));
     }
 
     private SqlExpression ParseFunctionCall(ref TokenLexer lexer)

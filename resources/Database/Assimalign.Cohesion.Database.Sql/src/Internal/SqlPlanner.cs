@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// Unsupported dialect features fail here with precise messages rather than
 /// misexecuting.
 /// </summary>
-internal sealed class SqlPlanner
+internal sealed partial class SqlPlanner
 {
     /// <summary>
     /// The schema used when a table reference has none.
@@ -51,11 +51,6 @@ internal sealed class SqlPlanner
 
     private SqlPlan PlanSelect(SqlSelectExpression select)
     {
-        if (select.Joins.Count > 0)
-        {
-            throw new DatabaseException("JOIN is not supported by the executor yet.");
-        }
-
         if (select.GroupBy.Count > 0 || select.Having is not null)
         {
             throw new DatabaseException("GROUP BY / HAVING are not supported by the executor yet.");
@@ -69,8 +64,15 @@ internal sealed class SqlPlanner
         // A virtual relation has column metadata, but no stored table or access path.
         var systemView = SqlSystemViews.Find(select.From);
         var table = systemView is null ? ResolveTable(select.From) : null;
-        var columns = systemView?.Columns ?? table!.Columns;
-        var evaluator = new SqlExpressionEvaluator(columns, _parameters);
+        var bindings = select.Joins.Count > 0 ? BindJoin(select, table!) : null;
+        var columns = bindings is null ? systemView?.Columns ?? table!.Columns
+            : bindings.SelectMany(binding => binding.Table.Columns).ToArray();
+        var evaluator = new SqlExpressionEvaluator(columns, _parameters, bindings);
+
+        if (bindings is not null)
+        {
+            ValidateExpression(select.Joins[0].Condition!, evaluator);
+        }
 
         // Lone COUNT(*) is the one aggregate the executor supports.
         bool isCountStar =
@@ -125,6 +127,14 @@ internal sealed class SqlPlanner
         foreach (var orderBy in select.OrderBy)
         {
             ValidateExpression(orderBy.Expression, evaluator);
+        }
+
+        if (bindings is not null)
+        {
+            return new SqlJoinPlan(bindings, columns, select.Joins[0].Condition!, projections,
+                select.Where, select.OrderBy, EvaluateCount(select.Limit, "LIMIT"),
+                EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct, isCountStar,
+                SelectJoinAccessPath(bindings, select.Joins[0].Condition!, evaluator));
         }
 
         if (systemView is not null)

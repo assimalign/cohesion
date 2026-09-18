@@ -456,16 +456,12 @@ public sealed partial class SqlQueryParser : QueryParser
                     return true;
                 }
 
-                // These shapes have syntax trees but no executor support (#1019-#1021).
-                // Keep scanning so a more specific restriction, such as JOIN ... USING,
-                // retains its existing diagnostic instead of being hidden by JOIN.
+                // These shapes have syntax trees but no executor support (#1020-#1021).
+                // JOIN shape restrictions are checked while parsing each SELECT, so
+                // a supported JOIN cannot hide a later unsupported query clause.
                 if (pendingExecutionClause is null)
                 {
-                    if (token.Equals("JOIN", StringComparison.OrdinalIgnoreCase))
-                    {
-                        pendingExecutionClause = SqlClauses.Join;
-                    }
-                    else if (token.Equals("BY", StringComparison.OrdinalIgnoreCase) &&
+                    if (token.Equals("BY", StringComparison.OrdinalIgnoreCase) &&
                              previousToken?.Equals("GROUP", StringComparison.OrdinalIgnoreCase) == true)
                     {
                         pendingExecutionClause = SqlClauses.GroupBy;

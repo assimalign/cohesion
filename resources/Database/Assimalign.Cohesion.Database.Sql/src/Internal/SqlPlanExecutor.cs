@@ -20,7 +20,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// Executes bound plans against shared storage: table scans with predicate
 /// filtering, projection/sort/limit for SELECT, typed writes for DML with
 /// secondary-index maintenance, and catalog calls for DDL. Results are
-/// deterministic: scans yield rows in physical order and ORDER BY sorts are stable.
+/// sorted with a stable ORDER BY; without ORDER BY their order is unspecified
+/// and may change with the chosen access path.
 /// </summary>
 internal sealed partial class SqlPlanExecutor
 {
@@ -54,6 +55,8 @@ internal sealed partial class SqlPlanExecutor
                 return ExecuteSystemView(systemView, statement, cancellationToken);
             case SqlSelectPlan select:
                 return ExecuteSelect(select, statement, cancellationToken);
+            case SqlJoinPlan join:
+                return await ExecuteJoinAsync(join, statement, cancellationToken).ConfigureAwait(false);
             case SqlInsertPlan insert:
                 return await ExecuteInsertAsync(insert, statement, cancellationToken).ConfigureAwait(false);
             case SqlUpdatePlan update:
@@ -99,27 +102,36 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        if (plan.IsCountStar)
+        return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
+            plan.IsDistinct, plan.IsCountStar, evaluator);
+    }
+
+    /// <summary>Applies the common SELECT projection, ordering, distinctness and window.</summary>
+    private static QueryResult MaterializeSelect(List<object?[]> matches, IReadOnlyList<SqlProjection> projections,
+        IReadOnlyList<SqlOrderByColumn> orderBy, long? limit, long? offset,
+        bool isDistinct, bool isCountStar, SqlExpressionEvaluator evaluator)
+    {
+        if (isCountStar)
         {
-            var countColumns = new[] { new QueryColumn { Name = plan.Projections[0].Name, Ordinal = 0, Type = DatabaseType.Int64 } };
+            var countColumns = new[] { new QueryColumn { Name = projections[0].Name, Ordinal = 0, Type = DatabaseType.Int64 } };
             return new SqlMaterializedResultSet(countColumns, new List<object?[]> { new object?[] { (long)matches.Count } });
         }
 
         // ORDER BY before projection so sort keys may reference any table column.
-        if (plan.OrderBy.Count > 0)
+        if (orderBy.Count > 0)
         {
-            matches = SortRows(matches, plan.OrderBy, evaluator);
+            matches = SortRows(matches, orderBy, evaluator);
         }
 
         // Project.
         var projected = new List<object?[]>(matches.Count);
         foreach (var row in matches)
         {
-            var output = new object?[plan.Projections.Count];
+            var output = new object?[projections.Count];
 
-            for (int i = 0; i < plan.Projections.Count; i++)
+            for (int i = 0; i < projections.Count; i++)
             {
-                var projection = plan.Projections[i];
+                var projection = projections[i];
                 output[i] = projection.ColumnOrdinal is int ordinal
                     ? row[ordinal]
                     : evaluator.Evaluate(projection.Expression!, row);
@@ -128,29 +140,29 @@ internal sealed partial class SqlPlanExecutor
             projected.Add(output);
         }
 
-        if (plan.IsDistinct)
+        if (isDistinct)
         {
             projected = Deduplicate(projected);
         }
 
         // OFFSET / LIMIT.
         IEnumerable<object?[]> window = projected;
-        if (plan.Offset is long offset)
+        if (offset is long skip)
         {
-            window = window.Skip((int)offset);
+            window = window.Skip((int)skip);
         }
-        if (plan.Limit is long limit)
+        if (limit is long take)
         {
-            window = window.Take((int)limit);
+            window = window.Take((int)take);
         }
 
-        var columns = new QueryColumn[plan.Projections.Count];
-        for (int i = 0; i < plan.Projections.Count; i++)
+        var columns = new QueryColumn[projections.Count];
+        for (int i = 0; i < projections.Count; i++)
         {
             columns[i] = new QueryColumn
             {
-                Name = plan.Projections[i].Name, Ordinal = i, Type = plan.Projections[i].Type,
-                IsNullable = plan.Projections[i].Expression is SqlCastExpression,
+                Name = projections[i].Name, Ordinal = i, Type = projections[i].Type,
+                IsNullable = projections[i].Expression is SqlCastExpression,
             };
         }
 

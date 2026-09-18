@@ -17,11 +17,14 @@ internal sealed class SqlExpressionEvaluator
 {
     private readonly IReadOnlyList<SqlCatalogColumn> _columns;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
+    private readonly IReadOnlyList<SqlTableBinding>? _bindings;
 
-    internal SqlExpressionEvaluator(IReadOnlyList<SqlCatalogColumn> columns, IReadOnlyDictionary<string, object?>? parameters)
+    internal SqlExpressionEvaluator(IReadOnlyList<SqlCatalogColumn> columns, IReadOnlyDictionary<string, object?>? parameters,
+        IReadOnlyList<SqlTableBinding>? bindings = null)
     {
         _columns = columns;
         _parameters = parameters;
+        _bindings = bindings;
     }
 
     /// <summary>
@@ -60,6 +63,35 @@ internal sealed class SqlExpressionEvaluator
 
     internal int ResolveColumn(SqlColumnReferenceExpression column)
     {
+        if (_bindings is not null)
+        {
+            int resolved = -1;
+            foreach (var binding in _bindings)
+            {
+                if (!MatchesQualifier(binding, column))
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < binding.Table.Columns.Count; i++)
+                {
+                    if (!string.Equals(binding.Table.Columns[i].Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (resolved >= 0)
+                    {
+                        throw new DatabaseException($"Ambiguous column '{ColumnName(column)}'; qualify it with a table name or alias.");
+                    }
+
+                    resolved = binding.Offset + i;
+                }
+            }
+
+            return resolved >= 0 ? resolved : throw new DatabaseException($"Unknown column '{ColumnName(column)}'.");
+        }
+
         for (int i = 0; i < _columns.Count; i++)
         {
             if (string.Equals(_columns[i].Name, column.ColumnName, StringComparison.OrdinalIgnoreCase))
@@ -70,6 +102,26 @@ internal sealed class SqlExpressionEvaluator
 
         throw new DatabaseException($"Unknown column '{column.ColumnName}'.");
     }
+
+    /// <summary>An alias replaces the base relation name within the join scope.</summary>
+    private static bool MatchesQualifier(SqlTableBinding binding, SqlColumnReferenceExpression column)
+    {
+        if (column.TableAlias is null)
+        {
+            return column.SchemaName is null;
+        }
+
+        if (binding.Reference.Alias is { } alias)
+        {
+            return column.SchemaName is null && string.Equals(alias, column.TableAlias, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return string.Equals(binding.Table.Name, column.TableAlias, StringComparison.OrdinalIgnoreCase)
+            && (column.SchemaName is null || string.Equals(binding.Table.Schema, column.SchemaName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ColumnName(SqlColumnReferenceExpression column)
+        => string.Join('.', new[] { column.SchemaName, column.TableAlias, column.ColumnName }.Where(part => part is not null));
 
     private static object? EvaluateLiteral(SqlLiteralExpression literal)
     {

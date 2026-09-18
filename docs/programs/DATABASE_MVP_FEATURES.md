@@ -18,7 +18,7 @@ Measured from source, not from the plan. Line counts are production code (`src/`
 
 | Engine | Production code | Tests | Verdict |
 |---|---|---|---|
-| **SQL** | ~14,300 lines at B1 baseline; B2 extends engine, language, catalog and schema | ~6,900 at B1 baseline; B2 and Phase 13 add acceptance coverage | **Working within a measured subset: 28 of 48 declared clauses.** Phase 14 verifies every advertised clause against a live engine with result/state assertions and a guard against missing execution cases. This is now measured, rather than declared. SQL transactions and referential integrity execute; JOIN (#1019), GROUP BY/HAVING/broader aggregates (#1020), subqueries/`INSERT ... SELECT` (#1021) remain MVP work; CAST now executes the documented exact scalar subset (#1022). B2 and the dialect matrix state partial-support boundaries and the 20 excluded clauses. |
+| **SQL** | ~14,300 lines at B1 baseline; B2 extends engine, language, catalog and schema | ~6,900 at B1 baseline; B2 and later phases add acceptance coverage | **Working within a measured subset: 29 of 48 declared clauses.** Phase 15 adds two-table `INNER JOIN ... ON` execution and wire coverage (#1019) to the profile-driven live-engine conformance cases. SQL transactions, referential integrity, and the exact scalar CAST subset (#1022) execute. GROUP BY/HAVING/broader aggregates (#1020) and subqueries/`INSERT ... SELECT` (#1021) remain MVP work. B2 and the dialect matrix state partial-support boundaries and the 19 excluded clauses. |
 | **Key-Value** | ~6,500 lines across engine, client, catalog, storage | ~2,700 | **Working.** Storage, commands, server, client all landed. |
 | **Documents** | engine, OQL parser, planner, chunked storage, catalog | 276 at engine baseline; Phase 13 adds execution conformance | **Working within a measured OQL subset: 8 of 12 declared clauses** *(engine landed `6085bad3`, `a4770b3f`)*. Phase 13 measures every advertised clause through a live engine, including grouping/aggregates/HAVING and `CREATE INDEX` / `DROP INDEX`, and fails CI for an unmapped profile addition. Nested documents, arrays, mixed-shape collections, collection ownership. |
 | **Graph** | engine, GQL parser, traversal planner, adjacency storage, catalog | 189 at engine baseline; Phase 13 adds execution conformance | **Working within a measured GQL subset: 8 of 27 declared clauses** *(engine landed `1092d6b2`)*. The old seven-clause figure omitted the later `SHOW` catalog extension. Phase 13 measures all eight against a live engine and guards against unmapped profile additions. Finite relationship-isomorphic traversal, scalar property/variable projections, conjunctive comparisons, graph creation, `DELETE` / `DETACH DELETE`, and catalog reads; this is not complete ISO/IEC 39075 support. |
@@ -83,23 +83,25 @@ Structural fixes that must land before engine work, because every engine inherit
 | # | Feature | What it means | Status | Work items |
 |---|---|---|---|---|
 | **B1** ✅ | **Each model opts into the clauses it supports** | The shared language package today hands every model the same lexer and a flat keyword list. B1 adds a capability profile: a model declares which clauses it accepts, and anything outside the profile produces a precise "not supported by this model" diagnostic instead of a generic parse failure. | `DONE` | #1002 |
-| **B2** ✅ | **A published, complete SQL surface** | Phase 4 adds wire-accessible `BEGIN` / `COMMIT` / `ROLLBACK`, durable foreign keys with delete cascade/restrict, row checks and unique indexes with concurrent-write enforcement. Phase 14 measures **28/48 clauses** through a live engine; this is now measured rather than declared, with profile-driven execution conformance that fails for a clause without a passing case. The former no-op CAST now performs exact conversions with target metadata and server/client coverage (#1022). The remaining language groups and partial-support boundaries below keep the broader feature partial. DDL remains self-committing and is refused inside explicit transactions. | `PARTIAL` (measured Phase 14 execution subset) | #172, #173, #174; catalog constraint portions of #175 / #177; #1019, #1020, #1021, #1022, #1023, #1024 |
+| **B2** ✅ | **A published, complete SQL surface** | Phase 4 adds wire-accessible `BEGIN` / `COMMIT` / `ROLLBACK`, durable foreign keys with delete cascade/restrict, row checks and unique indexes with concurrent-write enforcement. Phase 15 measures **29/48 clauses** through a live engine, with profile-driven execution conformance that fails for a clause without a passing case. Two stored tables execute `INNER JOIN ... ON` through the server/client, with one MVCC snapshot and secondary-index probes where equality is safe (#1019). CAST performs exact conversions with target metadata and wire coverage (#1022). The remaining language groups and partial-support boundaries below keep the broader feature partial. DDL remains self-committing and is refused inside explicit transactions. | `PARTIAL` (measured Phase 15 execution subset) | #172, #173, #174; catalog constraint portions of #175 / #177; #1019, #1020, #1021, #1022, #1023, #1024 |
 
-> **What the SQL profile executes (measured 2026-09-18, Phase 14).**
+> **What the SQL profile executes (measured 2026-09-18, Phase 15).**
 >
-> **Measured and advertised (28 of 48):** `SELECT` `INSERT` `UPDATE` `DELETE` `CREATE TABLE` `CREATE INDEX`
-> `ALTER TABLE` `DROP TABLE` `DROP INDEX` `FROM` `WHERE` `ORDER BY`
+> **Measured and advertised (29 of 48):** `SELECT` `INSERT` `UPDATE` `DELETE` `CREATE TABLE` `CREATE INDEX`
+> `ALTER TABLE` `DROP TABLE` `DROP INDEX` `FROM` `WHERE` `ORDER BY` `JOIN`
 > `LIMIT` `OFFSET` `VALUES` `CASE` `CAST` `BEGIN` `COMMIT` `ROLLBACK`
 > `TRANSACTION` `FOREIGN KEY` `REFERENCES` `CHECK` `UNIQUE` constraint `CONSTRAINT`
 > `CASCADE` `RESTRICT`. Each clause has a passing execution case, with exact value,
 > state, or intended semantic-error assertions. A conformance test enumerates the
 > profile and fails if a clause has no case. OQL and GQL have the same guard.
 > The earlier figure of 32 counted `JOIN`, `GROUP BY`, `HAVING`, and subqueries,
-> which parsed but did not execute. Phase 13 removed the no-op CAST; Phase 14 restores it after real conversion and wire verification (#1022). The four query clauses still produce `COHDBL001`; #1019–#1021 track them.
+> which parsed but did not execute. Phase 13 removed the no-op CAST; Phase 14 restored it after real conversion and wire verification (#1022), measuring 28/48. Phase 15 restores `JOIN` for its executable two-table inner form (#1019). `GROUP BY`, `HAVING`, and subqueries still produce `COHDBL001`; #1020–#1021 track them.
 >
 > **CAST boundaries:** signed Int8/Int16/Int32/Int64 and Decimal convert to each other or String; String converts to those numerics, Boolean, or String; Boolean converts to Boolean or String. All other pairs error. Null propagates with target metadata. Invalid text, overflow, fractional-to-integer loss, excess decimal precision/scale, and string overflow error. Decimal uses System.Decimal; p=1..28 and s=0..p. String length counts UTF-16 units; CHAR does not pad. No rounding or truncation. Unknown types are rejected during parsing. DEFAULT/CHECK casts remain rejected; full aliases, text grammar, and wire metadata boundaries are in the dialect matrix.
 >
-> **Partial support is explicit:** SELECT requires one table or system relation;
+> **JOIN boundaries:** exactly two stored tables support `INNER JOIN ... ON` or the equivalent `JOIN ... ON`, including self joins with distinct aliases. Both inputs and `ON` use the same statement MVCC snapshot. Qualified names and aliases bind across both inputs; ambiguous unqualified columns are errors. Joins compose with `WHERE`, `ORDER BY`, `LIMIT`, and `OFFSET`; row order without `ORDER BY` is unspecified. The planner can probe a secondary index on either input using mandatory equality predicates on a leading key prefix; the full `ON` remains a residual predicate. Types whose encoded key equality differs from SQL equality use a buffered nested loop with O(left rows × right rows) comparisons. `LEFT`, `RIGHT`, and `FULL OUTER`, `CROSS`, `NATURAL`, `USING`, missing `ON`, more than two inputs, and joins involving virtual system relations report `COHDBL001`.
+>
+> **Partial support is explicit:** SELECT requires one table or system relation, or the two-table inner join described above;
 > aggregates execute only as a lone `COUNT(*)`, optionally aliased/filtered. Other
 > aggregate projections still fail in planning (#1020); supported clause counts
 > do not imply support for every function in the lexical vocabulary. INSERT uses
@@ -114,7 +116,7 @@ Structural fixes that must land before engine work, because every engine inherit
 > appear in the [SQL dialect matrix](../../resources/Database/Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md)
 > and the Phase 13 audit notes (`_out/phase13-NOTES.md`).
 >
-> **Not advertised (20):**
+> **Not advertised (19):**
 >
 > | Group | Missing |
 > |---|---|
@@ -122,7 +124,7 @@ Structural fixes that must land before engine work, because every engine inherit
 > | **CTEs** | `WITH` · `RECURSIVE` |
 > | **Window functions** | `OVER` · `PARTITION BY` · `WINDOW` |
 > | **Views** | `CREATE VIEW` · `DROP VIEW` |
-> | **Joins** | `JOIN` · `NATURAL` · `USING` (#1019) |
+> | **Joins** | `NATURAL` · `USING`; outer and cross forms are excluded from the supported `JOIN` subset |
 > | **Grouping** | `GROUP BY` · `HAVING` (#1020, including aggregate execution) |
 > | **Subqueries** | subqueries (#1021, including `INSERT ... SELECT`) |
 > | **Other** | `TOP` · `ALL` · `FETCH` · `RETURNING` |

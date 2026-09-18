@@ -25,6 +25,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.DropTable, "DROP TABLE t;")]
     [InlineData(SqlClauses.DropIndex, "DROP INDEX ix_t_id ON t;")]
     [InlineData(SqlClauses.From, "SELECT * FROM t;")]
+    [InlineData(SqlClauses.Join, "SELECT * FROM t JOIN u ON t.id = u.id;")]
     [InlineData(SqlClauses.Where, "SELECT * FROM t WHERE id = 1;")]
     [InlineData(SqlClauses.OrderBy, "SELECT * FROM t ORDER BY id;")]
     [InlineData(SqlClauses.Limit, "SELECT * FROM t LIMIT 1;")]
@@ -54,19 +55,29 @@ public class SqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData(SqlClauses.Join, "SELECT * FROM t JOIN u ON t.id = u.id;")]
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;")]
     [InlineData(SqlClauses.Having, "SELECT id FROM t GROUP BY id HAVING COUNT(*) > 0;")]
     [InlineData(SqlClauses.Subquery, "SELECT * FROM t WHERE id IN (SELECT id FROM u);")]
     public void Parse_ClauseAwaitingExecution_IsNotDeclaredAndReportsDiagnostic(string clause, string sql)
     {
-        // These cases previously asserted parser-only support; execution is MVP work (#1019-#1021).
+        // These cases previously asserted parser-only support; execution is MVP work (#1020-#1021).
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();
 
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
 
         statement.Diagnostics.ShouldContain(diagnostic =>
             diagnostic.Code == "COHDBL001" && diagnostic.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Profile advertises only executable join types")]
+    [InlineData(SqlJoinType.Inner, true)]
+    [InlineData(SqlJoinType.LeftOuter, false)]
+    [InlineData(SqlJoinType.RightOuter, false)]
+    [InlineData(SqlJoinType.FullOuter, false)]
+    [InlineData(SqlJoinType.Cross, false)]
+    public void Profile_JoinType_DeclaresExactExecutionSurface(SqlJoinType joinType, bool supported)
+    {
+        SqlLanguageProfile.SupportsJoin(joinType).ShouldBe(supported);
     }
 
     [Theory]

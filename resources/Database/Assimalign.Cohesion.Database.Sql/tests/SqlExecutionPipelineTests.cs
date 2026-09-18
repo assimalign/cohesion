@@ -329,11 +329,14 @@ public class SqlExecutionPipelineTests : IDisposable
         var session = await OpenSeededSessionAsync(db);
         await using var _ = session;
 
-        // JOIN and GROUP BY moved from planner rejection to profile diagnostics (#1019/#1020).
-        (await Should.ThrowAsync<DatabaseParseException>(async () =>
-            await Sql(session, "SELECT * FROM users u INNER JOIN users v ON u.id = v.id;")))
-            .Message.ShouldBe("SQL parse error COHDBL001: The JOIN clause is not supported by the SQL surface of this database model.");
+        // The former unsupported JOIN case now executes through the distinct join plan (#1019).
+        var joined = await Rows(session, "SELECT * FROM users u INNER JOIN users v ON u.id = v.id ORDER BY u.id;");
+        joined.Count.ShouldBe(3);
+        joined[0].ShouldBe(new object?[] { 1L, "Ada", 36, 1L, "Ada", 36 });
+        joined[1].ShouldBe(new object?[] { 2L, "Grace", 45, 2L, "Grace", 45 });
+        joined[2].ShouldBe(new object?[] { 3L, "Alan", 41, 3L, "Alan", 41 });
 
+        // GROUP BY remains a profile diagnostic (#1020).
         (await Should.ThrowAsync<DatabaseParseException>(async () =>
             await Sql(session, "SELECT age FROM users GROUP BY age;")))
             .Message.ShouldBe("SQL parse error COHDBL001: The GROUP BY clause is not supported by the SQL surface of this database model.");

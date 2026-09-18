@@ -75,6 +75,7 @@ public static class SqlLanguageProfile
         SqlClauses.DropTable,
         SqlClauses.DropIndex,
         SqlClauses.From,
+        SqlClauses.Join,
         SqlClauses.Where,
         SqlClauses.OrderBy,
         SqlClauses.Limit,
@@ -104,4 +105,12 @@ public static class SqlLanguageProfile
         Keywords,
         Functions,
         Clauses);
+
+    /// <summary>
+    /// Reports whether a join type executes in the SQL surface. Supported joins
+    /// require an ON predicate and are limited to two tables per SELECT.
+    /// </summary>
+    /// <param name="joinType">The parsed join type.</param>
+    /// <returns><see langword="true"/> only for INNER JOIN (including bare JOIN).</returns>
+    public static bool SupportsJoin(SqlJoinType joinType) => joinType == SqlJoinType.Inner;
 }

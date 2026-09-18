@@ -36,6 +36,24 @@ public sealed partial class SqlQueryParser
 
         // JOINs
         var joins = ParseJoinClauses(ref lexer);
+        if (joins.Count > 0)
+        {
+            bool joinsSystemRelation = IsSystemJoinReference(from);
+            foreach (var join in joins)
+            {
+                joinsSystemRelation |= IsSystemJoinReference(join.Table);
+            }
+            if (joinsSystemRelation)
+            {
+                AddUnsupportedSurfaceDiagnostic(pos, _lastTokenEnd,
+                    "The SQL JOIN surface supports stored tables only; joins with INFORMATION_SCHEMA or COHESION_SCHEMA relations are not supported.");
+            }
+        }
+        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
+        {
+            AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + 1,
+                "Comma-separated SQL FROM tables are not supported; use a two-table INNER JOIN with an ON predicate.");
+        }
 
         // WHERE
         SqlExpression? where = null;
@@ -166,6 +184,28 @@ public sealed partial class SqlQueryParser
 
         while (!IsAtEnd(ref lexer))
         {
+            if (!IsKeyword(ref lexer, "JOIN") && !IsKeyword(ref lexer, "INNER") &&
+                !IsKeyword(ref lexer, "LEFT") && !IsKeyword(ref lexer, "RIGHT") &&
+                !IsKeyword(ref lexer, "FULL") && !IsKeyword(ref lexer, "CROSS"))
+            {
+                break;
+            }
+
+            int joinStart = lexer.Current.Position;
+            var joinLexer = lexer;
+            int joinEnd = joinStart + lexer.Current.Value.Length;
+            while (!IsAtEnd(ref joinLexer) && !IsKeyword(ref joinLexer, "JOIN"))
+            {
+                if (!joinLexer.MoveNext())
+                {
+                    break;
+                }
+            }
+            if (IsKeyword(ref joinLexer, "JOIN"))
+            {
+                joinEnd = joinLexer.Current.Position + joinLexer.Current.Value.Length;
+            }
+
             SqlJoinType? joinType = TryParseJoinType(ref lexer);
             if (!joinType.HasValue)
             {
@@ -182,16 +222,65 @@ public sealed partial class SqlQueryParser
 
             // ON condition
             SqlExpression? condition = null;
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ON"))
+            bool hasOn = !IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ON");
+            if (hasOn)
             {
                 Advance(ref lexer);
-                condition = ParseExpression(ref lexer);
+                if (IsAtEnd(ref lexer) || lexer.Current.Type == TokenType.Semicolon ||
+                    IsStatementBoundaryKeyword(ref lexer))
+                {
+                    AddSyntaxDiagnostic(ref lexer, "Expected a predicate after JOIN ... ON.");
+                }
+                else
+                {
+                    condition = ParseExpression(ref lexer);
+                }
+            }
+
+            if (joins.Count > 0)
+            {
+                AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd,
+                    "The SQL JOIN surface supports exactly two tables; additional JOIN clauses are not supported.");
+            }
+            else if (!SqlLanguageProfile.SupportsJoin(joinType.Value))
+            {
+                string form = joinType.Value switch
+                {
+                    SqlJoinType.LeftOuter => "LEFT OUTER JOIN",
+                    SqlJoinType.RightOuter => "RIGHT OUTER JOIN",
+                    SqlJoinType.FullOuter => "FULL OUTER JOIN",
+                    _ => "CROSS JOIN",
+                };
+                AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd,
+                    $"The {form} form is not supported by the SQL surface; only two-table INNER JOIN with an ON predicate executes.");
+            }
+            else if (!hasOn && !IsKeyword(ref lexer, "USING"))
+            {
+                AddUnsupportedSurfaceDiagnostic(joinStart, joinEnd,
+                    "The SQL JOIN surface requires an ON predicate; only two-table INNER JOIN with ON executes.");
             }
 
             joins.Add(new SqlJoinClause(joinType.Value, table, condition));
         }
 
         return joins;
+    }
+
+    private static bool IsSystemJoinReference(SqlTableReference? table) =>
+        string.Equals(table?.SchemaName, "INFORMATION_SCHEMA", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(table?.SchemaName, "COHESION_SCHEMA", StringComparison.OrdinalIgnoreCase);
+
+    private void AddUnsupportedSurfaceDiagnostic(int start, int end, string message)
+    {
+        _parseDiagnostics.Add(new Diagnostic
+        {
+            Code = "COHDBL001",
+            Message = message,
+            Start = start,
+            End = end,
+            Severity = DiagnosticSeverity.Error,
+            Location = DiagnosticLocation.Absolute,
+        });
     }
 
     private SqlJoinType? TryParseJoinType(ref TokenLexer lexer)
@@ -206,10 +295,7 @@ public sealed partial class SqlQueryParser
             if (IsKeyword(ref lexer, "INNER"))
             {
                 Advance(ref lexer);
-                if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "JOIN"))
-                {
-                    Advance(ref lexer);
-                }
+                ConsumeRequiredJoinKeyword(ref lexer);
             }
             else
             {
@@ -226,10 +312,7 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
             }
 
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "JOIN"))
-            {
-                Advance(ref lexer);
-            }
+            ConsumeRequiredJoinKeyword(ref lexer);
 
             return SqlJoinType.LeftOuter;
         }
@@ -242,10 +325,7 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
             }
 
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "JOIN"))
-            {
-                Advance(ref lexer);
-            }
+            ConsumeRequiredJoinKeyword(ref lexer);
 
             return SqlJoinType.RightOuter;
         }
@@ -258,10 +338,7 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
             }
 
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "JOIN"))
-            {
-                Advance(ref lexer);
-            }
+            ConsumeRequiredJoinKeyword(ref lexer);
 
             return SqlJoinType.FullOuter;
         }
@@ -269,15 +346,24 @@ public sealed partial class SqlQueryParser
         if (IsKeyword(ref lexer, "CROSS"))
         {
             Advance(ref lexer);
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "JOIN"))
-            {
-                Advance(ref lexer);
-            }
+            ConsumeRequiredJoinKeyword(ref lexer);
 
             return SqlJoinType.Cross;
         }
 
         return null;
+    }
+
+    private void ConsumeRequiredJoinKeyword(ref TokenLexer lexer)
+    {
+        if (IsKeyword(ref lexer, "JOIN"))
+        {
+            Advance(ref lexer);
+        }
+        else
+        {
+            AddSyntaxDiagnostic(ref lexer, "Expected JOIN after the join type.");
+        }
     }
 
     private SqlOrderByColumn ParseOrderByColumn(ref TokenLexer lexer)

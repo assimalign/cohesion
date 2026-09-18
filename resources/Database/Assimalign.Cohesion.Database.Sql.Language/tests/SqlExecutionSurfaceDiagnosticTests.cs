@@ -9,14 +9,68 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public class SqlExecutionSurfaceDiagnosticTests
 {
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Accepts two-table INNER JOIN with ON")]
+    [InlineData("SELECT * FROM t JOIN u ON t.id = u.id;")]
+    [InlineData("SELECT * FROM t INNER JOIN u ON t.id = u.id;")]
+    [InlineData("select * from t inner /* trivia */ join u on t.id = u.id;")]
+    public void Parse_InnerJoin_ReportsNoError(string sql)
+    {
+        SqlLanguageProfile.Instance.Supports(SqlClauses.Join).ShouldBeTrue();
+
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+
+        statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Excludes unimplemented join types")]
+    [InlineData("SELECT * FROM t LEFT JOIN u ON t.id = u.id;", "LEFT OUTER JOIN", "LEFT JOIN")]
+    [InlineData("SELECT * FROM t LEFT OUTER JOIN u ON t.id = u.id;", "LEFT OUTER JOIN", "LEFT OUTER JOIN")]
+    [InlineData("SELECT * FROM t RIGHT JOIN u ON t.id = u.id;", "RIGHT OUTER JOIN", "RIGHT JOIN")]
+    [InlineData("SELECT * FROM t RIGHT OUTER JOIN u ON t.id = u.id;", "RIGHT OUTER JOIN", "RIGHT OUTER JOIN")]
+    [InlineData("SELECT * FROM t FULL OUTER JOIN u ON t.id = u.id;", "FULL OUTER JOIN", "FULL OUTER JOIN")]
+    [InlineData("SELECT * FROM t CROSS JOIN u;", "CROSS JOIN", "CROSS JOIN")]
+    public void Parse_UnimplementedJoinType_ReportsPreciseModelDiagnostic(string sql, string form, string locationText)
+    {
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        diagnostic.Message!.ShouldContain(form);
+        diagnostic.Message!.ShouldContain("only two-table INNER JOIN with an ON predicate");
+        sql[diagnostic.Start!.Value..diagnostic.End!.Value].ShouldBe(locationText);
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Reports the explicit execution boundary")]
+    [InlineData("SELECT * FROM t JOIN u;", "requires an ON predicate")]
+    [InlineData("SELECT * FROM t JOIN u ON t.id = u.id JOIN v ON u.id = v.id;", "exactly two tables")]
+    [InlineData("SELECT * FROM t, u;", "Comma-separated")]
+    [InlineData("SELECT t.* FROM t JOIN u ON t.id = u.id;", "Qualified SQL wildcard")]
+    [InlineData("SELECT dbo.t.* FROM dbo.t JOIN dbo.u ON dbo.t.id = dbo.u.id;", "Qualified SQL wildcard")]
+    [InlineData("SELECT * FROM INFORMATION_SCHEMA.TABLES t JOIN u ON t.TABLE_NAME = u.name;", "stored tables only")]
+    [InlineData("SELECT * FROM t JOIN COHESION_SCHEMA.INDEXES i ON t.name = i.TABLE_NAME;", "stored tables only")]
+    public void Parse_UnsupportedJoinShape_ReportsPreciseModelDiagnostic(string sql, string message)
+    {
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+
+        var diagnostic = statement.Diagnostics.Single(item => item.Code == "COHDBL001");
+        diagnostic.Severity.ShouldBe(DiagnosticSeverity.Error);
+        diagnostic.Message!.ShouldContain(message);
+        statement.Diagnostics.ShouldNotContain(item => item.Code == "SQL0002");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Rejects incomplete INNER JOIN syntax")]
+    [InlineData("SELECT * FROM t INNER u ON t.id = u.id;")]
+    [InlineData("SELECT * FROM t INNER JOIN u ON;")]
+    [InlineData("SELECT * FROM t INNER JOIN u ON WHERE t.id = 1;")]
+    public void Parse_IncompleteInnerJoin_ReportsSyntaxDiagnostic(string sql)
+    {
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+
+        statement.Diagnostics.ShouldContain(item => item.Code == "SQL0003");
+    }
+
     [Theory]
-    [InlineData(SqlClauses.Join, "SELECT * FROM t JOIN u ON t.id = u.id;", "JOIN")]
-    [InlineData(SqlClauses.Join, "SELECT * FROM t INNER JOIN u ON t.id = u.id;", "JOIN")]
-    [InlineData(SqlClauses.Join, "SELECT * FROM t LEFT JOIN u ON t.id = u.id;", "JOIN")]
-    [InlineData(SqlClauses.Join, "SELECT * FROM t RIGHT OUTER JOIN u ON t.id = u.id;", "JOIN")]
-    [InlineData(SqlClauses.Join, "SELECT * FROM t FULL OUTER JOIN u ON t.id = u.id;", "JOIN")]
-    [InlineData(SqlClauses.Join, "SELECT * FROM t CROSS JOIN u;", "JOIN")]
-    [InlineData(SqlClauses.Join, "select * from t inner /* trivia */ join u on t.id = u.id;", "join")]
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;", "GROUP BY")]
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t group /* trivia */ by id;", "group /* trivia */ by")]
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id HAVING COUNT(*) > 0;", "GROUP BY")]
@@ -30,6 +84,8 @@ public class SqlExecutionSurfaceDiagnosticTests
     [InlineData(SqlClauses.Subquery, "INSERT INTO t (id) SELECT id FROM u;", "SELECT")]
     [InlineData(SqlClauses.Subquery, "UPDATE t SET id = (SELECT id FROM u);", "SELECT")]
     [InlineData(SqlClauses.Subquery, "DELETE FROM t WHERE id IN (SELECT id FROM u);", "SELECT")]
+    [InlineData(SqlClauses.GroupBy, "SELECT t.id FROM t JOIN u ON t.id = u.id GROUP BY t.id;", "GROUP BY")]
+    [InlineData(SqlClauses.Subquery, "SELECT t.id FROM t JOIN u ON t.id = u.id WHERE u.id IN (SELECT id FROM v);", "SELECT")]
     public void Parse_ClauseAwaitingExecution_ReportsModelDiagnostic(string clause, string sql, string locationText)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();
