@@ -66,6 +66,48 @@ internal class InMemoryFileContent
         }
     }
 
+    public int Read(long position, Span<byte> buffer)
+    {
+        lock (_lock)
+        {
+            if (position >= _stream.Length)
+            {
+                return 0;
+            }
+
+            _stream.Position = position;
+            return _stream.Read(buffer);
+        }
+    }
+
+    public void Write(long position, ReadOnlySpan<byte> buffer)
+    {
+        lock (_lock)
+        {
+            var endPosition = checked(position + buffer.Length);
+            var growth = Math.Max(0, endPosition - _stream.Length);
+
+            // Reserve quota before changing the shared buffer so a rejected write is atomic.
+            _file.FileSystem.IncrementSpaceUsed(growth);
+
+            try
+            {
+                _stream.Position = position;
+                _stream.Write(buffer);
+            }
+            catch
+            {
+                _file.FileSystem.IncrementSpaceUsed(-growth);
+                throw;
+            }
+        }
+
+        _file.Dispatcher.RaiseEvent(new FileSystemEventArgs(
+            WatcherChangeTypes.Changed,
+            _file.Path,
+            _file.Name));
+    }
+
     public void Write(long position, byte[] buffer, int offset, int count)
     {
         lock (_lock)

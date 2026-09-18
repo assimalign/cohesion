@@ -59,6 +59,29 @@ Translation lives in `AggregateMount.ToAggregatePath` /
 `ToProviderPath` with theory-driven unit tests so the conversion behavior
 is locked down.
 
+## Storage-engine handles
+
+`IFileSystemFile.OpenHandle(fileMode, fileAccess, fileShare)` returns the
+resolved underlying file's `IFileSystemFileHandle` directly. The caller owns
+the handle and must dispose it, synchronously or asynchronously. Existing
+`Open` overloads continue to return streams with their existing behavior.
+
+A storage engine addresses pages by byte offset and needs concurrent reads
+and writes without a shared stream cursor. It also needs a flush whose
+durability is explicit: `Stream` exposes neither positional operations nor
+the durable-flush guarantee. The handle supplies offset-based reads and
+writes, current length, `SetLength`, and sync/async durability-aware flush.
+
+Durability belongs to the resolved file, never to the aggregate or to another
+mount. `SupportsDurableFlush` therefore remains the provider's answer: a
+physical file supports durable flush while an in-memory file does not, even
+when a durable physical mount surrounds a nested in-memory mount.
+`Flush(durable: true)` and `FlushAsync(durable: true)` throw
+`NotSupportedException` when that handle reports `false`. A storage engine
+that asks for durability and silently does not get it is worse than one
+that cannot start. Aggregate delegation preserves this failure, cancellation,
+and disposal behavior without translating or weakening the provider's contract.
+
 ## Cross-provider Copy / Move
 
 ```csharp
@@ -141,6 +164,7 @@ src/
     AssemblyInfo.cs   (InternalsVisibleTo)
 tests/
   AggregateFileSystemTests.cs            provider-specific behavior
+  AggregateFileSystemFileHandleTests.cs  positional I/O and resolved durability
   AggregateFileSystemStandardTests.cs    inherits shared contract suite
   AggregateRouterTests.cs                router primitives
   Shared/FileSystemStandardTests.cs      (linked from root package)

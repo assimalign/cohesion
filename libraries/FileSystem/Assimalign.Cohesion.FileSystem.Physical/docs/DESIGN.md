@@ -7,6 +7,36 @@ The provider is intentionally a single root: pass an absolute path, get a
 file system rooted there. No virtual mounts, no glob filters at the
 provider level — for those, use the Aggregate provider.
 
+## Positional file handles and durability
+
+`IFileSystemFile.OpenHandle(FileMode, FileAccess, FileShare)` returns an owned
+`IFileSystemFileHandle` for page-oriented storage. It opens a `SafeFileHandle`
+with `File.OpenHandle` and performs reads, writes, length queries, and resizing
+through `System.IO.RandomAccess`. Independent offsets can be used concurrently
+without moving a shared cursor. The existing `Open` overloads still return
+streams unchanged: `Stream` alone supplies neither concurrent positional I/O
+nor a durability-aware flush, which a storage engine needs for commit recovery.
+
+`SupportsDurableFlush` is `true`. `Flush(durable: true)` calls
+`RandomAccess.FlushToDisk`, and returns only when that operation completes.
+There is no managed write buffer, so `Flush(durable: false)` has no work to do.
+`FlushAsync` checks cancellation before starting; a durable flush uses the same
+synchronous runtime primitive because .NET has no asynchronous durable flush.
+An I/O error propagates to the caller rather than being downgraded to success.
+
+The family contract requires `NotSupportedException` for durable flush whenever
+`SupportsDurableFlush` is `false`. This physical provider can honor the request;
+non-durable providers must fail loudly because acknowledging a commit without
+durable data prevents the storage engine from recovering that commit.
+
+The caller disposes each handle, synchronously or asynchronously. Disposal
+releases the native handle and later operations throw `ObjectDisposedException`.
+Mode, access, sharing, and read-only-provider checks still apply. As with
+`File.OpenHandle`, `FileMode.Append` opens or creates a write-only handle; writes
+use the explicitly supplied offsets rather than a stream's append cursor.
+All implementation paths use .NET 10 public APIs without reflection and retain
+NativeAOT compatibility.
+
 ## Path translation
 
 Every aggregate-style `FileSystemPath` is merged onto the root via
@@ -69,11 +99,13 @@ src/
   Internal/
     PhysicalFileSystemDirectory.cs
     PhysicalFileSystemFile.cs
+    PhysicalFileSystemFileHandle.cs
     PhysicalFileSystemInfo.cs
     PhysicalFileSystemChangeToken.cs
     FileSystemInfoHelper.cs
 tests/
   PhysicalFileSystemTests.cs         provider-specific behavior
+  PhysicalFileSystemFileHandleTests.cs positional I/O, durability, and disposal
   PhysicalFileSystemStandardTests.cs inherits the shared contract suite
   Shared/FileSystemStandardTests.cs  (linked from root package)
 ```

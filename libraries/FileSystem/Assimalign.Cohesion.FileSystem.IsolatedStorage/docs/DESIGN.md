@@ -7,6 +7,47 @@ Surface `System.IO.IsolatedStorage.IsolatedStorageFile` as an
 assembly sandboxed store — useful when you want persistent storage on
 every supported OS without writing path-resolution code per platform.
 
+## Positional file handles and durability
+
+`IFileSystemFile.OpenHandle(FileMode, FileAccess, FileShare)` returns a caller-owned
+`IFileSystemFileHandle` for page-oriented storage. Reads and writes supply their
+own offsets; a private `SemaphoreSlim` covers each seek and I/O operation, length
+query, resize, flush, and disposal. Concurrent calls cannot disturb one another's
+offsets, including when synchronous and asynchronous calls are mixed. This
+serializes I/O within one handle. The stream is private and never handed to callers.
+
+The .NET 10 implementation of `IsolatedStorageFileStream.SafeFileHandle` throws
+`IsolatedStorageException`, so the physical provider's `RandomAccess` route is
+unavailable through supported handle access. Its public `Flush(bool)` does forward
+to the backing `FileStream.Flush(bool)`, so this provider genuinely supports
+durability and reports `SupportsDurableFlush == true`.
+See the [.NET 10 runtime implementation](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.IO.IsolatedStorage/src/System/IO/IsolatedStorage/IsolatedStorageFileStream.cs).
+No reflection, deprecated native-handle access, or physical store-path discovery
+is needed; the implementation retains the store's public access boundaries and
+NativeAOT compatibility.
+
+`Flush(durable: true)` calls `IsolatedStorageFileStream.Flush(flushToDisk: true)`.
+`FlushAsync` honors cancellation while waiting for the gate and before starting
+the flush; its durable branch uses the synchronous durable primitive because
+there is no asynchronous overload with that guarantee. The non-durable branch
+uses the stream's ordinary `FlushAsync`. Failures propagate without degrading
+the guarantee. The family contract requires `NotSupportedException` whenever
+durable flush is requested from a handle reporting `SupportsDurableFlush == false`:
+a storage engine must refuse a guarantee it cannot provide rather than acknowledge
+commits it cannot recover.
+
+The existing `Open` overloads remain unchanged. A plain `Stream` cannot express
+concurrent positional operations or a durability-aware flush; the new handle
+provides both without requiring a storage engine to downcast its stream. Mode,
+access, sharing, and provider read-only checks are preserved. For handles,
+`FileMode.Append` is normalized to write-only `OpenOrCreate`, matching
+`File.OpenHandle`: each write still honors its explicit offset.
+
+Synchronous and asynchronous disposal wait for the current operation, release the
+owned isolated stream, and make subsequent operations throw `ObjectDisposedException`.
+The gate remains available after disposal so waiting callers observe that contract
+instead of racing disposal of the synchronization primitive.
+
 ## Path translation
 
 `IsolatedStoragePathHelper` is the single source of truth for translating
@@ -88,6 +129,7 @@ src/
   Internal/
     IsolatedStorageFileSystemDirectory.cs
     IsolatedStorageFileSystemFile.cs
+    IsolatedStorageFileSystemFileHandle.cs
     IsolatedStorageFileSystemInfo.cs
     IsolatedStorageFileSystemNoopEventToken.cs
     IsolatedStorageFileSystemPollingEventToken.cs
@@ -96,6 +138,7 @@ src/
     AssemblyInfo.cs   (InternalsVisibleTo declaration)
 tests/
   IsolatedStorageFileSystemTests.cs          provider-specific behavior
+  IsolatedStorageFileSystemFileHandleTests.cs positional I/O, durability, and disposal
   IsolatedStorageFileSystemStandardTests.cs  inherits the shared contract suite
   IsolatedStorageFileSystemTestFixture.cs    helper for store cleanup
   IsolatedStoragePathHelperTests.cs          direct unit tests
