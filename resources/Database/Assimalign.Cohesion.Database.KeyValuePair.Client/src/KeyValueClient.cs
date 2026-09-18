@@ -36,6 +36,7 @@ public static class KeyValueClient
         {
             Settings = options.Settings,
             ConnectionFactory = options.ConnectionFactory,
+            Family = KeyValueProtocol.Family,
         });
 
         return new DefaultKeyValueClient(client, options.Settings, options.Observer);

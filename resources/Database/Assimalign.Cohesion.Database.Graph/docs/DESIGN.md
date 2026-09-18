@@ -10,7 +10,7 @@ shared Storage, Transactions and Indexing rather than another pager, journal or 
 
 | Package | Responsibility |
 | --- | --- |
-| `Database.Graph` | Engine, sessions, typed operations, planning, execution and catalog protocol server |
+| `Database.Graph` | Engine, sessions, typed operations, planning, execution, catalog protocol server and path message family |
 | `Database.Graph.Language` | ISO GQL subset, AST and syntax/capability diagnostics |
 | `Database.Graph.Catalog` | Snapshot-visible labels, types, property keys, index metadata and ownership |
 | `Database.Graph.Storage` | Record encoding, kernel adapter, adjacency and property B+Trees |
@@ -162,14 +162,15 @@ would reserve labels in the user graph. `SHOW` instead returns a typed result se
 graph elements or persisted system data.
 
 `GraphDatabaseServer.Create(engine, options)` exposes these statements to the existing generic
-`Database.Client` over the shared Cohesion protocol. The composition root supplies an
+model-owned catalog exchange over the shared `Database.Client` connection infrastructure. The composition root supplies an
 `IConnectionListener` through `GraphDatabaseServerOptions.Listener` and owns the engine lifecycle;
 the server owns the listener and its accepted sessions. Startup authentication binds each connection
-to one database. Typed scalar result columns and rows use the existing protocol codecs, including
+to one database. Typed scalar result columns and rows use the Graph-owned catalog codecs, including
 GUID identities and nullable ownership values. The catalog server deliberately supports only `SHOW`
 statements: other graph queries return `ExecutionFailure` with
-`The graph wire server supports catalog SHOW statements only.` Graph element serialization and a
-typed Graph client remain outside this increment. No existing interface gained a transport member.
+`The graph wire server supports catalog SHOW statements only.` The path codecs below provide graph
+element serialization for a subsequent query server/client; those clients remain outside this
+increment. No existing interface gained a transport member.
 
 Each statement has a fixed ordered column contract. All name columns are strings, identity columns
 are GUIDs, and `IS_REQUIRED` and `IS_UNIQUE` are Booleans.
@@ -253,3 +254,112 @@ release-inventory surfaces. General graph wire queries, model security policies,
 Hosting/ApplicationModel changes and compiled-schema provisioning remain out of scope. The catalog
 server uses the shared authenticator rather than adding graph-specific authentication contracts.
 No reflection or runtime code generation is used.
+
+## Graph wire family
+
+`GraphProtocol.Family` fixes the graph vocabulary for an accepted connection. Shared
+`ProtocolChannel` handles framing and validates every type against the bound family; Graph owns
+all request/result payloads. The endpoint selects Graph before startup. No model discriminator is
+added to startup, and a connection or client pool cannot change families. Other endpoints may use
+the same model-scoped bytes for other meanings; shared codes 1–4 and 10–13 retain their meanings
+and 14–63 remain reserved. Bytes 5–9 retain Graph's deployed catalog exchange. The path extension
+uses 64–66. This follows the shared lexer/parser and per-model grammar precedent.
+
+Version **1.0** is retained: the deployed catalog, SQL and Key-Value exchanges are byte-for-byte
+unchanged. Unknown major versions receive shared `UnsupportedVersion`. Compatible negotiation
+chooses the smaller server/requested minor. The wire envelope is unsigned 32-bit big-endian payload
+length, one type byte, then the payload. The length excludes the five-byte header and cannot exceed
+16,777,216. Integers below are big-endian. A string is a nonnegative signed `int32` UTF-8 byte length
+followed by those bytes. There is no padding.
+
+| Byte | Direction | Payload |
+| --- | --- | --- |
+| 5 (`Execute`) | Client → server | GQL string; `int32` parameter count; repeated parameter-name string, `int32` encoded-value byte length, value bytes |
+| 6 (`ResultHeader`) | Server → client | `int32` column count; repeated column-name string and one `DatabaseType` byte |
+| 7 (`ResultRow`) | Server → client | Concatenated self-describing scalar tuple components, exactly one per declared column |
+| 8 (`ResultComplete`) | Server → client | `int64` affected count; -1 for a catalog result set |
+| 9 (`Transaction`) | Client → server | Reserved legacy identifier; current catalog server rejects it as out of order |
+| 64 (`ExecutePaths`) | Client → server | The same GQL/parameter payload as byte 5, requesting path-shaped results |
+| 65 (`Path`) | Server → client | Ordered node and relationship sequences in the format below |
+| 66 (`PathsComplete`) | Server → client | Exactly eight bytes: nonnegative `int64` count of Path frames in this exchange |
+
+Catalog parameters and tuples retain `DatabaseValueCodec` encoding; the precise scalar tags,
+numeric transforms and variable-length escaping are specified in
+[the unchanged SQL scalar wire encoding](../../Assimalign.Cohesion.Database.Sql/docs/WIRE-PROTOCOL.md).
+The catalog response is Header, zero or more Row frames, Complete; command responses may have only
+Complete. A shared Error ends the current exchange without Complete. Existing SHOW statements and
+their ordered column contracts above remain supported by `GraphDatabaseServer`. Its new channel
+is bound to `GraphProtocol.Family` once, before the handshake. Path messages are the public wire
+surface for subsequent graph query server/client work; sending ExecutePaths to the current catalog
+server produces shared `ProtocolViolation` and closes that session. The path tests use a test-owned
+responder executing the real engine and exchanging frames over `Connections.InMemory`.
+
+### Path payload
+
+A Path payload consists of the following fields, with no trailing bytes:
+
+1. `int32 nodeCount`, followed by `nodeCount` node records in traversal order.
+2. `int32 relationshipCount`, followed by `relationshipCount` relationship records in traversal order.
+
+A node record contains `uint64 id`, `int32 labelCount`, that many label strings, then a property map.
+A relationship record contains `uint64 id`, `uint64 fromNodeId`, `uint64 toNodeId`, relationship-type
+string, then a property map. Identities are nonzero, database-local unsigned integers; their entire
+64-bit range is preserved. Counts are nonnegative and bounded by the remaining payload before
+allocation. Each path contains at least one node and exactly one fewer relationships than nodes.
+Relationship `i` connects node `i` and node `i+1`; either direction is permitted. From/To always
+retain the graph's stored edge direction, including during reverse traversal. A one-node path has
+zero relationships; repeated nodes, cycles and self-loops remain representable.
+
+A property map is `int32 propertyCount` followed by property-name string and tagged value for each
+property. Names are ordinal and unique within the map; map entry order is not significant. Graph's
+scalar tags preserve the existing engine's numeric runtime types, including unsigned types absent
+from the shared catalog tuple codec. Their precise payloads are:
+
+| Tag | Value | Bytes after tag |
+| --- | --- | --- |
+| 0 | null | None |
+| 1 | false | None |
+| 2 | true | None |
+| 3 | string | Length-prefixed UTF-8 string |
+| 4 | byte | One unsigned byte |
+| 5 | sbyte | One two's-complement byte |
+| 6 | Int16 | Two-byte two's-complement integer |
+| 7 | UInt16 | Two-byte unsigned integer |
+| 8 | Int32 | Four-byte two's-complement integer |
+| 9 | UInt32 | Four-byte unsigned integer |
+| 10 | Int64 | Eight-byte two's-complement integer |
+| 11 | UInt64 | Eight-byte unsigned integer |
+| 12 | Single | Four-byte IEEE-754 binary32 bit pattern |
+| 13 | Double | Eight-byte IEEE-754 binary64 bit pattern |
+| 14 | Decimal | Four 32-bit words: low, middle, high 96-bit unsigned coefficient limbs, then flags |
+
+For Decimal, flags bit 31 is the sign, bits 16–23 hold the scale 0–28, and all other bits must be
+zero. Its value is `(-1)^sign × coefficient / 10^scale`. Each word is big-endian; limb order is low,
+middle, high. Single and Double must be finite. Unknown tags, duplicate property names, malformed
+lengths/counts, zero IDs, disconnected relationships and extra path bytes are protocol violations.
+Node labels and relationship types remain model strings; no fake table schema is introduced.
+
+After Ready, the path client sends ExecutePaths and consumes zero or more Path messages followed
+by one PathsComplete, or a shared Error with no completion. Requests are serialized. The completion
+count must match received paths; zero matches requires count zero. Each path fits one frame; this
+family does not impose Blob streaming on graph results. Codecs perform static, explicit encoding
+and decoding with no reflection or runtime serializer metadata.
+
+The sequence shows the graph-owned path exchange within the shared connection lifecycle:
+
+```mermaid
+sequenceDiagram
+    participant Client as Graph consumer
+    participant Session as Graph path endpoint
+    participant Engine as Graph engine
+    Client->>Session: Startup / authentication
+    Session-->>Client: Ready
+    Client->>Session: ExecutePaths (GQL, scalar parameters)
+    Session->>Engine: Execute graph query
+    loop Each matched path
+        Engine-->>Session: Ordered nodes and relationships
+        Session-->>Client: Path (identities, labels, properties, directions)
+    end
+    Session-->>Client: PathsComplete (path count)
+    Client->>Session: Terminate
+```

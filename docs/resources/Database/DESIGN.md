@@ -123,9 +123,9 @@ Per-model satellite projects follow one matrix: `.Language` (where a language ex
 
 ### 3.4 Service surface
 
-- **`Database.Protocol`** (new) — the wire protocol shared by server and client: length-prefixed, big-endian frame header (`u32 length + u8 type`), message families for startup/auth, query execute (parse/bind/execute), streaming result sets (header/row/complete), transaction control, and errors. Versioned handshake so protocol evolution never breaks deployed clients. Pure value objects + reader/writer contracts; no sockets here.
+- **`Database.Protocol`** — shared wire mechanism: the bounded big-endian frame envelope (`u32 length + u8 type`), startup/authentication, session lifecycle, errors, version negotiation, and immutable `ProtocolMessageFamily` / `ProtocolChannel` binding. Each model package owns its request and result vocabulary. SQL and Key-Value retain their deployed 1.0 bytes; Blob owns bounded chunk transfer, Documents owns nested JSON results, and Graph owns path-shaped results alongside its existing catalog exchange. No sockets or model payload policy live in this child root.
 - **The per-model servers** — the network front-end. **Servers are per-model** (2026-07-13): each model ships its own `{Model}DatabaseServer` fronting exactly one engine (`SqlDatabaseServer` in `Database.Sql`, `KeyValueDatabaseServer` in `Database.KeyValuePair`), which is where model-specific wire behavior grows. The **root contracts are the only area-wide requirement**: a model server implements `IDatabaseServer`/`IDatabaseServerContext` (+ `IDatabaseServerSession`) against `Connections` and the protocol child root (via the root's rollup). **Each model package carries its own full copy of the server machinery** — accept loop, session table, the session state machine and frame pump, authentication/idle/session-limit guardrails, two-phase drain — per-model duplication chosen by the owner (2026-07-14) with the second model's extraction evidence in hand: model independence outweighs the duplication/drift cost, and **wire-behavior parity is maintained by the protocol contract plus per-model E2E suites, not by shared code** (see the decision log and the preserved evidence table in §3.10). "Running" lives on the server; engines beneath it are data machines with no lifecycle.
-- **`Database.Client`** — the shared client core: connection strings, connection pooling, protocol client, result materialization. Per-model `.Client` projects add typed surfaces on top.
+- **`Database.Client`** — the shared client core: connection settings, pooling, handshake, framing, and a generic model-exchange seam. A pool fixes its message family at composition and rejects an exchange from another family. Per-model `.Client` projects own parameter encoding and result materialization.
 - **`Database.Security`** — authn/authz contracts (principals, roles, permission checks) consumed by the server and per-model security projects.
 - **`Database.Replication` / `Database.Governance`** — shared replication contracts (log shipping seam over the WAL) and operational governance (quotas, tenancy, audit events). Post-MVP build-out; contracts stay in place so model services don't invent local equivalents.
 
@@ -140,6 +140,9 @@ facts it depicts are stated here in prose so the section stands without it:
   one process. `ProtocolStartupMessage(Version, Database, Principal)` carries **no model field** —
   connecting to a given endpoint has already chosen the model. Routing several models behind one
   endpoint would require a model discriminator in the handshake, which is a protocol change.
+  Each accepted session binds one immutable message family. Core codes 1–4 and 10–13 retain
+  their meanings; model codes 5–9 preserve legacy clients and 64–255 allow new family messages.
+  Bytes are interpreted only by the bound endpoint family, never by a union of model codecs.
 - **Provisioning always precedes accept, regardless of composition order.** `Provision(...)`
   registers as an *additional host service*, and the built application starts every service before
   any server adapter. Shutdown reverses it: servers drain first, then services stop in reverse
@@ -150,9 +153,16 @@ facts it depicts are stated here in prose so the section stands without it:
 - **Engines share the kernel and never reference each other.** Both reach `Database.Storage`,
   `Database.Transactions`, and `Database.Indexing`; neither depends on the other. Writes serialize
   per database at the apply gate, so a write in one model never contends with a write in another.
-- **Only SQL and KeyValuePair ship servers today.** The Blob and Documents engines are in-process
-  only; their wire clients wait on a protocol decision (frames cap at 16 MiB and results are
-  column/row shaped, so streaming a large object needs chunked transfer).
+- **SQL, KeyValuePair, and Graph catalog ship servers today.** Blob and Documents remain
+  in-process engines, but now publish their own protocol families with Connections.InMemory
+  conformance exchanges. Blob bounds each content frame and acknowledges chunks; Documents
+  preserves JSON nesting; Graph preserves ordered nodes and relationships in paths. Their
+  production clients and additional server operations remain separate work items.
+- **Transport selection belongs to the composition root.** All engine servers accept
+  `IConnectionListener`; `Database.Sql.Tcp` supplies the existing `Listen(Uri)` convenience
+  for consumers that choose TCP. Engine packages reference no concrete transport.
+- **Wire version stays 1.0.** SQL/Key-Value identifiers and payloads are unchanged. Servers
+  reject incompatible majors before authentication and negotiate the supported minor baseline.
 
 <!-- Deviates from the repo documentation rule "no colors, no themes" in diagrams, per owner
      direction 2026-09-17: the owner asked to see a colored band rendered before deciding whether
@@ -185,10 +195,11 @@ sequenceDiagram
     Host->>KvSrv: StartAsync — bind listener, begin accept
     end
 
-    Note over SqlCli,KvSrv: No multiplexing front door. The endpoint chosen IS the model.
+    Note over SqlCli,KvSrv: The endpoint fixes one immutable message family; no multiplexing front door.
 
     par SQL connection
         SqlCli->>SqlSrv: connect to the SQL endpoint
+        SqlSrv->>SqlSrv: Bind SqlProtocol.Family to the accepted channel
         SqlCli->>SqlSrv: Startup(Version, Database, Principal)
         SqlSrv->>SqlSrv: reject if sessions >= MaxSessions
         SqlSrv-->>SqlCli: Authenticate (challenge)
@@ -197,26 +208,27 @@ sequenceDiagram
         SqlEng-->>SqlSrv: IDatabase — session bound to ONE database
         SqlSrv->>SqlEng: CreateSessionAsync
         SqlSrv-->>SqlCli: Ready
-        SqlCli->>SqlSrv: Execute("SELECT ...", parameters)
+        SqlCli->>SqlSrv: SQL-family Execute("SELECT ...", parameters)
         SqlSrv->>SqlEng: session.ExecuteAsync
         SqlEng->>SqlEng: parse against SqlLanguageProfile
         Note right of SqlEng: clause outside the profile returns COHDBL001
         SqlEng->>SqlEng: plan — selects a secondary index if one applies
         SqlEng->>Kernel: snapshot, index seek, versioned reads
         Kernel-->>SqlEng: rows at the session snapshot
-        SqlSrv-->>SqlCli: ResultHeader
-        SqlSrv-->>SqlCli: ResultRow (repeated)
-        SqlSrv-->>SqlCli: ResultComplete(AffectedCount)
+        SqlSrv-->>SqlCli: SQL-family result messages (unchanged 1.0 encoding)
     and Key-Value connection
         KvCli->>KvSrv: connect to the Key-Value endpoint
+        KvSrv->>KvSrv: Bind KeyValueProtocol.Family to the accepted channel
         KvCli->>KvSrv: Startup(Version, Database, Principal)
         KvSrv-->>KvCli: Authenticate then Ready
-        KvCli->>KvSrv: Execute("GET key")
+        KvCli->>KvSrv: Key-Value-family Execute("GET key")
         KvSrv->>KvEng: session.ExecuteAsync
         KvEng->>Kernel: snapshot read
         Kernel-->>KvEng: value at snapshot
-        KvSrv-->>KvCli: ResultHeader, ResultRow, ResultComplete
+        KvSrv-->>KvCli: Key-Value-family result messages (unchanged 1.0 encoding)
     end
+
+    Note over SqlCli,KvSrv: Other endpoint families: Blob chunks, nested Documents, Graph paths
 
     Note over SqlEng,Kernel: Both engines share the kernel but never each other. Writes serialize per database at the apply gate, not across the host.
 
@@ -284,8 +296,8 @@ inventing a framework-owned artifact or injecting resource-specific variables. I
 `ResourcePlan` requires stable workload identity, a sized per-replica claim for every persistent
 volume, and exactly one headless governing service. Platform compilers — not the planner — turn
 that IR into Kubernetes, Docker, or local objects. `DatabaseConnectionSettings.For(Uri)` bridges
-generated or ambient endpoints to the client, while `SqlDatabaseServerOptions.Listen(Uri)` bridges
-the same typed endpoint into server binding. Both validate the Cohesion endpoint shape before using
+generated or ambient endpoints to the client, while `SqlDatabaseServerOptions.Listen(Uri)` in
+`Database.Sql.Tcp` bridges the same typed endpoint into server binding. Both validate the Cohesion endpoint shape before using
 `Uri.IdnHost` and `Uri.Port` at the socket boundary; callers never reconstruct endpoint strings.
 
 The framework-owned `Assimalign.Cohesion.Database.Application` executable is deleted; #973

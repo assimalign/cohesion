@@ -27,6 +27,7 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
     private readonly IDatabaseAuthenticator _authenticator;
     private readonly CancellationTokenSource _lifetimeSource;
 
+    private ProtocolChannel? _channel;
     private IProtocolFrameReader? _reader;
     private IProtocolFrameWriter? _writer;
     private IDatabaseSession? _databaseSession;
@@ -104,8 +105,9 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
         try
         {
             Stream stream = _connection.AsStream();
-            _reader = ProtocolFraming.CreateReader(stream, leaveOpen: true);
-            _writer = ProtocolFraming.CreateWriter(stream, leaveOpen: true);
+            _channel = new ProtocolChannel(stream, GraphProtocol.Family, leaveOpen: true);
+            _reader = _channel.Reader;
+            _writer = _channel.Writer;
 
             if (await HandshakeAsync(softStop).ConfigureAwait(false))
             {
@@ -176,13 +178,13 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
 
         ProtocolStartupMessage startup = ProtocolStartupMessage.Decode(frame.Value.Payload.Span);
 
-        if (startup.Version.Major != ProtocolVersion.Current.Major)
+        if (!ProtocolVersion.TryNegotiate(startup.Version, out var negotiated))
         {
             await TryWriteErrorAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.").ConfigureAwait(false);
             return false;
         }
 
-        ProtocolVersion = ProtocolVersion.Current;
+        ProtocolVersion = negotiated;
 
         IDatabase? database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
 
@@ -269,7 +271,7 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
 
             switch (frame.Value.Type)
             {
-                case ProtocolMessageType.Execute:
+                case (ProtocolMessageType)GraphProtocolMessageType.Execute:
                     // Executions run on the session lifetime token, not the soft-stop
                     // token: a drain lets in-flight statements finish.
                     await ExecuteAsync(frame.Value, rowWriter, _lifetimeSource.Token).ConfigureAwait(false);
@@ -291,7 +293,7 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
 
     private async Task ExecuteAsync(ProtocolFrame frame, DatabaseKeyWriter rowWriter, CancellationToken cancellationToken)
     {
-        ProtocolExecuteMessage message = ProtocolExecuteMessage.Decode(frame.Payload.Span);
+        GraphProtocolExecuteMessage message = GraphProtocolExecuteMessage.Decode(frame.Payload.Span);
         Dictionary<string, object?>? parameters = null;
 
         if (message.Parameters.Count > 0)
@@ -347,7 +349,7 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
                     columns.Add((column.Name, (byte)column.Type));
                 }
 
-                await WriteFrameAsync(ProtocolMessageType.ResultHeader, new ProtocolResultHeaderMessage(columns).Encode(), cancellationToken).ConfigureAwait(false);
+                await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultHeader, new GraphProtocolResultHeaderMessage(columns).Encode(), cancellationToken).ConfigureAwait(false);
 
                 await foreach (QueryRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
@@ -358,10 +360,10 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
                         DatabaseValueCodec.Append(rowWriter, row.GetValue(ordinal));
                     }
 
-                    await WriteFrameAsync(ProtocolMessageType.ResultRow, rowWriter.ToArray(), cancellationToken).ConfigureAwait(false);
+                    await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultRow, rowWriter.ToArray(), cancellationToken).ConfigureAwait(false);
                 }
 
-                await WriteFrameAsync(ProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(resultSet.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
+                await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultComplete, new GraphProtocolResultCompleteMessage(resultSet.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
             }
 
             return;
@@ -377,7 +379,7 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             return;
         }
 
-        await WriteFrameAsync(ProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
+        await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.ResultComplete, new GraphProtocolResultCompleteMessage(result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -437,7 +439,7 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
         {
             // Teardown owns failures just like the pump. Attempt every release,
             // including the connection, when an earlier disposal fails.
-            IAsyncDisposable?[] resources = [_databaseSession, _reader, _writer, _connection];
+            IAsyncDisposable?[] resources = [_databaseSession, _channel, _connection];
             foreach (var resource in resources)
             {
                 if (resource is null) { continue; }

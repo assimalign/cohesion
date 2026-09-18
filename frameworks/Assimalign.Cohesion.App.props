@@ -264,6 +264,7 @@
         <!-- The SQL model family (the MVP engine): engine + wire-protocol server,
              dialect, catalog, model storage, and the typed client. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Tcp" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Language" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Catalog" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Schema" />

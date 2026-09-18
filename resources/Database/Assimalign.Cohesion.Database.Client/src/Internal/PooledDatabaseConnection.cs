@@ -1,27 +1,24 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Protocol;
-using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Client;
 
 /// <summary>
 /// A pooled protocol connection: dials the transport, runs the
-/// startup/authenticate/ready handshake, executes statements, and drains result
-/// streams. Disposing while rented returns it to the owning pool with its
-/// authenticated server session intact.
+/// startup/authenticate/ready handshake, and runs model-owned framed exchanges.
+/// Disposing while rented returns it to the owning pool with its authenticated
+/// server session intact.
 /// </summary>
 internal sealed class PooledDatabaseConnection : IDatabaseConnection
 {
     private readonly DefaultDatabaseClient _owner;
     private readonly IConnectionFactory _connectionFactory;
     private readonly DatabaseConnectionSettings _settings;
-    private readonly DatabaseKeyWriter _parameterWriter = new();
 
     private IConnection? _connection;
     private IProtocolFrameReader? _reader;
@@ -30,11 +27,12 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
     private bool _isRented;
     private bool _isClosed;
 
-    internal PooledDatabaseConnection(DefaultDatabaseClient owner, IConnectionFactory connectionFactory, DatabaseConnectionSettings settings)
+    internal PooledDatabaseConnection(DefaultDatabaseClient owner, IConnectionFactory connectionFactory, DatabaseConnectionSettings settings, ProtocolMessageFamily family)
     {
         _owner = owner;
         _connectionFactory = connectionFactory;
         _settings = settings;
+        Family = family;
         Database = _settings.Database!;
         Principal = _settings.Principal;
     }
@@ -51,6 +49,9 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
     /// <inheritdoc />
     public bool IsOpen => _isOpen && _connection is { State: ConnectionState.Open or ConnectionState.Opening };
 
+    /// <inheritdoc />
+    public ProtocolMessageFamily Family { get; }
+
     internal void MarkRented() => _isRented = true;
 
     /// <inheritdoc />
@@ -66,8 +67,9 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
         _connection = await _connectionFactory.ConnectAsync(_settings.EndPoint!, cancellationToken).ConfigureAwait(false);
 
         Stream stream = _connection.AsStream();
-        _reader = ProtocolFraming.CreateReader(stream, leaveOpen: true);
-        _writer = ProtocolFraming.CreateWriter(stream, leaveOpen: true);
+        var channel = new ProtocolChannel(stream, Family, leaveOpen: true);
+        _reader = channel.Reader;
+        _writer = channel.Writer;
 
         var startup = new ProtocolStartupMessage(ProtocolVersion.Current, Database, Principal);
         await WriteFrameAsync(ProtocolMessageType.Startup, startup.Encode(), cancellationToken).ConfigureAwait(false);
@@ -108,83 +110,44 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
     }
 
     /// <inheritdoc />
-    public async ValueTask<DatabaseClientResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
+    public async ValueTask<TResult> ExecuteAsync<TResult>(IDatabaseProtocolExchange<TResult> exchange, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(statement);
-
+        ArgumentNullException.ThrowIfNull(exchange);
+        if (!ReferenceEquals(Family, exchange.Family))
+        {
+            throw new ArgumentException("The exchange belongs to a different message family.", nameof(exchange));
+        }
         if (!IsOpen)
         {
             throw new DatabaseClientException(ProtocolErrorCode.Internal, "The connection is not open.");
         }
 
-        var encodedParameters = new Dictionary<string, byte[]>(parameters?.Count ?? 0);
-
-        if (parameters is not null)
+        try
         {
-            foreach ((string name, object? value) in parameters)
-            {
-                _parameterWriter.Reset();
-                DatabaseValueCodec.Append(_parameterWriter, value);
-                encodedParameters[name] = _parameterWriter.ToArray();
-            }
+            return await exchange.ExecuteAsync(_reader!, _writer!, cancellationToken).ConfigureAwait(false);
         }
-
-        var execute = new ProtocolExecuteMessage(statement, encodedParameters);
-        await WriteFrameAsync(ProtocolMessageType.Execute, execute.Encode(), cancellationToken).ConfigureAwait(false);
-
-        IReadOnlyList<DatabaseClientColumn> columns = [];
-        var rows = new List<object?[]>();
-
-        while (true)
+        catch (DatabaseClientException exception)
         {
-            ProtocolFrame frame = await ExpectFrameAsync(cancellationToken).ConfigureAwait(false);
-
-            switch (frame.Type)
+            // Only complete statement failures leave the session ready for reuse.
+            if (exception.Code is not (ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure))
             {
-                case ProtocolMessageType.ResultHeader:
-                {
-                    ProtocolResultHeaderMessage header = ProtocolResultHeaderMessage.Decode(frame.Payload.Span);
-                    var decoded = new List<DatabaseClientColumn>(header.Columns.Count);
-
-                    foreach ((string name, byte type) in header.Columns)
-                    {
-                        decoded.Add(new DatabaseClientColumn(name, (DatabaseType)type));
-                    }
-
-                    columns = decoded;
-                    break;
-                }
-
-                case ProtocolMessageType.ResultRow:
-                {
-                    rows.Add(DecodeRow(frame.Payload.Span, columns.Count));
-                    break;
-                }
-
-                case ProtocolMessageType.ResultComplete:
-                {
-                    ProtocolResultCompleteMessage complete = ProtocolResultCompleteMessage.Decode(frame.Payload.Span);
-                    return new DatabaseClientResult(columns, rows, complete.AffectedCount);
-                }
-
-                case ProtocolMessageType.Error:
-                {
-                    ProtocolErrorMessage error = ProtocolErrorMessage.Decode(frame.Payload.Span);
-
-                    // Statement-level failures leave the server session in the
-                    // ready state, so the connection stays poolable; everything
-                    // else means the server is closing the session.
-                    if (error.Code is not (ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure))
-                    {
-                        _isOpen = false;
-                    }
-
-                    throw new DatabaseClientException(error.Code, error.Message);
-                }
-
-                default:
-                    throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Unexpected {frame.Type} frame in an execute exchange."));
+                _isOpen = false;
             }
+            throw;
+        }
+        catch (ProtocolException exception)
+        {
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, exception.Message, exception));
+        }
+        catch (Exception exception) when (exception is IOException or ConnectionAbortedException or ConnectionResetException)
+        {
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, "The connection failed during an exchange.", exception));
+        }
+        catch
+        {
+            // Cancellation or a failed decoder may leave an unfinished response.
+            _isOpen = false;
+            throw;
         }
     }
 
@@ -245,19 +208,6 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
         {
             await _connection.DisposeAsync().ConfigureAwait(false);
         }
-    }
-
-    private static object?[] DecodeRow(ReadOnlySpan<byte> payload, int columnCount)
-    {
-        var values = new List<object?>(columnCount);
-        var reader = new DatabaseKeyReader(payload);
-
-        while (!reader.IsAtEnd)
-        {
-            values.Add(DatabaseValueCodec.Read(ref reader));
-        }
-
-        return [.. values];
     }
 
     private async ValueTask WriteFrameAsync(ProtocolMessageType type, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)

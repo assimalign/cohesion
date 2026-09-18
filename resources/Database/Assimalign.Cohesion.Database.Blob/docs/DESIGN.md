@@ -10,7 +10,8 @@ transaction coordination, locks, and version reclamation come from the shared ke
 
 | Package | Responsibility |
 | --- | --- |
-| `Assimalign.Cohesion.Database.Blob` | Database/session/container lifetimes, ownership, publication |
+| `Assimalign.Cohesion.Database.Blob` | Database/session/container lifetimes, ownership, publication, Blob wire family |
+| `Assimalign.Cohesion.Database.Protocol` | Shared framing, handshake, versioning, errors and family-bound channels |
 | `Assimalign.Cohesion.Database.Blob.Catalog` | Metadata versions, directory and ordered listings |
 | `Assimalign.Cohesion.Database.Blob.Storage` | Stream adapters and chunk encoding |
 | `Assimalign.Cohesion.Database.Transactions` | MVCC contexts, coordinator, locks and version ledger |
@@ -137,6 +138,106 @@ logical database lifecycle and scope guards. A child process round-trips a 128 M
 a 64 MiB managed heap and reopens the persisted object. A separate fixture is killed with
 unfinished replacement and new-object chains after checkpoint/write-back passes; restart keeps
 the committed object and hides both unfinished writes.
+
+## Blob wire family
+
+The model package owns the Blob message family; `Database.Protocol` supplies framing and the
+immutable family seam. `BlobProtocol.Family` binds one `ProtocolChannel` to Blob for its entire
+lifetime. The listener endpoint selects this family before reading startup; no model discriminator
+is added to the handshake. All family identifiers below are model-scoped: another model may use
+the same byte on its own endpoint, but the Blob channel cannot switch interpreters during a session.
+An independent client must connect to a configured Blob endpoint and complete the shared
+Startup → Authenticate → AuthenticateResponse → Ready exchange before sending a Blob request.
+Startup selects the database; container and object names never select or switch databases.
+
+The shared envelope remains a big-endian UInt32 payload byte count followed by one message-type
+byte, then that many payload bytes. The shared envelope caps payloads at 16 MiB. Blob content
+instead uses nonempty chunks of at most 65,536 bytes, so an object can exceed both a frame and
+available memory. No object-sized allocation or seeking is needed by either transfer helper.
+The sender retains one reusable 65,536-byte array; the receiver materializes and writes one
+bounded frame at a time. Incoming framing still enforces the shared 16 MiB ceiling before
+allocation, and Blob decoding rejects a content frame larger than its stricter 65,536-byte bound.
+
+Version 1.0 defines the following complete payload layouts. Integers are big-endian. A `text`
+field is an Int32 UTF-8 byte length followed by exactly that many UTF-8 bytes, without a
+terminator. Each text field is limited to 65,535 bytes, and invalid UTF-8, negative lengths,
+missing bytes, and trailing bytes are protocol violations. Container and object names must
+be nonempty and compare ordinally, case-sensitively. No Unicode normalization is applied.
+
+| Byte | Message | Direction | Payload in order |
+| --- | --- | --- | --- |
+| 64 | `Read` | Client → server | `text container`, `text name` |
+| 65 | `Write` | Client → server | `text container`, `text name`, UInt8 overwrite (`0` or `1`) |
+| 66 | `TransferStart` | Content sender → receiver | Int64 length (`-1` unknown, otherwise nonnegative), `text contentType` (empty means unspecified) |
+| 67 | `Chunk` | Content sender → receiver | 1–65,536 raw content bytes; no inner prefix |
+| 68 | `TransferComplete` | Content sender → receiver, or server → client upload acknowledgement | Int64 actual content byte count, nonnegative |
+| 69 | `ChunkAcknowledgement` | Content receiver → sender | Int64 cumulative accepted content byte count, nonnegative |
+
+`Read` returns `TransferStart`, zero or more chunks, and `TransferComplete`. A `Write` request
+is immediately followed by that transfer in the opposite direction. The sender waits for a
+`ChunkAcknowledgement` after every chunk before reading more source content. The receiver writes
+the chunk to its destination before acknowledging the cumulative count. Duplicate, out-of-order,
+or incorrect acknowledgement counts fail the transfer. This one-chunk window bounds content in
+flight even on transports without backpressure, including `Connections.InMemory`. The accepted
+tradeoff is one round trip per chunk; a future window extension would require explicit negotiation
+rather than silently increasing memory requirements.
+
+The receiver checks cumulative content against a declared nonnegative length before writing an
+excess chunk and checks completion against both the actual count and the declared count. With
+unknown length, the completion count still must equal actual received bytes. Empty objects send
+start and completion with no chunks. Chunk acknowledgement means the destination accepted the
+bytes; it never means the object was published or durably committed. On upload, after receiving
+and verifying `TransferComplete`, the server publishes through its storage transaction, then
+sends its own `TransferComplete` with the verified length as the success acknowledgement.
+
+This exchange shows the upload request, the bounded content flow, and publication acknowledgement:
+
+```mermaid
+sequenceDiagram
+    participant C as Blob client
+    participant S as Blob endpoint
+    participant D as Destination stream
+    C->>S: Shared startup and authentication
+    S-->>C: Ready
+    C->>S: Write(container, name, overwrite)
+    C->>S: TransferStart(length, contentType)
+    loop One chunk in flight
+        C->>S: Chunk(content)
+        S->>D: Write content
+        D-->>S: Write completed
+        S-->>C: ChunkAcknowledgement(cumulative length)
+    end
+    C->>S: TransferComplete(actual length)
+    S->>D: Publish upload
+    D-->>S: Commit completed
+    S-->>C: TransferComplete(actual length)
+```
+
+Only one request or transfer is active per connection; no transfer IDs or multiplexing exist.
+Shared Ping/Pong are used between operations. A shared Error frame may terminate an exchange;
+`BlobProtocolTransfer` converts it to `ProtocolException` including its stable code and message.
+Any unexpected frame, EOF before completion, malformed payload, source failure, destination
+failure, or cancellation aborts the transfer. Discard that connection instead of attempting to
+resume at an uncertain frame boundary. A server must abort the associated upload transaction,
+never publish a partial destination through successful stream disposal. Connection closure also
+cancels a sender waiting for acknowledgement. Callers should supply cancellation deadlines.
+
+`BlobProtocolTransfer` owns only the content sequence. It neither authenticates nor dispatches
+requests, commits destination storage, sends the final publication acknowledgement, closes the
+channel, or disposes caller streams. `ReceiveAsync` returns the content type and verified actual
+length, replacing an initially unknown length. Concrete Blob clients and server dispatch remain
+separate work (#214 and its server integration); no concrete transport is referenced here.
+Public codecs use explicit binary operations and strict UTF-8, with no reflection or object
+serialization. Shared protocol version remains 1.0 because these are first-use Blob endpoint
+messages and SQL/Key-Value payloads and identifiers remain unchanged.
+
+`BlobProtocolTests` use `Connections.InMemory` for authenticated request/transfer exchanges in
+both directions. A generated non-seekable source and validating non-seekable destination move
+16 MiB + 173 bytes without owning payload arrays. They verify content and a maximum 65,536-byte
+gap between source reads and destination acceptance, even though that transport has no automatic
+pipe backpressure. Additional tests fix independent wire vectors and cover empty/unknown lengths,
+short reads, malformed encodings, completion-count mismatches, and cancellation while awaiting
+an acknowledgement. Existing Blob test source files are unchanged.
 
 Names and metadata must fit one kernel record. Streams are sequential and not thread-safe.
 Applications must dispose them; no finalizer commits a forgotten upload. Blob has no query

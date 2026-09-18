@@ -78,7 +78,8 @@ Hosting concern implemented through that project's private
 
 Every `resources/Database/*` project. Model engines (`Database.Sql`, …)
 implement the contracts; each model's server (`SqlDatabaseServer`, …) pumps
-wire-protocol frames into sessions; `Database.Client` mirrors results on the
-caller side; `Database.Hosting` composes servers into a host.
+wire-protocol frames into sessions; `Database.Client` owns connection pooling and
+framed exchanges, while each model client materializes results; `Database.Hosting`
+composes servers into a host.
 
 See [DESIGN.md](DESIGN.md) for the contract-shape decisions.

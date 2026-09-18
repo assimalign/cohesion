@@ -927,3 +927,12 @@ behavioral tests; they do not use reflection or widen the session contract.
 
 Interpretive evaluation over the AST — no expression compilation, no reflection.
 Values are boxed scalars at this layer; span-based row codecs below.
+
+## Model-owned wire family (#1015)
+
+This package owns the Sql request and tabular result codecs; the shared protocol
+contains only mechanism. [Wire format](WIRE-PROTOCOL.md) specifies every message and
+scalar component for independent clients. The server binds SqlProtocol.Family
+once on accept, retains wire version 1.0 and the existing bytes, and negotiates
+incompatible majors before authentication. Result materialization belongs to
+Database.Sql.Client. The TCP Listen(Uri) extension lives in the optional Database.Sql.Tcp composition package; this engine references only generic Connections.

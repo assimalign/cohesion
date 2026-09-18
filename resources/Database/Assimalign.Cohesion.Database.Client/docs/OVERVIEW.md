@@ -3,8 +3,7 @@
 The shared client core of the Data Platform: the protocol client every per-model
 client (`Sql.Client`, `Documents.Client`, …) builds on. It dials a
 `libraries/Connections` transport, runs the startup/authenticate/ready
-handshake, executes statement text with parameters, materializes streamed
-results, and pools authenticated connections.
+handshake, runs model-owned framed exchanges, and pools authenticated connections.
 
 ## Scope
 
@@ -12,8 +11,10 @@ results, and pools authenticated connections.
   `RentAsync` returns an open, authenticated connection; disposing a rented
   connection returns it to the pool with its server session intact.
 - **`IDatabaseConnection`** — one protocol session: `OpenAsync` (handshake) and
-  `ExecuteAsync(statement, parameters)` returning a materialized
-  `DatabaseClientResult` (typed columns + boxed rows, or an affected count).
+  `ExecuteAsync<TResult>(IDatabaseProtocolExchange<TResult>)` returning the model's
+  result. The exchange supplies codecs and materialization policy.
+- **`DatabaseClientOptions.Family`** — the model family fixed for every connection
+  in the pool. The exchange must use the exact same family instance.
 - **`DatabaseConnectionSettings`** — typed settings with a minimal `key=value;`
   connection-string parser (`Database`, `Principal`, `Endpoint=host[:port]`,
   `MaxPoolSize`), plus `For(Uri)` for generated or ambient resource
@@ -24,16 +25,20 @@ results, and pools authenticated connections.
 ## Dependencies
 
 `Database` (root contracts + exception root), `Database.Protocol` (framing +
-payload schemas), `Database.Types` (the shared value codec for parameters and
-rows), `Connections` (transport factories).
+shared messages and family binding), `Connections` (transport factories).
 
 ## Usage
 
 ```csharp
+// This example composes the SQL-owned extension from Database.Sql.Client.
+using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Client;
+
 var client = DatabaseClient.Create(new DatabaseClientOptions
 {
     Settings = DatabaseConnectionSettings.Parse("Database=app;Principal=svc;Endpoint=db.internal:5740"),
     ConnectionFactory = new TcpConnectionFactory(...),
+    Family = SqlProtocol.Family,
 });
 
 await using var connection = await client.RentAsync();

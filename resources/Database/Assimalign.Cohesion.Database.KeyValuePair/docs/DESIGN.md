@@ -267,3 +267,12 @@ behavior without reflection.
 
 No reflection, no runtime codegen: byte spans, the shared tuple codec, and
 boxed scalars only at the result-row boundary (the Execution family's shape).
+
+## Model-owned wire family (#1015)
+
+This package owns the KeyValuePair request and tabular result codecs; the shared protocol
+contains only mechanism. [Wire format](WIRE-PROTOCOL.md) specifies every message and
+scalar component for independent clients. The server binds KeyValueProtocol.Family
+once on accept, retains wire version 1.0 and the existing bytes, and negotiates
+incompatible majors before authentication. Result materialization belongs to
+Database.KeyValuePair.Client. Transport listeners remain supplied through generic IConnectionListener.

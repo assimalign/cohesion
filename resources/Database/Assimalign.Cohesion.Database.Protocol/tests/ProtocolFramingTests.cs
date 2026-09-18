@@ -47,7 +47,7 @@ public class ProtocolFramingTests
         // Truncated payload: header declares 10 bytes, stream carries 2.
         using var truncated = new MemoryStream();
         var header = new byte[ProtocolFrameHeader.Size];
-        new ProtocolFrameHeader(ProtocolMessageType.Execute, 10).WriteTo(header);
+        new ProtocolFrameHeader(ProtocolMessageType.Startup, 10).WriteTo(header);
         truncated.Write(header);
         truncated.Write(new byte[] { 1, 2 });
         truncated.Position = 0;
@@ -62,7 +62,7 @@ public class ProtocolFramingTests
         using var oversized = new MemoryStream();
         var bad = new byte[ProtocolFrameHeader.Size];
         System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(bad, ProtocolFrameHeader.MaxPayloadLength + 1);
-        bad[4] = (byte)ProtocolMessageType.Execute;
+        bad[4] = (byte)ProtocolMessageType.Startup;
         oversized.Write(bad);
         oversized.Position = 0;
 
@@ -72,7 +72,7 @@ public class ProtocolFramingTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Protocol] - Messages: startup, error, execute, and result payloads round-trip")]
+    [Fact(DisplayName = "Cohesion Test [Database.Protocol] - Messages: startup and error payloads round-trip")]
     public void Messages_EncodeDecode_ShouldRoundTrip()
     {
         var startup = new ProtocolStartupMessage(ProtocolVersion.Current, "appdb", "svc-user");
@@ -82,22 +82,7 @@ public class ProtocolFramingTests
         var error = new ProtocolErrorMessage(ProtocolErrorCode.AuthenticationFailed, "bad credentials");
         ProtocolErrorMessage.Decode(error.Encode()).ShouldBe(error);
 
-        var execute = new ProtocolExecuteMessage("SELECT * FROM users WHERE id = @id;", new Dictionary<string, byte[]>
-        {
-            ["id"] = new byte[] { 0x05, 0x01, 0x02 },
-        });
-        var decodedExecute = ProtocolExecuteMessage.Decode(execute.Encode());
-        decodedExecute.Statement.ShouldBe(execute.Statement);
-        decodedExecute.Parameters["id"].ShouldBe(new byte[] { 0x05, 0x01, 0x02 });
 
-        var headerMessage = new ProtocolResultHeaderMessage(new List<(string, byte)> { ("id", 5), ("name", 9) });
-        var decodedHeader = ProtocolResultHeaderMessage.Decode(headerMessage.Encode());
-        decodedHeader.Columns.Count.ShouldBe(2);
-        decodedHeader.Columns[1].Name.ShouldBe("name");
-        decodedHeader.Columns[1].Type.ShouldBe((byte)9);
-
-        var complete = new ProtocolResultCompleteMessage(42);
-        ProtocolResultCompleteMessage.Decode(complete.Encode()).AffectedCount.ShouldBe(42);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Protocol] - Messages: malformed payloads throw ProtocolException")]
@@ -105,7 +90,5 @@ public class ProtocolFramingTests
     {
         Should.Throw<ProtocolException>(() => ProtocolStartupMessage.Decode(new byte[] { 0, 1 }));
         Should.Throw<ProtocolException>(() => ProtocolErrorMessage.Decode(new byte[] { 0 }));
-        Should.Throw<ProtocolException>(() => ProtocolExecuteMessage.Decode(new byte[] { 0, 0, 0, 5, 65 })); // string length beyond payload
-        Should.Throw<ProtocolException>(() => ProtocolResultCompleteMessage.Decode(new byte[] { 1, 2 }));
     }
 }

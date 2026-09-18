@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Client;
 
@@ -16,14 +17,16 @@ namespace Assimalign.Cohesion.Database.Client;
 internal sealed class DefaultDatabaseClient : IDatabaseClient
 {
     private readonly IConnectionFactory _connectionFactory;
+    private readonly ProtocolMessageFamily _family;
     private readonly ConcurrentStack<PooledDatabaseConnection> _idle = new();
     private readonly SemaphoreSlim _slots;
     private bool _isDisposed;
 
-    internal DefaultDatabaseClient(DatabaseConnectionSettings settings, IConnectionFactory connectionFactory)
+    internal DefaultDatabaseClient(DatabaseConnectionSettings settings, IConnectionFactory connectionFactory, ProtocolMessageFamily family)
     {
         Settings = settings;
         _connectionFactory = connectionFactory;
+        _family = family;
         _slots = new SemaphoreSlim(settings.MaxPoolSize, settings.MaxPoolSize);
     }
 
@@ -52,7 +55,7 @@ internal sealed class DefaultDatabaseClient : IDatabaseClient
                 await idle.CloseAsync().ConfigureAwait(false);
             }
 
-            var connection = new PooledDatabaseConnection(this, _connectionFactory, Settings);
+            var connection = new PooledDatabaseConnection(this, _connectionFactory, Settings, _family);
 
             try
             {

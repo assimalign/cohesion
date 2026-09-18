@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Protocol;
+
+namespace Assimalign.Cohesion.Database.KeyValuePair;
 
 /// <summary>
 /// Closes an execute exchange: how many records the statement affected
@@ -13,7 +15,7 @@ public sealed record ProtocolResultCompleteMessage(long AffectedCount)
     /// <summary>
     /// Encodes the message payload.
     /// </summary>
-    /// <returns>The payload bytes for a <see cref="ProtocolMessageType.ResultComplete"/> frame.</returns>
+    /// <returns>The payload bytes for a <see cref="KeyValueProtocolMessageType.ResultComplete"/> frame.</returns>
     public byte[] Encode()
     {
         var buffer = new List<byte>(sizeof(long));

@@ -10,6 +10,8 @@
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Shouldly" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.RecoveryFixture" ReferenceOutputAssembly="false" />
 	</ItemGroup>
 	<Target Name="CopyDocumentRecoveryFixture" AfterTargets="Build">

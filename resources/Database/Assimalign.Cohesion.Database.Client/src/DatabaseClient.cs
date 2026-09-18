@@ -11,10 +11,10 @@ public static class DatabaseClient
     /// Creates a pooling client from options. Connections dial lazily — creation
     /// performs no I/O.
     /// </summary>
-    /// <param name="options">The composition options. Requires settings with a database and endpoint, and a connection factory.</param>
+    /// <param name="options">The composition options. Requires settings with a database and endpoint, a connection factory, and the model's message family.</param>
     /// <returns>The client.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is null.</exception>
-    /// <exception cref="ArgumentException">Thrown when the options carry no settings, no connection factory, no database name, no endpoint, or a non-positive pool size.</exception>
+    /// <exception cref="ArgumentException">Thrown when the options carry no settings, no connection factory, no family, no database name, no endpoint, or a non-positive pool size.</exception>
     public static IDatabaseClient Create(DatabaseClientOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -40,6 +40,11 @@ public static class DatabaseClient
             throw new ArgumentException("The pool size must be positive.", nameof(options));
         }
 
-        return new DefaultDatabaseClient(options.Settings, options.ConnectionFactory);
+        if (options.Family is null)
+        {
+            throw new ArgumentException("A model message family is required.", nameof(options));
+        }
+
+        return new DefaultDatabaseClient(options.Settings, options.ConnectionFactory, options.Family);
     }
 }

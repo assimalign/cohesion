@@ -6,8 +6,8 @@ over the shared `Database.Client` pooling core.
 
 ## Purpose
 
-Gives key-value consumers a typed wire client without any engine or language
-reference: the connection builds the model's command grammar
+Gives key-value consumers a typed wire client using the model-owned codecs:
+the connection builds the model's command grammar
 (`GET @k`, `PUT @k @v [IF …]`, `DELETE @k [IF @etag]`, `EXISTS @k`,
 `SCAN [FROM/TO/PREFIX/LIMIT]` — the contract in the engine package's
 `docs/COMMANDS.md`) with byte parameters, sends it over the shared core, and
@@ -32,12 +32,13 @@ the stable `KeyValueClientErrorKind` taxonomy with the wire code preserved.
 
 - `Assimalign.Cohesion.Database` — the area root (exception ancestry).
 - `Assimalign.Cohesion.Database.Client` — the shared pooling/protocol core.
+- `Assimalign.Cohesion.Database.KeyValuePair` — family identifiers and payload codecs.
 - `Assimalign.Cohesion.Database.Types` — the shared value codec (transitive wire
   encoding of parameters and rows).
 - `Assimalign.Cohesion.Connections` — the transport factory that dials the server.
 
-Deliberately no reference to the engine package (`Database.KeyValuePair`) and no
-hosting reference — the client speaks the wire contract only.
+The model reference supplies the wire contract; the client constructs no engine
+and references no hosting module.
 
 ## Usage
 

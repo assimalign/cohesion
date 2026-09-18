@@ -136,6 +136,7 @@ public sealed class GraphCatalogClientTests
     private static IDatabaseClient CreateClient(TcpConnectionListener listener, string database)
         => DatabaseClient.Create(new DatabaseClientOptions
         {
+            Family = GraphProtocol.Family,
             Settings = new DatabaseConnectionSettings { Database = database, EndPoint = listener.EndPoint },
             ConnectionFactory = new TcpConnectionFactory(),
         });

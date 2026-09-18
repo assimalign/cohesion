@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Protocol;
+
+namespace Assimalign.Cohesion.Database.KeyValuePair;
 
 /// <summary>
 /// Opens a streamed result: the column names and type identifiers of the rows that
-/// follow. Row frames (<see cref="ProtocolMessageType.ResultRow"/>) carry each row
+/// follow. Row frames (<see cref="KeyValueProtocolMessageType.ResultRow"/>) carry each row
 /// as shared tuple-codec bytes, one typed component per column.
 /// </summary>
 /// <param name="Columns">The columns: name plus the shared type identity byte.</param>
@@ -14,7 +16,7 @@ public sealed record ProtocolResultHeaderMessage(IReadOnlyList<(string Name, byt
     /// <summary>
     /// Encodes the message payload.
     /// </summary>
-    /// <returns>The payload bytes for a <see cref="ProtocolMessageType.ResultHeader"/> frame.</returns>
+    /// <returns>The payload bytes for a <see cref="KeyValueProtocolMessageType.ResultHeader"/> frame.</returns>
     public byte[] Encode()
     {
         var buffer = new List<byte>(64);

@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -9,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Client;
 
 /// <summary>
 /// One authenticated client connection: a protocol session bound to a database on
-/// the server, able to execute statements and stream their results back.
+/// the server and one immutable model message family.
 /// </summary>
 /// <remarks>
 /// Connections are not thread-safe — one exchange at a time, mirroring the
@@ -39,6 +38,9 @@ public interface IDatabaseConnection : IAsyncDisposable
     /// </summary>
     bool IsOpen { get; }
 
+    /// <summary>Gets the message family fixed when the owning pool was created.</summary>
+    ProtocolMessageFamily Family { get; }
+
     /// <summary>
     /// Opens the connection: dials the transport and runs the
     /// startup/authenticate/ready handshake. A no-op when already open.
@@ -48,13 +50,14 @@ public interface IDatabaseConnection : IAsyncDisposable
     ValueTask OpenAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Executes statement text on the server in the bound database's language and
-    /// materializes the result.
+    /// Executes one complete model-owned framed exchange.
     /// </summary>
-    /// <param name="statement">The statement text.</param>
-    /// <param name="parameters">Parameter values keyed by bare parameter name, or null when the statement takes none.</param>
+    /// <typeparam name="TResult">The model's result type.</typeparam>
+    /// <param name="exchange">The operation, bound to this connection's exact family instance.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    /// <returns>The materialized result: columns and rows for row-returning statements, the affected count otherwise.</returns>
-    /// <exception cref="DatabaseClientException">Thrown when the server reports an error or the connection breaks mid-exchange. Statement-level failures (parse, execution) leave the connection usable.</exception>
-    ValueTask<DatabaseClientResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default);
+    /// <returns>The model-owned result.</returns>
+    /// <exception cref="ArgumentNullException">The exchange is null.</exception>
+    /// <exception cref="ArgumentException">The exchange belongs to a different family.</exception>
+    /// <exception cref="DatabaseClientException">The server reports an error or the connection fails.</exception>
+    ValueTask<TResult> ExecuteAsync<TResult>(IDatabaseProtocolExchange<TResult> exchange, CancellationToken cancellationToken = default);
 }

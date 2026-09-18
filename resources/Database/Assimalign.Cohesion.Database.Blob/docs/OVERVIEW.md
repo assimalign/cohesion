@@ -44,8 +44,16 @@ Disposing a session aborts its pending work. Blob has no statement or query lang
 `ExecuteAsync` rejects commands, including database switching and server administration.
 Creating and dropping logical databases remains the host-side engine API.
 
-Dependencies are the Database root, Blob.Storage, Blob.Catalog, Database.Storage, and
-Database.Transactions. The implementation targets .NET 10, Preview C#, and NativeAOT without
+The package owns the Blob wire message family. Bind a `ProtocolChannel` to `BlobProtocol.Family`
+at the Blob endpoint. `BlobReadMessage` and `BlobWriteMessage` identify an object;
+`BlobProtocolTransfer.SendAsync` and `ReceiveAsync` copy its content using at most one 64 KiB
+chunk in flight, with a receiver acknowledgement after each destination write. The helpers
+accept non-seekable streams and unknown lengths. The caller supplies the shared handshake,
+request dispatch, authentication, and upload publication. They are protocol building blocks
+for the separate Blob client and server work, not a connection-owning client.
+
+Dependencies are the Database root, Database.Protocol, Blob.Storage, Blob.Catalog,
+Database.Storage, and Database.Transactions. The implementation targets .NET 10, Preview C#, and NativeAOT without
 reflection or Microsoft.Extensions packages. Wire clients, security, replication, hosting
 integration, and compiled-schema provisioning are outside this package's current scope.
 

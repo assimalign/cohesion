@@ -1,14 +1,16 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Protocol;
+
+namespace Assimalign.Cohesion.Database.KeyValuePair;
 
 /// <summary>
-/// The execute request: statement text plus named parameter values, each encoded
-/// with the shared self-describing tuple codec (name string, then one typed
-/// component per value) so every model speaks one parameter encoding.
+/// The Key-Value execute request: statement text plus named parameter values.
+/// Each value uses one component of the shared scalar tuple codec; this
+/// request shape belongs to the Key-Value family.
 /// </summary>
-/// <param name="Statement">The statement text (SQL, OQL, or a model command).</param>
+/// <param name="Statement">The Key-Value statement text.</param>
 /// <param name="Parameters">The encoded parameter tuples: name → tuple-codec component bytes.</param>
 public sealed record ProtocolExecuteMessage(string Statement, IReadOnlyDictionary<string, byte[]> Parameters)
 {
@@ -23,7 +25,7 @@ public sealed record ProtocolExecuteMessage(string Statement, IReadOnlyDictionar
     /// <summary>
     /// Encodes the message payload.
     /// </summary>
-    /// <returns>The payload bytes for a <see cref="ProtocolMessageType.Execute"/> frame.</returns>
+    /// <returns>The payload bytes for a <see cref="KeyValueProtocolMessageType.Execute"/> frame.</returns>
     public byte[] Encode()
     {
         var buffer = new List<byte>(128);

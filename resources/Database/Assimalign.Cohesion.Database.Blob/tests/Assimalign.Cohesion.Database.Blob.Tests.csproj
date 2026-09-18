@@ -10,6 +10,7 @@
     <CohesionPackageReference Include="coverlet.collector" />
     <CohesionPackageReference Include="Shouldly" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.StreamingFixture" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <Target Name="CopyBlobStreamingFixture" AfterTargets="Build">

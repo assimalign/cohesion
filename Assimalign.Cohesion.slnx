@@ -1889,6 +1889,10 @@
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Storage/tests/">
 		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Storage/tests/Assimalign.Cohesion.Database.Sql.Storage.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Tcp/" />
+	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Sql.Tcp/src/">
+		<Project Path="resources/Database/Assimalign.Cohesion.Database.Sql.Tcp/src/Assimalign.Cohesion.Database.Sql.Tcp.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Database/Assimalign.Cohesion.Database.Storage/">
 		<File Path="resources/Database/Assimalign.Cohesion.Database.Storage/README.md" />
 	</Folder>

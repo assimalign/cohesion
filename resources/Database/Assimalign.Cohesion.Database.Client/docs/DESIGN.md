@@ -1,74 +1,74 @@
 # Assimalign.Cohesion.Database.Client — Design
 
-The client half of the #852 spine (area architecture:
-[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)): one model-agnostic protocol
-client the five per-model clients wrap, exactly mirroring the one
-model-agnostic server. Model semantics live in the statement text and the
-per-model packages; this project owns everything that is true for all of them —
-dialing, handshake, execute exchange, value encoding, pooling, error mapping.
+The shared client owns transport dialing, startup/authentication, framing, pooling,
+and connection health. Model clients own request encoding, response validation, and
+result materialization. The shared client references no model package and imposes
+no result shape.
 
-## Why-this-not-that decisions
+## Family boundary
 
-- **Text in, materialized values out.** The connection executes statement
-  *text* plus boxed parameters — the same shape the wire carries and the same
-  seam the server calls on `IDatabaseSession`. Typed request/result surfaces
-  (SQL command objects, document APIs) belong to the per-model clients that
-  know their language; putting any of them here would make the shared core
-  model-aware.
-- **Results materialize (MVP).** The wire streams `ResultHeader → ResultRow* →
-  ResultComplete`, but a pooled connection is only reusable once its exchange is
-  fully drained — handing the application an unfinished stream would couple row
-  consumption to pool health (the classic leaked-reader bug). Buffering rows
-  keeps pooling correct and simple; an incremental surface can be added by the
-  per-model clients once cursors/paging give it real semantics.
-- **Pooling reuses the authenticated session.** A pooled connection returns to
-  an idle stack with its wire session still in the ready state; the next rent
-  skips dial + handshake entirely (the acceptance criterion behind the pool). A
-  slot semaphore bounds total connections at `MaxPoolSize`; exhausted rents wait
-  for a return rather than failing. Health at return decides reuse: only
-  statement-level errors (`ParseFailure`/`ExecutionFailure`) leave a connection
-  poolable — every other error frame, transport fault, or mid-exchange close
-  marks it broken and it is closed instead of pooled. Known limitation: a
-  server-side eviction (idle timeout) of an *idle pooled* connection is
-  discovered at next use, not at return — a rent-time liveness ping is future
-  hardening, not MVP.
-- **Connection string carries identity, never the driver.** `key=value;` parsing
-  covers `Database`, `Principal`, `Endpoint=host[:port]` (→ `DnsEndPoint`), and
-  `MaxPoolSize`. The transport factory is a typed option
-  (`DatabaseClientOptions.ConnectionFactory`) because drivers are composed
-  statically for AOT — a driver name in a string implies runtime plugin
-  loading, which the platform forbids. Non-network endpoints (the in-memory
-  transport's named endpoints) cannot be expressed as strings at all; the typed
-  `EndPoint` property is the escape hatch, and it is how tests compose against
-  `Connections.InMemory`.
-- **Errors carry the wire code.** `DatabaseClientException : DatabaseException`
-  exposes the stable `ProtocolErrorCode` so callers program against the wire
-  contract, not message text. Handshake rejections (unsupported version,
-  unknown database, capacity, failed authentication) surface the server's code
-  verbatim from the error frame.
+Clients depend on shared mechanism and their own model's wire codecs:
 
-## Lifecycle pattern
+```mermaid
+flowchart LR
+    SqlClient["Database.Sql.Client"] --> Client["Database.Client"]
+    SqlClient --> Sql["Database.Sql"]
+    KvClient["Database.KeyValuePair.Client"] --> Client
+    KvClient --> Kv["Database.KeyValuePair"]
+    Client --> Protocol["Database.Protocol"]
+    Sql --> Protocol
+    Kv --> Protocol
+```
 
-`DatabaseClient.Create` performs no I/O. Rent → open-or-reuse → execute →
-dispose-returns-to-pool. Disposing the client closes all idle connections;
-connections still rented at that moment close for real when they return. Real
-closure sends a best-effort `Terminate` frame before transport teardown.
+| Package | Responsibility |
+| --- | --- |
+| Database.Client | Dial, handshake, bounded pooling, framed exchange lifetime |
+| Database.Protocol | Framing, shared messages, immutable family binding |
+| Database.Sql.Client | SQL parameter encoding, decoding, and materialization |
+| Database.KeyValuePair.Client | Key-value encoding, decoding, and materialization |
+| Model packages | Model identifiers and payload codecs |
 
-## AOT posture
+`DatabaseClientOptions.Family` is mandatory. The pool captures the exact immutable
+`ProtocolMessageFamily` instance before dialing. Every connection uses a
+`ProtocolChannel` bound to that family throughout its lifetime. An
+`IDatabaseProtocolExchange<TResult>` supplies its required family and consumes one
+exchange through the channel reader and writer. A different family instance is
+rejected before execution, including a family that reuses the same identifier bytes.
 
-No reflection: parameter and row values go through `DatabaseValueCodec`'s
-runtime-type switch, results are boxed scalars, and transports are composed
-statically.
+The operation returns only after consuming the complete response and must not
+retain or dispose the borrowed reader/writer. SQL and Key-Value materialize;
+a future Blob client can transfer bounded chunks directly to caller-owned streams.
+Neither choice becomes shared policy.
 
-## Non-goals
+## Lifecycle and errors
 
-- No per-model APIs, no LINQ, no ORM surface — per-model clients build here.
-- No client-side statement parsing or validation; the server's session owns its
-  language.
-- No transaction frames yet (the wire's `Transaction` message lands with the
-  protocol's transaction payload schema).
-- No TLS logic — security layers compose in the connection factory
-  (`Connections.Security`).
+Creation performs no I/O. Rent opens or reuses an authenticated session.
+Disposing a healthy rental returns it to an idle stack; `MaxPoolSize` bounds
+rentals and exhausted rents wait. Disposing the client closes idle connections;
+outstanding rentals close when returned. Closure sends best-effort `Terminate`.
+
+Completed `ParseFailure` and `ExecutionFailure` rejections remain reusable.
+Other errors, framing violations, transport failure, cancellation, and decoder
+exceptions invalidate the connection: an incomplete response cannot enter the pool.
+Handshake rejections preserve their wire code in `DatabaseClientException`.
+Idle server-side evictions remain discoverable at next use; rent-time pings are
+future work.
+
+## Settings and compatibility
+
+Connection strings carry database, principal, endpoint, and pool size. Drivers are
+typed `IConnectionFactory` options, composed statically. Typed endpoints also
+support in-memory transports. The endpoint selects the model; startup carries no
+model discriminator.
+
+SQL and Key-Value wire bytes stay at version 1.0. Moving APIs is a managed API
+migration: direct SQL callers import `Database.Sql.Client` and bind
+`SqlProtocol.Family`, or use the existing typed client. `DatabaseClientResult`
+and `DatabaseClientColumn` now live in the SQL client's namespace. New model
+clients implement the generic exchange interface using their model's exact family.
+
+No reflection, code generation, driver discovery, model parser, or model result
+policy is required. TLS remains a connection-factory concern.
 
 
 ## Declarative command delivery

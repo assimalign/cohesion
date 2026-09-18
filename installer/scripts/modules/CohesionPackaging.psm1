@@ -222,6 +222,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Database/Assimalign.Cohesion.Database.Sql.Language'
     'resources/Database/Assimalign.Cohesion.Database.Sql.Schema'
     'resources/Database/Assimalign.Cohesion.Database.Sql.Storage'
+    'resources/Database/Assimalign.Cohesion.Database.Sql.Tcp'
     'resources/Database/Assimalign.Cohesion.Database.Storage'
     'resources/Database/Assimalign.Cohesion.Database.Testing'
     'resources/Database/Assimalign.Cohesion.Database.Transactions'

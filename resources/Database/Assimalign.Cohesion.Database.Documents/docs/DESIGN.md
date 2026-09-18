@@ -26,7 +26,7 @@ flowchart TD
 
 | Assembly | Responsibility |
 | --- | --- |
-| `Database.Documents` | Engine, bound sessions, CRUD, OQL query/index-DDL plans and execution, builder extension |
+| `Database.Documents` | Engine, bound sessions, CRUD, OQL query/index-DDL plans and execution, document protocol family, builder extension |
 | `Database.Documents.Language` | Profile, parser, AST, stable diagnostic locations |
 | `Database.Documents.Catalog` | Versioned collection/document/index metadata and transactional index maintenance |
 | `Database.Documents.Storage` | Explicit JSON validation, stamped metadata/chunk records, kernel record-space adapter |
@@ -242,7 +242,7 @@ The current engine materializes query inputs/results and whole JSON values in
 managed memory. Chunk persistence handles documents larger than a page but does
 not promise a bounded heap independent of document/query size. Database-wide
 writer locking is conservative; there is no query-cost statistics model, join,
-subquery, external sort, wire protocol, replication, security, hosting wiring,
+subquery, external sort, document protocol server/client, replication, security, hosting wiring,
 ApplicationModel integration, or compiled-schema provisioning.
 
 Co-located tests cover nested/mixed JSON, expected-version writes, explicit commit
@@ -262,3 +262,64 @@ The engine's durability setting configures the storage's physical commit gate.
 The current transaction coordinator flushes logical document commits synchronously
 in both settings; grouped logical commit batching is not claimed. The WAL flush
 worker remains the engine-owned implementation of the shared storage flush duty.
+
+## Document wire family
+
+`DocumentProtocol.Family` contributes the Documents message vocabulary to the shared
+`ProtocolChannel`. The channel is permanently bound to this family at the endpoint; neither a
+request nor the startup payload can change the model. The shared package owns framing, startup,
+authentication, errors, liveness and termination. Documents owns OQL requests, JSON parameter
+objects and JSON results. This mirrors the shared lexer/parser mechanism and model language profile.
+There is no document server or document client in this increment. The public family and codecs
+are the surface for that work. `DocumentProtocolTests` exercises a complete startup/authentication,
+OQL request, engine execution, nested result and termination exchange over `Connections.InMemory`.
+
+The envelope remains protocol **1.0**: unsigned 32-bit big-endian payload length, one message-type
+byte, then exactly that many payload bytes. The length excludes the five-byte header and is at
+most 16,777,216. Shared codes 1–4 and 10–13 retain their meaning; 14–63 are reserved. The Documents
+endpoint admits only its family below and the shared codes. Code 64 on another model's endpoint
+belongs to that endpoint's vocabulary. A channel and a client pool cannot switch families.
+Unknown major versions are rejected with shared `UnsupportedVersion`; the negotiated minor is
+the smaller supported/requested minor. No deployed SQL or Key-Value frame changes.
+
+All lengths and counts below are signed big-endian integers. A string is an `int32` byte length
+followed by that many UTF-8 bytes; a negative length is invalid. No padding is present.
+
+| Byte | Direction | Payload |
+| --- | --- | --- |
+| 64 (`Execute`) | Client → server | Statement string; `int32` parameter-byte length; exactly that many UTF-8 JSON bytes containing one object |
+| 65 (`Document`) | Server → client | Exactly one complete UTF-8 JSON value occupying the entire payload, with no inner length prefix |
+| 66 (`Complete`) | Server → client | Exactly eight bytes: nonnegative `int64` count of Document frames emitted for this request |
+
+Parameters are named object members and may themselves contain nested values. An empty parameter
+set is `{}`. A result can be an object, array, string, number, Boolean or null; absent properties
+stay absent. The codec preserves the original bytes, including whitespace and Unicode spelling.
+JSON comments, trailing commas, multiple top-level values, malformed UTF-8 and nesting deeper
+than 256 levels are invalid. Extra bytes after the Execute parameter object or Complete count
+are protocol violations. Objects and arrays stay intact; there is no schema header or positional
+field vocabulary.
+
+After the shared Ready message the client sends one Execute and waits for zero or more Document
+messages followed by exactly one Complete. A shared Error instead terminates the current exchange;
+no Complete follows it. Statements are serialized on a connection. An empty result has Complete
+count zero. The family does not fragment an individual JSON value: each result must fit one frame;
+only Blob imposes a chunked byte-stream exchange. Session implementations must verify the completion
+count against the number of results received and reject out-of-order messages.
+
+The sequence shows the model-owned result exchange within the shared session lifecycle:
+
+```mermaid
+sequenceDiagram
+    participant Client as Document consumer
+    participant Channel as Shared protocol channel
+    participant Session as Document endpoint
+    Client->>Channel: Startup / authentication
+    Channel->>Session: Shared session handshake
+    Session-->>Client: Ready
+    Client->>Session: Execute (OQL, JSON parameters)
+    loop Each matching document
+        Session-->>Client: Document (nested JSON value)
+    end
+    Session-->>Client: Complete (result count)
+    Client->>Session: Terminate
+```

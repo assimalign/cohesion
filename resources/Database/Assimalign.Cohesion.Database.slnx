@@ -560,4 +560,7 @@
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Connections/Assimalign.Cohesion.Connections.InMemory/src/Assimalign.Cohesion.Connections.InMemory.csproj" />
 	</Folder>
+  <Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Tcp/src/">
+    <Project Path="Assimalign.Cohesion.Database.Sql.Tcp/src/Assimalign.Cohesion.Database.Sql.Tcp.csproj" />
+  </Folder>
 </Solution>

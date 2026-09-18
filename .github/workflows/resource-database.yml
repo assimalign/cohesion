@@ -60,6 +60,7 @@ jobs:
             'Assimalign.Cohesion.Database.Sql.Language',
             'Assimalign.Cohesion.Database.Sql.Schema',
             'Assimalign.Cohesion.Database.Sql.Storage',
+            'Assimalign.Cohesion.Database.Sql.Tcp',
             'Assimalign.Cohesion.Database.Storage',
             'Assimalign.Cohesion.Database.Testing',
             'Assimalign.Cohesion.Database.Transactions',
