@@ -1,34 +1,44 @@
 # The Declared SQL Dialect
 
-The contract for what the Cohesion SQL language accepts today. Anything not listed
-as **Supported** is out of the dialect: the parser either rejects it (`SQL0002`) or
-recognizes its tokens without statement support (listed under *Recognized, not
-supported* so diagnostics stay precise). The dialect grows deliberately — extending
-it means updating the parser, this matrix, and the conformance corpus in the same
-change (open/closed: new statement kinds extend the parser's keyword dispatch and
-new expression kinds extend the precedence ladder; existing AST shapes stay stable
-for planners and tooling).
+The contract for the Cohesion SQL surface that executes today. **Supported** means
+the documented subset has been measured through a live engine, including correct
+results, state changes, or intended semantic errors. Recognized clauses without
+execution support report `COHDBL001`; unknown commands report `SQL0002`. Extending
+the profile requires updating the parser, this matrix, and the engine's
+`SqlLanguageConformanceTests` execution-case table in the same change. That test
+enumerates the profile and fails if any advertised clause lacks a passing case.
 
 ## Statement matrix
 
-The B1 measurement was **21 of 48 declared clauses**. B2 implements **32 of 48**:
-the same 21 plus `CONSTRAINT`, `FOREIGN KEY`, `REFERENCES`, `CHECK`, `UNIQUE`,
-`CASCADE`, `RESTRICT`, `BEGIN`, `COMMIT`, `ROLLBACK`, and optional `TRANSACTION`.
-The remaining **16** are set operations (`UNION`, `INTERSECT`, `EXCEPT`), CTEs
-(`WITH`, `RECURSIVE`), window clauses (`WINDOW`, `OVER`, `PARTITION`), views
-(`CREATE VIEW`, `DROP VIEW`), `NATURAL`, `USING`, `TOP`, `ALL`, `FETCH`, and `RETURNING`.
+Phase 13 measures **27 of 48 declared clauses** against the live SQL engine.
+The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
+removed in Phase 12e (#1019–#1021), plus `CAST`, removed by this audit (#1022):
+its evaluator returned the operand unchanged even for invalid conversions.
+The intermediate 28/48 figure was a profile declaration, not an execution measurement.
+
+The **21 excluded clauses** are those five plus set operations (`UNION`,
+`INTERSECT`, `EXCEPT`), CTEs (`WITH`, `RECURSIVE`), window clauses (`WINDOW`,
+`OVER`, `PARTITION`), views (`CREATE VIEW`, `DROP VIEW`), `NATURAL`, `USING`,
+`TOP`, `ALL`, `FETCH`, and `RETURNING`. Counts describe named clauses, not
+complete ISO SQL support; the boundaries below are part of the contract.
 
 | Statement | Status | Notes |
 |---|---|---|
-| `SELECT` | Supported | `DISTINCT`, column lists with `AS`/implicit aliases, `FROM` with schema-qualified names + aliases, `INNER/LEFT [OUTER]/RIGHT [OUTER]/FULL [OUTER]/CROSS JOIN ... ON`, `WHERE`, `GROUP BY` (multi), `HAVING`, `ORDER BY ASC/DESC` (multi), `LIMIT`, `OFFSET`, scalar/`IN`/`EXISTS` subqueries |
-| `INSERT` | Supported | optional column list, multi-row `VALUES`, `INSERT ... SELECT` |
+| `SELECT` | Supported subset, measured | Single stored table or virtual system relation required; `DISTINCT`, projections and aliases, scalar expressions, `WHERE`, multi-expression `ORDER BY ASC/DESC`, nonnegative integer `LIMIT`/`OFFSET`. The only aggregate shape is a lone `COUNT(*)`, optionally aliased and filtered; `COUNT(column)`, `COUNT(DISTINCT ...)`, `SUM`/`AVG`/`MIN`/`MAX`, and mixed/nested aggregate projections do not execute (#1020). `SELECT` without `FROM` is rejected by the planner. |
+| `INSERT` / `VALUES` | Supported subset, measured | Optional column list and multi-row literal/scalar `VALUES`; `INSERT ... SELECT` reports `COHDBL001` (#1021). |
 | `UPDATE` | Supported | multi-column `SET`, `WHERE` |
 | `DELETE` | Supported | optional `WHERE` |
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
-| `ALTER TABLE` | Supported | `ADD [COLUMN] <definition>`, `DROP [COLUMN] <name>`, `ADD [CONSTRAINT <name>] <constraint>`, `DROP CONSTRAINT <name>` |
+| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. ADD COLUMN without a default preserves old rows with null in the new nullable column; literal defaults apply to subsequent inserts only. Existing rows are **not backfilled** with the literal default. Nonliteral ADD COLUMN defaults are silently discarded for both old and new rows; this form is not supported. These measured default gaps remain MVP work (#1023). |
 | `DROP TABLE` | Supported | `IF EXISTS` |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
+| `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
+| `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys with ASC/DESC execute. Projection aliases are not resolved and produce an unknown-column error. Integer keys are evaluated as constants, **not select-list ordinals**; `ORDER BY 1 DESC` does not sort by the first projection. Alias/ordinal ordering remains MVP work (#1024). |
+| `CAST` | Recognized, not supported | `COHDBL001` in projections, predicates, write expressions, and DDL expressions. The former no-op did not implement conversion or target validation; restore only with real execution (#1022). |
+| `JOIN` | Recognized, not supported | Inner, outer, and cross joins report `COHDBL001` (#1019). |
+| `GROUP BY` / `HAVING` | Recognized, not supported | `COHDBL001`; grouping and broader aggregates remain #1020. |
+| Subqueries / `INSERT ... SELECT` | Recognized, not supported | Scalar, `IN`/`NOT IN`, `EXISTS`/`NOT EXISTS`, derived-table, correlated, and insert-source queries report `COHDBL001` (#1021). Literal `IN` lists remain supported. |
 | `TOP` / `SELECT ALL` / `FETCH` | Recognized, not supported | row-limit and select modifiers rejected with `COHDBL001` |
 | DML `RETURNING` | Recognized, not supported | rejected with `COHDBL001` |
 | `NATURAL JOIN` / `JOIN ... USING` | Recognized, not supported | rejected with `COHDBL001` |
@@ -36,7 +46,7 @@ The remaining **16** are set operations (`UNION`, `INTERSECT`, `EXCEPT`), CTEs
 | `WITH` / `WITH RECURSIVE` (CTEs) | Recognized, not supported | rejected with `COHDBL001` |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `COHDBL001` |
 | `CREATE VIEW` / `DROP VIEW` | Recognized, not supported | rejected with `COHDBL001` |
-| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported | column and table declarations normalize into constraint definitions; `UNIQUE` lowers to a unique catalog index |
+| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the supported scalar functions; parameters and aggregates are excluded. |
 | `ON DELETE CASCADE` / `ON DELETE RESTRICT` | Supported | omitted deletion action defaults to `RESTRICT`; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
@@ -83,8 +93,7 @@ text, including escaped quotes for string defaults, or null when absent.
 
 Projection, aliases, parameters, `WHERE`, `ORDER BY`, `DISTINCT`, a lone
 `COUNT(*)`, `LIMIT`, and `OFFSET` follow the engine's existing SELECT surface.
-The broader parser matrix above does not imply additional engine support for
-joins, grouping, other aggregates, or subqueries over these relations. A client
+The supported subsets above apply equally to these relations. A client
 can issue, for example:
 
 ```sql
@@ -107,9 +116,12 @@ extension views are recorded in the
 Precedence, low to high: `OR` < `AND` < `NOT` < comparison (`=`, `<>`, `<`, `>`,
 `<=`, `>=`, `IS [NOT] NULL`, `[NOT] BETWEEN`, `[NOT] IN`, `[NOT] LIKE`) < additive
 (`+`, `-`, `||`) < multiplicative (`*`, `/`, `%`) < unary (`-`, `~`, `NOT`) <
-primary. Primary forms: literals, parameters (`@name`, `$1`), column references up
-to `schema.table.column`, function calls (including `COUNT(*)`), `CASE` (simple and
-searched), `CAST(x AS TYPE[(args)])`, parenthesized expressions, subqueries.
+primary. Executable primary forms include literals, parameters (`@name`, `$1`),
+column references, supported function calls, simple/searched `CASE`, and
+parenthesized expressions. `CAST` and subqueries retain syntax trees for tooling
+but carry `COHDBL001` and cannot execute. SQL aggregate support is limited to a
+lone `COUNT(*)` projection. `~` is parsed but not evaluated; it is outside the
+executable scalar subset.
 
 ## Literals
 
@@ -145,8 +157,11 @@ model orders and stores values identically.
 
 ## Builtin functions
 
-Parsed as function calls today; evaluation support lands with the executor and is
-tracked per function there. Declared names: aggregates `COUNT` (incl. `COUNT(*)`),
+The profile's function list is lexical vocabulary, not an execution claim and
+not part of the 48-clause denominator. Executable scalar functions are `COALESCE`,
+`UPPER`, `LOWER`, `LENGTH`, and `ABS`; aggregate support is only a lone `COUNT(*)`.
+Other parsed calls can still fail in planning/evaluation and must not be inferred
+to work from a supported `SELECT`. Recognized names include aggregates `COUNT`,
 `SUM`, `AVG`, `MIN`, `MAX`; null handling `COALESCE`, `NULLIF`; strings `TRIM`,
 `LTRIM`, `RTRIM`, `UPPER`, `LOWER`, `SUBSTRING`, `LENGTH`, `REPLACE`, `CONCAT`;
 numeric `ABS`, `CEILING`, `FLOOR`, `ROUND`, `POWER`, `SQRT`, `MOD`; date/time

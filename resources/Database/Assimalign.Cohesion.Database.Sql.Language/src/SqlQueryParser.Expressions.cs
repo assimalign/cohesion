@@ -600,6 +600,13 @@ public sealed partial class SqlQueryParser
     private SqlExpression ParseCast(ref TokenLexer lexer)
     {
         var pos = lexer.Current.Position;
+        // #1022: the evaluator ignores the target type. Diagnose the expression here,
+        // where CAST is syntax, so identifiers and aliases named cast remain valid.
+        if (!Supports(SqlClauses.Cast))
+        {
+            _parseDiagnostics.Add(QueryDiagnostics.UnsupportedClause(SqlClauses.Cast, Profile.Language,
+                Location.Create(1, 1, pos, pos + lexer.Current.Value.Length)));
+        }
         Advance(ref lexer); // consume CAST
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)

@@ -216,9 +216,12 @@ public class SqlExpressionParserTests
     }
 
     [Fact]
-    public void Parse_Cast_ReturnsCastExpression()
+    public void Parse_Cast_RetainsSyntaxAndReportsUnsupportedConversion()
     {
-        var expr = ParseExpr("CAST(x AS INT)");
+        // #1022: preserve the AST for tooling, but never advertise the evaluator's no-op as a conversion.
+        var statement = (SqlQueryStatement)_parser.Parse("SELECT CAST(x AS INT);");
+        statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "COHDBL001");
+        var expr = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns[0].Expression;
         var cast = expr.ShouldBeOfType<SqlCastExpression>();
         cast.Operand.ShouldBeOfType<SqlColumnReferenceExpression>();
         cast.TargetType.ShouldBe("INT");

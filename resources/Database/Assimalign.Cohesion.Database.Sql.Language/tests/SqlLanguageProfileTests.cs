@@ -31,7 +31,6 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Offset, "SELECT * FROM t LIMIT 1 OFFSET 1;")]
     [InlineData(SqlClauses.Values, "INSERT INTO t (id) VALUES (1);")]
     [InlineData(SqlClauses.Case, "SELECT CASE WHEN id = 1 THEN 'one' ELSE 'other' END FROM t;")]
-    [InlineData(SqlClauses.Cast, "SELECT CAST(id AS INT) FROM t;")]
     [InlineData(SqlClauses.Constraint, "CREATE TABLE t (id INT, CONSTRAINT ck CHECK (id > 0));")]
     [InlineData(SqlClauses.ForeignKey, "CREATE TABLE t (parent_id INT, FOREIGN KEY (parent_id) REFERENCES parent(id));")]
     [InlineData(SqlClauses.References, "CREATE TABLE t (parent_id INT REFERENCES parent(id));")]
@@ -58,9 +57,11 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;")]
     [InlineData(SqlClauses.Having, "SELECT id FROM t GROUP BY id HAVING COUNT(*) > 0;")]
     [InlineData(SqlClauses.Subquery, "SELECT * FROM t WHERE id IN (SELECT id FROM u);")]
+    // #1022 restores CAST only after real type conversion executes end to end.
+    [InlineData(SqlClauses.Cast, "SELECT CAST(id AS INT) FROM t;")]
     public void Parse_ClauseAwaitingExecution_IsNotDeclaredAndReportsDiagnostic(string clause, string sql)
     {
-        // These cases previously asserted parser-only support; execution is MVP work (#1019-#1021).
+        // These cases previously asserted parser-only support; execution is MVP work (#1019-#1022).
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();
 
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);

@@ -187,11 +187,12 @@ public sealed partial class GqlQueryParser : QueryParser
     }
     private void Expect(string text)
     {
-        if (!Take(text)) { Error("GQL0002", $"Expected {text}.", Current); }
+        if (!Failed && !Take(text)) { Error("GQL0002", $"Expected {text}.", Current); }
     }
     private void Expect(TokenType type, string text)
     {
-        if (!Take(type)) { Error("GQL0002", $"Expected {text}.", Current); }
+        // Preserve the original capability diagnostic instead of masking it with missing delimiters.
+        if (!Failed && !Take(type)) { Error("GQL0002", $"Expected {text}.", Current); }
     }
     private static Location Span(Lexeme start, Lexeme end) =>
         Location.Create(start.Line, end.Line + end.Text.AsSpan().Count('\n'), start.Start, end.End);

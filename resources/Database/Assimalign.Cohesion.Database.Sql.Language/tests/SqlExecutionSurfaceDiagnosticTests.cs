@@ -30,6 +30,17 @@ public class SqlExecutionSurfaceDiagnosticTests
     [InlineData(SqlClauses.Subquery, "INSERT INTO t (id) SELECT id FROM u;", "SELECT")]
     [InlineData(SqlClauses.Subquery, "UPDATE t SET id = (SELECT id FROM u);", "SELECT")]
     [InlineData(SqlClauses.Subquery, "DELETE FROM t WHERE id IN (SELECT id FROM u);", "SELECT")]
+    // #1022: reject CAST in every scalar context until conversion actually executes.
+    [InlineData(SqlClauses.Cast, "SELECT CAST('42' AS INT) FROM t;", "CAST")]
+    [InlineData(SqlClauses.Cast, "select cast /* trivia */ ('42' as int) from t;", "cast")]
+    [InlineData(SqlClauses.Cast, "SELECT id FROM t WHERE CAST(id AS TEXT) = '1';", "CAST")]
+    [InlineData(SqlClauses.Cast, "SELECT id FROM t ORDER BY CAST(id AS TEXT);", "CAST")]
+    [InlineData(SqlClauses.Cast, "SELECT id FROM t LIMIT CAST('1' AS INT);", "CAST")]
+    [InlineData(SqlClauses.Cast, "INSERT INTO t VALUES (CAST('42' AS INT));", "CAST")]
+    [InlineData(SqlClauses.Cast, "UPDATE t SET id = CAST('42' AS INT);", "CAST")]
+    [InlineData(SqlClauses.Cast, "DELETE FROM t WHERE id = CAST('42' AS INT);", "CAST")]
+    [InlineData(SqlClauses.Cast, "CREATE TABLE t (id INT CHECK (CAST(id AS TEXT) <> ''));", "CAST")]
+    [InlineData(SqlClauses.Cast, "ALTER TABLE t ADD CONSTRAINT ck CHECK (CAST(id AS TEXT) <> '');", "CAST")]
     public void Parse_ClauseAwaitingExecution_ReportsModelDiagnostic(string clause, string sql, string locationText)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();
@@ -47,6 +58,13 @@ public class SqlExecutionSurfaceDiagnosticTests
     [InlineData("SELECT 'JOIN GROUP BY HAVING (SELECT)' FROM t;")]
     [InlineData("SELECT \"JOIN\", \"GROUP\", \"HAVING\", \"SELECT\" FROM t;")]
     [InlineData("/* SELECT */ SELECT id FROM t /* JOIN u GROUP BY id HAVING id > 0 */ WHERE id > 0;")]
+    [InlineData("SELECT 'CAST(42 AS TEXT)' FROM t;")]
+    [InlineData("SELECT \"CAST\" FROM t;")]
+    [InlineData("SELECT id FROM t /* CAST(id AS TEXT) */ WHERE id > 0;")]
+    [InlineData("SELECT id AS cast FROM t;")]
+    [InlineData("SELECT id FROM t AS cast;")]
+    [InlineData("CREATE TABLE cast (id INT);")]
+    [InlineData("CREATE TABLE t (cast INT);")]
     public void Parse_UnsupportedWordsInLiteralsIdentifiersAndComments_RemainsSupported(string sql)
     {
         var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
