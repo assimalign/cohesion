@@ -120,15 +120,32 @@ caller-supplied glob.
 `OnRename` remaps both the old and new paths and dispatches a single
 remapped `FileSystemRenameEvent`.
 
-The fan-in tracks every mount subscription and disposes them all when the
-aggregate token is disposed. The aggregate file system also tracks every
-token it hands out and disposes them in its own `Dispose` for safety.
+The fan-in implements `IDisposable` independently of the unchanged
+`IFileSystemEventToken` interface. It owns every child token returned by its
+mount-level `Watch` calls, even when the mounted provider itself is borrowed.
+Disposing the fan-in releases its callback registrations and those child
+tokens; it never disposes a provider or an unrelated token. The aggregate file
+system tracks tokens returned by its own `Watch` and cleans them up on both
+`Dispose` and `DisposeAsync`, including when all mounts are borrowed. Explicit
+token disposal removes the token from that owner registry.
+
+Token and owner disposal are idempotent in either order. Registration and
+disposal coordinate through a gate; cleanup runs outside that gate because a
+child token may wait for an in-flight callback. Callbacks already selected may
+finish; each subsequent dispatch checks disposal, and registrations after
+disposal are inert. A partially
+constructed fan-in releases children already created if another mount's
+`Watch` fails. There is no aggregate polling timer to stop: timer lifetime
+belongs to each owned child token.
 
 ## Disposal
 
 ```csharp
 public void Dispose()
 {
+    if (!TryBeginDispose(out var tokens)) return;
+    foreach (var token in tokens) token.Dispose();
+
     foreach (var mount in _mountsSorted)
     {
         if (mount.OwnsFileSystem)

@@ -26,7 +26,7 @@ using Assimalign.Cohesion.FileSystem.Internal;
 /// <list type="bullet">
 /// <item><description><see cref="IFileSystemInfo.Attributes"/> /
 /// <see cref="IFileSystemInfo.SetAttributes"/> throw <see cref="NotSupportedException"/>.</description></item>
-/// <item><description><see cref="Watch"/> returns a noop token that never fires.</description></item>
+/// <item><description><see cref="Watch"/> uses polling; native rename notifications are unavailable.</description></item>
 /// </list>
 /// </remarks>
 [DebuggerDisplay("{Name} - Size: {Size}, Used: {SpaceUsed}")]
@@ -38,8 +38,9 @@ public sealed class IsolatedStorageFileSystem : IFileSystem
     private readonly bool _isReadOnly;
     private readonly bool _removeStoreOnDispose;
     private readonly TimeSpan _watchPollInterval;
-    private readonly List<IDisposable> _ownedTokens = new();
-    private bool _isDisposed;
+    private readonly TimeProvider _timeProvider;
+    private readonly List<IsolatedStorageFileSystemPollingEventToken> _ownedTokens = new();
+    private volatile bool _isDisposed;
 
     /// <summary>
     /// Creates a new <see cref="IsolatedStorageFileSystem"/> using the default user+assembly scope.
@@ -55,13 +56,20 @@ public sealed class IsolatedStorageFileSystem : IFileSystem
     /// <param name="options">Configuration for the store and its read-only behavior.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is null.</exception>
     public IsolatedStorageFileSystem(IsolatedStorageFileSystemOptions options)
+        : this(options, TimeProvider.System)
+    {
+    }
+
+    internal IsolatedStorageFileSystem(IsolatedStorageFileSystemOptions options, TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(timeProvider);
 
         _name = options.Name ?? nameof(IsolatedStorageFileSystem);
         _isReadOnly = options.IsReadOnly;
         _removeStoreOnDispose = options.RemoveStoreOnDispose;
         _watchPollInterval = options.WatchPollInterval;
+        _timeProvider = timeProvider;
         _storage = OpenStore(options);
         _root = new IsolatedStorageFileSystemDirectory(this, _storage, IsolatedStoragePathHelper.Root);
     }
@@ -78,25 +86,19 @@ public sealed class IsolatedStorageFileSystem : IFileSystem
     /// </summary>
     internal IFileSystemEventToken CreateWatchToken(FileSystemPath anchor, Glob? pattern)
     {
-        CheckIfDisposed();
-
-        if (_watchPollInterval <= TimeSpan.Zero || _watchPollInterval == Timeout.InfiniteTimeSpan)
-        {
-            return IsolatedStorageFileSystemNoopEventToken.Instance;
-        }
-
-        var token = IsolatedStorageFileSystemPollingEventToken.ForDirectory(
-            _storage,
-            anchor,
-            pattern,
-            _watchPollInterval);
-
         lock (_ownedTokens)
         {
-            _ownedTokens.Add(token);
-        }
+            CheckIfDisposed();
+            if (_watchPollInterval <= TimeSpan.Zero || _watchPollInterval == Timeout.InfiniteTimeSpan)
+            {
+                return IsolatedStorageFileSystemNoopEventToken.Instance;
+            }
 
-        return token;
+            var token = IsolatedStorageFileSystemPollingEventToken.ForDirectory(
+                _storage, anchor, pattern, _watchPollInterval, _timeProvider, ReleaseWatchToken);
+            _ownedTokens.Add(token);
+            return token;
+        }
     }
 
     /// <summary>
@@ -104,24 +106,27 @@ public sealed class IsolatedStorageFileSystem : IFileSystem
     /// </summary>
     internal IFileSystemEventToken CreateFileWatchToken(FileSystemPath filePath)
     {
-        CheckIfDisposed();
-
-        if (_watchPollInterval <= TimeSpan.Zero || _watchPollInterval == Timeout.InfiniteTimeSpan)
-        {
-            return IsolatedStorageFileSystemNoopEventToken.Instance;
-        }
-
-        var token = IsolatedStorageFileSystemPollingEventToken.ForFile(
-            _storage,
-            filePath,
-            _watchPollInterval);
-
         lock (_ownedTokens)
         {
-            _ownedTokens.Add(token);
-        }
+            CheckIfDisposed();
+            if (_watchPollInterval <= TimeSpan.Zero || _watchPollInterval == Timeout.InfiniteTimeSpan)
+            {
+                return IsolatedStorageFileSystemNoopEventToken.Instance;
+            }
 
-        return token;
+            var token = IsolatedStorageFileSystemPollingEventToken.ForFile(
+                _storage, filePath, _watchPollInterval, _timeProvider, ReleaseWatchToken);
+            _ownedTokens.Add(token);
+            return token;
+        }
+    }
+
+    private void ReleaseWatchToken(IsolatedStorageFileSystemPollingEventToken token)
+    {
+        lock (_ownedTokens)
+        {
+            _ownedTokens.Remove(token);
+        }
     }
 
     /// <inheritdoc />
@@ -512,6 +517,9 @@ public sealed class IsolatedStorageFileSystem : IFileSystem
     /// on <see cref="IsolatedStorageFileSystemOptions.WatchPollInterval"/> ticks and dispatches diff
     /// events. When the interval is non-positive or <see cref="Timeout.InfiniteTimeSpan"/>,
     /// polling is disabled and this returns a noop token that never fires.
+    /// Polling tokens implement <see cref="IDisposable"/>: dispose the returned token via
+    /// that interface to end a watch scope. Disposing a callback registration only unsubscribes
+    /// that callback. This provider also disposes outstanding tokens during its own disposal.
     /// </remarks>
     public IFileSystemEventToken Watch(Glob? pattern) => CreateWatchToken(IsolatedStoragePathHelper.Root, pattern);
 
@@ -531,24 +539,22 @@ public sealed class IsolatedStorageFileSystem : IFileSystem
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_isDisposed)
-        {
-            return;
-        }
-
-        _isDisposed = true;
-
         // Stop outstanding polling tokens first so their timers cannot race against the store
         // shutdown / removal below.
-        List<IDisposable> tokens;
+        List<IsolatedStorageFileSystemPollingEventToken> tokens;
         lock (_ownedTokens)
         {
-            tokens = new List<IDisposable>(_ownedTokens);
+            if (_isDisposed)
+            {
+                return;
+            }
+            _isDisposed = true;
+            tokens = new List<IsolatedStorageFileSystemPollingEventToken>(_ownedTokens);
             _ownedTokens.Clear();
         }
         foreach (var token in tokens)
         {
-            try { token.Dispose(); } catch { /* best-effort */ }
+            token.Dispose();
         }
 
         try

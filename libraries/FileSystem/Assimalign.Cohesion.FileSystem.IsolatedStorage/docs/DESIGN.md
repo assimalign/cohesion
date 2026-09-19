@@ -94,9 +94,24 @@ event token uses a `System.Threading.Timer`:
 4. Subscriber callbacks run inside `try/catch` so a faulty subscriber
    can't kill the timer loop.
 
-`Dispose()` stops the timer first, then clears the subscriber list, so
-no callbacks fire after the call returns. The file system tracks every
-token it hands out and disposes them in its own `Dispose` for safety.
+Polling tokens implement `IDisposable` without changing `IFileSystemEventToken`.
+Keep the token's lifetime scoped explicitly with `using var watchScope = token as IDisposable`;
+disposing an individual callback registration only unsubscribes that callback, not the watch.
+The file system retains outstanding tokens as a fallback and disposes them before closing or
+removing the store. A disposed token removes itself from that ownership list. Token and provider
+disposal are idempotent in either order, including concurrent calls. Creation and ownership
+registration are serialized with provider disposal so a late watch cannot escape cleanup.
+
+Snapshot I/O and token disposal share a gate: disposal waits for an active scan to finish, stops
+the timer, and prevents queued ticks from accessing the store. Notifications run outside that
+gate so a callback may dispose its own token or provider without deadlocking. A subscriber already
+being invoked may finish after disposal; dispatch checks the stopped state before each remaining
+subscriber. No callback can restart the timer. The timer is created through `TimeProvider.System`;
+an internal constructor accepts a controllable provider for deterministic lifetime tests.
+
+Snapshot streams use `FileShare.ReadWrite | FileShare.Delete`. Polling must allow callers to
+delete or replace files even while the scan samples their lengths. A disappearing file is a
+normal snapshot race, handled by the next diff rather than an exclusive polling handle.
 
 Rename detection requires correlating a delete + create pair within a
 single tick, which is fragile across providers. The provider declines to

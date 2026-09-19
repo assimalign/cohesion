@@ -75,11 +75,31 @@ throws `NotFound` rather than silently failing.
 
 ## Watch
 
-`PhysicalFileSystemChangeToken` wraps a `FileSystemWatcher`. The provider
-keeps a reference to the underlying watcher so disposal of the token also
-disposes the watcher. There is no glob filtering at the provider level
-beyond what the OS reports — callers wanting more precise filtering should
-use the `Assimalign.Cohesion.FileSystem.Globbing` package on top.
+`PhysicalFileSystemChangeToken` directly owns a `FileSystemWatcher`, so its
+lifetime is already independent of provider disposal. Physical watch tokens
+are caller-owned: `PhysicalFileSystem.Dispose()` does not own or stop them.
+Callers end a watch scope with `(token as IDisposable)?.Dispose()`; the
+`IFileSystemEventToken` interface remains unchanged. Native notifications do
+not open watched files, so the IsolatedStorage polling share-mode collision
+does not apply. Reported paths are checked against the token's glob.
+
+Token disposal retires all registrations before disposing the watcher and is
+idempotent, including disposal from within a callback. Subscription changes
+and notification snapshots share a gate, so a callback can unregister itself
+without invalidating iteration. Each dispatch rechecks whether its token or
+registration was retired. User callbacks run outside that gate: an already
+dispatched callback may finish after disposal, while queued notifications
+cannot revive the watcher or access its disposed resources. Registration on
+a disposed token throws `ObjectDisposedException`.
+
+The token owns its watcher through this lifecycle:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Watching
+    Watching --> Disposed: Token Dispose
+    Disposed --> Disposed: Repeated Dispose
+```
 
 ## Exception mapping
 

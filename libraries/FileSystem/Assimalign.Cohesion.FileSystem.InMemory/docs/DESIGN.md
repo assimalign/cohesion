@@ -87,8 +87,21 @@ events. Each mutation raises the appropriate event after the state change
 completes; `InMemoryFileSystemEventToken` subscribes to the dispatcher and
 filters by `Glob` and registration type.
 
-The synchronous nature makes the in-memory provider easy to assert against
-in tests — there is no race between mutation and notification.
+Tokens implement `IDisposable` without changing `IFileSystemEventToken`.
+Disposal detaches their named dispatcher handlers, clears registrations, and
+removes the token from the file system's ownership registry. Tokens created
+through file-system, directory, and file `Watch` entry points all enter that
+registry, so owner disposal also cleans up tokens callers leave undisposed.
+Both disposal orders are idempotent. InMemory has no polling timer or operating
+system watcher; its lifetime resource is the dispatcher subscription.
+
+Child dispatchers forward to their live parent instead of copying the parent's
+delegates. This is necessary for unsubscription to release a token throughout
+the tree; it also lets existing children observe later parent registrations.
+Callbacks run synchronously outside the subscription gate over a snapshot.
+They can unregister or dispose the token without invalidating enumeration.
+An already selected callback may finish; each subsequent dispatch checks
+disposal before invoking a subscriber, and future registrations are inert.
 
 ## Layout
 

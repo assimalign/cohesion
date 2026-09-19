@@ -178,7 +178,7 @@ internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
 
     public IFileSystemEventToken Watch()
     {
-        return new InMemoryFileSystemEventToken(this, Glob.Parse(Path));
+        return FileSystem.CreateWatchToken(this, Glob.Parse(Path));
     }
 
     public override void Dispose()
