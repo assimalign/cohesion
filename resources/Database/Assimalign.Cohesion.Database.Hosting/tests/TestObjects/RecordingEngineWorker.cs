@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
@@ -19,4 +20,6 @@ internal sealed class RecordingEngineWorker : IDatabaseEngineWorker
     public DatabaseEngineWorkerKind Kind { get; }
 
     public TimeSpan Interval { get; }
+
+    public void Run(CancellationToken cancellationToken) { }
 }

@@ -20,7 +20,7 @@ public sealed class BlobStorageDurabilityTests
     public async Task DatabaseOpen_ShouldResolveDurabilityFromStorage(bool physical, StorageCommitDurability? configured, StorageCommitDurability expected)
     {
         string directory = Path.Combine(Path.GetTempPath(), "cohesion-Blob-storage-durability", Guid.NewGuid().ToString("N"));
-        var options = new BlobDatabaseEngineOptions { RootPath = physical ? directory : null, Durability = configured };
+        var options = new BlobDatabaseEngineOptions { RootPath = physical ? FileSystemPath.Parse(directory) : (FileSystemPath?)null, Durability = configured };
         try
         {
             await using (var engine = BlobDatabaseEngine.Create(options))

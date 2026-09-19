@@ -127,7 +127,7 @@ public class DatabaseApplicationTests
 
         count.ShouldBe(1);
         harness.Application.Context.Servers.ShouldHaveSingleItem().ShouldBeSameAs(harness.Server);
-        harness.Application.Context.Engines.ShouldBeEmpty();
+        harness.Application.Context.Engines.ShouldHaveSingleItem().ShouldBeSameAs(harness.Engine);
         harness.Server.Context.Engine.ShouldBeSameAs(harness.Engine);
     }
 
@@ -141,8 +141,8 @@ public class DatabaseApplicationTests
         var options = new DatabaseApplicationOptions();
 
         options.Services.Add(new RecordingService(log, "provisioner"));
-        options.Servers.Add(new RecordingServer(log, "sql-server"));
-        options.Servers.Add(new RecordingServer(log, "docs-server"));
+        options.Servers.Add(new RecordingServer(log, "sql-server", new RecordingEngine("sql")));
+        options.Servers.Add(new RecordingServer(log, "docs-server", new RecordingEngine("documents")));
 
         var application = new DatabaseApplication(options);
 

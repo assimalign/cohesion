@@ -902,27 +902,44 @@ residual comparison for remaining columns; they scan the table only when no
 suitable index exists. A declared index
 whose physical tree is missing fails closed.
 
-## The application-builder verbs (`AddSqlDatabase`, `AddSqlServer`)
+## Application composition (Phase 29)
 
-The model registers itself on a database application through two
-`extension(IDatabaseApplicationBuilder)` members in `Extensions/`, composing
-against the **area root's builder seam only** (this package references no
-hosting module; COHRES001 stays intact — the same rule that puts
-`AddAuthentication` in `Web.Authentication`, not `Web.Hosting`):
+`AddSql(Action<IDatabaseApplicationContext, ISqlDatabaseEngineBuilder>)` is an
+`extension(IDatabaseApplicationBuilder)` member in this model package. It captures
+one factory and returns the application builder. Application Build invokes the
+callback with the build-time root context and a model builder; no model registration
+uses DI, configuration binding, Hosting, or a container. The model builder exposes
+all SQL options, including `FileSystemPath? RootPath`, and permanently freezes them
+when its one Build attempt begins. Direct `SqlDatabaseEngine.Create(options)` stays
+supported for standalone use.
 
-- `AddSqlDatabase(Action<SqlDatabaseEngineOptions>?)` creates and registers the
-  engine — operational the moment the verb returns — and returns it (the Web
-  convention of returning the feature's own composition object), so a
-  composition root can seed or provision databases, or front the engine with a
-  server, before the application starts.
-- `AddSqlServer(SqlDatabaseEngine, Action<SqlDatabaseServerOptions>)` creates and
-  registers a `SqlDatabaseServer` fronting the given engine and returns it. The
-  verb composes eagerly — a per-model server needs only its one engine, already
-  in hand, so the deferred context-receiving `AddServer` overload exists for
-  composition roots with genuinely late-bound decisions, not for model verbs.
+Workers and servers are nested deferred factories on `IDatabaseEngineBuilder`.
+Build creates the operational engine first, executes worker factories against it,
+then server factories. Workers are pumped on engine-owned threads through
+`IDatabaseEngineWorker.Run`; this genuinely model-agnostic registration/execution
+is why the base builder interface earns its place. No strongly typed factory
+overloads are added: a model server factory can cast its supplied engine once;
+duplicate delegate overloads would introduce lambda ambiguity without adding a
+construction capability. The former `AddSqlDatabase` and sibling application
+`AddSqlServer` verbs are replaced by `AddSql` with nested `AddServer`.
 
-Registration is dependency-free: the verbs new the objects up from options and
-hand them to `AddEngine`/`AddServer`; no container, no configuration binding.
+`IDatabaseEngine.Servers` exposes the resulting read-only server collection.
+Application Build snapshots it for start/stop only. The engine owns these factory
+products and disposes servers in reverse order before quiescing workers and closing
+databases. Application-owned factory engines transfer ownership at successful Build;
+instance-registered engines remain caller-owned. Failed factory construction cleans
+up accepted products, rejected products, and the engine; independent cleanup failures
+are aggregated. Async cleanup reached through synchronous Build/Dispose runs without
+the caller's synchronization context. Database name operations now accept
+`DatabaseName`, including SQL's collation-specific creation overload.
+No production hosting code currently consumes `IDatabaseEngineBuilder` generically.
+Its shared contract is retained for model-independent `AddWorker` composition;
+model-specific options stay on each derived builder interface.
+
+`SqlDatabaseEngine.CreateBuilder()` returns `ISqlDatabaseEngineBuilder`.
+This interface-first entry enables standalone nested composition and lets the concrete
+hosting-aware engine factory configure the same builder from its final configuration
+and services. The model still sees no DI or configuration contract.
 
 ## Error model
 

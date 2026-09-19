@@ -314,3 +314,33 @@ order. Key-value query sets use `-1`; outcome sets preserve their affected count
 packet-beta
 0-63: "Affected count (i64, big-endian)"
 ```
+
+## Phase 29 hosting composition
+
+`AddKeyValue(Action<IDatabaseApplicationContext, IKeyValueDatabaseEngineBuilder>)`
+replaces eager `AddKeyValueDatabase` and the sibling application `AddKeyValueServer`.
+The verb registers a dependency-free factory and returns the application builder.
+Application Build executes its callback; the model builder exposes all existing
+options, including `FileSystemPath? RootPath` and `IKeyValueStorageStrategy?`, and
+freezes them on its one Build attempt. It constructs the engine before invoking
+nested `AddWorker` and `AddServer` factories. No DI or configuration enters this
+model package. Direct `KeyValueDatabaseEngine.Create(options)` stays available.
+
+The root builder interface earns its place through model-agnostic workers:
+`IDatabaseEngineWorker.Run` lets each engine pump factory-supplied implementations
+and quiesce them during disposal. No strongly typed factory overloads are added;
+server callbacks can cast to the model engine once, avoiding ambiguous overloads.
+`IDatabaseEngine.Servers` is read-only observation; application Build flattens it
+for lifecycle, while the engine owns server disposal, followed by worker quiescence
+and database closure. Cleanup attempts independent children after a failure.
+Factory engines are application-owned; instance registrations remain caller-owned.
+Database create/open/drop/lookup now accept `DatabaseName`.
+
+No production hosting code currently consumes `IDatabaseEngineBuilder` generically.
+Its shared contract is retained for model-independent `AddWorker` composition;
+model-specific options stay on each derived builder interface.
+
+`KeyValueDatabaseEngine.CreateBuilder()` returns `IKeyValueDatabaseEngineBuilder`.
+This interface-first entry enables standalone nested composition and lets the concrete
+hosting-aware engine factory configure the same builder from its final configuration
+and services. The model still sees no DI or configuration contract.

@@ -20,7 +20,7 @@ public sealed class DocumentStorageDurabilityTests
     public async Task DatabaseOpen_ShouldResolveDurabilityFromStorage(bool physical, StorageCommitDurability? configured, StorageCommitDurability expected)
     {
         string directory = Path.Combine(Path.GetTempPath(), "cohesion-Document-storage-durability", Guid.NewGuid().ToString("N"));
-        var options = new DocumentDatabaseEngineOptions { RootPath = physical ? directory : null, Durability = configured };
+        var options = new DocumentDatabaseEngineOptions { RootPath = physical ? FileSystemPath.Parse(directory) : (FileSystemPath?)null, Durability = configured };
         try
         {
             await using (var engine = DocumentDatabaseEngine.Create(options))

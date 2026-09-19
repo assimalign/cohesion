@@ -52,7 +52,7 @@ public sealed class SqlStorageSemanticsParityTests
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
         {
             EngineName = "storage-parity",
-            RootPath = directory,
+            RootPath = directory is null ? (FileSystemPath?)null : FileSystemPath.Parse(directory),
         });
         var database = await engine.CreateDatabaseAsync("db");
         var instance = database.ShouldBeOfType<SqlDatabaseInstance>();

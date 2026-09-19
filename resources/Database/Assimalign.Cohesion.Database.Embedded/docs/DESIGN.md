@@ -24,3 +24,10 @@ The facade can only be thin because of an invariant this project *enforces by ex
 ## AOT posture
 
 Pure composition; no reflection, no discovery. Consumers reference engine packages statically.
+
+## Phase 29 root-contract migration
+
+The embedded test engine now implements the root's `DatabaseName` operations and
+read-only `Servers` observation. Embedded composition continues to own the engines
+explicitly supplied to `EmbeddedDatabase`; this existing aggregate is separate
+from the hosting builder's instance-borrowed registration contract.

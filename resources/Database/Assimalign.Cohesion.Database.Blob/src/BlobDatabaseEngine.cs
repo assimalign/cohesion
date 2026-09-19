@@ -21,7 +21,8 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
     private readonly object _sync = new();
     private readonly ManualResetEventSlim _commitPending = new();
     private readonly CancellationTokenSource _stop = new();
-    private readonly DatabaseEngineWorker[] _workers;
+    private readonly List<IDatabaseEngineWorker> _workers = [];
+    private readonly List<IDatabaseServer> _servers = [];
     private readonly List<Thread> _threads = [];
     private readonly string? _rootPath;
     private BlobDatabaseInstance[] _instances = [];
@@ -33,20 +34,16 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
     {
         _options = options;
         Name = options.EngineName ?? "blob-engine";
-        _rootPath = options.RootPath is { IsEmpty: false } root ? Path.GetFullPath(root) : null;
+        _rootPath = options.StorageStrategy is null && options.RootPath is { IsEmpty: false } root ? Path.GetFullPath(root) : null;
         if (_rootPath is not null)
         {
             Directory.CreateDirectory(_rootPath);
         }
 
-        _workers = [new BlobWriteAheadFlushWorker(this, _commitPending), new BlobPageWriteBackWorker(this),
-            new BlobCheckpointWorker(this), new BlobVersionPurgeWorker(this)];
-        foreach (var worker in _workers)
-        {
-            var thread = new Thread(() => Pump(worker)) { IsBackground = true, Name = Name + "/" + worker.Kind };
-            _threads.Add(thread);
-            thread.Start();
-        }
+        AttachWorker(new BlobWriteAheadFlushWorker(this, _commitPending));
+        AttachWorker(new BlobPageWriteBackWorker(this));
+        AttachWorker(new BlobCheckpointWorker(this));
+        AttachWorker(new BlobVersionPurgeWorker(this));
     }
 
     /// <inheritdoc />
@@ -57,10 +54,17 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
     /// <inheritdoc />
     public EngineModel Model => EngineModel.Blob;
     /// <inheritdoc />
-    public IReadOnlyList<IDatabaseEngineWorker> Workers => _workers;
+    public IReadOnlyList<IDatabaseEngineWorker> Workers => _workers.AsReadOnly();
+    /// <inheritdoc />
+    public IReadOnlyList<IDatabaseServer> Servers => _servers.AsReadOnly();
     internal BlobDatabaseEngineOptions EngineOptions => _options;
     internal BlobStorage[] GetStorageSnapshot() => Volatile.Read(ref _storages);
     internal BlobDatabaseInstance[] GetInstanceSnapshot() => Volatile.Read(ref _instances);
+
+    /// <summary>Creates a dependency-free builder for an engine and its deferred workers and servers.</summary>
+    /// <returns>A one-shot model builder; constructing the builder starts no components.</returns>
+    /// <remarks>Use this entry point inside hosting-aware factories to assign already resolved values before Build.</remarks>
+    public static IBlobDatabaseEngineBuilder CreateBuilder() => new BlobDatabaseEngineBuilder();
 
     /// <summary>Creates an operational engine using memory or files under the configured root.</summary>
     /// <param name="options">The engine configuration.</param>
@@ -79,11 +83,11 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
     }
 
     /// <inheritdoc />
-    public ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default)
+    public ValueTask<IDatabase> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => GetDatabase(name, create: true, cancellationToken);
 
     /// <inheritdoc />
-    public ValueTask<IDatabase> OpenDatabaseAsync(string name, CancellationToken cancellationToken = default)
+    public ValueTask<IDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => GetDatabase(name, create: false, cancellationToken);
 
     private ValueTask<IDatabase> GetDatabase(string name, bool create, CancellationToken cancellationToken)
@@ -104,12 +108,13 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
                 return new ValueTask<IDatabase>(existing);
             }
             var directory = FindDirectory(name);
-            if (create && directory is not null)
+            bool exists = _options.StorageStrategy?.StorageExists(name) ?? directory is not null;
+            if (create && exists)
             {
                 throw new DatabaseException($"Database '{name}' already exists.");
             }
 
-            if (!create && directory is null)
+            if (!create && !exists)
             {
                 throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
             }
@@ -122,7 +127,13 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
             BlobStorage? storage = null;
             try
             {
-                storage = OpenStorage(directory, name, create, _options.Durability);
+                storage = _options.StorageStrategy is { } strategy
+                    ? create ? strategy.CreateStorage(name, _options.Durability) : strategy.OpenStorage(name, _options.Durability)
+                    : OpenStorage(directory, name, create, _options.Durability);
+                if (storage is null)
+                {
+                    throw new InvalidOperationException("The storage strategy returned null.");
+                }
                 storage.GroupCommitWindow = _options.GroupCommitWindow;
                 storage.OnCommitPending = _commitPending.Set;
                 Volatile.Write(ref _storages, [.. _storages, storage]);
@@ -154,7 +165,7 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
     }
 
     /// <inheritdoc />
-    public ValueTask DropDatabaseAsync(string name, CancellationToken cancellationToken = default)
+    public ValueTask DropDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
     {
         ValidateName(name);
         cancellationToken.ThrowIfCancellationRequested();
@@ -163,14 +174,18 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
             ThrowIfDisposed();
             var directory = FindDirectory(name);
             bool open = _databases.Remove(name, out var database);
-            if (!open && directory is null)
+            if (!open && !(_options.StorageStrategy?.StorageExists(name) ?? directory is not null))
             {
                 throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
             }
 
             RebuildSnapshot();
             database?.Dispose();
-            if (directory is not null)
+            if (_options.StorageStrategy is { } strategy)
+            {
+                strategy.DropStorage(name);
+            }
+            else if (directory is not null)
             {
                 Directory.Delete(directory, recursive: true);
             }
@@ -185,7 +200,7 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
         lock (_sync)
         {
             ThrowIfDisposed();
-            names = _databases.Keys.Concat(_rootPath is null ? [] : Directory.EnumerateDirectories(_rootPath)
+            names = _databases.Keys.Concat(_options.StorageStrategy is { } strategy ? strategy.GetDatabaseNames().Select(name => name.ToString()) : _rootPath is null ? [] : Directory.EnumerateDirectories(_rootPath)
                 .Where(path => File.Exists(Path.Combine(path, "blob.dat"))).Select(path => Path.GetFileName(path)))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
         }
@@ -196,8 +211,9 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
     }
 
     /// <inheritdoc />
-    public bool TryGetDatabase(string name, out IDatabase database)
+    public bool TryGetDatabase(DatabaseName name, out IDatabase database)
     {
+        ValidateName(name);
         lock (_sync)
         {
             ThrowIfDisposed();
@@ -225,7 +241,28 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
         Volatile.Write(ref _storages, _databases.Values.Select(database => database.DataStorage).ToArray());
     }
 
-    private void Pump(DatabaseEngineWorker worker)
+    internal void AttachWorker(IDatabaseEngineWorker worker)
+    {
+        ThrowIfDisposed();
+        var thread = new Thread(() => Pump(worker)) { IsBackground = true, Name = Name + "/" + worker.Kind };
+        _workers.Add(worker);
+        _threads.Add(thread);
+        try { thread.Start(); }
+        catch
+        {
+            _threads.Remove(thread);
+            _workers.Remove(worker);
+            throw;
+        }
+    }
+
+    internal void AttachServer(IDatabaseServer server)
+    {
+        ThrowIfDisposed();
+        _servers.Add(server);
+    }
+
+    private void Pump(IDatabaseEngineWorker worker)
     {
         try { worker.Run(_stop.Token); }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
@@ -240,13 +277,36 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
             return;
         }
 
-        _stop.Cancel();
+        List<Exception>? errors = null;
+        for (int index = _servers.Count - 1; index >= 0; index--)
+        {
+            try { Task.Run(async () => await _servers[index].DisposeAsync().ConfigureAwait(false)).GetAwaiter().GetResult(); }
+            catch (Exception error) { (errors ??= []).Add(error); }
+        }
+
+        try { _stop.Cancel(); }
+        catch (Exception error) { (errors ??= []).Add(error); }
         foreach (var thread in _threads)
         {
             thread.Join();
         }
 
-        List<Exception>? errors = null;
+        for (int index = _workers.Count - 1; index >= 0; index--)
+        {
+            try
+            {
+                if (_workers[index] is IAsyncDisposable asynchronous)
+                {
+                    Task.Run(async () => await asynchronous.DisposeAsync().ConfigureAwait(false)).GetAwaiter().GetResult();
+                }
+                else if (_workers[index] is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
+            catch (Exception error) { (errors ??= []).Add(error); }
+        }
+
         lock (_sync)
         {
             foreach (var database in _databases.Values)
@@ -261,7 +321,7 @@ public sealed class BlobDatabaseEngine : IDatabaseEngine
         _stop.Dispose();
         if (errors is not null)
         {
-            throw new AggregateException("One or more blob databases failed to close.", errors);
+            throw new AggregateException("One or more blob engine components failed to close.", errors);
         }
     }
 

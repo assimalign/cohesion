@@ -14,6 +14,24 @@ independently consumable base components a database is made of (`Database.Types`
 `Database.Governance`) — so one reference to the root delivers the whole base
 surface. Child roots never reference the root.
 
+
+## Phase 29 composition contract (current)
+
+The approved [hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md) supersedes the historical builder/worker descriptions below. `IDatabaseApplicationBuilder` exposes exactly borrowed `AddEngine(instance)`, owned `AddEngine(Func<IDatabaseApplicationContext, IDatabaseEngine>)`, and one-shot `Build()`. There is no builder engine enumeration, application-level AddServer, or Use stage. `IDatabaseApplication` inherits `IAsyncDisposable`; its context observes every engine, nested servers, and ordinal `GetEngine(name)` lookup. All four named engine operations use the existing `DatabaseName` value object; its implicit string conversions preserve straightforward callers while implementations use the typed contract.
+
+`IDatabaseEngineBuilder` earns a shared seam because AddWorker is model-agnostic: the same factory can attach a worker to any model. Shared construction/rollback source is owned in this project's `shared/` and compiled by each model through `CohesionSharedSource`. Every model-specific interface extends the base and carries that model's options. No separate generic application composition algorithm consumes arbitrary model options. Strongly typed worker/server factory overloads are deliberately omitted: the common engine factory contract already works, and explicit casts for SQL/KeyValue servers avoid overload ambiguity and a second factory vocabulary.
+
+Workers remain scheduled and quiesced by their engine. `IDatabaseEngineWorker.Run(CancellationToken)` exposes the existing executable pump so workers returned by the approved deferred factories can run without requiring a particular base implementation. `IDatabaseEngine.Servers` enables hosting to discover nested servers. Engines own factory-produced workers and servers; hosting snapshots servers for lifecycle only. Application-created engines are disposed by the application; instance-registered engines remain caller-owned.
+
+```mermaid
+classDiagram
+    IDatabaseApplicationBuilder --> IDatabaseApplication : Build
+    IDatabaseApplication --> IDatabaseApplicationContext : Context
+    IDatabaseApplicationContext --> IDatabaseEngine : Engines
+    IDatabaseEngineBuilder --> IDatabaseEngine : Build
+    IDatabaseEngine --> IDatabaseServer : Servers
+    IDatabaseEngine --> IDatabaseEngineWorker : Workers
+```
 ## Why-this-not-that decisions
 
 - **Child roots roll up under the root; they never reference it** (owner

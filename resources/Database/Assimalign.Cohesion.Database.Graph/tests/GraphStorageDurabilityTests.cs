@@ -20,7 +20,7 @@ public sealed class GraphStorageDurabilityTests
     public async Task DatabaseOpen_ShouldResolveDurabilityFromStorage(bool physical, StorageCommitDurability? configured, StorageCommitDurability expected)
     {
         string directory = Path.Combine(Path.GetTempPath(), "cohesion-Graph-storage-durability", Guid.NewGuid().ToString("N"));
-        var options = new GraphDatabaseEngineOptions { RootPath = physical ? directory : null, Durability = configured };
+        var options = new GraphDatabaseEngineOptions { RootPath = physical ? FileSystemPath.Parse(directory) : (FileSystemPath?)null, Durability = configured };
         try
         {
             await using (var engine = GraphDatabaseEngine.Create(options))

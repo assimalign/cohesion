@@ -2,8 +2,12 @@
 
 `Assimalign.Cohesion.Database.Blob` implements named databases, containers, and streamed
 objects. Create an engine with `BlobDatabaseEngine.Create`; a null `RootPath` selects memory,
-and a path selects durable files. `AddBlobDatabase` registers the engine through the root
-`IDatabaseApplicationBuilder` extension seam. The feature has no Hosting reference.
+and a path selects durable files. `AddBlob((context, engine) => ...)` captures
+construction through the root `IDatabaseApplicationBuilder` and returns that builder.
+At Build the callback configures `IBlobDatabaseEngineBuilder`, including an optional
+borrowed `IBlobStorageStrategy` and deferred nested worker/server factories. The
+application owns the resulting engine and its nested components. The feature has
+no Hosting reference.
 
 ```csharp
 await using var engine = BlobDatabaseEngine.Create(new() { RootPath = "data" });
@@ -76,3 +80,8 @@ replication, hosting integration, and compiled-schema provisioning remain outsid
 
 See [DESIGN.md](DESIGN.md), the [storage format](../../Assimalign.Cohesion.Database.Blob.Storage/docs/DESIGN.md),
 and the [catalog format](../../Assimalign.Cohesion.Database.Blob.Catalog/docs/DESIGN.md).
+
+`BlobDatabaseEngine.CreateBuilder()` returns the same model builder for
+standalone composition or the concrete hosting builder's build-aware engine
+factory. This lets the consumer pass already resolved values and register nested
+components while keeping the model package dependency-free.

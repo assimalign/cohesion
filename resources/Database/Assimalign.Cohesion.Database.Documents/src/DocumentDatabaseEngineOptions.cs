@@ -60,10 +60,14 @@ public sealed class DocumentDatabaseEngineOptions
     /// Gets or sets the root directory where per-database files are created.
     /// </summary>
     /// <remarks>
-    /// When <see cref="RootPath"/> is provided,
+    /// When <see cref="StorageStrategy"/> is null and <see cref="RootPath"/> is provided,
     /// a file-based strategy is used automatically. When it is null, an in-memory
     /// strategy is used.
     /// </remarks>
     public FileSystemPath? RootPath { get; set; }
+
+    /// <summary>Gets or sets a borrowed storage strategy that overrides RootPath when provided.</summary>
+    /// <remarks>The engine owns storage returned by the strategy and does not dispose the strategy itself.</remarks>
+    public IDocumentStorageStrategy? StorageStrategy { get; set; }
 
 }

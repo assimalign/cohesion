@@ -109,13 +109,16 @@ Rules that do not move: (1) a runtime never references `ApplicationModel`; a man
 
 ```csharp
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);         // an ordinary builder; honors the ambient ResourceContext and the registered control plane because the opt-in generated them
-SqlDatabaseEngine engine = builder.AddSqlDatabase(o =>
+builder.AddSql((_, o) =>
 {
+    o.EngineName = "orders-sql";
     o.RootPath   = Resource.Mounts.Data;                                                // Resource.g.cs: typed accessors over ResourceRuntime.Current (COHESION_* out-of-process; set per invocation in-process)
     o.Durability = Resource.Settings.DatabaseDurability.Get<StorageCommitDurability>();
+    o.AddServer(engine => SqlDatabaseServer.Create(
+        (SqlDatabaseEngine)engine, new SqlDatabaseServerOptions().Listen(Resource.Endpoints.Db)));
 });
 
-builder.AddDatabase(engine, "orders", database =>                                     // the schema is code
+builder.AddDatabase("orders-sql", "orders", database =>                              // the schema is code
 {
     database.Type<Money>(type => type.Decimal(18, 2));                                  // custom type
     database.Table<Order>(table => { table.Key(o => o.Id); table.Index(o => o.CustomerId); });
@@ -125,8 +128,8 @@ builder.AddDatabase(engine, "orders", database =>                               
     database.Principal("appa-api", principal => principal.Grant(Permission.ReadWrite, "Orders", "OrderLines"));   // database-scoped identity
 });
 
-builder.AddSqlServer(engine, server => server.Listen(Resource.Endpoints.Db));
-await builder.Build().RunAsync();                                                       // provisioning runs before the server accepts; the `admin` control plane is started by the opt-in, never by a verb
+await using var app = builder.Build();
+await app.RunAsync();                                                                  // provisioning runs before the server accepts; the `admin` control plane is started by the opt-in, never by a verb
 
 record Order(long Id, long CustomerId, Money Total);                                    // the types the schema is built from follow the statements
 record OrderLine(long Id, long OrderId, int Quantity, Money UnitPrice);
@@ -670,3 +673,11 @@ These additive rows record the closing build-out decisions without changing the 
 | B27 | `resources/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry` stays an **empty placeholder** whose name collides with `Assimalign.Cohesion.Hosting.Telemetry` — **record as open** | Item 31b: `acc951aa` | `resources/LogSpace/README.md:12`; `Assimalign.Cohesion.LogSpace.Telemetry/src/` has no C# source |
 | B28 | `docs/RUNTIME_CONTRACT.md` keeps `otlp-grpc` **contract-valid**, now qualified in-row with the refusal; the design document's own protocol lists are untouched | Item 31b: `acc951aa` | `docs/RUNTIME_CONTRACT.md:38-40` (unchanged) |
 | B29 | the OTLP full-acceptance response returns an **empty `partialSuccess`** where upstream OTLP omits the field on full success — a documented, deliberate difference | Item 31b: `acc951aa` | `libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/DESIGN.md:36`; `resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/src/Internal/LogSpaceHttp.cs:73` |
+
+**Phase 29 approved composition update (2026-09-19).** The Database sample in §4.2.1
+now captures `AddSql` intent, nests `AddServer` under the engine builder, provisions
+by the engine name, and disposes the built application. This later owner-approved
+Database decision supersedes the eager `AddSqlDatabase` / application-level
+`AddSqlServer` spelling in historical decision text above. The historical decisions
+remain recorded; this change adds no ApplicationModel work. See
+[DATABASE_HOSTING_DESIGN.md](programs/DATABASE_HOSTING_DESIGN.md).

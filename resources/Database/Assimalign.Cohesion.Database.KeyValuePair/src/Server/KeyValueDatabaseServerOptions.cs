@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// The options deliberately carry no engine: servers are per-model and the
 /// composition root supplies the single engine directly
 /// (<see cref="KeyValueDatabaseServer.Create"/>, or the
-/// <c>AddKeyValueServer(engine, configure)</c> builder verb).
+/// <c>engineBuilder.AddServer(factory)</c> builder verb).
 /// </remarks>
 public sealed class KeyValueDatabaseServerOptions
 {

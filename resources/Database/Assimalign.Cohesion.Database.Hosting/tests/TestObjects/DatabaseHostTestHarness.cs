@@ -88,6 +88,7 @@ internal sealed class DatabaseHostTestHarness : IAsyncDisposable
     {
         await Client.DisposeAsync();
         await ((IHost)Application).StopAsync();
+        await ((IAsyncDisposable)Application).DisposeAsync();
         await Server.DisposeAsync();
         await Listener.DisposeAsync();
         await Engine.DisposeAsync();

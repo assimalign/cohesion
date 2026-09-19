@@ -36,12 +36,12 @@ the whole base surface — including child-owned vocabulary the contracts speak
   (`SqlDatabaseServer` in `Database.Sql`).
 - **Application composition seam** — `IDatabaseApplicationBuilder` /
   `IDatabaseApplication` / `IDatabaseApplicationContext`: model packages
-  register their engines and servers against this root seam (e.g.
-  `Database.Sql`'s `AddSqlDatabase(...)` / `AddSqlServer(...)` verbs) without
+  register deferred engines against this root seam (e.g.
+  `Database.Sql`'s `AddSql((context, engine) => ...)` with nested server factories) without
   knowing the hosting implementation. Composition roots register background work
   through the concrete `DatabaseApplicationBuilder.AddService` in `Database.Hosting`;
   the root contracts expose no hosting-library types.
-  `Database.Hosting` implements the seam (`DatabaseApplication.CreateBuilder()`)
+  `Database.Hosting` implements the seam (`DatabaseApplication.CreateBuilder(args)`)
   so services start before servers and stop after them in reverse order.
 - **Model-agnostic provisioning** — `CompiledSchema` carries identity, the
   canonical document, and its content hash. `IDatabaseSchemaProvisioner` applies
@@ -83,3 +83,5 @@ framed exchanges, while each model client materializes results; `Database.Hostin
 composes servers into a host.
 
 See [DESIGN.md](DESIGN.md) for the contract-shape decisions.
+
+Phase 29 adds `IDatabaseEngineBuilder` for model-agnostic deferred worker/server factories, inherited by each model's options-bearing builder. `IDatabaseEngine.Servers` exposes nested servers for host lifecycle discovery; engines retain their disposal ownership. Named engine operations now use `DatabaseName`. `IDatabaseApplication` is asynchronously disposable, its context includes all engines and ordinal `GetEngine(name)`, and its builder exposes AddEngine(instance/factory) plus one-shot Build without a mutable registry or Use stage.

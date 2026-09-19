@@ -146,7 +146,7 @@ public sealed class ResourceControlPlaneHostingTests
         DatabaseApplicationBuilder builder = new(
             new DatabaseApplicationOptions(),
             typeof(ResourceControlPlaneHostingTests).Assembly);
-        builder.AddServer(new ControlledStartServer(bindStarted, accepting));
+        builder.Options.Servers.Add(new ControlledStartServer(bindStarted, accepting));
         await using DatabaseApplication application = builder.Build();
         using var client = new HttpClient { BaseAddress = endpoint };
 

@@ -2,54 +2,34 @@ using System;
 
 namespace Assimalign.Cohesion.Database.Graph;
 
-/// <summary>
-/// Builder-time registration of the graph model. The verbs ship with the
-/// model package and compose against the area root's
-/// <see cref="IDatabaseApplicationBuilder"/> seam only — no hosting reference —
-/// so the graph model can register its engine on any composition
-/// surface that implements the builder (the cross-area builder pattern; the SQL
-/// precedent is <c>AddSqlDatabase</c>/<c>AddSqlServer</c> shipping in
-/// <c>Database.Sql</c>).
-/// </summary>
+/// <summary>Registers deferred graph engines through the dependency-free Database application seam.</summary>
 public static class GraphDatabaseApplicationExtensions
 {
     extension(IDatabaseApplicationBuilder builder)
     {
-        /// <summary>
-        /// Creates and registers a graph database engine on the application as
-        /// a server-less, embedded registration: file-backed when
-        /// <see cref="GraphDatabaseEngineOptions.RootPath"/> is set, in-memory
-        /// otherwise, with durability and worker cadence per the options. The
-        /// engine is a data machine — operational (background workers running) as
-        /// soon as this verb returns.
-        /// </summary>
-        /// <param name="configure">An optional callback to configure the engine options (storage path, durability, group-commit/checkpoint/write-back cadence).</param>
-        /// <returns>
-        /// The registered <see cref="GraphDatabaseEngine"/>, so the composition
-        /// root can create databases before the application starts.
-        /// </returns>
-        /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        public GraphDatabaseEngine AddGraphDatabase(Action<GraphDatabaseEngineOptions>? configure = null)
+        /// <summary>Registers a graph engine to construct when the application builds.</summary>
+        /// <param name="configure">Receives the build context and engine options; invoked once during Build.</param>
+        /// <returns>The application builder for further registration.</returns>
+        /// <exception cref="ArgumentNullException">The builder or callback is null.</exception>
+        /// <remarks>The application owns the created engine. Registration neither binds configuration nor resolves services.</remarks>
+        public IDatabaseApplicationBuilder AddGraph(Action<IDatabaseApplicationContext, IGraphDatabaseEngineBuilder> configure)
         {
             ArgumentNullException.ThrowIfNull(builder);
-
-            GraphDatabaseEngineOptions options = new();
-            configure?.Invoke(options);
-
-            GraphDatabaseEngine engine = GraphDatabaseEngine.Create(options);
-            try
+            ArgumentNullException.ThrowIfNull(configure);
+            return builder.AddEngine(context =>
             {
-                builder.AddEngine(engine);
-                return engine;
-            }
-            catch
-            {
-                engine.Dispose();
-                throw;
-            }
+                var engineBuilder = new GraphDatabaseEngineBuilder();
+                try
+                {
+                    configure(context, engineBuilder);
+                    return engineBuilder.Build();
+                }
+                catch (Exception failure) when (failure is not OutOfMemoryException)
+                {
+                    engineBuilder.Abort(failure);
+                    throw;
+                }
+            });
         }
-
     }
 }
-
-

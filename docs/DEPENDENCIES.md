@@ -33,8 +33,8 @@ not an edge.
 | Shipped library/resource projects | 251 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 635 |
-| Declared shared-source links | 9 |
+| Declared project references | 641 |
+| Declared shared-source links | 14 |
 
 ## Ambiguous project names
 
@@ -132,7 +132,7 @@ direction that matters — no shipped project under `resources/**` may reference
 | `libraries/Security` | _(none)_ |
 | `resources/ApiManager` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/Hosting, libraries/Http, resources/Web |
 | `resources/ConfigurationStore` | libraries/ApplicationModel, libraries/Core, libraries/Hosting, libraries/IdentityModel, resources/Web |
-| `resources/Database` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/FileSystem, libraries/Hosting, libraries/IdentityModel, resources/Web |
+| `resources/Database` | libraries/ApplicationModel, libraries/Configuration, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/FileSystem, libraries/Hosting, libraries/IdentityModel, resources/Web |
 | `resources/EmailHub` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/Hosting, libraries/Http, resources/Web |
 | `resources/EventHub` | libraries/ApplicationModel, libraries/Connections, libraries/Hosting, libraries/Http, resources/Web |
 | `resources/IdentityHub` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/Hosting, libraries/Http, libraries/IdentityModel, resources/Web |
@@ -669,7 +669,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.Database` | `Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.Database.Execution`<br>`Assimalign.Cohesion.Database.Governance`<br>`Assimalign.Cohesion.Database.Indexing`<br>`Assimalign.Cohesion.Database.Language`<br>`Assimalign.Cohesion.Database.Protocol`<br>`Assimalign.Cohesion.Database.Security`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions`<br>`Assimalign.Cohesion.Database.Types` | `Assimalign.Cohesion.Web` | — | — |
 | `Assimalign.Cohesion.Database.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.Hosting.Resources` | — | — | — |
-| `Assimalign.Cohesion.Database.Blob` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Blob.Catalog`<br>`Assimalign.Cohesion.Database.Blob.Storage`<br>`Assimalign.Cohesion.Database.Protocol`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions` | — | — | — |
+| `Assimalign.Cohesion.Database.Blob` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Blob.Catalog`<br>`Assimalign.Cohesion.Database.Blob.Storage`<br>`Assimalign.Cohesion.Database.Protocol`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions` | — | `Assimalign.Cohesion.Database` | — |
 | `Assimalign.Cohesion.Database.Blob.Catalog` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Blob.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions` | — | — | — |
 | `Assimalign.Cohesion.Database.Blob.Client` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Blob`<br>`Assimalign.Cohesion.Database.Client`<br>`Assimalign.Cohesion.Database.Protocol` | — | — | — |
 | `Assimalign.Cohesion.Database.Blob.Client.StreamingFixture` | `Assimalign.Cohesion.Connections.InMemory`<br>`Assimalign.Cohesion.Database.Blob`<br>`Assimalign.Cohesion.Database.Blob.Client` | — | — | — |
@@ -684,7 +684,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Database.Cache.Storage` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Cache.Tests` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Client` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Protocol` | — | — | — |
-| `Assimalign.Cohesion.Database.Documents` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Documents.Catalog`<br>`Assimalign.Cohesion.Database.Documents.Language`<br>`Assimalign.Cohesion.Database.Documents.Storage` | — | — | — |
+| `Assimalign.Cohesion.Database.Documents` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Documents.Catalog`<br>`Assimalign.Cohesion.Database.Documents.Language`<br>`Assimalign.Cohesion.Database.Documents.Storage` | — | `Assimalign.Cohesion.Database` | — |
 | `Assimalign.Cohesion.Database.Documents.Catalog` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Documents.Storage`<br>`Assimalign.Cohesion.Database.Indexing`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
 | `Assimalign.Cohesion.Database.Documents.Client` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Documents.Language` | `Assimalign.Cohesion.Database.Language` | — | — | — |
@@ -695,7 +695,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Database.Embedded` | `Assimalign.Cohesion.Database` | — | — | — |
 | `Assimalign.Cohesion.Database.Execution` | `Assimalign.Cohesion.Database.Language`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
 | `Assimalign.Cohesion.Database.Governance` | — | — | — | — |
-| `Assimalign.Cohesion.Database.Graph` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Graph.Catalog`<br>`Assimalign.Cohesion.Database.Graph.Language`<br>`Assimalign.Cohesion.Database.Graph.Storage` | — | — | — |
+| `Assimalign.Cohesion.Database.Graph` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Graph.Catalog`<br>`Assimalign.Cohesion.Database.Graph.Language`<br>`Assimalign.Cohesion.Database.Graph.Storage` | — | `Assimalign.Cohesion.Database` | — |
 | `Assimalign.Cohesion.Database.Graph.Catalog` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Graph.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
 | `Assimalign.Cohesion.Database.Graph.Client` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Graph.Language` | `Assimalign.Cohesion.Database.Language` | — | — | — |
@@ -703,9 +703,9 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Database.Graph.Replication` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Graph.Security` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Graph.Storage` | `Assimalign.Cohesion.Database.Indexing`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions` | — | — | — |
-| `Assimalign.Cohesion.Database.Hosting` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry` | `Assimalign.Cohesion.Web.Health`<br>`Assimalign.Cohesion.Web.Hosting`<br>`Assimalign.Cohesion.Web.Hosting.Health`<br>`Assimalign.Cohesion.Web.Hosting.Resources` | — | — |
+| `Assimalign.Cohesion.Database.Hosting` | `Assimalign.Cohesion.Configuration`<br>`Assimalign.Cohesion.Configuration.CommandLine`<br>`Assimalign.Cohesion.Configuration.EnvironmentVariables`<br>`Assimalign.Cohesion.Configuration.Json`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.FileSystem.Physical`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry` | `Assimalign.Cohesion.Web.Health`<br>`Assimalign.Cohesion.Web.Hosting`<br>`Assimalign.Cohesion.Web.Hosting.Health`<br>`Assimalign.Cohesion.Web.Hosting.Resources` | — | — |
 | `Assimalign.Cohesion.Database.Indexing` | `Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
-| `Assimalign.Cohesion.Database.KeyValuePair` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.KeyValuePair.Catalog`<br>`Assimalign.Cohesion.Database.KeyValuePair.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
+| `Assimalign.Cohesion.Database.KeyValuePair` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.KeyValuePair.Catalog`<br>`Assimalign.Cohesion.Database.KeyValuePair.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Types` | — | `Assimalign.Cohesion.Database` | — |
 | `Assimalign.Cohesion.Database.KeyValuePair.Catalog` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Indexing`<br>`Assimalign.Cohesion.Database.KeyValuePair.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
 | `Assimalign.Cohesion.Database.KeyValuePair.Client` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Client`<br>`Assimalign.Cohesion.Database.KeyValuePair`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
 | `Assimalign.Cohesion.Database.KeyValuePair.Replication` | — | — | — | — |
@@ -717,7 +717,7 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Database.Replication` | `Assimalign.Cohesion.Database.Storage` | — | — | — |
 | `Assimalign.Cohesion.Database.SampleHost` | — | — | — | — |
 | `Assimalign.Cohesion.Database.Security` | — | — | — | — |
-| `Assimalign.Cohesion.Database.Sql` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Sql.Catalog`<br>`Assimalign.Cohesion.Database.Sql.Language`<br>`Assimalign.Cohesion.Database.Sql.Schema`<br>`Assimalign.Cohesion.Database.Sql.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
+| `Assimalign.Cohesion.Database.Sql` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Sql.Catalog`<br>`Assimalign.Cohesion.Database.Sql.Language`<br>`Assimalign.Cohesion.Database.Sql.Schema`<br>`Assimalign.Cohesion.Database.Sql.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Types` | — | `Assimalign.Cohesion.Database` | — |
 | `Assimalign.Cohesion.Database.Sql.Catalog` | `Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Indexing`<br>`Assimalign.Cohesion.Database.Sql.Storage`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
 | `Assimalign.Cohesion.Database.Sql.Client` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Client`<br>`Assimalign.Cohesion.Database.Sql`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
 | `Assimalign.Cohesion.Database.Sql.Language` | `Assimalign.Cohesion.Database.Language`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
@@ -1102,7 +1102,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.Database.Types` | 14 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Documents.Catalog, Assimalign.Cohesion.Database.Execution, Assimalign.Cohesion.Database.Graph.Catalog, … |
 | `Assimalign.Cohesion.Web.Routing` | 14 | Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.SourceGeneration.WebTests, Assimalign.Cohesion.Web.Api, Assimalign.Cohesion.Web.Api.Tests, … |
 | `Assimalign.Cohesion.IdentityModel.Token` | 13 | Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub.Hosting, Assimalign.Cohesion.IdentityHub.Hosting.Tests, Assimalign.Cohesion.IdentityModel.AotSample, … |
-| `Assimalign.Cohesion.Configuration` | 10 | Assimalign.Cohesion.Configuration.CommandLine, Assimalign.Cohesion.Configuration.EnvironmentVariables, Assimalign.Cohesion.Configuration.FileSystem, Assimalign.Cohesion.Configuration.FileSystem.Tests, … |
+| `Assimalign.Cohesion.Configuration` | 11 | Assimalign.Cohesion.Configuration.CommandLine, Assimalign.Cohesion.Configuration.EnvironmentVariables, Assimalign.Cohesion.Configuration.FileSystem, Assimalign.Cohesion.Configuration.FileSystem.Tests, … |
 
 ## Harnesses
 

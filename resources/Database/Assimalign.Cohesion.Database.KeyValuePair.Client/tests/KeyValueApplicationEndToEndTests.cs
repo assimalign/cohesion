@@ -18,8 +18,8 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Tests;
 
 /// <summary>
 /// The key-value wire end-to-end: the full stack composed the builder-first way —
-/// file-backed key-value engine registered by <c>AddKeyValueDatabase</c>, a real
-/// TCP loopback listener, the model server registered by <c>AddKeyValueServer</c>,
+/// file-backed key-value engine registered by <c>AddKeyValue</c>, a real
+/// TCP loopback listener, a deferred server nested beneath the engine,
 /// the hosting application built from the root builder — driven with the typed
 /// key-value client, including restart recovery over the real file sets.
 /// </summary>
@@ -91,29 +91,31 @@ public sealed class KeyValueApplicationEndToEndTests : IDisposable
 
     /// <summary>
     /// Composes the key-value application the builder-first way: engine verb,
-    /// TCP listener, server verb, build. The caller owns engine and listener
-    /// disposal (composition-root ownership).
+    /// nested TCP server factory, build. The application owns engine disposal;
+    /// the engine owns its server and listener.
     /// </summary>
     private (KeyValueDatabaseEngine Engine, TcpConnectionListener Listener, IDatabaseApplication Application) Compose()
     {
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
 
-        KeyValueDatabaseEngine engine = builder.AddKeyValueDatabase(options =>
+        TcpConnectionListener? listener = null;
+        builder.AddKeyValue((context, options) =>
         {
             options.EngineName = "kv";
             options.RootPath = _rootPath;
+            options.AddServer(engine =>
+            {
+                listener = new TcpConnectionListener(new TcpConnectionListenerOptions
+                {
+                    EndPoint = new IPEndPoint(IPAddress.Loopback, 0),
+                });
+                return KeyValueDatabaseServer.Create((KeyValueDatabaseEngine)engine,
+                    new KeyValueDatabaseServerOptions { Listener = listener });
+            });
         });
-
-        var listener = new TcpConnectionListener(new TcpConnectionListenerOptions
-        {
-            EndPoint = new IPEndPoint(IPAddress.Loopback, 0),
-        });
-
-        builder.AddKeyValueServer(engine, options => options.Listener = listener);
-
-        return (engine, listener, builder.Build());
+        var application = builder.Build();
+        return ((KeyValueDatabaseEngine)application.Context.GetEngine("kv"), listener!, application);
     }
-
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair.Client] - E2E: key-value over TCP round-trips CRUD/CAS/scan and data survives a restart")]
     public async Task EndToEnd_KeyValueOverTcpWithRestart_ShouldServeAndRecover()
     {
@@ -123,8 +125,7 @@ public sealed class KeyValueApplicationEndToEndTests : IDisposable
         {
             var (engine, listener, application) = Compose();
 
-            await using (engine)
-            await using (listener)
+            await using (application)
             {
                 // Code-first provisioning before the endpoint accepts (the area
                 // principle: the wire carries no database-management verbs).
@@ -173,8 +174,7 @@ public sealed class KeyValueApplicationEndToEndTests : IDisposable
         {
             var (engine, listener, application) = Compose();
 
-            await using (engine)
-            await using (listener)
+            await using (application)
             {
                 await engine.OpenDatabaseAsync(DatabaseName, TestTimeout());
 

@@ -13,6 +13,47 @@ public class HostTests
 {
     public const string DisplayPrefix = $"Cohesion Test [Hosting] - Host: ";
 
+    [Theory(DisplayName = DisplayPrefix + "Rejected startup hooks never enter the service lifecycle")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StartAsync_WhenStartingHookRejects_ShouldLeaveServiceLifecycleUntouched(bool afterCompletedCycle)
+    {
+        var events = new List<TestLifecycleService.Lifecycle>();
+        var options = new TestHostOptions();
+        options.HostedServices.Add(new TestLifecycleService(events.Add));
+        bool reject = !afterCompletedCycle;
+        var expectedFailure = new InvalidOperationException("startup rejected");
+        await using IHost host = new HookRecordingHost(options, phase =>
+        {
+            if (phase == "OnStarting" && reject)
+            {
+                throw expectedFailure;
+            }
+        });
+
+        if (afterCompletedCycle)
+        {
+            await host.StartAsync();
+            await host.StopAsync();
+            reject = true;
+        }
+        var previousEvents = events.ToArray();
+
+        var failure = await Should.ThrowAsync<InvalidOperationException>(
+            () => host.StartAsync().WaitAsync(TimeSpan.FromSeconds(5)));
+        failure.ShouldBeSameAs(expectedFailure);
+        host.Context.State.ShouldBe(HostState.Failed);
+        events.ShouldBe(previousEvents);
+        await host.StopAsync();
+        events.ShouldBe(previousEvents);
+
+        // The generic host still permits a fresh attempt when its hook permits it.
+        reject = false;
+        await host.StartAsync();
+        await host.StopAsync();
+        events.Count.ShouldBe(previousEvents.Length + 6);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "Pre-cancelled run starts and stops each service once")]
     public async Task RunAsync_WithPreCancelledToken_ShouldStartAndStopEachServiceOnce()
     {

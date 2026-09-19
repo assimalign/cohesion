@@ -3,38 +3,33 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
-
-/// <summary>
-/// A minimal <see cref="IDatabaseApplicationBuilder"/> that records registrations,
-/// proving the model verbs compose against the area root's builder seam without
-/// any hosting-library dependency.
-/// </summary>
+/// <summary>Records dependency-free engine intent without a hosting dependency.</summary>
 internal sealed class RecordingApplicationBuilder : IDatabaseApplicationBuilder
 {
-    private readonly List<IDatabaseEngine> _engines = new();
-    private readonly List<IDatabaseServer> _servers = new();
-
-    public IReadOnlyList<IDatabaseEngine> Engines => _engines;
-
-    public IReadOnlyList<IDatabaseServer> Servers => _servers;
+    public List<Func<IDatabaseApplicationContext, IDatabaseEngine>> Factories { get; } = [];
 
     public IDatabaseApplicationBuilder AddEngine(IDatabaseEngine engine)
     {
         ArgumentNullException.ThrowIfNull(engine);
-        _engines.Add(engine);
-        return this;
+        return AddEngine(_ => engine);
     }
 
-    public IDatabaseApplicationBuilder AddServer(IDatabaseServer server)
+    public IDatabaseApplicationBuilder AddEngine(Func<IDatabaseApplicationContext, IDatabaseEngine> configure)
     {
-        ArgumentNullException.ThrowIfNull(server);
-        _servers.Add(server);
+        ArgumentNullException.ThrowIfNull(configure);
+        Factories.Add(configure);
         return this;
     }
 
-    public IDatabaseApplicationBuilder AddServer(Func<IDatabaseApplicationContext, IDatabaseServer> configure)
-        => throw new NotSupportedException("Deferred factories resolve at Build — the hosting layer's job, deliberately not simulated here.");
+    public IDatabaseEngine MaterializeEngine() => Factories[0](new EmptyContext());
 
     public IDatabaseApplication Build()
-        => throw new NotSupportedException("Building is the hosting layer's job — deliberately not simulated here.");
+        => throw new NotSupportedException("The hosting layer builds applications.");
+
+    private sealed class EmptyContext : IDatabaseApplicationContext
+    {
+        public IReadOnlyList<IDatabaseEngine> Engines => [];
+        public IReadOnlyList<IDatabaseServer> Servers => [];
+        public IDatabaseEngine GetEngine(string name) => throw new KeyNotFoundException(name);
+    }
 }

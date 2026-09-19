@@ -220,3 +220,7 @@ Sessions do not edit this table; the orchestrator reconciles it from merged PRs.
 - Hosting model: `libraries/Hosting/.../docs/DESIGN.md` (execution menu) · Orchestration: `libraries/ApplicationModel/DESIGN.md`
 - Platform data layer: other resources consume engines **embedded-first** via `Database.Embedded` (DESIGN.md §3.7); engines must stay self-sufficient (#862)
 - Work-item mechanics: `.claude/skills/cohesion-work-items/` (`-EmitClosesBlock` for PR close-out)
+
+## Phase 29 hosting supersession (2026-09-19)
+
+The owner-approved [Database hosting design](DATABASE_HOSTING_DESIGN.md) supersedes earlier eager model-builder and sibling-server composition descriptions in this historical plan. The implementation uses deferred AddSql/AddDocuments/AddGraph/AddKeyValue/AddBlob, nested worker/server factories, one-shot Build, engine access / Run and explicit disposal ownership. Database.Hosting composes Configuration and interpreted DependencyInjection; ApplicationModel remains deferred. Historical delivery entries above are retained as written.

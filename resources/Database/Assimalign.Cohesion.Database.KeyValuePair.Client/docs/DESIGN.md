@@ -68,3 +68,12 @@ here without changing shared result policy.
 Encoding and materialization use no reflection or runtime code generation.
 Wire transactions, typed serialization, caching, retry policy, and rent-time
 liveness pings remain outside this surface.
+
+## Phase 29 composition migration
+
+The TCP end-to-end fixture now registers `AddKeyValue` with a nested deferred
+`AddServer` factory. Build constructs the engine and listener/server, then the
+fixture retrieves the engine from the built context for provisioning. The
+application owns the engine and the engine owns its server/listener; disposing
+the application closes this whole graph before the restart-recovery composition.
+Wire/client behavior and protocol remain unchanged.

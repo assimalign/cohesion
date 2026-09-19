@@ -1,0 +1,32 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Assimalign.Cohesion.Database/" />
+	<Folder Name="/Assimalign.Cohesion.Database/docs/">
+		<File Path="docs/DESIGN.md" />
+		<File Path="docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Database/src/">
+		<Project Path="src/Assimalign.Cohesion.Database.csproj" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Database/tests/">
+		<Project Path="tests/Assimalign.Cohesion.Database.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Database/refs/">
+		<Project Path="../../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../../../libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/src/Assimalign.Cohesion.FileSystem.Physical.csproj" />
+		<Project Path="../../../libraries/FileSystem/Assimalign.Cohesion.FileSystem/src/Assimalign.Cohesion.FileSystem.csproj" />
+		<Project Path="../Assimalign.Cohesion.Database.Execution/src/Assimalign.Cohesion.Database.Execution.csproj" />
+		<Project Path="../Assimalign.Cohesion.Database.Governance/src/Assimalign.Cohesion.Database.Governance.csproj" />
+		<Project Path="../Assimalign.Cohesion.Database.Indexing/src/Assimalign.Cohesion.Database.Indexing.csproj" />
+		<Project Path="../Assimalign.Cohesion.Database.Language/src/Assimalign.Cohesion.Database.Language.csproj" />
+		<Project Path="../Assimalign.Cohesion.Database.Protocol/src/Assimalign.Cohesion.Database.Protocol.csproj" />
+		<Project Path="../Assimalign.Cohesion.Database.Security/src/Assimalign.Cohesion.Database.Security.csproj" />
+		<Project Path="../Assimalign.Cohesion.Database.Storage/src/Assimalign.Cohesion.Database.Storage.csproj" />
+		<Project Path="../Assimalign.Cohesion.Database.Transactions/src/Assimalign.Cohesion.Database.Transactions.csproj" />
+		<Project Path="../Assimalign.Cohesion.Database.Types/src/Assimalign.Cohesion.Database.Types.csproj" />
+	</Folder>
+</Solution>

@@ -13,6 +13,7 @@ internal sealed class RecordingEngine : IDatabaseEngine
 {
     private readonly string _name;
     private readonly IReadOnlyList<IDatabaseEngineWorker> _workers;
+    private readonly List<IDatabaseServer> _servers = [];
     private EngineState _state;
 
     internal RecordingEngine(
@@ -33,32 +34,49 @@ internal sealed class RecordingEngine : IDatabaseEngine
 
     public IReadOnlyList<IDatabaseEngineWorker> Workers => _workers;
 
-    public ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default)
+    public IReadOnlyList<IDatabaseServer> Servers => _servers;
+
+    internal int DisposeCount { get; private set; }
+
+    internal Exception? DisposeException { get; set; }
+
+    internal void AddServer(Func<IDatabaseEngine, IDatabaseServer> factory) => _servers.Add(factory(this));
+
+    public ValueTask<IDatabase> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
 
-    public ValueTask<IDatabase> OpenDatabaseAsync(string name, CancellationToken cancellationToken = default)
+    public ValueTask<IDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
 
-    public ValueTask DropDatabaseAsync(string name, CancellationToken cancellationToken = default)
+    public ValueTask DropDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
 
     public IAsyncEnumerable<IDatabase> GetDatabasesAsync(CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
 
-    public bool TryGetDatabase(string name, out IDatabase database)
+    public bool TryGetDatabase(DatabaseName name, out IDatabase database)
     {
         database = null!;
         return false;
     }
 
-    public void Dispose()
-    {
-        _state = EngineState.Disposed;
-    }
+    public void Dispose() => DisposeAsync().GetAwaiter().GetResult();
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        Dispose();
-        return ValueTask.CompletedTask;
+        if (_state == EngineState.Disposed)
+        {
+            return;
+        }
+        _state = EngineState.Disposed;
+        DisposeCount++;
+        for (int index = _servers.Count - 1; index >= 0; index--)
+        {
+            await _servers[index].DisposeAsync();
+        }
+        if (DisposeException is not null)
+        {
+            throw DisposeException;
+        }
     }
 }

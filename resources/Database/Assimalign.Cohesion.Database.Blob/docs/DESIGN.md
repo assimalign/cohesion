@@ -359,3 +359,47 @@ The Blob server tests cover all five operations against another database and ano
 matching names, authenticator evidence, session limits, idle/authentication timeouts, terminal
 lifecycle, engine-state rejection, both drain phases, and a blocked over-limit rejection. The
 client suite supplies in-memory end-to-end failure cases and the constrained-heap wire round trip.
+
+
+## Phase 29: deferred hosting composition
+
+The owner-approved [Database hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md)
+is implemented as `AddBlob((context, engine) => ...)` on
+`IDatabaseApplicationBuilder`. This replaces `AddBlobDatabase`. The model callback
+runs during application Build and receives an `IBlobDatabaseEngineBuilder`.
+It configures the complete option set, including `FileSystemPath? RootPath`,
+durability, storage strategy, identity and worker intervals; it neither binds
+configuration nor accesses a service container. Retained builder options and
+factories reject mutation after the first engine Build attempt.
+
+`AddWorker` and `AddServer` take factories whose engine argument exists before
+the factory runs. The engine schedules custom workers through the common
+`IDatabaseEngineWorker.Run` contract; this is the concrete generic consumer
+that earns `IDatabaseEngineBuilder`. There are no additional strongly typed
+factory overloads: a model-specific factory can cast its argument, while ordinary
+workers remain portable across models. The engine owns successful factory
+products and cleans them up on subsequent construction failure. Nested servers
+must front that exact engine. The application snapshots each engine's Servers
+for start/stop; disposing the engine disposes its servers and custom workers.
+
+`BlobDatabaseEngine.Create(options)` remains the standalone entry point.
+Application factory registrations are application-owned; instance registrations
+remain caller-owned, including their nested components. All four named database
+operations now take `DatabaseName`, with the existing implicit string conversion
+preserving ordinary literal call sites. Empty/default names are rejected.
+
+The explicit requirement for StorageStrategy supersedes the draft's statement
+that this model lacks a storage injection parameter. `IBlobStorageStrategy`
+provides create/open/drop, existence and discovery using the existing
+`BlobStorage` product. It overrides RootPath without allocating default
+files; returned storage is engine-owned and the strategy itself is borrowed.
+Durability is supplied explicitly, and opening must defer checkpointing until
+engine recovery. Default file/memory selection remains unchanged.
+
+`BlobDatabaseEngine.CreateBuilder()` exposes the model builder for the
+concrete hosting builder's `AddEngine(name, build => ...)` overload. The consumer
+assigns resolved configuration/service values, registers nested server/worker
+factories, and returns `Build()`; the model package still never sees DI.
+There is no generic production orchestration over `IDatabaseEngineBuilder`;
+the base contract supports model-agnostic worker composition, demonstrated by
+tests exercising the public factory through that base interface.

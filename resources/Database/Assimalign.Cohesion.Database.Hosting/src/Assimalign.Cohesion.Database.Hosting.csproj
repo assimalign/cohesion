@@ -9,6 +9,12 @@
 	-->
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration.Json" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration.EnvironmentVariables" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration.CommandLine" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Physical" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />

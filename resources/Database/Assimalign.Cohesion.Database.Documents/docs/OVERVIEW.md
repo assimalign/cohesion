@@ -23,14 +23,22 @@ await session.ExecuteAsync("CREATE INDEX by_total ON orders (total)");
 var result = await session.ExecuteAsync("SELECT o.customer.name FROM orders o WHERE o.total >= 40");
 ```
 
-`AddDocumentDatabase` is a C# extension member on the root
-`IDatabaseApplicationBuilder`. It creates and registers an operational engine;
-it has no Hosting dependency. The four workers start with engine creation and
-stop before disposal durably closes databases.
+`AddDocuments((context, engine) => ...)` captures engine construction on the root
+`IDatabaseApplicationBuilder` and returns that application builder. During Build,
+the callback configures `IDocumentDatabaseEngineBuilder`, including an optional
+borrowed `IDocumentStorageStrategy` and deferred worker/server factories. The
+application owns the resulting engine and its nested components. The model has
+no Hosting dependency. Standalone Create remains available; all four built-in
+workers start with engine creation and stop when the engine is disposed.
 
 The engine references the Documents Language, Catalog, and Storage packages and
 the shared Database root. [DESIGN.md](DESIGN.md) describes transaction ownership,
 OQL semantics, and limits. The [language design](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md)
 defines the supported grammar; the [storage design](../../Assimalign.Cohesion.Database.Documents.Storage/docs/DESIGN.md)
-defines the on-disk format. Wire clients, replication, security, hosting wiring,
-ApplicationModel, and compiled-schema provisioning are outside this implementation.
+defines the on-disk format. ApplicationModel and compiled-schema provisioning
+remain outside this composition change.
+
+`DocumentDatabaseEngine.CreateBuilder()` returns the same model builder for
+standalone composition or the concrete hosting builder's build-aware engine
+factory. This lets the consumer pass already resolved values and register nested
+components while keeping the model package dependency-free.

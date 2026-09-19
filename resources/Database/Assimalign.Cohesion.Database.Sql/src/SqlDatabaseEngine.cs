@@ -33,7 +33,9 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     private readonly SqlDatabaseEngineOptions _options;
     private readonly Dictionary<string, IDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _syncRoot = new();
-    private readonly DatabaseEngineWorker[] _workers;
+    private readonly List<IDatabaseEngineWorker> _workers;
+    private readonly List<IDatabaseServer> _servers = [];
+    private readonly List<IDatabaseEngineWorker> _customWorkers = [];
     private readonly ManualResetEventSlim _commitPendingSignal = new();
     private readonly Action _signalCommitPending;
     private readonly List<Thread> _workerThreads = new();
@@ -105,7 +107,10 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     public EngineModel Model => EngineModel.Sql;
 
     /// <inheritdoc />
-    public IReadOnlyList<IDatabaseEngineWorker> Workers => _workers;
+    public IReadOnlyList<IDatabaseEngineWorker> Workers => _workers.AsReadOnly();
+
+    /// <inheritdoc />
+    public IReadOnlyList<IDatabaseServer> Servers => _servers.AsReadOnly();
 
     /// <summary>
     /// Gets the engine options, for the engine's background workers.
@@ -140,8 +145,12 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
         return new SqlDatabaseEngine(options);
     }
 
+    /// <summary>Creates a dependency-free builder for SQL options and nested worker/server factories.</summary>
+    /// <returns>A fresh builder supporting one engine construction attempt.</returns>
+    public static ISqlDatabaseEngineBuilder CreateBuilder() => new SqlDatabaseEngineBuilder();
+
     /// <inheritdoc />
-    public ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default)
+    public ValueTask<IDatabase> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
         => CreateDatabaseAsync(name, Collation.Binary, cancellationToken);
 
     /// <summary>Creates a database with a persisted default string collation.</summary>
@@ -149,7 +158,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     /// <param name="defaultCollation">The collation inherited by columns without an override.</param>
     /// <param name="cancellationToken">Cancellation token for creation.</param>
     /// <returns>The created database.</returns>
-    public ValueTask<IDatabase> CreateDatabaseAsync(string name, Collation defaultCollation, CancellationToken cancellationToken = default)
+    public ValueTask<IDatabase> CreateDatabaseAsync(DatabaseName name, Collation defaultCollation, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(defaultCollation);
@@ -205,7 +214,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     }
 
     /// <inheritdoc />
-    public ValueTask<IDatabase> OpenDatabaseAsync(string name, CancellationToken cancellationToken = default)
+    public ValueTask<IDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
 
@@ -264,7 +273,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     }
 
     /// <inheritdoc />
-    public ValueTask DropDatabaseAsync(string name, CancellationToken cancellationToken = default)
+    public ValueTask DropDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
 
@@ -317,7 +326,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     }
 
     /// <inheritdoc />
-    public bool TryGetDatabase(string name, out IDatabase database)
+    public bool TryGetDatabase(DatabaseName name, out IDatabase database)
     {
         ThrowIfDisposed();
 
@@ -327,38 +336,48 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
         }
     }
 
-    /// <inheritdoc />
-    public void Dispose()
+    internal void AttachWorker(IDatabaseEngineWorker worker)
     {
-        if (_disposed)
+        ThrowIfDisposed();
+        if (string.IsNullOrWhiteSpace(worker.Name))
         {
-            return;
+            throw new ArgumentException("A worker must have a diagnostic name.", nameof(worker));
         }
-
-        _disposed = true;
-
-        // Quiesce the worker pumps before closing storages: no worker pass may
-        // touch a database that is being disposed.
-        StopWorkerThreads();
-
-        lock (_syncRoot)
+        foreach (var existing in _workers)
         {
-            // Closing a database flushes according to its policy: disposal checkpoints
-            // when no transaction is active (clean shutdown) and force-flushes the
-            // journal otherwise. Durable policies place committed work on stable
-            // storage before disposal completes.
-            foreach (var database in _databases.Values)
+            if (string.Equals(existing.Name, worker.Name, StringComparison.OrdinalIgnoreCase))
             {
-                database.Dispose();
+                throw new InvalidOperationException($"Worker name '{worker.Name}' is already registered.");
             }
-            _databases.Clear();
-            _storageSnapshot = [];
-            _instanceSnapshot = [];
         }
-
-        _workerStopSource.Dispose();
-        _commitPendingSignal.Dispose();
+        var thread = new Thread(() => PumpWorker(worker, _workerStopSource.Token))
+        {
+            IsBackground = true,
+            Name = worker.Name,
+        };
+        _workers.Add(worker);
+        _customWorkers.Add(worker);
+        _workerThreads.Add(thread);
+        try
+        {
+            thread.Start();
+        }
+        catch (Exception failure) when (failure is not OutOfMemoryException)
+        {
+            _workers.Remove(worker);
+            _customWorkers.Remove(worker);
+            _workerThreads.Remove(thread);
+            throw;
+        }
     }
+
+    internal void AttachServer(IDatabaseServer server)
+    {
+        ThrowIfDisposed();
+        _servers.Add(server);
+    }
+    /// <inheritdoc />
+    public void Dispose() => Task.Run(async () => await DisposeAsync().ConfigureAwait(false)).GetAwaiter().GetResult();
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
@@ -367,10 +386,50 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
         {
             return;
         }
-
         _disposed = true;
+        List<Exception> failures = [];
 
-        StopWorkerThreads();
+        // Servers release listeners and active sessions before engine workers or
+        // database storage disappear. Continue cleanup after independent failures.
+        for (int index = _servers.Count - 1; index >= 0; index--)
+        {
+            try
+            {
+                await _servers[index].DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception failure) when (failure is not OutOfMemoryException)
+            {
+                failures.Add(failure);
+            }
+        }
+
+        try
+        {
+            StopWorkerThreads();
+        }
+        catch (Exception failure) when (failure is not OutOfMemoryException)
+        {
+            failures.Add(failure);
+        }
+
+        for (int index = _customWorkers.Count - 1; index >= 0; index--)
+        {
+            try
+            {
+                if (_customWorkers[index] is IAsyncDisposable asyncDisposable)
+                {
+                    await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                }
+                else if (_customWorkers[index] is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
+            catch (Exception failure) when (failure is not OutOfMemoryException)
+            {
+                failures.Add(failure);
+            }
+        }
 
         IDatabase[] snapshot;
         lock (_syncRoot)
@@ -380,16 +439,24 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             _storageSnapshot = [];
             _instanceSnapshot = [];
         }
-
         foreach (var database in snapshot)
         {
-            await database.DisposeAsync().ConfigureAwait(false);
+            try
+            {
+                await database.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception failure) when (failure is not OutOfMemoryException)
+            {
+                failures.Add(failure);
+            }
         }
-
         _workerStopSource.Dispose();
         _commitPendingSignal.Dispose();
+        if (failures.Count != 0)
+        {
+            throw new AggregateException("Engine disposal encountered failures.", failures);
+        }
     }
-
     /// <summary>
     /// Configures a freshly created or opened storage file set with the engine's
     /// durability policy and wires its commit-pending hook to the engine's flush
@@ -469,7 +536,7 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     /// observe that the engine runs degraded. An escaped exception on a raw thread
     /// would terminate the process.
     /// </summary>
-    private void PumpWorker(DatabaseEngineWorker worker, CancellationToken cancellationToken)
+    private void PumpWorker(IDatabaseEngineWorker worker, CancellationToken cancellationToken)
     {
         try
         {
@@ -490,14 +557,32 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     /// </summary>
     private void StopWorkerThreads()
     {
-        _workerStopSource.Cancel();
-
+        List<Exception> failures = [];
+        try
+        {
+            _workerStopSource.Cancel();
+        }
+        catch (Exception failure) when (failure is not OutOfMemoryException)
+        {
+            // A custom cancellation callback must not skip worker joins.
+            failures.Add(failure);
+        }
         foreach (var thread in _workerThreads)
         {
-            thread.Join();
+            try
+            {
+                thread.Join();
+            }
+            catch (Exception failure) when (failure is not OutOfMemoryException)
+            {
+                failures.Add(failure);
+            }
         }
-
         _workerThreads.Clear();
+        if (failures.Count != 0)
+        {
+            throw new AggregateException("Worker shutdown encountered failures.", failures);
+        }
     }
 
     private void ThrowIfDisposed()

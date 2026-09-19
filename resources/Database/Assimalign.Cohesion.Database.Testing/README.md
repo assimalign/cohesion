@@ -10,12 +10,16 @@ The resource stays an ordinary top-level `Program.cs`:
 
 ```csharp
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
-await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
-    options.RootPath = Resource.Mounts.Data.Path);
+builder.AddSql((_, options) =>
+{
+    options.EngineName = "app-sql";
+    options.RootPath = Resource.Mounts.Data.Path;
+    options.AddServer(engine => SqlDatabaseServer.Create(
+        (SqlDatabaseEngine)engine, new SqlDatabaseServerOptions().Listen(Resource.Endpoints.Db)));
+});
 
-builder.AddDatabase(engine, "app", SqlSchema.Compile("app", database =>
+builder.AddDatabase("app-sql", "app", SqlSchema.Compile("app", database =>
     database.Table<Account>(table => table.Key(account => account.Id))));
-builder.AddSqlServer(engine, options => options.Listen(Resource.Endpoints.Db));
 
 await using DatabaseApplication application = builder.Build();
 await application.RunAsync();

@@ -58,24 +58,27 @@ await session.ExecuteAsync(SqlQueryRequest.FromSql(
 
 ### Registering on a database application
 
-The model's builder verbs compose against the area root's
-`IDatabaseApplicationBuilder` seam (no hosting reference — the verbs ship here,
-per the area builder pattern). `AddSqlDatabase` registers the engine;
-`AddSqlServer` fronts it with the SQL model's wire-protocol server
-(`SqlDatabaseServer` — the model's own machinery; servers are per-model and the
-root's `IDatabaseServer` contract is the only area-wide requirement):
+`AddSql` captures engine intent through the area root's dependency-free builder
+contract. The application builds and owns the engine; its optional server belongs
+to that engine. The callback and nested factory execute during Build:
 
 ```csharp
-SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
+builder.AddSql((context, engine) =>
 {
-    options.RootPath = dataDirectory;          // omit for in-memory
-    options.Durability = StorageCommitDurability.Grouped;
+    engine.EngineName = "orders";
+    engine.RootPath = dataDirectory;
+    engine.Durability = StorageCommitDurability.Grouped;
+    engine.AddServer(databaseEngine =>
+    {
+        var options = new SqlDatabaseServerOptions();
+        options.Listen(new Uri("tcp://127.0.0.1:5439"));
+        return SqlDatabaseServer.Create((SqlDatabaseEngine)databaseEngine, options);
+    });
 });
-
-SqlDatabaseServer server = builder.AddSqlServer(engine, options =>
-{
-    options.Listener = listener;               // server binds and owns its lifecycle
-});
+await using var application = builder.Build();
+IDatabaseEngine orders = application.Context.GetEngine("orders");
 ```
 
+The `Listen` helper ships in `Database.Sql.Tcp`. Omit `AddServer` for embedded
+SQL. `SqlDatabaseEngine.Create(options)` also remains available for standalone use.
 See [DESIGN.md](DESIGN.md) for the execution model and its decisions.

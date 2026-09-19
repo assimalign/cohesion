@@ -10,15 +10,17 @@ using Assimalign.Cohesion.Hosting;
 
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 
-await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
+builder.AddSql((_, options) =>
 {
     options.EngineName = "sample-sql";
     options.RootPath = Resource.Mounts.Data.Path
         ?? throw new InvalidOperationException("The Database data mount must have a materialized path.");
     options.Durability = Resource.Settings.DatabaseDurability.Get<StorageCommitDurability>();
+    options.AddServer(engine => SqlDatabaseServer.Create(
+        (SqlDatabaseEngine)engine, new SqlDatabaseServerOptions().Listen(Resource.Endpoints.Db)));
 });
 
-builder.AddDatabase(engine, "sample", SqlSchema.Compile("sample", database =>
+builder.AddDatabase("sample-sql", "sample", SqlSchema.Compile("sample", database =>
 {
     database.Table<Order>("orders", table =>
     {
@@ -27,8 +29,6 @@ builder.AddDatabase(engine, "sample", SqlSchema.Compile("sample", database =>
         table.Index(order => order.Item);
     });
 }));
-
-builder.AddSqlServer(engine, options => options.Listen(Resource.Endpoints.Db));
 
 await using DatabaseApplication application = builder.Build();
 await application.RunAsync();

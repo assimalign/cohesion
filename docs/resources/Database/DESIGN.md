@@ -185,8 +185,8 @@ sequenceDiagram
 
     rect rgb(245,245,245)
     Note over Host,Kernel: Startup — services before servers, so Provision precedes accept
-    Host->>SqlEng: AddSqlDatabase(options) — engine runs from creation
-    Host->>KvEng: AddKeyValueDatabase(options)
+    Host->>SqlEng: Build deferred AddSql intent — engine runs from creation
+    Host->>KvEng: Build deferred AddKeyValue intent
     SqlEng->>Kernel: spawn workers (checkpoint, WAL flush, write-back, purge)
     KvEng->>Kernel: spawn workers
     Host->>SqlEng: Provision(compiled schema) — additional host service
@@ -249,8 +249,8 @@ private cross-area references to `Web.Hosting` and `Web.Health` are the sanction
 HTTP surface without becoming part of the Database reference API.
 
 Composition is **builder-first**. The root's `IDatabaseApplicationBuilder` is the seam model
-packages register engines and servers on — `Database.Sql` ships `AddSqlDatabase(...)` and
-`AddSqlServer(...)`. Composition roots register ordered lifecycle services through the
+packages register deferred engines on — `Database.Sql` ships `AddSql((context, engine) => ...)`,
+with servers nested under `engine.AddServer(factory)`. Composition roots register ordered lifecycle services through the
 concrete `DatabaseApplicationBuilder.AddService` verb in `Database.Hosting`; the root
 contract references no hosting library (O34). `Database.Hosting` implements the builder and exposes
 `DatabaseApplication.CreateBuilder(args)`. The `args` overload checks the calling assembly's
@@ -384,7 +384,7 @@ The KeyValuePair engine was built as the deliberate test of R3's premise — tha
 | Types (order-preserving self-describing tuple codec, `DatabaseValueCodec`) | entry records (key/value binary components) and every wire value | raw key bytes double as `IndexKey`s — the model's ordering contract *is* the codec's |
 | Execution (request/result families) | `KeyValueRequest` family + materialized result sets | the typed seam and the wire ride the same shapes |
 | Protocol + the server machinery | the command grammar rides the existing `Execute` message; results ride the generic result framing — **zero protocol changes** | the extraction evidence (preserved below; the owner subsequently chose per-model duplication): even the execute pump proved model-agnostic |
-| The composition surface (`IDatabaseApplicationBuilder`, per-model verbs, root server contracts) | `AddKeyValueDatabase`/`AddKeyValueServer` + `KeyValueDatabaseServer` (the model's own `IDatabaseServer`) | the TCP E2E composes the whole stack builder-first, restart included |
+| The composition surface (`IDatabaseApplicationBuilder`, per-model verbs, root server contracts) | `AddKeyValue` / nested `AddServer(factory)` + `KeyValueDatabaseServer` (the model's own `IDatabaseServer`) | the TCP E2E composes the whole stack builder-first, restart included |
 | The engine-owned worker discipline (data machines, five-worker inventory) | same inventory, same pump base; the version-purge worker is **live** from the first cut | worker-inventory and purge-pass suites |
 
 **What it exposed (the gaps, each filed rather than hacked around):**
@@ -505,3 +505,9 @@ Everything under `resources/Database/` builds with `IsAotCompatible=true` (area 
 - `libraries/ApplicationModel/DESIGN.md` — the two-plane orchestration model `Database.ApplicationModel` plugs into
 - `libraries/Hosting/Assimalign.Cohesion.Hosting/docs/DESIGN.md` — the per-service execution menu the host composition follows
 - `docs/SERVICE_LAYER_DESIGN.md` §Database, `docs/programs/SERVICE_STORY_REQUIREMENTS.md` §Database — the earlier requirement passes this design reconciles
+
+## Phase 29 hosting composition
+
+The owner-approved [hosting design](../../programs/DATABASE_HOSTING_DESIGN.md), with its implementation corrections, is now Add intent → one-shot Build → engine access / Run. All five model verbs are deferred and return the application builder. No Use method is introduced. Each model owns a typed engine-builder interface with options and deferred worker/server factories. `DatabaseName` is the root and concrete engine name parameter for create/open/drop/lookup operations.
+
+Hosting snapshots engine-owned servers for start/stop, disposes factory-owned engines, borrows registered instances, and constructs one Configuration / interpreted DependencyInjection provider per application. Services start before servers; servers drain first. Application disposal closes owned products before infrastructure and aggregates cleanup failures. Existing ApplicationModel integration is preserved without adding manifests, control planes or orchestration work. See the Hosting project DESIGN for ownership, configuration precedence and failure rules.
