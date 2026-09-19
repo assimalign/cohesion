@@ -121,9 +121,10 @@ internal sealed partial class SqlPlanner
             ValidateExpression(select.Where, evaluator, _subqueryTypes);
         }
 
+        var orderByProjections = BindOrderByProjections(select, projections, columns.Count);
         foreach (var orderBy in select.OrderBy)
         {
-            ValidateExpression(orderBy.Expression, evaluator, _subqueryTypes);
+            ValidateExpression(orderBy.Expression, evaluator, _subqueryTypes, orderByProjections);
         }
 
         if (bindings is not null)
@@ -131,14 +132,14 @@ internal sealed partial class SqlPlanner
             return new SqlJoinPlan(bindings, columns, select.Joins[0].Condition!, projections,
                 select.Where, select.OrderBy, EvaluateCount(select.Limit, "LIMIT"),
                 EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct,
-                SelectJoinAccessPath(bindings, select.Joins[0].Condition!, evaluator));
+                SelectJoinAccessPath(bindings, select.Joins[0].Condition!, evaluator), orderByProjections);
         }
 
         if (systemView is not null)
         {
             return new SqlSystemViewPlan(systemView, projections, select.Where, select.OrderBy,
                 EvaluateCount(select.Limit, "LIMIT"), EvaluateCount(select.Offset, "OFFSET"),
-                select.IsDistinct);
+                select.IsDistinct, orderByProjections);
         }
 
         return new SqlSelectPlan(
@@ -149,7 +150,7 @@ internal sealed partial class SqlPlanner
             EvaluateCount(select.Limit, "LIMIT"),
             EvaluateCount(select.Offset, "OFFSET"),
             select.IsDistinct,
-            SelectAccessPath(table!, select.Where));
+            SelectAccessPath(table!, select.Where), orderByProjections);
     }
 
     // ── Access-path selection (rule-based, by design) ──────────────────
@@ -805,10 +806,16 @@ internal sealed partial class SqlPlanner
     /// UPDATE, DELETE, VALUES, CHECK, DEFAULT or LIMIT expression — and is rejected. Null
     /// rejects every subquery, which is what the constraint validators want.
     /// </param>
+    /// <param name="boundValues">ORDER BY nodes already bound to output values.</param>
     /// <exception cref="DatabaseException">The expression cannot be planned.</exception>
     internal static void ValidateExpression(SqlExpression expression, SqlExpressionEvaluator evaluator,
-        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries = null)
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries = null,
+        IReadOnlyDictionary<SqlExpression, int>? boundValues = null)
     {
+        if (boundValues is not null && boundValues.ContainsKey(expression))
+        {
+            return;
+        }
         bool isBound = boundSubqueries is not null && boundSubqueries.ContainsKey(expression);
         switch (expression)
         {
@@ -834,7 +841,7 @@ internal sealed partial class SqlPlanner
 
         foreach (var child in Children(expression))
         {
-            ValidateExpression(child, evaluator, boundSubqueries);
+            ValidateExpression(child, evaluator, boundSubqueries, boundValues);
         }
     }
 

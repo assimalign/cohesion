@@ -52,10 +52,8 @@ internal sealed partial class SqlPlanExecutor
         }
 
         int projectionStart = plan.Keys.Count + plan.Aggregates.Count;
-        var aliasSources = plan.ValueOrdinals.Where(pair => pair.Value >= projectionStart)
-            .ToDictionary(pair => pair.Key, pair => plan.Projections[pair.Value - projectionStart].Expression!);
         var evaluator = new SqlExpressionEvaluator(plan.SourceColumns, _parameters, plan.Bindings, plan.ValueOrdinals,
-            _catalog.DefaultCollation, aliasSources, _subqueryValues);
+            _catalog.DefaultCollation, subqueryValues: _subqueryValues);
         var matches = new List<object?[]>();
         foreach (var (key, states) in groups)
         {
@@ -79,7 +77,8 @@ internal sealed partial class SqlPlanExecutor
         }
         if (plan.OrderBy.Count > 0)
         {
-            matches = SortRows(matches, plan.OrderBy, evaluator);
+            matches = SortRows(matches, plan.OrderBy,
+                evaluator.ForOrdering(plan.Projections, plan.OrderByProjections, projectionStart));
         }
         var projected = matches.Select(row => row[projectionStart..]).ToList();
         if (plan.IsDistinct)

@@ -115,36 +115,16 @@ internal sealed partial class SqlPlanExecutor
         }
 
         return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-            plan.IsDistinct, evaluator);
+            plan.IsDistinct, evaluator, plan.OrderByProjections);
     }
 
     /// <summary>Applies the common SELECT projection, ordering, distinctness and window.</summary>
     private static QueryResult MaterializeSelect(List<object?[]> matches, IReadOnlyList<SqlProjection> projections,
         IReadOnlyList<SqlOrderByColumn> orderBy, long? limit, long? offset,
-        bool isDistinct, SqlExpressionEvaluator evaluator)
+        bool isDistinct, SqlExpressionEvaluator evaluator,
+        IReadOnlyDictionary<SqlExpression, int>? orderByProjections)
     {
-        // ORDER BY before projection so sort keys may reference any table column.
-        if (orderBy.Count > 0)
-        {
-            matches = SortRows(matches, orderBy, evaluator);
-        }
-
-        // Project.
-        var projected = new List<object?[]>(matches.Count);
-        foreach (var row in matches)
-        {
-            var output = new object?[projections.Count];
-
-            for (int i = 0; i < projections.Count; i++)
-            {
-                var projection = projections[i];
-                output[i] = projection.ColumnOrdinal is int ordinal
-                    ? row[ordinal]
-                    : NormalizeGroupValue(evaluator.Evaluate(projection.Expression!, row), projection.Type);
-            }
-
-            projected.Add(output);
-        }
+        var projected = ProjectAndSortRows(matches, projections, orderBy, evaluator, orderByProjections);
 
         if (isDistinct)
         {
@@ -173,6 +153,51 @@ internal sealed partial class SqlPlanExecutor
         }
 
         return new SqlMaterializedResultSet(columns, window.ToList());
+    }
+
+    /// <summary>
+    /// Keeps source columns available for scalar keys and materializes output values
+    /// once for aliases and ordinals, matching grouped-query ordering semantics.
+    /// </summary>
+    private static List<object?[]> ProjectAndSortRows(List<object?[]> matches,
+        IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlOrderByColumn> orderBy,
+        SqlExpressionEvaluator evaluator, IReadOnlyDictionary<SqlExpression, int>? outputSlots)
+    {
+        if (matches.Count == 0)
+        {
+            return [];
+        }
+        if (outputSlots is { Count: > 0 })
+        {
+            int projectionStart = matches[0].Length;
+            var rows = new List<object?[]>(matches.Count);
+            foreach (var source in matches)
+            {
+                var row = new object?[projectionStart + projections.Count];
+                source.CopyTo(row, 0);
+                Project(source).CopyTo(row, projectionStart);
+                rows.Add(row);
+            }
+            return SortRows(rows, orderBy, evaluator.ForOrdering(projections, outputSlots, projectionStart))
+                .Select(row => row[projectionStart..]).ToList();
+        }
+        if (orderBy.Count > 0)
+        {
+            matches = SortRows(matches, orderBy, evaluator);
+        }
+        return matches.Select(Project).ToList();
+
+        object?[] Project(object?[] row)
+        {
+            var output = new object?[projections.Count];
+            for (int i = 0; i < projections.Count; i++)
+            {
+                var projection = projections[i];
+                output[i] = projection.ColumnOrdinal is int ordinal ? row[ordinal]
+                    : NormalizeGroupValue(evaluator.Evaluate(projection.Expression!, row), projection.Type);
+            }
+            return output;
+        }
     }
 
     private static List<object?[]> SortRows(List<object?[]> rows, IReadOnlyList<SqlOrderByColumn> orderBy,

@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Database.Language;
 
 public sealed partial class SqlQueryParser
 {
-    /// <summary>Rejects the empty grouping set instead of executing it as a NULL-valued grouping key.</summary>
+    /// <summary>Rejects empty grouping sets and ordinal syntax outside ORDER BY.</summary>
     private SqlExpression ParseGroupingExpression(ref TokenLexer lexer)
     {
         if (lexer.Current.Type == TokenType.LeftParen && TryPeekToken(lexer, out string next, out int end) && next == ")")
@@ -19,7 +19,23 @@ public sealed partial class SqlQueryParser
             return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, start, end));
         }
 
-        return ParseExpression(ref lexer);
+        var expression = ParseExpression(ref lexer);
+        var numeric = expression switch
+        {
+            SqlLiteralExpression { LiteralType: SqlLiteralType.Integer or SqlLiteralType.Float } literal => literal,
+            SqlUnaryExpression
+            {
+                Operator: SqlUnaryOperator.Negate,
+                Operand: SqlLiteralExpression { LiteralType: SqlLiteralType.Integer or SqlLiteralType.Float } literal,
+            } => literal,
+            _ => null,
+        };
+        if (numeric is not null)
+        {
+            AddUnsupportedSurfaceDiagnostic(expression.Location?.Start ?? 0, numeric.Location?.End ?? 0,
+                "SQL select-list ordinals in GROUP BY are not supported; use the source grouping expression. Ordinals are supported only in ORDER BY.");
+        }
+        return expression;
     }
 
     /// <summary>

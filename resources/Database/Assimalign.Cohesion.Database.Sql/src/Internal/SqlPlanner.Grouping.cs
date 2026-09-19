@@ -47,30 +47,10 @@ internal sealed partial class SqlPlanner
             Bind(select.Having);
         }
 
-        // ORDER BY accepts an output alias, with the same completed group values
-        // as the projection. Alias slots follow the keys and all aggregates.
-        var aliases = new List<(SqlExpression Expression, int Projection)>();
+        var orderByProjections = BindOrderByProjections(select, projections, columns.Count);
         foreach (var order in select.OrderBy)
         {
-            if (order.Expression is SqlColumnReferenceExpression { TableAlias: null, SchemaName: null } reference)
-            {
-                var matches = select.Columns.Select((column, index) => (column, index))
-                    .Where(pair => string.Equals(pair.column.Alias, reference.ColumnName, StringComparison.OrdinalIgnoreCase)).ToArray();
-                if (matches.Length > 1)
-                {
-                    throw new DatabaseException($"Ambiguous ORDER BY alias '{reference.ColumnName}'.");
-                }
-                if (matches.Length == 1)
-                {
-                    aliases.Add((order.Expression, matches[0].index));
-                    continue;
-                }
-            }
-            Bind(order.Expression);
-        }
-        foreach (var alias in aliases)
-        {
-            slots[alias.Expression] = select.GroupBy.Count + aggregates.Count + alias.Projection;
+            Bind(order.Expression, orderByProjections);
         }
 
         var source = columns.Select((column, index) => new SqlProjection(column.Name, index, null, column.Type.Type)).ToArray();
@@ -82,10 +62,15 @@ internal sealed partial class SqlPlanner
                 : new SqlSelectPlan(table!, source, select.Where, [], null, null, false, SelectAccessPath(table!, select.Where));
 
         return new SqlGroupPlan(input, columns, bindings, select.GroupBy, aggregates, slots, projections,
-            select.Having, select.OrderBy, EvaluateCount(select.Limit, "LIMIT"), EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct);
+            select.Having, select.OrderBy, EvaluateCount(select.Limit, "LIMIT"), EvaluateCount(select.Offset, "OFFSET"),
+            select.IsDistinct, orderByProjections);
 
-        void Bind(SqlExpression expression)
+        void Bind(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int>? outputSlots = null)
         {
+            if (outputSlots is not null && outputSlots.ContainsKey(expression))
+            {
+                return;
+            }
             if (expression is SqlFunctionCallExpression call && IsAggregate(call))
             {
                 if (call.Arguments.Count != 1 || call.Arguments[0] is SqlStarExpression
@@ -122,7 +107,9 @@ internal sealed partial class SqlPlanner
             }
             for (int i = 0; i < select.GroupBy.Count; i++)
             {
-                if (SameGroupExpression(expression, select.GroupBy[i], evaluator))
+                // An alias-bearing expression is evaluated over completed outputs;
+                // comparing it against source keys would rebind the alias as a column.
+                if (!ContainsOutput(expression) && SameGroupExpression(expression, select.GroupBy[i], evaluator))
                 {
                     slots[expression] = i;
                     return;
@@ -137,11 +124,14 @@ internal sealed partial class SqlPlanner
             {
                 throw new DatabaseException("SELECT * is not allowed in a grouped query; project GROUP BY expressions or aggregate functions.");
             }
-            ValidateExpression(expression, evaluator, _subqueryTypes);
+            ValidateExpression(expression, evaluator, _subqueryTypes, outputSlots);
             foreach (var child in Children(expression))
             {
-                Bind(child);
+                Bind(child, outputSlots);
             }
+
+            bool ContainsOutput(SqlExpression candidate)
+                => outputSlots is not null && (outputSlots.ContainsKey(candidate) || Children(candidate).Any(ContainsOutput));
         }
     }
 

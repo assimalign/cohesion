@@ -4,16 +4,36 @@ The SQL engine (area architecture: [resources/Database/DESIGN.md](../../../../do
 §3.3): parse (`Sql.Language`) → plan (`SqlPlanner`) → execute (`SqlPlanExecutor`)
 against shared storage, with the catalog (`Sql.Catalog`) as schema authority.
 
+## Ordering output values (#1024)
+
+`SqlPlanner.Ordering.cs` binds aliases and standalone numeric ordinals to
+projection indexes for stored tables, system relations, joins and groups.
+Unqualified aliases take precedence over source columns, including inside
+scalar ordering expressions. Qualified references and aggregate operands retain
+their source scope. Invalid numeric ordinals fail during binding, even for an
+empty input; compound constants such as `1 + 1` remain scalar expressions.
+
+The executor materializes each referenced projection before sorting and retains
+source values alongside it for other ordering keys. Grouped queries use the
+same binding against completed group outputs. `SqlExpressionEvaluator` resolves
+bound AST nodes by identity to these output slots and follows each projection's
+source for collation. It does not reconstruct language AST nodes or require
+cross-assembly internal access. Sorting is stable, with NULL first ascending and
+last descending, followed by DISTINCT and LIMIT/OFFSET. Explicit NULL placement
+and derived-table ordering remain capability errors. The exact syntax contract
+and execution evidence are in
+[DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md).
+
 ## Subquery and insert-source operators (#1021)
 
 `SqlPlanner.Subqueries.cs` binds each uncorrelated child SELECT in its own local
 scope and lowers its use sites to typed slots. `SqlSubqueryPlan` owns those child
 plans and the enclosing relation plan. `SqlPlanExecutor.Subqueries.cs` executes
 each child with the enclosing `SqlStatementContext`, materializes its results,
-and substitutes typed constants or an IN value list before running the enclosing
-plan. Expression evaluation never opens a query, session, transaction, or read
-view. The memoized expression rewrite preserves grouping's expression-ordinal
-bindings, including subqueries in HAVING and aggregate arguments.
+and supplies typed constants or an IN value list by AST node identity while the
+enclosing plan runs. Expression evaluation never opens a query, session,
+transaction, or read view. Keeping the expression trees preserves grouping's
+expression-ordinal bindings, including subqueries in HAVING and aggregate arguments.
 
 Scalar children require one output column and at most one row; an empty result
 is a typed null. IN children require one column and preserve SQL three-valued
@@ -123,8 +143,8 @@ or storage location for metadata. No existing public interface changes.
 `SqlPlanExecutor.SystemViews.cs` projects catalog descriptions to rows at query
 time and applies the same expression evaluator and SELECT semantics as table
 queries: column and expression projection, aliases, parameters, `WHERE`,
-`ORDER BY`, `DISTINCT`, a lone `COUNT(*)`, `LIMIT`, and `OFFSET`. The existing
-planner limits on joins, grouping, other aggregates, and subqueries also apply.
+`ORDER BY`, `DISTINCT`, grouping/aggregates, `LIMIT`, and `OFFSET`. The existing
+planner limits on joins and subqueries also apply.
 Rows use the ordinary materialized result and wire codecs, so metadata is
 available over `SqlDatabaseServer` without a separate protocol operation.
 
@@ -959,7 +979,8 @@ four independently shippable steps:
 
 ## Non-goals (current cut)
 
-Joins, grouping/aggregation (beyond `COUNT(*)`), subqueries, `Serializable`
+Outer/multi-table joins beyond the supported two-table INNER JOIN, correlated
+and derived-table subqueries, explicit NULL placement, `Serializable`
 isolation (rejected at begin), cost-based optimization (selection stays
 rule-based), index seeks for UPDATE/DELETE target collection, and index-only
 result production (a seek always fetches the row). (Row-level MVCC visibility

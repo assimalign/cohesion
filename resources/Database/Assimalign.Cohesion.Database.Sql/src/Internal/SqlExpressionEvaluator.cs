@@ -21,7 +21,7 @@ internal sealed class SqlExpressionEvaluator
     private readonly IReadOnlyList<SqlTableBinding>? _bindings;
     private readonly IReadOnlyDictionary<SqlExpression, int>? _valueOrdinals;
     private readonly Collation _defaultCollation;
-    private readonly IReadOnlyDictionary<SqlExpression, SqlExpression>? _expressionSources;
+    private readonly IReadOnlyDictionary<SqlExpression, SqlProjection>? _projectionSources;
 
     /// <summary>
     /// Values materialized by the enclosing subquery plan, keyed by the slot the planner
@@ -34,7 +34,7 @@ internal sealed class SqlExpressionEvaluator
         IReadOnlyList<SqlTableBinding>? bindings = null,
         IReadOnlyDictionary<SqlExpression, int>? valueOrdinals = null,
         Collation? defaultCollation = null,
-        IReadOnlyDictionary<SqlExpression, SqlExpression>? expressionSources = null,
+        IReadOnlyDictionary<SqlExpression, SqlProjection>? projectionSources = null,
         IReadOnlyDictionary<SqlExpression, SqlExpression[]>? subqueryValues = null)
     {
         _columns = columns;
@@ -42,8 +42,31 @@ internal sealed class SqlExpressionEvaluator
         _bindings = bindings;
         _valueOrdinals = valueOrdinals;
         _defaultCollation = defaultCollation ?? Collation.Binary;
-        _expressionSources = expressionSources;
+        _projectionSources = projectionSources;
         _subqueryValues = subqueryValues;
+    }
+
+    /// <summary>
+    /// Resolves ordering references against materialized output slots while retaining
+    /// the source scope for other keys and each projection's comparison collation.
+    /// </summary>
+    internal SqlExpressionEvaluator ForOrdering(IReadOnlyList<SqlProjection> projections,
+        IReadOnlyDictionary<SqlExpression, int>? outputSlots, int projectionStart)
+    {
+        if (outputSlots is null || outputSlots.Count == 0)
+        {
+            return this;
+        }
+        var ordinals = _valueOrdinals is null ? new Dictionary<SqlExpression, int>()
+            : new Dictionary<SqlExpression, int>(_valueOrdinals);
+        var sources = new Dictionary<SqlExpression, SqlProjection>();
+        foreach (var (expression, index) in outputSlots)
+        {
+            ordinals[expression] = projectionStart + index;
+            sources[expression] = projections[index];
+        }
+        return new SqlExpressionEvaluator(_columns, _parameters, _bindings, ordinals,
+            _defaultCollation, sources, _subqueryValues);
     }
 
     /// <summary>
@@ -156,10 +179,12 @@ internal sealed class SqlExpressionEvaluator
         {
             return (constant.Collation, 2);
         }
-        if (expression is not null && _expressionSources is not null
-            && _expressionSources.TryGetValue(expression, out var source))
+        if (expression is not null && _projectionSources is not null
+            && _projectionSources.TryGetValue(expression, out var source))
         {
-            return FindCollation(source);
+            return source.ColumnOrdinal is int ordinal
+                ? (ResolveColumnCollation(ordinal), _columns[ordinal].Collation is null ? 1 : 2)
+                : FindCollation(source.Expression);
         }
         if (expression is SqlCollateExpression collate)
         {

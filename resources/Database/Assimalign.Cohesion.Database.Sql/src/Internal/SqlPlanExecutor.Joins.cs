@@ -38,7 +38,7 @@ internal sealed partial class SqlPlanExecutor
         }
 
         return MaterializeSelect(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
-            plan.IsDistinct, evaluator);
+            plan.IsDistinct, evaluator, plan.OrderByProjections);
     }
 
     /// <summary>

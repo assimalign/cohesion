@@ -29,26 +29,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        // Match stored-table SELECT semantics: sort against the whole relation,
-        // project, remove duplicate projected rows, and finally apply the window.
-        if (plan.OrderBy.Count > 0)
-        {
-            matches = SortRows(matches, plan.OrderBy, evaluator);
-        }
-
-        var projected = new List<object?[]>(matches.Count);
-        foreach (var row in matches)
-        {
-            var output = new object?[plan.Projections.Count];
-            for (int i = 0; i < plan.Projections.Count; i++)
-            {
-                var projection = plan.Projections[i];
-                output[i] = projection.ColumnOrdinal is int ordinal
-                    ? row[ordinal]
-                    : NormalizeGroupValue(evaluator.Evaluate(projection.Expression!, row), projection.Type);
-            }
-            projected.Add(output);
-        }
+        var projected = ProjectAndSortRows(matches, plan.Projections, plan.OrderBy, evaluator, plan.OrderByProjections);
 
         if (plan.IsDistinct)
         {

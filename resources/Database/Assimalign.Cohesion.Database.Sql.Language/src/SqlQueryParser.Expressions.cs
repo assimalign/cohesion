@@ -330,6 +330,22 @@ public sealed partial class SqlQueryParser
 
         var pos = lexer.Current.Position;
 
+        // Preserve a signed numeric token as a literal. ORDER BY binding must
+        // distinguish +1 from a larger constant expression such as +1 + 1.
+        if (lexer.Current.Type == TokenType.Plus)
+        {
+            var next = lexer;
+            if (AdvancePastComments(ref next) && next.Current.Type is TokenType.Integer or TokenType.Float)
+            {
+                Advance(ref lexer);
+                string value = CurrentText(ref lexer);
+                var type = lexer.Current.Type == TokenType.Integer ? SqlLiteralType.Integer : SqlLiteralType.Float;
+                int end = lexer.Current.Position + lexer.Current.Value.Length;
+                Advance(ref lexer);
+                return new SqlLiteralExpression(value, type, Location.Create(1, 1, pos, end));
+            }
+        }
+
         // Star (wildcard)
         if (lexer.Current.Type == TokenType.Asterisk)
         {

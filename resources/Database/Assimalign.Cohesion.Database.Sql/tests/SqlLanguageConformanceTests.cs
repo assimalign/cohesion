@@ -27,13 +27,21 @@ public sealed class SqlLanguageConformanceTests
         "INSERT INTO t VALUES (1, 'Ada', 36), (2, 'Grace', 45), (3, 'Alan', 41);",
     ];
 
+    private static readonly string[] OrderingSeed =
+    [
+        "CREATE TABLE ordering_rows (id INT PRIMARY KEY, age INT);",
+        "INSERT INTO ordering_rows VALUES (40, 20), (10, 10), (50, 20), (20, 30), (30, 10);",
+    ];
+
+    private static readonly object?[][] OrderingInsertionRows = [[40, 20], [10, 10], [50, 20], [20, 30], [30, 10]];
+
     /// <summary>Requires every advertised clause to have a case with correct live-engine results.</summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Profile: every advertised clause has a verified live execution case")]
     public async Task Profile_EveryAdvertisedClause_ShouldExecuteItsMappedCase()
     {
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
-        // Phase 21 expands ALTER TABLE's measured subset without adding a named clause.
+        // Phase 22 restores ORDER BY aliases and ordinals within the existing 33 named clauses.
         SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(33);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
@@ -129,8 +137,8 @@ public sealed class SqlLanguageConformanceTests
     private static void RequireExecutionCases(IEnumerable<string> clauses, IReadOnlyDictionary<string, ExecutionCase> cases)
         => clauses.Where(clause => !cases.ContainsKey(clause)).ShouldBeEmpty("Every advertised clause needs a live execution case.");
 
-    /// <summary>Reverses the default audit failures while retaining the unsupported ordering observations.</summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Partial clauses: defaults backfill or reject atomically and ORDER BY limits remain explicit")]
+    /// <summary>Reverses the default and ordering audit failures with verified live results.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Partial clauses: defaults backfill or reject atomically and ORDER BY aliases and ordinals execute")]
     public async Task PartialForms_DefaultsAndOrdering_ShouldMatchMeasuredBoundaries()
     {
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-partial" });
@@ -151,10 +159,80 @@ public sealed class SqlLanguageConformanceTests
             [[1, "Ada", 36, 7], [2, "Grace", 45, 7], [3, "Alan", 41, 7], [4, "new", 1, 7]]);
         await ExecuteAsync(session, "INSERT INTO t (id, name, age) VALUES (5, 'next', 2);");
         await ExpectRowsAsync(session, "SELECT literal_default FROM t WHERE id = 5;", [[7]]);
-        // #1024 must bind projection aliases and ordinals before these forms count as correct execution.
-        var aliasError = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT age AS years FROM t ORDER BY years;"));
-        aliasError.Message.ShouldBe("Unknown column 'years'.");
-        await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY 1 DESC;", [[1], [2], [3], [4], [5]]);
+        // #1024: invert the original failures; both complete results differ from insertion and scan order.
+        object?[][] years = [[1], [2], [36], [41], [45]];
+        RequireReordering(await RowsAsync(session, "SELECT age FROM t;"), [[36], [45], [41], [1], [2]], years);
+        await ExpectRowsAsync(session, "SELECT age AS years FROM t ORDER BY years;", years);
+        object?[][] reverseIds = [[5], [4], [3], [2], [1]];
+        RequireReordering(await RowsAsync(session, "SELECT id FROM t;"), [[1], [2], [3], [4], [5]], reverseIds);
+        await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY 1 DESC;", reverseIds);
+    }
+
+    /// <summary>Uses expanded projection positions without requiring unique output names.</summary>
+    /// <param name="projection">The wildcard or duplicate-name projection.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - ORDER BY: ordinals address expanded and duplicate-name projections")]
+    [InlineData("*")]
+    [InlineData("id AS value, age AS value")]
+    public async Task OrderBy_ExpandedOrDuplicateProjection_ShouldResolveOrdinals(string projection)
+    {
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-projection" });
+        var database = await engine.CreateDatabaseAsync("audit");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        foreach (string setup in OrderingSeed) { await ExecuteAsync(session, setup); }
+
+        object?[][] expected = [[30, 10], [10, 10], [50, 20], [40, 20], [20, 30]];
+        RequireReordering(await RowsAsync(session, $"SELECT {projection} FROM ordering_rows;"), OrderingInsertionRows, expected);
+        await ExpectRowsAsync(session, $"SELECT {projection} FROM ordering_rows ORDER BY 2 ASC, 1 DESC;", expected);
+    }
+
+    /// <summary>Resolves an alias once while its projection still reads the same-named source column.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - ORDER BY: same-name alias uses its computed projection without recursion")]
+    public async Task OrderBy_AliasSharingItsOperandName_ShouldUseComputedOutput()
+    {
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-self" });
+        var database = await engine.CreateDatabaseAsync("audit");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        foreach (string setup in OrderingSeed) { await ExecuteAsync(session, setup); }
+
+        object?[][] expected = [[20, 70L], [50, 80L], [40, 80L], [30, 90L], [10, 90L]];
+        object?[][] inserted = [[40, 80L], [10, 90L], [50, 80L], [20, 70L], [30, 90L]];
+        RequireReordering(await RowsAsync(session, "SELECT id, 100 - age AS age FROM ordering_rows;"), inserted, expected);
+        await ExpectRowsAsync(session, "SELECT id, 100 - age AS age FROM ordering_rows ORDER BY age ASC, 1 DESC;", expected);
+    }
+
+    /// <summary>Uses the same alias-first rule for an aggregate alias nested in an ordering expression.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - ORDER BY: grouped nested alias wins over a source column")]
+    public async Task OrderBy_GroupedAliasCollision_ShouldPreferAggregateOutput()
+    {
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-group" });
+        var database = await engine.CreateDatabaseAsync("audit");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        foreach (string setup in OrderingSeed) { await ExecuteAsync(session, setup); }
+
+        const string query = "SELECT ordering_rows.age AS source_age, SUM(id) AS age FROM ordering_rows GROUP BY ordering_rows.age";
+        object?[][] expected = [[30, 20m], [10, 40m], [20, 90m]];
+        object?[][] inserted = [[20, 90m], [10, 40m], [30, 20m]];
+        RequireReordering(await RowsAsync(session, query), inserted, expected);
+        await ExpectRowsAsync(session, query + " ORDER BY age + 1;", expected);
+    }
+
+    /// <summary>Rejects ambiguous aliases and keeps projection aliases out of source-expression scope.</summary>
+    /// <param name="query">The query whose name binding is invalid.</param>
+    /// <param name="message">The precise binding error.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - ORDER BY: ambiguous aliases and alias chains fail binding")]
+    [InlineData("SELECT id AS value, age AS value FROM ordering_rows ORDER BY value;", "Ambiguous ORDER BY alias 'value'.")]
+    [InlineData("SELECT id AS value, age AS value FROM ordering_rows ORDER BY value + 1;", "Ambiguous ORDER BY alias 'value'.")]
+    [InlineData("SELECT age AS value, SUM(id) AS value FROM ordering_rows GROUP BY age ORDER BY value;", "Ambiguous ORDER BY alias 'value'.")]
+    [InlineData("SELECT age AS years, years + 1 AS next_year FROM ordering_rows ORDER BY next_year;", "Unknown column 'years'.")]
+    [InlineData("SELECT age AS years FROM ordering_rows WHERE years > 0 ORDER BY years;", "Unknown column 'years'.")]
+    public async Task OrderBy_InvalidAliasBinding_ShouldFailPrecisely(string query, string message)
+    {
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-invalid" });
+        var database = await engine.CreateDatabaseAsync("audit");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        foreach (string setup in OrderingSeed) { await ExecuteAsync(session, setup); }
+
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, query))).Message.ShouldBe(message);
     }
 
     private static Dictionary<string, ExecutionCase> CreateCases() => new(StringComparer.Ordinal)
@@ -179,8 +257,16 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression { GroupBy.Count: 1 }, [[false, 1L, 36m], [true, 2L, 86m]]),
         [SqlClauses.Having] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t WHERE age > 35 GROUP BY age > 40 HAVING SUM(age) > 50;",
             expression => expression is SqlSelectExpression { Having: not null }, [[true, 2L, 86m]]),
-        [SqlClauses.OrderBy] = Query("SELECT id FROM t ORDER BY age DESC, id ASC;", expression => expression is SqlSelectExpression { OrderBy.Count: 2 },
-            [[2], [3], [1]]),
+        [SqlClauses.OrderBy] = new("SELECT id, age AS years FROM ordering_rows ORDER BY years + 1 ASC, 1 DESC;", OrderingSeed,
+            expression => expression is SqlSelectExpression { OrderBy.Count: 2 },
+            async (session, result) =>
+            {
+                object?[][] expected = [[30, 10], [10, 10], [50, 20], [40, 20], [20, 30]];
+                RequireReordering(await RowsAsync(session, "SELECT id, age FROM ordering_rows;"), OrderingInsertionRows, expected);
+                CheckRows(await ReadRowsAsync(result), expected);
+                // Retain the previous verified source-expression subset beside the restored forms.
+                await ExpectRowsAsync(session, "SELECT id, age FROM ordering_rows ORDER BY age + 1 ASC, id DESC;", expected);
+            }),
         [SqlClauses.Limit] = Query("SELECT id FROM t ORDER BY id LIMIT 2;", expression => expression is SqlSelectExpression { Limit: not null },
             [[1], [2]]),
         [SqlClauses.Offset] = Query("SELECT id FROM t ORDER BY id OFFSET 1;", expression => expression is SqlSelectExpression { Offset: not null },
@@ -400,6 +486,16 @@ public sealed class SqlLanguageConformanceTests
 
     private static async Task ExpectRowsAsync(IDatabaseSession session, string statement, object?[][] expected)
         => CheckRows(await RowsAsync(session, statement), expected);
+
+    /// <summary>Prevents correct-order expectations from passing when the executor merely preserves input order.</summary>
+    private static void RequireReordering(List<object?[]> scanned, object?[][] inserted, object?[][] expected)
+    {
+        static bool SameRows(IEnumerable<object?[]> left, IEnumerable<object?[]> right)
+            => left.Count() == right.Count() && left.Zip(right).All(pair => pair.First.SequenceEqual(pair.Second));
+
+        SameRows(expected, scanned).ShouldBeFalse("The expected order must differ from the observed storage scan order.");
+        SameRows(expected, inserted).ShouldBeFalse("The expected order must differ from insertion order.");
+    }
 
     private static void CheckRows(List<object?[]> actual, object?[][] expected)
     {

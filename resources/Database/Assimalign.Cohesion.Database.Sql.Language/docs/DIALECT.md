@@ -10,7 +10,7 @@ enumerates the profile and fails if any advertised clause lacks a passing case.
 
 ## Statement matrix
 
-Phase 21 measures **33 of 49 declared clauses** against the live SQL engine.
+Phase 22 measures **33 of 49 declared clauses** against the live SQL engine.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
 Phase 14 restores `CAST` with actual conversion, type metadata, and wire execution
@@ -24,8 +24,10 @@ for uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries and
 adds transactional `INSERT ... SELECT`, with server/client execution (#1021).
 Phase 21 restores literal `ALTER TABLE ADD COLUMN` defaults for populated tables,
 including old-row and omitted-column insert values over the wire, and rejects
-nonliteral defaults before mutation (#1023). The count remains 33/49 because
-`ALTER TABLE` was already advertised for its smaller executable subset.
+nonliteral defaults before mutation (#1023). Phase 22 resolves `ORDER BY`
+projection aliases, including aliases inside scalar expressions, and select-list
+ordinals through the SQL server/client (#1024). The count remains 33/49 because
+`ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
 The **16 excluded clauses** are set operations (`UNION`,
 `INTERSECT`, `EXCEPT`), CTEs (`WITH`, `RECURSIVE`), window clauses (`WINDOW`,
@@ -45,7 +47,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
 | `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
-| `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys with ASC/DESC execute. Grouped/aggregate queries also accept aggregate expressions and standalone projection aliases. Other projection aliases, including aliases nested inside ordering expressions, are not resolved. Integer keys are evaluated as constants, **not select-list ordinals**; `ORDER BY 1 DESC` does not sort by the first projection. General alias/ordinal ordering remains MVP work (#1024). |
+| `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys, projection aliases (bare or nested in expressions), and one-based select-list ordinals execute with ASC/DESC. Unqualified aliases take precedence over same-named source columns; qualified references bind to the source. Composes with DISTINCT, LIMIT/OFFSET, supported joins, grouped/aggregate queries, and system relations. Zero, negative, out-of-range, and non-integer numeric ordinals error; `1 + 1` remains a constant expression. Explicit NULLS FIRST/LAST, derived-table output ordering, and GROUP BY ordinals report `COHDBL001`. See the ordering contract below (#1024). |
 | `CAST` | Supported subset, measured | Exact signed integer, decimal, boolean, and string conversions in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST in DEFAULT or CHECK remains rejected. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` | Supported subset, measured | Two stored-table `INNER JOIN ... ON` or bare `JOIN ... ON`, with index assistance where the mandatory equality predicate matches an applicable secondary-index prefix. `LEFT [OUTER]`, `RIGHT [OUTER]`, `FULL [OUTER]`, `CROSS`, additional joins beyond two tables, joins without `ON`, comma joins, and joins of virtual system relations report `COHDBL001`. See the precise contract below. |
@@ -63,6 +65,60 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
+
+## Ordering, output aliases and ordinals (#1024)
+
+`ORDER BY` evaluates its keys before `OFFSET` and `LIMIT`, using the result of
+grouping and `HAVING` when present. It accepts source columns, executable scalar
+expressions, output aliases, and one-based select-list ordinals. These keys
+compose with `DISTINCT`, pagination, the supported two-table inner join, grouped
+and ungrouped aggregates, and virtual system relations. Mixed ASC/DESC keys
+compare from left to right. NULL sorts first in ASC and last in DESC. Rows with
+equal keys have no promised relative order; add a tie-breaking key for stable
+paging. The same expression and column collation rules apply to aliases and
+ordinals as to the values they reference.
+
+**Name precedence:** an unqualified name in an ordering expression resolves to
+an explicit SELECT alias first, case-insensitively, then to a source column.
+This agrees with ISO/IEC 9075 select-list precedence for a bare ordering name
+and extends the same rule consistently to names inside scalar expressions.
+Thus `SELECT age AS years FROM t ORDER BY years` and `ORDER BY years + 1`
+both use the projected age, even if `t` also has a `years` column.
+`ORDER BY t.years` explicitly selects that source column. If several output
+columns declare the same alias, using that alias is an ambiguity error; an
+ordinal can identify the intended column. Alias references use the selected
+expression's source scope: an alias never recursively refers to itself or to
+another output alias. Grouped queries use the same rules and retain their
+grouping validity checks. Aggregate call arguments still bind against their
+input source, and inner SELECT bodies resolve names in their own query scope.
+
+**Ordinal syntax:** a standalone integer literal selects an output column after
+wildcard expansion: `ORDER BY 1` uses the first output, and `ORDER BY 2 DESC`
+uses the second in descending order. A leading `+` directly before the numeric
+literal and parentheses around a literal are accepted. Zero, negative values,
+values beyond the output width, and non-integer numeric literal syntax
+(including `1.0`, `.5`, and `1e0`) are precise planning errors, even on empty
+input. They are never executed as constant keys. In contrast, an expression
+such as `ORDER BY 1 + 1` is evaluated normally as a constant, not ordinal 2;
+use another ordering key when such an expression leaves every row tied.
+Parameters and numeric literals inside larger expressions are values, not
+output positions. Ordinals are available only in ORDER BY. Standalone numeric
+GROUP BY keys report `COHDBL001`; `GROUP BY 1 + 1` remains a constant grouping
+expression. WHERE/HAVING predicates and LIMIT/OFFSET values retain their normal
+expression meanings and never refer to select-list positions.
+
+**Explicit boundaries:** `NULLS FIRST` and `NULLS LAST` report `COHDBL001`.
+Derived tables in FROM/JOIN remain unsupported, so ordering by an output of
+`FROM (SELECT ...)` reports `COHDBL001` too. Supported uncorrelated scalar
+subquery expressions, including projected scalar subquery aliases, and ordering
+inside supported subqueries keep the same ordering rules. Alias names in
+GROUP BY and HAVING remain outside the projection-alias binding scope; repeat
+the source/grouping expression or aggregate there.
+
+Phase 13's partial boundary is closed for the forms above: ungrouped aliases no
+longer fail with an unknown-column error, and `ORDER BY 1 DESC` no longer returns
+the unsorted scan. Execution and wire tests use deliberately scrambled values
+whose required ordering differs from both insertion order and the actual scan.
 
 ## ADD COLUMN defaults, atomicity and MVCC (#1023)
 
@@ -250,10 +306,11 @@ The in-process and wire result metadata use the same base types as these values.
 Numeric `CASE`/`COALESCE` alternatives in grouped projections use a common
 numeric result type; incompatible nonnumeric alternatives are planning errors.
 
-Aggregate expressions and standalone output aliases can be used as `ORDER BY`
-keys in grouped/aggregate queries. Aliases inside larger ordering expressions,
-aliases in `GROUP BY` or `HAVING`, and select-list ordinal ordering are outside
-this subset; use the source/grouping expression or repeat the aggregate.
+Aggregate expressions, output aliases (including inside scalar expressions),
+and select-list ordinals can be used as `ORDER BY` keys in grouped/aggregate
+queries under the ordering contract above. Aliases in `GROUP BY` or `HAVING`
+remain outside this subset; use the source/grouping expression or repeat the
+aggregate. GROUP BY ordinals report `COHDBL001`.
 
 `DISTINCT` and explicit `ALL` inside aggregates, aggregate `FILTER`, in-aggregate
 `ORDER BY`, empty grouping sets (`GROUP BY ()`), `GROUPING SETS`, `ROLLUP`, `CUBE`, `GROUPING`/`GROUPING_ID`, window

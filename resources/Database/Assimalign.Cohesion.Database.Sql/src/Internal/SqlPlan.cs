@@ -29,7 +29,8 @@ internal sealed record SqlGroupPlan(
     IReadOnlyList<SqlOrderByColumn> OrderBy,
     long? Limit,
     long? Offset,
-    bool IsDistinct) : SqlPlan;
+    bool IsDistinct,
+    IReadOnlyDictionary<SqlExpression, int> OrderByProjections) : SqlPlan;
 
 /// <summary>One projected output column of a SELECT.</summary>
 /// <param name="Name">The output column name (alias, column name, or a synthesized name).</param>
@@ -46,7 +47,8 @@ internal sealed record SqlSelectPlan(
     long? Limit,
     long? Offset,
     bool IsDistinct,
-    SqlAccessPath Access) : SqlPlan;
+    SqlAccessPath Access,
+    IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlPlan;
 
 /// <summary>A stored relation's identity and position in a joined row.</summary>
 internal sealed record SqlTableBinding(SqlCatalogTable Table, SqlTableReference Reference, int Offset);
@@ -65,7 +67,8 @@ internal sealed record SqlJoinPlan(
     long? Limit,
     long? Offset,
     bool IsDistinct,
-    SqlJoinIndexPath? Access) : SqlPlan;
+    SqlJoinIndexPath? Access,
+    IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlPlan;
 
 /// <summary>
 /// A correlated equality-prefix seek into one input, with probe ordinals in
@@ -84,7 +87,8 @@ internal sealed record SqlSystemViewPlan(
     IReadOnlyList<SqlOrderByColumn> OrderBy,
     long? Limit,
     long? Offset,
-    bool IsDistinct) : SqlPlan;
+    bool IsDistinct,
+    IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlPlan;
 
 /// <summary>
 /// How a SELECT reaches its table's rows — the seek node the thin IR gained when
