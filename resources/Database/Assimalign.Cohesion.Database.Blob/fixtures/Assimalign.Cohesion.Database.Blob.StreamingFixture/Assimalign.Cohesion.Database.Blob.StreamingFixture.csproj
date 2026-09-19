@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>Preview</LangVersion>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot Condition="'$(BlobFixtureNativeAot)' == 'true'">true</PublishAot>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob" />
+  </ItemGroup>
+</Project>

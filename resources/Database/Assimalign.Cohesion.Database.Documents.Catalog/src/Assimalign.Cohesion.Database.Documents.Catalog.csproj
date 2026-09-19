@@ -1,1 +1,10 @@
-<Project Sdk="Microsoft.NET.Sdk"/>
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Storage" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Transactions" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Indexing" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
+  </ItemGroup>
+</Project>

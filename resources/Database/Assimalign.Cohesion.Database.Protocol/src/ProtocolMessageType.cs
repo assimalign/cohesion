@@ -17,21 +17,6 @@ public enum ProtocolMessageType : byte
     /// <summary>Server → client: session established; carries session parameters.</summary>
     Ready = 4,
 
-    /// <summary>Client → server: execute a query or command in the session's language.</summary>
-    Execute = 5,
-
-    /// <summary>Server → client: result set header (column/shape metadata).</summary>
-    ResultHeader = 6,
-
-    /// <summary>Server → client: one result row/entry; repeated.</summary>
-    ResultRow = 7,
-
-    /// <summary>Server → client: result complete; carries affected count and status.</summary>
-    ResultComplete = 8,
-
-    /// <summary>Client → server: transaction control (begin, commit, rollback).</summary>
-    Transaction = 9,
-
     /// <summary>Server → client: error; carries a <see cref="ProtocolErrorCode"/> and message.</summary>
     Error = 10,
 

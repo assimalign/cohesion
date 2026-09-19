@@ -4,6 +4,7 @@ using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.SampleHost;
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Hosting;
 
@@ -17,7 +18,7 @@ await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
     options.Durability = Resource.Settings.DatabaseDurability.Get<StorageCommitDurability>();
 });
 
-builder.AddDatabase(engine, "sample", database =>
+builder.AddDatabase(engine, "sample", SqlSchema.Compile("sample", database =>
 {
     database.Table<Order>("orders", table =>
     {
@@ -25,7 +26,7 @@ builder.AddDatabase(engine, "sample", database =>
         table.Column(order => order.Item);
         table.Index(order => order.Item);
     });
-});
+}));
 
 builder.AddSqlServer(engine, options => options.Listen(Resource.Endpoints.Db));
 

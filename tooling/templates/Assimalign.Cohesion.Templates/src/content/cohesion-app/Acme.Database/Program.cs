@@ -1,8 +1,8 @@
 using System;
 
-using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Acme.Database;
 
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
@@ -14,17 +14,19 @@ await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
         ?? throw new InvalidOperationException("The database data mount must have a materialized path.");
 });
 
-builder.AddDatabase(engine, "customers", database =>
+SqlCompiledSchema schema = SqlSchema.Compile("customers", database =>
 {
-    database.Table<Customer>(table =>
+    database.Table<Customer>("Customers", table =>
     {
         table.Key(customer => customer.Id);
         table.Index(customer => customer.Email);
     });
     database.Principal(
         "acme-api",
-        principal => principal.Grant(Permission.ReadWrite, "Customers"));
+        principal => principal.Grant(SqlPermission.ReadWrite, "Customers"));
 });
+
+builder.AddDatabase(engine, "customers", schema);
 
 builder.AddSqlServer(engine, options => options.Listen(Resource.Endpoints.Db));
 

@@ -23,11 +23,16 @@ to the project boundary; do not duplicate the keystone here.
 
 - Depends on `Assimalign.Cohesion.IdentityModel.Protocols` (transitively the
   root canonical model). Shared and root types resolve by namespace nesting.
-- Uses two shared-internal seams via `InternalsVisibleTo`: the root's
-  `ModelSnapshot` (descriptor materialization, e.g. `SamlAuthnRequest`'s string
-  lists) and `…Protocols`' `ProtocolEndpoint.IsValidLocation` (endpoint
-  well-formedness). Both are exposed to this assembly from the projects that own
-  them, per the family's "adding a protocol package" recipe.
+- Compiles the internal static `ModelSnapshot` helper from the root's single
+  `shared/ModelSnapshot.cs` source, named by this csproj's `CohesionSharedSource`
+  item, for
+  descriptor materialization such as `SamlAuthnRequest`'s string lists. Its
+  inputs and results use public model values or BCL types; no helper instance
+  crosses an assembly boundary, so its local CLR identity is harmless. The
+  shared file documents the scoped namespace-alignment exception.
+- Endpoint construction uses the public `ProtocolEndpoint` model owned by
+  Protocols. This branch does not need the internal location validator. No
+  public helper API or shipped-to-shipped friend grant is needed.
 
 ## Boundary with the SAML token package
 

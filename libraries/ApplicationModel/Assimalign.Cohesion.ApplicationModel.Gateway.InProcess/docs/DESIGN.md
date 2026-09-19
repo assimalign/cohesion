@@ -190,4 +190,12 @@ HTTPS mounts retain the existing FromBytes handover. The context constructor rec
 
 ## Telemetry invocation values (31b)
 
-InProcessPlanController.Compile copies the plan environment and explicitly applies the gateway's internal ResourceTelemetryInjection. InProcessContextFactory then materializes `.state/telemetry.headers` through LocalMountMaterializer immediately after the trust bundle, including empty-content removal. CreateAmbientValues carries endpoint, protocol and that protected path into ResourceContext; Hosting.Telemetry reads them through the additive TryGetEnvironmentValue member, with no process-environment fallback. The headers use the same ResourceMount.ReadAllBytes path as local hosts. Member stop invokes the registered telemetry IHostService for bounded final-batch flush. Discovery ordering, scoped emitter credentials and the absence of an inferred dependency follow the gateway design.
+InProcessPlanController.Compile copies the plan environment and applies the gateway's public IResourceTelemetry view through ApplyEnvironment. InProcessContextFactory then materializes `.state/telemetry.headers` through ILocalResourceState.MaterializeRuntimeFilesAsync immediately after the trust bundle, including empty-content removal. CreateAmbientValues carries endpoint, protocol and that protected path into ResourceContext; Hosting.Telemetry reads them through the additive TryGetEnvironmentValue member, with no process-environment fallback. The headers use the same ResourceMount.ReadAllBytes path as local hosts. Member stop invokes the registered telemetry IHostService for bounded final-batch flush. Discovery ordering, scoped emitter credentials and the absence of an inferred dependency follow the gateway design.
+
+## Gateway boundary (Phase 19)
+
+The controller reads telemetry with `IResourceControlContext.GetTelemetry()` and carries only
+`IResourceTelemetry` into its compilation. Context preparation uses `ILocalResourceState`
+for endpoint allocation and protected runtime files; the gateway package owns persistence and
+file protection. Offline rendering calls the inherited `RenderLocalPlanSetAsync` operation
+with an artifact identity/content-root tuple. No concrete gateway internals cross this boundary.

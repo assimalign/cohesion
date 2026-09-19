@@ -7,6 +7,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.Database.Hosting.Tests;

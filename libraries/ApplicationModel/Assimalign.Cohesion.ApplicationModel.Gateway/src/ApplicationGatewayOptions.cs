@@ -102,7 +102,18 @@ public class ApplicationGatewayOptions
     /// </summary>
     public TimeSpan ReadinessBudget { get; set; } = TimeSpan.FromSeconds(60);
 
-    internal void ValidateCommon()
+    /// <summary>Validates the common gateway settings before a derived options type validates its platform settings.</summary>
+    /// <exception cref="ArgumentNullException">
+    /// <see cref="ApplicationVersion"/>, <see cref="StoreClient"/>, or <see cref="TimeProvider"/> is null.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// A configured directory or parameter path is empty, the application version is empty,
+    /// or a controller registration is null.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// A credential lifetime is nonpositive or exceeds its maximum, or the readiness budget is nonpositive.
+    /// </exception>
+    protected internal void ValidateCommon()
     {
         if (ExportDirectory is not null && string.IsNullOrWhiteSpace(ExportDirectory))
         {

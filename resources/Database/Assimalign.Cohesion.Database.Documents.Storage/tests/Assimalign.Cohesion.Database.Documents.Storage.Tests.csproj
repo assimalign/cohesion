@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
@@ -23,6 +23,7 @@
     <CohesionPackageReference Include="xunit" />
     <CohesionPackageReference Include="xunit.runner.visualstudio" />
     <CohesionPackageReference Include="coverlet.collector" />
+    <CohesionPackageReference Include="Shouldly" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="xunit.runner.json" />

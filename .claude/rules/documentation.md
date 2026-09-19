@@ -184,9 +184,13 @@ pwsh build/scripts/Update-CohesionDependencyGraph.ps1
 
 This applies to every reference flavor the graph tracks — `CohesionProjectReference`,
 `CohesionPrivateProjectReference`, `CohesionAnalyzerReference`,
-`CohesionAnalyzerAsProjectReference`, `CohesionPackageReference`, and raw `ProjectReference` /
-`PackageReference` — and to adding or deleting a project, which changes the counts and the area
-tables even when no edge moves.
+`CohesionAnalyzerAsProjectReference`, `CohesionPackageReference`, `CohesionSharedSource`, and raw
+`ProjectReference` / `PackageReference` — and to adding or deleting a project, which changes the
+counts and the area tables even when no edge moves.
+
+`CohesionSharedSource` is in that list for the same reason as the rest: compiling another
+project's `shared/` folder into your assembly is a real coupling, and a graph that omitted it
+would assert an independence that is not true.
 
 `-Check` regenerates in memory and exits non-zero when the committed file disagrees with the
 project files. That is the CI form, and it is the reason this is a rule rather than a suggestion:

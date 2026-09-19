@@ -8,7 +8,6 @@ internal sealed record SchemaSourceModel(
     bool AllowsDestructiveChanges,
     IReadOnlyList<SchemaTypeSource> Types,
     IReadOnlyList<SchemaTableSource> Tables,
-    IReadOnlyList<SchemaCollectionSource> Collections,
     IReadOnlyList<SchemaFunctionSource> Functions,
     IReadOnlyList<SchemaTriggerSource> Triggers,
     IReadOnlyList<SchemaPrincipalSource> Principals,
@@ -27,13 +26,6 @@ internal sealed record SchemaTableSource(
 internal sealed record SchemaColumnSource(string Name, string TypeName, bool IsNullable);
 
 internal sealed record SchemaReferenceSource(string Member, string TargetType);
-
-internal sealed record SchemaCollectionSource(
-    string Name,
-    string EntryType,
-    IReadOnlyList<SchemaColumnSource> Fields,
-    string? Key,
-    IReadOnlyList<string> Indexes);
 
 internal sealed record SchemaFunctionSource(
     string Name,

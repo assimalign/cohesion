@@ -1,3 +1,4 @@
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -13,12 +14,20 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal readonly struct SqlStatementContext
 {
-    internal SqlStatementContext(ITransactionContext transaction, SqlTransactionCoordinator coordinator)
+    internal SqlStatementContext(
+        ITransactionContext transaction,
+        TransactionCoordinator coordinator,
+        string? provisioningSchema = null,
+        string databaseName = "",
+        ISqlCatalogSnapshot? catalogSnapshot = null)
     {
         Transaction = transaction;
         Coordinator = coordinator;
         Snapshot = transaction.Snapshot;
         Metrics = new SqlStatementMetrics();
+        ProvisioningSchema = provisioningSchema;
+        DatabaseName = databaseName;
+        CatalogSnapshot = catalogSnapshot;
     }
 
     /// <summary>
@@ -29,7 +38,7 @@ internal readonly struct SqlStatementContext
     /// <summary>
     /// Gets the database's transaction coordinator.
     /// </summary>
-    internal SqlTransactionCoordinator Coordinator { get; }
+    internal TransactionCoordinator Coordinator { get; }
 
     /// <summary>
     /// Gets the visibility snapshot for the whole statement.
@@ -41,4 +50,13 @@ internal readonly struct SqlStatementContext
     /// examined) — the session exposes the last statement's instance to tests.
     /// </summary>
     internal SqlStatementMetrics Metrics { get; }
+
+    /// <summary>Gets the applying compiled schema's name, or null for a live-session statement.</summary>
+    internal string? ProvisioningSchema { get; }
+
+    /// <summary>Gets the current database's catalog identifier for metadata rows.</summary>
+    internal string DatabaseName { get; }
+
+    /// <summary>Gets the catalog directory paired with this statement's visibility lifetime.</summary>
+    internal ISqlCatalogSnapshot? CatalogSnapshot { get; }
 }

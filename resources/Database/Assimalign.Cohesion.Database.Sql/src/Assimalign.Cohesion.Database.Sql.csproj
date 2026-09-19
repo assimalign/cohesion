@@ -7,10 +7,10 @@
 		     2026-07-14; the root contract is the only area-wide requirement. Protocol
 		     and Security arrive transitively through the root's child-root rollup). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Language" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Catalog" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Schema" />
 		<!-- Direct (not just transitive via Sql.Storage): the engine's public options
 		     surface exposes StorageCommitDurability and its workers drive the IStorage
 		     worker seams. -->

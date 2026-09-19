@@ -17,10 +17,10 @@ namespace Assimalign.Cohesion.Sdk.Database.Tasks.Compilation;
 /// </summary>
 internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> report)
 {
-    private const string SchemaBuilderType = "Assimalign.Cohesion.Database.IDatabaseSchemaBuilder";
-    private const string TableBuilderType = "Assimalign.Cohesion.Database.IDatabaseTableBuilder<T>";
-    private const string TypeBuilderType = "Assimalign.Cohesion.Database.IDatabaseTypeBuilder";
-    private const string PrincipalBuilderType = "Assimalign.Cohesion.Database.IDatabasePrincipalBuilder";
+    private const string SchemaBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.ISqlSchemaBuilder";
+    private const string TableBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.ISqlTableBuilder<T>";
+    private const string TypeBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.ISqlTypeBuilder";
+    private const string PrincipalBuilderType = "Assimalign.Cohesion.Database.Sql.Schema.ISqlPrincipalBuilder";
 
     private static readonly SymbolDisplayFormat TypeDisplayFormat = new(
         globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
@@ -99,7 +99,7 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
             foreach (InvocationExpressionSyntax invocation in syntaxTree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
                 IMethodSymbol? method = ResolveMethod(semanticModel, invocation);
-                if (method is not null && IsAddDatabase(method))
+                if (method is not null && IsSchemaDeclaration(method))
                 {
                     calls.Add((invocation, method, semanticModel));
                 }
@@ -111,30 +111,29 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
             Location? location = calls.Count > 0 ? calls[0].Invocation.GetLocation() : null;
             Error(
                 "COHDBSDK101",
-                $"Database schema compilation requires exactly one AddDatabase(engine, name, schema) declaration; found {calls.Count}.",
+                $"Database schema compilation requires exactly one SqlSchema.Create(name, configure) or SqlSchema.Compile(name, configure) declaration; found {calls.Count}.",
                 location);
             return null;
         }
 
-        (InvocationExpressionSyntax addDatabase, IMethodSymbol addDatabaseMethod, SemanticModel model) = calls[0];
-        ExpressionSyntax? nameExpression = GetArgument(addDatabase, addDatabaseMethod, "name", 1);
+        (InvocationExpressionSyntax schemaDeclaration, IMethodSymbol schemaDeclarationMethod, SemanticModel model) = calls[0];
+        ExpressionSyntax? nameExpression = GetArgument(schemaDeclaration, schemaDeclarationMethod, "name", 0);
         string? name = nameExpression is null ? null : ConstantString(model, nameExpression);
         if (string.IsNullOrWhiteSpace(name))
         {
-            Error("COHDBSDK102", "AddDatabase schema name must be a non-empty compile-time string constant.", nameExpression?.GetLocation() ?? addDatabase.GetLocation());
+            Error("COHDBSDK102", $"SqlSchema.{schemaDeclarationMethod.Name} name must be a non-empty compile-time string constant.", nameExpression?.GetLocation() ?? schemaDeclaration.GetLocation());
         }
 
-        ExpressionSyntax? configureExpression = GetArgument(addDatabase, addDatabaseMethod, "configure", 2);
+        ExpressionSyntax? configureExpression = GetArgument(schemaDeclaration, schemaDeclarationMethod, "configure", 1);
         LambdaExpressionSyntax? configure = UnwrapLambda(configureExpression);
         if (configure is null)
         {
-            Error("COHDBSDK103", "AddDatabase schema configuration must be an inline lambda so the build can analyze it without executing Program.Main.", configureExpression?.GetLocation() ?? addDatabase.GetLocation());
+            Error("COHDBSDK103", $"SqlSchema.{schemaDeclarationMethod.Name} configuration must be an inline lambda so the build can analyze it without executing Program.Main.", configureExpression?.GetLocation() ?? schemaDeclaration.GetLocation());
             return null;
         }
 
         var types = new List<SchemaTypeSource>();
         var tables = new List<SchemaTableSource>();
-        var collections = new List<SchemaCollectionSource>();
         var functions = new List<SchemaFunctionSource>();
         var triggers = new List<SchemaTriggerSource>();
         var principals = new List<SchemaPrincipalSource>();
@@ -160,9 +159,6 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
                 case "Table":
                     tables.Add(ExtractTable(model, invocation, method));
                     break;
-                case "Collection":
-                    collections.Add(ExtractCollection(model, invocation, method));
-                    break;
                 case "Extension":
                     extensions.Add(ExtractExtension(model, invocation, method));
                     break;
@@ -184,14 +180,12 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
         ValidateUnique(types.Select(static item => item.TypeName), "type", configure.GetLocation());
         ValidateUnique(tables.Select(static item => item.RowType), "table", configure.GetLocation());
         ValidateUnique(tables.Select(static item => item.Name), "table name", configure.GetLocation());
-        ValidateUnique(collections.Select(static item => item.Name), "collection", configure.GetLocation());
         ValidateUnique(functions.Select(static item => item.Name), "function", configure.GetLocation());
         ValidateUnique(principals.Select(static item => item.Name), "principal", configure.GetLocation());
         ValidateUnique(extensions.Select(static item => item.Name), "extension", configure.GetLocation());
         ValidateTables(types, tables, configure.GetLocation());
-        ValidateCollections(types, collections, configure.GetLocation());
         ValidateTriggers(tables, triggers, configure.GetLocation());
-        ValidateGrants(tables, collections, functions, principals, configure.GetLocation());
+        ValidateGrants(tables, functions, principals, configure.GetLocation());
 
         if (_hasErrors || name is null)
         {
@@ -203,7 +197,6 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
             allowsDestructiveChanges,
             types.OrderBy(static item => item.TypeName, StringComparer.Ordinal).ToArray(),
             tables.OrderBy(static item => item.Name, StringComparer.Ordinal).ToArray(),
-            collections.OrderBy(static item => item.Name, StringComparer.Ordinal).ToArray(),
             functions.OrderBy(static item => item.Name, StringComparer.Ordinal).ToArray(),
             triggers.OrderBy(static item => item.RowType, StringComparer.Ordinal).ThenBy(static item => item.Event, StringComparer.Ordinal).ToArray(),
             principals.OrderBy(static item => item.Name, StringComparer.Ordinal).ToArray(),
@@ -336,16 +329,6 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
             references.OrderBy(static item => item.Member, StringComparer.Ordinal).ThenBy(static item => item.TargetType, StringComparer.Ordinal).ToArray());
     }
 
-    private SchemaCollectionSource ExtractCollection(SemanticModel model, InvocationExpressionSyntax invocation, IMethodSymbol method)
-    {
-        SchemaTableSource table = ExtractTable(model, invocation, method);
-        if (table.References.Count > 0)
-        {
-            Error("COHDBSDK104", $"Collection '{table.Name}' cannot declare relational references.", invocation.GetLocation());
-        }
-        return new SchemaCollectionSource(table.Name, table.RowType, table.Columns, table.PrimaryKey, table.Indexes);
-    }
-
     private SchemaExtensionSource ExtractExtension(SemanticModel model, InvocationExpressionSyntax invocation, IMethodSymbol method)
     {
         ExpressionSyntax? nameExpression = GetArgument(invocation, method, "name", 0);
@@ -392,7 +375,7 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
         string eventName = EnumMemberName(model, eventExpression) ?? string.Empty;
         if (eventName.Length == 0)
         {
-            Error("COHDBSDK104", "Trigger event must be a named TriggerEvent constant.", eventExpression?.GetLocation() ?? invocation.GetLocation());
+            Error("COHDBSDK104", "Trigger event must be a named SqlTriggerEvent constant.", eventExpression?.GetLocation() ?? invocation.GetLocation());
         }
 
         ExpressionSyntax? bodyExpression = GetArgument(invocation, method, "body", 1);
@@ -529,33 +512,6 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
         }
     }
 
-    private void ValidateCollections(
-        IReadOnlyList<SchemaTypeSource> types,
-        IReadOnlyList<SchemaCollectionSource> collections,
-        Location location)
-    {
-        var declaredTypes = types.Select(static item => item.TypeName).ToHashSet(StringComparer.Ordinal);
-        foreach (SchemaCollectionSource collection in collections)
-        {
-            if (collection.Fields.Count == 0)
-            {
-                Error("COHDBSDK106", $"Collection '{collection.Name}' must declare at least one field.", location);
-            }
-            ValidateUnique(collection.Fields.Select(static item => item.Name), $"field on collection '{collection.Name}'", location);
-            if (collection.Key is null)
-            {
-                Error("COHDBSDK106", $"Collection '{collection.Name}' must declare a key.", location);
-            }
-            foreach (SchemaColumnSource field in collection.Fields)
-            {
-                if (!IsBuiltInType(field.TypeName) && !declaredTypes.Contains(field.TypeName))
-                {
-                    Error("COHDBSDK106", $"Field '{collection.Name}.{field.Name}' uses unknown schema type '{field.TypeName}'. Declare it with database.Type<T>(...).", location);
-                }
-            }
-        }
-    }
-
     private void ValidateTriggers(
         IReadOnlyList<SchemaTableSource> tables,
         IReadOnlyList<SchemaTriggerSource> triggers,
@@ -570,13 +526,11 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
 
     private void ValidateGrants(
         IReadOnlyList<SchemaTableSource> tables,
-        IReadOnlyList<SchemaCollectionSource> collections,
         IReadOnlyList<SchemaFunctionSource> functions,
         IReadOnlyList<SchemaPrincipalSource> principals,
         Location location)
     {
         var objects = tables.Select(static item => item.Name)
-            .Concat(collections.Select(static item => item.Name))
             .Concat(functions.Select(static item => item.Name))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (SchemaPrincipalSource principal in principals)
@@ -740,13 +694,15 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
         return info.Symbol as IMethodSymbol ?? info.CandidateSymbols.OfType<IMethodSymbol>().FirstOrDefault();
     }
 
-    private static bool IsAddDatabase(IMethodSymbol method)
+    private static bool IsSchemaDeclaration(IMethodSymbol method)
     {
-        if (!string.Equals(method.Name, "AddDatabase", StringComparison.Ordinal) || method.Parameters.Length != 3)
+        if (method.Name is not ("Create" or "Compile") ||
+            !IsOnNamedType(method, "Assimalign.Cohesion.Database.Sql.Schema.SqlSchema") ||
+            method.Parameters.Length != 2)
         {
             return false;
         }
-        IMethodSymbol? configure = DelegateInvoke(method.Parameters[2].Type);
+        IMethodSymbol? configure = DelegateInvoke(method.Parameters[1].Type);
         return configure?.Parameters.Length == 1 &&
             string.Equals(DisplayTypeName(configure.Parameters[0].Type), SchemaBuilderType, StringComparison.Ordinal);
     }
@@ -760,8 +716,8 @@ internal sealed class CSharpSchemaExtractor(Action<SchemaSourceDiagnostic> repor
     {
         INamedTypeSymbol containingType = method.ContainingType.OriginalDefinition;
         return string.Equals(typeName, TableBuilderType, StringComparison.Ordinal) &&
-            string.Equals(containingType.MetadataName, "IDatabaseTableBuilder`1", StringComparison.Ordinal) &&
-            string.Equals(containingType.ContainingNamespace.ToDisplayString(), "Assimalign.Cohesion.Database", StringComparison.Ordinal);
+            string.Equals(containingType.MetadataName, "ISqlTableBuilder`1", StringComparison.Ordinal) &&
+            string.Equals(containingType.ContainingNamespace.ToDisplayString(), "Assimalign.Cohesion.Database.Sql.Schema", StringComparison.Ordinal);
     }
 
     private static string TypeName(ITypeSymbol type)

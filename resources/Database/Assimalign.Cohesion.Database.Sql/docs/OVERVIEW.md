@@ -14,6 +14,11 @@ shared storage, with DDL flowing through the relational catalog
 - **Sessions and transactions** — explicit transactions map to storage
   transactions (durable commit, page-image rollback); statements outside a
   transaction auto-commit.
+- **Database scope (A5)** — every session stays bound to the database that
+  created it. Qualified table references resolve only within that database's
+  catalog; SQL cannot switch databases or manage the server. Conformance tests
+  keep identically named tables in two databases isolated and reject attempts
+  to select another database or create/drop databases through a session.
 - **Compiled-schema provisioning** — `ISqlDatabase` diffs a validated
   `CompiledSchema`, renders deterministic table/column/index DDL into parsed
   `SqlQueryRequest`s, compensates completed reversible steps on failure, and

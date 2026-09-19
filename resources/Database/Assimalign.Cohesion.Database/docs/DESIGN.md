@@ -190,25 +190,27 @@ surface. Child roots never reference the root.
   alternative — a builder type in the hosting module — would force every model
   package that wants a registration verb to reference the composition surface,
   which is precisely what the hosting-isolation rule forbids.
-- **The C# schema is one retained root model, not a second build-only language**
-  (#973, compiled by #859). `IDatabaseSchema` and `IDatabaseSchemaBuilder`
-  describe custom types, tables and key-value collections (columns/fields,
-  keys, indexes, and relational references), functions, triggers,
-  database-scoped principals, model extensions, and the explicit destructive
-  migration opt-in. `DatabaseSchemaCompiler.Compile` validates and lowers that
-  declaration into the immutable, dialect-bound `CompiledSchema` contract.
-  Its source-generated canonical JSON and SHA-256 `Hash` are shared by runtime
-  provisioning and `Sdk.Database` build tooling; malformed documents surface
-  typed, declaration-naming validation errors. `SchemaMigrationPlanner` diffs
-  supported table/collection shapes in deterministic dependency order and
-  refuses destructive operations unless the desired declaration opted in.
-  Metadata dimensions without a shipped statement surface fail explicitly
-  instead of producing an empty, falsely converged plan. Keeping the vocabulary
-  in the root lets customer `Program.cs`, hosting, model engines, and build
-  tooling share the declaration without making a model package reference
-  `Database.Hosting`; the rejected alternatives were administrative wire verbs
-  and a parallel declarative source format, both of which would violate the
-  area's code-first principle.
+- **Model-specific schemas belong to their model family** (MVP features A1–A4,
+  2026-09-17). `CompiledSchema` is an abstract model-agnostic identity carrying
+  `Format`, `Name`, `Model`, `AllowsDestructiveChanges`, and the model's canonical
+  document. The root computes SHA-256 over that document without inspecting its
+  shape. `IDatabaseSchemaProvisioner` remains the common apply seam, returning
+  the readonly `SchemaMigrationResult` value (`FromHash`, `ToHash`,
+  `OperationCount`, `WasAlreadyApplied`). Relational declarations, builders,
+  validation, serialization, and migration planning moved to the thin
+  `Database.Sql.Schema` package, which build tooling can consume without the SQL
+  engine or network stack. The former root schema's collection shape was removed;
+  the document model will define its own vocabulary in its own model family.
+  If another model needs a different shape, it does not belong in this root.
+- **Object ownership separates code-first provisioning from ad-hoc statements.**
+  `DatabaseObjectOwner.Adhoc` objects remain fully mutable through session
+  statements. `DatabaseObjectOwner.Schema` objects can change only through schema
+  apply; a session attempting to alter or drop one receives
+  `DatabaseObjectLockedException` identifying the object, its compiled
+  `OwningSchema`, and the operation. `OwningSchema` is provisioning identity,
+  distinct from any model-specific namespace such as a SQL table's `Schema`.
+  Model catalogs persist ownership and model engines enforce it. Neither the
+  ownership contract nor the exception requires a relational object shape.
 - **`ProtocolVersion` lives in `Database.Protocol`, and the root consumes it.**
   The struct is wire vocabulary, so it lives with the wire implementation —
   `ProtocolVersion.Current` ("the version this assembly implements") is a plain
@@ -226,7 +228,7 @@ the root for **the contract root and everything built *above* it**: the model
 engines and their satellites (`SqlCatalogException`, engine-thrown
 `DatabaseException`s), the client core (`DatabaseClientException`,
 `SqlClientException`), the server, and `Database.Embedded`.
-The root defines four semantic subtypes, each because the distinction is part
+The root defines semantic subtypes, each because the distinction is part
 of a public contract: `DatabaseNotFoundException` is the exact absence signal
 from `IDatabaseEngine.OpenDatabaseAsync` (so provisioning and server binding do
 not confuse an operational failure with a missing database),
@@ -276,11 +278,9 @@ as `DatabaseException`, so the inversion changed no live wire mapping.
 
 ## AOT posture
 
-Contracts, enums, value objects, and statically constructed schema declarations only. The schema
-builder and compiler inspect the typed expression-tree nodes supplied directly by the caller but
-never compile an expression, scan an assembly, or dynamically load code. Compiled-schema JSON uses
-a source-generated context; function and trigger expressions are lowered to a deterministic,
-allowlisted syntax tree and are never activated by the compiler.
+Contracts, enums, value objects, and canonical-document hashing only. The root does not inspect
+model schemas or discover types dynamically. SQL declaration compilation and source-generated
+JSON serialization live in `Database.Sql.Schema`.
 
 ## Non-goals
 

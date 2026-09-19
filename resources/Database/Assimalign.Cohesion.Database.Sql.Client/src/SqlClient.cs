@@ -36,6 +36,7 @@ public static class SqlClient
         {
             Settings = options.Settings,
             ConnectionFactory = options.ConnectionFactory,
+            Family = SqlProtocol.Family,
         });
 
         return new DefaultSqlClient(client, options.Settings, options.Observer);

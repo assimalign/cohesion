@@ -90,6 +90,49 @@ internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
         }
     }
 
+    public IFileSystemFileHandle OpenHandle(FileMode fileMode, FileAccess fileAccess, FileShare fileShare)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan((int)fileMode, (int)FileMode.CreateNew, nameof(fileMode));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan((int)fileMode, (int)FileMode.Append, nameof(fileMode));
+        ArgumentOutOfRangeException.ThrowIfLessThan((int)fileAccess, (int)FileAccess.Read, nameof(fileAccess));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan((int)fileAccess, (int)FileAccess.ReadWrite, nameof(fileAccess));
+
+        if ((fileShare & ~(FileShare.ReadWrite | FileShare.Delete | FileShare.Inheritable)) != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(fileShare));
+        }
+
+        ValidateOpenArguments(fileMode, fileAccess);
+
+        if (FileSystem.IsReadOnly && (fileMode != FileMode.Open || fileAccess != FileAccess.Read))
+        {
+            throw new InvalidOperationException("The file system is read-only. Only FileMode.Open with FileAccess.Read is allowed.");
+        }
+
+        var registration = RegisterOpen(fileAccess, fileShare);
+
+        try
+        {
+            var handle = new InMemoryFileSystemFileHandle(
+                this,
+                (fileAccess & FileAccess.Read) != 0,
+                (fileAccess & FileAccess.Write) != 0,
+                () => ReleaseOpen(registration));
+
+            if (fileMode is FileMode.Create or FileMode.Truncate)
+            {
+                handle.SetLength(0);
+            }
+
+            return handle;
+        }
+        catch
+        {
+            ReleaseOpen(registration);
+            throw;
+        }
+    }
+
     internal void EnsureDeleteAllowed(FileSystemPath path)
     {
         lock (_openLock)
@@ -135,7 +178,7 @@ internal class InMemoryFileSystemFile : InMemoryFileSystemInfo, IFileSystemFile
 
     public IFileSystemEventToken Watch()
     {
-        return new InMemoryFileSystemEventToken(this, Glob.Parse(Path));
+        return FileSystem.CreateWatchToken(this, Glob.Parse(Path));
     }
 
     public override void Dispose()

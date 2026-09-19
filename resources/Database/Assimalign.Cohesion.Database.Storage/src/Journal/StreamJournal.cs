@@ -6,24 +6,48 @@ using System.IO;
 namespace Assimalign.Cohesion.Database.Storage;
 
 using Assimalign.Cohesion.Database.Storage.Internal;
+using Assimalign.Cohesion.FileSystem;
 
 /// <summary>
 /// Stream-backed write-ahead log implementation. Frames append sequentially at the
-/// end of the stream; durable flushes use <see cref="FileStream.Flush(bool)"/> when
-/// the underlying stream is a file.
+/// end of the stream; durable flushes are carried by an explicit
+/// <see cref="IFileSystemFileHandle"/> contract.
 /// </summary>
 public sealed class StreamJournal : StorageJournal
 {
     private readonly Stream _stream;
+    private readonly IFileSystemFileHandle _handle;
     private readonly bool _leaveOpen;
 
     /// <summary>
-    /// Initializes a stream-backed journal.
+    /// Initializes a non-durable stream-backed journal. Use a handle or
+    /// <see cref="StorageStream"/> to supply an explicit durability contract.
     /// </summary>
     /// <param name="stream">Readable, writable, seekable stream.</param>
     /// <param name="leaveOpen">When true, the stream is not disposed with the journal.</param>
     /// <exception cref="ArgumentException">The stream does not support read, write, and seek.</exception>
     public StreamJournal(Stream stream, bool leaveOpen = false)
+        : this(stream, new StorageStream(stream), leaveOpen)
+    {
+    }
+
+    /// <summary>Initializes a journal that retains the storage stream's durability contract.</summary>
+    /// <param name="stream">Readable, writable, seekable storage stream.</param>
+    /// <param name="leaveOpen">When true, the stream is not disposed with the journal.</param>
+    public StreamJournal(StorageStream stream, bool leaveOpen = false)
+        : this(stream, stream, leaveOpen)
+    {
+    }
+
+    /// <summary>Initializes a journal backed by an explicit random-access file handle.</summary>
+    /// <param name="handle">The file handle providing I/O and durability.</param>
+    /// <param name="leaveOpen">When true, the handle is not disposed with the journal.</param>
+    public StreamJournal(IFileSystemFileHandle handle, bool leaveOpen = false)
+        : this(new StorageStream(handle), leaveOpen)
+    {
+    }
+
+    private StreamJournal(Stream stream, IFileSystemFileHandle handle, bool leaveOpen)
     {
         ArgumentNullException.ThrowIfNull(stream);
 
@@ -33,6 +57,7 @@ public sealed class StreamJournal : StorageJournal
         }
 
         _stream = stream;
+        _handle = handle;
         _leaveOpen = leaveOpen;
     }
 
@@ -43,8 +68,18 @@ public sealed class StreamJournal : StorageJournal
     /// <returns>Created journal instance.</returns>
     public static StreamJournal FromFile(string path)
     {
-        var stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
-        return new StreamJournal(stream);
+        return new StreamJournal(StorageFileSystem.OpenHandle(path, null, FileShare.Read));
+    }
+
+    /// <summary>Creates a journal through the supplied file system.</summary>
+    /// <param name="path">Journal path, relative to the supplied file system.</param>
+    /// <param name="fileSystem">The file system used to open the journal.</param>
+    /// <returns>Created journal instance.</returns>
+    /// <remarks>A non-durable provider is rejected at the first requested durable flush.</remarks>
+    public static StreamJournal FromFile(string path, IFileSystem fileSystem)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        return new StreamJournal(StorageFileSystem.OpenHandle(path, fileSystem, FileShare.Read));
     }
 
     /// <inheritdoc />
@@ -57,19 +92,12 @@ public sealed class StreamJournal : StorageJournal
     /// <inheritdoc />
     protected override void FlushCore(bool forceDurable)
     {
-        if (forceDurable && _stream is FileStream fileStream)
-        {
-            fileStream.Flush(flushToDisk: true);
-            return;
-        }
-
-        _stream.Flush();
+        _handle.Flush(durable: forceDurable);
     }
 
     /// <inheritdoc />
     protected override IEnumerable<ReadOnlyMemory<byte>> ReadFrames()
     {
-        var frames = new List<ReadOnlyMemory<byte>>();
         long originalPosition = _stream.Position;
 
         try
@@ -107,10 +135,8 @@ public sealed class StreamJournal : StorageJournal
                     break;
                 }
 
-                frames.Add(body);
+                yield return body;
             }
-
-            return frames;
         }
         finally
         {

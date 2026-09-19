@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
-using Assimalign.Cohesion.Database;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Sdk.Database.Tasks.Compilation;
 
 using Microsoft.Build.Framework;
@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Sdk.Database.Tasks;
 
 /// <summary>
 /// Statically compiles a database application's retained C# schema declaration
-/// into the Database root's canonical semantic document and content hash.
+/// into the SQL schema package's canonical semantic document and content hash.
 /// </summary>
 public sealed class CompileDatabaseSchemaTask : DatabaseTask
 {
@@ -36,7 +36,7 @@ public sealed class CompileDatabaseSchemaTask : DatabaseTask
     public string AssemblyName { get; set; } = string.Empty;
 
     /// <summary>
-    /// The database model the project targets (<c>Sql</c> or <c>KeyValuePair</c>).
+    /// The database model the project targets. Only <c>Sql</c> currently supplies a compiled-schema package.
     /// </summary>
     [Required]
     public string Model { get; set; } = string.Empty;
@@ -62,6 +62,13 @@ public sealed class CompileDatabaseSchemaTask : DatabaseTask
     /// <inheritdoc />
     public override bool Execute()
     {
+        if (!string.Equals(Model, "Sql", StringComparison.Ordinal))
+        {
+            Log.LogError(null, "COHDBSDK106", null, null, 0, 0, 0, 0,
+                $"Database model '{Model}' has no model-specific compiled-schema package.");
+            return false;
+        }
+
         try
         {
             string projectDirectory = Path.GetFullPath(ProjectDirectory);
@@ -79,14 +86,14 @@ public sealed class CompileDatabaseSchemaTask : DatabaseTask
                 return false;
             }
 
-            CompiledSchema schema;
+            SqlCompiledSchema schema;
             try
             {
                 schema = CompiledSchemaSourceWriter.Create(source, Model);
             }
-            catch (DatabaseSchemaValidationException exception)
+            catch (SqlSchemaValidationException exception)
             {
-                foreach (DatabaseSchemaValidationError error in exception.Errors)
+                foreach (SqlSchemaValidationError error in exception.Errors)
                 {
                     Log.LogError(
                         null,
@@ -109,8 +116,8 @@ public sealed class CompileDatabaseSchemaTask : DatabaseTask
 
             string outputPath = ResolvePath(OutputPath, projectDirectory);
             string hashOutputPath = ResolvePath(HashOutputPath, projectDirectory);
-            string document = CompiledSchemaSerializer.Serialize(schema);
-            SchemaHash = CompiledSchemaSerializer.ComputeHash(schema);
+            string document = SqlCompiledSchemaSerializer.Serialize(schema);
+            SchemaHash = SqlCompiledSchemaSerializer.ComputeHash(schema);
             WriteIfChanged(outputPath, document);
             WriteIfChanged(hashOutputPath, SchemaHash + "\n");
             Log.LogMessage(

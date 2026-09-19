@@ -2,6 +2,35 @@
 
 The multi-model OLTP database engine family for Cohesion: five independent database engines — **SQL**, **Documents**, **Graph**, **Blob**, and **KeyValuePair** — sharing one durable kernel (storage, write-ahead logging, transactions, indexing). A hosted database is an ordinary customer-owned `Sdk.Database` executable whose `Program.cs` composes its engines, code-first schema, servers, and provisioning. See [DESIGN.md](../../docs/resources/Database/DESIGN.md) for the architecture, requirements, and decision log; sequencing lives in [docs/programs/DATABASE_PROGRAM_PLAN.md](../../docs/programs/DATABASE_PROGRAM_PLAN.md).
 
+## Area root, child roots, and model families
+
+`Assimalign.Cohesion.Database` is the **area root**. It holds only what is true of
+every model: engine, database, session, and transaction contracts; the provisioning
+seam and compiled-schema identity; object ownership; value objects; and exceptions.
+It composes the **child roots** `Types`, `Language`, `Storage`, `Transactions`,
+`Indexing`, `Execution`, `Protocol`, `Security`, and `Governance`. The dependency
+arrow always points **root → child**; a child root never references the area root.
+
+**A project whose name contains a model segment — `*.Sql.*`, `*.Documents.*`,
+`*.Graph.*`, `*.Blob.*`, or `*.KeyValuePair.*` — is a model family member. It inherits
+the area root and owns its model's vocabulary.** Relational tables, document
+collections, graph edges, and blob containers live in their model family, never in
+the area root.
+
+The placement test is: *if a different model would need a different shape of it,
+it is not root material.* `CompiledSchema` identity is root material;
+`CompiledSchemaTable` is not. The root previously carried the relational schema
+model; feature A3 in [DATABASE_MVP_FEATURES.md](../../docs/programs/DATABASE_MVP_FEATURES.md)
+moved it into `Database.Sql.Schema`. That package supplies SQL declarations,
+compilation, canonical serialization, and migration planning, independently of the
+SQL engine. The SDK build task consumes this thin package without referencing the
+SQL engine or transports.
+
+`DatabaseObjectOwner` distinguishes code-first `Schema` objects from `Adhoc`
+objects. SQL persists ownership and refuses session DDL that alters or drops a
+schema-owned object; only compiled-schema provisioning may change it. Ad-hoc
+objects remain fully mutable through ad-hoc statements.
+
 ## Project map
 
 An arrow means "references": `Database.Hosting --> Database` reads
@@ -63,7 +92,7 @@ In the repo's L1/L2/L3 model (see `docs/programs/DELIVERY_ROADMAP.md`), this are
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Database` | Contract root: `IDatabase`, `IDatabaseEngine`, `IDatabaseSession`, `IDatabaseTransaction`, `DatabaseException` and its exact `DatabaseNotFoundException` absence signal, the application-composition seam (`IDatabaseApplicationBuilder`/`IDatabaseApplication`), and the code-first schema compiler (`IDatabaseSchema` → validated, canonical `CompiledSchema`) plus deterministic migration planner — **rolls up the child roots** (references `Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`/`Governance`; child roots never reference the root) |
+| `Assimalign.Cohesion.Database` | Area root: engine/database/session/transaction contracts, exceptions, application composition, model-agnostic `CompiledSchema` identity and provisioning seam, and object ownership — **rolls up the child roots** (`Types`/`Language`/`Storage`/`Transactions`/`Execution`/`Indexing`/`Protocol`/`Security`/`Governance`; child roots never reference the root) |
 | `Assimalign.Cohesion.Database.Storage` | Child root — pages, buffer pool, free-space map, journal (WAL), recovery, backup |
 | `Assimalign.Cohesion.Database.Transactions` | Child root — MVCC snapshots, isolation levels, lock manager, transaction log seam, `TransactionId`/`TransactionState` |
 | `Assimalign.Cohesion.Database.Indexing` | Order-preserving key encoding, B+Tree/hash index contracts, cursors (child root; rolled up by the root) |
@@ -78,10 +107,23 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 
 | Model | Root project | Notes |
 |---|---|---|
-| SQL | `Assimalign.Cohesion.Database.Sql` | Ships the SQL engine, compiled-schema migration renderer/provisioner, the model's wire-protocol server (`SqlDatabaseServer`), the `SqlDatabaseServerOptions.Listen(Uri)` endpoint bridge, and the model builder verbs; declared dialect in `Sql.Language` |
-| Documents | `Assimalign.Cohesion.Database.Documents` | OQL-based language contract |
-| Graph | `Assimalign.Cohesion.Database.Graph` | Query standard selection (#193) gates language work |
-| Blob | `Assimalign.Cohesion.Database.Blob` | API-driven; no `.Language` project |
+| SQL | `Assimalign.Cohesion.Database.Sql` | Ships the SQL engine, compiled-schema migration renderer/provisioner, the model's wire-protocol server (`SqlDatabaseServer`), its own protocol family, and the model builder verbs; declared dialect in `Sql.Language` |
+| SQL TCP composition | `Assimalign.Cohesion.Database.Sql.Tcp` | Optional `SqlDatabaseServerOptions.Listen(Uri)` endpoint convenience; references SQL and Connections.Tcp while the engine stays transport-independent |
+| SQL schema | `Assimalign.Cohesion.Database.Sql.Schema` | Thin SQL schema declarations, compiled relational object shapes, canonical serialization, validation, and migration planning; shared by SQL and SDK Tasks, with direct references only to the area root and `Database.Types` |
+| Documents | `Assimalign.Cohesion.Database.Documents` | Session-bound JSON document engine, OQL query/index-DDL planning and execution, collection ownership, and transactional index management |
+| Documents language | `Assimalign.Cohesion.Database.Documents.Language` | Declared OQL query/index-DDL subset, AST, diagnostics, and conformance corpus |
+| Documents catalog | `Assimalign.Cohesion.Database.Documents.Catalog` | Versioned collections, document metadata, and eagerly maintained shared B+Tree indexes |
+| Documents storage | `Assimalign.Cohesion.Database.Documents.Storage` | UTF-8 JSON serialization and stamped chunk chains over shared storage and transactions |
+| Graph | `Assimalign.Cohesion.Database.Graph` | Durable graph engine, bounded traversal planning/execution, database-bound sessions, and root-builder composition |
+| Graph language | `Assimalign.Cohesion.Database.Graph.Language` | Executable ISO/IEC 39075 GQL subset, pattern AST, diagnostics, and conformance corpus |
+| Graph storage | `Assimalign.Cohesion.Database.Graph.Storage` | Versioned nodes and relationships, durable endpoint adjacency, and shared B+Tree property indexes |
+| Graph catalog | `Assimalign.Cohesion.Database.Graph.Catalog` | Snapshot-visible labels, relationship types, property keys, indexes, and schema ownership enforcement |
+| Blob | `Assimalign.Cohesion.Database.Blob` | Streaming blob and container API, database-bound sessions, transport-neutral `BlobDatabaseServer`, engine lifecycle, and ownership enforcement over the shared kernel; no `.Language` project |
+| Blob client | `Assimalign.Cohesion.Database.Blob.Client` | [Typed streaming client](Assimalign.Cohesion.Database.Blob.Client/docs/OVERVIEW.md) over shared connection pooling and handshake; bounded upload/download, delete, properties, and prefix listing |
+| Blob storage | `Assimalign.Cohesion.Database.Blob.Storage` | Chunk chains backed by shared pages, WAL, recovery, and transactions; incremental stream reads and writes |
+| Blob catalog | `Assimalign.Cohesion.Database.Blob.Catalog` | Durable containers, ownership markers, and per-blob metadata for name/prefix listing |
+| Blob streaming fixture | `Assimalign.Cohesion.Database.Blob.StreamingFixture` | Non-packable process fixture under `Blob/fixtures/`, exercised by Blob tests to verify bounded-memory streams and crash recovery |
+| Blob wire streaming fixture | `Assimalign.Cohesion.Database.Blob.Client.StreamingFixture` | Non-packable process fixture under `Blob.Client/fixtures/`; transfers 256 MiB through the real client/server over InMemory with a 64 MiB managed heap |
 | KeyValuePair | `Assimalign.Cohesion.Database.KeyValuePair` | **Delivered** — ordered key space on the shared kernel (index-primary composition, etag CAS) and the model's wire-protocol server (`KeyValueDatabaseServer`); command grammar in `docs/COMMANDS.md`; no `.Language` project |
 | Cache | `Assimalign.Cohesion.Database.Cache` | Post-MVP; deferred behind KeyValuePair |
 
@@ -89,8 +131,8 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Database.Protocol` | Child root — wire protocol frames and message contracts (shared client/server), `ProtocolVersion` |
-| `Assimalign.Cohesion.Database.Client` | Shared client core: connection strings, pooling, protocol client, and `DatabaseConnectionSettings.For(Uri)` for generated or ambient endpoints |
+| `Assimalign.Cohesion.Database.Protocol` | Child root — framing, handshake, lifecycle, errors, version negotiation, and immutable model-family binding |
+| `Assimalign.Cohesion.Database.Client` | Shared client core: connection settings, pooling, handshake, framing, and model-exchange lifetime; model clients materialize results |
 | `Assimalign.Cohesion.Database.Security` | Child root — authN/authZ contracts (principals, roles, permissions) |
 | `Assimalign.Cohesion.Database.Replication` | Shared replication contracts (WAL log-shipping seam) |
 | `Assimalign.Cohesion.Database.Governance` | Child root — quotas, tenancy boundaries, audit events |

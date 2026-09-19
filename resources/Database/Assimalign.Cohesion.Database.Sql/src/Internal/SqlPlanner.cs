@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// Unsupported dialect features fail here with precise messages rather than
 /// misexecuting.
 /// </summary>
-internal sealed class SqlPlanner
+internal sealed partial class SqlPlanner
 {
     /// <summary>
     /// The schema used when a table reference has none.
@@ -33,6 +33,7 @@ internal sealed class SqlPlanner
 
     internal SqlPlan Plan(SqlQueryExpression expression)
     {
+        SqlSystemViews.EnsureReadOnly(expression);
         return expression switch
         {
             SqlSelectExpression select => PlanSelect(select),
@@ -48,90 +49,108 @@ internal sealed class SqlPlanner
         };
     }
 
-    private SqlSelectPlan PlanSelect(SqlSelectExpression select)
+    private SqlPlan PlanSelect(SqlSelectExpression select)
+        => PlanSubqueries(select);
+
+    /// <summary>Binds a SELECT whose subqueries have already been lowered to value slots.</summary>
+    private SqlPlan PlanSelectCore(SqlSelectExpression select)
     {
-        if (select.Joins.Count > 0)
-        {
-            throw new DatabaseException("JOIN is not supported by the executor yet.");
-        }
-
-        if (select.GroupBy.Count > 0 || select.Having is not null)
-        {
-            throw new DatabaseException("GROUP BY / HAVING are not supported by the executor yet.");
-        }
-
         if (select.From is null)
         {
             throw new DatabaseException("SELECT requires a FROM table.");
         }
 
-        var table = ResolveTable(select.From);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters);
+        // A virtual relation has column metadata, but no stored table or access path.
+        var systemView = SqlSystemViews.Find(select.From);
+        var table = systemView is null ? ResolveTable(select.From) : null;
+        var bindings = select.Joins.Count > 0 ? BindJoin(select, table!) : null;
+        var columns = bindings is null ? systemView?.Columns ?? table!.Columns
+            : bindings.SelectMany(binding => binding.Table.Columns).ToArray();
+        var evaluatorBindings = bindings ?? (_subqueryDepth > 0 && table is not null
+            ? new[] { new SqlTableBinding(table, select.From, 0) } : null);
+        var evaluator = new SqlExpressionEvaluator(columns, _parameters, evaluatorBindings, defaultCollation: _catalog.DefaultCollation);
 
-        // Lone COUNT(*) is the one aggregate the executor supports.
-        bool isCountStar =
-            select.Columns.Count == 1 &&
-            select.Columns[0].Expression is SqlFunctionCallExpression { Arguments.Count: 1 } call &&
-            string.Equals(call.FunctionName, "COUNT", StringComparison.OrdinalIgnoreCase) &&
-            call.Arguments[0] is SqlStarExpression;
+        if (bindings is not null)
+        {
+            ValidateExpression(select.Joins[0].Condition!, evaluator, _subqueryTypes);
+        }
+
+        if (select.Where is not null && ContainsAggregate(select.Where))
+        {
+            throw new DatabaseException("Aggregate functions are not allowed in WHERE; use HAVING to filter groups.");
+        }
+        if (bindings is not null && ContainsAggregate(select.Joins[0].Condition!))
+        {
+            throw new DatabaseException("Aggregate functions are not allowed in JOIN ON.");
+        }
+
+        if (select.GroupBy.Count > 0 || select.Having is not null
+            || select.Columns.Any(column => ContainsAggregate(column.Expression))
+            || select.OrderBy.Any(order => ContainsAggregate(order.Expression)))
+        {
+            return PlanGroup(select, table, systemView, columns, bindings, evaluator);
+        }
 
         var projections = new List<SqlProjection>();
-
-        if (isCountStar)
+        foreach (var column in select.Columns)
         {
-            projections.Add(new SqlProjection(select.Columns[0].Alias ?? "count", null, null, DatabaseType.Int64));
-        }
-        else
-        {
-            foreach (var column in select.Columns)
+            if (column.Expression is SqlStarExpression)
             {
-                if (ContainsAggregate(column.Expression))
+                for (int i = 0; i < columns.Count; i++)
                 {
-                    throw new DatabaseException("Aggregate functions (other than a lone COUNT(*)) are not supported by the executor yet.");
+                    projections.Add(new SqlProjection(columns[i].Name, i, null, columns[i].Type.Type));
                 }
-
-                if (column.Expression is SqlStarExpression)
-                {
-                    for (int i = 0; i < table.Columns.Count; i++)
-                    {
-                        projections.Add(new SqlProjection(table.Columns[i].Name, i, null, table.Columns[i].Type.Type));
-                    }
-                }
-                else if (column.Expression is SqlColumnReferenceExpression reference)
-                {
-                    int ordinal = evaluator.ResolveColumn(reference);
-                    projections.Add(new SqlProjection(
-                        column.Alias ?? table.Columns[ordinal].Name, ordinal, null, table.Columns[ordinal].Type.Type));
-                }
-                else
-                {
-                    ValidateExpression(column.Expression, evaluator);
-                    projections.Add(new SqlProjection(
-                        column.Alias ?? $"column{projections.Count + 1}", null, column.Expression, DatabaseType.Null));
-                }
+            }
+            else if (column.Expression is SqlColumnReferenceExpression reference)
+            {
+                int ordinal = evaluator.ResolveColumn(reference);
+                projections.Add(new SqlProjection(
+                    column.Alias ?? columns[ordinal].Name, ordinal, null, columns[ordinal].Type.Type));
+            }
+            else
+            {
+                ValidateExpression(column.Expression, evaluator, _subqueryTypes);
+                projections.Add(new SqlProjection(
+                    column.Alias ?? $"column{projections.Count + 1}", null, column.Expression,
+                    GroupExpressionType(column.Expression, columns, evaluator)));
             }
         }
 
         if (select.Where is not null)
         {
-            ValidateExpression(select.Where, evaluator);
+            ValidateExpression(select.Where, evaluator, _subqueryTypes);
         }
 
+        var orderByProjections = BindOrderByProjections(select, projections, columns.Count);
         foreach (var orderBy in select.OrderBy)
         {
-            ValidateExpression(orderBy.Expression, evaluator);
+            ValidateExpression(orderBy.Expression, evaluator, _subqueryTypes, orderByProjections);
+        }
+
+        if (bindings is not null)
+        {
+            return new SqlJoinPlan(bindings, columns, select.Joins[0].Condition!, projections,
+                select.Where, select.OrderBy, EvaluateCount(select.Limit, "LIMIT"),
+                EvaluateCount(select.Offset, "OFFSET"), select.IsDistinct,
+                SelectJoinAccessPath(bindings, select.Joins[0].Condition!, evaluator), orderByProjections);
+        }
+
+        if (systemView is not null)
+        {
+            return new SqlSystemViewPlan(systemView, projections, select.Where, select.OrderBy,
+                EvaluateCount(select.Limit, "LIMIT"), EvaluateCount(select.Offset, "OFFSET"),
+                select.IsDistinct, orderByProjections);
         }
 
         return new SqlSelectPlan(
-            table,
+            table!,
             projections,
             select.Where,
             select.OrderBy,
             EvaluateCount(select.Limit, "LIMIT"),
             EvaluateCount(select.Offset, "OFFSET"),
             select.IsDistinct,
-            isCountStar,
-            SelectAccessPath(table, select.Where));
+            SelectAccessPath(table!, select.Where), orderByProjections);
     }
 
     // ── Access-path selection (rule-based, by design) ──────────────────
@@ -203,7 +222,7 @@ internal sealed class SqlPlanner
     /// following key column when its type's evaluator order provably matches the
     /// codec's byte order. Returns null when the index contributes nothing.
     /// </summary>
-    private static SqlIndexSeekPath? TryBuildSeek(
+    private SqlIndexSeekPath? TryBuildSeek(
         SqlCatalogTable table,
         SqlCatalogIndex index,
         Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates,
@@ -250,16 +269,16 @@ internal sealed class SqlPlanner
                         switch (op)
                         {
                             case SqlBinaryOperator.GreaterThan:
-                                lower = Tighter(lower, new SqlSeekBound(value, Inclusive: false), isLower: true);
+                                lower = Tighter(lower, new SqlSeekBound(value, Inclusive: false), isLower: true, table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
                                 break;
                             case SqlBinaryOperator.GreaterOrEqual:
-                                lower = Tighter(lower, new SqlSeekBound(value, Inclusive: true), isLower: true);
+                                lower = Tighter(lower, new SqlSeekBound(value, Inclusive: true), isLower: true, table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
                                 break;
                             case SqlBinaryOperator.LessThan:
-                                upper = Tighter(upper, new SqlSeekBound(value, Inclusive: false), isLower: false);
+                                upper = Tighter(upper, new SqlSeekBound(value, Inclusive: false), isLower: false, table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
                                 break;
                             case SqlBinaryOperator.LessOrEqual:
-                                upper = Tighter(upper, new SqlSeekBound(value, Inclusive: true), isLower: false);
+                                upper = Tighter(upper, new SqlSeekBound(value, Inclusive: true), isLower: false, table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
                                 break;
                         }
                     }
@@ -291,14 +310,14 @@ internal sealed class SqlPlanner
     /// Keeps the tighter of two candidate bounds (the residual predicate makes
     /// either choice correct; tighter just reads fewer entries).
     /// </summary>
-    private static SqlSeekBound? Tighter(SqlSeekBound? current, SqlSeekBound candidate, bool isLower)
+    private static SqlSeekBound? Tighter(SqlSeekBound? current, SqlSeekBound candidate, bool isLower, Collation collation)
     {
         if (current is null || current.Value.Value is null || candidate.Value is null)
         {
             return candidate;
         }
 
-        int comparison = SqlExpressionEvaluator.Compare(candidate.Value, current.Value.Value);
+        int comparison = SqlExpressionEvaluator.Compare(candidate.Value, current.Value.Value, collation);
         bool candidateTighter = isLower ? comparison > 0 : comparison < 0;
         return candidateTighter ? candidate : current;
     }
@@ -323,10 +342,10 @@ internal sealed class SqlPlanner
         }
 
         if (expression is SqlBetweenExpression { IsNegated: false } between &&
-            between.Operand is SqlColumnReferenceExpression betweenColumn)
+            UnwrapCollation(between.Operand) is SqlColumnReferenceExpression)
         {
-            TryAddPredicate(table, betweenColumn, SqlBinaryOperator.GreaterOrEqual, between.Low, predicates);
-            TryAddPredicate(table, betweenColumn, SqlBinaryOperator.LessOrEqual, between.High, predicates);
+            TryAddPredicate(table, between.Operand, SqlBinaryOperator.GreaterOrEqual, between.Low, predicates);
+            TryAddPredicate(table, between.Operand, SqlBinaryOperator.LessOrEqual, between.High, predicates);
             return;
         }
 
@@ -347,14 +366,24 @@ internal sealed class SqlPlanner
                 return;
         }
 
-        if (binary.Left is SqlColumnReferenceExpression leftColumn)
+        if (UnwrapCollation(binary.Left) is SqlColumnReferenceExpression)
         {
-            TryAddPredicate(table, leftColumn, binary.Operator, binary.Right, predicates);
+            TryAddPredicate(table, binary.Left, binary.Operator, binary.Right, predicates);
         }
-        else if (binary.Right is SqlColumnReferenceExpression rightColumn)
+        else if (UnwrapCollation(binary.Right) is SqlColumnReferenceExpression)
         {
-            TryAddPredicate(table, rightColumn, Flip(binary.Operator), binary.Left, predicates);
+            TryAddPredicate(table, binary.Right, Flip(binary.Operator), binary.Left, predicates, columnOnLeft: false);
         }
+    }
+
+    /// <summary>Removes only COLLATE wrappers when recognizing a direct key reference.</summary>
+    private static SqlExpression UnwrapCollation(SqlExpression expression)
+    {
+        while (expression is SqlCollateExpression collate)
+        {
+            expression = collate.Operand;
+        }
+        return expression;
     }
 
     private static SqlBinaryOperator Flip(SqlBinaryOperator op) => op switch
@@ -368,20 +397,33 @@ internal sealed class SqlPlanner
 
     private void TryAddPredicate(
         SqlCatalogTable table,
-        SqlColumnReferenceExpression column,
+        SqlExpression columnExpression,
         SqlBinaryOperator op,
         SqlExpression comparand,
-        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates)
+        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates,
+        bool columnOnLeft = true)
     {
         if (ReferencesAnyColumn(comparand))
         {
             return;
         }
 
+        var column = (SqlColumnReferenceExpression)UnwrapCollation(columnExpression);
+        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
         int ordinal;
         try
         {
-            ordinal = new SqlExpressionEvaluator(table.Columns, _parameters).ResolveColumn(column);
+            ordinal = evaluator.ResolveColumn(column);
+            if (table.Columns[ordinal].Type.Type is DatabaseType.String or DatabaseType.Json)
+            {
+                var indexedCollation = table.Columns[ordinal].Collation ?? _catalog.DefaultCollation;
+                var effectiveCollation = columnOnLeft ? evaluator.ResolveCollation(columnExpression, comparand)
+                    : evaluator.ResolveCollation(comparand, columnExpression);
+                if (!indexedCollation.IsIndexBacked || effectiveCollation != indexedCollation)
+                {
+                    return; // Different equivalence/order would omit rows before residual evaluation.
+                }
+            }
         }
         catch (DatabaseException)
         {
@@ -391,9 +433,17 @@ internal sealed class SqlPlanner
         object? value;
         try
         {
-            value = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters)
+            value = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation)
                 .Evaluate(comparand, Array.Empty<object?>());
-            value = SqlPlanExecutor.CoerceForColumn(value, table.Columns[ordinal]);
+            object? storageValue = SqlPlanExecutor.CoerceForColumn(value, table.Columns[ordinal]);
+            // A rounded bound can exclude qualifying rows before residual evaluation
+            // (e.g. an INT key > CAST('1.5' AS DECIMAL) must still include 2).
+            if (value is not null && storageValue is not null &&
+                SqlExpressionEvaluator.Compare(value, storageValue) != 0)
+            {
+                return;
+            }
+            value = storageValue;
         }
         catch (DatabaseException)
         {
@@ -423,15 +473,13 @@ internal sealed class SqlPlanner
     }
 
     /// <summary>
-    /// The range-sargability type matrix: range seeks are restricted to types
-    /// whose evaluator comparison order provably equals the key codec's byte
-    /// order. Strings are equality-only — <c>Collation.Binary</c> orders by
-    /// code point, which diverges from ordinal UTF-16 comparison for astral
-    /// planes (the #854 lesson) — and so are Guid/binary/json.
+    /// Range seeks require evaluator order to match encoded byte order. String
+    /// predicates also pass the effective-collation compatibility check above.
+    /// Guid, binary and JSON remain equality-only.
     /// </summary>
     private static bool IsRangeSargable(DatabaseType type) => type switch
     {
-        DatabaseType.Boolean
+        DatabaseType.Boolean or DatabaseType.String
             or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64
             or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal
             or DatabaseType.Date or DatabaseType.Time or DatabaseType.DateTime
@@ -449,16 +497,11 @@ internal sealed class SqlPlanner
         return Children(expression).Any(ReferencesAnyColumn);
     }
 
-    private SqlInsertPlan PlanInsert(SqlInsertExpression insert)
+    private SqlPlan PlanInsert(SqlInsertExpression insert)
     {
-        if (insert.SelectSource is not null)
+        if (insert.SelectSource is null && (insert.Values is null || insert.Values.Count == 0))
         {
-            throw new DatabaseException("INSERT ... SELECT is not supported by the executor yet.");
-        }
-
-        if (insert.Values is null || insert.Values.Count == 0)
-        {
-            throw new DatabaseException("INSERT requires a VALUES list.");
+            throw new DatabaseException("INSERT requires a VALUES list or SELECT source.");
         }
 
         var table = ResolveTable(insert.Table);
@@ -475,12 +518,21 @@ internal sealed class SqlPlanner
             foreach (string name in insert.Columns)
             {
                 int ordinal = FindColumnOrdinal(table, name);
+                if (ordinals.Contains(ordinal))
+                {
+                    throw new DatabaseException($"INSERT target column '{name}' is specified more than once.");
+                }
                 ordinals.Add(ordinal);
             }
             targetOrdinals = ordinals;
         }
 
-        foreach (var row in insert.Values)
+        if (insert.SelectSource is not null)
+        {
+            return PlanInsertSelect(table, targetOrdinals, insert.SelectSource);
+        }
+
+        foreach (var row in insert.Values!)
         {
             if (row.Count != targetOrdinals.Count)
             {
@@ -489,13 +541,13 @@ internal sealed class SqlPlanner
             }
         }
 
-        return new SqlInsertPlan(table, targetOrdinals, insert.Values);
+        return new SqlInsertPlan(table, targetOrdinals, insert.Values!);
     }
 
     private SqlUpdatePlan PlanUpdate(SqlUpdateExpression update)
     {
         var table = ResolveTable(update.Table);
-        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters);
+        var evaluator = new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation);
 
         var assignments = new List<(int Ordinal, SqlExpression Value)>(update.Assignments.Count);
         foreach (var assignment in update.Assignments)
@@ -519,7 +571,7 @@ internal sealed class SqlPlanner
 
         if (delete.Where is not null)
         {
-            ValidateExpression(delete.Where, new SqlExpressionEvaluator(table.Columns, _parameters));
+            ValidateExpression(delete.Where, new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation));
         }
 
         return new SqlDeletePlan(table, delete.Where);
@@ -535,17 +587,12 @@ internal sealed class SqlPlanner
         {
             var typeInfo = ResolveTypeName(definition.DataType, definition.ColumnName);
 
-            string? defaultLiteral = definition.DefaultValue switch
-            {
-                null => null,
-                SqlLiteralExpression literal => literal.LiteralType == SqlLiteralType.Null ? null : literal.Value,
-                _ => throw new DatabaseException(
-                    $"Column '{definition.ColumnName}': only literal DEFAULT values are supported."),
-            };
+            string? defaultLiteral = ResolveDefaultLiteral(definition);
 
             // PRIMARY KEY columns are implicitly NOT NULL.
             bool nullable = definition.IsNullable && !definition.IsPrimaryKey;
-            columns.Add(new SqlCatalogColumn(definition.ColumnName, typeInfo, nullable, defaultLiteral));
+            columns.Add(new SqlCatalogColumn(definition.ColumnName, typeInfo, nullable, defaultLiteral,
+                ResolveColumnCollation(definition, typeInfo)));
 
             if (definition.IsPrimaryKey)
             {
@@ -553,7 +600,48 @@ internal sealed class SqlPlanner
             }
         }
 
-        return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists);
+        foreach (var constraint in create.Constraints.Where(c => c.Kind == SqlConstraintKind.PrimaryKey))
+        {
+            foreach (string column in constraint.Columns)
+            {
+                if (!primaryKey.Contains(column, StringComparer.OrdinalIgnoreCase))
+                {
+                    primaryKey.Add(column);
+                }
+            }
+        }
+        for (int i = 0; i < columns.Count; i++)
+        {
+            var column = columns[i];
+            if (primaryKey.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                columns[i] = new SqlCatalogColumn(column.Name, column.Type, false, column.DefaultLiteral, column.Collation);
+            }
+        }
+        return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists, create.Constraints);
+    }
+
+    /// <summary>Rejects unevaluated schema expressions before a DDL plan can mutate the catalog.</summary>
+    private static string? ResolveDefaultLiteral(SqlColumnDefinition definition) => definition.DefaultValue switch
+    {
+        null => null,
+        SqlLiteralExpression literal => literal.LiteralType == SqlLiteralType.Null ? null : literal.Value,
+        _ => throw new DatabaseException(
+            $"Column '{definition.ColumnName}': only literal DEFAULT values are supported."),
+    };
+
+    /// <summary>Validates the column override without changing inherited database defaults.</summary>
+    private static Collation? ResolveColumnCollation(SqlColumnDefinition definition, DatabaseTypeInfo type)
+    {
+        if (definition.CollationName is null)
+        {
+            return null;
+        }
+        if (type.Type != DatabaseType.String)
+        {
+            throw new DatabaseException($"COLLATE requires a string column; '{definition.ColumnName}' is {type.Type}.");
+        }
+        return Collation.FromName(definition.CollationName);
     }
 
     private SqlDropTablePlan PlanDropTable(SqlDropTableExpression drop)
@@ -575,7 +663,12 @@ internal sealed class SqlPlanner
 
         foreach (string column in create.Columns)
         {
-            FindColumnOrdinal(table, column); // throws for unknown columns at plan time
+            int ordinal = FindColumnOrdinal(table, column);
+            if (table.Columns[ordinal].Type.Type is DatabaseType.String or DatabaseType.Json
+                && !(table.Columns[ordinal].Collation ?? _catalog.DefaultCollation).IsIndexBacked)
+            {
+                throw new DatabaseException($"Collation 'invariant' is not index-backed; column '{column}' cannot have an index or indexed constraint.");
+            }
         }
 
         return new SqlCreateIndexPlan(table, create.IndexName, create.Columns, create.IsUnique, create.IfNotExists);
@@ -608,8 +701,13 @@ internal sealed class SqlPlanner
                 new SqlCatalogColumn(
                     add.Column.ColumnName,
                     ResolveTypeName(add.Column.DataType, add.Column.ColumnName),
-                    add.Column.IsNullable && !add.Column.IsPrimaryKey)),
+                    add.Column.IsNullable && !add.Column.IsPrimaryKey,
+                    ResolveDefaultLiteral(add.Column),
+                    ResolveColumnCollation(add.Column, ResolveTypeName(add.Column.DataType, add.Column.ColumnName))),
+                add.Column.Constraints),
             SqlAlterDropColumnAction drop => new SqlDropColumnPlan(schema, alter.Table.TableName, drop.ColumnName),
+            SqlAlterAddConstraintAction add => new SqlAddConstraintPlan(ResolveTable(alter.Table), add.Constraint),
+            SqlAlterDropConstraintAction drop => new SqlDropConstraintPlan(ResolveTable(alter.Table), drop.ConstraintName),
             _ => throw new DatabaseException("This ALTER TABLE action is not supported by the executor yet."),
         };
     }
@@ -684,33 +782,66 @@ internal sealed class SqlPlanner
             return null;
         }
 
-        object? value = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters)
+        object? value = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation)
             .Evaluate(expression, Array.Empty<object?>());
 
         return value switch
         {
+            sbyte number when number >= 0 => number,
+            short number when number >= 0 => number,
             long number when number >= 0 => number,
             int number when number >= 0 => number,
             _ => throw new DatabaseException($"{clause} requires a non-negative integer."),
         };
     }
 
-    private static void ValidateExpression(SqlExpression expression, SqlExpressionEvaluator evaluator)
+    /// <summary>
+    /// Checks an expression the planner is about to bind.
+    /// </summary>
+    /// <param name="expression">The expression to validate.</param>
+    /// <param name="evaluator">The evaluator resolving column references.</param>
+    /// <param name="boundSubqueries">
+    /// Subquery nodes this statement has already bound to child plans. A subquery outside
+    /// that set sits in a position that does not run <see cref="PlanSubqueries"/> — an
+    /// UPDATE, DELETE, VALUES, CHECK, DEFAULT or LIMIT expression — and is rejected. Null
+    /// rejects every subquery, which is what the constraint validators want.
+    /// </param>
+    /// <param name="boundValues">ORDER BY nodes already bound to output values.</param>
+    /// <exception cref="DatabaseException">The expression cannot be planned.</exception>
+    internal static void ValidateExpression(SqlExpression expression, SqlExpressionEvaluator evaluator,
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries = null,
+        IReadOnlyDictionary<SqlExpression, int>? boundValues = null)
     {
+        if (boundValues is not null && boundValues.ContainsKey(expression))
+        {
+            return;
+        }
+        bool isBound = boundSubqueries is not null && boundSubqueries.ContainsKey(expression);
         switch (expression)
         {
-            case SqlSubqueryExpression or SqlExistsExpression:
-                throw new DatabaseException("Subqueries are not supported by the executor yet.");
+            case SqlCollateExpression collate:
+                Collation.FromName(collate.CollationName);
+                break;
+            case SqlCastExpression { TargetTypeInfo: null } cast:
+                throw new DatabaseException($"CAST target '{cast.TargetType}' has not been resolved.");
+            case SqlSubqueryExpression or SqlExistsExpression when !isBound:
+                throw new DatabaseException("COHDBL001: Subqueries are supported only in SELECT expressions and INSERT ... SELECT.");
             case SqlColumnReferenceExpression reference:
                 evaluator.ResolveColumn(reference); // throws for unknown columns at plan time
                 break;
-            case SqlInExpression { Values: null }:
-                throw new DatabaseException("IN subqueries are not supported by the executor yet.");
+            case SqlInExpression { Values: null } when !isBound:
+                throw new DatabaseException("COHDBL001: IN subqueries are supported only in SELECT expressions and INSERT ... SELECT.");
+        }
+
+        // A bound subquery is its own scope, already planned and validated on its own terms.
+        if (isBound && expression is SqlSubqueryExpression or SqlExistsExpression)
+        {
+            return;
         }
 
         foreach (var child in Children(expression))
         {
-            ValidateExpression(child, evaluator);
+            ValidateExpression(child, evaluator, boundSubqueries, boundValues);
         }
     }
 
@@ -725,10 +856,17 @@ internal sealed class SqlPlanner
         return Children(expression).Any(ContainsAggregate);
     }
 
-    private static IEnumerable<SqlExpression> Children(SqlExpression expression)
+    /// <summary>Finds conversions even when wrapped in an unsupported DDL default expression.</summary>
+    private static bool ContainsCast(SqlExpression expression)
+        => expression is SqlCastExpression || Children(expression).Any(ContainsCast);
+
+    internal static IEnumerable<SqlExpression> Children(SqlExpression expression)
     {
         switch (expression)
         {
+            case SqlCollateExpression collate:
+                yield return collate.Operand;
+                break;
             case SqlBinaryExpression binary:
                 yield return binary.Left;
                 yield return binary.Right;

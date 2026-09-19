@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Sql;
 
 using Assimalign.Cohesion.Database.Sql.Storage;
+using Assimalign.Cohesion.Database.Types;
 
 using Internal;
 
@@ -19,8 +20,9 @@ using Internal;
 /// the storage strategy is resolved and the engine-owned background workers
 /// (write-ahead-log group-commit flusher, page write-back, checkpointer, and the
 /// maintenance stubs) are already pumping on dedicated threads the engine spawned —
-/// and disposal is its one lifecycle transition: quiesce the workers, durably flush
-/// and close every open database. Each database is backed by a storage strategy
+/// and disposal is its one lifecycle transition: quiesce the workers, flush each
+/// database according to its backing's durability policy and close it. Each
+/// database is backed by a storage strategy
 /// managing two file sets (data and <c>.catalog</c>); the strategy is file-based
 /// when <see cref="SqlDatabaseEngineOptions.RootPath"/> is set and in-memory
 /// otherwise. The journal is owned per-database through the storage layer, so there
@@ -57,13 +59,13 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
         // Resolve the storage strategy at creation: the engine is operational from
         // the moment the constructor returns (create → use → dispose; no start).
         _strategy = options.StorageStrategy
-            ?? (string.IsNullOrWhiteSpace(options.RootPath)
-                ? new InMemorySqlStorageStrategy()
-                : new FileSystemSqlStorageStrategy(options.RootPath));
+            ?? (options.RootPath is { IsEmpty: false } strategyRoot
+                ? new FileSystemSqlStorageStrategy(strategyRoot, options.Durability)
+                : new InMemorySqlStorageStrategy(options.Durability));
 
-        if (!string.IsNullOrWhiteSpace(options.RootPath))
+        if (options.RootPath is { IsEmpty: false } root)
         {
-            Directory.CreateDirectory(options.RootPath);
+            Directory.CreateDirectory(root);
         }
 
         _workers =
@@ -140,8 +142,18 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
 
     /// <inheritdoc />
     public ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default)
+        => CreateDatabaseAsync(name, Collation.Binary, cancellationToken);
+
+    /// <summary>Creates a database with a persisted default string collation.</summary>
+    /// <param name="name">The database name.</param>
+    /// <param name="defaultCollation">The collation inherited by columns without an override.</param>
+    /// <param name="cancellationToken">Cancellation token for creation.</param>
+    /// <returns>The created database.</returns>
+    public ValueTask<IDatabase> CreateDatabaseAsync(string name, Collation defaultCollation, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(defaultCollation);
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -155,21 +167,35 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                 throw new DatabaseException($"A database with name '{name}' already exists.");
             }
 
-            var storage = ConfigureStorage(_strategy.CreateStorage(name));
-            var catalogStorage = ConfigureStorage(_strategy.CreateStorage(name + CatalogSuffix));
+            var storage = _strategy.CreateStorage(name);
+            SqlStorage? catalogStorage = null;
 
             // Publish the storages to the worker snapshot BEFORE constructing the
             // instance: instance construction itself commits (recovery checkpoint,
             // record-space format marker), and under grouped durability those
             // commits need the flush worker to see the storages or they wait out
             // the whole self-help window.
-            PublishStorageSnapshotLocked(storage, catalogStorage);
-
             try
             {
-                var database = new SqlDatabaseInstance(name, this, storage, catalogStorage);
+                ConfigureStorage(storage, name);
+                catalogStorage = _strategy.CreateStorage(name + CatalogSuffix);
+                ConfigureStorage(catalogStorage, name + CatalogSuffix);
+                PublishStorageSnapshotLocked(storage, catalogStorage);
+                var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, defaultCollation: defaultCollation);
                 _databases[name] = database;
                 return new ValueTask<IDatabase>(database);
+            }
+            catch
+            {
+                try
+                {
+                    storage.Dispose();
+                }
+                finally
+                {
+                    catalogStorage?.Dispose();
+                }
+                throw;
             }
             finally
             {
@@ -200,21 +226,35 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                 throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
             }
 
-            var storage = ConfigureStorage(_strategy.OpenStorage(name));
-            var catalogStorage = ConfigureStorage(_strategy.StorageExists(name + CatalogSuffix)
-                ? _strategy.OpenStorage(name + CatalogSuffix)
-                : _strategy.CreateStorage(name + CatalogSuffix));
+            var storage = _strategy.OpenStorage(name);
+            SqlStorage? catalogStorage = null;
 
             // See CreateDatabaseAsync: instance construction commits (recovery
             // checkpoint, record-space upgrade), so the flush worker must see the
             // storages first under grouped durability.
-            PublishStorageSnapshotLocked(storage, catalogStorage);
-
             try
             {
+                ConfigureStorage(storage, name);
+                catalogStorage = _strategy.StorageExists(name + CatalogSuffix)
+                    ? _strategy.OpenStorage(name + CatalogSuffix)
+                    : _strategy.CreateStorage(name + CatalogSuffix);
+                ConfigureStorage(catalogStorage, name + CatalogSuffix);
+                PublishStorageSnapshotLocked(storage, catalogStorage);
                 var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, recover: true);
                 _databases[name] = database;
                 return new ValueTask<IDatabase>(database);
+            }
+            catch
+            {
+                try
+                {
+                    storage.Dispose();
+                }
+                finally
+                {
+                    catalogStorage?.Dispose();
+                }
+                throw;
             }
             finally
             {
@@ -303,10 +343,10 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
 
         lock (_syncRoot)
         {
-            // Closing a database durably flushes it: storage disposal checkpoints
+            // Closing a database flushes according to its policy: disposal checkpoints
             // when no transaction is active (clean shutdown) and force-flushes the
-            // journal otherwise, so committed work is on stable storage when
-            // disposal completes.
+            // journal otherwise. Durable policies place committed work on stable
+            // storage before disposal completes.
             foreach (var database in _databases.Values)
             {
                 database.Dispose();
@@ -355,12 +395,11 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
     /// durability policy and wires its commit-pending hook to the engine's flush
     /// worker signal.
     /// </summary>
-    private SqlStorage ConfigureStorage(SqlStorage storage)
+    private void ConfigureStorage(SqlStorage storage, string storageName)
     {
-        storage.CommitDurability = _options.Durability;
+        storage.ConfigureCommitDurability(_options.Durability, $"{_strategy.GetType().Name} ({storageName})");
         storage.GroupCommitWindow = _options.GroupCommitWindow;
         storage.OnCommitPending = _signalCommitPending;
-        return storage;
     }
 
     /// <summary>

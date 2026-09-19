@@ -11,7 +11,7 @@ public class ProtocolFrameHeaderTests
     public void WriteTo_ThenTryParse_ShouldRoundTrip()
     {
         // Arrange
-        var header = new ProtocolFrameHeader(ProtocolMessageType.Execute, 1234);
+        var header = new ProtocolFrameHeader(ProtocolMessageType.Startup, 1234);
         Span<byte> buffer = stackalloc byte[ProtocolFrameHeader.Size];
 
         // Act
@@ -20,7 +20,7 @@ public class ProtocolFrameHeaderTests
 
         // Assert
         parsed.ShouldBeTrue();
-        result.Type.ShouldBe(ProtocolMessageType.Execute);
+        result.Type.ShouldBe(ProtocolMessageType.Startup);
         result.PayloadLength.ShouldBe(1234u);
     }
 
@@ -41,7 +41,7 @@ public class ProtocolFrameHeaderTests
     public void TryParse_LengthAboveMaximum_ShouldReturnFalse()
     {
         // Arrange
-        var header = new ProtocolFrameHeader(ProtocolMessageType.Execute, ProtocolFrameHeader.MaxPayloadLength);
+        var header = new ProtocolFrameHeader(ProtocolMessageType.Startup, ProtocolFrameHeader.MaxPayloadLength);
         Span<byte> buffer = stackalloc byte[ProtocolFrameHeader.Size];
         header.WriteTo(buffer);
         // Bump the encoded length one past the maximum.
@@ -58,10 +58,10 @@ public class ProtocolFrameHeaderTests
     public void Frame_Header_ShouldMatchPayload()
     {
         // Arrange
-        var frame = new ProtocolFrame(ProtocolMessageType.ResultRow, new byte[42]);
+        var frame = new ProtocolFrame(ProtocolMessageType.Ping, new byte[42]);
 
         // Assert
-        frame.Header.Type.ShouldBe(ProtocolMessageType.ResultRow);
+        frame.Header.Type.ShouldBe(ProtocolMessageType.Ping);
         frame.Header.PayloadLength.ShouldBe(42u);
     }
 }

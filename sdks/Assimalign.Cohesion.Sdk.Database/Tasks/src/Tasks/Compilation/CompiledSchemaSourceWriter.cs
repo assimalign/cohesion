@@ -3,30 +3,20 @@ using System.Collections.Generic;
 using System.Linq;
 
 using Assimalign.Cohesion.Database;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Sdk.Database.Tasks.Compilation;
 
-/// <summary>Maps Roslyn-lowered declarations onto the Database root's canonical contract.</summary>
+/// <summary>Maps Roslyn-lowered declarations onto the SQL schema package's canonical contract.</summary>
 internal static class CompiledSchemaSourceWriter
 {
-    public static CompiledSchema Create(SchemaSourceModel source, string modelName)
+    public static SqlCompiledSchema Create(SchemaSourceModel source, string modelName)
     {
         ArgumentNullException.ThrowIfNull(source);
-        EngineModel model = modelName switch
+        if (!string.Equals(modelName, "Sql", StringComparison.Ordinal))
         {
-            "Sql" => EngineModel.Sql,
-            "KeyValuePair" => EngineModel.KeyValueStore,
-            _ => throw new InvalidOperationException($"Database model '{modelName}' has no compiled-schema mapping.")
-        };
-
-        if (model == EngineModel.Sql && source.Collections.Count > 0)
-        {
-            throw new InvalidOperationException("The SQL model accepts tables, not key-value collections.");
-        }
-        if (model == EngineModel.KeyValueStore && source.Tables.Count > 0)
-        {
-            throw new InvalidOperationException("The KeyValuePair model accepts collections, not relational tables.");
+            throw new InvalidOperationException($"Database model '{modelName}' has no model-specific compiled-schema package.");
         }
 
         var customTypes = source.Types.ToDictionary(
@@ -78,21 +68,6 @@ internal static class CompiledSchemaSourceWriter
                 constraints));
         }
 
-        CompiledSchemaCollection[] collections = source.Collections
-            .Select(collection => new CompiledSchemaCollection(
-                collection.Name,
-                collection.EntryType,
-                collection.Fields.Select(CreateColumn).ToArray(),
-                collection.Key is null
-                    ? null
-                    : new CompiledSchemaKey($"PK_{collection.Name}", Array.AsReadOnly([collection.Key])),
-                collection.Indexes
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .OrderBy(static member => member, StringComparer.Ordinal)
-                    .Select(member => new CompiledSchemaIndex($"IX_{collection.Name}_{member}", Array.AsReadOnly([member])))
-                    .ToArray()))
-            .ToArray();
-
         CompiledSchemaFunction[] functions = source.Functions
             .Select(function =>
             {
@@ -117,7 +92,7 @@ internal static class CompiledSchemaSourceWriter
             .Select(trigger =>
             {
                 SchemaTableSource table = tablesByRowType[trigger.RowType];
-                TriggerEvent triggerEvent = Enum.Parse<TriggerEvent>(trigger.Event, ignoreCase: false);
+                SqlTriggerEvent triggerEvent = Enum.Parse<SqlTriggerEvent>(trigger.Event, ignoreCase: false);
                 return new CompiledSchemaTrigger(
                     $"TR_{table.Name}_{triggerEvent}",
                     table.Name,
@@ -131,9 +106,9 @@ internal static class CompiledSchemaSourceWriter
                 principal.Name,
                 principal.Grants
                     .GroupBy(static grant => grant.Permission, StringComparer.Ordinal)
-                    .OrderBy(group => Enum.Parse<Permission>(group.Key, ignoreCase: false))
+                    .OrderBy(group => Enum.Parse<SqlPermission>(group.Key, ignoreCase: false))
                     .Select(group => new CompiledSchemaGrant(
-                        Enum.Parse<Permission>(group.Key, ignoreCase: false),
+                        Enum.Parse<SqlPermission>(group.Key, ignoreCase: false),
                         group.SelectMany(static grant => grant.Objects)
                             .Distinct(StringComparer.OrdinalIgnoreCase)
                             .OrderBy(static item => item, StringComparer.Ordinal)
@@ -141,14 +116,13 @@ internal static class CompiledSchemaSourceWriter
                     .ToArray()))
             .ToArray();
 
-        return new CompiledSchema(
-            CompiledSchema.CurrentFormat,
+        return new SqlCompiledSchema(
+            SqlCompiledSchema.CurrentFormat,
             source.Name,
-            model,
+            EngineModel.Sql,
             source.AllowsDestructiveChanges,
             customTypes.Values.OrderBy(static type => type.Name, StringComparer.Ordinal).ToArray(),
             tables.OrderBy(static table => table.Name, StringComparer.Ordinal).ToArray(),
-            collections.OrderBy(static collection => collection.Name, StringComparer.Ordinal).ToArray(),
             functions.OrderBy(static function => function.Name, StringComparer.Ordinal).ToArray(),
             triggers.OrderBy(static trigger => trigger.Name, StringComparer.Ordinal).ToArray(),
             principals.OrderBy(static principal => principal.Name, StringComparer.Ordinal).ToArray(),

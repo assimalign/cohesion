@@ -1,9 +1,9 @@
 using System;
 using System.IO;
 
-using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Schema;
 
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 
@@ -13,17 +13,19 @@ await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
     options.RootPath = Path.Combine(AppContext.BaseDirectory, "data");
 });
 
-builder.AddDatabase(engine, "customers", database =>
+SqlCompiledSchema schema = SqlSchema.Compile("customers", database =>
 {
-    database.Table<Customer>(table =>
+    database.Table<Customer>("Customers", table =>
     {
         table.Key(customer => customer.Id);
         table.Index(customer => customer.Email);
     });
     database.Principal(
         "__RESOURCE_NAME__-api",
-        principal => principal.Grant(Permission.ReadWrite, "Customers"));
+        principal => principal.Grant(SqlPermission.ReadWrite, "Customers"));
 });
+
+builder.AddDatabase(engine, "customers", schema);
 
 builder.AddSqlServer(engine, options => options.Listen(new Uri("cohesion-db://localhost:5740")));
 

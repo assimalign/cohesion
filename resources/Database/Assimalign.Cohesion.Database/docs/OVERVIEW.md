@@ -8,8 +8,9 @@ logical database), `IDatabaseSession` (scoped execution context), and
 (`IDatabaseServer`, `IDatabaseServerContext`, `IDatabaseServerSession`; servers
 are per-model, each implemented inside its model package),
 the application seam (`IDatabaseApplication`, `IDatabaseApplicationContext`,
-`IDatabaseApplicationBuilder`), the immutable C# schema surface
-(`IDatabaseSchema`, `IDatabaseSchemaBuilder`, `DatabaseSchema`), the area's
+`IDatabaseApplicationBuilder`), the model-agnostic provisioning surface
+(`CompiledSchema`, `IDatabaseSchemaProvisioner`, `SchemaMigrationResult`), object
+ownership (`DatabaseObjectOwner`, `DatabaseObjectLockedException`), the area's
 exception root (`DatabaseException`, `DatabaseNotFoundException`,
 `DatabaseParseException`), and shared value
 objects (`DatabaseName`, `EngineState`, `EngineModel`). The root is also the
@@ -42,11 +43,16 @@ the whole base surface — including child-owned vocabulary the contracts speak
   the root contracts expose no hosting-library types.
   `Database.Hosting` implements the seam (`DatabaseApplication.CreateBuilder()`)
   so services start before servers and stop after them in reverse order.
-- **Code-first schema declarations** — `DatabaseSchema.Create(...)` and
-  `IDatabaseSchemaBuilder` retain one logical database's custom types, tables,
-  functions, triggers, and database-scoped principals. The concrete Hosting
-  builder's `AddDatabase(engine, name, schema)` uses the same model for
-  before-accept provisioning now and for schema compile/migration work later.
+- **Model-agnostic provisioning** — `CompiledSchema` carries identity, the
+  canonical document, and its content hash. `IDatabaseSchemaProvisioner` applies
+  it and returns `SchemaMigrationResult`. SQL declarations and relational
+  shapes live in `Database.Sql.Schema`; Hosting receives an already compiled
+  schema through `AddDatabase(engine, name, schema)`.
+- **Object ownership** — `DatabaseObjectOwner` distinguishes code-first
+  provisioning from ad-hoc statements. Schema-owned objects require schema
+  apply to change; ad-hoc objects remain mutable through session statements.
+  `DatabaseObjectLockedException` identifies the refused object, owning schema,
+  and operation.
 - **Session contracts** — query execution (typed `QueryRequest` and
   language-text overloads) and transaction management. Sessions are
   single-threaded by contract; disposing one rolls back its active transaction.
@@ -72,7 +78,8 @@ Hosting concern implemented through that project's private
 
 Every `resources/Database/*` project. Model engines (`Database.Sql`, …)
 implement the contracts; each model's server (`SqlDatabaseServer`, …) pumps
-wire-protocol frames into sessions; `Database.Client` mirrors results on the
-caller side; `Database.Hosting` composes servers into a host.
+wire-protocol frames into sessions; `Database.Client` owns connection pooling and
+framed exchanges, while each model client materializes results; `Database.Hosting`
+composes servers into a host.
 
 See [DESIGN.md](DESIGN.md) for the contract-shape decisions.

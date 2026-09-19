@@ -6,6 +6,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Tests;
 
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
@@ -22,7 +23,7 @@ public class TransactionRecoveryTests
     public async Task Commit_JournalBoundLog_ShouldBeDurableBeforeReturn()
     {
         // Arrange
-        using var stream = new MemoryStream();
+        using var stream = new SimulatedDurableFileHandle();
         using var journal = new StreamJournal(stream, leaveOpen: true);
         var manager = TransactionManager.Create(
             TransactionLog.CreateJournalBound(journal), LockManager.Create(), VersionStore.CreateInMemory());
@@ -43,7 +44,7 @@ public class TransactionRecoveryTests
     public async Task Recovery_CrashBeforeCommitRecord_ShouldPurgeUncommittedVersions()
     {
         // Arrange: one committed transaction, one in-flight when the process dies.
-        using var stream = new MemoryStream();
+        using var stream = new SimulatedDurableFileHandle();
 
         TransactionSequence committedSequence;
         TransactionSequence crashedSequence;
@@ -125,7 +126,7 @@ public class TransactionRecoveryTests
         // Arrange: transaction 7 begins, a checkpoint truncates its begin record
         // away but carries it as active; transaction 8 begins after and commits.
         // A crash follows.
-        using var stream = new MemoryStream();
+        using var stream = new SimulatedDurableFileHandle();
         using var journal = new StreamJournal(stream, leaveOpen: true);
 
         journal.AppendBegin(7);

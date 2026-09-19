@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Shouldly;
 using Xunit;
+using Assimalign.Cohesion.Database.Tests;
 
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
@@ -225,8 +226,8 @@ public class StorageModelAlignmentTests
         public static TestStorage Create(Stream data)
         {
             var storage = new TestStorage(
-                new StorageStream(data),
-                new StorageStream(new MemoryStream()),
+                new StorageStream(new SimulatedDurableFileHandle(data)),
+                new StorageStream(new SimulatedDurableFileHandle()),
                 new StorageStream(new MemoryStream()));
             storage.InitializeNew((Name)"test");
             return storage;
@@ -235,8 +236,8 @@ public class StorageModelAlignmentTests
         public static TestStorage Open(Stream data)
         {
             var storage = new TestStorage(
-                new StorageStream(data),
-                new StorageStream(new MemoryStream()),
+                new StorageStream(new SimulatedDurableFileHandle(data)),
+                new StorageStream(new SimulatedDurableFileHandle()),
                 new StorageStream(new MemoryStream()));
             storage.OpenExisting();
             return storage;

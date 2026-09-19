@@ -6,8 +6,8 @@
     Walks every csproj under libraries/, resources/, analyzers/, tooling/, extensions/,
     sdks/, frameworks/, build/ and samples/, reads the Cohesion reference items
     (CohesionProjectReference, CohesionPrivateProjectReference, CohesionAnalyzerReference,
-    CohesionAnalyzerAsProjectReference, CohesionPackageReference) plus raw ProjectReference and
-    PackageReference, and writes a single generated document: per-area mermaid graphs, per-area
+    CohesionAnalyzerAsProjectReference, CohesionPackageReference, CohesionSharedSource) plus raw
+    ProjectReference and PackageReference, and writes a single generated document: per-area mermaid graphs, per-area
     reference tables, an area-to-area roll-up, and a fan-in ranking.
 
     This is a *static* read of the project files, deliberately: it does not restore, evaluate
@@ -123,6 +123,7 @@ foreach ($relative in $orderedPaths) {
         Kind         = Get-ProjectKind $relative
         Project      = @()
         Private      = @()
+        Shared       = @()
         Analyzer     = @()
         Package      = @()
     }
@@ -156,6 +157,7 @@ foreach ($project in $projects.Values) {
 
     $projectRefs  = @(Get-IncludeValues $xml 'CohesionProjectReference')
     $privateRefs  = @(Get-IncludeValues $xml 'CohesionPrivateProjectReference')
+    $sharedRefs   = @(Get-IncludeValues $xml 'CohesionSharedSource')
     $analyzerRefs = @(Get-IncludeValues $xml 'CohesionAnalyzerReference') +
                     @(Get-IncludeValues $xml 'CohesionAnalyzerAsProjectReference')
     $packageRefs  = @(Get-IncludeValues $xml 'CohesionPackageReference') +
@@ -168,6 +170,7 @@ foreach ($project in $projects.Values) {
 
     $project.Project  = @($projectRefs  | Sort-Object -Unique)
     $project.Private  = @($privateRefs  | Sort-Object -Unique)
+    $project.Shared   = @($sharedRefs   | Sort-Object -Unique)
     $project.Analyzer = @($analyzerRefs | Sort-Object -Unique)
     $project.Package  = @($packageRefs  | Sort-Object -Unique)
 }
@@ -204,7 +207,13 @@ function Get-AreaOf {
 # Flatten every declared edge once, then group. Accumulating into hashtable-of-collections is the
 # obvious shape and the wrong one in PowerShell: the stored value degrades to a fixed-size array.
 $edges = foreach ($project in $projects.Values) {
-    foreach ($target in @(@($project.Project) + @($project.Private))) {
+    # Shared-source links are edges too: compiling another project's shared\ folder into this
+    # assembly couples the two exactly as a reference does. Deduped per project so a name that is
+    # both referenced and shared-source-linked (the normal case) is one edge, not two.
+    # A project naming ITSELF is how it compiles its own shared\ folder (that folder sits outside
+    # the csproj's src\ directory). It is not a dependency on anything, so it stays out of the
+    # edge list and out of the graphs; the per-area table's Shared source column still records it.
+    foreach ($target in @(@($project.Project) + @($project.Private) + @($project.Shared) | Sort-Object -Unique | Where-Object { $_ -ne $project.Name })) {
         [pscustomobject]@{
             From      = $project.Name
             FromArea  = $project.Area
@@ -264,6 +273,13 @@ Add-Line 'An arrow always means "references" / "depends on", the same direction 
 Add-Line 'written in: `Web.Hosting --> Web` reads "`Web.Hosting` references `Assimalign.Cohesion.Web`".'
 Add-Line 'The `Assimalign.Cohesion.` prefix is stripped from node labels; tables carry the exact names.'
 Add-Line ''
+Add-Line 'A `CohesionSharedSource` link — compiling another project''s `shared/` folder into this'
+Add-Line 'assembly — counts as an edge here, because it couples the two exactly as a reference does. It'
+Add-Line 'also has its own column in the per-area tables. No edge is counted twice when a project both'
+Add-Line 'references a project and links its shared source, and a project naming itself (how it compiles'
+Add-Line 'its own `shared/` folder, which sits outside its `src/` directory) is shown in the table but is'
+Add-Line 'not an edge.'
+Add-Line ''
 Add-Line '| | Count |'
 Add-Line '| --- | --- |'
 Add-Line "| Projects indexed | $($projects.Count) |"
@@ -272,6 +288,8 @@ Add-Line "| Library areas | $($libraryAreas.Count) |"
 Add-Line "| Resource areas | $($resourceAreas.Count) |"
 $edgeCount = ($graphProjects | ForEach-Object { @($_.Project).Count + @($_.Private).Count } | Measure-Object -Sum).Sum
 Add-Line "| Declared project references | $edgeCount |"
+$sharedCount = (@($projects.Values) | ForEach-Object { @($_.Shared).Count } | Measure-Object -Sum).Sum
+Add-Line "| Declared shared-source links | $sharedCount |"
 Add-Line ''
 
 # --- Ambiguous project names ---------------------------------------------
@@ -379,7 +397,7 @@ foreach ($area in $areaNames) {
     # it the table alone carries the area and the roll-up above carries the direction.
     $intra = @()
     foreach ($m in $members) {
-        foreach ($t in @($m.Project) + @($m.Private)) {
+        foreach ($t in @(@($m.Project) + @($m.Private) + @($m.Shared) | Sort-Object -Unique | Where-Object { $_ -ne $m.Name })) {
             if ((Get-AreaOf $t) -eq $area) { $intra += ,@($m.Name, $t) }
         }
     }
@@ -405,13 +423,14 @@ foreach ($area in $areaNames) {
         Add-Line ''
     }
 
-    Add-Line '| Project | References | Private references | Packages |'
-    Add-Line '| --- | --- | --- | --- |'
+    Add-Line '| Project | References | Private references | Shared source | Packages |'
+    Add-Line '| --- | --- | --- | --- | --- |'
     foreach ($m in $members) {
         $refs = if (@($m.Project).Count) { (@($m.Project) | ForEach-Object { "``$_``" }) -join '<br>' } else { '—' }
         $priv = if (@($m.Private).Count) { (@($m.Private) | ForEach-Object { "``$_``" }) -join '<br>' } else { '—' }
+        $shrd = if (@($m.Shared).Count)  { (@($m.Shared)  | ForEach-Object { "``$_``" }) -join '<br>' } else { '—' }
         $pkgs = if (@($m.Package).Count) { (@($m.Package) | ForEach-Object { "``$_``" }) -join '<br>' } else { '—' }
-        Add-Line "| ``$($m.Name)`` | $refs | $priv | $pkgs |"
+        Add-Line "| ``$($m.Name)`` | $refs | $priv | $shrd | $pkgs |"
     }
     Add-Line ''
 }

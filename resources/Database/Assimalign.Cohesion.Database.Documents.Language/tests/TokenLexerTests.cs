@@ -1,18 +1,18 @@
 using System;
 using System.Collections.Generic;
+using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Language;
-using Assimalign.Cohesion.Database.Language.Oql;
 using Shouldly;
 using Xunit;
 
-namespace Assimalign.Cohesion.Database.Language.Oql.Tests;
+namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
 public class TokenLexerTests
 {
     private static List<(TokenType Type, string Value, int Position)> Tokenize(string input)
     {
         var tokens = new List<(TokenType, string, int)>();
-        var lexer = new TokenLexer(input, OqlLanguage.CreateLexerOptions());
+        var lexer = new TokenLexer(input, OqlLanguageProfile.Instance.ToLexerOptions());
 
         foreach (var token in lexer)
         {
@@ -317,7 +317,7 @@ public class TokenLexerTests
     [Fact]
     public void MoveNext_EmptyInput_ReturnsFalse()
     {
-        var lexer = new TokenLexer("", OqlLanguage.CreateLexerOptions());
+        var lexer = new TokenLexer("", OqlLanguageProfile.Instance.ToLexerOptions());
 
         lexer.MoveNext().ShouldBeFalse();
         lexer.Current.Type.ShouldBe(TokenType.Eof);
@@ -326,7 +326,7 @@ public class TokenLexerTests
     [Fact]
     public void MoveNext_WhitespaceOnly_ReturnsFalse()
     {
-        var lexer = new TokenLexer("   \t\n  ", OqlLanguage.CreateLexerOptions());
+        var lexer = new TokenLexer("   \t\n  ", OqlLanguageProfile.Instance.ToLexerOptions());
 
         lexer.MoveNext().ShouldBeFalse();
     }
@@ -346,7 +346,7 @@ public class TokenLexerTests
     [Fact]
     public void Reset_AfterPartialScan_RestartsFromBeginning()
     {
-        var lexer = new TokenLexer("SELECT name", OqlLanguage.CreateLexerOptions());
+        var lexer = new TokenLexer("SELECT name", OqlLanguageProfile.Instance.ToLexerOptions());
 
         lexer.MoveNext(); // SELECT
         lexer.Reset();
@@ -487,7 +487,7 @@ public class TokenLexerTests
     [Fact]
     public void GetEnumerator_MultipleForeachLoops_EachStartsFromBeginning()
     {
-        var lexer = new TokenLexer("SELECT name", OqlLanguage.CreateLexerOptions());
+        var lexer = new TokenLexer("SELECT name", OqlLanguageProfile.Instance.ToLexerOptions());
 
         var first = new List<string>();
         foreach (var token in lexer)

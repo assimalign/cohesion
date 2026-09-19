@@ -12,7 +12,7 @@ using Microsoft.CodeAnalysis.Operations;
 namespace Assimalign.Cohesion.Sdk.Database.Tasks.Compilation;
 
 /// <summary>
-/// Mirrors DatabaseSchemaCompiler's deliberately narrow expression grammar without loading or
+/// Mirrors SqlSchemaCompiler's deliberately narrow expression grammar without loading or
 /// executing consumer code.
 /// </summary>
 internal sealed class CSharpExpressionCanonicalizer
@@ -189,7 +189,7 @@ internal sealed class CSharpExpressionCanonicalizer
         ITypeSymbol resultType = _model.GetTypeInfo(unary).Type ?? throw Unsupported(unary);
 
         _builder.Append(nodeType).Append('<').Append(CSharpTypeIdentity.Create(resultType))
-            .Append(">[method=").Append(MethodId(method)).Append("](");
+            .Append(">[method=").Append(MethodId(method, resultType, [ExpressionType(unary.Operand)])).Append("](");
         Write(unary.Operand, checkedContext);
         _builder.Append(')');
     }
@@ -218,7 +218,7 @@ internal sealed class CSharpExpressionCanonicalizer
         }
 
         _builder.Append("Convert<").Append(CSharpTypeIdentity.Create(resultType))
-            .Append(">[method=").Append(MethodId(method)).Append("](");
+            .Append(">[method=").Append(MethodId(method, resultType, [_model.GetTypeInfo(operand).Type ?? throw Unsupported(operand)])).Append("](");
         WriteCore(UnwrapParentheses(operand), checkedContext: false);
         _builder.Append(')');
     }
@@ -254,7 +254,7 @@ internal sealed class CSharpExpressionCanonicalizer
 
         IBinaryOperation? operation = _model.GetOperation(binary) as IBinaryOperation;
         ITypeSymbol resultType = _model.GetTypeInfo(binary).Type ?? throw Unsupported(binary);
-        IMethodSymbol? method = operation?.OperatorMethod;
+        IMethodSymbol? method = operation?.OperatorMethod ?? DecimalBinaryOperator(binary);
         bool usesObjectStringConcat = false;
         if (method is null && binary.IsKind(SyntaxKind.AddExpression) &&
             resultType.SpecialType == SpecialType.System_String)
@@ -267,7 +267,8 @@ internal sealed class CSharpExpressionCanonicalizer
         bool lifted = operation?.IsLifted == true;
         bool liftedToNull = lifted && IsNullableType(resultType);
         _builder.Append(nodeType).Append('<').Append(CSharpTypeIdentity.Create(resultType))
-            .Append(">[method=").Append(MethodId(method))
+            .Append(">[method=").Append(MethodId(method, resultType,
+                [BinaryOperandType(binary.Left, usesObjectStringConcat), BinaryOperandType(binary.Right, usesObjectStringConcat)]))
             .Append(";lifted=").Append(lifted ? '1' : '0')
             .Append(";liftedToNull=").Append(liftedToNull ? '1' : '0').Append("](");
         WriteBinaryOperand(binary.Left, checkedContext, usesObjectStringConcat);
@@ -319,6 +320,41 @@ internal sealed class CSharpExpressionCanonicalizer
         _builder.Append(')');
     }
 
+    private IMethodSymbol? DecimalBinaryOperator(BinaryExpressionSyntax binary)
+    {
+        ITypeSymbol operandType = ExpressionType(binary.Left);
+        if (operandType is INamedTypeSymbol nullable && IsNullableType(nullable))
+        {
+            operandType = nullable.TypeArguments[0];
+        }
+        if (operandType.SpecialType != SpecialType.System_Decimal)
+        {
+            return null;
+        }
+
+        // Roslyn represents decimal operators as built-ins; expression trees retain the
+        // corresponding Decimal method. Resolve that known symbol without executing code.
+        string? name = binary.Kind() switch
+        {
+            SyntaxKind.AddExpression => "op_Addition",
+            SyntaxKind.SubtractExpression => "op_Subtraction",
+            SyntaxKind.MultiplyExpression => "op_Multiply",
+            SyntaxKind.DivideExpression => "op_Division",
+            SyntaxKind.ModuloExpression => "op_Modulus",
+            SyntaxKind.EqualsExpression => "op_Equality",
+            SyntaxKind.NotEqualsExpression => "op_Inequality",
+            SyntaxKind.LessThanExpression => "op_LessThan",
+            SyntaxKind.LessThanOrEqualExpression => "op_LessThanOrEqual",
+            SyntaxKind.GreaterThanExpression => "op_GreaterThan",
+            SyntaxKind.GreaterThanOrEqualExpression => "op_GreaterThanOrEqual",
+            _ => null
+        };
+        return name is null ? null : _model.Compilation.GetSpecialType(SpecialType.System_Decimal)
+            .GetMembers(name).OfType<IMethodSymbol>()
+            .Single(method => method.Parameters.Length == 2 && method.Parameters.All(parameter =>
+                parameter.Type.SpecialType == SpecialType.System_Decimal));
+    }
+
     private IMethodSymbol StringConcatMethod(BinaryExpressionSyntax binary)
     {
         TypeInfo left = _model.GetTypeInfo(binary.Left);
@@ -343,7 +379,10 @@ internal sealed class CSharpExpressionCanonicalizer
         IMethodSymbol method = _model.GetSymbolInfo(call).Symbol as IMethodSymbol ?? throw Unsupported(call);
         IMethodSymbol emitted = method.ReducedFrom ?? method;
         EnsureAllowed(emitted, call);
-        _builder.Append("call(").Append(MethodId(emitted)).Append(',');
+        _builder.Append("call(").Append(MethodId(emitted,
+            _model.GetTypeInfo(call).Type ?? throw Unsupported(call),
+            ArgumentsInParameterOrder(call.ArgumentList.Arguments, method)
+                .Select(argument => ExpressionType(argument.Expression)).ToArray())).Append(',');
 
         ExpressionSyntax? receiver = call.Expression is MemberAccessExpressionSyntax access && !method.IsStatic
             ? access.Expression
@@ -438,11 +477,24 @@ internal sealed class CSharpExpressionCanonicalizer
     {
         string typeName = method.ContainingType.ToDisplayString(QualifiedTypeFormat);
         return typeName is
-            "Assimalign.Cohesion.Database.IDatabaseTriggerContext" or
+            "Assimalign.Cohesion.Database.Sql.Schema.ISqlTriggerContext" or
             "System.String" or "System.Math" or "System.MathF" or "System.Decimal" or "System.Convert";
     }
 
-    private static string MethodId(IMethodSymbol? method)
+    private ITypeSymbol ExpressionType(ExpressionSyntax expression)
+        => _model.GetTypeInfo(expression).ConvertedType
+            ?? _model.GetTypeInfo(expression).Type
+            ?? throw Unsupported(expression);
+
+    private ITypeSymbol BinaryOperandType(ExpressionSyntax operand, bool boxNonStringForConcat)
+    {
+        ITypeSymbol type = ExpressionType(operand);
+        return boxNonStringForConcat && _model.GetTypeInfo(operand).Type?.SpecialType != SpecialType.System_String
+            ? _model.Compilation.GetSpecialType(SpecialType.System_Object)
+            : type;
+    }
+
+    private static string MethodId(IMethodSymbol? method, ITypeSymbol resultType, IReadOnlyList<ITypeSymbol> argumentTypes)
     {
         if (method is null)
         {
@@ -452,14 +504,10 @@ internal sealed class CSharpExpressionCanonicalizer
         var builder = new StringBuilder()
             .Append(CSharpTypeIdentity.Create(method.ContainingType))
             .Append('.').Append(method.Name);
-        if (method.IsGenericMethod)
-        {
-            builder.Append('<').AppendJoin(',', method.TypeArguments.Select(CSharpTypeIdentity.Create)).Append('>');
-        }
         builder.Append('(')
-            .AppendJoin(',', method.Parameters.Select(parameter => CSharpTypeIdentity.Create(parameter.Type, parameter.RefKind)))
+            .AppendJoin(',', argumentTypes.Select(CSharpTypeIdentity.Create))
             .Append(")->")
-            .Append(CSharpTypeIdentity.Create(method.ReturnType, method.ReturnsByRef || method.ReturnsByRefReadonly ? RefKind.Ref : RefKind.None));
+            .Append(CSharpTypeIdentity.Create(resultType));
         return builder.ToString();
     }
 

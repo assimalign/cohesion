@@ -4,10 +4,8 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 
 /// <summary>
 /// <see cref="IFileSystemEventToken"/> stub returned by <see cref="IsolatedStorageFileSystem"/> for
-/// watch calls. <see cref="System.IO.IsolatedStorage.IsolatedStorageFile"/> does not surface
-/// change notifications, so this token registers no callbacks and never fires. Returning a noop
-/// token keeps client code uniform with the other providers while documenting that the watch
-/// capability is intentionally absent on the isolated store.
+/// watch calls when polling is disabled. This shared token owns no timer or subscriptions
+/// and requires no disposal; registrations are independently disposable no-ops.
 /// </summary>
 internal sealed class IsolatedStorageFileSystemNoopEventToken : IFileSystemEventToken
 {

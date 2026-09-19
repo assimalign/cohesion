@@ -902,7 +902,6 @@
 	</Folder>
 	<Folder Name="/libraries/IdentityModel/">
 		<File Path="IdentityModel/Directory.Build.props" />
-		<File Path="IdentityModel/Directory.Build.targets" />
 		<File Path="IdentityModel/README.md" />
 	</Folder>
 	<Folder Name="/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/" />

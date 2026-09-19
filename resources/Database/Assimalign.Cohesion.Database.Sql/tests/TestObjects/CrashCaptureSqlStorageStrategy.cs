@@ -6,6 +6,8 @@ namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Storage;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Tests;
 
 /// <summary>
 /// A storage strategy for crash-simulation tests: every database's three streams
@@ -66,7 +68,9 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
             // immediately "on disk"); the journal honors flush-gated durability.
             var streams = (Data: new GatedStream(writeThrough: true), Journal: new GatedStream(writeThrough: false), Backup: new GatedStream(writeThrough: true));
             _live[databaseName] = streams;
-            return SqlStorage.Create(streams.Data, streams.Journal, streams.Backup, databaseName);
+            return SqlStorage.Create(new StorageStream(new SimulatedDurableFileHandle(streams.Data)),
+                new StorageStream(new SimulatedDurableFileHandle(streams.Journal)),
+                new StorageStream(new SimulatedDurableFileHandle(streams.Backup)), databaseName);
         }
     }
 
@@ -85,7 +89,9 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
 
             // Deferred checkpoint per the strategy contract: the engine analyzes
             // the recovered journal before truncation.
-            return SqlStorage.Open(streams.Data, streams.Journal, streams.Backup, checkpointOnOpen: false);
+            return SqlStorage.Open(new StorageStream(new SimulatedDurableFileHandle(streams.Data)),
+                new StorageStream(new SimulatedDurableFileHandle(streams.Journal)),
+                new StorageStream(new SimulatedDurableFileHandle(streams.Backup)), checkpointOnOpen: false);
         }
     }
 
