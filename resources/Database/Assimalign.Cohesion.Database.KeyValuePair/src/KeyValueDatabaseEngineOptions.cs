@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 
 using Assimalign.Cohesion.Database.Storage;
 
@@ -67,7 +68,7 @@ public sealed class KeyValueDatabaseEngineOptions
     /// a file-based strategy is used automatically. When both are null, an in-memory
     /// strategy is used.
     /// </remarks>
-    public string? RootPath { get; set; }
+    public FileSystemPath? RootPath { get; set; }
 
     /// <summary>
     /// Gets or sets the storage strategy for creating and opening database storage.

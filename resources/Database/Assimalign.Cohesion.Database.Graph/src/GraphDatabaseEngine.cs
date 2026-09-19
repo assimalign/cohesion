@@ -33,7 +33,7 @@ public sealed class GraphDatabaseEngine : IDatabaseEngine
     {
         _options = options;
         Name = options.EngineName ?? "graph-engine";
-        _rootPath = string.IsNullOrWhiteSpace(options.RootPath) ? null : Path.GetFullPath(options.RootPath);
+        _rootPath = options.RootPath is { IsEmpty: false } root ? Path.GetFullPath(root) : null;
         if (_rootPath is not null)
         {
             Directory.CreateDirectory(_rootPath);

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 
 using Assimalign.Cohesion.Database.Storage;
 
@@ -63,6 +64,6 @@ public sealed class BlobDatabaseEngineOptions
     /// a file-based strategy is used automatically. When it is null, an in-memory
     /// strategy is used.
     /// </remarks>
-    public string? RootPath { get; set; }
+    public FileSystemPath? RootPath { get; set; }
 
 }

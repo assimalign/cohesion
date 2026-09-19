@@ -59,13 +59,13 @@ public sealed class KeyValueDatabaseEngine : IDatabaseEngine
         // Resolve the storage strategy at creation: the engine is operational from
         // the moment the constructor returns (create → use → dispose; no start).
         _strategy = options.StorageStrategy
-            ?? (string.IsNullOrWhiteSpace(options.RootPath)
-                ? new InMemoryKeyValueStorageStrategy(options.Durability)
-                : new FileSystemKeyValueStorageStrategy(options.RootPath, options.Durability));
+            ?? (options.RootPath is { IsEmpty: false } strategyRoot
+                ? new FileSystemKeyValueStorageStrategy(strategyRoot, options.Durability)
+                : new InMemoryKeyValueStorageStrategy(options.Durability));
 
-        if (!string.IsNullOrWhiteSpace(options.RootPath))
+        if (options.RootPath is { IsEmpty: false } root)
         {
-            Directory.CreateDirectory(options.RootPath);
+            Directory.CreateDirectory(root);
         }
 
         _workers =
