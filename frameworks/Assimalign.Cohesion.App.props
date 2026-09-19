@@ -250,7 +250,7 @@
              closure, so the framework must deliver it. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Governance" />
 
-        <!-- Service surface: wire protocol, client core, security, the embedded
+        <!-- Service surface: wire protocol, client core, object mapping, security, the embedded
              facade, and the composition-only hosting module. Servers are per-model
              and ship inside their model package, each carrying its own copy of the
              server machinery (owner decision 2026-07-14 - the root contract is the
@@ -258,6 +258,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Protocol" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Security" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Client" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Mapping" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Embedded" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Hosting" />
 
@@ -297,6 +298,9 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Language" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Catalog" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Storage" />
+
+        <!-- Delivered by the Ref pack; Sdk.Database exposes its explicit generation opt-in. -->
+        <CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration.Database" />
 
         <!--
             Deliberately EXCLUDED from the MVP framework:

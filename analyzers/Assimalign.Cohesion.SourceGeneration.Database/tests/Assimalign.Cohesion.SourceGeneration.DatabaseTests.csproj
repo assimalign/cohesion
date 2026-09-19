@@ -17,6 +17,10 @@
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp"  />
 		<CohesionPackageReference Include="Microsoft.CodeAnalysis.Analyzers" />
-		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp.SourceGenerators.Testing"  />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionAnalyzerAsProjectReference Include="Assimalign.Cohesion.SourceGeneration.Database" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Mapping" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Schema" />
 	</ItemGroup>
 </Project>

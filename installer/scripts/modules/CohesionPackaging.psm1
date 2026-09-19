@@ -215,6 +215,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Client'
     'resources/Database/Assimalign.Cohesion.Database.KeyValuePair.Storage'
     'resources/Database/Assimalign.Cohesion.Database.Language'
+    'resources/Database/Assimalign.Cohesion.Database.Mapping'
     'resources/Database/Assimalign.Cohesion.Database.Protocol'
     'resources/Database/Assimalign.Cohesion.Database.Security'
     'resources/Database/Assimalign.Cohesion.Database.Sql'

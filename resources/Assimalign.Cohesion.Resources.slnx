@@ -488,6 +488,17 @@
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Language/tests/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Language/tests/Assimalign.Cohesion.Database.Language.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Mapping/" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Mapping/docs/">
+		<File Path="Database/Assimalign.Cohesion.Database.Mapping/docs/DESIGN.md" />
+		<File Path="Database/Assimalign.Cohesion.Database.Mapping/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Mapping/src/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Mapping/src/Assimalign.Cohesion.Database.Mapping.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Mapping/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Mapping/tests/Assimalign.Cohesion.Database.Mapping.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Memory/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Memory/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Memory/src/Assimalign.Cohesion.Database.Memory.csproj" />

@@ -16,4 +16,11 @@
 		<EnablePreviewFeatures>false</EnablePreviewFeatures>
 		<GenerateDocumentationFile>false</GenerateDocumentationFile>
 	</PropertyGroup>
+    <!-- Test hosts execute on the current runtime; only compiler-loaded components use netstandard. -->
+    <PropertyGroup Condition="$(MSBuildProjectDirectory.EndsWith('tests'))">
+        <TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+        <IsRoslynComponent>false</IsRoslynComponent>
+        <EnforceExtendedAnalyzerRules>false</EnforceExtendedAnalyzerRules>
+        <IncludeBuildOutput>true</IncludeBuildOutput>
+    </PropertyGroup>
 </Project>
