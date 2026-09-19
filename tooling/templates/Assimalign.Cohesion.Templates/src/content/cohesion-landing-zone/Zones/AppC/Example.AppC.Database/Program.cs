@@ -1,8 +1,8 @@
 using System;
 
-using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Storage;
 using Example.AppC.Database;
 
@@ -16,22 +16,24 @@ await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
     options.Durability = Resource.Settings.DatabaseDurability.Get<StorageCommitDurability>();
 });
 
-builder.AddDatabase(engine, "inventory", database =>
+SqlCompiledSchema schema = SqlSchema.Compile("inventory", database =>
 {
-    database.Table<Item>(table =>
+    database.Table<Item>("Items", table =>
     {
         table.Key(item => item.Sku);
         table.Index(item => item.Name);
     });
-    database.Table<Movement>(table =>
+    database.Table<Movement>("Movements", table =>
     {
         table.Key(movement => movement.Id);
         table.References<Item>(movement => movement.Sku);
     });
     database.Principal(
         "appc-api",
-        principal => principal.Grant(Permission.ReadWrite, "Items", "Movements"));
+        principal => principal.Grant(SqlPermission.ReadWrite, "Items", "Movements"));
 });
+
+builder.AddDatabase(engine, "inventory", schema);
 
 builder.AddSqlServer(engine, options => options.Listen(Resource.Endpoints.Db));
 

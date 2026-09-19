@@ -1,8 +1,8 @@
 using System;
 
-using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Storage;
 using Example.AppA.Database;
 
@@ -16,22 +16,24 @@ await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
     options.Durability = Resource.Settings.DatabaseDurability.Get<StorageCommitDurability>();
 });
 
-builder.AddDatabase(engine, "orders", database =>
+SqlCompiledSchema schema = SqlSchema.Compile("orders", database =>
 {
-    database.Table<Order>(table =>
+    database.Table<Order>("Orders", table =>
     {
         table.Key(order => order.Id);
         table.Index(order => order.CustomerId);
     });
-    database.Table<OrderLine>(table =>
+    database.Table<OrderLine>("OrderLines", table =>
     {
         table.Key(line => line.Id);
         table.References<Order>(line => line.OrderId);
     });
     database.Principal(
         "appa-api",
-        principal => principal.Grant(Permission.ReadWrite, "Orders", "OrderLines"));
+        principal => principal.Grant(SqlPermission.ReadWrite, "Orders", "OrderLines"));
 });
+
+builder.AddDatabase(engine, "orders", schema);
 
 builder.AddSqlServer(engine, options => options.Listen(Resource.Endpoints.Db));
 

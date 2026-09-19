@@ -1,8 +1,8 @@
 using System;
 
-using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Storage;
 using Example.AppB.Database;
 
@@ -16,22 +16,24 @@ await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
     options.Durability = Resource.Settings.DatabaseDurability.Get<StorageCommitDurability>();
 });
 
-builder.AddDatabase(engine, "billing", database =>
+SqlCompiledSchema schema = SqlSchema.Compile("billing", database =>
 {
-    database.Table<Invoice>(table =>
+    database.Table<Invoice>("Invoices", table =>
     {
         table.Key(invoice => invoice.Id);
         table.Index(invoice => invoice.AccountId);
     });
-    database.Table<Payment>(table =>
+    database.Table<Payment>("Payments", table =>
     {
         table.Key(payment => payment.Id);
         table.References<Invoice>(payment => payment.InvoiceId);
     });
     database.Principal(
         "appb-api",
-        principal => principal.Grant(Permission.ReadWrite, "Invoices", "Payments"));
+        principal => principal.Grant(SqlPermission.ReadWrite, "Invoices", "Payments"));
 });
+
+builder.AddDatabase(engine, "billing", schema);
 
 builder.AddSqlServer(engine, options => options.Listen(Resource.Endpoints.Db));
 

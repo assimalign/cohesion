@@ -78,7 +78,7 @@ internal static partial class TemplateRepository
         if (gateway)
         {
             // The SDK suite is the reference package closure; its SDK-only list is not needed here.
-            string consumer = File.ReadAllText(Path.Combine(Root, "sdks", "Assimalign.Cohesion.Sdk.Gateway", "tests", "ConsumerWorkspace.cs"));
+            string consumer = File.ReadAllText(Path.Combine(Root, "sdks", "Assimalign.Cohesion.Sdk.Gateway", "Tasks", "tests", "ConsumerWorkspace.cs"));
             string block = GatewayClosure().Match(consumer).Groups[1].Value;
             foreach (Match match in LibraryId().Matches(block))
             {

@@ -87,6 +87,10 @@ jobs:
             'Assimalign.Cohesion.Database.Storage'
             'Assimalign.Cohesion.Database.Transactions'
             'Assimalign.Cohesion.Database.Types'
+            # Database.Storage routes its data and WAL files through IFileSystem, so both
+            # FileSystem packages are in the gateway consumer's restore closure.
+            'Assimalign.Cohesion.FileSystem'
+            'Assimalign.Cohesion.FileSystem.Physical'
             'Assimalign.Cohesion.SecretStore.Client'
             'Assimalign.Cohesion.ConfigurationStore.Client'
             'Assimalign.Cohesion.IdentityHub.Client'
