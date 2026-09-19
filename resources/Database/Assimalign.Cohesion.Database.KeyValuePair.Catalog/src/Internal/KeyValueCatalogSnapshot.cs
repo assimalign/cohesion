@@ -9,4 +9,4 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 /// </summary>
 internal sealed record KeyValueCatalogSnapshot(
     int EntrySpaceFormatVersion,
-    IReadOnlyList<BTreeIndexRegistration> IndexRegistrations);
+    IReadOnlyList<BTreeIndexRegistration> IndexRegistrations) : IKeyValueCatalogSnapshot;

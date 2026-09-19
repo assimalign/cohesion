@@ -104,7 +104,9 @@ public sealed class GraphStoreTests
         await store.DeleteNodeAsync(a.Id, true, partial);
         var uncommitted = await store.CreateNodeAsync(["N"], Properties("key", 3), partial);
         await store.CreateRelationshipAsync(b.Id, uncommitted.Id, "PARTIAL", Empty, partial);
-        storage.WriteAheadJournal.Flush(true);
+        // Drain journal buffering into the in-memory recovery image; MemoryStream
+        // has no durable-flush contract.
+        storage.WriteAheadJournal.Flush(forceDurable: false);
 
         using var recovered = GraphStorage.Open(Clone(data), Clone(journal), new MemoryStream(), false);
         await using var recovery = new TransactionCoordinator(recovered, recovered.WriteAheadJournal, recovered.Records);

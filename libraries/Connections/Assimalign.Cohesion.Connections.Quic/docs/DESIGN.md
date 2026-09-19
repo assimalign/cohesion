@@ -115,7 +115,9 @@ is routine for streams released after their owning connection closed.
 
 No reflection, no runtime code generation, no serialization. The driver
 is `System.Net.Quic` calls plus pipe plumbing from the contracts
-library's `Internal` namespace (shared via `InternalsVisibleTo`). Fully
+library's `shared/` folder - `PipeOptionsFactory` and `StreamPipeOptionsContext` are compiled
+into this driver as internal types - with lifecycle reporting through the public
+`ConnectionDiagnostics`. Fully
 NativeAOT compatible. Platform support follows `System.Net.Quic`
 (`windows` / `linux` / `macos`, gated by `QuicListener.IsSupported` at
 runtime).

@@ -22,8 +22,9 @@ Local IPC is served here via Unix domain sockets; the Windows-native equivalent 
 
 ## Dependencies
 
-- `Assimalign.Cohesion.Connections` — the contracts this driver implements plus the shared internal
-  toolbox (duplex-pipe wiring, pipe options, diagnostics) consumed via `InternalsVisibleTo`.
+- `Assimalign.Cohesion.Connections` — the contracts this driver implements plus
+  `ConnectionDiagnostics`; its duplex-pipe wiring and pool-owning pipe options are compiled in
+  from that library's `shared/` folder (`CohesionSharedSource`).
 - `Assimalign.Cohesion.Core` — `FileHandleEndPoint` and shared primitives.
 - `System.Net.Sockets` and `System.IO.Pipelines` from the shared framework. No third-party packages, no
   reflection.

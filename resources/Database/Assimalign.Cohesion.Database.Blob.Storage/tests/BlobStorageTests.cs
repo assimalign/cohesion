@@ -155,9 +155,11 @@ public sealed class BlobStorageTests
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var abandoned = storage.OpenWrite(coordinator, writer, _ => default, () => coordinator.RollbackAsync(writer));
         await abandoned.WriteAsync(Pattern(2_000_000));
-        storage.WriteAheadJournal.Flush(true);
+        // Drain journal buffering into the in-memory crash image. MemoryStream
+        // has no durable-flush contract; physical persistence is tested separately.
+        storage.WriteAheadJournal.Flush(forceDurable: false);
 
-        // Capture the exact persisted files before any stream or coordinator disposal.
+        // Capture the serialized storage bytes before any stream or coordinator disposal.
         using var recovered = BlobStorage.Open(Clone(data), Clone(journal), new MemoryStream(), false);
         await using var recoveredCoordinator = Coordinate(recovered);
         recoveredCoordinator.AnalyzeAndScrub();

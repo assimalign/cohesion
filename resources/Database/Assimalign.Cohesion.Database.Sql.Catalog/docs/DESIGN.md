@@ -102,7 +102,7 @@ compiled schema's name. `SqlCatalogTable.Schema` is strictly the SQL namespace
 provisioned the object and is null for ad-hoc objects. `SqlCatalogIndex` exposes
 the same ownership value as `OwningSchema`, distinct from its table's SQL
 namespace. Ordinary catalog creation defaults to `Adhoc`; the SQL provisioner's
-internal table-creation path stamps `Schema` ownership and `OwningSchema`
+`SqlCatalog.ReserveTableAsync`/`SqlCatalog.PublishTableAsync` path stamps `Schema` ownership and `OwningSchema`
 atomically with the first table record. Index creation already accepts a complete
 description and persists the same metadata. Column add/drop replacements retain
 the table's ownership unchanged.
@@ -117,9 +117,11 @@ without a compatibility alias. The schema hash/document record remains unchanged
 and continues to support drift detection independently of per-object ownership.
 
 The engine enforces the live-session DDL lock; the catalog remains the durable
-metadata component used by sanctioned schema application as well. Its public
-interface has no new member. The schema table-creation helper and implementation
-overload are internal, accessible only to the SQL engine and catalog tests.
+metadata component used by sanctioned schema application as well. Ownership
+metadata is accepted by the staged-publication statics on `SqlCatalog`;
+authorization to change an existing schema-owned object remains an engine/session
+decision. `ISqlCatalog` itself has no new member. The older direct-creation helpers
+remain internal and are used only by catalog tests.
 
 ## Constraint persistence
 
@@ -139,8 +141,20 @@ then the engine commits the empty index trees before publishing the table,
 constraints, index descriptions, and registrations in one catalog transaction.
 A crash before publication leaves no visible table with missing enforcement.
 Replacement publication similarly commits newly added columns/constraints and
-their new indexes together. The internal `SqlCatalog` helpers expose this engine
-path to the existing friend assembly while leaving `ISqlCatalog` unchanged.
+their new indexes together. `SqlCatalog.ReserveTableAsync(ISqlCatalog, ...)` and
+`SqlCatalog.PublishTableAsync(ISqlCatalog, ...)` expose this composition lifecycle as
+`public static` methods that downcast to the internal implementation - the same bridge
+shape as the existing `CreateTableAsync`/`AddConstraintAsync` helpers, and for the same
+reason: the lifecycle is a capability of *this* catalog, not a contract every
+`ISqlCatalog` implementation must honour. A reservation
+persists only the identity counter and does not lock the name; callers serialize
+DDL and durably build enforcing indexes before publishing. New publications reject
+zero or unallocated identities so they cannot bypass the durable identity counter.
+Replacement publication
+retains existing index descriptions while adding the supplied new descriptions.
+`SqlCatalog.DropConstraintAsync(ISqlCatalog, ...)` owns removal of persisted
+foreign-key/check metadata, alongside the existing table, column, and index mutations
+on the interface.
 
 Index records have their own version-`1` trailing extension carrying `IsPrimaryKey`.
 This identifies the physical index enforcing primary-key metadata, allowing schema
@@ -157,12 +171,23 @@ metadata store. `SqlCatalogTable` describes stored objects only and gains no
 virtual/system flag. SQL view names, columns, binding, and row projection belong
 to the SQL engine, not to this persistence library.
 
-The existing friend-assembly boundary exposes an internal atomic snapshot of
-tables and their index descriptions under the catalog's metadata lock. The SQL
+`SqlCatalog.CaptureSnapshot(ISqlCatalog)` returns an `ISqlCatalogSnapshot` containing
+an atomic capture of tables, index descriptions, and default collation under the
+catalog's metadata lock. `ISqlCatalogSnapshot` is public because it is the return type
+of a public static method; the implementation stays internal; callers can retain
+the read-only capture without holding a storage handle or disposing it. Table
+columns, primary-key columns, and index key-column names are copied into read-only
+collections when descriptions are created; callers cannot mutate retained input
+lists to alter a published table or an already captured directory. The SQL
 session captures it at transaction begin for snapshot isolation and at statement
 start for `ReadCommitted` or auto-commit. The engine derives every view row and
 referenced constraint from that capture, preventing an enumeration from mixing
-metadata before and after a DDL publication. `ISqlCatalog` remains unchanged.
+metadata before and after a DDL publication. Captures expose existing catalog
+descriptions, with no SQL view binding, query execution, or mutable persistence
+capability. These `SqlCatalog` statics replace the shipped-to-shipped friend grant
+without widening `ISqlCatalog`: consistent reads and staged publication are
+capabilities of this catalog implementation, and putting them on the interface would
+make every future implementation owe four more members.
 After a table drop, fresh snapshots contain none of its table, index, constraint,
 column, or ownership metadata. See the SQL engine's
 [virtual relation design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#virtual-system-relations-c1)

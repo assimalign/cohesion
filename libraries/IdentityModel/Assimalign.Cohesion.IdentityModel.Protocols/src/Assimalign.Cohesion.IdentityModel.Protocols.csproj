@@ -6,9 +6,14 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
   </ItemGroup>
   <ItemGroup>
-    <!-- Protocol contract branches build on these abstractions and share the internal
-         endpoint-validation helper. Add each new protocol assembly here. -->
-    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect" />
+    <!-- ModelSnapshot from the IdentityModel root; shared\EndpointLocation.cs is this
+         project's own shared source, linked into the protocol branches that validate
+         endpoint locations. Both are stateless statics - no instance crosses an
+         assembly boundary. -->
+    <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" />
+    <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel.Protocols" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.Tests" />
   </ItemGroup>
 </Project>

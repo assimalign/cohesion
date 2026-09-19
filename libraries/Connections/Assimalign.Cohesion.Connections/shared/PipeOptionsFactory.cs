@@ -2,8 +2,13 @@ using System;
 using System.Buffers;
 using System.IO.Pipelines;
 
-namespace Assimalign.Cohesion.Connections.Internal;
+namespace Assimalign.Cohesion.Connections;
 
+/// <summary>Creates pooled pipe options for connection drivers.</summary>
+// Deviates from the repo namespace-matches-assembly rule per design decision: this file is
+// shared source (CohesionSharedSource), compiled into each transport driver that needs pooled
+// pipe options. It holds no mutable state - only constants and two readonly TimeSpans - and
+// hands every object it creates to the calling assembly, so linking a private copy is safe.
 internal static partial class PipeOptionsFactory
 {
     private const int DefaultReadBufferSize = 64 * 1024;
@@ -47,6 +52,10 @@ internal static partial class PipeOptionsFactory
             transportScheduler);
     }
 
+    /// <summary>Creates stream adapter options backed by one owned adaptive memory pool.</summary>
+    /// <param name="readBufferSize">Reader buffer size in bytes; null, nonpositive, or values above <see cref="int.MaxValue"/> use the default.</param>
+    /// <param name="writeBufferSize">Writer buffer size in bytes; null, nonpositive, or values above <see cref="int.MaxValue"/> use the default.</param>
+    /// <returns>A context that must outlive all stream adapters created from its options.</returns>
     public static StreamPipeOptionsContext CreateStreamOptions(long? readBufferSize, long? writeBufferSize)
     {
         AdaptiveMemoryPool memoryPool = CreateMemoryPool(readBufferSize, writeBufferSize);
@@ -80,12 +89,22 @@ internal static partial class PipeOptionsFactory
             : PipeScheduler.ThreadPool;
     }
 
-    internal static PipeOptionsContext CreatePipeOptions(
+    /// <summary>Creates receive and send pipe options with explicit continuation schedulers.</summary>
+    /// <param name="maxReadBufferSize">Receive back-pressure threshold in bytes; null or nonpositive disables the threshold.</param>
+    /// <param name="maxWriteBufferSize">Send back-pressure threshold in bytes; null or nonpositive disables the threshold.</param>
+    /// <param name="applicationScheduler">Scheduler for application-side continuations.</param>
+    /// <param name="transportScheduler">Scheduler for driver-side continuations.</param>
+    /// <returns>A context that owns the shared pool and must outlive all pipes using the options.</returns>
+    /// <exception cref="ArgumentNullException">Either scheduler is null.</exception>
+    public static PipeOptionsContext CreatePipeOptions(
         long? maxReadBufferSize,
         long? maxWriteBufferSize,
         PipeScheduler applicationScheduler,
         PipeScheduler transportScheduler)
     {
+        ArgumentNullException.ThrowIfNull(applicationScheduler);
+        ArgumentNullException.ThrowIfNull(transportScheduler);
+
         AdaptiveMemoryPool memoryPool = CreateMemoryPool(maxReadBufferSize, maxWriteBufferSize);
 
         return new PipeOptionsContext(

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
@@ -10,6 +11,7 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// manager exports (<see cref="ISqlCatalog.SaveIndexRegistrationsAsync"/>), because
 /// root page ids drift on splits while the schema-level description is stable.
 /// </summary>
+/// <remarks>Key-column names are copied into a read-only collection so published descriptions remain stable.</remarks>
 public sealed class SqlCatalogIndex
 {
     /// <summary>
@@ -42,7 +44,7 @@ public sealed class SqlCatalogIndex
 
         TableObjectId = tableObjectId;
         Name = name;
-        ColumnNames = columnNames;
+        ColumnNames = Array.AsReadOnly(columnNames.ToArray());
         IsUnique = isUnique;
         Owner = owner;
         OwningSchema = owningSchema;

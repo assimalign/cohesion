@@ -491,3 +491,43 @@ Certificates-only transport anchors are carried in ResourceInputs, materialized 
 After resolving inputs, the gateway discovers a same-application Running LogSpace and its observed `otlp` HTTPS endpoint (or a Local DevPort once Running). It excludes LogSpace itself and external plans. The internal ResourceControlContext carries the resulting ResourceTelemetryInjection; controllers pass it explicitly into their compilation objects without changing ResourceInputs or the plan schema. Endpoint/protocol values use GatewayEnvironmentVariables and the canonical endpoint writer. Absence removes the variables and calls the generalized protected-file writer with empty content to delete `.state/telemetry.headers`.
 
 Emitter credentials are ES256 tokens with audience=LogSpace, subject=emitter and scope=telemetry. A separate `(application, sink, emitter)` cache prevents reuse of LogSpace's bootstrap credential. LogSpace requires that scope on ingest and rejects it on query and management routes. The headers document contains exactly one Authorization bearer line and uses the bootstrap protected-file carrier in both topologies. No inferred dependency is added: an earlier producer starts without telemetry, and a running process needs restart to consume newly prepared environment/header values. Bootstrap reads headers once; live credential-file reload remains outside this delivery. RemoteReference telemetry awaits a trusted named-OTLP endpoint and credential contract on IControlPlaneExternalResourceResolver.
+
+## Platform composition seams (Phase 19)
+
+The in-process gateway composes this package through public contracts and a protected rendering
+operation. It has no shipped-to-shipped internals grant.
+
+`ILocalResourceState`, created by `LocalResourceState.Create(stateDirectory)`, owns persistent
+local endpoint allocations and protected runtime files. `ResolveEndpointsAsync` resolves
+loopback bindings and fills runtime environment values; `DeleteEndpointAllocationAsync`
+withdraws just those bindings; `MaterializeRuntimeFilesAsync` prepares the trust bundle and
+telemetry header carrier using the same protection and empty-content deletion rules as the
+local process gateway. The internal `LocalPortStore`, `LocalMountMaterializer`, serialization,
+and Windows protection implementation remain owned here. This is a local-hosting capability,
+so independently shipped platform controllers can reuse the persistence rules without accessing
+their data structures. Calls on one service share its allocation gate; separate processes still
+require separate active ownership of an application, as before.
+
+`IResourceTelemetry` exposes only the resolved endpoint and sensitive headers document.
+`ResourceTelemetryExtensions.GetTelemetry` reads the default control context on the owner's
+side of the boundary and returns null for an external context. `ApplyEnvironment` writes the
+endpoint/protocol and clears a stale headers path, or removes telemetry values when no injection
+exists. `ResourceControlContext` and the concrete injection remain internal; the base application
+model and plan schema gain no gateway capability.
+
+Derived gateways use `ApplicationGateway.RenderLocalPlanSetAsync` with an artifact resolver
+returning an identity/content-root tuple. Document serialization and `LocalRenderArtifact`
+remain internal. The seam belongs on the existing guided gateway base because each local
+topology knows its artifact identity while this package owns the plan-set format. Rendering
+retains the existing no-realization behavior.
+
+The only interface-first deviation is the stateless `LocalResourceState.Create` construction
+entry point; it returns `ILocalResourceState` backed by an internal implementation. All
+capabilities are named for the operation or state they represent, rather than a specific consumer.
+
+`ApplicationGatewayOptions.ValidateCommon()` is `protected internal`: a platform-specific
+options subclass can validate the inherited settings before its own settings, while the base
+gateway can continue validating the same invariants at run entry. It remains nonvirtual so
+platform extensions cannot weaken common credential, readiness, path, or controller checks.
+This inherited validation requirement was exposed by the final direct InProcess rebuild after
+the initial helper-type errors had been resolved.

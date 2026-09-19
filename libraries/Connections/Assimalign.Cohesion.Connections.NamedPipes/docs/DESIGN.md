@@ -119,7 +119,8 @@ reachable on other operating systems.
 
 - **`Assimalign.Cohesion.Connections`** — the `Connection` / `ConnectionListener` / `ConnectionFactory`
   guided bases this driver implements, plus `ConnectionCapabilities`, `ConnectionProtocol.NamedPipe`,
-  `ConnectionAbortedException`, `ListenerId`, and the shared `ConnectionEventSource` diagnostics.
+  `ConnectionAbortedException`, `ListenerId`, and the public `ConnectionDiagnostics` reporting seam.
+  The event source remains internal to the owning Connections library.
 - **`Assimalign.Cohesion.Connections.Tcp`** — the sibling stream driver whose Unix domain socket path is
   the POSIX counterpart to this Windows-native local IPC transport.
 - **`Assimalign.Cohesion.Http.Connections`** — composes this listener via

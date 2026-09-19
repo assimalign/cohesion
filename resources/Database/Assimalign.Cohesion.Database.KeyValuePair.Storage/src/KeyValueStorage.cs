@@ -133,7 +133,10 @@ public sealed class KeyValueStorage : Assimalign.Cohesion.Database.Storage.Stora
     /// (<c>TransactionRecovery.Analyze</c>) both ride the same journal the storage
     /// brackets write page images to.
     /// </summary>
-    internal IStorageJournal WriteAheadJournal => WriteAheadLog;
+    /// <value>The journal used by this storage instance; ownership remains with the storage.</value>
+    /// <exception cref="InvalidOperationException">The storage has not been initialized.</exception>
+    /// <remarks>Do not dispose the journal separately from its owning storage.</remarks>
+    public IStorageJournal WriteAheadJournal => WriteAheadLog;
 
     /// <summary>
     /// Inserts an entry record into the specified key space's record chain within

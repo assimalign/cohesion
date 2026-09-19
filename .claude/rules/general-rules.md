@@ -171,6 +171,7 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/
 │   ├── Exceptions/        # Custom exceptions
 │   ├── ValueObjects/      # Value types
 │   └── [Feature folders]
+├── shared/                # Source compiled into sibling assemblies — see "Shared source"
 ├── docs/
 │   ├── OVERVIEW.md
 │   ├── DESIGN.md
@@ -248,23 +249,13 @@ Adding a public API to the producer *purely* to serve one consumer is not a way 
 is the one-off accretion the abstraction rule above already rejects. If none of the three options
 fits, the boundary itself is wrong: raise it rather than granting visibility.
 
-**Pre-existing grants remain: 18 shipped-to-shipped grants across 11 files**, measured
-2026-09-18. They predate this rule and are not a precedent for new ones; removing them is
-separate, deliberate work.
-
-| Granting assembly | Grants to |
-| --- | --- |
-| `Connections` | `Connections.Tcp`, `.Quic`, `.NamedPipes` |
-| `Http` | `Web.Routing` |
-| `Http.Sessions` | `Web.Sessions` |
-| `IdentityModel` | `IdentityModel.Protocols`, `.Protocols.OpenIdConnect`, `.Protocols.Saml` |
-| `IdentityModel.Protocols` | `.Protocols.OpenIdConnect`, `.Protocols.Saml` |
-| `ObjectValidation` | `ObjectValidation.Configurable`, `.Configurable.Json`, `.Configurable.Xml` |
-| `ApplicationModel.Gateway` | `ApplicationModel.Gateway.InProcess` |
-| `Database.Sql.Catalog` | `Database.Sql` |
-| `Database.Sql.Storage` | `Database.Sql` |
-| `Database.KeyValuePair.Catalog` | `Database.KeyValuePair` |
-| `Database.KeyValuePair.Storage` | `Database.KeyValuePair` |
+**Zero shipped-to-shipped grants remain**, measured 2026-09-18 after Phase 19.
+Four dead grants were removed in `e8577dfe`; the remaining fourteen were resolved
+with public composition seams, producer-owned operations, and **shared source**
+(next section). The IdentityModel family compiles its static materialization and
+endpoint-validation helpers from one source file per helper into each assembly
+that needs them, and the Connections drivers compile their pipe plumbing the same
+way; the public `ProtocolEndpoint` model remains defined in its owning assembly alone.
 
 To re-measure, exclude `obj/` and `bin/` and everything targeting a `*.Tests` assembly:
 
@@ -279,6 +270,61 @@ same in `Rezolvr.Hosting`, `SecretStore.Hosting`, `ApplicationModel.Gateway`). T
 and do not widen a shipped boundary, but they do reach past a project's own tests. Prefer a
 project's own test assembly; if a sibling's tests genuinely need the internals, that is worth
 questioning on the same terms as the rest of this section.
+
+### Shared source — the `shared/` folder
+
+Sometimes the honest answer to "two assemblies need the same internal helper" is neither a grant
+nor a new public API: it is **one source file compiled into both**. A project that shares source
+puts those files in a **`shared/` folder inside the project, beside `src/`, `tests/` and `docs/`**
+(lowercase, matching its siblings):
+
+```
+libraries/{Category}/Assimalign.Cohesion.{Library}/
+├── src/
+├── shared/
+├── tests/
+└── docs/
+```
+
+Every assembly that wants those files names the **owning project** in its own csproj:
+
+```xml
+<ItemGroup>
+  <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" />
+</ItemGroup>
+```
+
+- It resolves **by project name**, exactly like `CohesionProjectReference`, off the same
+  `libraries/` + `resources/` index (`build/Targets/Build.SharedFiles.targets`). No relative paths.
+- It compiles every `*.cs` under that project's `shared/` tree into the consumer, linked under a
+  `shared\` node. **The folder is the unit**, not the file.
+- The item lives in the **consuming csproj**, never in a `Directory.Build.targets`. Someone
+  reading the csproj has to be able to see what the assembly is built from; an allowlist one
+  directory up is exactly the thing that makes linked source hard to find. This applies to the
+  owning project too: `shared/` is outside the csproj's `src/` directory, so a project that wants
+  its own shared folder compiled in names **itself**.
+- Naming a project with no `shared/` folder, or a name that is not a project, fails the build.
+
+**The safety test.** A file in `shared/` holds only stateless static types, or types whose
+instances never cross an assembly boundary. No static mutable fields, no singletons, no
+`EventSource`, no lock objects, no id generators — anything with process-global identity or shared
+state must stay in one assembly behind a seam. Linking duplicates the type: each assembly gets its
+own distinct CLR type and its own copy of any state.
+
+The canonical illustration is `Assimalign.Cohesion.Connections`, which does both at once.
+`DuplexPipePair` and the pool-owning pipe options are shared source — every instance is created,
+used and disposed inside the one driver that asked for them. `ConnectionEventSource` is not, and
+cannot be: it carries `[EventSource(Name = "Assimalign.Cohesion.Connections")]` and a static
+`Log` singleton holding counters, so four linked copies would be four providers claiming one
+process-global name, each under-reporting. It stays internal behind the public, stateless
+`ConnectionDiagnostics` forwarders.
+
+A shared-source link is a real coupling, so it is tracked in `docs/DEPENDENCIES.md` alongside the
+reference flavors — regenerate the graph when you add or remove one (`documentation.md`).
+
+Linked types keep their **owning** namespace so family callers resolve the same names; that is a
+narrowly scoped, per-file deviation from the namespace-matches-assembly rule and every shared file
+carries the `// Deviates from ...` comment saying so (`deviations.md`).
 
 ## Interface-first with a guided abstract base
 

@@ -103,7 +103,9 @@ public sealed class DocumentCatalogTests
         var abandoned = await f.Coordinator.BeginAsync(IsolationLevel.Snapshot);
         await f.WriteIn(abandoned, "doc001", "{\"value\":900}");
         await f.WriteIn(abandoned, "partial", "{\"value\":901}");
-        f.Storage.WriteAheadJournal.Flush(true);
+        // Drain journal buffering into the in-memory recovery image; MemoryStream
+        // has no durable-flush contract.
+        f.Storage.WriteAheadJournal.Flush(forceDurable: false);
 
         using var reopened = DocumentStorage.Open(Clone(f.Data), Clone(f.Journal), new MemoryStream(), false);
         await using var coordinator = new TransactionCoordinator(reopened, reopened.WriteAheadJournal, reopened.Records);

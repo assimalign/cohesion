@@ -65,7 +65,9 @@ public sealed class DocumentContentTests
         count.ShouldBeGreaterThan(128);
         var abandoned = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await storage.WriteContentAsync(coordinator, abandoned, Encoding.UTF8.GetBytes("{\"partial\":true}"));
-        storage.WriteAheadJournal.Flush(true);
+        // Drain journal buffering into the in-memory recovery image; MemoryStream
+        // has no durable-flush contract.
+        storage.WriteAheadJournal.Flush(forceDurable: false);
 
         using var recovered = DocumentStorage.Open(Clone(data), Clone(journal), new MemoryStream(), false);
         await using var recovery = Coordinate(recovered);

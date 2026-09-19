@@ -122,7 +122,7 @@ internal sealed partial class SqlPlanExecutor
                 }, durable: true, cancellationToken).ConfigureAwait(false);
             }
             await SqlCatalog.PublishTableAsync(_catalog, table, indexes, ((IIndexRegistry)_indexManager).ExportRegistrations(),
-                cancellationToken, replaceExisting).ConfigureAwait(false);
+                replaceExisting, cancellationToken).ConfigureAwait(false);
         }
         catch
         {

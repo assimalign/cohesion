@@ -51,7 +51,7 @@ public static class SessionContextExtensions
         /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
         /// <exception cref="InvalidOperationException">
         /// Session support is not enabled, no session has been established on this
-        /// request, or the response head has already started (the cookie can no
+        /// request, the managed session was replaced, or the response head has already started (the cookie can no
         /// longer be replaced — regenerate before writing the response).
         /// </exception>
         public ValueTask RegenerateSessionIdAsync(CancellationToken cancellationToken = default)

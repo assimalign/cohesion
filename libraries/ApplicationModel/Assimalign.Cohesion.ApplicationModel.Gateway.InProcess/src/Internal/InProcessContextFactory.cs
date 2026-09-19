@@ -19,12 +19,12 @@ internal sealed class InProcessContextFactory
     private static readonly string ConfigurationPrefix = GetConfigurationPrefix();
 
     private readonly string _stateDirectory;
-    private readonly LocalPortStore _ports;
+    private readonly ILocalResourceState _localState;
 
     internal InProcessContextFactory(string stateDirectory)
     {
         _stateDirectory = Path.GetFullPath(stateDirectory);
-        _ports = new LocalPortStore(_stateDirectory);
+        _localState = LocalResourceState.Create(_stateDirectory);
     }
 
     internal async Task<InProcessMemberConfiguration> CreateAsync(
@@ -62,8 +62,8 @@ internal sealed class InProcessContextFactory
             [ResourceEnvironment.Gateway] = "inprocess",
             [ResourceEnvironment.ContentRoot] = compilation.Artifact.ContentRootPath,
         };
-        IReadOnlyList<ResourceEndpoint> allocated = await _ports
-            .ResolveAsync(
+        IReadOnlyList<ResourceEndpoint> allocated = await _localState
+            .ResolveEndpointsAsync(
                 control.Model.Name,
                 control.Resource.Name,
                 declared,
@@ -90,10 +90,9 @@ internal sealed class InProcessContextFactory
             member,
             outerContext);
 
-        await new LocalMountMaterializer(_stateDirectory).MaterializeTrustBundleAsync(control.Model.Name,
-            control.Resource.Name, compilation.Inputs.TrustBundle, ambientEnvironment, cancellationToken).ConfigureAwait(false);
-        await new LocalMountMaterializer(_stateDirectory).MaterializeTelemetryHeadersAsync(control.Model.Name,
-            control.Resource.Name, compilation.Telemetry?.HeadersDocument ?? ReadOnlyMemory<byte>.Empty,
+        await _localState.MaterializeRuntimeFilesAsync(
+            control.Model.Name, control.Resource.Name, compilation.Inputs.TrustBundle,
+            compilation.Telemetry?.HeadersDocument ?? ReadOnlyMemory<byte>.Empty,
             ambientEnvironment, cancellationToken).ConfigureAwait(false);
 
         var resourceContext = new ResourceContext(
@@ -128,7 +127,7 @@ internal sealed class InProcessContextFactory
         ResourceName resource,
         CancellationToken cancellationToken)
     {
-        await _ports.DeleteAsync(application, resource, cancellationToken).ConfigureAwait(false);
+        await _localState.DeleteEndpointAllocationAsync(application, resource, cancellationToken).ConfigureAwait(false);
 
         cancellationToken.ThrowIfCancellationRequested();
         string resourceDirectory = GetResourceStateDirectory(application, resource);

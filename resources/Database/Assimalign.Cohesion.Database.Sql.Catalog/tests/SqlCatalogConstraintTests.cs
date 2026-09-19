@@ -104,7 +104,7 @@ public sealed class SqlCatalogConstraintTests
 
         var index = new SqlCatalogIndex(table.ObjectId, "uq_id", ["id"], true);
         BTreeIndexRegistration[] registrations = [new(table.ObjectId, new IndexDefinition("uq_id", IndexKind.BTree, true), 7)];
-        await SqlCatalog.PublishTableAsync(catalog, table, [index], registrations, default);
+        await SqlCatalog.PublishTableAsync(catalog, table, [index], registrations, cancellationToken: default);
 
         using var reopenedStorage = SqlStorage.Open(Copy(data), Copy(journal), new MemoryStream());
         ISqlCatalog reopened = SqlCatalog.Open(reopenedStorage);
@@ -124,7 +124,7 @@ public sealed class SqlCatalogConstraintTests
             DatabaseObjectOwner.Adhoc, null, default);
         SqlCatalogIndex[] indexes = [new(table.ObjectId, "pk_t", ["id"], true, isPrimaryKey: true), new(table.ObjectId, "uq_id", ["id"], true)];
         BTreeIndexRegistration[] registrations = [new(table.ObjectId, new IndexDefinition("pk_t", IndexKind.BTree, true), 7), new(table.ObjectId, new IndexDefinition("uq_id", IndexKind.BTree, true), 8)];
-        await SqlCatalog.PublishTableAsync(catalog, table, indexes, registrations, default);
+        await SqlCatalog.PublishTableAsync(catalog, table, indexes, registrations, cancellationToken: default);
 
         using var reopenedStorage = SqlStorage.Open(Copy(data), Copy(journal), new MemoryStream());
         ISqlCatalog reopened = SqlCatalog.Open(reopenedStorage);

@@ -42,11 +42,13 @@ internal sealed class DefaultKeyValueCatalog : IKeyValueCatalog
         return catalog;
     }
 
-    internal KeyValueCatalogSnapshot CaptureSnapshot()
+    // Exposed through KeyValueCatalog.CaptureSnapshot(IKeyValueCatalog) without adding a
+    // capability to the public catalog contract.
+    internal IKeyValueCatalogSnapshot CaptureSnapshot()
     {
         lock (_sync)
         {
-            return new KeyValueCatalogSnapshot(_entrySpaceFormatVersion, _registrations.ToArray());
+            return new KeyValueCatalogSnapshot(_entrySpaceFormatVersion, Array.AsReadOnly(_registrations.ToArray()));
         }
     }
 

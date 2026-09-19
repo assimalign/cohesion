@@ -68,8 +68,7 @@ public sealed class InProcessGateway : ApplicationGateway, IApplicationGatewayRe
         IReadOnlyList<IApplicationModel> models,
         TextWriter output,
         CancellationToken cancellationToken = default) =>
-        LocalPlanSetWriter.WriteAsync(
-            Name,
+        RenderLocalPlanSetAsync(
             "inProcessHost",
             "ambient",
             models,
@@ -185,7 +184,7 @@ public sealed class InProcessGateway : ApplicationGateway, IApplicationGatewayRe
             + "generated in-process entry binding. Use an enabled, composable Cohesion project reference; "
             + "plain executables, package-only manifests, and image-only resources are never nested.");
 
-    private LocalRenderArtifact ResolveRenderArtifact(IApplicationResource resource)
+    private (string Identity, string? ContentRoot) ResolveRenderArtifact(IApplicationResource resource)
     {
         if (resource is not IManifestResource manifestResource
             || !InProcessResourceBindings.TryGet(resource, out InProcessResourceBinding? binding))
@@ -193,7 +192,7 @@ public sealed class InProcessGateway : ApplicationGateway, IApplicationGatewayRe
             throw MissingBinding(resource);
         }
 
-        return new LocalRenderArtifact(
+        return (
             manifestResource.Manifest.Artifact.Assembly,
             binding.ContentRootPath);
     }

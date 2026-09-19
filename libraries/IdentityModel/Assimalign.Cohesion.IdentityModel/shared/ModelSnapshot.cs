@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
+// Deviates from the repo namespace-matches-assembly rule per design decision: this
+// internal static helper is linked into the IdentityModel protocol family, keeping
+// one implementation without exposing it publicly or sharing instances across assemblies.
 namespace Assimalign.Cohesion.IdentityModel;
 
 /// <summary>

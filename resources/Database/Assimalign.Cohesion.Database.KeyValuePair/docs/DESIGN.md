@@ -142,8 +142,12 @@ transaction: catalog publications are self-committing, separate from entry MVCC.
 An already returned result retains its capture. The executor receives only its
 session's database catalog and name; no selector can address another database.
 
-The catalog snapshot belongs to the catalog package; the command executor
-depends on that snapshot and returns the ordinary wire result shape:
+The catalog snapshot belongs to the catalog package. The executor obtains its
+public `IKeyValueCatalogSnapshot` contract through the `public static`
+`KeyValueCatalog.CaptureSnapshot(IKeyValueCatalog)` bridge - not through
+`IKeyValueCatalog`, which the capture is deliberately not a member of - with the
+capture implementation kept internal. It owns no storage handle and
+requires no disposal. The command executor returns the ordinary wire result shape:
 
 ```mermaid
 flowchart LR

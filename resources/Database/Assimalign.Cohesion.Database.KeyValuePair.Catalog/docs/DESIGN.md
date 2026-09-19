@@ -34,12 +34,21 @@ that has none.
 ## Query-time introspection captures (C2)
 
 The engine's `KEYSPACES` command describes the single implicit key space from
-this catalog. An internal capture copies the entry-format marker and index
-registrations together under the existing metadata lock. The engine alone
+this catalog. `KeyValueCatalog.CaptureSnapshot(IKeyValueCatalog)` returns an
+`IKeyValueCatalogSnapshot` containing the entry-format marker and index
+registrations copied together under the existing metadata lock. The engine alone
 projects those values into client rows; the catalog stores no virtual objects or
 materialized discovery records. An existing capture is unaffected by later
-metadata publications. Friend access keeps the seam internal and leaves
-`IKeyValueCatalog` unchanged, following SQL's catalog-snapshot precedent.
+metadata publications. The capture is a `public static` method on `KeyValueCatalog`
+that downcasts to the internal implementation, not a member of `IKeyValueCatalog`:
+it replaces the shipped-to-shipped friend grant without making every future catalog
+implementation owe the capability. This deliberately mirrors
+`SqlCatalog.CaptureSnapshot`; the two sibling catalogs are the same shape and are
+kept that way. `IKeyValueCatalogSnapshot` is public because it is that method's
+return type; its implementation remains internal, the capture owns no storage and
+requires no disposal, and registrations are exposed through a read-only collection,
+matching their existing catalog vocabulary rather than adding command-result types
+here.
 
 The capture contains one database's metadata because this catalog is opened on
 that database's dedicated file set. The engine omits physical index page ids and

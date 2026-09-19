@@ -73,8 +73,8 @@ other protocols, and so each protocol is built and tested in isolation.
   (subjects, application identities, actors, credentials, claims and
   attributes, sessions, authentication context, authentication results); the
   `IdentityModelException` error root; and the shared internal
-  descriptor-materialization helper (`ModelSnapshot`), exposed to the family
-  via `InternalsVisibleTo`.
+  descriptor-materialization algorithm (`ModelSnapshot`), compiled from linked
+  shared source into each family assembly that needs it.
 - **`…IdentityModel.Protocols`** owns: the shared, transport-agnostic protocol
   abstractions — party roles, published-entity metadata, message envelopes,
   response status, validation results, logout semantics, binding and endpoint
@@ -120,9 +120,12 @@ A new identity protocol (say, WS-Federation or a future protocol) is a new
 
 1. Create `libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.<Name>/`
    with `src/` and `tests/`, referencing `Assimalign.Cohesion.IdentityModel.Protocols`.
-2. Add `<InternalsVisibleTo Include="…Protocols.<Name>" />` to the root project
-   (for the shared `ModelSnapshot`) and to `…Protocols` (for shared endpoint
-   validation) — the two shared-internal seams the branches use.
+2. If the branch needs descriptor snapshots or endpoint-location validation, add
+   the owning project's name as a `CohesionSharedSource` item **in the branch's own
+   csproj** — `Assimalign.Cohesion.IdentityModel` for `ModelSnapshot`,
+   `Assimalign.Cohesion.IdentityModel.Protocols` for `EndpointLocation`. The sources
+   live in each owner's `shared/` folder beside `src/`; never grant another shipped
+   assembly internal visibility or copy a helper body into the branch.
 3. Register the assembly in `frameworks/Assimalign.Cohesion.App.props`, add it
    to both `.slnx` files, and add a branch entry to
    `IdentityModelFamilyBoundaryTests` / `IdentityModelNamespaceAlignmentTests`.
@@ -135,6 +138,32 @@ verifies their RSA/ECDSA signatures. Execution that needs transport or key manag
 separate descendant projects (for example `…Protocols.OpenIdConnect.Metadata` retrieving
 discovery documents over HTTP, or `…Protocols.Saml.Serialization` reading assertion XML), which
 depend on the appropriate Security/transport areas.
+
+### Shared implementation source
+
+`ModelSnapshot` remains an internal static helper. One source file —
+`Assimalign.Cohesion.IdentityModel/shared/ModelSnapshot.cs` — is linked into the root,
+Protocols, OpenIdConnect, and Saml assemblies. Its inputs and results are BCL collection contracts and the public
+`IdentityClaimValue` type. No helper instance exists or crosses an assembly
+boundary, and no caller depends on the identity of its empty collection field.
+Independent internal CLR types therefore preserve the snapshot behavior without
+turning descriptor materialization into a public API commitment.
+
+The static endpoint-location algorithm is likewise linked into Protocols and
+OpenIdConnect as `Assimalign.Cohesion.IdentityModel.Protocols/shared/EndpointLocation.cs`.
+`ProtocolEndpoint` itself is a public model
+whose instances do cross assembly boundaries; it stays defined only in Protocols.
+Only the stateless string-to-boolean validation logic is shared as source.
+
+The two linked helpers deliberately retain their owning namespaces so their
+family callers resolve the same internal names. This narrowly scoped deviation
+from the namespace-matches-assembly rule is documented in both shared files; it
+does not affect any public type. Each consuming assembly declares its own
+`CohesionSharedSource` item — the repo-wide `shared/` convention in
+`.claude/rules/general-rules.md` — so the csproj a reader opens is the csproj that
+says which source it compiles. There is no area `Directory.Build.targets`: an
+allowlist hidden a directory above the project was exactly the thing that made the
+linkage hard to see. All family friend grants target test assemblies only.
 
 ## Namespace map
 

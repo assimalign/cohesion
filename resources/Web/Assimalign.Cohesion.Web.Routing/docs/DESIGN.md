@@ -166,7 +166,7 @@ Each pattern is `host[:port]`, where `host` takes one of four forms:
   a malformed pattern throws `RoutePatternException` at the producer, never at match time. The
   parser and matcher are span-based `IndexOf`/`EndsWith` scans — no regex, no reflection, AOT-safe.
 - The `host[:port]` **structural split and port parse are shared** with the `Http` layer, not
-  reimplemented here: `RouteHostConstraint` delegates both to `HttpHost.TrySplitHostPort` /
+  reimplemented here: `RouteHostConstraint` delegates both to the public `HttpHost.TrySplitHostPort` /
   `HttpHost.TryParsePort` (#890). This is the same primitive `HttpHostMatcher` (#781) validates
   against, so host **selection** here and host **allowlist validation** there cannot drift on what
   a given wire value means — the bracket rules, single-colon rule, and 1–65535 port range are one

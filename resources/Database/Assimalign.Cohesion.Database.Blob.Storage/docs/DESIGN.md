@@ -122,7 +122,10 @@ No partially written chain gains a visible metadata head.
 
 The co-located suite exercises chunk boundaries, CRC, cancellation, snapshot
 retention, page reuse, and a crash image containing committed and abandoned
-chains. The engine's executable fixture additionally round-trips a file-backed
+chains. The in-memory crash-image test uses an ordinary journal flush before
+cloning serialized bytes: its MemoryStreams provide no durable-flush contract.
+It verifies recovery replay and abandoned-chunk cleanup rather than physical
+persistence. The engine's executable fixture additionally round-trips a file-backed
 object larger than a constrained managed heap and reopens its files. The code
 uses static calls and BCL types, with no reflection or `Microsoft.Extensions.*`.
 Container ownership, listing, security, transport, and schema provisioning are

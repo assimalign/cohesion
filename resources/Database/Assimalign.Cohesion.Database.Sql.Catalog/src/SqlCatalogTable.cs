@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 /// <summary>
 /// The catalog's description of one table: identity, columns, and constraints.
 /// </summary>
+/// <remarks>Collection inputs are copied into read-only collections so published descriptions remain stable.</remarks>
 public sealed class SqlCatalogTable
 {
     /// <summary>
@@ -42,8 +44,8 @@ public sealed class SqlCatalogTable
         ObjectId = objectId;
         Schema = schema;
         Name = name;
-        Columns = columns;
-        PrimaryKeyColumns = primaryKeyColumns ?? Array.Empty<string>();
+        Columns = Array.AsReadOnly(columns.ToArray());
+        PrimaryKeyColumns = Array.AsReadOnly(primaryKeyColumns?.ToArray() ?? []);
         Owner = owner;
         OwningSchema = owningSchema;
         var constraintCopy = new SqlCatalogConstraint[constraints?.Count ?? 0];

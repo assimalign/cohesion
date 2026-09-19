@@ -1013,7 +1013,6 @@
 	</Folder>
 	<Folder Name="/cohesion/libraries/IdentityModel/">
 		<File Path="libraries/IdentityModel/Directory.Build.props" />
-		<File Path="libraries/IdentityModel/Directory.Build.targets" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/" />
 	<Folder Name="/cohesion/libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/src/">

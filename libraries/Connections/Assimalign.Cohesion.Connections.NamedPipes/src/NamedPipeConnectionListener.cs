@@ -8,7 +8,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
-using Assimalign.Cohesion.Connections.Internal;
 using Assimalign.Cohesion.Connections.NamedPipes.Internal;
 
 namespace Assimalign.Cohesion.Connections.NamedPipes;
@@ -95,7 +94,7 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
 
             _pendingStream = CreateServerStream();
             _isBound = true;
-            ConnectionEventSource.Log.ListenerInitialized(ConnectionProtocol.NamedPipe, _listenerId);
+            ConnectionDiagnostics.ListenerInitialized(ConnectionProtocol.NamedPipe, _listenerId);
         }
 
         return ValueTask.CompletedTask;
@@ -181,7 +180,7 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
 
             }, (this, connection));
 
-            ConnectionEventSource.Log.ConnectionStart(ConnectionProtocol.NamedPipe, _listenerId, connection.Id);
+            ConnectionDiagnostics.ConnectionStart(ConnectionProtocol.NamedPipe, _listenerId, connection.Id);
 
             return connection;
         }

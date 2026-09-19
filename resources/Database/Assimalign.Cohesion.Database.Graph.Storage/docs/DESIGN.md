@@ -152,7 +152,9 @@ Opening follows this order:
 4. `RecoverIndexesAsync(plan.Aborted)` scrubs aborted index writers and deleters.
 5. `CompleteRecovery()` checkpoints after lifecycle classification has been consumed.
 
-Crash tests clone data and journal streams without disposing the live database, then
+Crash tests ordinarily flush the journal and clone data and journal memory streams
+without disposing the live database. MemoryStream has no durable-flush contract;
+these serialized images test recovery replay and scrub, not physical persistence. They
 prove committed nodes, relationships and property indexes survive while a partially
 applied logical transaction disappears. The graph store keeps an in-memory identity
 directory rebuilt in `O(V + E + I)` at open; label scans examine `O(V)` records and sort

@@ -64,7 +64,9 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         return catalog;
     }
 
-    internal SqlCatalogSnapshot CaptureSnapshot()
+    // Exposed through SqlCatalog.CaptureSnapshot(ISqlCatalog) without adding a capability
+    // to the public catalog contract.
+    internal ISqlCatalogSnapshot CaptureSnapshot()
     {
         lock (_sync)
         {
@@ -1030,11 +1032,17 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         return reader.ReadString(out _);
     }
 
+    // Exposed through SqlCatalog.ReserveTableAsync(ISqlCatalog, ...) without adding a
+    // capability to the public catalog contract.
     internal ValueTask<SqlCatalogTable> ReserveTableAsync(
         string schema, string name, IReadOnlyList<SqlCatalogColumn> columns,
         IReadOnlyList<string>? primaryKeyColumns, IReadOnlyList<SqlCatalogConstraint> constraints,
-        DatabaseObjectOwner owner, string? owningSchema, CancellationToken cancellationToken)
+        DatabaseObjectOwner owner, string? owningSchema, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(columns);
+        ArgumentNullException.ThrowIfNull(constraints);
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
@@ -1054,14 +1062,23 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         }
     }
 
+    // Exposed through SqlCatalog.PublishTableAsync(ISqlCatalog, ...) without adding a
+    // capability to the public catalog contract.
     internal ValueTask PublishTableAsync(
         SqlCatalogTable table, IReadOnlyList<SqlCatalogIndex> indexes,
-        IReadOnlyList<BTreeIndexRegistration> registrations, CancellationToken cancellationToken,
-        bool replaceExisting = false)
+        IReadOnlyList<BTreeIndexRegistration> registrations, bool replaceExisting = false,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(indexes);
+        ArgumentNullException.ThrowIfNull(registrations);
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
+            if (!replaceExisting && (table.ObjectId == 0 || table.ObjectId >= _nextObjectId))
+            {
+                throw new SqlCatalogException($"Table '{table.Schema}.{table.Name}' has no reserved catalog identity.");
+            }
             _tables.TryGetValue((table.Schema, table.Name), out TableSlot? existing);
             if (replaceExisting ? existing is null || existing.Table.ObjectId != table.ObjectId :
                 existing is not null || FindTableByObjectId(table.ObjectId) is not null)
@@ -1126,9 +1143,14 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         }
     }
 
+    // Exposed through SqlCatalog.DropConstraintAsync(ISqlCatalog, ...) without adding a
+    // capability to the public catalog contract.
     internal ValueTask<SqlCatalogTable> DropConstraintAsync(
-        string schema, string name, string constraintName, CancellationToken cancellationToken)
+        string schema, string name, string constraintName, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(constraintName);
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {

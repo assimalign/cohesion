@@ -35,9 +35,9 @@ Correlation is deliberately excluded: qualified outer references receive
 that cannot resolve in its local scope. Parsing and planning enforce at most 32
 subquery levels. UPDATE/DELETE, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
 subqueries, quantified comparisons, derived tables, CTEs and lateral joins remain
-outside the profile. SELECT continues to require FROM. Internal friend access
-from the language assembly permits AST lowering without extending public
-interfaces. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
+outside the profile. SELECT continues to require FROM. Subquery resolution uses
+AST node identity at evaluation time; it needs no language-assembly friend access
+or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
 for the exact supported forms and semantics.
 
 ## Compiled-schema provisioning
@@ -94,9 +94,11 @@ Schema reconciliation compares only objects owned by the applying schema. Ad-hoc
 tables and ad-hoc indexes coexist with it and do not create false drift or become
 implicit destructive migration targets. A desired name that collides with an
 ad-hoc object is rejected before applying any steps; adoption requires a future
-explicit policy. No existing public interface gains an ownership or bypass
-member: table creation uses a narrow internal catalog helper, with friend access
-for this engine, and ordinary `ISqlCatalog.CreateTableAsync` stays ad-hoc.
+explicit policy. Table creation uses the catalog's reserve/build/publish lifecycle,
+including its ownership metadata, through the `public static` `SqlCatalog` bridges
+rather than any member of `ISqlCatalog`; ordinary `ISqlCatalog.CreateTableAsync`
+stays ad-hoc. The catalog persists descriptions;
+the engine continues to authorize session operations against schema-owned objects.
 
 ## Virtual system relations (C1)
 
@@ -126,8 +128,10 @@ planner limits on joins, grouping, other aggregates, and subqueries also apply.
 Rows use the ordinary materialized result and wire codecs, so metadata is
 available over `SqlDatabaseServer` without a separate protocol operation.
 
-An internal catalog snapshot captures tables and their index descriptions
-together under the catalog's existing metadata lock. A snapshot transaction
+`SqlCatalog.CaptureSnapshot(ISqlCatalog)` returns the catalog-owned
+`ISqlCatalogSnapshot` contract, capturing tables and their index descriptions together under the
+catalog's existing metadata lock. The capture is read-only, carries no storage
+handle, and has no disposal lifetime. A snapshot transaction
 retains the capture taken at begin; auto-commit and `ReadCommitted` statements
 capture at statement start. All system rows for that statement use that one
 capture, including referenced-key resolution. Catalog publication cannot split

@@ -7,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
-using Assimalign.Cohesion.Connections.Internal;
 using Assimalign.Cohesion.Connections.Tcp.Internal;
 
 namespace Assimalign.Cohesion.Connections.Tcp;
@@ -74,7 +73,7 @@ internal sealed class TcpConnection : Connection
 
         _state = ConnectionState.Open;
 
-        ConnectionEventSource.Log.ConnectionStart(_protocol, listenerId, Id);
+        ConnectionDiagnostics.ConnectionStart(_protocol, listenerId, Id);
     }
 
     /// <inheritdoc />
@@ -179,7 +178,7 @@ internal sealed class TcpConnection : Connection
                 if (result.BytesTransferred == 0)
                 {
                     // Finished: the remote host has finished sending data.
-                    ConnectionEventSource.Log.ConnectionFinished(_protocol, _listenerId, Id);
+                    ConnectionDiagnostics.ConnectionFinished(_protocol, _listenerId, Id);
                     break;
                 }
 
@@ -191,7 +190,7 @@ internal sealed class TcpConnection : Connection
                 if (flushResultTaskPaused)
                 {
                     // Paused: the consumer is applying back-pressure, so receiving is paused.
-                    ConnectionEventSource.Log.ConnectionPaused(_protocol, _listenerId, Id);
+                    ConnectionDiagnostics.ConnectionPaused(_protocol, _listenerId, Id);
                 }
 
                 FlushResult flushResult = await flushResultTask;
@@ -199,7 +198,7 @@ internal sealed class TcpConnection : Connection
                 if (flushResultTaskPaused)
                 {
                     // Resumed: the consumer caught up and the connection has resumed receiving data.
-                    ConnectionEventSource.Log.ConnectionResumed(_protocol, _listenerId, Id);
+                    ConnectionDiagnostics.ConnectionResumed(_protocol, _listenerId, Id);
                 }
                 if (flushResult.IsCompleted || flushResult.IsCanceled)
                 {
@@ -218,7 +217,7 @@ internal sealed class TcpConnection : Connection
             // avoid the duplicate is not worthwhile.
             if (!_isSocketDisposed)
             {
-                ConnectionEventSource.Log.ConnectionReset(_protocol, _listenerId, Id);
+                ConnectionDiagnostics.ConnectionReset(_protocol, _listenerId, Id);
             }
         }
         catch (Exception exception)
@@ -231,12 +230,12 @@ internal sealed class TcpConnection : Connection
                 if (!_isSocketDisposed)
                 {
                     // This is unexpected if the socket hasn't been disposed yet.
-                    ConnectionEventSource.Log.ConnectionError(_protocol, _listenerId, Id, exception.Message);
+                    ConnectionDiagnostics.ConnectionError(_protocol, _listenerId, Id, exception.Message);
                 }
             }
             else
             {
-                ConnectionEventSource.Log.ConnectionError(
+                ConnectionDiagnostics.ConnectionError(
                     _protocol,
                     _listenerId,
                     Id,
@@ -331,7 +330,7 @@ internal sealed class TcpConnection : Connection
         when (SocketHelper.IsConnectionResetError(exception.SocketErrorCode))
         {
             error = new ConnectionResetException(exception.Message, exception);
-            ConnectionEventSource.Log.ConnectionReset(_protocol, _listenerId, Id);
+            ConnectionDiagnostics.ConnectionReset(_protocol, _listenerId, Id);
         }
         catch (Exception exception)
         when ((exception is SocketException socketException && SocketHelper.IsConnectionAbortError(socketException.SocketErrorCode)) || exception is ObjectDisposedException)
@@ -342,7 +341,7 @@ internal sealed class TcpConnection : Connection
         catch (Exception exception)
         {
             error = exception;
-            ConnectionEventSource.Log.ConnectionError(
+            ConnectionDiagnostics.ConnectionError(
                 _protocol,
                 _listenerId,
                 Id,

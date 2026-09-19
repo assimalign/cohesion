@@ -1,6 +1,7 @@
+using System;
 using System.IO.Pipelines;
 
-namespace Assimalign.Cohesion.Connections.Internal;
+namespace Assimalign.Cohesion.Connections;
 
 /// <summary>
 /// Creates the mirrored pair of pipes that connect a transport driver's wire pump to its
@@ -16,6 +17,10 @@ namespace Assimalign.Cohesion.Connections.Internal;
 /// driver's receive and send loops. The same wiring applies to server- and client-initiated
 /// connections; there is no side-dependent variation.
 /// </remarks>
+// Deviates from the repo namespace-matches-assembly rule per design decision: this file is
+// shared source (CohesionSharedSource), compiled into each transport driver that wires a pump
+// to its consumer. It is a stateless factory over BCL pipes and no instance of it crosses an
+// assembly boundary, so linking a private copy per driver is safe.
 internal sealed class DuplexPipePair
 {
     private DuplexPipePair(PipeReader input, PipeWriter output, PipeWriter transportOutput, PipeReader transportInput)
@@ -52,8 +57,12 @@ internal sealed class DuplexPipePair
     /// <param name="inputOptions">Options for the receive (wire-to-consumer) pipe.</param>
     /// <param name="outputOptions">Options for the send (consumer-to-wire) pipe.</param>
     /// <returns>The created <see cref="DuplexPipePair"/>.</returns>
+    /// <exception cref="ArgumentNullException">Either pipe options argument is null.</exception>
     public static DuplexPipePair Create(PipeOptions inputOptions, PipeOptions outputOptions)
     {
+        ArgumentNullException.ThrowIfNull(inputOptions);
+        ArgumentNullException.ThrowIfNull(outputOptions);
+
         Pipe input = new(inputOptions);
         Pipe output = new(outputOptions);
 

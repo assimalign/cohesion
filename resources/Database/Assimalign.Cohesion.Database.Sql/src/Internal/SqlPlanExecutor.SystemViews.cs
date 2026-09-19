@@ -83,6 +83,10 @@ internal sealed partial class SqlPlanExecutor
         // Tables, columns, constraints, and indexes all come from the same
         // immutable catalog snapshot as the statement, including FK targets.
         var catalog = statement.CatalogSnapshot;
+        if (catalog is null)
+        {
+            yield break;
+        }
         string database = statement.DatabaseName;
         foreach (var table in catalog.Tables)
         {
@@ -209,7 +213,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private static IEnumerable<(string Name, IReadOnlyList<string> Columns, bool IsPrimaryKey)> SystemKeyConstraints(
-        SqlCatalogSnapshot catalog, SqlCatalogTable table)
+        ISqlCatalogSnapshot catalog, SqlCatalogTable table)
     {
         var indexes = catalog.GetIndexes(table.ObjectId);
         // Catalogs created before primary indexes existed still retain the

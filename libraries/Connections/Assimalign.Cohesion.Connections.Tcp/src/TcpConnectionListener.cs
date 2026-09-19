@@ -6,7 +6,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
-using Assimalign.Cohesion.Connections.Internal;
 using Assimalign.Cohesion.Connections.Tcp.Internal;
 
 namespace Assimalign.Cohesion.Connections.Tcp;
@@ -113,7 +112,7 @@ public sealed class TcpConnectionListener : ConnectionListener
             _socketFilePath = socketFilePath;
             _socket = socket;
 
-            ConnectionEventSource.Log.ListenerInitialized(_protocol, _listenerId);
+            ConnectionDiagnostics.ListenerInitialized(_protocol, _listenerId);
         }
 
         return ValueTask.CompletedTask;

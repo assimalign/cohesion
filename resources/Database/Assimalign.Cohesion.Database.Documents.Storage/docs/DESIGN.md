@@ -93,8 +93,10 @@ logical writer. They remain invisible until the transaction commits. Replacing/d
 tombstones every old chunk through `ITransactionContext`; snapshot readers retain the old chain
 until the shared purge bound allows reclamation. The shared version ledger removes all created
 chunks and clears old tombstones on rollback. A crash uses the shared recovery scrub instead of
-an in-memory undo ledger. Tests capture the persisted streams before disposal to prove committed
-chunks survive and abandoned chunks disappear, including chains larger than 128 pages.
+an in-memory undo ledger. Tests flush the journal ordinarily and clone serialized memory-stream
+bytes before disposal to prove committed chunks survive and abandoned chunks disappear,
+including chains larger than 128 pages. These recovery images test replay and scrub;
+MemoryStream supplies no durable-flush contract or physical-persistence guarantee.
 
 ## Compatibility and limits
 

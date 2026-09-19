@@ -146,9 +146,9 @@ public readonly struct HttpHost : IEquatable<HttpHost>
     /// exposes its host without brackets, an unbracketed value with multiple colons is an IPv6
     /// literal that carries no port, and a single-colon value splits at that colon.
     /// </summary>
-    /// <param name="value">The value to split. Callers trim before calling; this method does not.</param>
+    /// <param name="value">The value to split. Surrounding whitespace is preserved; trim it before calling when appropriate.</param>
     /// <param name="host">The host component (IPv6 brackets removed); undefined when the method returns <see langword="false"/>.</param>
-    /// <param name="port">The raw port text (digits only when structurally present); empty when <paramref name="hasPort"/> is <see langword="false"/>.</param>
+    /// <param name="port">The raw, unvalidated port text; empty when <paramref name="hasPort"/> is <see langword="false"/>. Undefined when the method returns <see langword="false"/>.</param>
     /// <param name="hasPort">
     /// <see langword="true"/> when a port component is syntactically present. The port text is
     /// <em>not</em> range-validated here — a present-but-out-of-range or non-numeric port still
@@ -158,9 +158,14 @@ public readonly struct HttpHost : IEquatable<HttpHost>
     /// <returns>
     /// <see langword="true"/> when the value is structurally <c>host[:port]</c>; <see langword="false"/>
     /// for an unterminated or empty bracket form, trailing junk after a closing bracket, or a
-    /// trailing colon with no port digits.
+    /// trailing colon with no port text. Malformed input is reported without throwing.
     /// </returns>
-    internal static bool TrySplitHostPort(ReadOnlySpan<char> value, out ReadOnlySpan<char> host, out ReadOnlySpan<char> port, out bool hasPort)
+    /// <remarks>
+    /// Empty input is accepted. Host characters and IPv6 address contents are not
+    /// validated. Successful outputs are slices of <paramref name="value"/>;
+    /// no strings are allocated and surrounding whitespace is preserved.
+    /// </remarks>
+    public static bool TrySplitHostPort(ReadOnlySpan<char> value, out ReadOnlySpan<char> host, out ReadOnlySpan<char> port, out bool hasPort)
     {
         host = value;
         port = default;
@@ -240,8 +245,8 @@ public readonly struct HttpHost : IEquatable<HttpHost>
     /// host constraint so both paths apply the identical port rule.
     /// </summary>
     /// <param name="value">The port text to parse.</param>
-    /// <param name="port">The parsed port when the text is a valid 1–65535 decimal.</param>
-    /// <returns><see langword="true"/> when the text is a valid port; otherwise <see langword="false"/>.</returns>
-    internal static bool TryParsePort(ReadOnlySpan<char> value, out int port) =>
+    /// <param name="port">The parsed port when the text is a valid 1–65535 decimal; undefined when the method returns <see langword="false"/>.</param>
+    /// <returns><see langword="true"/> when the text is a valid port; otherwise <see langword="false"/>. Malformed input is reported without throwing.</returns>
+    public static bool TryParsePort(ReadOnlySpan<char> value, out int port) =>
         int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out port) && port is >= 1 and <= 65535;
 }

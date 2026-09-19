@@ -7,13 +7,11 @@ using Assimalign.Cohesion.Database.Types;
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 /// <summary>
-/// An engine-internal, immutable directory captured under the catalog's publication
-/// lock. It carries no storage identity and adds no capability to ISqlCatalog.
+/// An immutable directory captured under the catalog's publication lock.
+/// Storage identity and mutable catalog implementation remain private.
 /// </summary>
-internal sealed class SqlCatalogSnapshot
+internal sealed class SqlCatalogSnapshot : ISqlCatalogSnapshot
 {
-    internal static SqlCatalogSnapshot Empty { get; } = new([], []);
-
     private readonly IReadOnlyDictionary<ulong, IReadOnlyList<SqlCatalogIndex>> _indexes;
 
     internal SqlCatalogSnapshot(IEnumerable<SqlCatalogTable> tables, IEnumerable<SqlCatalogIndex> indexes, Collation? defaultCollation = null)
@@ -24,14 +22,18 @@ internal sealed class SqlCatalogSnapshot
             group => group.Key, group => (IReadOnlyList<SqlCatalogIndex>)Array.AsReadOnly(group.ToArray()));
     }
 
-    internal IReadOnlyList<SqlCatalogTable> Tables { get; }
+    /// <inheritdoc />
+    public IReadOnlyList<SqlCatalogTable> Tables { get; }
 
-    internal Collation DefaultCollation { get; }
+    /// <inheritdoc />
+    public Collation DefaultCollation { get; }
 
-    internal IReadOnlyList<SqlCatalogIndex> GetIndexes(ulong objectId)
+    /// <inheritdoc />
+    public IReadOnlyList<SqlCatalogIndex> GetIndexes(ulong objectId)
         => _indexes.TryGetValue(objectId, out var indexes) ? indexes : Array.Empty<SqlCatalogIndex>();
 
-    internal bool TryGetTable(string schema, string name, out SqlCatalogTable table)
+    /// <inheritdoc />
+    public bool TryGetTable(string schema, string name, out SqlCatalogTable table)
     {
         foreach (var candidate in Tables)
         {

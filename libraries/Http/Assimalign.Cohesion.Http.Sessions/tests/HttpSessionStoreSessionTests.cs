@@ -8,8 +8,7 @@ using Xunit;
 namespace Assimalign.Cohesion.Http.Tests;
 
 /// <summary>
-/// Exercises the internal store-backed session (reached via
-/// <c>InternalsVisibleTo</c>): load/commit round-trips through the store, the
+/// Exercises the store-backed session: load/commit round-trips through the store, the
 /// commit-only-when-modified rule, the last-commit-wins concurrency contract, and
 /// id reassignment for session-id regeneration.
 /// </summary>
@@ -17,19 +16,51 @@ public class HttpSessionStoreSessionTests
 {
     private static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(20);
 
+    [Fact(DisplayName = "Cohesion Test [Http.Sessions] - CreateSession: A new session should remain unloaded until requested")]
+    public async Task CreateSession_StoredState_ShouldRemainUnloadedUntilLoadAsync()
+    {
+        // Arrange
+        InMemoryHttpSessionStore store = new();
+        IHttpStoredSession writer = store.CreateSession("id", IdleTimeout);
+        writer.SetString("user", "alice");
+        await writer.CommitAsync();
+
+        // Act
+        IHttpStoredSession session = store.CreateSession("id", IdleTimeout);
+
+        // Assert
+        session.IsAvailable.ShouldBeFalse();
+        session.Keys.ShouldBeEmpty();
+        await session.LoadAsync();
+        session.IsAvailable.ShouldBeTrue();
+        session.GetString("user").ShouldBe("alice");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Http.Sessions] - CreateSession: Nonpositive idle windows should fail before use")]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void CreateSession_NonpositiveIdleTimeout_ShouldThrow(int seconds)
+    {
+        // Arrange
+        InMemoryHttpSessionStore store = new();
+
+        // Act / Assert
+        Should.Throw<ArgumentOutOfRangeException>(() => store.CreateSession("id", TimeSpan.FromSeconds(seconds)));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Sessions] - StoreSession: Commit then load on a fresh session should round-trip state")]
     public async Task CommitAsync_LoadAsync_ShouldRoundTripThroughStore()
     {
         // Arrange
         InMemoryHttpSessionStore store = new();
-        HttpSessionStoreSession writer = new("id", store, IdleTimeout);
+        IHttpStoredSession writer = store.CreateSession("id", IdleTimeout);
         writer.SetString("user", "alice");
         writer.SetInt32("count", 3);
 
         // Act
         await writer.CommitAsync();
 
-        HttpSessionStoreSession reader = new("id", store, IdleTimeout);
+        IHttpStoredSession reader = store.CreateSession("id", IdleTimeout);
         await reader.LoadAsync();
 
         // Assert
@@ -99,7 +130,7 @@ public class HttpSessionStoreSessionTests
     {
         // Arrange
         InMemoryHttpSessionStore store = new();
-        HttpSessionStoreSession session = new("old-id", store, IdleTimeout);
+        IHttpStoredSession session = store.CreateSession("old-id", IdleTimeout);
         session.SetString("user", "alice");
         await session.CommitAsync(); // stored under old-id
 
@@ -112,7 +143,7 @@ public class HttpSessionStoreSessionTests
         session.Id.ShouldBe("new-id");
         (await store.GetAsync("old-id")).ShouldBeNull();
 
-        HttpSessionStoreSession reader = new("new-id", store, IdleTimeout);
+        IHttpStoredSession reader = store.CreateSession("new-id", IdleTimeout);
         await reader.LoadAsync();
         reader.GetString("user").ShouldBe("alice");
     }
