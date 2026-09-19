@@ -199,6 +199,19 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
         => DatabaseDownloadStream.CreateAsync(this, exchange, cancellationToken);
 
     /// <inheritdoc />
+    public ValueTask AbortAsync()
+    {
+        lock (_exchangeLock)
+        {
+            if (_isRented)
+            {
+                _isOpen = false;
+            }
+            return DisposeAsync();
+        }
+    }
+
+    /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
         lock (_exchangeLock)

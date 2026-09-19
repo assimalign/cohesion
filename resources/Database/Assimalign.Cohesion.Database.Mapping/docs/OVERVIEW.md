@@ -36,9 +36,10 @@ Plain SDK consumers referencing the Mapping and SQL schema packages also expose 
 Generation is disabled by default. This switch adds no schema description; the same C# declaration
 remains authoritative. See the [generator design](../../../../analyzers/Assimalign.Cohesion.SourceGeneration.Database/docs/DESIGN.md).
 
-Adapters must implement atomic commit and rollback-on-disposal. A transaction that can return an
-ambiguous commit result does not satisfy this contract; see [DESIGN.md](DESIGN.md) for the boundary
-that future wire clients must resolve.
+Adapters must implement atomic commit and rollback-on-disposal. If a commit response is lost,
+`MappingCommitOutcomeUnknownException` permanently faults the unit of work and its tracked sets.
+It does not imply rollback or permit replay. See [DESIGN.md](DESIGN.md) for the explicit boundary
+and SQL reconciliation requirements.
 
 Tests are in `tests/Assimalign.Cohesion.Database.Mapping.Tests.csproj`. The executable NativeAOT
 guard lives in `samples/Assimalign.Cohesion.Database.Mapping.AotGuard/`; its README gives publish

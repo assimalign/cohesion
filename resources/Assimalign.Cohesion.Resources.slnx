@@ -585,6 +585,17 @@
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql.Replication/tests/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Sql.Replication/tests/Assimalign.Cohesion.Database.Sql.Replication.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql.Mapping/" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql.Mapping/docs/">
+		<File Path="Database/Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md" />
+		<File Path="Database/Assimalign.Cohesion.Database.Sql.Mapping/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql.Mapping/src/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Sql.Mapping/src/Assimalign.Cohesion.Database.Sql.Mapping.csproj" />
+	</Folder>
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql.Mapping/tests/">
+		<Project Path="Database/Assimalign.Cohesion.Database.Sql.Mapping/tests/Assimalign.Cohesion.Database.Sql.Mapping.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql.Schema/" />
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Sql.Schema/docs/">
 		<File Path="Database/Assimalign.Cohesion.Database.Sql.Schema/docs/DESIGN.md" />

@@ -39,6 +39,14 @@ public interface IDatabaseConnection : IAsyncDisposable
     /// </summary>
     bool IsOpen { get; }
 
+    /// <summary>Discards this rental and closes its session instead of returning it to the pool.</summary>
+    /// <returns>The asynchronous transport teardown operation.</returns>
+    /// <remarks>Use when application-level session state cannot be reset safely. Aborting cancels
+    /// and joins an active exchange. It cannot undo a transaction already committed by the server
+    /// or determine an unacknowledged command's outcome. This operation is deliberately not cancellable:
+    /// an unsafe rental must not survive cleanup merely because its caller cancelled.</remarks>
+    ValueTask AbortAsync();
+
     /// <summary>Gets the message family fixed when the owning pool was created.</summary>
     ProtocolMessageFamily Family { get; }
 

@@ -13,25 +13,25 @@ public interface ITrackedEntities<TEntity, in TKey> where TEntity : class where 
     /// <param name="entity">The materialized entity.</param>
     /// <returns>The canonical tracked instance; existing local values are never overwritten.</returns>
     /// <exception cref="ArgumentNullException">The entity is null.</exception>
-    /// <exception cref="InvalidOperationException">A save is active or a tracked key changed.</exception>
+    /// <exception cref="InvalidOperationException">A save is active, a tracked key changed, or the scope has an unknown commit outcome.</exception>
     TEntity Attach(TEntity entity);
 
     /// <summary>Tracks an entity for insertion.</summary>
     /// <param name="entity">The new entity with its application-assigned key.</param>
     /// <exception cref="ArgumentNullException">The entity is null.</exception>
-    /// <exception cref="InvalidOperationException">The key is already tracked, a key changed, or a save is active.</exception>
+    /// <exception cref="InvalidOperationException">The key is already tracked, a key changed, a save is active, or the scope has an unknown commit outcome.</exception>
     void Add(TEntity entity);
 
     /// <summary>Schedules deletion, or cancels an entity's pending insertion.</summary>
     /// <param name="entity">The exact tracked instance.</param>
     /// <exception cref="ArgumentNullException">The entity is null.</exception>
-    /// <exception cref="InvalidOperationException">The instance is not tracked, a key changed, or a save is active.</exception>
+    /// <exception cref="InvalidOperationException">The instance is not tracked, a key changed, a save is active, or the scope has an unknown commit outcome.</exception>
     void Remove(TEntity entity);
 
     /// <summary>Finds the canonical tracked instance, including one pending deletion.</summary>
     /// <param name="key">The identity to find.</param>
     /// <returns>The tracked entity, or null when absent.</returns>
     /// <exception cref="ArgumentNullException">The key is null.</exception>
-    /// <exception cref="InvalidOperationException">A save is active or a tracked key changed.</exception>
+    /// <exception cref="InvalidOperationException">A save is active, a tracked key changed, or the scope has an unknown commit outcome.</exception>
     TEntity? Find(TKey key);
 }

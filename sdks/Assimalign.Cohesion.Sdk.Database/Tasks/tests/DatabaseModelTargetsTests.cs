@@ -28,6 +28,60 @@ public class DatabaseModelTargetsTests
             .ShouldBe("obj/Debug/net10.0/cohesion/database.schema.sha256");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Targets: mapper generation is compiler-visible without an implicit opt-in")]
+    public void Evaluate_WithoutMappingOptIn_ShouldExposePropertyWithoutEnablingGeneration()
+    {
+        using var directory = new TemporaryDirectory();
+        using var projects = new ProjectCollection();
+        Project project = LoadProject(directory, projects, "Sql");
+
+        project.GetItems("CompilerVisibleProperty")
+            .Select(item => item.EvaluatedInclude)
+            .ShouldContain("CohesionGenerateDatabaseMappers");
+        project.GetPropertyValue("CohesionGenerateDatabaseMappers").ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Targets: consumer controls mapper generation")]
+    [InlineData("true")]
+    [InlineData("false")]
+    public void Evaluate_WithMappingSetting_ShouldPreserveConsumerChoice(string mappingSetting)
+    {
+        using var directory = new TemporaryDirectory();
+        using var projects = new ProjectCollection();
+        Project project = LoadProject(directory, projects, "Sql", mappingSetting);
+
+        project.GetItems("CompilerVisibleProperty")
+            .Select(item => item.EvaluatedInclude)
+            .ShouldContain("CohesionGenerateDatabaseMappers");
+        project.GetPropertyValue("CohesionGenerateDatabaseMappers").ShouldBe(mappingSetting);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Framework: Database targeting pack delivers the mapper generator")]
+    public void Evaluate_DatabaseFramework_ShouldIncludeRuntimeAndCompilerContracts()
+    {
+        using var directory = new TemporaryDirectory();
+        using var projects = new ProjectCollection();
+        string manifestPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..", "..", "frameworks", "Assimalign.Cohesion.App.props"));
+        File.Exists(manifestPath).ShouldBeTrue();
+        string projectPath = directory.File("FrameworkEvaluation.proj");
+        File.WriteAllText(projectPath, $$"""
+            <Project>
+              <PropertyGroup>
+                <CohesionFrameworkName>Assimalign.Cohesion.App.Database</CohesionFrameworkName>
+              </PropertyGroup>
+              <Import Project="{{SecurityElement.Escape(manifestPath)}}" />
+            </Project>
+            """);
+
+        var project = new Project(projectPath, globalProperties: null, toolsVersion: null, projectCollection: projects);
+
+        project.GetItems("CohesionFrameworkAssembly").Select(item => item.EvaluatedInclude)
+            .ShouldContain("Assimalign.Cohesion.Database.Mapping");
+        project.GetItems("CohesionFrameworkAnalyzer").Select(item => item.EvaluatedInclude)
+            .ShouldContain("Assimalign.Cohesion.SourceGeneration.Database");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Targets: exact model imports its compile tool set")]
     [InlineData("Sql", "_CohesionCompileSqlDatabaseSchema")]
     [InlineData("KeyValuePair", "_CohesionCompileKeyValuePairDatabaseSchema")]
@@ -65,7 +119,8 @@ public class DatabaseModelTargetsTests
     private static Project LoadProject(
         TemporaryDirectory directory,
         ProjectCollection projects,
-        string model)
+        string model,
+        string? mappingSetting = null)
     {
         // bin/<cfg>/<tfm> -> tests -> Tasks -> the SDK family root, which is where Targets/ sits.
         string targetsDirectory = Path.GetFullPath(Path.Combine(
@@ -90,6 +145,7 @@ public class DatabaseModelTargetsTests
               <Import Project="{{SecurityElement.Escape(propsPath)}}" />
               <PropertyGroup>
                 <IntermediateOutputPath>obj/Debug/net10.0/</IntermediateOutputPath>
+                <CohesionGenerateDatabaseMappers>{{SecurityElement.Escape(mappingSetting ?? string.Empty)}}</CohesionGenerateDatabaseMappers>
               </PropertyGroup>
               <Import Project="{{SecurityElement.Escape(targetPath)}}" />
             </Project>

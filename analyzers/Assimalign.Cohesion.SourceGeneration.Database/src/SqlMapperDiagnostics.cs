@@ -19,4 +19,8 @@ internal static class SqlMapperDiagnostics
     internal static readonly DiagnosticDescriptor ConflictingDeclaration = new(
         "COHMAP004", "Entity has conflicting schema declarations", "{0}",
         "Database.Mapping", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor InvalidRelationalSchema = new(
+        "COHMAP005", "Relational mapping contradicts the retained schema", "{0}",
+        "Database.Mapping", DiagnosticSeverity.Error, isEnabledByDefault: true);
 }

@@ -80,6 +80,13 @@ before it writes any frames. Disposing a connection cancels and joins its curren
 operation before returning the rental, so an active exchange cannot enter the idle
 pool. Disposal and failure release each rental exactly once.
 
+`IDatabaseConnection.AbortAsync` explicitly discards a rental when a model cannot
+reset its application-level session state. It marks the connection unusable before
+cancelling/joining any active exchange and disposing the rental, so the pool closes
+its transport instead of reusing the session. This is non-cancellable and idempotent
+on the current rental. It makes no claim about whether the server completed an
+unacknowledged command; transaction outcome and reconciliation remain model concerns.
+
 ## Streaming exchange and ownership
 
 `IDatabaseStreamingExchange` supplies the exact `Family`, an `OpenAsync` phase that

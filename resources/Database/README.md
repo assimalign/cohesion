@@ -136,6 +136,7 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 | `Assimalign.Cohesion.Database.Protocol` | Child root — framing, handshake, lifecycle, errors, version negotiation, and immutable model-family binding |
 | `Assimalign.Cohesion.Database.Client` | Shared client core: connection settings, pooling, handshake, framing, and model-exchange lifetime; model clients materialize results |
 | `Assimalign.Cohesion.Database.Mapping` | [Model-agnostic object mapping](Assimalign.Cohesion.Database.Mapping/docs/OVERVIEW.md): entity identity, explicit snapshot change tracking, transactional units of work, and contracts implemented by compile-time mappers; [design and extension seams](Assimalign.Cohesion.Database.Mapping/docs/DESIGN.md) |
+| `Assimalign.Cohesion.Database.Sql.Mapping` | [Relational mapping](Assimalign.Cohesion.Database.Sql.Mapping/docs/OVERVIEW.md): schema-generated entity maps, typed SQL queries and transactional change tracking over the SQL client; [ownership and transaction outcome boundaries](Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md) |
 | `Assimalign.Cohesion.Database.Security` | Child root — authN/authZ contracts (principals, roles, permissions) |
 | `Assimalign.Cohesion.Database.Replication` | Shared replication contracts (WAL log-shipping seam) |
 | `Assimalign.Cohesion.Database.Governance` | Child root — quotas, tenancy boundaries, audit events |

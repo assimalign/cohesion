@@ -31,6 +31,9 @@ internal sealed class SqlConnection : ISqlConnection
     public bool IsOpen => _connection.IsOpen;
 
     /// <inheritdoc />
+    public ValueTask AbortAsync() => _connection.AbortAsync();
+
+    /// <inheritdoc />
     public async ValueTask<SqlResultSet> QueryAsync(SqlCommand command, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);

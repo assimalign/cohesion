@@ -284,6 +284,9 @@ public sealed class SqlMapperGeneratorTests
                     }));
                     if (!schema.Tables.Single().Columns.Select(column => column.Type.ToString()).SequenceEqual(new[]
                         { "Int32", "Boolean", "Int8", "Int16", "Int16", "Int64", "Float32", "Float64", "Decimal", "String", "Binary", "Date", "Time", "DateTime", "DateTimeOffset", "TimeSpan", "Guid", "Int16" })) return false;
+                    var generated = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "scalar", Assimalign.Cohesion.Database.EngineModel.Sql,
+                        false, [], [EntityMapper.SchemaTable], [], [], [], []);
+                    if (generated.CanonicalDocument != schema.CanonicalDocument) return false;
                     var entity = new Entity
                     {
                         Id = 1, Boolean = true, SignedByte = -12, Byte = 255, Short = -234, Long = 1234567890123,
@@ -294,6 +297,7 @@ public sealed class SqlMapperGeneratorTests
                     };
                     var mapper = new EntityMapper();
                     var snapshot = mapper.Capture(entity);
+                    if (!mapper.ColumnTypes.SequenceEqual(schema.Tables.Single().Columns.Select(column => column.Type))) return false;
                     snapshot.Binary![0] = 8;
                     if (snapshot.Binary[0] != 1) return false;
                     var values = new object?[18];
@@ -311,7 +315,7 @@ public sealed class SqlMapperGeneratorTests
             }
             """;
 
-        CompileAndRun(source).ShouldBeTrue();
+        CompileAndRun(source, includeSqlAdapter: true).ShouldBeTrue();
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Mapping] - Generator: snapshot member collisions are diagnosed")]
@@ -443,9 +447,256 @@ public sealed class SqlMapperGeneratorTests
         result.Compilation.GetDiagnostics().Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
     }
 
-    private static bool CompileAndRun(string source)
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Mapping] - Generator: relational schema contradictions fail at build time")]
+    [InlineData("database.Table<Parent>(table => table.Key(row => row.Id));", "database.Table<Child>(table => { table.Key(row => row.Id); table.References<Missing>(row => row.ParentId); });", "requires a mapped target")]
+    [InlineData("database.Table<Parent>(table => table.Key(row => row.Id));", "database.Table<Child>(table => { table.Key(row => row.Id); table.References<Parent>(row => row.WrongType); });", "does not match")]
+    [InlineData("database.Table<Parent>(\"same\", table => table.Key(row => row.Id));", "database.Table<Child>(\"SAME\", table => table.Key(row => row.Id));", "declared more than once")]
+    [InlineData("database.Table<Parent>(table => table.Key(row => row.Id));", "database.Table<Parent>(table => table.Key(row => row.Id));", "declared more than once")]
+    [InlineData("database.Table<Parent>(table => { table.Key(row => row.Id); table.Column(row => row.id); });", "", "duplicates a declared column")]
+    [InlineData("database.Table<Parent>(table => { table.Key(row => row.Id); table.Index(row => row.Name); table.Index(row => row.Name); });", "", "Index on")]
+    [InlineData("database.Table<Parent>(table => table.Key(row => row.Id));", "database.Table<Child>(table => { table.Key(row => row.Id); table.References<Parent>(row => row.ParentId); table.References<Parent>(row => row.ParentId); });", "Reference from")]
+    public void Generate_RelationalContradiction_ShouldReportFocusedDiagnostic(string parent, string child, string message)
     {
+        string source = """
+            using Assimalign.Cohesion.Database.Sql.Schema;
+            public sealed class Parent { public int Id { get; set; } public int id { get; set; } public string? Name { get; set; } }
+            public sealed class Child { public int Id { get; set; } public int ParentId { get; set; } public long WrongType { get; set; } }
+            public sealed class Missing { public int Id { get; set; } }
+            public static class Declaration { public static ISqlSchema Create() => SqlSchema.Create("test", database => {
+            """ + parent + child + "}); }";
+
         RunResult result = Run(source);
+
+        result.Diagnostics.ShouldContain(diagnostic => diagnostic.Id == "COHMAP005" && diagnostic.GetMessage().Contains(message, StringComparison.Ordinal));
+        result.Generated.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Mapping] - Generator: references cannot borrow targets from another schema")]
+    public void Generate_ReferenceInAnotherSchema_ShouldRejectMissingTarget()
+    {
+        const string source = """
+            using Assimalign.Cohesion.Database.Sql.Schema;
+            public sealed class Parent { public int Id { get; set; } }
+            public sealed class Child { public int Id { get; set; } public int ParentId { get; set; } }
+            public static class Declaration
+            {
+                public static ISqlSchema One() => SqlSchema.Create("one", database => database.Table<Parent>(table => table.Key(row => row.Id)));
+                public static ISqlSchema Two() => SqlSchema.Create("two", database => database.Table<Child>(table => { table.Key(row => row.Id); table.References<Parent>(row => row.ParentId); }));
+            }
+            """;
+
+        Run(source).Diagnostics.ShouldContain(diagnostic => diagnostic.Id == "COHMAP005");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Mapping] - Generator: custom storage overrides cannot silently replace scalar mapping")]
+    public void Generate_CustomPrimitiveStorage_ShouldRejectMismatchedConversion()
+    {
+        string source = Preamble + """
+
+            public static class Declaration
+            {
+                public static ISqlSchema Create() => SqlSchema.Create("test", database =>
+                {
+                    database.Table<Entity>(table => table.Key(row => row.Id));
+                    database.Type<long>(type => type.Decimal(12, 0));
+                });
+            }
+            """;
+
+        RunResult result = Run(source);
+
+        result.Diagnostics.ShouldContain(diagnostic => diagnostic.Id == "COHMAP005" && diagnostic.GetMessage().Contains("custom schema storage override", StringComparison.Ordinal));
+        result.Generated.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Mapping] - Generator: derived foreign-key constraint names cannot collide")]
+    public void Generate_CollidingConstraintNames_ShouldRejectSchema()
+    {
+        const string source = """
+            using Assimalign.Cohesion.Database.Sql.Schema;
+            public sealed class First { public int Id { get; set; } }
+            public sealed class Second { public int Id { get; set; } }
+            public sealed class Child { public int Id { get; set; } public int ParentId { get; set; } public int two_ParentId { get; set; } }
+            public static class Declaration
+            {
+                public static ISqlSchema Create() => SqlSchema.Create("test", database =>
+                {
+                    database.Table<First>("one_two", table => table.Key(row => row.Id));
+                    database.Table<Second>("one", table => table.Key(row => row.Id));
+                    database.Table<Child>(table =>
+                    {
+                        table.Key(row => row.Id);
+                        table.References<First>(row => row.ParentId);
+                        table.References<Second>(row => row.two_ParentId);
+                    });
+                });
+            }
+            """;
+
+        RunResult result = Run(source);
+
+        result.Diagnostics.ShouldContain(diagnostic => diagnostic.Id == "COHMAP005" && diagnostic.GetMessage().Contains("duplicate constraint name", StringComparison.Ordinal));
+        result.Generated.ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Mapping] - Generator: unsupported quoted identifiers fail before generating SQL")]
+    [InlineData("bad\\\"name")]
+    [InlineData("bad\\0name")]
+    public void Generate_UnsupportedSqlIdentifier_ShouldReportDiagnostic(string name)
+    {
+        string source = Preamble + "\npublic static class Declaration { public static ISqlSchema Create() => SqlSchema.Create(\"test\", database => database.Table<Entity>(\"" + name + "\", table => table.Key(row => row.Id))); }";
+
+        RunResult result = Run(source, includeSqlAdapter: true);
+
+        result.Diagnostics.ShouldContain(diagnostic => diagnostic.Id == "COHMAP005" && diagnostic.GetMessage().Contains("engine cannot parse", StringComparison.Ordinal));
+        result.Generated.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Mapping] - Generator: generated query-column member collisions are diagnosed")]
+    public void Generate_ReservedColumnsMember_ShouldReportDiagnostic()
+    {
+        const string source = """
+            using Assimalign.Cohesion.Database.Sql.Schema;
+            public sealed class Entity { public int Id { get; set; } public int Columns { get; set; } }
+            public static class Declaration
+            {
+                public static ISqlSchema Create() => SqlSchema.Create("test", database => database.Table<Entity>(table =>
+                {
+                    table.Key(row => row.Id); table.Column(row => row.Columns);
+                }));
+            }
+            """;
+
+        RunResult result = Run(source, includeSqlAdapter: true);
+
+        result.Diagnostics.ShouldContain(diagnostic => diagnostic.Id == "COHMAP002");
+        result.Generated.ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Mapping] - Generator: SQL keys require matching predicate and storage identity")]
+    [InlineData("float", "floating-point")]
+    [InlineData("double", "floating-point")]
+    [InlineData("System.DateTime", "DateTime.Kind")]
+    [InlineData("System.DateTimeOffset", "DateTimeOffset.Offset")]
+    public void Generate_RepresentationSensitiveSqlKey_ShouldRejectOnlySqlAdapter(string keyType, string reason)
+    {
+        string source = "using Assimalign.Cohesion.Database.Sql.Schema; public sealed class Entity { public " + keyType +
+            " Id { get; set; } } public static class Declaration { public static ISqlSchema Create() => SqlSchema.Create(\"test\", database => database.Table<Entity>(table => table.Key(row => row.Id))); }";
+
+        RunResult sql = Run(source, includeSqlAdapter: true);
+        RunResult core = Run(source);
+
+        sql.Diagnostics.ShouldContain(diagnostic => diagnostic.Id == "COHMAP003" && diagnostic.GetMessage().Contains(reason, StringComparison.Ordinal));
+        sql.Generated.ShouldBeEmpty();
+        core.Diagnostics.ShouldBeEmpty();
+        core.Compilation.GetDiagnostics().Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        core.Generated.Count.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Mapping] - Generator: index and relationship differences are mapping conflicts")]
+    [InlineData("table.Index(row => row.ParentId);")]
+    [InlineData("table.References<Parent>(row => row.ParentId);")]
+    public void Generate_ConflictingRelationalMetadata_ShouldRejectDivergentMappings(string extra)
+    {
+        string source = """
+            using Assimalign.Cohesion.Database.Sql.Schema;
+            public sealed class Parent { public int Id { get; set; } }
+            public sealed class Child { public int Id { get; set; } public int ParentId { get; set; } }
+            public static class Declaration
+            {
+                public static ISqlSchema One() => SqlSchema.Create("one", database =>
+                {
+                    database.Table<Parent>(table => table.Key(row => row.Id));
+                    database.Table<Child>(table => { table.Key(row => row.Id); table.Column(row => row.ParentId); });
+                });
+                public static ISqlSchema Two() => SqlSchema.Create("two", database =>
+                {
+                    database.Table<Parent>(table => table.Key(row => row.Id));
+                    database.Table<Child>(table => { table.Key(row => row.Id); table.Column(row => row.ParentId);
+            """ + extra + "}); }); }";
+
+        Run(source).Diagnostics.ShouldContain(diagnostic => diagnostic.Id == "COHMAP004");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Mapping] - Generator: emitted relational metadata exactly matches retained schema compilation")]
+    public void Generate_SqlAdapter_ShouldMatchCanonicalSchemaAndSnapshotStorage()
+    {
+        const string source = """
+            #nullable enable
+            using System;
+            using System.Linq;
+            using Assimalign.Cohesion.Database;
+            using Assimalign.Cohesion.Database.Sql.Schema;
+            using Assimalign.Cohesion.Database.Sql.Mapping;
+            namespace GeneratedTest;
+            public sealed class Outer
+            {
+                public sealed class Parent { public short Id { get; set; } public string Name { get; set; } = ""; }
+            }
+            public sealed class Child
+            {
+                public int Id { get; set; }
+                public byte? ParentId { get; set; }
+                public byte[]? Payload { get; set; }
+            }
+            public static class Probe
+            {
+                public static bool Run()
+                {
+                    var retained = SqlSchema.Compile("relational", database =>
+                    {
+                        database.Table<Outer.Parent>("parent table", table => { table.Key(row => row.Id); table.Index(row => row.Name); });
+                        database.Table<Child>("child table", table =>
+                        {
+                            table.Key(row => row.Id); table.References<Outer.Parent>(row => row.ParentId);
+                            table.Index(row => row.ParentId); table.Column(row => row.Payload);
+                        });
+                    });
+                    var generated = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "relational", EngineModel.Sql, false,
+                        [], [Outer_ParentMapper.SchemaTable, ChildMapper.SchemaTable], [], [], [], []);
+                    if (generated.CanonicalDocument != retained.CanonicalDocument) return false;
+                    var mapper = new ChildMapper();
+                    ISqlEntityMapping<Child, int, ChildMapper.Snapshot> contract = mapper;
+                    if (contract.TableName != "child table" || contract.KeyColumnName != "Id") return false;
+                    if (!contract.ColumnNames.SequenceEqual(new[] { "Id", "ParentId", "Payload" })) return false;
+                    if (!contract.ColumnTypes.Select(type => type.ToString()).SequenceEqual(new[] { "Int32", "Int16", "Binary" })) return false;
+                    if (!contract.ReferencedTables.SequenceEqual(new[] { "parent table" })) return false;
+                    var entity = new Child { Id = 1, ParentId = 7, Payload = [1, 2] };
+                    var snapshot = mapper.Capture(entity);
+                    entity.ParentId = 8;
+                    entity.Payload[0] = 9;
+                    var values = new object?[3];
+                    mapper.WriteSnapshot(snapshot, values);
+                    if ((short)values[1]! != 7 || ((byte[])values[2]!)[0] != 1) return false;
+                    ((byte[])values[2]!)[0] = 8;
+                    if (snapshot.Payload![0] != 1) return false;
+                    SqlColumn<Child, byte?> column = ChildMapper.Columns.ParentId;
+                    return column != null && ChildMapper.SchemaTable.Owner == DatabaseObjectOwner.Schema;
+                }
+            }
+            """;
+
+        CompileAndRun(source, includeSqlAdapter: true).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Mapping] - Generator: SQL adapter output remains static and AOT safe")]
+    public void Generate_SqlAdapter_ShouldEmitNoRuntimeDiscovery()
+    {
+        string source = Preamble + "\npublic static class Declaration { public static ISqlSchema Create() => SqlSchema.Create(\"test\", database => database.Table<Entity>(table => table.Key(entity => entity.Id))); }";
+
+        RunResult result = Run(source, includeSqlAdapter: true);
+
+        result.Diagnostics.ShouldBeEmpty();
+        result.Compilation.GetDiagnostics().Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldBeEmpty();
+        foreach (string forbidden in new[] { "System.Reflection", "typeof(", ".GetType(", "Activator.", "Expression.", "IQueryable", "dynamic " })
+        {
+            result.Generated.Single().ShouldNotContain(forbidden, Case.Sensitive);
+        }
+    }
+
+    private static bool CompileAndRun(string source, bool includeSqlAdapter = false)
+    {
+        RunResult result = Run(source, includeSqlAdapter: includeSqlAdapter);
         result.Diagnostics.ShouldBeEmpty();
         using var output = new MemoryStream();
         var emitted = result.Compilation.Emit(output);
@@ -465,7 +716,7 @@ public sealed class SqlMapperGeneratorTests
         }
     }
 
-    private static RunResult Run(string source, string? generateMappers = "true")
+    private static RunResult Run(string source, string? generateMappers = "true", bool includeSqlAdapter = false)
     {
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)
@@ -482,6 +733,19 @@ public sealed class SqlMapperGeneratorTests
             {
                 references.Add(MetadataReference.CreateFromFile(assembly.Location));
             }
+        }
+
+        if (includeSqlAdapter)
+        {
+            string location = typeof(Assimalign.Cohesion.Database.Sql.Mapping.ISqlEntityMapping<,,>).Assembly.Location;
+            if (!references.Any(reference => reference.Display == location))
+            {
+                references.Add(MetadataReference.CreateFromFile(location));
+            }
+        }
+        else
+        {
+            references.RemoveAll(reference => Path.GetFileName(reference.Display) == "Assimalign.Cohesion.Database.Sql.Mapping.dll");
         }
 
         var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);

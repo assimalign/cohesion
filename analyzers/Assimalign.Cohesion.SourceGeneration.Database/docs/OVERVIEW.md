@@ -66,6 +66,19 @@ Binary data is copied on capture, read, write and snapshot access. Undeclared me
 Snapshots detect value changes, binary content mutations, `DateTime.Kind` changes and
 `DateTimeOffset.Offset` changes. There are no proxies, interception or navigation traversal.
 
+Referencing `Assimalign.Cohesion.Database.Sql.Mapping` also emits its `ISqlEntityMapping` adapter
+contract: table/column/key/reference metadata, a snapshot writer, and typed query columns such as
+`CustomerMapper.Columns.Id.Equal(7)`. `SqlMapping.Query(mapper)` composes these columns through the
+adapter's supported SQL surface. Foreign-key declarations must target a table in the same schema
+and have compatible storage types; contradictions fail the build with `COHMAP005`.
+SQL keys exclude floating-point, `DateTime` and `DateTimeOffset` values with `COHMAP003` because
+SQL equality does not preserve their stored key identities; these remain supported value columns.
+
+Each SQL mapper exposes `SchemaTable`, an immutable compiled table containing those same columns,
+keys, indexes and foreign keys. NativeAOT applications can assemble a `SqlCompiledSchema` from
+these generated tables and deploy it without executing the source declaration. It represents
+table metadata only; other schema objects retain their existing compilation path.
+
 ## Verification and scope
 
 Run the generator suite by project path:
@@ -79,6 +92,9 @@ column order, key and storage types, and round-trip entities. Runtime discovery 
 generated source. The NativeAOT guard lives under
 `resources/Database/Assimalign.Cohesion.Database.Mapping/samples/` and executes the generated mapper
 and unit of work after native publishing.
+The SQL adapter's additional guard in
+`resources/Database/Assimalign.Cohesion.Database.Sql.Mapping/samples/` deploys generated table
+metadata and runs mapper queries and saves against the real SQL engine.
 
 The existing schema builder uses CLR type/expression metadata when **executed**. That pre-existing
 schema compilation path is outside this mapper's runtime path: the AOT guard's declaration method

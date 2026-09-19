@@ -58,6 +58,20 @@ wire. SQL parsing remains the server's responsibility.
 Disposing a typed connection returns its shared authenticated session; disposing
 the client closes its pool. Connections support one exchange at a time.
 
+`ISqlConnection.AbortAsync` discards a rental and closes its session instead of
+returning it to the pool. Use it when SQL session state cannot be reset, including
+a failed ROLLBACK or uncertain COMMIT. It delegates to the shared client's discard
+operation and is not cancellable. Discarding prevents session leakage; it cannot
+undo an already published transaction.
+
+SQL transactions currently use ordinary `BEGIN`, `COMMIT` and `ROLLBACK` commands
+on one connection. The wire protocol does not expose a durable transaction token,
+status lookup or replay deduplication. A connection loss after the server publishes
+COMMIT but before the response reaches the client has an unknown outcome. Client
+exceptions do not promise that a failed COMMIT left no writes. The SQL mapper
+documents and enforces this boundary by faulting its scope/store and refusing replay;
+see its [reconciliation contract](../../Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md#commit-outcome-and-reconciliation).
+
 `SqlClientException : DatabaseException` maps stable wire codes to SQL error kinds
 and retains the original code. The shared pool invalidates incomplete exchanges,
 including cancellation and decoder failure. Completed parse/execution failures

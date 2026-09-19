@@ -132,7 +132,7 @@ public sealed partial class SqlQueryParser
             AddSyntaxDiagnostic(ref lexer, "Expected an identifier.");
             return "?";
         }
-        string name = CurrentText(ref lexer);
+        string name = CurrentIdentifierText(ref lexer);
         Advance(ref lexer);
         return name;
     }

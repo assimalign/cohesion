@@ -271,6 +271,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Schema" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Storage" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Client" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Mapping" />
 
         <!-- The KeyValuePair model family (the second model - the kernel-generality
              proof): engine + wire-protocol server, model storage, the minimal

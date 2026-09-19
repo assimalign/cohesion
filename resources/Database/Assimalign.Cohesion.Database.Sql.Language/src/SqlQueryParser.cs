@@ -263,6 +263,17 @@ public sealed partial class SqlQueryParser : QueryParser
         return lexer.Current.Type == TokenType.Eof ? string.Empty : lexer.Current.Value.ToString();
     }
 
+    // Quoting is lexical syntax, not part of an identifier's catalog identity. Keep
+    // CurrentText unchanged for command dispatch, literals and diagnostics: a quoted
+    // reserved word remains an identifier token and must never become a keyword.
+    private static string CurrentIdentifierText(ref TokenLexer lexer)
+    {
+        var value = lexer.Current.Value;
+        return lexer.Current.Type == TokenType.QuotedIdentifier && value.Length >= 2 && value[^1] == '"'
+            ? value[1..^1].ToString()
+            : CurrentText(ref lexer);
+    }
+
     private static bool IsKeyword(ref TokenLexer lexer, string keyword)
     {
         return lexer.Current.Type == TokenType.Keyword &&
@@ -290,7 +301,7 @@ public sealed partial class SqlQueryParser : QueryParser
 
     private SqlTableReference ParseTableReference(ref TokenLexer lexer)
     {
-        string firstPart = CurrentText(ref lexer);
+        string firstPart = CurrentIdentifierText(ref lexer);
         string? schemaName = null;
         string? alias = null;
 
@@ -299,7 +310,7 @@ public sealed partial class SqlQueryParser : QueryParser
             if (Advance(ref lexer) && IsIdentifierOrKeyword(ref lexer))
             {
                 schemaName = firstPart;
-                firstPart = CurrentText(ref lexer);
+                firstPart = CurrentIdentifierText(ref lexer);
                 Advance(ref lexer);
             }
         }
@@ -309,14 +320,14 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             if (Advance(ref lexer) && IsIdentifierOrKeyword(ref lexer))
             {
-                alias = CurrentText(ref lexer);
+                alias = CurrentIdentifierText(ref lexer);
                 Advance(ref lexer);
             }
         }
         else if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer) &&
                  !IsStatementBoundaryKeyword(ref lexer))
         {
-            alias = CurrentText(ref lexer);
+            alias = CurrentIdentifierText(ref lexer);
             Advance(ref lexer);
         }
 

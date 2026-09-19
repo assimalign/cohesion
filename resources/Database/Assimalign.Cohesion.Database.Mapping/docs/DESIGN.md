@@ -85,8 +85,12 @@ There is no transaction for an empty change set. All staged writes use the same 
 writers neither commit nor mutate snapshots.
 
 The store adapter supplies `IMappingStore<TTransaction>` and `IMappingTransaction`. The transaction
-must publish all writes atomically, publish none on a throwing/cancelled commit, and roll back
-uncommitted writes on disposal. The unit of work always disposes an acquired transaction. A mapping
+must publish all writes atomically, publish none on an ordinary throwing/cancelled commit, and roll back
+uncommitted writes on disposal. An adapter that cannot confirm a commit must throw
+`MappingCommitOutcomeUnknownException` and prevent reuse of its unresolved store scope. This is a
+distinct outcome, not a rollback: the unit of work retains its snapshots but permanently rejects
+save, registration and tracked-set access, including when transaction disposal subsequently fails.
+The caller must reconcile authoritatively before constructing a new scope. The unit of work always disposes an acquired transaction. A mapping
 core cannot synthesize atomicity over a store that lacks it; this contract deliberately refuses to
 promise a distributed transaction. Tests use a transactional store that stages multiple writes and
 injects failures after staging, at commit and through cancellation to verify both stored state and
@@ -97,7 +101,8 @@ There is no post-commit cancellation check. A disposal failure after successful 
 but accepted baselines are preserved so a retry does not duplicate the committed writes. Before
 commit, failures leave additions, deletions and original snapshots intact for retry. Mapper and
 adapter exceptions propagate; invalid lifecycle/identity operations use `InvalidOperationException`
-and invalid arguments use BCL argument exceptions. There is no new exception hierarchy.
+and invalid arguments use BCL argument exceptions. `MappingCommitOutcomeUnknownException` is the
+explicit exception for uncertainty at the publication boundary.
 
 The caller owns the store's lifetime. The scope holds entities and snapshots only; it acquires and
 disposes store resources within each save, so it requires no separate disposal protocol. Retaining
@@ -118,10 +123,12 @@ the scope retains tracked entities. End its lifetime at the application unit-of-
   Typed stream access should retain its stream source/target, with typed metadata materialized
   separately. Blob content must not be captured in snapshots or buffered by these contracts.
 
-The remaining uncertainty is transport commit certainty: future clients must expose an atomic,
-definite transaction outcome, or explicitly design reconciliation before adopting this save
-contract. Client transaction support and SQL dependency ordering need proof in #1008; the other
-wire clients do not yet exist. No one-off bridge members have been added to preempt those decisions.
+Phase 27 establishes that the SQL client cannot resolve a lost COMMIT response: the protocol has
+no durable commit-status token. The SQL adapter exposes the unknown-outcome exception and faults
+the store scope. It promises atomic database publication, but not a definite client outcome or safe
+retry after transport loss. See the [SQL mapper design](../../Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md)
+for reconciliation requirements. Future adapters must either prove definite outcomes or preserve
+this explicit boundary; none may translate uncertainty into an ordinary retryable failure.
 
 ## AOT and verification
 

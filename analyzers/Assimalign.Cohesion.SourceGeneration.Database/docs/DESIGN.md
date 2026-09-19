@@ -17,6 +17,8 @@ flowchart LR
     Declaration --> Schema["Database.Sql.Schema contracts"]
     Generated["Generated entity mapper"] --> Mapping["Database.Mapping contracts"]
     Generated --> Entity["Application entity"]
+    Generated --> SqlMapping["Database.Sql.Mapping contracts, when referenced"]
+    Generated --> Schema
     Mapping --> Database["Database area root"]
 ```
 
@@ -25,7 +27,7 @@ flowchart LR
 | `Assimalign.Cohesion.SourceGeneration.Database` | Compiler-only declaration analysis, diagnostics and source emission |
 | `Assimalign.Cohesion.Database.Sql.Schema` | Existing retained and compiled schema authority |
 | `Assimalign.Cohesion.Database.Mapping` | Store-neutral identity, snapshot comparison, materialization and atomic save contracts |
-| Generated entity mapper | Direct member reads/writes, schema ordinal conversion, key extraction and detached snapshots |
+| Generated entity mapper | Direct member access, schema ordinal conversion, key extraction, detached snapshots and relational metadata |
 
 The generator references Roslyn packages, not the `net10.0` schema/runtime assemblies. It reads
 their symbols in the consuming compilation, so it stays loadable in the sanctioned
@@ -52,7 +54,7 @@ an execution model, so the generator does not guess which declarations execute.
 `Column`, `Key`, `PrimaryKey`, `Index` and `References` all select a direct member. As in the real
 builder, the first mention establishes column order, repeated mentions are deduplicated, and the
 last key declaration determines the primary key. Indexes and references contribute their selected
-column but no relationship behavior in this phase. Functions, triggers, principals, custom type
+column, and their declarations are retained for compiled table metadata and relationship ordering. Functions, triggers, principals, custom type
 declarations and extensions retain their existing schema ownership; their runtime behavior is not
 part of entity mapping. A custom scalar selected into an entity is diagnosed until a deliberate
 conversion contract is supplied by model-specific work.
@@ -72,6 +74,26 @@ nested entities use their enclosing names joined by underscores. Name collisions
 entity or an existing application type are diagnosed. Source hint names use a bounded prefix and
 deterministic SHA-256 identity suffix to avoid collisions between dotted and underscored namespace
 names and filesystem component limits.
+
+SQL adapter keys additionally exclude `float`, `double`, `DateTime` and `DateTimeOffset` with
+`COHMAP003`. SQL equality promotes floating-point values to Decimal, while temporal equality
+ignores `DateTime.Kind` or `DateTimeOffset.Offset`; stored identity preserves representations that
+those predicates cannot distinguish. An UPDATE or DELETE could otherwise address the wrong key
+or fail to address an existing key. These types remain supported as ordinary SQL columns and as
+core-only mapping keys, where the adapter chooses its identity/predicate semantics.
+
+Relational consistency is checked within each schema callback. Duplicate table names and CLR row
+types, case-insensitive column collisions, duplicate indexes/references, missing foreign-key
+targets and foreign-key storage type mismatches produce `COHMAP005`. A target declared only in
+another schema does not satisfy a reference. Nullable foreign keys are allowed; storage types
+must match, including CLR `byte` and `short` sharing SQL `Int16`. Primitive custom-type overrides
+are rejected when used by a mapped column because they would invalidate emitted scalar casts.
+Repeated declarations of one entity must agree on indexes, foreign-key targets and target table
+names as well as columns and keys. Invalid schema callbacks emit no mappers.
+
+The SQL adapter quotes identifiers. The engine lexer cannot escape a double quote inside a quoted
+identifier, so SQL mapper table names containing double quotes or NUL produce `COHMAP005`.
+Unsupported SQL is rejected before emission. C# member names cannot contain either character.
 
 ## Materialization and ownership
 
@@ -107,6 +129,36 @@ transient mutations reverted before capture are not tracked. The generator emits
 mutation interception. Identity changes are exposed by `GetKey`; the unit of work decides whether
 they are legal for its already tracked entities.
 
+## SQL adapter and AOT schema deployment
+
+When the consuming compilation references `Database.Sql.Mapping.ISqlEntityMapping`, the same
+mapper implements that interface, which extends the core mapper/reader/writer contracts. It adds
+the retained `TableName`, ordered `ColumnNames` and `ColumnTypes`, `KeyColumnName`, distinct `ReferencedTables`, and
+`WriteSnapshot`. Snapshot writes use captured values and the same checked storage conversions and
+binary ownership as entity writes. The runtime adapter supplies change writers and transaction
+ordering; the generator emits no connection or transaction implementation.
+
+Nested `Columns` exposes one `SqlColumn<TEntity,TValue>` per mapped member. These statically typed
+values feed the adapter's limited predicate and ordering surface. No expression trees or query
+provider are emitted. `ColumnTypes` lets the runtime validate even manually constructed column
+tokens against the generated storage type before compiling a query. A member named `Columns` is diagnosed because it conflicts with that nested
+type's generated member name.
+
+Static `SchemaTable` supplies a `CompiledSchemaTable` from those same declarations, including the
+canonical CLR row identity, ordered storage types and nullability, primary key, secondary indexes
+and foreign-key constraints. Reference nullability follows the retained builder's CLR behavior:
+reference members are nullable regardless of C# nullable annotations. This property permits an AOT
+application to construct `SqlCompiledSchema` for deployment without executing the metadata-based
+schema callback. It emits only the mapped table, not unrelated functions, triggers, principals,
+custom types or extensions. Applications must include every required generated table when
+assembling the compiled schema; the compiled-schema validator checks references.
+
+Tests compare the entire canonical document of generated tables against `SqlSchema.Compile`,
+including nested CLR row identities, quoted identifiers containing spaces, indexes, nullable
+foreign keys, and `byte`/`short` storage compatibility. The SQL mapper NativeAOT guard deploys these
+generated tables and exercises the mapper through the real engine. The declaration method is
+compiler input and is never executed in that guard.
+
 ## Evidence and extension boundaries
 
 Generator tests execute real `SqlSchema.Compile`, verify ordered compiled columns, storage types
@@ -121,8 +173,8 @@ without invoking the pre-existing schema builder at runtime, then runs generated
 identity, snapshots and transactional save. This proves the mapper runtime after trimming. It
 does not broaden the claim to execution of the existing metadata-based schema compiler itself.
 
-`#1008` owns SQL query generation, foreign-key/relationship materialization, ownership enforcement
-and the real SQL transactional writer. `#1009` can compare snapshot members for partial document
+`Database.Sql.Mapping` owns SQL query generation, explicit relationship queries, ownership
+enforcement and the real SQL transactional writer. `#1009` can compare snapshot members for partial document
 updates without importing table semantics. `#1010` can implement the same generic reader contract
 with a path-shaped source; nothing in the core requires this generator's ordinal sequence.
 `#1011` should compose typed serializers and streaming accessors directly and need not acquire a

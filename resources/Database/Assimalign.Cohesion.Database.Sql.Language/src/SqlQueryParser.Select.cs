@@ -185,7 +185,7 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
             if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
             {
-                alias = CurrentText(ref lexer);
+                alias = CurrentIdentifierText(ref lexer);
                 Advance(ref lexer);
             }
         }
@@ -193,7 +193,7 @@ public sealed partial class SqlQueryParser
                  !IsStatementBoundaryKeyword(ref lexer))
         {
             // Check it's not a keyword that starts the next clause
-            alias = CurrentText(ref lexer);
+            alias = CurrentIdentifierText(ref lexer);
             Advance(ref lexer);
         }
 

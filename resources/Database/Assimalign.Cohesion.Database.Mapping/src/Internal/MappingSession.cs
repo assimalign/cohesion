@@ -10,6 +10,7 @@ internal sealed class MappingSession<TTransaction>(IMappingStore<TTransaction> s
 {
     private readonly List<ITrackedMapping<TTransaction>> _mappings = [];
     private bool _saving;
+    private MappingCommitOutcomeUnknownException? _unresolvedCommit;
 
     public ITrackedEntities<TEntity, TKey> Register<TEntity, TKey, TSnapshot>(
         IEntityMapper<TEntity, TKey, TSnapshot> mapper,
@@ -55,7 +56,17 @@ internal sealed class MappingSession<TTransaction>(IMappingStore<TTransaction> s
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (MappingCommitOutcomeUnknownException exception)
+            {
+                // Record this before disposal: even a cleanup failure must never make an
+                // unresolved save retryable or cause its snapshots to be accepted.
+                _unresolvedCommit = exception;
+                throw;
+            }
             // Never observe cancellation between commit and acceptance. A committed save must
             // not be replayed merely because cancellation raced with its successful completion.
             foreach (IPendingChange<TTransaction> change in changes)
@@ -73,6 +84,13 @@ internal sealed class MappingSession<TTransaction>(IMappingStore<TTransaction> s
 
     private void EnsureIdle()
     {
+        if (_unresolvedCommit is not null)
+        {
+            throw new InvalidOperationException(
+                "The mapping commit outcome is unknown. Reconcile the save with the store before creating a new unit of work.",
+                _unresolvedCommit);
+        }
+
         if (_saving)
         {
             throw new InvalidOperationException("A mapping save is already in progress.");

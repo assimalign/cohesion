@@ -29,6 +29,14 @@ public interface ISqlConnection : IAsyncDisposable
     /// </summary>
     bool IsOpen { get; }
 
+    /// <summary>Discards this connection's rental and closes its session.</summary>
+    /// <returns>The asynchronous transport teardown operation.</returns>
+    /// <remarks>Use after an uncertain transaction outcome or failed session cleanup. The connection
+    /// is never returned to the pool for reuse. This cannot reverse an already committed transaction
+    /// and does not establish the outcome of an unacknowledged COMMIT. This operation is deliberately
+    /// not cancellable so an unsafe rental cannot survive cancellation of cleanup.</remarks>
+    ValueTask AbortAsync();
+
     /// <summary>
     /// Executes a row-returning command and materializes the full result set.
     /// </summary>

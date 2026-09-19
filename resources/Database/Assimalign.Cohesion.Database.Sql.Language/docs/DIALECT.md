@@ -439,6 +439,15 @@ executable scalar subset.
 
 ## Literals
 
+Names may be delimited with double quotes, including reserved words, spaces and
+literal dots. The parser removes delimiters from identifier values for catalog
+binding while retaining their identifier token classification. Schema/table
+qualification uses a dot **outside** the delimiters: `"dbo"."order details"` is
+qualified, while `"order.details"` names one table. This applies to DML target
+columns, expression references, aliases and DDL table/index/constraint names.
+Embedded double quotes inside an identifier are outside the current lexer subset;
+the mapper diagnoses such retained names before emitting SQL.
+
 | Form | Examples | AST literal type |
 |---|---|---|
 | String | `'it''s'` (doubled-quote escape) | `String` |

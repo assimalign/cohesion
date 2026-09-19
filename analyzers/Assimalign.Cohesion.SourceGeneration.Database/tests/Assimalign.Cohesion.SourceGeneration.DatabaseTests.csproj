@@ -22,5 +22,6 @@
 		<CohesionAnalyzerAsProjectReference Include="Assimalign.Cohesion.SourceGeneration.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Mapping" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Schema" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Mapping" />
 	</ItemGroup>
 </Project>

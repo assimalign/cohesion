@@ -17,6 +17,8 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<!-- Generation remains off unless the consuming project explicitly sets this property to true. -->
+		<CompilerVisibleProperty Include="CohesionGenerateDatabaseMappers" />
 		<CohesionCommand Include="database.add-database;database.add-principal" />
 		<CohesionEndpoint Include="db" Scheme="cohesion-db" ContainerPort="5740" Public="false" />
 		<CohesionEndpoint Include="admin" Scheme="http" ContainerPort="8081" Public="false" />

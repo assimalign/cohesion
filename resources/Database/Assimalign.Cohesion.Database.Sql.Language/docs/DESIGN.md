@@ -39,6 +39,12 @@ the parser implements today. Recognized clauses outside that set produce the sha
   doubled quotes unescaped — because every consumer (executor, planner, schema
   compiler) wants the value, and exactly one component (the parser) knows the
   escaping rules.
+- **Delimited identifier nodes carry the identifier value.** Name consumption
+  strips the surrounding double quotes for tables, schemas, aliases, columns,
+  indexes and constraints. Tokens retain their quoted-identifier classification,
+  so a quoted reserved word cannot become a keyword or literal. Keyword dispatch,
+  literal parsing and diagnostics continue to consume raw token text. Embedded
+  double-quote escapes are outside the current lexer subset.
 - **Type names resolve through one table.** `SqlTypeNames` is the single
   SQL-name → `DatabaseType` mapping (with the `DECIMAL(p[,s])`
   argument-is-precision rule); catalogs and the schema compiler must not grow

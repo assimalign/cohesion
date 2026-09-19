@@ -23,6 +23,7 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
 {
     private const string SchemaNamespace = "Assimalign.Cohesion.Database.Sql.Schema";
     private const string MappingNamespace = "global::Assimalign.Cohesion.Database.Mapping.";
+    private const string SqlMappingNamespace = "global::Assimalign.Cohesion.Database.Sql.Mapping.";
 
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -71,7 +72,11 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
             return null;
         }
 
-        var result = new SchemaResult();
+        var result = new SchemaResult
+        {
+            HasSqlAdapter = context.SemanticModel.Compilation.GetTypeByMetadataName(
+                "Assimalign.Cohesion.Database.Sql.Mapping.ISqlEntityMapping`3") is not null
+        };
         ExpressionSyntax? configure = Argument(invocation, method, "configure");
         if (!TryCallback(configure, context.SemanticModel.Compilation, token, out Callback? callback))
         {
@@ -102,8 +107,13 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
             {
                 AnalyzeTable(call, called, callback!.Model, result, token);
             }
+            else if (called.Name == "Type")
+            {
+                result.CustomTypes.Add(called.TypeArguments[0].WithNullableAnnotation(NullableAnnotation.NotAnnotated).ToDisplayString());
+            }
         }
 
+        ValidateRelationships(result);
         return result;
     }
 
@@ -133,6 +143,13 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
             tableName = text;
         }
 
+        if (result.HasSqlAdapter && (tableName.IndexOf('"') >= 0 || tableName.IndexOf('\0') >= 0))
+        {
+            result.Error(SqlMapperDiagnostics.InvalidRelationalSchema, invocation,
+                "SQL mapper table identifiers cannot contain a double quote or NUL because the engine cannot parse escaped quoted identifiers.");
+            return;
+        }
+
         if (!TryCallback(Argument(invocation, method, "configure"), model.Compilation, token, out Callback? callback) ||
             !TryStatements(callback!, out IReadOnlyList<InvocationExpressionSyntax> calls))
         {
@@ -142,6 +159,8 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
         }
 
         var columns = new List<Column>();
+        var references = new List<Reference>();
+        var indexes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         Column? key = null;
         bool valid = true;
         foreach (InvocationExpressionSyntax call in calls)
@@ -157,7 +176,8 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
             }
 
             ITypeSymbol? type = MemberType(member!);
-            if (member!.Name is "Snapshot" or "Matches" or "BytesEqual" || member.Name.StartsWith("_value", StringComparison.Ordinal))
+            if (member!.Name is "Snapshot" or "Matches" or "BytesEqual" || member.Name.StartsWith("_value", StringComparison.Ordinal) ||
+                (result.HasSqlAdapter && member.Name == "Columns"))
             {
                 result.Error(SqlMapperDiagnostics.UnsupportedEntity, call,
                     "Mapped member '" + member.Name + "' conflicts with a generated snapshot member name.");
@@ -176,6 +196,12 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
             Column? column = columns.FirstOrDefault(value => value.Name == member!.Name);
             if (column is null)
             {
+                if (columns.Any(value => string.Equals(value.Name, member.Name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    result.Error(SqlMapperDiagnostics.InvalidRelationalSchema, call,
+                        "Column '" + member.Name + "' duplicates a declared column under the SQL schema's case-insensitive name rules.");
+                    valid = false;
+                }
                 column = new Column(member!.Name, type);
                 columns.Add(column);
             }
@@ -184,12 +210,38 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
             {
                 key = column; // Matches the retained builder's last primary-key declaration.
             }
+            else if (called.Name == "Index" && !indexes.Add(column.Name))
+            {
+                result.Error(SqlMapperDiagnostics.InvalidRelationalSchema, call,
+                    "Index on '" + tableName + "." + column.Name + "' is declared more than once.");
+                valid = false;
+            }
+            else if (called.Name == "References")
+            {
+                string target = called.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                if (references.Any(reference => reference.Column.Name == column.Name && reference.TargetEntity == target))
+                {
+                    result.Error(SqlMapperDiagnostics.InvalidRelationalSchema, call,
+                        "Reference from '" + tableName + "." + column.Name + "' to '" + target + "' is declared more than once.");
+                    valid = false;
+                }
+                references.Add(new Reference(column, target, call.GetLocation()));
+            }
         }
 
         if (key is null || key.IsBinary || IsNullable(key.Type))
         {
             result.Error(SqlMapperDiagnostics.InvalidKey, invocation,
                 "A generated mapper requires one declared non-null immutable scalar primary key; byte[] and nullable keys are unsupported.");
+            valid = false;
+        }
+        else if (result.HasSqlAdapter && (key.Type.SpecialType is SpecialType.System_Single or SpecialType.System_Double ||
+                 key.IsDateTime || key.IsDateTimeOffset))
+        {
+            result.Error(SqlMapperDiagnostics.InvalidKey, invocation,
+                key.IsDateTime || key.IsDateTimeOffset
+                    ? "SQL equality ignores DateTime.Kind and DateTimeOffset.Offset while stored keys preserve them; SQL mappings require another immutable scalar primary-key type."
+                    : "SQL equality converts floating-point operands to Decimal and cannot preserve every stored floating-point key identity; SQL mappings require another immutable scalar primary-key type.");
             valid = false;
         }
 
@@ -206,8 +258,75 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
 
         if (valid)
         {
-            result.Tables.Add(new Table(entity, tableName, columns, key!, invocation.GetLocation()));
+            result.Tables.Add(new Table(entity, tableName, columns, key!, references, indexes,
+                result.HasSqlAdapter, invocation.GetLocation()));
         }
+    }
+
+    private static void ValidateRelationships(SchemaResult result)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var entities = new Dictionary<string, Table>(StringComparer.Ordinal);
+        foreach (Table table in result.Tables)
+        {
+            if (!names.Add(table.Name) || entities.ContainsKey(table.EntityName))
+            {
+                result.Diagnostics.Add(Diagnostic.Create(SqlMapperDiagnostics.InvalidRelationalSchema, table.Location,
+                    "Table '" + table.Name + "' or row type '" + table.EntityName + "' is declared more than once in one schema."));
+            }
+            else
+            {
+                entities.Add(table.EntityName, table);
+            }
+        }
+
+        foreach (Table table in result.Tables)
+        {
+            var constraintNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (Column column in table.Columns)
+            {
+                if (result.CustomTypes.Contains(ScalarTypeIdentity(column.Type)))
+                {
+                    result.Diagnostics.Add(Diagnostic.Create(SqlMapperDiagnostics.InvalidRelationalSchema, table.Location,
+                        "Mapped member '" + table.Name + "." + column.Name + "' uses a custom schema storage override; generated scalar conversions cannot represent it."));
+                }
+            }
+            foreach (Reference reference in table.References)
+            {
+                if (!entities.TryGetValue(reference.TargetEntity, out Table? target))
+                {
+                    result.Diagnostics.Add(Diagnostic.Create(SqlMapperDiagnostics.InvalidRelationalSchema, reference.Location,
+                        "Reference '" + table.Name + "." + reference.Column.Name + "' requires a mapped target with a primary key in the same schema: '" + reference.TargetEntity + "'."));
+                }
+                else if (StorageType(reference.Column.Type) != StorageType(target.Key.Type))
+                {
+                    result.Diagnostics.Add(Diagnostic.Create(SqlMapperDiagnostics.InvalidRelationalSchema, reference.Location,
+                        "Foreign-key storage type for '" + table.Name + "." + reference.Column.Name + "' does not match '" + target.Name + "." + target.Key.Name + "'."));
+                }
+                else
+                {
+                    reference.TargetTable = target.Name;
+                    reference.TargetKey = target.Key.Name;
+                    if (!constraintNames.Add("FK_" + table.Name + "_" + target.Name + "_" + reference.Column.Name))
+                    {
+                        result.Diagnostics.Add(Diagnostic.Create(SqlMapperDiagnostics.InvalidRelationalSchema, reference.Location,
+                            "Foreign-key declarations produce a duplicate constraint name on table '" + table.Name + "'."));
+                    }
+                }
+            }
+        }
+    }
+
+    private static string StorageType(ITypeSymbol type)
+        => ScalarTypeIdentity(type) == "byte" ? "short" : ScalarTypeIdentity(type);
+
+    private static string ScalarTypeIdentity(ITypeSymbol type)
+    {
+        if (type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
+        {
+            type = nullable.TypeArguments[0];
+        }
+        return type.WithNullableAnnotation(NullableAnnotation.NotAnnotated).ToDisplayString();
     }
 
     private static bool TryCallback(ExpressionSyntax? expression, Compilation compilation,
@@ -389,7 +508,7 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
                 context.ReportDiagnostic(diagnostic);
             }
 
-            foreach (Table table in result.Tables)
+            foreach (Table table in result.Diagnostics.Count == 0 ? result.Tables : Enumerable.Empty<Table>())
             {
                 string generatedName = table.Entity.ContainingNamespace.ToDisplayString() + "." + table.MapperName;
                 if (names.TryGetValue(generatedName, out Table? named) && named.EntityName != table.EntityName)
@@ -409,7 +528,7 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
                 if (tables.TryGetValue(table.EntityName, out Table? previous) && previous.Signature != table.Signature)
                 {
                     context.ReportDiagnostic(Diagnostic.Create(SqlMapperDiagnostics.ConflictingDeclaration, table.Location,
-                        "Entity '" + table.EntityName + "' has conflicting table, member-order or primary-key declarations."));
+                        "Entity '" + table.EntityName + "' has conflicting table, member-order, primary-key, index or foreign-key declarations."));
                     conflicts.Add(table.EntityName);
                 }
                 else
@@ -448,11 +567,20 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
         string key = table.Key.TypeName;
         string mapper = table.MapperName;
         text.AppendLine("/// <summary>Maps the retained SQL schema's declared values and captures detached entity state.</summary>");
-        text.Append(table.IsPublic ? "public" : "internal").Append(" sealed class ").Append(mapper)
-            .Append(" : ").Append(MappingNamespace).Append("IEntityMapper<").Append(entity).Append(", ").Append(key).Append(", ")
+        text.Append(table.IsPublic ? "public" : "internal").Append(" sealed class ").Append(mapper).Append(" : ");
+        if (table.HasSqlAdapter)
+        {
+            text.Append(SqlMappingNamespace).Append("ISqlEntityMapping<").Append(entity).Append(", ").Append(key).Append(", ")
+                .Append(mapper).AppendLine(".Snapshot>\n{");
+            GenerateSqlMapping(text, table);
+        }
+        else
+        {
+            text.Append(MappingNamespace).Append("IEntityMapper<").Append(entity).Append(", ").Append(key).Append(", ")
             .Append(mapper).Append(".Snapshot>, ").Append(MappingNamespace).Append("IEntityReader<").Append(entity)
             .Append(", global::System.Collections.Generic.IReadOnlyList<object?>>, ").Append(MappingNamespace)
             .Append("IEntityWriter<").Append(entity).AppendLine(", global::System.Collections.Generic.IList<object?>>\n{");
+        }
         text.AppendLine("    /// <inheritdoc />").Append("    public ").Append(key).Append(" GetKey(").Append(entity).AppendLine(" entity)\n    {")
             .AppendLine("        global::System.ArgumentNullException.ThrowIfNull(entity);")
             .Append("        return entity.@").Append(table.Key.Name);
@@ -592,6 +720,119 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
         return text.AppendLine("    }\n}").ToString();
     }
 
+    private static void GenerateSqlMapping(StringBuilder text, Table table)
+    {
+        GenerateSchemaTable(text, table);
+        text.AppendLine("    /// <inheritdoc />")
+            .Append("    public string TableName => ").Append(Literal(table.Name)).AppendLine(";")
+            .AppendLine("    /// <inheritdoc />")
+            .Append("    public string KeyColumnName => ").Append(Literal(table.Key.Name)).AppendLine(";")
+            .AppendLine("    /// <inheritdoc />")
+            .Append("    public global::System.Collections.Generic.IReadOnlyList<string> ColumnNames { get; } = global::System.Array.AsReadOnly(new string[] { ")
+            .Append(string.Join(", ", table.Columns.Select(column => Literal(column.Name)))).AppendLine(" });")
+            .AppendLine("    /// <inheritdoc />")
+            .Append("    public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Types.DatabaseType> ColumnTypes { get; } = global::System.Array.AsReadOnly(new global::Assimalign.Cohesion.Database.Types.DatabaseType[] { ")
+            .Append(string.Join(", ", table.Columns.Select(column => "global::Assimalign.Cohesion.Database.Types.DatabaseType." + DatabaseTypeName(column.Type))))
+            .AppendLine(" });")
+            .AppendLine("    /// <inheritdoc />")
+            .Append("    public global::System.Collections.Generic.IReadOnlyList<string> ReferencedTables { get; } = global::System.Array.AsReadOnly(new string[] { ")
+            .Append(string.Join(", ", table.References.Select(reference => reference.TargetTable).Distinct(StringComparer.OrdinalIgnoreCase).Select(Literal)))
+            .AppendLine(" });")
+            .AppendLine("    /// <inheritdoc />")
+            .AppendLine("    public void WriteSnapshot(Snapshot snapshot, global::System.Collections.Generic.IList<object?> target)\n    {")
+            .AppendLine("        global::System.ArgumentNullException.ThrowIfNull(snapshot);\n        global::System.ArgumentNullException.ThrowIfNull(target);")
+            .Append("        if (target.Count != ").Append(table.Columns.Count)
+            .AppendLine(") throw new global::System.ArgumentException(\"The value count must match the retained schema.\", nameof(target));");
+        for (int index = 0; index < table.Columns.Count; index++)
+        {
+            Column column = table.Columns[index];
+            text.Append("        target[").Append(index).Append("] = ");
+            if (column.IsByte)
+            {
+                text.Append(IsNullable(column.Type) ? "(short?)" : "(short)");
+            }
+            text.Append("snapshot.@").Append(column.Name).AppendLine(";");
+        }
+        text.AppendLine("    }")
+            .AppendLine("    /// <summary>Provides typed query columns from the retained table declaration.</summary>")
+            .AppendLine("    public static class Columns\n    {");
+        foreach (Column column in table.Columns)
+        {
+            text.AppendLine("        /// <summary>Gets the retained column for typed SQL predicates and ordering.</summary>")
+                .Append("        public static ").Append(SqlMappingNamespace).Append("SqlColumn<").Append(table.EntityName).Append(", ")
+                .Append(column.TypeName).Append("> @").Append(column.Name).Append(" { get; } = new(")
+                .Append(Literal(table.Name)).Append(", ").Append(Literal(column.Name)).AppendLine(");");
+        }
+        text.AppendLine("    }");
+    }
+
+    private static void GenerateSchemaTable(StringBuilder text, Table table)
+    {
+        const string schema = "global::" + SchemaNamespace + ".";
+        text.AppendLine("    /// <summary>Gets the immutable compiled table from the retained declaration for reflection-free deployment.</summary>")
+            .Append("    public static ").Append(schema).Append("CompiledSchemaTable SchemaTable { get; } = new(")
+            .Append(Literal(table.Name)).Append(", ").Append(Literal(RowTypeIdentity(table.Entity))).AppendLine(",")
+            .Append("        new ").Append(schema).AppendLine("CompiledSchemaColumn[]\n        {");
+        foreach (Column column in table.Columns)
+        {
+            text.Append("            new(").Append(Literal(column.Name)).Append(", global::Assimalign.Cohesion.Database.Types.DatabaseType.")
+                .Append(DatabaseTypeName(column.Type)).Append(", ")
+                .Append(column.Type.IsReferenceType || IsNullable(column.Type) ? "true" : "false").AppendLine("),");
+        }
+        text.AppendLine("        },")
+            .Append("        new ").Append(schema).Append("CompiledSchemaKey(").Append(Literal("PK_" + table.Name))
+            .Append(", new string[] { ").Append(Literal(table.Key.Name)).AppendLine(" }),")
+            .Append("        new ").Append(schema).AppendLine("CompiledSchemaIndex[]\n        {");
+        foreach (string index in table.Indexes.OrderBy(value => value, StringComparer.Ordinal))
+        {
+            text.Append("            new(").Append(Literal("IX_" + table.Name + "_" + index))
+                .Append(", new string[] { ").Append(Literal(index)).AppendLine(" }),");
+        }
+        text.AppendLine("        },")
+            .Append("        new ").Append(schema).AppendLine("CompiledSchemaConstraint[]\n        {");
+        foreach (Reference reference in table.References)
+        {
+            text.Append("            new(").Append(Literal("FK_" + table.Name + "_" + reference.TargetTable + "_" + reference.Column.Name))
+                .Append(", ").Append(schema).Append("CompiledSchemaConstraintKind.Reference, new string[] { ")
+                .Append(Literal(reference.Column.Name)).Append(" }, ").Append(Literal(reference.TargetTable))
+                .Append(", new string[] { ").Append(Literal(reference.TargetKey)).AppendLine(" }),");
+        }
+        text.AppendLine("        });");
+    }
+
+    private static string RowTypeIdentity(INamedTypeSymbol entity)
+        => entity.ContainingType is not null ? RowTypeIdentity(entity.ContainingType) + "+" + entity.MetadataName :
+            entity.ContainingAssembly.Name + ":" + NamespaceIdentity(entity.ContainingNamespace) + entity.MetadataName;
+
+    private static string NamespaceIdentity(INamespaceSymbol value)
+        => value.IsGlobalNamespace ? string.Empty : NamespaceIdentity(value.ContainingNamespace) + value.Name + ".";
+
+    private static string DatabaseTypeName(ITypeSymbol type)
+    {
+        if (type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
+        {
+            type = nullable.TypeArguments[0];
+        }
+        return type.SpecialType switch
+        {
+            SpecialType.System_Boolean => "Boolean",
+            SpecialType.System_SByte => "Int8",
+            SpecialType.System_Byte or SpecialType.System_Int16 => "Int16",
+            SpecialType.System_Int32 => "Int32",
+            SpecialType.System_Int64 => "Int64",
+            SpecialType.System_Single => "Float32",
+            SpecialType.System_Double => "Float64",
+            SpecialType.System_Decimal => "Decimal",
+            SpecialType.System_String => "String",
+            _ => type is IArrayTypeSymbol ? "Binary" : type.Name switch
+            {
+                "DateOnly" => "Date", "TimeOnly" => "Time", _ => type.Name
+            }
+        };
+    }
+
+    private static string Literal(string value) => SymbolDisplay.FormatLiteral(value, quote: true);
+
     private sealed class Callback(SyntaxNode body, IParameterSymbol parameter, SemanticModel model)
     {
         internal SyntaxNode Body { get; } = body;
@@ -601,6 +842,8 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
 
     private sealed class SchemaResult
     {
+        internal bool HasSqlAdapter { get; set; }
+        internal HashSet<string> CustomTypes { get; } = new(StringComparer.Ordinal);
         internal List<Table> Tables { get; } = new();
         internal List<Diagnostic> Diagnostics { get; } = new();
         internal void Error(DiagnosticDescriptor descriptor, SyntaxNode node, string message)
@@ -626,19 +869,36 @@ public sealed class SqlMapperGenerator : IIncrementalGenerator
                 ? nullable.TypeArguments[0] : symbol).ToDisplayString();
     }
 
-    private sealed class Table(INamedTypeSymbol entity, string name, List<Column> columns, Column key, Location location)
+    private sealed class Reference(Column column, string targetEntity, Location location)
     {
+        internal Column Column { get; } = column;
+        internal string TargetEntity { get; } = targetEntity;
+        internal Location Location { get; } = location;
+        internal string TargetTable { get; set; } = string.Empty;
+        internal string TargetKey { get; set; } = string.Empty;
+    }
+
+    private sealed class Table(INamedTypeSymbol entity, string name, List<Column> columns, Column key,
+        List<Reference> references, HashSet<string> indexes, bool hasSqlAdapter, Location location)
+    {
+        internal string Name { get; } = name;
+        internal bool HasSqlAdapter { get; } = hasSqlAdapter;
         internal INamedTypeSymbol Entity { get; } = entity;
         internal string EntityName { get; } = entity.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         internal List<Column> Columns { get; } = columns;
         internal Column Key { get; } = key;
+        internal List<Reference> References { get; } = references;
+        internal HashSet<string> Indexes { get; } = indexes;
         internal Location Location { get; } = location;
-        internal string Signature { get; } = name + "|" + key.Name + "|" + string.Join("|", columns.Select(column => column.Name));
+        internal string Signature => Literal(Name) + "|" + Literal(Key.Name) + "|" + string.Join("|", Columns.Select(column => Literal(column.Name))) +
+            "|indexes:" + string.Join("|", Indexes.OrderBy(value => value, StringComparer.Ordinal).Select(Literal)) + "|references:" +
+            string.Join("|", References.Select(reference => Literal(reference.Column.Name) + ":" + Literal(reference.TargetEntity) + ":" + Literal(reference.TargetTable) + ":" + Literal(reference.TargetKey))
+                .OrderBy(value => value, StringComparer.Ordinal));
         internal bool IsPublic { get; } = Public(entity);
-        internal string MapperName { get; } = Name(entity) + "Mapper";
+        internal string MapperName { get; } = MapperNamePrefix(entity) + "Mapper";
 
-        private static string Name(INamedTypeSymbol symbol)
-            => symbol.ContainingType is null ? symbol.Name : Name(symbol.ContainingType) + "_" + symbol.Name;
+        private static string MapperNamePrefix(INamedTypeSymbol symbol)
+            => symbol.ContainingType is null ? symbol.Name : MapperNamePrefix(symbol.ContainingType) + "_" + symbol.Name;
 
         private static bool Public(INamedTypeSymbol symbol)
             => symbol.DeclaredAccessibility == Accessibility.Public && (symbol.ContainingType is null || Public(symbol.ContainingType));

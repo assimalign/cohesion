@@ -74,6 +74,14 @@ triggers, principals/grants, extensions) fail before execution rather than
 recording a false applied hash. Foreign keys and checks now render into provisioning
 DDL and persist in the table catalog; unique declarations use unique indexes.
 
+Retained table, column, index and constraint names share the parser's delimited
+identifier contract. The renderer preserves bare ordinary names and double-quotes
+reserved words or names containing spaces and literal dots. Catalog names contain
+the identifier value without its delimiters. Embedded double quotes and null
+characters fail before deployment because the current lexer does not support
+those identifier forms. The mapper uses the same retained names, so its quoted
+DML binds the objects deployed by this renderer without another naming convention.
+
 Each DDL request remains self-committing under the catalog's established rule.
 On a later failure, completed reversible steps run their compensating requests
 in reverse order and the applied-schema marker remains unchanged. The marker is

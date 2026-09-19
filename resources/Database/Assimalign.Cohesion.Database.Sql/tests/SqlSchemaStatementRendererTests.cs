@@ -110,8 +110,8 @@ public class SqlSchemaStatementRendererTests
         // Act / Assert
         Should.Throw<DatabaseException>(() => SqlSchemaStatementRenderer.CreateTable(customTable))
             .Message.ShouldContain("custom type");
-        Should.Throw<DatabaseException>(() => SqlSchemaStatementRenderer.DropTable("not-safe!"))
-            .Message.ShouldContain("cannot be represented");
+        Should.Throw<DatabaseException>(() => SqlSchemaStatementRenderer.DropTable("not\"safe"))
+            .Message.ShouldContain("embedded double quote");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Migration scripts: portable operations render in plan order")]

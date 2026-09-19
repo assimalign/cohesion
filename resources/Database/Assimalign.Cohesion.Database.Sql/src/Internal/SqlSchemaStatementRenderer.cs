@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Collections.Generic;
 using System.Text;
 
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
@@ -246,19 +247,28 @@ internal static class SqlSchemaStatementRenderer
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
 
-        if (!(char.IsLetter(value[0]) || value[0] == '_'))
+        if (value.IndexOfAny(['\0', '"']) >= 0)
         {
-            throw new DatabaseException($"Schema identifier '{value}' cannot be represented by the SQL dialect.");
+            throw new DatabaseException($"Schema identifier '{value}' contains a null character or embedded double quote unsupported by the SQL dialect.");
         }
 
+        bool requiresQuotes = !(char.IsLetter(value[0]) || value[0] == '_');
         for (int index = 1; index < value.Length; index++)
         {
             if (!(char.IsLetterOrDigit(value[index]) || value[index] == '_'))
             {
-                throw new DatabaseException($"Schema identifier '{value}' cannot be represented by the SQL dialect.");
+                requiresQuotes = true;
             }
         }
 
-        return value;
+        foreach (string keyword in SqlLanguageProfile.Instance.Keywords)
+        {
+            requiresQuotes |= string.Equals(value, keyword, StringComparison.OrdinalIgnoreCase);
+        }
+        foreach (string function in SqlLanguageProfile.Instance.Functions)
+        {
+            requiresQuotes |= string.Equals(value, function, StringComparison.OrdinalIgnoreCase);
+        }
+        return requiresQuotes ? "\"" + value + "\"" : value;
     }
 }

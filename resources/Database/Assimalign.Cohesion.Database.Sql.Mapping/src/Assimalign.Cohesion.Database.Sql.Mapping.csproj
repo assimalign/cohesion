@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <!-- Keep the generator at the Mapping package's single analyzer path for direct and transitive consumers. -->
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Mapping" PrivateAssets="contentfiles;build" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Types" />
+  </ItemGroup>
+</Project>

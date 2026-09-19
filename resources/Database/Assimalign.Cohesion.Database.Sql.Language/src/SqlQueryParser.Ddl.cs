@@ -62,7 +62,7 @@ public sealed partial class SqlQueryParser
         string indexName = "?";
         if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
         {
-            indexName = CurrentText(ref lexer);
+            indexName = CurrentIdentifierText(ref lexer);
             Advance(ref lexer);
         }
 
@@ -84,7 +84,7 @@ public sealed partial class SqlQueryParser
             {
                 if (IsIdentifierOrKeyword(ref lexer))
                 {
-                    columns.Add(CurrentText(ref lexer));
+                    columns.Add(CurrentIdentifierText(ref lexer));
                     Advance(ref lexer);
                 }
 
@@ -138,7 +138,7 @@ public sealed partial class SqlQueryParser
         if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
         {
             // Don't parse alias for CREATE TABLE
-            string firstPart = CurrentText(ref lexer);
+            string firstPart = CurrentIdentifierText(ref lexer);
             string? schemaName = null;
 
             if (Advance(ref lexer) && lexer.Current.Type == TokenType.Dot)
@@ -146,7 +146,7 @@ public sealed partial class SqlQueryParser
                 if (Advance(ref lexer) && IsIdentifierOrKeyword(ref lexer))
                 {
                     schemaName = firstPart;
-                    firstPart = CurrentText(ref lexer);
+                    firstPart = CurrentIdentifierText(ref lexer);
                     Advance(ref lexer);
                 }
             }
@@ -195,7 +195,7 @@ public sealed partial class SqlQueryParser
         string columnName = string.Empty;
         if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
         {
-            columnName = CurrentText(ref lexer);
+            columnName = CurrentIdentifierText(ref lexer);
             Advance(ref lexer);
         }
 
@@ -300,7 +300,7 @@ public sealed partial class SqlQueryParser
         SqlTableReference? table = null;
         if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
         {
-            string firstPart = CurrentText(ref lexer);
+            string firstPart = CurrentIdentifierText(ref lexer);
             string? schemaName = null;
 
             if (Advance(ref lexer) && lexer.Current.Type == TokenType.Dot)
@@ -308,7 +308,7 @@ public sealed partial class SqlQueryParser
                 if (Advance(ref lexer) && IsIdentifierOrKeyword(ref lexer))
                 {
                     schemaName = firstPart;
-                    firstPart = CurrentText(ref lexer);
+                    firstPart = CurrentIdentifierText(ref lexer);
                     Advance(ref lexer);
                 }
             }
@@ -350,7 +350,7 @@ public sealed partial class SqlQueryParser
             string colName = string.Empty;
             if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
             {
-                colName = CurrentText(ref lexer);
+                colName = CurrentIdentifierText(ref lexer);
                 Advance(ref lexer);
             }
             action = isConstraint
@@ -405,7 +405,7 @@ public sealed partial class SqlQueryParser
         string indexName = "?";
         if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
         {
-            indexName = CurrentText(ref lexer);
+            indexName = CurrentIdentifierText(ref lexer);
             Advance(ref lexer);
         }
 
@@ -456,7 +456,7 @@ public sealed partial class SqlQueryParser
     {
         if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
         {
-            string firstPart = CurrentText(ref lexer);
+            string firstPart = CurrentIdentifierText(ref lexer);
             string? schemaName = null;
 
             if (Advance(ref lexer) && lexer.Current.Type == TokenType.Dot)
@@ -464,7 +464,7 @@ public sealed partial class SqlQueryParser
                 if (Advance(ref lexer) && IsIdentifierOrKeyword(ref lexer))
                 {
                     schemaName = firstPart;
-                    firstPart = CurrentText(ref lexer);
+                    firstPart = CurrentIdentifierText(ref lexer);
                     Advance(ref lexer);
                 }
             }

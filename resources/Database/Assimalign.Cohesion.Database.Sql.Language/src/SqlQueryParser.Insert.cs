@@ -60,7 +60,7 @@ public sealed partial class SqlQueryParser
 
         if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
         {
-            columns.Add(CurrentText(ref lexer));
+            columns.Add(CurrentIdentifierText(ref lexer));
             Advance(ref lexer);
 
             while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
@@ -68,7 +68,7 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
                 if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
                 {
-                    columns.Add(CurrentText(ref lexer));
+                    columns.Add(CurrentIdentifierText(ref lexer));
                     Advance(ref lexer);
                 }
             }

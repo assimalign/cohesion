@@ -481,7 +481,7 @@ public sealed partial class SqlQueryParser
     private SqlExpression ParseColumnRefOrFunction(ref TokenLexer lexer)
     {
         var pos = lexer.Current.Position;
-        string first = CurrentText(ref lexer);
+        string first = CurrentIdentifierText(ref lexer);
         Advance(ref lexer);
 
         // Check for function call: identifier(
@@ -500,7 +500,7 @@ public sealed partial class SqlQueryParser
             }
             if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
             {
-                string second = CurrentText(ref lexer);
+                string second = CurrentIdentifierText(ref lexer);
                 Advance(ref lexer);
 
                 // Check for a.b.c
@@ -513,7 +513,7 @@ public sealed partial class SqlQueryParser
                     }
                     if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
                     {
-                        string third = CurrentText(ref lexer);
+                        string third = CurrentIdentifierText(ref lexer);
                         Advance(ref lexer);
                         return new SqlColumnReferenceExpression(third, second, first,
                             Location.Create(1, 1, pos, pos));
