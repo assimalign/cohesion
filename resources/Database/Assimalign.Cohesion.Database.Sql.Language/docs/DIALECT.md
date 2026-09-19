@@ -10,7 +10,7 @@ enumerates the profile and fails if any advertised clause lacks a passing case.
 
 ## Statement matrix
 
-Phase 18 measures **33 of 49 declared clauses** against the live SQL engine.
+Phase 21 measures **33 of 49 declared clauses** against the live SQL engine.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
 Phase 14 restores `CAST` with actual conversion, type metadata, and wire execution
@@ -22,6 +22,10 @@ and server/client execution (#1020). Phase 17 adds executable column and express
 uniqueness, and server/client execution (#1025). Phase 18 restores `SUBQUERY`
 for uncorrelated scalar, `IN`/`NOT IN`, and `EXISTS`/`NOT EXISTS` queries and
 adds transactional `INSERT ... SELECT`, with server/client execution (#1021).
+Phase 21 restores literal `ALTER TABLE ADD COLUMN` defaults for populated tables,
+including old-row and omitted-column insert values over the wire, and rejects
+nonliteral defaults before mutation (#1023). The count remains 33/49 because
+`ALTER TABLE` was already advertised for its smaller executable subset.
 
 The **16 excluded clauses** are set operations (`UNION`,
 `INTERSECT`, `EXCEPT`), CTEs (`WITH`, `RECURSIVE`), window clauses (`WINDOW`,
@@ -36,7 +40,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `UPDATE` | Supported | multi-column `SET`, `WHERE` |
 | `DELETE` | Supported | optional `WHERE` |
 | `CREATE TABLE` | Supported | `IF NOT EXISTS`, column definitions with parameterized types, `COLLATE <name>`, `NOT NULL`/`NULL`, `DEFAULT <literal>`, column and table `PRIMARY KEY`, `REFERENCES`/`FOREIGN KEY`, `CHECK`, and `UNIQUE`; optional `CONSTRAINT <name>` |
-| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. ADD COLUMN without a default preserves old rows with null in the new nullable column; literal defaults apply to subsequent inserts only. Existing rows are **not backfilled** with the literal default. Nonliteral ADD COLUMN defaults are silently discarded for both old and new rows; this form is not supported. These measured default gaps remain MVP work (#1023). |
+| `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. ADD COLUMN literal defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults and nonliteral expressions reject before mutation. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). |
 | `DROP TABLE` | Supported | `IF EXISTS` |
 | `CREATE INDEX` | Supported | `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON <table> (<column> [, ...])` — plain column lists only (no `ASC`/`DESC`, expressions, or `INCLUDE`; each is an additive extension) |
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
@@ -59,6 +63,52 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
+
+## ADD COLUMN defaults, atomicity and MVCC (#1023)
+
+`ALTER TABLE t ADD COLUMN extra INT DEFAULT 7` makes every preexisting row read
+7 while preserving all original values. The backfill is **resolved at read time
+from persisted catalog metadata**: a missing trailing field takes the added
+column's validated literal default. Existing row bytes and MVCC writer/deleter
+stamps are unchanged. A stored NULL remains NULL; it is never mistaken for a
+missing field. A later UPDATE writes the resulting full row normally.
+
+A subsequent INSERT that omits the column uses the same default. Explicit NULL
+is stored for nullable columns and rejected for NOT NULL columns. A nullable
+addition with no default, or with `DEFAULT NULL`, yields NULL for old rows and
+omitted inserts. On a populated table, NOT NULL requires a non-null default;
+without one the statement fails. On an empty table, NOT NULL without a default
+is allowed, and future inserts must supply a value. The emptiness check considers
+current committed rows; historical row versions visible only to an older row
+snapshot retain a missing NULL field when such an addition has no default.
+
+Only literal defaults execute. `DEFAULT (1 + 2)`, function calls, parameters,
+CAST, and other expressions are rejected during planning, before schema or data
+mutation, using CREATE TABLE's diagnostic:
+`Column 'extra': only literal DEFAULT values are supported.` Defaults must
+convert to the declared storage type and fit its bounds, including string length
+and decimal precision/scale; invalid conversions and out-of-range defaults reject
+before publication. Strings are not truncated and decimals are not rounded.
+Approximate floating-point defaults use normal IEEE conversion rounding, but
+nonfinite results and nonzero values that underflow to zero are rejected.
+`COLLATE` on an added string column preserves the literal's
+original text and controls its comparisons and indexes, just as for CREATE TABLE.
+
+Publication changes the complete table definition atomically after validation;
+there is no row-rewrite phase to partially commit. A failed ADD COLUMN preserves
+the previous schema, rows, and catalog state. The default survives catalog reopen,
+so old-row reads recover the same values without any separate backfill journal.
+Already bound plans keep their immutable table definition. Ordinary statements
+planned after the change use the complete new definition, even in a transaction
+whose older MVCC snapshot still selects earlier row versions; missing fields
+resolve consistently from that statement's definition. Ordinary table schemas
+are not pinned to BEGIN. The separate INFORMATION_SCHEMA snapshot contract below
+is unchanged.
+
+DDL remains self-committing and is rejected inside an explicit transaction with
+`COHSQLT003`; it cannot be undone by a later ROLLBACK. ALTER against a code-owned
+table (`DatabaseObjectOwner.Schema`) remains refused unless performed by its
+owning schema deployment.
 
 ## Collation (#1025)
 

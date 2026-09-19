@@ -175,14 +175,17 @@ internal sealed partial class SqlPlanExecutor
     {
         await AcquireObjectLockAsync(statement, plan.Schema, plan.Name, "ALTER TABLE ADD COLUMN", cancellationToken).ConfigureAwait(false);
         _catalog.TryGetTable(plan.Schema, plan.Name, out var table);
-        if (plan.Constraints.Count == 0)
-        {
-            await _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken).ConfigureAwait(false);
-            return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
-        }
         if (table.FindColumn(plan.Column.Name) is not null)
         {
             throw new DatabaseException($"Column '{plan.Column.Name}' already exists.");
+        }
+
+        // Validate even on an empty table: publishing an unusable default would
+        // defer the failure until a later INSERT. No catalog or row writes occur
+        // until every default and existing-row constraint has been checked.
+        if (plan.Column.DefaultLiteral is not null)
+        {
+            ResolveDefault(plan.Column);
         }
 
         var columns = table.Columns.Append(plan.Column).ToArray();
@@ -196,9 +199,12 @@ internal sealed partial class SqlPlanExecutor
         var provisional = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema, table.Constraints);
         var constraints = BindConstraints(provisional, plan.Constraints);
         await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
+        constraints = BindConstraints(provisional, plan.Constraints);
         var replacement = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, primary, table.Owner, table.OwningSchema,
             table.Constraints.Concat(constraints).ToArray());
-        // Existing ADD COLUMN semantics decode missing trailing fields as NULL.
+        // Backfill is logical: missing trailing fields resolve from the immutable
+        // replacement metadata. Existing row bytes and MVCC stamps never change;
+        // one durable catalog publication makes the complete addition visible.
         var rows = Scan(replacement, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Select(row => row.Values).ToList();
         foreach (var row in rows)
         {
@@ -206,7 +212,14 @@ internal sealed partial class SqlPlanExecutor
         }
 
         ValidateRows(replacement, rows, statement, cancellationToken, current: true);
-        await PublishConstrainedTableAsync(replacement, plan.Constraints, statement, cancellationToken, replaceExisting: true).ConfigureAwait(false);
+        if (plan.Constraints.Count == 0)
+        {
+            await _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await PublishConstrainedTableAsync(replacement, plan.Constraints, statement, cancellationToken, replaceExisting: true).ConfigureAwait(false);
+        }
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
     }
 

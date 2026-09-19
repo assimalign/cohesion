@@ -1106,7 +1106,7 @@ internal sealed partial class SqlPlanExecutor
                     continue;
                 }
 
-                var values = SqlRowCodec.TryDecode(record.Span, table.ObjectId, table.Columns.Count, out var writer, out var deleter);
+                var values = DecodeRow(record.Span, table, out var writer, out var deleter);
 
                 if (values is null)
                 {
@@ -1282,7 +1282,7 @@ internal sealed partial class SqlPlanExecutor
             cancellationToken.ThrowIfCancellationRequested();
 
             var unit = iterator.Current;
-            var values = SqlRowCodec.TryDecode(unit.Data.Span, table.ObjectId, table.Columns.Count, out var writer, out var deleter);
+            var values = DecodeRow(unit.Data.Span, table, out var writer, out var deleter);
 
             if (values is not null)
             {
@@ -1375,18 +1375,4 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private static object? ResolveDefault(SqlCatalogColumn column)
-    {
-        if (column.DefaultLiteral is null)
-        {
-            if (!column.IsNullable)
-            {
-                throw new DatabaseException($"Column '{column.Name}' does not allow NULL and has no default.");
-            }
-
-            return null;
-        }
-
-        return CoerceForColumn(column.DefaultLiteral, column);
-    }
 }

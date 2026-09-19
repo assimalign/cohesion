@@ -33,6 +33,8 @@ public sealed class SqlLanguageConformanceTests
     {
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
+        // Phase 21 expands ALTER TABLE's measured subset without adding a named clause.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(33);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -127,24 +129,28 @@ public sealed class SqlLanguageConformanceTests
     private static void RequireExecutionCases(IEnumerable<string> clauses, IReadOnlyDictionary<string, ExecutionCase> cases)
         => clauses.Where(clause => !cases.ContainsKey(clause)).ShouldBeEmpty("Every advertised clause needs a live execution case.");
 
-    /// <summary>Records incorrect partial forms; these observations never count as positive clause coverage.</summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Partial clauses: record DEFAULT and ORDER BY execution limits")]
-    public async Task PartialForms_UnsupportedDefaultsAndOrdering_ShouldExposeMeasuredBoundaries()
+    /// <summary>Reverses the default audit failures while retaining the unsupported ordering observations.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Partial clauses: defaults backfill or reject atomically and ORDER BY limits remain explicit")]
+    public async Task PartialForms_DefaultsAndOrdering_ShouldMatchMeasuredBoundaries()
     {
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-partial" });
         var database = await engine.CreateDatabaseAsync("audit");
-        await using var session = await database.CreateSessionAsync();
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
         foreach (string setup in Seed) { await ExecuteAsync(session, setup); }
-        // #1023 must backfill literal defaults and reject/evaluate expression defaults before advertising them.
+        // #1023: the parsed expression must fail before publishing a column or changing old rows.
         string alter = "ALTER TABLE t ADD COLUMN extra INT DEFAULT (1 + 2);";
         new SqlQueryParser().Parse(alter).Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
-        (await ExecuteAsync(session, alter)).Status.ShouldBe(QueryResultStatus.Success);
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, alter)))
+            .Message.ShouldBe("Column 'extra': only literal DEFAULT values are supported.");
+        await ExpectRowsAsync(session, "SELECT * FROM t ORDER BY id;", [[1, "Ada", 36], [2, "Grace", 45], [3, "Alan", 41]]);
         await ExecuteAsync(session, "INSERT INTO t (id, name, age) VALUES (4, 'new', 1);");
-        await ExpectRowsAsync(session, "SELECT extra FROM t ORDER BY id;", [[null], [null], [null], [null]]);
+        (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT extra FROM t;")))
+            .Message.ShouldBe("Unknown column 'extra'.");
         await ExecuteAsync(session, "ALTER TABLE t ADD COLUMN literal_default INT DEFAULT 7;");
-        await ExpectRowsAsync(session, "SELECT literal_default FROM t ORDER BY id;", [[null], [null], [null], [null]]);
+        await ExpectRowsAsync(session, "SELECT id, name, age, literal_default FROM t ORDER BY id;",
+            [[1, "Ada", 36, 7], [2, "Grace", 45, 7], [3, "Alan", 41, 7], [4, "new", 1, 7]]);
         await ExecuteAsync(session, "INSERT INTO t (id, name, age) VALUES (5, 'next', 2);");
-        await ExpectRowsAsync(session, "SELECT extra, literal_default FROM t WHERE id = 5;", [[null, 7]]);
+        await ExpectRowsAsync(session, "SELECT literal_default FROM t WHERE id = 5;", [[7]]);
         // #1024 must bind projection aliases and ordinals before these forms count as correct execution.
         var aliasError = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "SELECT age AS years FROM t ORDER BY years;"));
         aliasError.Message.ShouldBe("Unknown column 'years'.");
@@ -226,7 +232,7 @@ public sealed class SqlLanguageConformanceTests
                 await ExecuteAsync(session, "INSERT INTO created (id) VALUES (7);");
                 await ExpectRowsAsync(session, "SELECT id, label FROM created;", [[7, "new"]]);
             }),
-        [SqlClauses.AlterTable] = new("ALTER TABLE t ADD COLUMN extra INT;", Seed,
+        [SqlClauses.AlterTable] = new("ALTER TABLE t ADD COLUMN extra INT NOT NULL DEFAULT 7;", Seed,
             expression => expression is SqlAlterTableExpression { Action: SqlAlterAddColumnAction }, VerifyAlterAsync),
         [SqlClauses.DropTable] = new("DROP TABLE t;", Seed,
             expression => expression is SqlDropTableExpression,
@@ -337,8 +343,13 @@ public sealed class SqlLanguageConformanceTests
     private static async Task VerifyAlterAsync(IDatabaseSession session, QueryResult result)
     {
         result.Status.ShouldBe(QueryResultStatus.Success);
-        await ExpectRowsAsync(session, "SELECT extra FROM t ORDER BY id;", [[null], [null], [null]]);
-        await ExecuteAsync(session, "UPDATE t SET extra = 7;");
+        await ExpectRowsAsync(session, "SELECT id, name, age, extra FROM t ORDER BY id;",
+            [[1, "Ada", 36, 7], [2, "Grace", 45, 7], [3, "Alan", 41, 7]]);
+        await ExecuteAsync(session, "ALTER TABLE t ADD COLUMN nullable_extra INT;");
+        await ExpectRowsAsync(session, "SELECT nullable_extra FROM t ORDER BY id;", [[null], [null], [null]]);
+        await ExecuteAsync(session, "ALTER TABLE t DROP COLUMN nullable_extra;");
+        await ExecuteAsync(session, "INSERT INTO t (id, name, age) VALUES (4, 'new', 1);");
+        await ExpectRowsAsync(session, "SELECT id, name, age, extra FROM t WHERE id = 4;", [[4, "new", 1, 7]]);
         await ExecuteAsync(session, "ALTER TABLE t ADD CONSTRAINT positive CHECK(extra > 0);");
         (await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "UPDATE t SET extra = 0 WHERE id = 1;")))
             .ConstraintKind.ShouldBe("CHECK");

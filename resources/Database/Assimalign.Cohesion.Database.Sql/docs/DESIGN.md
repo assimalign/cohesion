@@ -290,7 +290,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   shared tuple codec payload (#854): the owning table's object id, then one
   self-describing component per column. Why a fixed binary prefix and not
   tuple components (the rejected alternative): (a) stamps in front never
-  disturb ADD COLUMN's O(1) null-tail decode, which depends on missing
+  disturb ADD COLUMN's missing-tail decode, which depends on absent
   components being *trailing*; (b) fixed width makes tombstoning a same-length
   in-place write — a delete can never relocate a record; (c) stamp reads don't
   pay tuple-decode costs on the scan hot path. Since format version 3 the
@@ -332,9 +332,27 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   version-store ledger dies with the process; index entries reference
   locations only from format 3 onward, and a version-2 database cannot have
   SQL indexes).
-- **Schema evolution:** `ADD COLUMN` is O(1) — missing trailing components decode
-  as null; `DROP COLUMN` rewrites the table's rows (positional records), inside
-  the caller's transaction.
+- **Schema evolution (#1023):** `ADD COLUMN` validates the literal default and
+  current rows under the exclusive object lock before publishing the complete
+  replacement definition in one catalog transaction. Backfill is resolved at
+  read time from persisted column metadata; no existing row bytes, locations or
+  MVCC stamps are changed. `SqlRowCodec` reports how many fields were physically
+  present, and the executor resolves only the missing tail, on both scans and
+  index seeks. Explicit NULLs remain NULL. Default conversion is shared with
+  omitted-column INSERT values and rejects overflow, nonfinite floats, string
+  truncation, and decimal rounding or precision loss. Validation scans are
+  O(table); there is no physical backfill or cross-storage row/catalog commit.
+  A crash before catalog publication leaves the old definition; after publication
+  the same persisted default resolves old rows on reopen. Constrained additions
+  still build enforcing indexes durably before publication; a crash can leave
+  unpublished index pages, never a partly backfilled table.
+  Bound plans retain their immutable definition; later statements bind the full
+  new definition even with an older row snapshot. NOT NULL without a default
+  fails if any current row exists; historical deleted versions can still read
+  NULL under an older snapshot after an addition to a currently empty table.
+  `DROP COLUMN` rewrites positional records, materializing surviving defaults
+  while preserving version stamps. DDL is self-committing and refused in explicit
+  transactions. Schema-owned tables retain their existing live-session DDL guard.
 - **Expression evaluation** is interpretive with SQL null propagation (nulls
   reject predicates, comparisons with null are null, `AND`/`OR` are three-valued),
   numeric promotion to decimal, ordinal string comparison, hand-rolled `LIKE`

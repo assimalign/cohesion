@@ -586,13 +586,7 @@ internal sealed partial class SqlPlanner
         {
             var typeInfo = ResolveTypeName(definition.DataType, definition.ColumnName);
 
-            string? defaultLiteral = definition.DefaultValue switch
-            {
-                null => null,
-                SqlLiteralExpression literal => literal.LiteralType == SqlLiteralType.Null ? null : literal.Value,
-                _ => throw new DatabaseException(
-                    $"Column '{definition.ColumnName}': only literal DEFAULT values are supported."),
-            };
+            string? defaultLiteral = ResolveDefaultLiteral(definition);
 
             // PRIMARY KEY columns are implicitly NOT NULL.
             bool nullable = definition.IsNullable && !definition.IsPrimaryKey;
@@ -625,6 +619,15 @@ internal sealed partial class SqlPlanner
         }
         return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists, create.Constraints);
     }
+
+    /// <summary>Rejects unevaluated schema expressions before a DDL plan can mutate the catalog.</summary>
+    private static string? ResolveDefaultLiteral(SqlColumnDefinition definition) => definition.DefaultValue switch
+    {
+        null => null,
+        SqlLiteralExpression literal => literal.LiteralType == SqlLiteralType.Null ? null : literal.Value,
+        _ => throw new DatabaseException(
+            $"Column '{definition.ColumnName}': only literal DEFAULT values are supported."),
+    };
 
     /// <summary>Validates the column override without changing inherited database defaults.</summary>
     private static Collation? ResolveColumnCollation(SqlColumnDefinition definition, DatabaseTypeInfo type)
@@ -689,12 +692,6 @@ internal sealed partial class SqlPlanner
     {
         string schema = alter.Table.SchemaName ?? DefaultSchema;
 
-        if (alter.Action is SqlAlterAddColumnAction { Column.DefaultValue: not null } addition &&
-            ContainsCast(addition.Column.DefaultValue))
-        {
-            throw new DatabaseException("CAST in DEFAULT expressions is not supported; only literal DEFAULT values are supported.");
-        }
-
         return alter.Action switch
         {
             SqlAlterAddColumnAction add => new SqlAddColumnPlan(
@@ -704,7 +701,7 @@ internal sealed partial class SqlPlanner
                     add.Column.ColumnName,
                     ResolveTypeName(add.Column.DataType, add.Column.ColumnName),
                     add.Column.IsNullable && !add.Column.IsPrimaryKey,
-                    add.Column.DefaultValue is SqlLiteralExpression literal ? literal.Value : null,
+                    ResolveDefaultLiteral(add.Column),
                     ResolveColumnCollation(add.Column, ResolveTypeName(add.Column.DataType, add.Column.ColumnName))),
                 add.Column.Constraints),
             SqlAlterDropColumnAction drop => new SqlDropColumnPlan(schema, alter.Table.TableName, drop.ColumnName),

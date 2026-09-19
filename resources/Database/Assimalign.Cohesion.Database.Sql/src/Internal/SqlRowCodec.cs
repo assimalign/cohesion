@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// catalog column order. The object-id prefix is what lets multiple tables share
 /// one record space (scans filter by it); the fixed-width stamp header is what
 /// makes tombstoning an in-place, same-length update (a deleter stamp never
-/// relocates a record) and keeps ADD COLUMN's O(1) null-tail decode intact
+/// relocates a record) and keeps ADD COLUMN's missing-tail decode intact
 /// (stamps sit in front of the tuple, never after the columns).
 /// </summary>
 internal static class SqlRowCodec
@@ -90,19 +90,22 @@ internal static class SqlRowCodec
     /// <summary>
     /// Decodes a stamped record when it belongs to the expected table; returns
     /// null when the record belongs to a different object or is too short to
-    /// carry a stamp header. Missing trailing columns read as nulls, which is how
-    /// ADD COLUMN stays O(1). The version stamps are returned alongside the
-    /// values — visibility is the caller's decision, made against its snapshot.
+    /// carry a stamp header. Returns the stored column count so the caller can
+    /// resolve absent trailing fields from its bound catalog definition without
+    /// confusing them with explicitly stored NULLs. Visibility is the caller's
+    /// decision, made against its snapshot and the returned version stamps.
     /// </summary>
     internal static object?[]? TryDecode(
         ReadOnlySpan<byte> record,
         ulong objectId,
         int columnCount,
         out TransactionSequence writer,
-        out TransactionSequence deleter)
+        out TransactionSequence deleter,
+        out int storedColumnCount)
     {
         writer = default;
         deleter = default;
+        storedColumnCount = 0;
 
         if (record.Length < StampHeaderSize)
         {
@@ -124,11 +127,11 @@ internal static class SqlRowCodec
         {
             if (reader.IsAtEnd)
             {
-                values[i] = null; // column added after this row was written
-                continue;
+                break; // column added after this row version was written
             }
 
             values[i] = ReadValue(ref reader);
+            storedColumnCount++;
         }
 
         return values;
