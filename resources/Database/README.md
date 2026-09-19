@@ -43,7 +43,6 @@ flowchart LR
     P2["Database.Client"]
     P3["Database.Hosting — runtime module"]
     P4["Database.Testing"]
-    MAPPING["Database.Mapping"]
     CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
     APPMODEL["Assimalign.Cohesion.ApplicationModel — L2"]
@@ -53,7 +52,6 @@ flowchart LR
     P1 --> APPMODEL
     P1 --> HOSTFAM
     P2 --> P0
-    MAPPING --> P0
     P3 --> P0
     P3 --> HOSTFAM
     P3 -->|"private"| PRIV
@@ -77,7 +75,7 @@ be done through abstractions alone, so the project declares
 holder needs the deviation protocol in `.claude/rules/deviations.md`.
 
 The diagram is the area's **spine** — the root, the runtime module, the hosting-family
-integrations, the declarative plane, and the mapping, client and test packages. The area has more
+integrations, the declarative plane, and the client and test packages. The area has more
 projects than one readable diagram holds; the table below and `docs/DEPENDENCIES.md` carry
 them all.
 
@@ -135,8 +133,6 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 |---|---|
 | `Assimalign.Cohesion.Database.Protocol` | Child root — framing, handshake, lifecycle, errors, version negotiation, and immutable model-family binding |
 | `Assimalign.Cohesion.Database.Client` | Shared client core: connection settings, pooling, handshake, framing, and model-exchange lifetime; model clients materialize results |
-| `Assimalign.Cohesion.Database.Mapping` | [Model-agnostic object mapping](Assimalign.Cohesion.Database.Mapping/docs/OVERVIEW.md): entity identity, explicit snapshot change tracking, transactional units of work, and contracts implemented by compile-time mappers; [design and extension seams](Assimalign.Cohesion.Database.Mapping/docs/DESIGN.md) |
-| `Assimalign.Cohesion.Database.Sql.Mapping` | [Relational mapping](Assimalign.Cohesion.Database.Sql.Mapping/docs/OVERVIEW.md): schema-generated entity maps, typed SQL queries and transactional change tracking over the SQL client; [ownership and transaction outcome boundaries](Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md) |
 | `Assimalign.Cohesion.Database.Security` | Child root — authN/authZ contracts (principals, roles, permissions) |
 | `Assimalign.Cohesion.Database.Replication` | Shared replication contracts (WAL log-shipping seam) |
 | `Assimalign.Cohesion.Database.Governance` | Child root — quotas, tenancy boundaries, audit events |

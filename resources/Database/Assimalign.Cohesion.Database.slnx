@@ -406,17 +406,6 @@
 	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Language/tests/">
 		<Project Path="Assimalign.Cohesion.Database.Language/tests/Assimalign.Cohesion.Database.Language.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Mapping/" />
-	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Mapping/docs/">
-		<File Path="Assimalign.Cohesion.Database.Mapping/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.Database.Mapping/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Mapping/src/">
-		<Project Path="Assimalign.Cohesion.Database.Mapping/src/Assimalign.Cohesion.Database.Mapping.csproj" />
-	</Folder>
-	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Mapping/tests/">
-		<Project Path="Assimalign.Cohesion.Database.Mapping/tests/Assimalign.Cohesion.Database.Mapping.Tests.csproj" />
-	</Folder>
 	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Memory/" />
 	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Memory/src/">
 		<Project Path="Assimalign.Cohesion.Database.Memory/src/Assimalign.Cohesion.Database.Memory.csproj" />
@@ -502,17 +491,6 @@
 	</Folder>
 	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Replication/tests/">
 		<Project Path="Assimalign.Cohesion.Database.Sql.Replication/tests/Assimalign.Cohesion.Database.Sql.Replication.Tests.csproj" />
-	</Folder>
-	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Mapping/" />
-	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Mapping/docs/">
-		<File Path="Assimalign.Cohesion.Database.Sql.Mapping/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.Database.Sql.Mapping/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Mapping/src/">
-		<Project Path="Assimalign.Cohesion.Database.Sql.Mapping/src/Assimalign.Cohesion.Database.Sql.Mapping.csproj" />
-	</Folder>
-	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Mapping/tests/">
-		<Project Path="Assimalign.Cohesion.Database.Sql.Mapping/tests/Assimalign.Cohesion.Database.Sql.Mapping.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Schema/" />
 	<Folder Name="/Database/Models/Sql/Assimalign.Cohesion.Database.Sql.Schema/docs/">

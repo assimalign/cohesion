@@ -18,21 +18,6 @@ the AOT-compatible `Database.Sql.Schema` package, but the task and Roslyn assemb
 runtime closure. The task references only `Database.Sql.Schema`; it does not pull the SQL
 engine, its storage implementation, or `Connections.Tcp` into MSBuild.
 
-## Mapper generation delivery
-
-The Database targeting pack bundles `Assimalign.Cohesion.SourceGeneration.Database` as a compiler
-analyzer. The SDK exposes `CohesionGenerateDatabaseMappers` through `CompilerVisibleProperty`;
-the consuming application must set it to `true` to enable mapping generation. Missing or false
-values leave schema-only applications unaffected. This opt-in is independent of
-`CohesionDatabaseProject`, which controls the schema artifact and migration tasks. Both paths
-read the application's existing C# schema declarations; the flag supplies no duplicate schema
-metadata and neither path executes the consumer's schema callback in the compiler.
-
-The generator's emitted code uses the shared `Database.Mapping` runtime contracts. The generator
-assembly itself runs only in the compiler and is not added to the application's runtime closure.
-SDK tests evaluate the real props/manifest imports to verify the opt-in is compiler-visible,
-consumer-controlled and delivered alongside its runtime contract.
-
 ## Orchestration commands
 
 When `CohesionApplicationModel=enabled`, the base manifest task writes this SDK's

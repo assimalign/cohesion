@@ -28,10 +28,6 @@
     <Project Path="Assimalign.Cohesion.SourceGeneration.ComponentModel/tests/Assimalign.Cohesion.SourceGeneration.ComponentModelTests.csproj" />
   </Folder>
   <Folder Name="/Assimalign.Cohesion.SourceGeneration.Database/" />
-  <Folder Name="/Assimalign.Cohesion.SourceGeneration.Database/docs/">
-    <File Path="Assimalign.Cohesion.SourceGeneration.Database/docs/DESIGN.md" />
-    <File Path="Assimalign.Cohesion.SourceGeneration.Database/docs/OVERVIEW.md" />
-  </Folder>
   <Folder Name="/Assimalign.Cohesion.SourceGeneration.Database/src/">
     <Project Path="Assimalign.Cohesion.SourceGeneration.Database/src/Assimalign.Cohesion.SourceGeneration.Database.csproj" />
   </Folder>
