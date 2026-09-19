@@ -22,15 +22,17 @@ flowchart LR
 
 | Package | Responsibility |
 | --- | --- |
-| `Assimalign.Cohesion.Database.Blob.Client` | Typed operation APIs, bounded download/list materialization, client errors |
-| `Assimalign.Cohesion.Database.Client` | Pool leases, transport dialing, startup handshake, complete framed exchanges |
+| `Assimalign.Cohesion.Database.Blob.Client` | Typed operation APIs, Blob transfer validation, bounded list materialization, client errors |
+| `Assimalign.Cohesion.Database.Client` | Pool leases, transport dialing, startup handshake, framed exchanges, bounded streaming lifetime |
 | `Assimalign.Cohesion.Database.Blob` | Blob codecs, shared transfer state machine, engine and server |
 | `Assimalign.Cohesion.Database.Protocol` | Family validation, frame envelope, startup and error vocabulary |
 | `Assimalign.Cohesion.Connections` | Transport-neutral connection factory |
 
-Public APIs are new client interfaces, a static factory, options, and a typed exception.
-Existing engine, protocol, and shared client interfaces are unchanged. Explicit codecs and
-ordinary generic delegates keep the implementation NativeAOT compatible without reflection.
+Public APIs are client interfaces, a static factory, options, and a typed exception.
+Blob consumes the shared streaming exchange contract without changing its own caller-facing
+connection contract or its model's wire protocol. Explicit codecs and ordinary generic
+delegates keep the implementation compatible with `net10.0` and NativeAOT without reflection.
+The streaming migration adds no dependencies or shipped-library `InternalsVisibleTo` grants.
 
 ## Upload and atomic publication
 
@@ -54,17 +56,19 @@ return is stronger: it confirms receipt of the matching publication acknowledgem
 
 ## Streaming downloads and bounded memory
 
-`IDatabaseProtocolExchange` must consume a complete exchange before returning and prohibits
-retaining its frame reader or writer after return. A download therefore keeps that exchange
-running as an asynchronous producer. The public `DownloadAsync` returns only after this producer
-validates `TransferStart`; errors before startup fail the method itself. The producer passes
-the metadata and frame adapters to `BlobProtocolTransfer.ReceiveAsync`. It does not implement
-another chunk or acknowledgement state machine.
+Downloads implement `IDatabaseStreamingExchange`. Its `OpenAsync` phase sends the Blob read
+request and validates `TransferStart`; `DownloadAsync` returns only after that validation,
+so errors before startup fail the method itself. Its `CopyToAsync` phase passes the metadata,
+frame adapters, and borrowed destination stream to `BlobProtocolTransfer.ReceiveAsync`, which
+verifies chunks, counts, acknowledgements, and terminal completion. This is Blob-specific wire
+work. The shared client runs the producer and owns the content stream and its lifetime.
+`BlobDownloadStream` is only an exception facade over that shared stream.
 
-The returned `Stream` reads from a single-slot bounded queue. The destination adapter copies
-one received chunk into a queue entry because incoming frame payload ownership belongs to
-the frame reader. Once the queue fills, destination writes wait for consumer progress, which
-also stops further protocol acknowledgements. Content memory is bounded by the consumer's
+The shared content stream reads from a single-slot bounded queue. The shared destination
+adapter copies received content into entries no larger than 65,536 bytes because incoming
+frame payload ownership belongs to the frame reader. Once the queue fills, destination writes
+wait for consumer progress, which also stops further protocol acknowledgements. Content memory
+is bounded by the consumer's
 current chunk, one queued chunk, a pending destination chunk, and a fixed number of frame/source
 buffers, independent of object length. Caller-controlled read/copy buffers are additional.
 The server must use file-backed storage for objects larger than its heap; an in-memory engine
@@ -79,22 +83,22 @@ sequenceDiagram
     participant E as Shared exchange
     participant S as Blob server
     A->>C: DownloadAsync
-    C->>E: ExecuteAsync (remains active)
+    C->>E: ExecuteStreamingAsync
     E->>S: Read
     S-->>E: TransferStart
+    E-->>C: Shared stream after startup validation
     C-->>A: Stream
     loop Bounded content flow
         S-->>E: Chunk
-        E->>C: Await bounded destination write
-        A->>C: ReadAsync
+        E->>E: Await bounded destination write
+        A->>E: ReadAsync through Blob facade
         E-->>S: ChunkAcknowledgement
     end
     S-->>E: TransferComplete
-    E-->>C: Verified exchange completion
-    C-->>A: EOF after queued content is consumed
+    E-->>A: EOF after verified completion and queued content
 ```
 
-The producer records failure independently of queue completion. Reads consult that sticky
+The shared producer records failure independently of queue completion. Reads consult that sticky
 failure before returning content and before returning EOF. Queue exhaustion alone never
 means success: EOF requires verified protocol completion. A server error, connection truncation,
 or invalid count throws `BlobClientException`, even if earlier reads yielded valid chunks.
@@ -105,15 +109,17 @@ are unsupported even when the server declared a length.
 ## Cancellation, disposal, and pooled leases
 
 Each connection allows only one exchange. Starting another while one is active fails promptly
-with `InvalidOperationException`. The typed connection retains its shared pool lease until it
-is disposed; a background producer cannot accidentally return that lease while using frames.
+with `InvalidOperationException`. Downloads call `IDatabaseConnection.ExecuteStreamingAsync`,
+so a healthy typed connection retains its caller-owned shared pool lease until connection
+disposal; a background producer cannot accidentally return that lease while using frames.
 Normal verified completion releases the operation slot, even if some verified bytes remain
 in the download's bounded local queue. Dispose downloads before starting subsequent work.
 
-The download-start token is linked to the connection lifetime and remains active on the
-returned stream. A token passed to any asynchronous read cancels the whole transfer, including
-a producer blocked on a full queue or awaiting a wire frame. Stream disposal cancels an
-unfinished producer, waits for its completion and connection teardown, and discards remaining
+The download-start token remains active on the returned stream. Disposing the connection
+cancels and joins an active producer. A token passed to any asynchronous read cancels the whole transfer, including
+a producer blocked on a full queue or awaiting a wire frame. Synchronous or asynchronous stream
+disposal cancels an unfinished producer, waits for its completion and connection teardown, and
+discards remaining
 queued bytes. It suppresses already-recorded transfer failures; reads are the error surface.
 Disposing a fully completed stream leaves the connection healthy. Connection disposal cancels
 and joins any current operation before returning its lease. Disposing a pooled client follows
@@ -126,13 +132,25 @@ closure wakes the server and causes unfinished uploads to roll back. No retry or
 
 ## Errors and metadata operations
 
-A model reader adapter recognizes shared `Error` frames and throws `BlobClientException`
-with their original code and message before the generic transfer helper can collapse them
-into `ProtocolException`. This exception deliberately derives from `DatabaseException`, not
-`DatabaseClientException`: the shared pool considers `ExecutionFailure` reusable for completed
-tabular commands, whereas every Blob server error terminates its session. The adapter therefore
-makes shared exchange invalidation unconditional without changing an existing interface.
-Other shared client errors are translated to the same Blob exception after invalidation.
+A model reader adapter recognizes shared `Error` frames and throws `DatabaseClientException`
+with their original code and message before `BlobProtocolTransfer` can collapse them into
+`ProtocolException`. Preserving diagnostics at that helper boundary remains necessary, but
+the adapter no longer changes the exception type to force pool invalidation. The shared pool
+uses the exchange's completion evidence instead of inspecting the error code. Blob failures
+never certify that the session is reusable: every Blob server error terminates its session,
+and an abandoned transfer may retain unread frames.
+
+The typed operation boundary and the download stream facade translate shared client errors to
+`BlobClientException` only after shared health processing. This retains the existing Blob error
+surface, original wire code, and sticky read failures. Ordinary Blob operations also retain their
+frame-only adapters for completed transport pipes that report `InvalidOperationException`:
+these preserve existing Blob upload and metadata diagnostics without changing SQL or Key-Value
+transport behavior. Downloads use the shared streaming frame adapters for that normalization.
+These adapters do not control connection health or intercept errors from caller-owned streams.
+Blob-specific codecs, transfer validation,
+acknowledgements, publication acknowledgement, metadata shapes, and typed exception mapping
+remain in Blob; producer coordination, content buffering, cancellation, and connection release
+belong to the shared client.
 
 Delete accepts only an operation completion count of zero or one. Properties accepts a single
 matching item followed by completion(1), or completion(0) for absence. Listings yield metadata
@@ -156,8 +174,8 @@ or expose a buffered byte-array content API. Tests use `Connections.InMemory`, i
 nonseekable content, interrupted uploads, cancellation in both directions, server errors,
 scoping, pooling, and a file-backed transfer materially larger than a child process's managed heap.
 
-The family integration exposed two concrete limitations: transfer helpers originally accepted
-only `ProtocolChannel` while shared exchanges expose frame reader/writer pairs, and shared
-pool error reuse is based on SQL-like error codes. Additive helper overloads and the model
-error adapter solve this without changing existing public interfaces; the phase escalation
-record documents the design pressure for future models.
+The shared streaming contract also supports test-level consumers from a second model, so
+future Documents and Graph clients can supply their own startup and content protocol without
+copying Blob's former queue, producer, cancellation, or rental-release machinery. Listings
+remain a Blob-owned bounded typed enumeration: they produce metadata items rather than a
+content stream and validate Blob-specific prefix and item-count rules.

@@ -24,14 +24,18 @@ internal sealed class GraphCatalogTestExchange(string statement) : IDatabaseProt
 {
     public ProtocolMessageFamily Family => GraphProtocol.Family;
 
+    public bool IsResponseComplete { get; private set; }
+
     public async ValueTask<GraphCatalogTestResult> ExecuteAsync(IProtocolFrameReader reader,
         IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
     {
+        IsResponseComplete = false;
         await writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.Execute,
             GraphProtocolExecuteMessage.Create(statement).Encode()), cancellationToken);
         await writer.FlushAsync(cancellationToken);
         var columns = new List<(string Name, DatabaseType Type)>();
         var rows = new List<object?[]>();
+        bool hasResultFrames = false;
         while (true)
         {
             var frame = await reader.ReadFrameAsync(cancellationToken)
@@ -39,18 +43,26 @@ internal sealed class GraphCatalogTestExchange(string statement) : IDatabaseProt
             switch (frame.Type)
             {
                 case (ProtocolMessageType)GraphProtocolMessageType.ResultHeader:
+                    hasResultFrames = true;
                     foreach (var column in GraphProtocolResultHeaderMessage.Decode(frame.Payload.Span).Columns)
                     {
                         columns.Add((column.Name, (DatabaseType)column.Type));
                     }
                     break;
                 case (ProtocolMessageType)GraphProtocolMessageType.ResultRow:
+                    hasResultFrames = true;
                     rows.Add(DecodeRow(frame.Payload.Span, columns.Count));
                     break;
                 case (ProtocolMessageType)GraphProtocolMessageType.ResultComplete:
-                    return new(columns, rows, GraphProtocolResultCompleteMessage.Decode(frame.Payload.Span).AffectedCount);
+                    var complete = GraphProtocolResultCompleteMessage.Decode(frame.Payload.Span);
+                    IsResponseComplete = true;
+                    return new(columns, rows, complete.AffectedCount);
                 case ProtocolMessageType.Error:
                     var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
+                    // The Graph server rejects catalog statements before emitting results,
+                    // then returns to its ready loop. Errors after results do not certify that boundary.
+                    IsResponseComplete = !hasResultFrames &&
+                        error.Code is ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure;
                     throw new DatabaseClientException(error.Code, error.Message);
                 default:
                     throw new ProtocolException("Unexpected catalog response.");

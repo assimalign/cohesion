@@ -26,6 +26,10 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
     private bool _isOpen;
     private bool _isRented;
     private bool _isClosed;
+    private readonly object _exchangeLock = new();
+    private CancellationTokenSource? _operation;
+    private TaskCompletionSource? _exchangeCompletion;
+    private Task? _returnTask;
 
     internal PooledDatabaseConnection(DefaultDatabaseClient owner, IConnectionFactory connectionFactory, DatabaseConnectionSettings settings, ProtocolMessageFamily family)
     {
@@ -52,7 +56,14 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
     /// <inheritdoc />
     public ProtocolMessageFamily Family { get; }
 
-    internal void MarkRented() => _isRented = true;
+    internal void MarkRented()
+    {
+        lock (_exchangeLock)
+        {
+            _isRented = true;
+            _returnTask = null;
+        }
+    }
 
     /// <inheritdoc />
     public async ValueTask OpenAsync(CancellationToken cancellationToken = default)
@@ -117,19 +128,33 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
         {
             throw new ArgumentException("The exchange belongs to a different message family.", nameof(exchange));
         }
-        if (!IsOpen)
+        CancellationTokenSource operation;
+        TaskCompletionSource completion;
+        lock (_exchangeLock)
         {
-            throw new DatabaseClientException(ProtocolErrorCode.Internal, "The connection is not open.");
+            if (!IsOpen)
+            {
+                throw new DatabaseClientException(ProtocolErrorCode.Internal, "The connection is not open.");
+            }
+            ObjectDisposedException.ThrowIf(!_isRented, this);
+            if (_operation is not null)
+            {
+                throw new InvalidOperationException("An exchange is already active on this connection.");
+            }
+            operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _operation = operation;
+            _exchangeCompletion = completion;
         }
 
         try
         {
-            return await exchange.ExecuteAsync(_reader!, _writer!, cancellationToken).ConfigureAwait(false);
+            return await exchange.ExecuteAsync(_reader!, _writer!, operation.Token).ConfigureAwait(false);
         }
-        catch (DatabaseClientException exception)
+        catch (DatabaseClientException)
         {
-            // Only complete statement failures leave the session ready for reuse.
-            if (exception.Code is not (ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure))
+            // The exchange knows whether it consumed a terminal, reusable response.
+            if (!exchange.IsResponseComplete)
             {
                 _isOpen = false;
             }
@@ -143,25 +168,63 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
         {
             throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, "The connection failed during an exchange.", exception));
         }
-        catch
+        catch (OperationCanceledException)
         {
             // Cancellation or a failed decoder may leave an unfinished response.
             _isOpen = false;
             throw;
         }
+        catch
+        {
+            if (!exchange.IsResponseComplete)
+            {
+                _isOpen = false;
+            }
+            throw;
+        }
+        finally
+        {
+            lock (_exchangeLock)
+            {
+                _operation = null;
+                _exchangeCompletion = null;
+                operation.Dispose();
+                completion.TrySetResult();
+            }
+        }
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        if (_isRented)
-        {
-            _isRented = false;
-            await _owner.ReturnAsync(this).ConfigureAwait(false);
-            return;
-        }
+    public ValueTask<Stream> ExecuteStreamingAsync(IDatabaseStreamingExchange exchange, CancellationToken cancellationToken = default)
+        => DatabaseDownloadStream.CreateAsync(this, exchange, cancellationToken);
 
-        await CloseAsync().ConfigureAwait(false);
+    /// <inheritdoc />
+    public ValueTask DisposeAsync()
+    {
+        lock (_exchangeLock)
+        {
+            if (_returnTask is not null)
+            {
+                return new ValueTask(_returnTask);
+            }
+            if (!_isRented)
+            {
+                return ValueTask.CompletedTask;
+            }
+            _isRented = false;
+            _operation?.Cancel();
+            _returnTask = ReturnAfterExchangeAsync(_exchangeCompletion?.Task);
+            return new ValueTask(_returnTask);
+        }
+    }
+
+    private async Task ReturnAfterExchangeAsync(Task? completion)
+    {
+        if (completion is not null)
+        {
+            await completion.ConfigureAwait(false);
+        }
+        await _owner.ReturnAsync(this).ConfigureAwait(false);
     }
 
     /// <summary>

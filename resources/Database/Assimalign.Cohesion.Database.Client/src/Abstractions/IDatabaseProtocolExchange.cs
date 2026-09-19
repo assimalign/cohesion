@@ -14,6 +14,15 @@ public interface IDatabaseProtocolExchange<TResult>
     /// <summary>Gets the exact family instance required by this operation.</summary>
     ProtocolMessageFamily Family { get; }
 
+    /// <summary>Gets whether a failed invocation consumed a terminal response and left the session ready for another exchange.</summary>
+    /// <remarks>
+    /// The default is false: an unverified failure must discard the connection regardless of its error code.
+    /// Implementations reset this state before each invocation and set it only after validating a complete,
+    /// reusable response. Successful return already guarantees completion. Transport and framing failures
+    /// always invalidate the connection, even if this property is true.
+    /// </remarks>
+    bool IsResponseComplete => false;
+
     /// <summary>Writes the request and consumes the model's response exchange.</summary>
     /// <param name="reader">The connection's family-validating frame reader.</param>
     /// <param name="writer">The connection's family-validating frame writer.</param>

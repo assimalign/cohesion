@@ -83,23 +83,28 @@ internal sealed class DefaultDatabaseClient : IDatabaseClient
     /// </summary>
     internal async ValueTask ReturnAsync(PooledDatabaseConnection connection)
     {
-        if (!_isDisposed && connection.IsOpen)
-        {
-            _idle.Push(connection);
-        }
-        else
-        {
-            await connection.CloseAsync().ConfigureAwait(false);
-        }
-
         try
         {
-            _slots.Release();
+            if (!_isDisposed && connection.IsOpen)
+            {
+                _idle.Push(connection);
+            }
+            else
+            {
+                await connection.CloseAsync().ConfigureAwait(false);
+            }
         }
-        catch (ObjectDisposedException)
+        finally
         {
-            // The client was disposed while this connection was rented; nothing
-            // waits on the slot anymore.
+            try
+            {
+                _slots.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The client was disposed while this connection was rented; nothing
+                // waits on the slot anymore.
+            }
         }
     }
 
