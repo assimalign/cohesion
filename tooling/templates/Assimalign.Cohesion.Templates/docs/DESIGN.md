@@ -128,3 +128,16 @@ and rehearsed in a scratch module. The root solution and README updates follow t
 Filler resource programs hold the concrete Hosting builder, apply area verbs before Build(),
 and retain the concrete application with await using before calling RunAsync. This keeps host
 execution and disposal available while the root interfaces carry only area contracts.
+
+
+## Phase 29 Database composition migration
+
+Database programs now capture `AddSql((context, engine) => ...)` intent, register
+the server through that engine builder's deferred `AddServer` factory, and
+identify deferred provisioning with the engine name. One application Build
+constructs and owns the engine and nested server; the program disposes the
+application. The standalone template still uses its ordinary local data path.
+This migration changes composition only; it adds no ApplicationModel declarations,
+manifests or resource control planes. Template acceptance explicitly builds all
+five emitted Database programs because resources-only changes do not trigger the
+Templates workflow.

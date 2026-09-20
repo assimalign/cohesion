@@ -3,15 +3,18 @@ using System;
 using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Hosting;
 using Acme.Database;
 
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 
-await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
+builder.AddSql((_, options) =>
 {
     options.EngineName = "acme-sql";
     options.RootPath = Resource.Mounts.Data.Path
         ?? throw new InvalidOperationException("The database data mount must have a materialized path.");
+    options.AddServer(engine => SqlDatabaseServer.Create(
+        (SqlDatabaseEngine)engine, new SqlDatabaseServerOptions().Listen(Resource.Endpoints.Db)));
 });
 
 SqlCompiledSchema schema = SqlSchema.Compile("customers", database =>
@@ -26,9 +29,7 @@ SqlCompiledSchema schema = SqlSchema.Compile("customers", database =>
         principal => principal.Grant(SqlPermission.ReadWrite, "Customers"));
 });
 
-builder.AddDatabase(engine, "customers", schema);
-
-builder.AddSqlServer(engine, options => options.Listen(Resource.Endpoints.Db));
+builder.AddDatabase("acme-sql", "customers", schema);
 
 await using DatabaseApplication application = builder.Build();
 await application.RunAsync();

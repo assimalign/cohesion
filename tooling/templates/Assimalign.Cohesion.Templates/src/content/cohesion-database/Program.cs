@@ -4,13 +4,16 @@ using System.IO;
 using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Hosting;
 
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 
-await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
+builder.AddSql((_, options) =>
 {
     options.EngineName = "__RESOURCE_NAME__";
     options.RootPath = Path.Combine(AppContext.BaseDirectory, "data");
+    options.AddServer(engine => SqlDatabaseServer.Create(
+        (SqlDatabaseEngine)engine, new SqlDatabaseServerOptions().Listen(new Uri("cohesion-db://localhost:5740"))));
 });
 
 SqlCompiledSchema schema = SqlSchema.Compile("customers", database =>
@@ -25,9 +28,7 @@ SqlCompiledSchema schema = SqlSchema.Compile("customers", database =>
         principal => principal.Grant(SqlPermission.ReadWrite, "Customers"));
 });
 
-builder.AddDatabase(engine, "customers", schema);
-
-builder.AddSqlServer(engine, options => options.Listen(new Uri("cohesion-db://localhost:5740")));
+builder.AddDatabase("__RESOURCE_NAME__", "customers", schema);
 
 await using DatabaseApplication application = builder.Build();
 await application.RunAsync();
