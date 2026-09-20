@@ -216,7 +216,7 @@ public class IniConfigurationParserTests
     }
 
     // The parser is internal to the production assembly. Reach it via reflection so
-    // these tests stay grammar-focused without needing an InternalsVisibleTo hook.
+    // these tests stay grammar-focused without needing a friend-assembly grant.
     // Trim warnings (IL2026/IL2075) are intentional: this is test-only reflection
     // and we never trim the test assembly.
     [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(

@@ -6,14 +6,14 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Database.Sql.Schema;
 
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
 /// <summary>
 /// Tests for the application builder — the area's instance of the cross-area
-/// builder pattern: engines, lifecycle services, and servers register against the root's
-/// <c>IDatabaseApplicationBuilder</c> seam, a deferred server factory receives the
-/// application context at build (the Web shape), and the built
+/// builder pattern: engine factories register against the root's
+/// <c>IDatabaseApplicationBuilder</c> seam, nested servers are flattened at Build, and the built
 /// <c>IDatabaseApplication</c> exposes the composition through its context.
 /// </summary>
 public class DatabaseApplicationBuilderTests
@@ -26,10 +26,9 @@ public class DatabaseApplicationBuilderTests
         IDatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
 
         builder.AddEngine(engine);
-        builder.Engines.ShouldHaveSingleItem();
 
         // Act
-        IDatabaseApplication application = builder.Build();
+        await using IDatabaseApplication application = builder.Build();
         await application.StartAsync(DatabaseHostTestHarness.Timeout());
 
         // Assert: the context carries the server-less registration; the engine is a
@@ -53,8 +52,8 @@ public class DatabaseApplicationBuilderTests
 
         // Act
         DatabaseApplicationBuilder returnedBuilder = builder.AddService(service);
-        builder.AddServer(server);
-        IDatabaseApplication application = builder.Build();
+        builder.Options.Servers.Add(server);
+        await using IDatabaseApplication application = builder.Build();
         await application.StartAsync(DatabaseHostTestHarness.Timeout());
         await application.StopAsync(DatabaseHostTestHarness.Timeout());
 
@@ -76,7 +75,7 @@ public class DatabaseApplicationBuilderTests
         IDatabaseApplicationContext? observedContext = null;
         int factoryCalls = 0;
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.AddServer(server);
+        engine.AddServer(_ => server);
         builder.AddService(firstService);
         builder.AddService(context =>
         {
@@ -87,7 +86,7 @@ public class DatabaseApplicationBuilderTests
         builder.AddEngine(engine);
 
         // Act
-        IDatabaseApplication application = builder.Build();
+        await using IDatabaseApplication application = builder.Build();
         await application.StartAsync(DatabaseHostTestHarness.Timeout());
         await application.StopAsync(DatabaseHostTestHarness.Timeout());
 
@@ -106,26 +105,29 @@ public class DatabaseApplicationBuilderTests
             "first-service:stop"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Deferred server factory receives the context with the final engine list")]
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Deferred engine factory nests its endpoint and observes preceding engines")]
     public async Task Build_WithDeferredServerFactory_ShouldComposeEndpointOverContext()
     {
-        // Arrange: the server factory is registered BEFORE the engine — it must
-        // still see the full engine list, because it runs at Build with the context.
+        // Arrange: engine factories observe earlier registrations and construct
+        // servers only after their own engine exists.
         var log = new List<string>();
         var engine = new RecordingEngine();
-        var server = new RecordingServer(log, "deferred");
+        RecordingServer? server = null;
         IReadOnlyList<IDatabaseEngine>? observedEngines = null;
 
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.AddServer(context =>
-        {
-            observedEngines = context.Engines;
-            return server;
-        });
         builder.AddEngine(engine);
+        builder.AddEngine(context =>
+        {
+            observedEngines = [.. context.Engines];
+            var endpointEngine = new RecordingEngine("endpoint-engine");
+            endpointEngine.AddServer(owner => server = new RecordingServer(log, "deferred", owner));
+            return endpointEngine;
+        });
+        server.ShouldBeNull();
 
         // Act
-        DatabaseApplication application = builder.Build();
+        await using DatabaseApplication application = builder.Build();
         await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
         await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
 
@@ -137,33 +139,30 @@ public class DatabaseApplicationBuilderTests
         log.ShouldBe(["deferred:start", "deferred:stop"]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Multiple servers register — one per model — and resolve in registration order")]
-    public async Task AddServer_MultipleRegistrations_ShouldComposeAllInOrder()
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Nested servers flatten in engine and server registration order")]
+    public async Task Build_WithMultipleNestedServers_ShouldComposeAllInOrder()
     {
-        // Arrange: an instance registration plus a deferred factory that observes
-        // the server registered ahead of it through the context.
+        // Arrange: servers belong to the same engine; the application discovers
+        // their fixed order when the engine factory returns.
         var log = new List<string>();
-        var first = new RecordingServer(log, "first");
-        var second = new RecordingServer(log, "second");
-        IReadOnlyList<IDatabaseServer>? observedServers = null;
+        RecordingServer? first = null;
+        RecordingServer? second = null;
 
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.AddServer(first);
-        builder.AddServer(context =>
+        builder.AddEngine(_ =>
         {
-            observedServers = [.. context.Servers];
-            return second;
+            var engine = new RecordingEngine();
+            engine.AddServer(owner => first = new RecordingServer(log, "first", owner));
+            engine.AddServer(owner => second = new RecordingServer(log, "second", owner));
+            return engine;
         });
 
         // Act
-        DatabaseApplication application = builder.Build();
+        await using DatabaseApplication application = builder.Build();
         await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
         await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
 
-        // Assert: both servers composed in registration order; the deferred factory
-        // saw the first server already registered; stop drains in reverse.
-        observedServers.ShouldNotBeNull();
-        observedServers.ShouldHaveSingleItem().ShouldBeSameAs(first);
+        // Assert: nested server order is stable and stop drains in reverse.
         application.Context.Servers.Count.ShouldBe(2);
         application.Context.Servers[0].ShouldBeSameAs(first);
         application.Context.Servers[1].ShouldBeSameAs(second);
@@ -179,9 +178,9 @@ public class DatabaseApplicationBuilderTests
         var engine = new ProvisioningEngine(log);
         var server = new RecordingServer(log, "server", engine);
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.AddServer(server);
+        builder.Options.Servers.Add(server);
         CompiledSchema schema = CompileSchema("app");
-        builder.Provision(engine, schema);
+        builder.Provision(engine.Name, schema);
 
         // Act
         await using DatabaseApplication application = builder.Build();
@@ -202,7 +201,8 @@ public class DatabaseApplicationBuilderTests
         var failure = new DatabaseException("The database storage could not be opened.");
         var engine = new ProvisioningEngine(log, openException: failure);
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.Provision(engine, CompileSchema("app"));
+        builder.AddEngine(engine);
+        builder.Provision(engine.Name, CompileSchema("app"));
 
         // Act
         await using DatabaseApplication application = builder.Build();
@@ -222,11 +222,11 @@ public class DatabaseApplicationBuilderTests
         var engine = new ProvisioningEngine(log);
         var server = new RecordingServer(log, "server", engine);
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.AddServer(server);
+        builder.Options.Servers.Add(server);
 
         // Act
-        CompiledSchema schema = builder.AddDatabase(engine, "orders", database =>
-            database.Table<Order>("orders", table => table.Key(order => order.Id)));
+        SqlCompiledSchema schema = CompileSchema("orders");
+        builder.AddDatabase(engine.Name, "orders", schema);
         await using DatabaseApplication application = builder.Build();
         await ((IHost)application).StartAsync(DatabaseHostTestHarness.Timeout());
         await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
@@ -240,12 +240,12 @@ public class DatabaseApplicationBuilderTests
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Builder: Building twice is rejected")]
-    public void Build_WhenAlreadyBuilt_ShouldThrow()
+    public async Task Build_WhenAlreadyBuilt_ShouldThrow()
     {
         // Arrange
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
         builder.AddEngine(new RecordingEngine());
-        builder.Build();
+        await using var application = builder.Build();
 
         // Act + Assert
         Should.Throw<InvalidOperationException>(() => builder.Build());
@@ -256,7 +256,7 @@ public class DatabaseApplicationBuilderTests
     {
         // Arrange
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
-        builder.AddServer(_ => null!);
+        builder.AddEngine(_ => null!);
 
         // Act + Assert
         Should.Throw<InvalidOperationException>(() => builder.Build());
@@ -264,7 +264,7 @@ public class DatabaseApplicationBuilderTests
 
     private sealed record Order(int Id);
 
-    private static CompiledSchema CompileSchema(string name)
-        => DatabaseSchemaCompiler.Compile(DatabaseSchema.Create(name, database =>
-            database.Table<Order>("orders", table => table.Key(order => order.Id))), EngineModel.Sql);
+    private static SqlCompiledSchema CompileSchema(string name)
+        => SqlSchema.Compile(name, database =>
+            database.Table<Order>("orders", table => table.Key(order => order.Id)));
 }

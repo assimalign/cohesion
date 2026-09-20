@@ -51,14 +51,14 @@ public sealed class ProtocolEndpoint
             throw new IdentityModelException("A protocol endpoint requires a location.");
         }
 
-        if (!IsExplicitAbsoluteUri(descriptor.Location))
+        if (!EndpointLocation.IsValid(descriptor.Location))
         {
             throw new IdentityModelException(
                 $"The endpoint location '{descriptor.Location}' is not an absolute URI.");
         }
 
         if (descriptor.ResponseLocation is not null &&
-            !IsExplicitAbsoluteUri(descriptor.ResponseLocation))
+            !EndpointLocation.IsValid(descriptor.ResponseLocation))
         {
             throw new IdentityModelException(
                 $"The endpoint response location '{descriptor.ResponseLocation}' is not an absolute URI.");
@@ -119,31 +119,4 @@ public sealed class ProtocolEndpoint
 
     /// <inheritdoc />
     public override string ToString() => $"{Kind} {Location} ({Binding})";
-
-    /// <summary>
-    /// Determines whether a string satisfies the endpoint location rule: it parses as an
-    /// absolute URI and spells its scheme explicitly. Shared with branch materializers
-    /// that project typed wire members into endpoint lists.
-    /// </summary>
-    /// <param name="value">The candidate location.</param>
-    /// <returns><see langword="true" /> when the value is a valid endpoint location; otherwise <see langword="false" />.</returns>
-    internal static bool IsValidLocation(string value) => IsExplicitAbsoluteUri(value);
-
-    private static bool IsExplicitAbsoluteUri(string value)
-    {
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
-        {
-            return false;
-        }
-
-        // System.Uri accepts implicit file paths ("C:\...", "\\server\share"),
-        // scheme-relative strings ("//host/path"), and whitespace-padded input as
-        // "absolute" — and does so differently per OS ("/path" is an absolute file URI on
-        // Unix only). Requiring the wire string to spell its scheme explicitly rejects
-        // all of those identically on every platform while still accepting private-use
-        // schemes such as "com.example.app:/cb".
-        return value.Length > uri.Scheme.Length
-            && value.StartsWith(uri.Scheme, StringComparison.OrdinalIgnoreCase)
-            && value[uri.Scheme.Length] == ':';
-    }
 }

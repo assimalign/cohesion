@@ -13,10 +13,12 @@ namespace Assimalign.Cohesion.Database.Storage;
 /// are strictly monotonic and match the physical order of records in the journal
 /// stream. A transaction's first page modification appends the page's before-image;
 /// commit appends the after-image of every modified page followed by the commit
-/// record, which must be durable (<see cref="EnsureDurable"/>) before the commit is
-/// acknowledged — the write-ahead rule. A page may be written to the data file only
+/// record. In durable storage modes this record must be durable
+/// (<see cref="EnsureDurable"/>) before the commit is acknowledged — the write-ahead
+/// rule. In those modes a page may be written to the data file only
 /// after the journal is durable up to that page's LSN, which the buffer pool enforces
-/// through the same <see cref="EnsureDurable"/> gate.
+/// through the same <see cref="EnsureDurable"/> gate. Non-durable storage appends
+/// the same records and uses ordinary flushes without a persistence guarantee.
 /// </para>
 /// <para>
 /// <b>Recovery.</b> On open, recovery replays the journal: committed after-images
@@ -69,8 +71,8 @@ public interface IStorageJournal : IAsyncDisposable, IDisposable
     long AppendOperation(long transactionSequence, ReadOnlySpan<byte> payload);
 
     /// <summary>
-    /// Appends a transaction-commit record. The caller must make the record durable
-    /// with <see cref="EnsureDurable"/> before acknowledging the commit.
+    /// Appends a transaction-commit record. A caller promising durable commits must
+    /// make the record durable with <see cref="EnsureDurable"/> before acknowledging it.
     /// </summary>
     /// <param name="transactionSequence">The storage-level transaction sequence.</param>
     /// <returns>The assigned LSN.</returns>

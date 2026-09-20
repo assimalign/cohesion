@@ -19,8 +19,8 @@ public readonly record struct ProtocolFrameHeader(ProtocolMessageType Type, uint
 
     /// <summary>
     /// The maximum payload length a peer may send, guarding allocation from
-    /// untrusted length prefixes. Larger logical payloads (blob streams, large
-    /// result rows) are chunked across frames.
+    /// untrusted length prefixes. The model family defines how logical values
+    /// exceeding this bound are represented.
     /// </summary>
     public const uint MaxPayloadLength = 16 * 1024 * 1024;
 

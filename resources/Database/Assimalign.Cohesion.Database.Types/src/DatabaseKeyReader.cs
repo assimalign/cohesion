@@ -138,17 +138,19 @@ public ref struct DatabaseKeyReader
     /// Consumes a string component, returning its value and collation.
     /// </summary>
     /// <param name="collation">The collation the component was encoded under.</param>
-    /// <returns>The decoded value.</returns>
+    /// <returns>The canonical comparison value; folding collations do not preserve original spelling.</returns>
     public string ReadString(out Collation collation)
     {
         Expect(DatabaseType.String);
         collation = Collation.FromId(Take());
 
-        if (ReferenceEquals(collation, Collation.Binary))
+        if (collation.IsIndexBacked)
         {
             return Encoding.UTF8.GetString(KeyComponentEncoding.ReadEscaped(_source, ref _position));
         }
 
+        // Compatibility decoding for previously written legacy invariant keys.
+        // New writers reject this non-index-backed collation.
         // Skip the order-defining sort key; the original bytes follow, length-prefixed.
         KeyComponentEncoding.ReadEscaped(_source, ref _position);
         int length = BinaryPrimitives.ReadInt32BigEndian(TakeSpan(sizeof(int)));

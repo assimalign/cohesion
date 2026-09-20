@@ -29,8 +29,9 @@ branch (`…Protocols.OpenIdConnect`) and, when it lands, the SAML branch
 
 ## Dependencies
 
-- `Assimalign.Cohesion.IdentityModel` (the canonical model + the shared
-  internal `ModelSnapshot` materialization helper). BCL otherwise; no
+- `Assimalign.Cohesion.IdentityModel` (the canonical model). The internal
+  `ModelSnapshot` materialization helper is compiled from linked shared source.
+  BCL otherwise; no
   `Microsoft.Extensions.*`, no transport or serializer dependencies.
 
 ## Scope

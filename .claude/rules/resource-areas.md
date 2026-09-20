@@ -227,7 +227,7 @@ happen to compose.
   Precedents: `IWebApplicationBuilder` (Web root) + `WebApplication.CreateBuilder(args)`
   (`Web.Hosting`) + `AddAuthentication` (`Web.Authentication`); `IDatabaseApplicationBuilder`
   (Database root) + `DatabaseApplication.CreateBuilder(args)` (`Database.Hosting`) +
-  `AddSqlDatabase` (`Database.Sql`). The root application exposes `Context`, `StartAsync`,
+  `AddSql` (`Database.Sql`, with nested engine server factories). The root application exposes `Context`, `StartAsync`,
   and `StopAsync`; its builder exposes area verbs and `Build()`. Background-work
   registration (`AddService`) is a concrete-builder verb in `<Area>.Hosting`, absent
   from the root contract; no area-owned service abstraction is introduced. This pattern

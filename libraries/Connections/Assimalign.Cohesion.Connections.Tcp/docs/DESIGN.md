@@ -17,14 +17,14 @@ separate package) avoids duplicating the entire socket data path. A third endpoi
 ## Data Path
 
 Each connection owns two pump loops moving bytes between the socket and the consumer-facing duplex pipe
-(`DuplexPipePair`, from the core library's internal toolbox):
+(`DuplexPipePair`, compiled in from the contracts library's `shared/` folder):
 
 - **Receive loop** reads from the socket into the transport-output pipe writer, applying back-pressure
   when the consumer is slow (the flush pauses the loop).
 - **Send loop** reads from the transport-input pipe reader and writes to the socket via a pooled sender.
 
 `connection.Input` is what the peer sent; `connection.Output` is what you send. The mirrored pump ends
-live in the internal `DuplexPipePair` and never surface on the contract. Socket tuning (adaptive memory
+live in the compiled-in `DuplexPipePair` and never surface on the connection contract. Socket tuning (adaptive memory
 pool block size, IO-queue schedulers, read/write buffer thresholds) comes from
 `SocketPipeOptionsFactory` and is shared per listener across its connections.
 
@@ -85,7 +85,7 @@ family — `AddressFamily.Unix → ConnectionProtocol.UnixDomainSocket`, otherwi
 
 - the **listener's** `Capabilities` (from the configured endpoint) and its `ListenerInitialized`
   diagnostic (from the bound socket, which also resolves a `FileHandleEndPoint`'s real family);
-- every **connection's** `Capabilities` and all of its `ConnectionEventSource` events (from the
+- every **connection's** `Capabilities` and all of its `ConnectionDiagnostics` events (from the
   connected socket's family).
 
 So a connection over a Unix domain socket reports `UnixDomainSocket` in its capabilities and event
@@ -125,8 +125,10 @@ async socket-event args, and `System.Diagnostics.Tracing` counters — all from 
 
 - **`Assimalign.Cohesion.Connections`** — the guided bases (`Connection`, `ConnectionListener`,
   `ConnectionFactory`), `ConnectionCapabilities` / `ConnectionProtocol`, the exception family, and the
-  internal toolbox (`DuplexPipePair`, pipe options, `ConnectionEventSource`, `ListenerId`) shared via
-  `InternalsVisibleTo`.
+  public `ConnectionDiagnostics` and `ListenerId`. Its pipe plumbing (`DuplexPipePair`,
+  `PipeOptionsContext`, `PipeOptionsFactory`) is compiled into this driver from that
+  library's `shared/` folder via `CohesionSharedSource` - internal here, and never part of
+  the contracts assembly's public surface.
 - **`Assimalign.Cohesion.Connections.NamedPipes`** — the sibling local-IPC driver; its named pipe is the
   Windows-native counterpart to this driver's Unix domain socket.
 - **`Assimalign.Cohesion.Security`** — TLS as a connection layer composed over this driver.

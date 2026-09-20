@@ -5,8 +5,6 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Connections.Internal;
-
 namespace Assimalign.Cohesion.Connections.Quic;
 
 /// <summary>
@@ -98,7 +96,7 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
                 })
             }, cancellationToken).ConfigureAwait(false);
 
-            ConnectionEventSource.Log.ListenerInitialized(ConnectionProtocol.Quic, _listenerId);
+            ConnectionDiagnostics.ListenerInitialized(ConnectionProtocol.Quic, _listenerId);
         }
         finally
         {

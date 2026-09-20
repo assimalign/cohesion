@@ -142,7 +142,7 @@ internal sealed class InProcessPlanController : IApplicationResourceController
             artifact,
             context.Inputs,
             context.ObservedDependencies,
-            (context as ResourceControlContext)?.Telemetry);
+            context.GetTelemetry());
         InProcessMemberConfiguration configuration = await _contexts
             .CreateAsync(context, compilation, _outerContext, cancellationToken)
             .ConfigureAwait(false);
@@ -169,7 +169,7 @@ internal sealed class InProcessPlanController : IApplicationResourceController
         InProcessResourceArtifact artifact,
         ResourceInputs inputs,
         IReadOnlyList<ResourceDependencyObservation> observedDependencies,
-        ResourceTelemetryInjection? telemetry = null)
+        IResourceTelemetry? telemetry = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(artifact);
@@ -192,7 +192,7 @@ internal sealed class InProcessPlanController : IApplicationResourceController
         }
 
         var environment = new Dictionary<string, string>(plan.Container.Environment, StringComparer.Ordinal);
-        ResourceTelemetryInjection.Apply(telemetry, environment);
+        telemetry.ApplyEnvironment(environment);
         return new InProcessPlanCompilation(
             plan,
             artifact,

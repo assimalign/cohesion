@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,15 +12,14 @@ namespace Assimalign.Cohesion.Database;
 /// <remarks>
 /// The application starts and stops its <em>servers</em> (and any additional
 /// composed services); engines have no lifecycle to drive — they are data machines,
-/// operational from creation and terminal on disposal, owned by whichever
-/// composition root created them. This is the Web area's application shape
-/// (<c>IWebApplication</c>): a context plus start/stop.
+/// operational from creation and terminal on disposal. The application disposes
+/// factory-produced engines; instance-registered engines remain caller-owned.
+/// Disposal stops services and servers before releasing owned products.
 /// </remarks>
-public interface IDatabaseApplication
+public interface IDatabaseApplication : IAsyncDisposable
 {
     /// <summary>
-    /// Gets the composed state of the application: its servers and its server-less
-    /// engine registrations.
+    /// Gets the fixed runtime registry of every composed engine and server.
     /// </summary>
     IDatabaseApplicationContext Context { get; }
 

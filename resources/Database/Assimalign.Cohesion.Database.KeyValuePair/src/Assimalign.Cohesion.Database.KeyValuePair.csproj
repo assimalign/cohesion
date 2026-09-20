@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+        <CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<!-- Transport listeners/connections for the key-value model's wire-protocol
 		     server (KeyValueDatabaseServer and its machinery are implemented in this
 		     package — servers are per-model and each model carries its own copy,

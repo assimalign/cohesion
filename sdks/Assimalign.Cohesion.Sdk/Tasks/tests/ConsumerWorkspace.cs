@@ -26,10 +26,13 @@ internal sealed class ConsumerWorkspace : IDisposable
     ];
     private static readonly string RepositoryRoot = FindRepositoryRoot();
     private static readonly string PackageVersion = ResolvePackageVersion();
+    // The SDK family layout is sdks/<family>/Tasks/{src,tests,docs}; the fixtures sit beside
+    // this test project's sources, so the path carries the Tasks/ segment.
     private static readonly string TestProjectsRoot = Path.Combine(
         RepositoryRoot,
         "sdks",
         BaseSdkPackageId,
+        "Tasks",
         "tests",
         "TestProjects");
 

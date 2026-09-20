@@ -1,39 +1,42 @@
 using System;
 
-using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Hosting;
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Database.Storage;
 using Example.AppB.Database;
 
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 
-await using SqlDatabaseEngine engine = builder.AddSqlDatabase(options =>
+builder.AddSql((_, options) =>
 {
     options.EngineName = "appb-sql";
     options.RootPath = Resource.Mounts.Data.Path
         ?? throw new InvalidOperationException("The database data mount must have a materialized path.");
     options.Durability = Resource.Settings.DatabaseDurability.Get<StorageCommitDurability>();
+    options.AddServer(engine => SqlDatabaseServer.Create(
+        (SqlDatabaseEngine)engine, new SqlDatabaseServerOptions().Listen(Resource.Endpoints.Db)));
 });
 
-builder.AddDatabase(engine, "billing", database =>
+SqlCompiledSchema schema = SqlSchema.Compile("billing", database =>
 {
-    database.Table<Invoice>(table =>
+    database.Table<Invoice>("Invoices", table =>
     {
         table.Key(invoice => invoice.Id);
         table.Index(invoice => invoice.AccountId);
     });
-    database.Table<Payment>(table =>
+    database.Table<Payment>("Payments", table =>
     {
         table.Key(payment => payment.Id);
         table.References<Invoice>(payment => payment.InvoiceId);
     });
     database.Principal(
         "appb-api",
-        principal => principal.Grant(Permission.ReadWrite, "Invoices", "Payments"));
+        principal => principal.Grant(SqlPermission.ReadWrite, "Invoices", "Payments"));
 });
 
-builder.AddSqlServer(engine, options => options.Listen(Resource.Endpoints.Db));
+builder.AddDatabase("appb-sql", "billing", schema);
 
 await using DatabaseApplication application = builder.Build();
 await application.RunAsync();

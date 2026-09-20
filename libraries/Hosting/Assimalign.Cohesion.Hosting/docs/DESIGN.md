@@ -174,3 +174,12 @@ Host environment predicates use ordinal case-insensitive matching. `IsLocal()` i
 developer-machine environment; `IsDevelopment()` identifies an ordinary deployable environment
 and grants no developer-only fallback. Names come from `AppEnvironment.Keys`; plain-host and
 Core unset defaults remain Production.
+
+## Startup-hook rejection (Phase 29)
+
+A failure in `OnStartingAsync` consumes no service lifecycle work. The host resets
+its run signal and marks the attempt failed, but does not call service `StopAsync`
+for an attempt that never reached service startup. This lets area hosts enforce
+terminal lifecycle rules without stopping the prior run's services a second time.
+Once the hook succeeds, existing rollback still stops services in reverse order
+on lifecycle/startup failure. The generic host retains its supported restart behavior.

@@ -11,4 +11,10 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 	</ItemGroup>
+	<ItemGroup>
+		<!-- DuplexPipePairTests covers the Connections shared\ source, which the library itself
+		     does not compile in (no type in Connections produces or consumes one). The suite
+		     therefore links the same files the drivers do. -->
+		<CohesionSharedSource Include="Assimalign.Cohesion.Connections" />
+	</ItemGroup>
 </Project>

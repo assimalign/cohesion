@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;
+using Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
 /// In-memory storage strategy that uses MemoryStreams for all three storage files.
@@ -14,6 +14,12 @@ internal sealed class InMemoryKeyValueStorageStrategy : IKeyValueStorageStrategy
 {
     private readonly HashSet<string> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _syncRoot = new();
+    private readonly StorageCommitDurability? _durability;
+
+    internal InMemoryKeyValueStorageStrategy(StorageCommitDurability? durability = null)
+    {
+        _durability = durability;
+    }
 
     /// <inheritdoc />
     public KeyValueStorage CreateStorage(string databaseName)
@@ -26,7 +32,7 @@ internal sealed class InMemoryKeyValueStorageStrategy : IKeyValueStorageStrategy
             }
         }
 
-        return KeyValueStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), databaseName);
+        return KeyValueStorage.Create(StorageStream.FromInMemory(), StorageStream.FromInMemory(), StorageStream.FromInMemory(), databaseName, _durability);
     }
 
     /// <inheritdoc />
@@ -42,7 +48,7 @@ internal sealed class InMemoryKeyValueStorageStrategy : IKeyValueStorageStrategy
 
         // In-memory storage cannot truly reopen persisted data without snapshot support.
         // For now, open returns a fresh instance. Recovery scenarios require file-based storage.
-        return KeyValueStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), databaseName);
+        return KeyValueStorage.Create(StorageStream.FromInMemory(), StorageStream.FromInMemory(), StorageStream.FromInMemory(), databaseName, _durability);
     }
 
     /// <inheritdoc />

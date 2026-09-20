@@ -5,6 +5,16 @@ The key-value engine (area architecture:
 an ordered key space over the shared kernel, and the **second model engine** —
 built deliberately as the proof that the kernel is model-general, not SQL-shaped.
 
+## String comparison and collation (#1025)
+
+Key-Value remains binary-only for user data: keys and values are opaque bytes,
+and key equality, ordering, uniqueness, and prefix ranges use unsigned
+lexicographic byte comparison. Text supplied as a key is compared in its encoded
+form without case or accent folding. Command keywords and administrative database
+lookup remain ordinal-ignore-case; those identifier rules do not transform user
+keys. SQL database defaults and column/expression `COLLATE` have no effect on
+this model. Configurable text collation is deferred.
+
 ## Design intent
 
 Compose kernel pieces, never re-implement them — and compose them in a
@@ -15,7 +25,7 @@ Compose kernel pieces, never re-implement them — and compose them in a
 | Primary structure | the record space (scan-primary; indexes are secondary accelerators) | **the B+Tree primary key index** (index-primary; every read is a seek) |
 | Record payload | object-id-prefixed typed tuple, schema from the catalog | key + value as two binary tuple components, self-describing |
 | Conflict grain | table intent locks + per-row location locks + unique-key locks | **key locks only** (one per command) |
-| Statement surface | the SQL dialect | five command verbs (docs/COMMANDS.md) |
+| Statement surface | the SQL dialect | data commands plus `KEYSPACES` discovery (docs/COMMANDS.md) |
 | Catalog | schemas/tables/columns/indexes | registrations + format marker only |
 
 Both engines share, unchanged: the storage substrate (slotted pages, per-owner
@@ -78,7 +88,7 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
     exception storm on a hot upsert path) or folding conflicts into
     `applied=false` (hides real contention and breaks retry semantics).
 - **Transactions.** Identical binding to the SQL engine's (§3.8): per-database
-  `KeyValueTransactionCoordinator` (manager + lock manager + record-space
+  `Database.Transactions.TransactionCoordinator` (manager + lock manager + record-space
   version store + gated journal-bound log, one sequence namespace with storage),
   explicit transactions and auto-commit both ride manager contexts, `Snapshot`
   default / `ReadCommitted` per-command refresh / `Serializable` rejected,
@@ -93,7 +103,7 @@ one-sequence-namespace pairing, and the per-statement bracket/apply-gate model.
 
 ## The text seam (docs/COMMANDS.md — the grammar contract)
 
-The session's text-execute seam parses the five-verb command grammar into the
+The session's text-execute seam parses the command grammar into the
 same typed requests the typed seam executes. **Decision (2026-07-14): the
 recommended minimal-grammar shape was taken** — it makes the model
 wire-compatible with the existing `Execute` message (statement text + named
@@ -105,6 +115,54 @@ prediction) — would have forked the protocol message family and the server pum
 for no expressiveness gain over named binary parameters; it remains open as a
 measured-need optimization, not a default. The grammar is a contract: parser,
 COMMANDS.md, and the corpus tests change together (the DIALECT.md precedent).
+
+## Key-space catalog introspection (C2)
+
+The survey found one implicit key space and no named key-space registry. The
+catalog holds its primary index registration and entry-space format version;
+`GetAsync`, `ExistsAsync`, and `ScanAsync` already expose entry access, but none
+describes that key space. `KEYSPACES` extends the existing command vocabulary
+with discovery through the session and wire protocol. Its typed counterpart is
+`KeyValueKeySpacesRequest`; no existing public interface changes.
+
+The command returns one row describing the catalog-registered implicit space:
+database name, key-space object id, entry format version, primary-index name,
+index kind, and uniqueness. The exact column order and types are specified in
+[COMMANDS.md](COMMANDS.md#key-space-discovery-c2). The key-space id is local to
+the database and does not imply named-space support. Physical index pages remain
+internal. This model has no compiled-schema ownership or ownership enforcement,
+so there is no `OWNER` or `OWNING_SCHEMA` field to report. A smaller surface
+faithfully describes its catalog without inventing relational or schema concepts.
+
+The executor captures format and index registrations together under the
+catalog's metadata lock when each command runs. Rows are computed in memory from
+that capture and never persisted into entry storage or a second metadata cache.
+The next command sees newly published catalog state, even inside a snapshot
+transaction: catalog publications are self-committing, separate from entry MVCC.
+An already returned result retains its capture. The executor receives only its
+session's database catalog and name; no selector can address another database.
+
+The catalog snapshot belongs to the catalog package. The executor obtains its
+public `IKeyValueCatalogSnapshot` contract through the `public static`
+`KeyValueCatalog.CaptureSnapshot(IKeyValueCatalog)` bridge - not through
+`IKeyValueCatalog`, which the capture is deliberately not a member of - with the
+capture implementation kept internal. It owns no storage handle and
+requires no disposal. The command executor returns the ordinary wire result shape:
+
+```mermaid
+flowchart LR
+    Session["KeyValueDatabaseSession"] --> Parser["KeyValueCommandParser"]
+    Session --> Executor["KeyValueOperationExecutor"]
+    Executor --> Snapshot["KeyValuePair.Catalog snapshot"]
+```
+
+`KEYSPACES` is read-only. Both supported mutation verbs reject the reserved
+target (`PUT KEYSPACES ...`, `DELETE KEYSPACES ...`) before execution with
+`DatabaseParseException`, mapped to `ParseFailure` on the wire, and the stable
+diagnostic `The KEYSPACES catalog surface is read-only.` Keys passed as byte
+parameters remain data, including the bytes `KEYSPACES`. Scope, fresh captures,
+unchanged user storage, and client discovery/refusal are covered by
+`KeyValueIntrospectionTests` without replacing existing entry-access tests.
 
 ## The key-value server runtime (`KeyValueDatabaseServer`)
 
@@ -175,15 +233,24 @@ re-bootstrapping on the next open.
 (retryable) for MVCC conflicts — kernel exceptions are translated at the model
 boundary, never leaked raw.
 
-## Known duplication (recorded kernel gaps — see area DESIGN §3.10)
+## Shared MVCC composition (#918 — area DESIGN §3.10)
 
-`KeyValueTransactionCoordinator`, `KeyValueVersionStore`, and the stamp half of
-`KeyValueRecordCodec` are near-verbatim adaptations of their SQL counterparts:
-the per-database MVCC composition proved model-agnostic in mechanics but has no
-kernel home yet, so the second model paid a copy. Extracting it is filed work —
-#918 (the area generality report §3.10 carries the evidence). The copies are deliberate
-(hacking a premature kernel package into shape mid-bring-up would have risked
-the SQL engine's stability for a refactor the third model can validate instead).
+`TransactionCoordinator` and `RecordSpaceVersionStore` now live in the existing
+`Database.Transactions` child root. `KeyValueTransactionRecordSpace` supplies
+entry reads, transactional updates/deletes, and the existing packed location
+codec. `KeyValueRecordCodec` retains key/value payload encoding and delegates
+stamp operations to `RecordVersionStamp`; the shared
+[16-byte layout](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#record-stamp-prefix-the-16-byte-contract)
+is the contract for subsequent models. The instance's thin
+`IStorageTransactionSource` adapter retains the engine's `DatabaseException`
+for a missing statement bracket; Indexing's `RecordVersionIndex` binds the
+primary index to the shared undo ledger without a reverse dependency.
+
+Recovery ordering is unchanged: re-attach the primary index, analyze and scrub
+records, scrub the index with the same classification, then complete the
+deferred checkpoint before ensuring the primary index exists. The coordinator
+retains the same journal append/checkpoint gate, statement apply gate, and
+snapshot-based safe prune bound as the extracted copies.
 
 ## Non-goals (current cut)
 
@@ -195,7 +262,85 @@ the SQL engine's stability for a refactor the third model can validate instead).
 - Multi-key atomic batches, `Serializable` isolation, secondary value indexes,
   index compaction (the stub worker's future body).
 
+## Database scope conformance (A5)
+
+Each session captures one database instance and its operation executor.
+`IKeyValueDatabase` validates that instance identity before all five typed
+operations, including deferred scan enumeration. Typed requests carry no database
+selector; key bytes are data even when they resemble qualified names. The text
+grammar has no database selector or server administration verb. Database lifecycle
+operations belong to the host-owned engine.
+
+`KeyValueDatabaseScopeTests` mirrors the SQL/Blob guard: two databases contain
+the same key with different values, attempts to pass a foreign session fail,
+commands cannot select another database, and attempted server/database commands
+leave the binding and engine inventory unchanged. The tests use public execution
+behavior without reflection.
+
 ## AOT posture
 
 No reflection, no runtime codegen: byte spans, the shared tuple codec, and
 boxed scalars only at the result-row boundary (the Execution family's shape).
+
+## Model-owned wire family (#1015)
+
+This package owns the KeyValuePair request and tabular result codecs; the shared protocol
+contains only mechanism. [Wire format](WIRE-PROTOCOL.md) specifies every message and
+scalar component for independent clients. The server binds KeyValueProtocol.Family
+once on accept, retains wire version 1.0 and the existing bytes, and negotiates
+incompatible majors before authentication. Result materialization belongs to
+Database.KeyValuePair.Client. Transport listeners remain supplied through generic IConnectionListener.
+
+Payload offsets are zero-based and exclude the shared five-byte frame header. `Execute` (5)
+starts with a signed 32-bit big-endian statement byte length `S` at bytes 0–3, followed by
+`S` UTF-8 statement bytes at byte 4 and a nonnegative signed 32-bit big-endian parameter
+count at bytes `4 + S`–`7 + S`. Each parameter beginning at byte `Q` has a nonnegative
+signed 32-bit big-endian name length `N` at bytes `Q`–`Q + 3`, `N` UTF-8 name bytes at
+byte `Q + 4`, a nonnegative signed 32-bit big-endian encoded-value length `V` at bytes
+`Q + 4 + N`–`Q + 7 + N`, and `V` self-describing scalar-component bytes at byte
+`Q + 8 + N`. `ResultHeader` (6) starts with a nonnegative signed 32-bit big-endian column
+count at bytes 0–3; each repeated column has the same four-byte name length and UTF-8 name,
+followed immediately by one unsigned `DatabaseType` byte. `ResultRow` (7) concatenates one
+self-describing scalar component per result field from byte 0 through the payload end, with
+no count prefix. `Transaction` (9) is reserved and has no implemented payload; supported
+key-value transaction commands travel as statement text in `Execute`.
+
+`ResultComplete` (8) is the implemented family's one fixed-width payload. Its encoder emits
+exactly eight bytes: bytes 0–7 (bits 0–63) are the signed 64-bit affected count in big-endian
+order. Key-value query sets use `-1`; outcome sets preserve their affected count of `1` or
+`0`. The packet view below shows that complete fixed-width payload.
+
+```mermaid
+packet-beta
+0-63: "Affected count (i64, big-endian)"
+```
+
+## Phase 29 hosting composition
+
+`AddKeyValue(Action<IDatabaseApplicationContext, IKeyValueDatabaseEngineBuilder>)`
+replaces eager `AddKeyValueDatabase` and the sibling application `AddKeyValueServer`.
+The verb registers a dependency-free factory and returns the application builder.
+Application Build executes its callback; the model builder exposes all existing
+options, including `FileSystemPath? RootPath` and `IKeyValueStorageStrategy?`, and
+freezes them on its one Build attempt. It constructs the engine before invoking
+nested `AddWorker` and `AddServer` factories. No DI or configuration enters this
+model package. Direct `KeyValueDatabaseEngine.Create(options)` stays available.
+
+The root builder interface earns its place through model-agnostic workers:
+`IDatabaseEngineWorker.Run` lets each engine pump factory-supplied implementations
+and quiesce them during disposal. No strongly typed factory overloads are added;
+server callbacks can cast to the model engine once, avoiding ambiguous overloads.
+`IDatabaseEngine.Servers` is read-only observation; application Build flattens it
+for lifecycle, while the engine owns server disposal, followed by worker quiescence
+and database closure. Cleanup attempts independent children after a failure.
+Factory engines are application-owned; instance registrations remain caller-owned.
+Database create/open/drop/lookup now accept `DatabaseName`.
+
+No production hosting code currently consumes `IDatabaseEngineBuilder` generically.
+Its shared contract is retained for model-independent `AddWorker` composition;
+model-specific options stay on each derived builder interface.
+
+`KeyValueDatabaseEngine.CreateBuilder()` returns `IKeyValueDatabaseEngineBuilder`.
+This interface-first entry enables standalone nested composition and lets the concrete
+hosting-aware engine factory configure the same builder from its final configuration
+and services. The model still sees no DI or configuration contract.

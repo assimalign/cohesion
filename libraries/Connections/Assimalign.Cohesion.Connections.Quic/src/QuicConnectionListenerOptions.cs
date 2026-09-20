@@ -5,8 +5,6 @@ using System.Net.Security;
 using System.Runtime.Versioning;
 using System.Security.Authentication;
 
-using Assimalign.Cohesion.Connections.Internal;
-
 namespace Assimalign.Cohesion.Connections.Quic;
 
 /// <summary>

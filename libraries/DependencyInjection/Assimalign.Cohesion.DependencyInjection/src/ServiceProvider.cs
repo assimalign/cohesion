@@ -33,7 +33,7 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
     {
         // note that Root needs to be set before calling GetEngine(), because the engine may need to access Root
         Root = new ServiceProviderEngineScope(this, isRootScope: true);
-        engine = GetEngine();
+        engine = GetEngine(options.EnableDynamicCode);
         createServiceAccessor = CreateServiceAccessor;
         realizedServices = new ConcurrentDictionary<Type, Func<ServiceProviderEngineScope, object?>>();
 
@@ -176,19 +176,16 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
         }
         return new ServiceProviderEngineScope(this, isRootScope: false);
     }
-    private ServiceProviderEngine GetEngine()
+    private ServiceProviderEngine GetEngine(bool enableDynamicCode)
     {
-        ServiceProviderEngine engine;
-        
-        engine = RuntimeFeature.IsDynamicCodeCompiled ?
-             CreateDynamicEngine() :           
-            RuntimeServiceProviderEngine.Instance;  // Don't try to compile Expressions/IL if they are going to get interpreted
-
-        return engine;
-
+        // Choose before constructing a compiled engine: the dynamic engine queues compilation
+        // after repeated resolutions, whereas the runtime engine has no compilation path.
+        return enableDynamicCode && RuntimeFeature.IsDynamicCodeCompiled
+            ? CreateDynamicEngine()
+            : RuntimeServiceProviderEngine.Instance;
 
         [UnconditionalSuppressMessage("AotAnalysis", "IL3050:RequiresDynamicCode",
-                Justification = "CreateDynamicEngine won't be called when using NativeAOT.")] // see also https://github.com/dotnet/linker/issues/2715
+                Justification = "CreateDynamicEngine is guarded by EnableDynamicCode and RuntimeFeature.IsDynamicCodeCompiled.")] // see also https://github.com/dotnet/linker/issues/2715
         ServiceProviderEngine CreateDynamicEngine() => new DynamicServiceProviderEngine(this);
     }
 }

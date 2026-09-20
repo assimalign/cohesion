@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database;
 /// </summary>
 /// <remarks>
 /// This exception is the precise absence signal for
-/// <see cref="IDatabaseEngine.OpenDatabaseAsync(string, System.Threading.CancellationToken)"/>.
+/// <see cref="IDatabaseEngine.OpenDatabaseAsync(DatabaseName, System.Threading.CancellationToken)"/>.
 /// Callers may distinguish a missing database from other failures that prevent an
 /// existing database from being opened.
 /// </remarks>

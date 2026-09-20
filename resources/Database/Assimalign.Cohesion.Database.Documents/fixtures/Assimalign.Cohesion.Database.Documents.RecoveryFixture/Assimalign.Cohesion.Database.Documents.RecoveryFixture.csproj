@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <!-- Set locally so NativeAOT does not propagate to netstandard analyzer builds. -->
+    <PublishAot Condition="'$(DocumentFixtureNativeAot)' == 'true'">true</PublishAot>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
+  </ItemGroup>
+</Project>

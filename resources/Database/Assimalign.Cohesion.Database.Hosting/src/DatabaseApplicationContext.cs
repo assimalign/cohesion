@@ -4,6 +4,8 @@ using System.Collections.ObjectModel;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Configuration;
+
 namespace Assimalign.Cohesion.Database.Hosting;
 
 using Assimalign.Cohesion.Hosting;
@@ -11,13 +13,13 @@ using Assimalign.Cohesion.Hosting.Health;
 
 /// <summary>
 /// The host context for <see cref="DatabaseApplication"/> — the concrete
-/// <see cref="IDatabaseApplicationContext"/>: the servers the application runs and
-/// the engines registered without a server.
+/// <see cref="IDatabaseApplicationContext"/>: final infrastructure, every engine,
+/// and the servers flattened from those engines.
 /// </summary>
 /// <remarks>
-/// The context wraps the live option lists while deferred server factories run, so each factory
-/// observes registrations produced before it. The built application then freezes both registries;
-/// retaining and mutating the builder options cannot change the running context.
+/// Engine factories observe preceding construction through read-only snapshots. The complete
+/// engine/server registries are frozen before service factories run; retained options cannot
+/// change the running context.
 /// </remarks>
 public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicationContext, IHealthContributor
 {
@@ -26,8 +28,10 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     private IReadOnlyList<IDatabaseServer> _servers;
     private IReadOnlyList<IHostService> _hostedServices = [];
 
-    internal DatabaseApplicationContext(DatabaseApplicationOptions options)
+    internal DatabaseApplicationContext(DatabaseApplicationOptions options, IConfiguration configuration, IServiceProvider services)
     {
+        Configuration = configuration;
+        Services = services;
         _environment = new HostEnvironment(options.Environment ?? "production")
         {
             ContentRootPath = options.ContentRootPath,
@@ -51,6 +55,26 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
 
     /// <inheritdoc />
     public IReadOnlyList<IDatabaseServer> Servers => _servers;
+
+    /// <summary>Gets loaded configuration; mutations do not recompose engine options.</summary>
+    public IConfiguration Configuration { get; }
+
+    /// <summary>Gets the application provider, borrowed until application disposal.</summary>
+    public IServiceProvider Services { get; }
+
+    /// <inheritdoc />
+    public IDatabaseEngine GetEngine(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        foreach (IDatabaseEngine engine in _engines)
+        {
+            if (string.Equals(engine.Name, name, StringComparison.Ordinal))
+            {
+                return engine;
+            }
+        }
+        throw new KeyNotFoundException($"No database engine named '{name}' is registered.");
+    }
 
     /// <summary>
     /// Gets the stable name of the database application health contribution.

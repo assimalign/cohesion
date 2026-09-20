@@ -4,6 +4,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 
 using Assimalign.Cohesion.Database;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Sdk.Database.Tasks;
 
@@ -28,31 +29,33 @@ public class CompileDatabaseSchemaTaskTests
 
         task.Execute().ShouldBeTrue(string.Join(Environment.NewLine, engine.Errors.Select(static error => error.Message)));
 
-        CompiledSchema schema = CompiledSchemaSerializer.Read(task.OutputPath);
-        schema.Format.ShouldBe(CompiledSchema.CurrentFormat);
+        SqlCompiledSchema schema = SqlCompiledSchemaSerializer.Read(task.OutputPath);
+        schema.Format.ShouldBe(SqlCompiledSchema.CurrentFormat);
         schema.Name.ShouldBe("orders");
         schema.Model.ShouldBe(EngineModel.Sql);
         schema.Tables.Select(static table => table.Name).ShouldBe(["OrderLines", "Orders"]);
         schema.Hash.ShouldBe(task.SchemaHash);
         File.ReadAllText(task.HashOutputPath).ShouldBe(schema.Hash + "\n");
-        CompiledSchemaSerializer.Serialize(schema).ShouldBe(File.ReadAllText(task.OutputPath));
+        SqlCompiledSchemaSerializer.Serialize(schema).ShouldBe(File.ReadAllText(task.OutputPath));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: key-value declaration selects the key-value model")]
-    public void Execute_WithKeyValuePairCollection_ShouldMapToKeyValueStoreModel()
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: key-value compilation fails until its model package exists")]
+    public void Execute_WithKeyValuePairModel_ShouldFailWithoutArtifacts()
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
-        File.WriteAllText(sourcePath, KeyValueSchemaSource);
+        File.WriteAllText(sourcePath, SqlSchemaSource);
         var engine = new RecordingBuildEngine();
         var task = CreateTask(directory, sourcePath, "KeyValuePair", engine);
 
-        task.Execute().ShouldBeTrue(string.Join(Environment.NewLine, engine.Errors.Select(static error => error.Message)));
+        task.Execute().ShouldBeFalse();
 
-        CompiledSchema schema = CompiledSchemaSerializer.Read(task.OutputPath);
-        schema.Model.ShouldBe(EngineModel.KeyValueStore);
-        schema.Collections.ShouldHaveSingleItem().Name.ShouldBe("Sessions");
-        schema.Tables.ShouldBeEmpty();
+        engine.Errors.ShouldContain(error =>
+            error.Code == "COHDBSDK106" &&
+            error.Message != null &&
+            error.Message.Contains("model-specific compiled-schema package", StringComparison.Ordinal));
+        File.Exists(task.OutputPath).ShouldBeFalse();
+        File.Exists(task.HashOutputPath).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: reference-pack primitives use runtime type identities")]
@@ -71,7 +74,7 @@ public class CompileDatabaseSchemaTaskTests
 
         task.Execute().ShouldBeTrue(string.Join(Environment.NewLine, engine.Errors.Select(static error => error.Message)));
 
-        CompiledSchema schema = CompiledSchemaSerializer.Read(task.OutputPath);
+        SqlCompiledSchema schema = SqlCompiledSchemaSerializer.Read(task.OutputPath);
         CompiledSchemaTable table = schema.Tables.ShouldHaveSingleItem();
         (string Name, DatabaseType Type)[] expectedColumns =
         [
@@ -102,7 +105,7 @@ public class CompileDatabaseSchemaTaskTests
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: static and runtime compilers have canonical parity")]
     public void Execute_WithSupportedSchema_ShouldMatchRuntimeCompilerDocumentAndHash()
     {
-        IDatabaseSchema declaration = DatabaseSchema.Create("parity", database =>
+        SqlCompiledSchema runtimeSchema = SqlSchema.Compile("parity", database =>
         {
             database.AllowDestructiveChanges();
             database.Type<ParityMoney>(type => type.Decimal(18, 2));
@@ -119,17 +122,19 @@ public class CompileDatabaseSchemaTaskTests
             database.Function("negative", () => -1L);
             database.Function<long>("wide_constant", () => 1);
             database.Function<long?, long?>("nullable_identity", value => value);
+            database.Function<decimal?, decimal?>("nullable_decimal", value => value + value);
+            database.Function<decimal, decimal>("round_decimal", value => decimal.Round(value, 2));
             database.Function<string, string>("suffix", value => value + "!");
             database.Function<int, string>("mixed_suffix", value => "x" + value);
             database.Function<ParityArrayHolder, long>("first_array_value", holder => holder.Values[0]);
+            database.Trigger<ParityOrder>(SqlTriggerEvent.AfterInsert, (context, order) => context.Audit("created", order.Id));
             database.Extension("collation", "ordinal");
             database.Principal("app", principal =>
             {
-                principal.Grant(Permission.Read, "Orders");
-                principal.Grant(Permission.Read, "next_order");
+                principal.Grant(SqlPermission.Read, "Orders");
+                principal.Grant(SqlPermission.Read, "next_order");
             });
         });
-        CompiledSchema runtimeSchema = DatabaseSchemaCompiler.Compile(declaration, EngineModel.Sql);
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("ParitySchema.cs");
         File.WriteAllText(sourcePath, ParitySchemaSource);
@@ -138,7 +143,7 @@ public class CompileDatabaseSchemaTaskTests
 
         task.Execute().ShouldBeTrue(string.Join(Environment.NewLine, engine.Errors.Select(static error => error.Message)));
 
-        File.ReadAllText(task.OutputPath).ShouldBe(CompiledSchemaSerializer.Serialize(runtimeSchema));
+        File.ReadAllText(task.OutputPath).ShouldBe(SqlCompiledSchemaSerializer.Serialize(runtimeSchema));
         task.SchemaHash.ShouldBe(runtimeSchema.Hash);
         File.ReadAllText(task.HashOutputPath).ShouldBe(runtimeSchema.Hash + "\n");
     }
@@ -206,19 +211,18 @@ public class CompileDatabaseSchemaTaskTests
         File.Exists(task.HashOutputPath).ShouldBeFalse();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: exactly one AddDatabase declaration is required")]
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Compile schema: exactly one SqlSchema declaration is required")]
     [InlineData("", 0)]
     [InlineData("""
         public static class SecondSchema
         {
             public static void Configure()
             {
-                var builder = new Assimalign.Cohesion.Database.Hosting.DatabaseApplicationBuilder();
-                builder.AddDatabase(null!, "second", database => { });
+                SqlSchema.Create("second", database => { });
             }
         }
         """, 2)]
-    public void Execute_WithoutExactlyOneAddDatabase_ShouldFail(string replacement, int expectedCount)
+    public void Execute_WithoutExactlyOneSchemaDeclaration_ShouldFail(string replacement, int expectedCount)
     {
         using var directory = new TemporaryDirectory();
         string sourcePath = directory.File("Schema.cs");
@@ -249,6 +253,7 @@ public class CompileDatabaseSchemaTaskTests
                 .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
         string[] references = frameworkReferences
             .Append(Path.Combine(AppContext.BaseDirectory, "Assimalign.Cohesion.Database.dll"))
+            .Append(Path.Combine(AppContext.BaseDirectory, "Assimalign.Cohesion.Database.Sql.Schema.dll"))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         return new CompileDatabaseSchemaTask
@@ -292,8 +297,7 @@ public class CompileDatabaseSchemaTaskTests
         {
             public static void Configure()
             {
-                var builder = new Assimalign.Cohesion.Database.Hosting.DatabaseApplicationBuilder();
-                builder.AddDatabase(null!, "orders", database =>
+                SqlSchema.Compile("orders", database =>
                 {
                     database.Type<Money>(type => type.Decimal(18, 2));
                     database.Table<Order>("Orders", table =>
@@ -308,26 +312,7 @@ public class CompileDatabaseSchemaTaskTests
                         table.Column(line => line.Total);
                     });
                     database.Function("next_order", (long orderId) => orderId + 1);
-                    database.Principal("app", principal => principal.Grant(Permission.ReadWrite, "Orders", "OrderLines"));
-                });
-            }
-        }
-        """;
-
-    private const string KeyValueSchemaSource = SchemaTypes + """
-
-        public static class SchemaProgram
-        {
-            public static void Configure()
-            {
-                var builder = new Assimalign.Cohesion.Database.Hosting.DatabaseApplicationBuilder();
-                builder.AddDatabase(null!, "sessions", database =>
-                {
-                    database.Collection<Session>("Sessions", collection =>
-                    {
-                        collection.Key(session => session.Id);
-                        collection.Column(session => session.Value);
-                    });
+                    database.Principal("app", principal => principal.Grant(SqlPermission.ReadWrite, "Orders", "OrderLines"));
                 });
             }
         }
@@ -336,17 +321,7 @@ public class CompileDatabaseSchemaTaskTests
     private const string PrimitiveSchemaSource = """
         using System;
         using Assimalign.Cohesion.Database;
-
-        namespace Assimalign.Cohesion.Database.Hosting
-        {
-            public sealed class DatabaseApplicationBuilder
-            {
-                public CompiledSchema AddDatabase(
-                    object engine,
-                    string name,
-                    Action<IDatabaseSchemaBuilder> configure) => throw new NotSupportedException();
-            }
-        }
+        using Assimalign.Cohesion.Database.Sql.Schema;
 
         public sealed record Order(
             long Id,
@@ -371,8 +346,7 @@ public class CompileDatabaseSchemaTaskTests
         {
             public static void Configure()
             {
-                var builder = new Assimalign.Cohesion.Database.Hosting.DatabaseApplicationBuilder();
-                builder.AddDatabase(null!, "sample", database =>
+                SqlSchema.Create("sample", database =>
                 {
                     database.Table<Order>("Orders", table =>
                     {
@@ -402,17 +376,7 @@ public class CompileDatabaseSchemaTaskTests
     private const string ParitySchemaSource = """
         using System;
         using Assimalign.Cohesion.Database;
-
-        namespace Assimalign.Cohesion.Database.Hosting
-        {
-            public sealed class DatabaseApplicationBuilder
-            {
-                public CompiledSchema AddDatabase(
-                    IDatabaseEngine engine,
-                    string name,
-                    Action<IDatabaseSchemaBuilder> configure) => throw new NotSupportedException();
-            }
-        }
+        using Assimalign.Cohesion.Database.Sql.Schema;
 
         namespace Assimalign.Cohesion.Sdk.Database.Tests
         {
@@ -424,8 +388,7 @@ public class CompileDatabaseSchemaTaskTests
             {
                 public static void Configure()
                 {
-                    var builder = new Assimalign.Cohesion.Database.Hosting.DatabaseApplicationBuilder();
-                    builder.AddDatabase(null!, "parity", database =>
+                        SqlSchema.Create("parity", database =>
                     {
                         database.AllowDestructiveChanges();
                         database.Type<ParityMoney>(type => type.Decimal(18, 2));
@@ -442,14 +405,17 @@ public class CompileDatabaseSchemaTaskTests
                         database.Function("negative", () => -1L);
                         database.Function<long>("wide_constant", () => 1);
                         database.Function<long?, long?>("nullable_identity", value => value);
+                        database.Function<decimal?, decimal?>("nullable_decimal", value => value + value);
+                        database.Function<decimal, decimal>("round_decimal", value => decimal.Round(value, 2));
                         database.Function<string, string>("suffix", value => value + "!");
                         database.Function<int, string>("mixed_suffix", value => "x" + value);
                         database.Function<ParityArrayHolder, long>("first_array_value", holder => holder.Values[0]);
+                        database.Trigger<ParityOrder>(SqlTriggerEvent.AfterInsert, (context, order) => context.Audit("created", order.Id));
                         database.Extension("collation", "ordinal");
                         database.Principal("app", principal =>
                         {
-                            principal.Grant(Permission.Read, "Orders");
-                            principal.Grant(Permission.Read, "next_order");
+                            principal.Grant(SqlPermission.Read, "Orders");
+                            principal.Grant(SqlPermission.Read, "next_order");
                         });
                     });
                 }
@@ -460,17 +426,7 @@ public class CompileDatabaseSchemaTaskTests
     private const string SchemaTypes = """
         using System;
         using Assimalign.Cohesion.Database;
-
-        namespace Assimalign.Cohesion.Database.Hosting
-        {
-            public sealed class DatabaseApplicationBuilder
-            {
-                public CompiledSchema AddDatabase(
-                    object engine,
-                    string name,
-                    Action<IDatabaseSchemaBuilder> configure) => throw new NotSupportedException();
-            }
-        }
+        using Assimalign.Cohesion.Database.Sql.Schema;
 
         public sealed record Order(long Id, long CustomerId);
         public sealed record OrderLine(long Id, long OrderId, Money Total);

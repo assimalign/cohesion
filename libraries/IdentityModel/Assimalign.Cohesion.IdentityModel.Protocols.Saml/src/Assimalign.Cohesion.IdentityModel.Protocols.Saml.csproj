@@ -6,6 +6,10 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Protocols" />
   </ItemGroup>
   <ItemGroup>
+    <!-- ModelSnapshot (descriptor materialization), compiled in as a stateless static. -->
+    <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.Saml.Tests" />
   </ItemGroup>
 </Project>

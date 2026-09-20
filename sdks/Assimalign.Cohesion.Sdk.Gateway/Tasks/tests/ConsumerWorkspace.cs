@@ -67,6 +67,10 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.Database.Storage",
         "Assimalign.Cohesion.Database.Transactions",
         "Assimalign.Cohesion.Database.Types",
+        // Database.Storage routes its data and WAL files through IFileSystem, so both
+        // FileSystem packages are real dependencies of every gateway consumer's restore.
+        "Assimalign.Cohesion.FileSystem",
+        "Assimalign.Cohesion.FileSystem.Physical",
         "Assimalign.Cohesion.SecretStore.Client",
         "Assimalign.Cohesion.ConfigurationStore.Client"
     ];
@@ -77,10 +81,13 @@ internal sealed class ConsumerWorkspace : IDisposable
     private static readonly string PackageVersion =
         Environment.GetEnvironmentVariable("COHESION_GATEWAY_TEST_PACKAGE_VERSION")
         ?? ResolvePackageVersion();
+    // The SDK family layout is sdks/<family>/Tasks/{src,tests,docs}; the fixtures sit beside
+    // this test project's sources, so the path carries the Tasks/ segment.
     private static readonly string TestProjectsRoot = Path.Combine(
         RepositoryRoot,
         "sdks",
         "Assimalign.Cohesion.Sdk.Gateway",
+        "Tasks",
         "tests",
         "TestProjects");
 

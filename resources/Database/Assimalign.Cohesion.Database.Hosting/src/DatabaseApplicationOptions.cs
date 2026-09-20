@@ -1,54 +1,24 @@
 using System.Collections.Generic;
 using System.IO;
 
-namespace Assimalign.Cohesion.Database.Hosting;
-
 using Assimalign.Cohesion.Hosting;
 
-/// <summary>
-/// Options for <see cref="DatabaseApplication"/>: the wire-protocol servers the
-/// application runs, the engines it holds as server-less embedded registrations,
-/// and any additional host services.
-/// </summary>
-/// <remarks>
-/// The hosting module is composition-only: it wraps each registered
-/// <see cref="IDatabaseServer"/> in an internal endpoint host service, registered
-/// after every other service so the servers start last and drain first. Engines
-/// have no lifecycle for the host to drive — they are data machines, operational
-/// from creation — so <see cref="Engines"/> is purely the application context's
-/// observational registry of server-less engines. Per-model servers are composed by
-/// the model packages (for example <c>SqlDatabaseServer</c> via the
-/// <c>AddSqlServer</c> builder verb in <c>Assimalign.Cohesion.Database.Sql</c>) or
-/// directly by the composition root, and assigned here.
-/// The inherited concurrent start and stop switches are unsupported: a database application
-/// requires sequential lifecycle execution to preserve provisioning-before-accept and
-/// drain-before-service-stop.
-/// </remarks>
+namespace Assimalign.Cohesion.Database.Hosting;
+
+/// <summary>Host settings and legacy borrowed composition inputs copied at application Build.</summary>
+/// <remarks>Sequential start/stop is required. Mutating these inputs after Build cannot change the application.</remarks>
 public sealed class DatabaseApplicationOptions : HostOptions<DatabaseApplicationContext>
 {
-    internal FileSystemPath? ContentRootPath { get; set; }
+    /// <summary>Gets or sets the content root for configuration files; defaults to the application base directory.</summary>
+    public FileSystemPath? ContentRootPath { get; set; }
 
-    /// <summary>
-    /// Gets the engines this application holds as server-less, embedded
-    /// registrations (exposed through
-    /// <see cref="IDatabaseApplicationContext.Engines"/>). The composition root
-    /// that created an engine owns its disposal; the application never starts,
-    /// stops, or disposes engines.
-    /// </summary>
+    /// <summary>Gets caller-owned engines to borrow. Nested servers are discovered during Build.</summary>
     public IList<IDatabaseEngine> Engines { get; } = new List<IDatabaseEngine>();
 
-    /// <summary>
-    /// Gets the wire-protocol servers the application runs — one per model it
-    /// serves. Each is wrapped in an internal endpoint host service registered
-    /// last, so servers start last and drain first on stop.
-    /// </summary>
+    /// <summary>Gets legacy caller-owned servers to start and stop; their engines are implicitly borrowed.</summary>
+    /// <remarks>New composition nests server factories under model engine builders.</remarks>
     public IList<IDatabaseServer> Servers { get; } = new List<IDatabaseServer>();
 
-    /// <summary>
-    /// Gets the additional host services composed ahead of the servers, including
-    /// services registered through <see cref="DatabaseApplicationBuilder.AddService(IHostService)"/>.
-    /// They start in registration order before the servers and stop in reverse
-    /// registration order after the servers have drained.
-    /// </summary>
+    /// <summary>Gets caller-owned services, started before servers and stopped after servers drain.</summary>
     public IList<IHostService> Services { get; } = new List<IHostService>();
 }

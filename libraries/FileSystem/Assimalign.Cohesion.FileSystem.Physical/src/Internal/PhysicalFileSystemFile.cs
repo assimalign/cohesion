@@ -63,6 +63,17 @@ internal class PhysicalFileSystemFile : PhysicalFileSystemInfo, IFileSystemFile
 
         return File.Open(Path, fileMode, fileAccess, fileShare);
     }
+    /// <inheritdoc />
+    public IFileSystemFileHandle OpenHandle(FileMode fileMode, FileAccess fileAccess, FileShare fileShare)
+    {
+        if (FileSystem.IsReadOnly && (fileMode != FileMode.Open || fileAccess != FileAccess.Read))
+        {
+            throw new InvalidOperationException("The file system is read-only. Only FileMode.Open with FileAccess.Read is allowed.");
+        }
+
+        return new PhysicalFileSystemFileHandle(File.OpenHandle(
+            Path, fileMode, fileAccess, fileShare, FileOptions.Asynchronous | FileOptions.RandomAccess));
+    }
     public override void Dispose()
     {
 

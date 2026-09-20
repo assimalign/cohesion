@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Protocol;
 
 /// <summary>
 /// Writes frames to a stream: header then payload, flushed on demand so callers
-/// batch small frames (result rows) into one transport write.
+/// batch small frames (logical values) into one transport write.
 /// </summary>
 internal sealed class ProtocolStreamFrameWriter : IProtocolFrameWriter
 {

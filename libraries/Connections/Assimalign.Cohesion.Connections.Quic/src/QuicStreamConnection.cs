@@ -7,7 +7,6 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Connections.Internal;
 using Assimalign.Cohesion.Connections.Quic.Internal;
 
 namespace Assimalign.Cohesion.Connections.Quic;
@@ -87,7 +86,7 @@ internal sealed class QuicStreamConnection : Connection
             : UnwritablePipeWriter.Instance;
         _state = ConnectionState.Open;
 
-        ConnectionEventSource.Log.ConnectionStart(ConnectionProtocol.Quic, listenerId, Id);
+        ConnectionDiagnostics.ConnectionStart(ConnectionProtocol.Quic, listenerId, Id);
     }
 
     /// <inheritdoc />
@@ -177,7 +176,7 @@ internal sealed class QuicStreamConnection : Connection
 
         _onDisposed(this);
 
-        ConnectionEventSource.Log.ConnectionStop(ConnectionProtocol.Quic, _listenerId, Id);
+        ConnectionDiagnostics.ConnectionStop(ConnectionProtocol.Quic, _listenerId, Id);
 
         lock (_stateLock)
         {

@@ -210,8 +210,8 @@ alongside allocating `Host` / `Port` convenience properties:
 
 **Parity with routing.** Parity is now *shared code*, not two mirrored copies:
 the structural `host[:port]` split (`TrySplitHostPort`) and the port parse
-(`TryParsePort`) are `internal` helpers here that the Web routing host
-constraint (`RouteHostConstraint`, #788) also calls (via `InternalsVisibleTo`),
+(`TryParsePort`) are public static operations on `HttpHost` that the Web routing host
+constraint (`RouteHostConstraint`, #788) also calls,
 so the bracket rules, single-colon rule, and 1–65535 port range are one copy of
 the logic (#890). `TryGetComponents` layers this primitive's stricter rule on
 top of the shared split: it validates the port as part of parsing and reports a
@@ -220,6 +220,13 @@ structural split but defers the port parse, so it can tolerate junk port text on
 a route that does not constrain the port. Selection can afford that leniency; a
 validation primitive claiming "components" cannot — same split, different port
 policy, no drift.
+
+These operations are a public composition seam for authority consumers that need
+to select their own port policy. The split returns spans into the original input,
+preserves whitespace, and does not validate host characters or port text. Port
+parsing accepts only decimal 1–65535. Both return `false` for malformed input and
+do not throw. The existing `TryGetComponents` remains the fully validated port
+convenience. No shipped assembly needs access to HTTP internals.
 
 ### The allowlist matcher
 

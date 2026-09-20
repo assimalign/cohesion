@@ -1,27 +1,24 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Protocol;
-using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Client;
 
 /// <summary>
 /// A pooled protocol connection: dials the transport, runs the
-/// startup/authenticate/ready handshake, executes statements, and drains result
-/// streams. Disposing while rented returns it to the owning pool with its
-/// authenticated server session intact.
+/// startup/authenticate/ready handshake, and runs model-owned framed exchanges.
+/// Disposing while rented returns it to the owning pool with its authenticated
+/// server session intact.
 /// </summary>
 internal sealed class PooledDatabaseConnection : IDatabaseConnection
 {
     private readonly DefaultDatabaseClient _owner;
     private readonly IConnectionFactory _connectionFactory;
     private readonly DatabaseConnectionSettings _settings;
-    private readonly DatabaseKeyWriter _parameterWriter = new();
 
     private IConnection? _connection;
     private IProtocolFrameReader? _reader;
@@ -29,12 +26,17 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
     private bool _isOpen;
     private bool _isRented;
     private bool _isClosed;
+    private readonly object _exchangeLock = new();
+    private CancellationTokenSource? _operation;
+    private TaskCompletionSource? _exchangeCompletion;
+    private Task? _returnTask;
 
-    internal PooledDatabaseConnection(DefaultDatabaseClient owner, IConnectionFactory connectionFactory, DatabaseConnectionSettings settings)
+    internal PooledDatabaseConnection(DefaultDatabaseClient owner, IConnectionFactory connectionFactory, DatabaseConnectionSettings settings, ProtocolMessageFamily family)
     {
         _owner = owner;
         _connectionFactory = connectionFactory;
         _settings = settings;
+        Family = family;
         Database = _settings.Database!;
         Principal = _settings.Principal;
     }
@@ -51,7 +53,17 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
     /// <inheritdoc />
     public bool IsOpen => _isOpen && _connection is { State: ConnectionState.Open or ConnectionState.Opening };
 
-    internal void MarkRented() => _isRented = true;
+    /// <inheritdoc />
+    public ProtocolMessageFamily Family { get; }
+
+    internal void MarkRented()
+    {
+        lock (_exchangeLock)
+        {
+            _isRented = true;
+            _returnTask = null;
+        }
+    }
 
     /// <inheritdoc />
     public async ValueTask OpenAsync(CancellationToken cancellationToken = default)
@@ -66,8 +78,9 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
         _connection = await _connectionFactory.ConnectAsync(_settings.EndPoint!, cancellationToken).ConfigureAwait(false);
 
         Stream stream = _connection.AsStream();
-        _reader = ProtocolFraming.CreateReader(stream, leaveOpen: true);
-        _writer = ProtocolFraming.CreateWriter(stream, leaveOpen: true);
+        var channel = new ProtocolChannel(stream, Family, leaveOpen: true);
+        _reader = channel.Reader;
+        _writer = channel.Writer;
 
         var startup = new ProtocolStartupMessage(ProtocolVersion.Current, Database, Principal);
         await WriteFrameAsync(ProtocolMessageType.Startup, startup.Encode(), cancellationToken).ConfigureAwait(false);
@@ -108,97 +121,123 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
     }
 
     /// <inheritdoc />
-    public async ValueTask<DatabaseClientResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
+    public async ValueTask<TResult> ExecuteAsync<TResult>(IDatabaseProtocolExchange<TResult> exchange, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(statement);
-
-        if (!IsOpen)
+        ArgumentNullException.ThrowIfNull(exchange);
+        if (!ReferenceEquals(Family, exchange.Family))
         {
-            throw new DatabaseClientException(ProtocolErrorCode.Internal, "The connection is not open.");
+            throw new ArgumentException("The exchange belongs to a different message family.", nameof(exchange));
         }
-
-        var encodedParameters = new Dictionary<string, byte[]>(parameters?.Count ?? 0);
-
-        if (parameters is not null)
+        CancellationTokenSource operation;
+        TaskCompletionSource completion;
+        lock (_exchangeLock)
         {
-            foreach ((string name, object? value) in parameters)
+            if (!IsOpen)
             {
-                _parameterWriter.Reset();
-                DatabaseValueCodec.Append(_parameterWriter, value);
-                encodedParameters[name] = _parameterWriter.ToArray();
+                throw new DatabaseClientException(ProtocolErrorCode.Internal, "The connection is not open.");
             }
+            ObjectDisposedException.ThrowIf(!_isRented, this);
+            if (_operation is not null)
+            {
+                throw new InvalidOperationException("An exchange is already active on this connection.");
+            }
+            operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _operation = operation;
+            _exchangeCompletion = completion;
         }
 
-        var execute = new ProtocolExecuteMessage(statement, encodedParameters);
-        await WriteFrameAsync(ProtocolMessageType.Execute, execute.Encode(), cancellationToken).ConfigureAwait(false);
-
-        IReadOnlyList<DatabaseClientColumn> columns = [];
-        var rows = new List<object?[]>();
-
-        while (true)
+        try
         {
-            ProtocolFrame frame = await ExpectFrameAsync(cancellationToken).ConfigureAwait(false);
-
-            switch (frame.Type)
+            return await exchange.ExecuteAsync(_reader!, _writer!, operation.Token).ConfigureAwait(false);
+        }
+        catch (DatabaseClientException)
+        {
+            // The exchange knows whether it consumed a terminal, reusable response.
+            if (!exchange.IsResponseComplete)
             {
-                case ProtocolMessageType.ResultHeader:
-                {
-                    ProtocolResultHeaderMessage header = ProtocolResultHeaderMessage.Decode(frame.Payload.Span);
-                    var decoded = new List<DatabaseClientColumn>(header.Columns.Count);
-
-                    foreach ((string name, byte type) in header.Columns)
-                    {
-                        decoded.Add(new DatabaseClientColumn(name, (DatabaseType)type));
-                    }
-
-                    columns = decoded;
-                    break;
-                }
-
-                case ProtocolMessageType.ResultRow:
-                {
-                    rows.Add(DecodeRow(frame.Payload.Span, columns.Count));
-                    break;
-                }
-
-                case ProtocolMessageType.ResultComplete:
-                {
-                    ProtocolResultCompleteMessage complete = ProtocolResultCompleteMessage.Decode(frame.Payload.Span);
-                    return new DatabaseClientResult(columns, rows, complete.AffectedCount);
-                }
-
-                case ProtocolMessageType.Error:
-                {
-                    ProtocolErrorMessage error = ProtocolErrorMessage.Decode(frame.Payload.Span);
-
-                    // Statement-level failures leave the server session in the
-                    // ready state, so the connection stays poolable; everything
-                    // else means the server is closing the session.
-                    if (error.Code is not (ProtocolErrorCode.ParseFailure or ProtocolErrorCode.ExecutionFailure))
-                    {
-                        _isOpen = false;
-                    }
-
-                    throw new DatabaseClientException(error.Code, error.Message);
-                }
-
-                default:
-                    throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, $"Unexpected {frame.Type} frame in an execute exchange."));
+                _isOpen = false;
+            }
+            throw;
+        }
+        catch (ProtocolException exception)
+        {
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.ProtocolViolation, exception.Message, exception));
+        }
+        catch (Exception exception) when (exception is IOException or ConnectionAbortedException or ConnectionResetException)
+        {
+            throw MarkBroken(new DatabaseClientException(ProtocolErrorCode.Internal, "The connection failed during an exchange.", exception));
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation or a failed decoder may leave an unfinished response.
+            _isOpen = false;
+            throw;
+        }
+        catch
+        {
+            if (!exchange.IsResponseComplete)
+            {
+                _isOpen = false;
+            }
+            throw;
+        }
+        finally
+        {
+            lock (_exchangeLock)
+            {
+                _operation = null;
+                _exchangeCompletion = null;
+                operation.Dispose();
+                completion.TrySetResult();
             }
         }
     }
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        if (_isRented)
-        {
-            _isRented = false;
-            await _owner.ReturnAsync(this).ConfigureAwait(false);
-            return;
-        }
+    public ValueTask<Stream> ExecuteStreamingAsync(IDatabaseStreamingExchange exchange, CancellationToken cancellationToken = default)
+        => DatabaseDownloadStream.CreateAsync(this, exchange, cancellationToken);
 
-        await CloseAsync().ConfigureAwait(false);
+    /// <inheritdoc />
+    public ValueTask AbortAsync()
+    {
+        lock (_exchangeLock)
+        {
+            if (_isRented)
+            {
+                _isOpen = false;
+            }
+            return DisposeAsync();
+        }
+    }
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync()
+    {
+        lock (_exchangeLock)
+        {
+            if (_returnTask is not null)
+            {
+                return new ValueTask(_returnTask);
+            }
+            if (!_isRented)
+            {
+                return ValueTask.CompletedTask;
+            }
+            _isRented = false;
+            _operation?.Cancel();
+            _returnTask = ReturnAfterExchangeAsync(_exchangeCompletion?.Task);
+            return new ValueTask(_returnTask);
+        }
+    }
+
+    private async Task ReturnAfterExchangeAsync(Task? completion)
+    {
+        if (completion is not null)
+        {
+            await completion.ConfigureAwait(false);
+        }
+        await _owner.ReturnAsync(this).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -245,19 +284,6 @@ internal sealed class PooledDatabaseConnection : IDatabaseConnection
         {
             await _connection.DisposeAsync().ConfigureAwait(false);
         }
-    }
-
-    private static object?[] DecodeRow(ReadOnlySpan<byte> payload, int columnCount)
-    {
-        var values = new List<object?>(columnCount);
-        var reader = new DatabaseKeyReader(payload);
-
-        while (!reader.IsAtEnd)
-        {
-            values.Add(DatabaseValueCodec.Read(ref reader));
-        }
-
-        return [.. values];
     }
 
     private async ValueTask WriteFrameAsync(ProtocolMessageType type, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)

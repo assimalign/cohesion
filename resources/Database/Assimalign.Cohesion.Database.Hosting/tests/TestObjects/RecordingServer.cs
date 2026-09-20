@@ -24,19 +24,35 @@ internal sealed class RecordingServer : IDatabaseServer
 
     public IDatabaseServerContext Context => _context;
 
+    internal int DisposeCount { get; private set; }
+    internal Exception? StartException { get; set; }
+    internal Exception? StopException { get; set; }
+
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
         _log.Add($"{_name}:start");
+        if (StartException is not null)
+        {
+            throw StartException;
+        }
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
         _log.Add($"{_name}:stop");
+        if (StopException is not null)
+        {
+            throw StopException;
+        }
         return Task.CompletedTask;
     }
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync()
+    {
+        DisposeCount++;
+        return ValueTask.CompletedTask;
+    }
 
     private sealed class RecordingServerContext : IDatabaseServerContext
     {

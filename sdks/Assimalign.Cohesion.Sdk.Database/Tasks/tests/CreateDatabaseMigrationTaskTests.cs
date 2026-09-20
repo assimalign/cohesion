@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 
 using Assimalign.Cohesion.Database;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Sdk.Database.Tasks;
 
@@ -18,7 +19,7 @@ public class CreateDatabaseMigrationTaskTests
     {
         using var directory = new TemporaryDirectory();
         string schemaPath = directory.File("database.schema.json");
-        CompiledSchemaSerializer.Write(schemaPath, CreateSchema(includeDescription: false));
+        SqlCompiledSchemaSerializer.Write(schemaPath, CreateSchema(includeDescription: false));
         var engine = new RecordingBuildEngine();
         var task = new CreateDatabaseMigrationTask
         {
@@ -38,9 +39,9 @@ public class CreateDatabaseMigrationTaskTests
         script.ShouldContain("CREATE TABLE IF NOT EXISTS dbo.Orders (Id BIGINT PRIMARY KEY NOT NULL);");
         script.ShouldNotContain("BEGIN;");
         script.ShouldNotContain("COMMIT;");
-        CompiledSchemaSerializer.Read(task.BaselinePath).Hash.ShouldBe(CreateSchema(includeDescription: false).Hash);
+        SqlCompiledSchemaSerializer.Read(task.BaselinePath).Hash.ShouldBe(CreateSchema(includeDescription: false).Hash);
 
-        CompiledSchemaSerializer.Write(schemaPath, CreateSchema(includeDescription: true));
+        SqlCompiledSchemaSerializer.Write(schemaPath, CreateSchema(includeDescription: true));
         task.MigrationName = "add-description";
         task.Execute().ShouldBeTrue();
         Path.GetFileName(task.MigrationPath).ShouldBe("0002_add-description.sql");
@@ -71,7 +72,7 @@ public class CreateDatabaseMigrationTaskTests
     {
         using var directory = new TemporaryDirectory();
         string schemaPath = directory.File("database.schema.json");
-        CompiledSchemaSerializer.Write(schemaPath, CreateStringKeySchema());
+        SqlCompiledSchemaSerializer.Write(schemaPath, CreateStringKeySchema());
         var engine = new RecordingBuildEngine();
         var task = new CreateDatabaseMigrationTask
         {
@@ -96,10 +97,10 @@ public class CreateDatabaseMigrationTaskTests
         string schemaPath = directory.File("database.schema.json");
         string migrationsRoot = directory.File("Migrations");
         Directory.CreateDirectory(migrationsRoot);
-        CompiledSchemaSerializer.Write(
+        SqlCompiledSchemaSerializer.Write(
             Path.Combine(migrationsRoot, "0001_initial.schema.json"),
             CreateSchema(includeDescription: false));
-        CompiledSchemaSerializer.Write(
+        SqlCompiledSchemaSerializer.Write(
             schemaPath,
             CreateSchema(includeDescription: true, descriptionIsNullable: false));
         var engine = new RecordingBuildEngine();
@@ -120,7 +121,7 @@ public class CreateDatabaseMigrationTaskTests
         File.Exists(Path.Combine(migrationsRoot, "0002_required-description.schema.json")).ShouldBeFalse();
     }
 
-    private static CompiledSchema CreateSchema(bool includeDescription, bool descriptionIsNullable = true)
+    private static SqlCompiledSchema CreateSchema(bool includeDescription, bool descriptionIsNullable = true)
     {
         CompiledSchemaColumn[] columns = includeDescription
             ? [
@@ -134,8 +135,8 @@ public class CreateDatabaseMigrationTaskTests
             new CompiledSchemaKey("PK_Orders", ["Id"]),
             [],
             []);
-        return new CompiledSchema(
-            CompiledSchema.CurrentFormat,
+        return new SqlCompiledSchema(
+            SqlCompiledSchema.CurrentFormat,
             "orders",
             EngineModel.Sql,
             false,
@@ -144,11 +145,10 @@ public class CreateDatabaseMigrationTaskTests
             [],
             [],
             [],
-            [],
             []);
     }
 
-    private static CompiledSchema CreateStringKeySchema()
+    private static SqlCompiledSchema CreateStringKeySchema()
     {
         var table = new CompiledSchemaTable(
             "Sessions",
@@ -157,14 +157,13 @@ public class CreateDatabaseMigrationTaskTests
             new CompiledSchemaKey("PK_Sessions", ["Id"]),
             [],
             []);
-        return new CompiledSchema(
-            CompiledSchema.CurrentFormat,
+        return new SqlCompiledSchema(
+            SqlCompiledSchema.CurrentFormat,
             "sessions",
             EngineModel.Sql,
             false,
             [],
             [table],
-            [],
             [],
             [],
             [],

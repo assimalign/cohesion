@@ -1,7 +1,10 @@
 using System;
 using System.Globalization;
+using System.Collections.Generic;
 using System.Text;
 
+using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -17,12 +20,6 @@ internal static class SqlSchemaStatementRenderer
     {
         ArgumentNullException.ThrowIfNull(table);
 
-        if (table.Constraints.Count > 0)
-        {
-            throw new DatabaseException(
-                $"Table '{table.Name}' declares constraints that the SQL DDL executor does not support yet.");
-        }
-
         var builder = new StringBuilder();
         builder.Append("CREATE TABLE IF NOT EXISTS ")
                .Append(QualifiedTable(table.Name))
@@ -36,7 +33,21 @@ internal static class SqlSchemaStatementRenderer
             }
 
             CompiledSchemaColumn column = table.Columns[index];
-            AppendColumn(builder, column, IsPrimaryKeyColumn(table.PrimaryKey, column.Name));
+            AppendColumn(builder, column, IsPrimaryKeyColumn(table.PrimaryKey, column.Name),
+                emitPrimaryKey: table.PrimaryKey?.Columns.Count == 1);
+        }
+
+        if (table.PrimaryKey is { Columns.Count: > 1 } primaryKey)
+        {
+            builder.Append(", PRIMARY KEY (");
+            AppendColumns(builder, primaryKey.Columns);
+            builder.Append(')');
+        }
+
+        foreach (CompiledSchemaConstraint constraint in table.Constraints)
+        {
+            builder.Append(", ");
+            AppendConstraint(builder, constraint);
         }
 
         return builder.Append(");").ToString();
@@ -58,6 +69,55 @@ internal static class SqlSchemaStatementRenderer
 
     internal static string DropColumn(string tableName, string columnName)
         => $"ALTER TABLE {QualifiedTable(tableName)} DROP COLUMN {Identifier(columnName)};";
+
+    internal static string AddConstraint(string tableName, CompiledSchemaConstraint constraint)
+    {
+        var builder = new StringBuilder($"ALTER TABLE {QualifiedTable(tableName)} ADD ");
+        AppendConstraint(builder, constraint);
+        return builder.Append(';').ToString();
+    }
+
+    internal static string DropConstraint(string tableName, string constraintName)
+        => $"ALTER TABLE {QualifiedTable(tableName)} DROP CONSTRAINT {Identifier(constraintName)};";
+
+    private static void AppendConstraint(StringBuilder builder, CompiledSchemaConstraint constraint)
+    {
+        builder.Append("CONSTRAINT ").Append(Identifier(constraint.Name)).Append(' ');
+        switch (constraint.Kind)
+        {
+            case CompiledSchemaConstraintKind.Reference:
+                builder.Append("FOREIGN KEY (");
+                AppendColumns(builder, constraint.Columns);
+                builder.Append(") REFERENCES ").Append(QualifiedTable(constraint.ReferencedObject!)).Append(" (");
+                AppendColumns(builder, constraint.ReferencedColumns);
+                builder.Append(") ON DELETE ").Append(constraint.OnDelete switch
+                {
+                    CompiledSchemaReferentialAction.Restrict => "RESTRICT",
+                    CompiledSchemaReferentialAction.Cascade => "CASCADE",
+                    _ => throw new DatabaseException($"Constraint '{constraint.Name}' has an unsupported delete action."),
+                });
+                break;
+            case CompiledSchemaConstraintKind.Check:
+                string expression = constraint.Expression?.CanonicalText
+                    ?? throw new DatabaseException($"Check constraint '{constraint.Name}' has no expression.");
+                builder.Append("CHECK (").Append(expression).Append(')');
+                break;
+            default:
+                throw new DatabaseException($"Constraint '{constraint.Name}' has an unsupported kind.");
+        }
+    }
+
+    private static void AppendColumns(StringBuilder builder, IReadOnlyList<string> columns)
+    {
+        for (int index = 0; index < columns.Count; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(", ");
+            }
+            builder.Append(Identifier(columns[index]));
+        }
+    }
 
     internal static string CreateIndex(string tableName, CompiledSchemaIndex index)
     {
@@ -91,13 +151,13 @@ internal static class SqlSchemaStatementRenderer
     internal static string DropIndex(string tableName, string indexName)
         => $"DROP INDEX IF EXISTS {Identifier(indexName)} ON {QualifiedTable(tableName)};";
 
-    private static void AppendColumn(StringBuilder builder, CompiledSchemaColumn column, bool isPrimaryKey)
+    private static void AppendColumn(StringBuilder builder, CompiledSchemaColumn column, bool isPrimaryKey, bool emitPrimaryKey = true)
     {
         builder.Append(Identifier(column.Name))
                .Append(' ')
                .Append(TypeName(column));
 
-        if (isPrimaryKey)
+        if (isPrimaryKey && emitPrimaryKey)
         {
             builder.Append(" PRIMARY KEY");
         }
@@ -187,19 +247,28 @@ internal static class SqlSchemaStatementRenderer
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
 
-        if (!(char.IsLetter(value[0]) || value[0] == '_'))
+        if (value.IndexOfAny(['\0', '"']) >= 0)
         {
-            throw new DatabaseException($"Schema identifier '{value}' cannot be represented by the SQL dialect.");
+            throw new DatabaseException($"Schema identifier '{value}' contains a null character or embedded double quote unsupported by the SQL dialect.");
         }
 
+        bool requiresQuotes = !(char.IsLetter(value[0]) || value[0] == '_');
         for (int index = 1; index < value.Length; index++)
         {
             if (!(char.IsLetterOrDigit(value[index]) || value[index] == '_'))
             {
-                throw new DatabaseException($"Schema identifier '{value}' cannot be represented by the SQL dialect.");
+                requiresQuotes = true;
             }
         }
 
-        return value;
+        foreach (string keyword in SqlLanguageProfile.Instance.Keywords)
+        {
+            requiresQuotes |= string.Equals(value, keyword, StringComparison.OrdinalIgnoreCase);
+        }
+        foreach (string function in SqlLanguageProfile.Instance.Functions)
+        {
+            requiresQuotes |= string.Equals(value, function, StringComparison.OrdinalIgnoreCase);
+        }
+        return requiresQuotes ? "\"" + value + "\"" : value;
     }
 }

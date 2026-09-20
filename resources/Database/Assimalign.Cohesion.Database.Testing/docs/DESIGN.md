@@ -124,7 +124,12 @@ it does not depend on an application-export API. Coverage asserts:
 - Schema compilation or migration policy; the resource's normal builder owns declarations
   and provisioning, and their dedicated work items own compilation.
 - Replacing real-process gateway tests. The in-process factory gives fast resource tests;
-  the sample E2E independently validates the SDK manifest and process carrier.
+the sample E2E independently validates the SDK manifest and process carrier.
+
+The fixture declares and compiles its relational schema with
+`Database.Sql.Schema`'s `SqlSchema.Compile`, then passes the compiled identity to Hosting's
+`AddDatabase`. The SDK analyzes that same declaration at build time. Hosting's
+before-accept provisioning order and the fixture's runtime behavior are unchanged.
 
 ## Bootstrap identity (O35)
 
@@ -132,3 +137,16 @@ Default program factories issue an ephemeral ES256 JWT with issuer `tests`, subj
 and the program assembly name as audience. The ambient context carries the token and its public
 P-256 trust JWK. Internal stop requests send that JWT as Bearer; public clients remain uncredentialed.
 Custom managed contexts must supply a matching JWT and public trust key.
+
+
+## Phase 29 Database composition migration
+
+Database programs now capture `AddSql((context, engine) => ...)` intent, register
+the server through that engine builder's deferred `AddServer` factory, and
+identify deferred provisioning with the engine name. One application Build
+constructs and owns the engine and nested server; the program disposes the
+application. The standalone template still uses its ordinary local data path.
+This migration changes composition only; it adds no ApplicationModel declarations,
+manifests or resource control planes. Template acceptance explicitly builds all
+five emitted Database programs because resources-only changes do not trigger the
+Templates workflow.

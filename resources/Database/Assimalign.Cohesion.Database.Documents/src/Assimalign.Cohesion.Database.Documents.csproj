@@ -1,5 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Language" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Storage" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Catalog" />
+		<InternalsVisibleTo Include="Assimalign.Cohesion.Database.Documents.Tests" />
 	</ItemGroup>
 </Project>

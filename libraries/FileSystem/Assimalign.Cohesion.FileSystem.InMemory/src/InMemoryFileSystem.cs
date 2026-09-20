@@ -28,6 +28,8 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
     private readonly bool _isReadOnly;
     private readonly CultureInfo _cultureInfo;
     private readonly bool _ignoreCase;
+    private readonly object _watchGate = new();
+    private readonly HashSet<InMemoryFileSystemEventToken> _watchTokens = new();
     private Size _size;
     private Size _spaceUsed;
     private bool _isDisposed;
@@ -253,6 +255,25 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
     {
         CheckIfDisposed();
         return _root.Watch(pattern);
+    }
+
+    internal IFileSystemEventToken CreateWatchToken(InMemoryFileSystemInfo info, Glob pattern)
+    {
+        lock (_watchGate)
+        {
+            CheckIfDisposed();
+            var token = new InMemoryFileSystemEventToken(info, pattern, RemoveWatchToken);
+            _watchTokens.Add(token);
+            return token;
+        }
+    }
+
+    private void RemoveWatchToken(InMemoryFileSystemEventToken token)
+    {
+        lock (_watchGate)
+        {
+            _watchTokens.Remove(token);
+        }
     }
 
     /// <inheritdoc />
@@ -612,9 +633,21 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_isDisposed)
+        InMemoryFileSystemEventToken[] tokens;
+        lock (_watchGate)
         {
-            return;
+            if (_isDisposed)
+            {
+                return;
+            }
+            _isDisposed = true;
+            tokens = _watchTokens.ToArray();
+            _watchTokens.Clear();
+        }
+
+        foreach (var token in tokens)
+        {
+            token.Dispose();
         }
 
         Lock(LockPolicy.Exclusive);
@@ -625,7 +658,6 @@ public sealed partial class InMemoryFileSystem : InMemoryFileSystemLockHandle, I
         }
         finally
         {
-            _isDisposed = true;
             Unlock();
         }
     }

@@ -3,7 +3,8 @@ on:
   push:
     paths:
       # Covers Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost, the area's
-      # acceptance fixture, which now sits inside the project whose tests drive it.
+      # acceptance fixture, and the engine/wire streaming fixtures under Blob and Blob.Client.
+      # Fixtures sit inside the projects whose tests drive them.
       - 'resources/Database/**'
       - '.github/actions/build/**'
       - '.github/workflows/resource-database.yml'        # When Pipeline File Changes
@@ -20,37 +21,52 @@ jobs:
         # Every delivered Database project is listed so the area's dependency-rule guard
         # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
         # each of them - most importantly Database.Hosting, which nothing else pulls in
-        # transitively. The as-yet source-less model scaffolds (Documents/Graph/Blob/
-        # Cache, plus KeyValuePair.Replication/.Security) and the post-MVP contract
+        # transitively. The as-yet source-less model scaffolds (Cache, plus
+        # Documents.Client/.Replication/.Security, Graph.Replication/.Security,
+        # Blob.Replication/.Security and
+        # KeyValuePair.Replication/.Security) and the post-MVP contract
         # shells (Replication, Sql.Replication, Sql.Security, Memory) are
         # excluded until they ship.
         projects: [
             'Assimalign.Cohesion.Database',
-            'Assimalign.Cohesion.Database.Types',
-            'Assimalign.Cohesion.Database.Language',
-            'Assimalign.Cohesion.Database.Storage',
-            'Assimalign.Cohesion.Database.Transactions',
-            'Assimalign.Cohesion.Database.Indexing',
-            'Assimalign.Cohesion.Database.Execution',
-            'Assimalign.Cohesion.Database.Protocol',
-            'Assimalign.Cohesion.Database.Security',
+            'Assimalign.Cohesion.Database.ApplicationModel',
+            'Assimalign.Cohesion.Database.Blob',
+            'Assimalign.Cohesion.Database.Blob.Catalog',
+            'Assimalign.Cohesion.Database.Blob.Client',
+            'Assimalign.Cohesion.Database.Blob.Storage',
             'Assimalign.Cohesion.Database.Client',
+            'Assimalign.Cohesion.Database.Documents',
+            'Assimalign.Cohesion.Database.Documents.Catalog',
+            'Assimalign.Cohesion.Database.Documents.Language',
+            'Assimalign.Cohesion.Database.Documents.Storage',
             'Assimalign.Cohesion.Database.Embedded',
+            'Assimalign.Cohesion.Database.Execution',
+            'Assimalign.Cohesion.Database.Governance',
+            'Assimalign.Cohesion.Database.Graph',
+            'Assimalign.Cohesion.Database.Graph.Catalog',
+            'Assimalign.Cohesion.Database.Graph.Client',
+            'Assimalign.Cohesion.Database.Graph.Language',
+            'Assimalign.Cohesion.Database.Graph.Storage',
             'Assimalign.Cohesion.Database.Hosting',
-            'Assimalign.Cohesion.Database.Sql',
-            'Assimalign.Cohesion.Database.Sql.Language',
-            'Assimalign.Cohesion.Database.Sql.Catalog',
-            'Assimalign.Cohesion.Database.Sql.Storage',
-            'Assimalign.Cohesion.Database.Sql.Client',
+            'Assimalign.Cohesion.Database.Indexing',
             'Assimalign.Cohesion.Database.KeyValuePair',
-            'Assimalign.Cohesion.Database.KeyValuePair.Storage',
             'Assimalign.Cohesion.Database.KeyValuePair.Catalog',
             'Assimalign.Cohesion.Database.KeyValuePair.Client',
-            'Assimalign.Cohesion.Database.ApplicationModel',
-            # Its test project carries the non-packable resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost
-            # reference, so the real SDK-consumer apphost is built and exercised here.
+            'Assimalign.Cohesion.Database.KeyValuePair.Storage',
+            'Assimalign.Cohesion.Database.Language',
+            'Assimalign.Cohesion.Database.Protocol',
+            'Assimalign.Cohesion.Database.Security',
+            'Assimalign.Cohesion.Database.Sql',
+            'Assimalign.Cohesion.Database.Sql.Catalog',
+            'Assimalign.Cohesion.Database.Sql.Client',
+            'Assimalign.Cohesion.Database.Sql.Language',
+            'Assimalign.Cohesion.Database.Sql.Schema',
+            'Assimalign.Cohesion.Database.Sql.Storage',
+            'Assimalign.Cohesion.Database.Sql.Tcp',
+            'Assimalign.Cohesion.Database.Storage',
             'Assimalign.Cohesion.Database.Testing',
-            'Assimalign.Cohesion.Database.Governance'
+            'Assimalign.Cohesion.Database.Transactions',
+            'Assimalign.Cohesion.Database.Types'
         ]
         # Database.Testing evaluates the real Sdk.Database SampleHost project. Its
         # package-backed SDK/framework closure is prepared once below and reused on

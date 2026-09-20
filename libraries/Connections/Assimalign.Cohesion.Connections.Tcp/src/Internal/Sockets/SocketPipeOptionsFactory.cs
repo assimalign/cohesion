@@ -1,8 +1,6 @@
 using System;
 using System.IO.Pipelines;
 
-using Assimalign.Cohesion.Connections.Internal;
-
 namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 
 /// <summary>

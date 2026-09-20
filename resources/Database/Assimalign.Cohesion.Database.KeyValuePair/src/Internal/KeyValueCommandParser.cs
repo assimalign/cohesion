@@ -6,8 +6,9 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 /// <summary>
 /// Parses the key-value command grammar (the contract in <c>docs/COMMANDS.md</c>)
 /// into typed requests: <c>GET @k</c>, <c>PUT @k @v [IF ABSENT | IF @etag]</c>,
-/// <c>DELETE @k [IF @etag]</c>, <c>EXISTS @k</c>, and
-/// <c>SCAN [FROM @start] [TO @end] [PREFIX @p] [LIMIT n|@n]</c>. Keywords are
+/// <c>DELETE @k [IF @etag]</c>, <c>EXISTS @k</c>,
+/// <c>SCAN [FROM @start] [TO @end] [PREFIX @p] [LIMIT n|@n]</c>, and
+/// <c>KEYSPACES</c>. Keywords are
 /// case-insensitive; every data operand is a named parameter (<c>@name</c>)
 /// riding the session's parameter map — the grammar itself never carries values,
 /// which is what keeps it trivially injection-proof and wire-compatible with the
@@ -36,6 +37,14 @@ internal static class KeyValueCommandParser
             throw new DatabaseParseException("The command is empty.");
         }
 
+        // KEYSPACES is a virtual command result, never an entry address. A
+        // parameter-bound key containing those bytes remains ordinary data.
+        if (tokens.Length > 1 && IsKeyword(tokens[1], "KEYSPACES") &&
+            (IsKeyword(tokens[0], "PUT") || IsKeyword(tokens[0], "DELETE")))
+        {
+            throw new DatabaseParseException("The KEYSPACES catalog surface is read-only.");
+        }
+
         try
         {
             return tokens[0].ToUpperInvariant() switch
@@ -45,8 +54,9 @@ internal static class KeyValueCommandParser
                 "DELETE" => ParseDelete(tokens, parameters),
                 "EXISTS" => ParseExists(tokens, parameters),
                 "SCAN" => ParseScan(tokens, parameters),
+                "KEYSPACES" => ParseKeySpaces(tokens),
                 var verb => throw new DatabaseParseException(
-                    $"Unknown command '{verb}'. The key-value grammar is GET, PUT, DELETE, EXISTS, and SCAN (docs/COMMANDS.md)."),
+                    $"Unknown command '{verb}'. The key-value grammar is GET, PUT, DELETE, EXISTS, SCAN, and KEYSPACES (docs/COMMANDS.md)."),
             };
         }
         catch (ArgumentException exception)
@@ -55,6 +65,12 @@ internal static class KeyValueCommandParser
             // conditions) is a command error at this boundary.
             throw new DatabaseParseException(exception.Message);
         }
+    }
+
+    private static KeyValueKeySpacesRequest ParseKeySpaces(string[] tokens)
+    {
+        RequireTokenCount(tokens, 1, "KEYSPACES");
+        return new KeyValueKeySpacesRequest();
     }
 
     private static KeyValueGetRequest ParseGet(string[] tokens, IReadOnlyDictionary<string, object?>? parameters)

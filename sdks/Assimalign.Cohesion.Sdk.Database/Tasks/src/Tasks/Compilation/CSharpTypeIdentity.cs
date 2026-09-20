@@ -6,7 +6,7 @@ using Microsoft.CodeAnalysis;
 
 namespace Assimalign.Cohesion.Sdk.Database.Tasks.Compilation;
 
-/// <summary>Mirrors the Database root's portable reflection type identity for Roslyn symbols.</summary>
+/// <summary>Mirrors the SQL schema compiler's portable identity of supplied type metadata for Roslyn symbols.</summary>
 internal static class CSharpTypeIdentity
 {
     internal static string Create(ITypeSymbol type)

@@ -31,8 +31,10 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
 
     public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
 
+    public IReadOnlyList<IDatabaseServer> Servers => Array.Empty<IDatabaseServer>();
+
     public ValueTask<IDatabase> CreateDatabaseAsync(
-        string name,
+        DatabaseName name,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -44,7 +46,7 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
     }
 
     public ValueTask<IDatabase> OpenDatabaseAsync(
-        string name,
+        DatabaseName name,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -66,7 +68,7 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
     }
 
     public ValueTask DropDatabaseAsync(
-        string name,
+        DatabaseName name,
         CancellationToken cancellationToken = default)
     {
         throw new NotSupportedException();
@@ -78,7 +80,7 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
         throw new NotSupportedException();
     }
 
-    public bool TryGetDatabase(string name, out IDatabase database)
+    public bool TryGetDatabase(DatabaseName name, out IDatabase database)
     {
         database = _database!;
         return _databaseIsOpen && _database is not null;
@@ -97,7 +99,7 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
 }
 
 internal sealed class ProvisioningDatabase(
-    string name,
+    DatabaseName name,
     IDatabaseEngine engine,
     List<string> log) : IDatabase, IDatabaseSchemaProvisioner
 {

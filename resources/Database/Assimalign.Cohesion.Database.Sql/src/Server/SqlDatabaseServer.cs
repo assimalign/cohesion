@@ -38,7 +38,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// releases the listener. Stop is terminal: restarting means composing a fresh
 /// server and listener. The composition root retains ownership of the engine;
 /// the server owns the listener lifecycle once startup is attempted.
-/// Compose one with <see cref="Create"/>, or through the <c>AddSqlServer(...)</c>
+/// Compose one with <see cref="Create"/>, or through the <c>engineBuilder.AddServer(factory)</c>
 /// builder verb.
 /// </remarks>
 public sealed class SqlDatabaseServer : IDatabaseServer

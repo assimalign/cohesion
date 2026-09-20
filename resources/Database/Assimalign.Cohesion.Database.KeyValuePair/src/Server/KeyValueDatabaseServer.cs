@@ -40,7 +40,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair;
 /// composing a fresh server and listener. The composition root retains ownership
 /// of the engine; the server owns the listener lifecycle once startup is attempted. Compose
 /// one with <see cref="Create"/>, or through the
-/// <c>AddKeyValueServer(...)</c> builder verb.
+/// <c>engineBuilder.AddServer(factory)</c> builder verb.
 /// </remarks>
 public sealed class KeyValueDatabaseServer : IDatabaseServer
 {

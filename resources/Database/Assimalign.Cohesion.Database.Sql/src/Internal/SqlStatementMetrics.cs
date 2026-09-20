@@ -17,7 +17,8 @@ internal sealed class SqlStatementMetrics
 
     /// <summary>
     /// Gets or sets the access path the executor drove ("scan", or
-    /// "seek:&lt;index&gt;"), empty for statements with no table access.
+    /// "seek:&lt;index&gt;", "join-scan", or "join-seek:&lt;index&gt;"), empty for
+    /// statements with no table access.
     /// </summary>
     internal string AccessPath { get; set; } = string.Empty;
 }

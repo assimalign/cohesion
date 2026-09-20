@@ -7,4 +7,11 @@
         <CohesionProjectReference Include="Assimalign.Cohesion.Core" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
     </ItemGroup>
+    <ItemGroup>
+        <!-- The driver's pipe plumbing (StreamPipeOptionsContext and PipeOptionsFactory, which
+             also carries PipeOptionsContext) compiles in from the Connections shared\ folder.
+             All of it is stateless or driver-owned, so a private copy per driver is correct;
+             none of it is part of the Connections public surface. -->
+        <CohesionSharedSource Include="Assimalign.Cohesion.Connections" />
+    </ItemGroup>
 </Project>

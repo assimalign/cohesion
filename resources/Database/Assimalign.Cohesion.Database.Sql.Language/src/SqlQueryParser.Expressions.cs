@@ -20,7 +20,8 @@ public sealed partial class SqlQueryParser
     //                            | [NOT] LIKE ...)?
     //   ParseAddition           → ParseMultiplication ((+|-||) ParseMultiplication)*
     //   ParseMultiplication     → ParseUnary ((*|/|%) ParseUnary)*
-    //   ParseUnary              → (-|~)? ParsePrimary
+    //   ParseUnary              → (-|~)? ParseCollate
+    //   ParseCollate            → ParsePrimary (COLLATE name)*
     //   ParsePrimary            → literal | column_ref | param | function(...)
     //                            | (expr) | (SELECT ...) | CASE | CAST | EXISTS | *
 
@@ -164,7 +165,7 @@ public sealed partial class SqlQueryParser
                 // Check if it's a subquery: IN (SELECT ...)
                 if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
                 {
-                    var subquery = ParseSelect(ref lexer);
+                    var subquery = ParseSubquery(ref lexer);
                     if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
                     {
                         Advance(ref lexer);
@@ -199,7 +200,7 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var pattern = ParsePrimary(ref lexer);
+            var pattern = ParseCollate(ref lexer);
             return new SqlLikeExpression(left, pattern, notBefore, Location.Create(1, 1, pos, pos));
         }
 
@@ -302,7 +303,7 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var operand = ParsePrimary(ref lexer);
+            var operand = ParseCollate(ref lexer);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.Negate,
                 Location.Create(1, 1, pos, pos));
         }
@@ -311,12 +312,12 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var operand = ParsePrimary(ref lexer);
+            var operand = ParseCollate(ref lexer);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.BitwiseNot,
                 Location.Create(1, 1, pos, pos));
         }
 
-        return ParsePrimary(ref lexer);
+        return ParseCollate(ref lexer);
     }
 
     private SqlExpression ParsePrimary(ref TokenLexer lexer)
@@ -328,6 +329,22 @@ public sealed partial class SqlQueryParser
         }
 
         var pos = lexer.Current.Position;
+
+        // Preserve a signed numeric token as a literal. ORDER BY binding must
+        // distinguish +1 from a larger constant expression such as +1 + 1.
+        if (lexer.Current.Type == TokenType.Plus)
+        {
+            var next = lexer;
+            if (AdvancePastComments(ref next) && next.Current.Type is TokenType.Integer or TokenType.Float)
+            {
+                Advance(ref lexer);
+                string value = CurrentText(ref lexer);
+                var type = lexer.Current.Type == TokenType.Integer ? SqlLiteralType.Integer : SqlLiteralType.Float;
+                int end = lexer.Current.Position + lexer.Current.Value.Length;
+                Advance(ref lexer);
+                return new SqlLiteralExpression(value, type, Location.Create(1, 1, pos, end));
+            }
+        }
 
         // Star (wildcard)
         if (lexer.Current.Type == TokenType.Asterisk)
@@ -422,7 +439,7 @@ public sealed partial class SqlQueryParser
             // Subquery: (SELECT ...)
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
             {
-                var subSelect = ParseSelect(ref lexer);
+                var subSelect = ParseSubquery(ref lexer);
                 if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
                 {
                     Advance(ref lexer);
@@ -464,7 +481,7 @@ public sealed partial class SqlQueryParser
     private SqlExpression ParseColumnRefOrFunction(ref TokenLexer lexer)
     {
         var pos = lexer.Current.Position;
-        string first = CurrentText(ref lexer);
+        string first = CurrentIdentifierText(ref lexer);
         Advance(ref lexer);
 
         // Check for function call: identifier(
@@ -477,18 +494,26 @@ public sealed partial class SqlQueryParser
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Dot)
         {
             Advance(ref lexer); // consume dot
+            if (lexer.Current.Type == TokenType.Asterisk)
+            {
+                return ParseUnsupportedQualifiedStar(ref lexer, pos);
+            }
             if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
             {
-                string second = CurrentText(ref lexer);
+                string second = CurrentIdentifierText(ref lexer);
                 Advance(ref lexer);
 
                 // Check for a.b.c
                 if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Dot)
                 {
                     Advance(ref lexer);
+                    if (lexer.Current.Type == TokenType.Asterisk)
+                    {
+                        return ParseUnsupportedQualifiedStar(ref lexer, pos);
+                    }
                     if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
                     {
-                        string third = CurrentText(ref lexer);
+                        string third = CurrentIdentifierText(ref lexer);
                         Advance(ref lexer);
                         return new SqlColumnReferenceExpression(third, second, first,
                             Location.Create(1, 1, pos, pos));
@@ -504,6 +529,15 @@ public sealed partial class SqlQueryParser
         // Simple identifier
         return new SqlColumnReferenceExpression(first, null, null,
             Location.Create(1, 1, pos, pos + first.Length));
+    }
+
+    private SqlStarExpression ParseUnsupportedQualifiedStar(ref TokenLexer lexer, int start)
+    {
+        int end = lexer.Current.Position + 1;
+        AddUnsupportedSurfaceDiagnostic(start, end,
+            "Qualified SQL wildcard projections are not supported; select explicit columns or use unqualified *.");
+        Advance(ref lexer);
+        return new SqlStarExpression(Location.Create(1, 1, start, end));
     }
 
     private SqlExpression ParseFunctionCall(ref TokenLexer lexer)
@@ -528,6 +562,14 @@ public sealed partial class SqlQueryParser
 
         var args = new List<SqlExpression>();
 
+        if (IsAggregateFunction(name) && (IsKeyword(ref lexer, "DISTINCT") || IsKeyword(ref lexer, "ALL")))
+        {
+            string modifier = CurrentText(ref lexer).ToUpperInvariant();
+            AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + modifier.Length,
+                $"The {modifier} modifier inside SQL aggregate functions is not supported.");
+            Advance(ref lexer);
+        }
+
         if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
         {
             // Handle COUNT(*) and similar
@@ -545,6 +587,12 @@ public sealed partial class SqlQueryParser
                     args.Add(ParseExpression(ref lexer));
                 }
             }
+        }
+
+        if (IsAggregateFunction(name) && IsKeyword(ref lexer, "ORDER"))
+        {
+            AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length,
+                "ORDER BY inside SQL aggregate functions is not supported.");
         }
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
@@ -597,56 +645,6 @@ public sealed partial class SqlQueryParser
             Location.Create(1, 1, pos, pos));
     }
 
-    private SqlExpression ParseCast(ref TokenLexer lexer)
-    {
-        var pos = lexer.Current.Position;
-        Advance(ref lexer); // consume CAST
-
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
-        {
-            Advance(ref lexer);
-        }
-
-        var operand = ParseExpression(ref lexer);
-
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "AS"))
-        {
-            Advance(ref lexer);
-        }
-
-        // Parse type name (could be multi-word like VARCHAR(100))
-        string targetType = string.Empty;
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-        {
-            targetType = CurrentText(ref lexer);
-            Advance(ref lexer);
-
-            // Handle parameterized types: VARCHAR(100)
-            if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
-            {
-                targetType += "(";
-                Advance(ref lexer);
-                if (!IsAtEnd(ref lexer))
-                {
-                    targetType += CurrentText(ref lexer);
-                    Advance(ref lexer);
-                }
-                if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-                {
-                    targetType += ")";
-                    Advance(ref lexer);
-                }
-            }
-        }
-
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-        {
-            Advance(ref lexer);
-        }
-
-        return new SqlCastExpression(operand, targetType, Location.Create(1, 1, pos, pos));
-    }
-
     private SqlExpression ParseExists(ref TokenLexer lexer, bool isNegated, int pos)
     {
         Advance(ref lexer); // consume EXISTS
@@ -659,7 +657,7 @@ public sealed partial class SqlQueryParser
         SqlSelectExpression? subquery = null;
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
         {
-            subquery = ParseSelect(ref lexer);
+            subquery = ParseSubquery(ref lexer);
         }
 
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)

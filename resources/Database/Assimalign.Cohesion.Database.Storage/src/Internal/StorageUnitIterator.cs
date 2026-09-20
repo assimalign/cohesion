@@ -82,6 +82,8 @@ internal sealed unsafe class StorageUnitIterator : IStorageUnitIterator
 
             if (!_freeSpaceMap.IsAllocated((PageId)pageId))
             {
+                _currentHandle?.Dispose();
+                _currentHandle = null;
                 AdvancePage();
                 continue;
             }

@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
-using Assimalign.Cohesion.Database;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
 using Microsoft.Build.Framework;
@@ -115,11 +115,11 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             string migrationsRoot = ResolvePath(MigrationsRoot, projectDirectory);
             Directory.CreateDirectory(migrationsRoot);
             BaselineFile? latest = FindLatestBaseline(migrationsRoot);
-            CompiledSchema desired = CompiledSchemaSerializer.Read(schemaPath);
-            CompiledSchema? current = latest is null
+            SqlCompiledSchema desired = SqlCompiledSchemaSerializer.Read(schemaPath);
+            SqlCompiledSchema? current = latest is null
                 ? null
-                : CompiledSchemaSerializer.Read(latest.Path);
-            SchemaMigrationPlan plan = SchemaMigrationPlanner.Plan(current, desired);
+                : SqlCompiledSchemaSerializer.Read(latest.Path);
+            SqlSchemaMigrationPlan plan = SqlSchemaMigrationPlanner.Plan(current, desired);
             if (plan.IsEmpty)
             {
                 Log.LogError(
@@ -160,7 +160,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             }
 
             string script = SqlMigrationWriter.Write(prefix, plan);
-            string baseline = CompiledSchemaSerializer.Serialize(desired);
+            string baseline = SqlCompiledSchemaSerializer.Serialize(desired);
             WritePair(MigrationPath, script, BaselinePath, baseline);
             Log.LogMessage(
                 MessageImportance.High,
@@ -169,7 +169,7 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or ArgumentException or
-            InvalidOperationException or DatabaseSchemaValidationException or DatabaseSchemaMigrationException)
+            InvalidOperationException or SqlSchemaValidationException or SqlSchemaMigrationException)
         {
             Log.LogError(null, "COHDBSDK206", null, null, 0, 0, 0, 0, exception.Message);
             return false;
@@ -228,30 +228,30 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
 
     private static class SqlMigrationWriter
     {
-        internal static string Write(string migrationName, SchemaMigrationPlan plan)
+        internal static string Write(string migrationName, SqlSchemaMigrationPlan plan)
         {
             var builder = new StringBuilder();
             builder.Append("-- Cohesion database migration ").Append(migrationName).Append('\n');
             builder.Append("-- Source schema: ").Append(plan.SourceHash ?? "<empty>").Append('\n');
             builder.Append("-- Target schema: ").Append(plan.TargetHash).Append('\n');
-            foreach (SchemaMigrationOperation operation in plan.Operations)
+            foreach (SqlSchemaMigrationOperation operation in plan.Operations)
             {
                 WriteOperation(builder, operation);
             }
             return builder.ToString();
         }
 
-        private static void WriteOperation(StringBuilder builder, SchemaMigrationOperation operation)
+        private static void WriteOperation(StringBuilder builder, SqlSchemaMigrationOperation operation)
         {
             switch (operation.Kind)
             {
-                case SchemaMigrationOperationKind.AddTable:
+                case SqlSchemaMigrationOperationKind.AddTable:
                     WriteAddTable(builder, Required(operation.Table, operation));
                     break;
-                case SchemaMigrationOperationKind.DropTable:
+                case SqlSchemaMigrationOperationKind.DropTable:
                     builder.Append("DROP TABLE IF EXISTS ").Append(QualifiedTable(operation.ObjectName)).Append(";\n");
                     break;
-                case SchemaMigrationOperationKind.AddColumn:
+                case SqlSchemaMigrationOperationKind.AddColumn:
                     CompiledSchemaColumn addedColumn = Required(operation.Column, operation);
                     if (!addedColumn.IsNullable)
                     {
@@ -264,25 +264,21 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
                     WriteColumn(builder, addedColumn, isPrimaryKey: false);
                     builder.Append(";\n");
                     break;
-                case SchemaMigrationOperationKind.AlterColumn:
+                case SqlSchemaMigrationOperationKind.AlterColumn:
                     throw Unsupported(operation, "ALTER metadata is not implemented by the SQL DDL dialect");
-                case SchemaMigrationOperationKind.DropColumn:
+                case SqlSchemaMigrationOperationKind.DropColumn:
                     builder.Append("ALTER TABLE ").Append(QualifiedTable(Required(operation.ParentName, operation)))
                         .Append(" DROP COLUMN ").Append(Identifier(operation.ObjectName)).Append(";\n");
                     break;
-                case SchemaMigrationOperationKind.AddIndex:
+                case SqlSchemaMigrationOperationKind.AddIndex:
                     WriteAddIndex(builder, Required(operation.ParentName, operation), Required(operation.Index, operation));
                     break;
-                case SchemaMigrationOperationKind.DropIndex:
+                case SqlSchemaMigrationOperationKind.DropIndex:
                     builder.Append("DROP INDEX IF EXISTS ").Append(Identifier(operation.ObjectName))
                         .Append(" ON ").Append(QualifiedTable(Required(operation.ParentName, operation))).Append(";\n");
                     break;
-                case SchemaMigrationOperationKind.AlterTable:
+                case SqlSchemaMigrationOperationKind.AlterTable:
                     throw Unsupported(operation, "ALTER metadata is not implemented by the SQL DDL dialect");
-                case SchemaMigrationOperationKind.AddCollection:
-                case SchemaMigrationOperationKind.AlterCollection:
-                case SchemaMigrationOperationKind.DropCollection:
-                    throw Unsupported(operation, "key-value collections do not belong to the SQL model");
                 default:
                     throw Unsupported(operation, "the operation kind is unknown");
             }
@@ -417,18 +413,18 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             return value;
         }
 
-        private static InvalidOperationException Unsupported(SchemaMigrationOperation operation, string reason)
+        private static InvalidOperationException Unsupported(SqlSchemaMigrationOperation operation, string reason)
             => new($"SQL migration operation '{operation.Kind}' for '{QualifiedName(operation)}' is unsupported: {reason}.");
 
-        private static string QualifiedName(SchemaMigrationOperation operation)
+        private static string QualifiedName(SqlSchemaMigrationOperation operation)
             => operation.ParentName is null
                 ? operation.ObjectName
                 : $"{operation.ParentName}.{operation.ObjectName}";
 
-        private static T Required<T>(T? value, SchemaMigrationOperation operation) where T : class
+        private static T Required<T>(T? value, SqlSchemaMigrationOperation operation) where T : class
             => value ?? throw new InvalidOperationException($"Migration operation '{operation.Kind}' for '{operation.ObjectName}' omitted required data.");
 
-        private static string Required(string? value, SchemaMigrationOperation operation)
+        private static string Required(string? value, SqlSchemaMigrationOperation operation)
             => value ?? throw new InvalidOperationException($"Migration operation '{operation.Kind}' for '{operation.ObjectName}' omitted its parent name.");
 
     }

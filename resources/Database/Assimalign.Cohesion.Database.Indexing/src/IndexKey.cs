@@ -65,6 +65,17 @@ public readonly struct IndexKey : IEquatable<IndexKey>, IComparable<IndexKey>
     }
 
     /// <summary>
+    /// Encodes a string through its collation's deterministic byte transform.
+    /// Collation-equal strings have identical keys and hashes, including unique locks.
+    /// </summary>
+    /// <param name="value">The string to encode.</param>
+    /// <param name="collation">The index-backed collation defining order and equality.</param>
+    /// <returns>The encoded string key.</returns>
+    /// <exception cref="DatabaseTypeException">The collation is not index-backed.</exception>
+    public static IndexKey FromString(string value, Collation collation)
+        => From(new DatabaseKeyWriter().AppendString(value, collation));
+
+    /// <summary>
     /// Creates a key from the shared type system's composite key writer — the path
     /// for typed and composite keys (strings under an explicit collation, decimals,
     /// temporal types, multi-column keys).

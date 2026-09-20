@@ -99,9 +99,11 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
         using CancellationTokenRegistration startupCancellationRegistration =
             cancellationToken.Register(Context.Shutdown);
 
+        bool serviceStartupEntered = false;
         try
         {
             await OnStartingAsync(cancellationToken).ConfigureAwait(false);
+            serviceStartupEntered = true;
 
             List<Exception> exceptions = new();
             bool concurrent = _options.StartServicesConcurrently;
@@ -188,7 +190,7 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
 
             // A failed or cancelled start must not wedge the host in Starting with
             // partially-started services leaked: compensate, mark Failed, rethrow.
-            await RollbackStartAsync().ConfigureAwait(false);
+            await RollbackStartAsync(serviceStartupEntered).ConfigureAwait(false);
 
             if (startupTimedOut)
             {
@@ -567,20 +569,25 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     /// Rollback failures are swallowed so they never mask the original fault, which the
     /// caller rethrows.
     /// </summary>
-    private async Task RollbackStartAsync()
+    private async Task RollbackStartAsync(bool serviceStartupEntered)
     {
         using var cancellationTokenSource = new CancellationTokenSource(_options.ShutdownTimeout);
 
-        foreach (IHostService service in Context.HostedServices.Reverse())
+        // A rejected OnStarting hook has not entered any service lifecycle. In
+        // particular, a terminal host guard must not stop last run's services again.
+        if (serviceStartupEntered)
         {
-            try
+            foreach (IHostService service in Context.HostedServices.Reverse())
             {
-                await service.StopAsync(cancellationTokenSource.Token).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Best-effort teardown on the failure path; the original start fault is
-                // what the caller must observe.
+                try
+                {
+                    await service.StopAsync(cancellationTokenSource.Token).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Best-effort teardown on the failure path; the original start fault is
+                    // what the caller must observe.
+                }
             }
         }
 
