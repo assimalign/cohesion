@@ -520,35 +520,13 @@ internal sealed class SqlExpressionEvaluator
     }
 
     /// <summary>
-    /// Compares two non-null values with numeric promotion (integers and floats
-    /// promote to decimal/double) and the resolved string collation.
+    /// Uses the same non-null value order as grouping, sorting and extrema.
     /// </summary>
     internal static int Compare(object left, object right, Collation? collation = null)
-    {
-        if (TryToNumber(left, out decimal leftNumber) && TryToNumber(right, out decimal rightNumber))
-        {
-            return leftNumber.CompareTo(rightNumber);
-        }
+        => SqlValueComparer.Compare(left, right, collation);
 
-        if (left is string leftText && right is string rightText)
-        {
-            return (collation ?? Collation.Binary).Compare(leftText, rightText);
-        }
-
-        if (left is bool leftFlag && right is bool rightFlag)
-        {
-            return leftFlag.CompareTo(rightFlag);
-        }
-
-        if (left.GetType() == right.GetType() && left is IComparable comparable)
-        {
-            return comparable.CompareTo(right);
-        }
-
-        throw new DatabaseException($"Cannot compare values of types {left.GetType().Name} and {right.GetType().Name}.");
-    }
-
-    private static bool TryToNumber(object value, out decimal number)
+    /// <summary>Retains decimal arithmetic conversion independently of value comparison.</summary>
+    private static bool TryToArithmeticNumber(object value, out decimal number)
     {
         switch (value)
         {
@@ -556,8 +534,8 @@ internal sealed class SqlExpressionEvaluator
             case short v: number = v; return true;
             case int v: number = v; return true;
             case long v: number = v; return true;
-            case float v: number = (decimal)v; return true;
-            case double v: number = (decimal)v; return true;
+            case float v: number = Convert.ToDecimal(v); return true;
+            case double v: number = Convert.ToDecimal(v); return true;
             case decimal v: number = v; return true;
             default: number = 0; return false;
         }
@@ -571,7 +549,7 @@ internal sealed class SqlExpressionEvaluator
     {
         bool integers = left is sbyte or short or int or long && right is sbyte or short or int or long;
 
-        if (!TryToNumber(left, out decimal a) || !TryToNumber(right, out decimal b))
+        if (!TryToArithmeticNumber(left, out decimal a) || !TryToArithmeticNumber(right, out decimal b))
         {
             throw new DatabaseException("Arithmetic requires numeric operands.");
         }

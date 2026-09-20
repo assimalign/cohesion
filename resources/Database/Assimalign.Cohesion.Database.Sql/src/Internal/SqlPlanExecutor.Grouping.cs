@@ -139,13 +139,13 @@ internal sealed partial class SqlPlanExecutor
                         _sum = checked(_sum + Convert.ToDecimal(value, CultureInfo.InvariantCulture));
                         break;
                     case "MIN":
-                        if (_extreme is null || CompareGroupValues(value, _extreme, collation) < 0)
+                        if (_extreme is null || SqlValueComparer.Compare(value, _extreme, collation) < 0)
                         {
                             _extreme = value;
                         }
                         break;
                     case "MAX":
-                        if (_extreme is null || CompareGroupValues(value, _extreme, collation) > 0)
+                        if (_extreme is null || SqlValueComparer.Compare(value, _extreme, collation) > 0)
                         {
                             _extreme = value;
                         }
@@ -181,7 +181,7 @@ internal sealed partial class SqlPlanExecutor
             for (int i = 0; i < left.Length; i++)
             {
                 if (left[i] is null ? right[i] is not null : right[i] is null
-                    || CompareGroupValues(left[i]!, right[i]!, collations[i]) != 0)
+                    || SqlValueComparer.Compare(left[i]!, right[i]!, collations[i]) != 0)
                 {
                     return false;
                 }
@@ -194,67 +194,9 @@ internal sealed partial class SqlPlanExecutor
             var hash = new HashCode();
             for (int i = 0; i < values.Length; i++)
             {
-                var value = values[i];
-                switch (value)
-                {
-                    case sbyte or short or int or long or float or double or decimal:
-                        hash.Add(GroupNumber(value));
-                        break;
-                    case byte[] bytes:
-                        foreach (byte item in bytes)
-                        {
-                            hash.Add(item);
-                        }
-                        break;
-                    case string text:
-                        hash.Add(collations[i].GetHashCode(text));
-                        break;
-                    default:
-                        hash.Add(value);
-                        break;
-                }
+                hash.Add(SqlValueComparer.GetHashCode(values[i], collations[i]));
             }
             return hash.ToHashCode();
-        }
-    }
-
-    /// <summary>Compares aggregate/group values using the existing SQL value ordering.</summary>
-    private static int CompareGroupValues(object left, object right, Collation? collation = null)
-    {
-        if (left is byte[] a && right is byte[] b)
-        {
-            return a.AsSpan().SequenceCompareTo(b);
-        }
-        if (left is sbyte or short or int or long or float or double or decimal
-            && right is sbyte or short or int or long or float or double or decimal)
-        {
-            object x = GroupNumber(left), y = GroupNumber(right);
-            return (x, y) switch
-            {
-                (decimal first, decimal second) => first.CompareTo(second),
-                (double first, double second) => first.CompareTo(second),
-                (double first, _) => first > 0 ? 1 : -1,
-                (_, double second) => second > 0 ? -1 : 1,
-                _ => throw new DatabaseException("Invalid numeric grouping key."),
-            };
-        }
-        return SqlExpressionEvaluator.Compare(left, right, collation);
-    }
-
-    /// <summary>
-    /// Keeps the evaluator's decimal numeric equality and a matching hash. An
-    /// approximate value outside decimal range remains comparable for grouping
-    /// and extrema; only SUM/AVG require it to fit in a decimal accumulator.
-    /// </summary>
-    private static object GroupNumber(object value)
-    {
-        try
-        {
-            return Convert.ToDecimal(value, CultureInfo.InvariantCulture);
-        }
-        catch (OverflowException) when (value is float or double)
-        {
-            return Convert.ToDouble(value, CultureInfo.InvariantCulture);
         }
     }
 

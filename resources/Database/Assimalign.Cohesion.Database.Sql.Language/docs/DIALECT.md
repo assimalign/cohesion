@@ -258,6 +258,52 @@ Joins involving `INFORMATION_SCHEMA` or `COHESION_SCHEMA` are also excluded.
 No outer-join null-extension behavior is advertised. These are explicit
 ISO/IEC 9075 subset boundaries, not additional named clauses in the 49-clause count.
 
+## Value comparison (#1029)
+
+Predicates (`=`, `<>`, `<`, `<=`, `>`, `>=`, `BETWEEN`, `IN`, and join
+conditions), `ORDER BY`, `DISTINCT`, `GROUP BY`, and `MIN`/`MAX` share one
+non-null value comparator. NULL retains SQL three-valued predicate semantics;
+grouping combines NULL keys and ascending ordering places NULL first.
+
+- **Binary:** unsigned byte-by-byte lexicographic order. The first differing
+  byte decides; a proper prefix sorts before its extension. Equality requires
+  identical content and length, including empty values; there is no padding.
+- **Numerics:** signed integers and Decimal compare exactly. Float32 promotes
+  exactly to Float64; floating pairs preserve their represented IEEE values
+  across the entire finite range, including subnormals and adjacent doubles.
+  A mixed exact/approximate comparison compares their exact represented values
+  without rounding either operand. Thus `1d = 1m`, but `0.1d > 0.1m` (host
+  notation), and the next double above `1d` is greater than `1m`.
+  The previous decimal-first grouping conversion is **not** acceptable for
+  equality: it collapsed adjacent doubles and underflowed tiny values. Refining
+  those rounded mixed equalities is necessary for a transitive total order;
+  existing exact equalities and sign/range ordering are retained. Numeric hashes
+  agree with this equality, including across runtime numeric types.
+- **IEEE extension:** all NaNs, regardless of sign or payload, compare equal
+  to each other and less than every other non-null numeric value. In particular,
+  `NaN = NaN` is TRUE and `NaN <> NaN` is FALSE. The numeric order is
+  `NaN < -infinity < finite values < +infinity`; like-signed infinities are
+  equal. Positive and negative zero are equal in predicates and form one
+  DISTINCT/grouping class. NaN is a value, not NULL. These deliberate rules
+  apply to Float32, Float64, and mixed numeric comparisons.
+- **Other values:** strings use the effective collation; Boolean orders FALSE
+  before TRUE. Supported same-type comparable values retain their runtime
+  ordering. Incompatible type families raise a query error.
+
+This implements an ISO/IEC 9075 subset for binary strings and approximate
+numerics, with an explicit NaN/infinity extension rather than an SQL-standard
+NaN claim. Bind binary/IEEE values as parameters or read stored columns; SQL
+fractional/exponent literals still follow the exact Decimal literal contract,
+and there are no NaN/infinity literals. This changes comparison, not arithmetic,
+SUM/AVG accumulation, CAST, storage coercion, or physical key identity.
+Floating range predicates and signed-zero equality predicates do not supply
+index seek bounds: physical index ordering places NaN last and distinguishes
+signed zeros. They are evaluated on scanned rows or as residuals of another
+safe index predicate.
+Nonzero floating equality may still seek; joins retain their conservative
+approximate-numeric scan policy. Mapper restrictions and key exclusions remain
+deferred with #1007/#1008.
+
 ## Grouping and aggregate functions (#1020)
 
 Grouping is a separate execution stage over a stored table, a virtual system

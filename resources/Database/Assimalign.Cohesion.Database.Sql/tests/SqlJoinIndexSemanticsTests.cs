@@ -17,19 +17,19 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlJoinIndexSemanticsTests
 {
-    /// <summary>Preserves equal floating values whose encoded keys differ.</summary>
+    /// <summary>Adjacent floating values remain distinct under conservative join scanning.</summary>
     /// <returns>A task representing the test.</returns>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - JOIN: floating equality scans when decimal comparison collapses distinct keys")]
-    public async Task Join_CloseDoubleKeys_ShouldScanWithoutLosingEqualRows()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - JOIN: floating equality preserves adjacent double distinctions")]
+    public async Task Join_CloseDoubleKeys_ShouldScanWithoutCollapsingDistinctRows()
     {
-        // Arrange: the SQL evaluator compares these through Decimal, while the
-        // B+Tree keys preserve their distinct IEEE representations.
+        // Arrange: both comparison and keys preserve adjacent IEEE values;
+        // joins still scan because signed-zero equality spans distinct keys.
         double left = 1d;
         double right = Math.BitIncrement(left);
         BitConverter.DoubleToInt64Bits(left).ShouldNotBe(BitConverter.DoubleToInt64Bits(right));
 
         // Act + Assert.
-        await AssertUnsafeEqualityScansAsync("DOUBLE", left, right);
+        await AssertUnsafeEqualityScansAsync("DOUBLE", left, right, equal: false);
     }
 
     /// <summary>Preserves equal timestamps with different DateTime kinds.</summary>
@@ -142,9 +142,9 @@ public sealed class SqlJoinIndexSemanticsTests
         MetricsOf(session).AccessPath.ShouldBe("join-seek:ix_key");
     }
 
-    private static async Task AssertUnsafeEqualityScansAsync(string type, object left, object right)
+    private static async Task AssertUnsafeEqualityScansAsync(string type, object left, object right, bool equal = true)
     {
-        SqlExpressionEvaluator.Compare(left, right).ShouldBe(0);
+        (SqlExpressionEvaluator.Compare(left, right) == 0).ShouldBe(equal);
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "join-equality-fallback" });
         var database = await engine.CreateDatabaseAsync("join-equality-fallback");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
@@ -157,7 +157,7 @@ public sealed class SqlJoinIndexSemanticsTests
         const string sql = "SELECT l.id, r.id FROM outer_rows l INNER JOIN inner_rows r ON l.key_value = r.key_value ORDER BY l.id, r.id";
 
         PlanOf(database, sql).Access.ShouldBeNull();
-        (await ReadPairsAsync(session, sql)).ShouldBe(new[] { (1, 2), (1, 3) });
+        (await ReadPairsAsync(session, sql)).ShouldBe(equal ? new[] { (1, 2), (1, 3) } : new[] { (1, 2) });
         MetricsOf(session).AccessPath.ShouldBe("join-scan");
     }
 

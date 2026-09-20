@@ -217,7 +217,7 @@ internal sealed partial class SqlPlanExecutor
                 (null, null) => 0,
                 (null, _) => -1,
                 (_, null) => 1,
-                _ => CompareGroupValues(left, right, collation),
+                _ => SqlValueComparer.Compare(left, right, collation),
             });
 
             if (ordered is null)

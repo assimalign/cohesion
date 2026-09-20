@@ -463,6 +463,13 @@ internal sealed partial class SqlPlanner
             return;
         }
 
+        // Physical IEEE keys distinguish signed zero; SQL equality combines them.
+        // A single encoded equality probe would omit the other zero representation.
+        if (value is double doubleValue && doubleValue == 0d || value is float floatValue && floatValue == 0f)
+        {
+            return;
+        }
+
         if (!predicates.TryGetValue(ordinal, out var list))
         {
             list = new List<(SqlBinaryOperator, object?)>();
@@ -475,13 +482,14 @@ internal sealed partial class SqlPlanner
     /// <summary>
     /// Range seeks require evaluator order to match encoded byte order. String
     /// predicates also pass the effective-collation compatibility check above.
-    /// Guid, binary and JSON remain equality-only.
+    /// Guid, binary and JSON remain equality-only. Floating keys place NaN last,
+    /// unlike SQL comparison, so even finite range bounds require a scan.
     /// </summary>
     private static bool IsRangeSargable(DatabaseType type) => type switch
     {
         DatabaseType.Boolean or DatabaseType.String
             or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64
-            or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal
+            or DatabaseType.Decimal
             or DatabaseType.Date or DatabaseType.Time or DatabaseType.DateTime
             or DatabaseType.DateTimeOffset or DatabaseType.TimeSpan => true,
         _ => false,

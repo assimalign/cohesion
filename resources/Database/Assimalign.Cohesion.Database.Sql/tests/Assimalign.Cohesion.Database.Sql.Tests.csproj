@@ -18,6 +18,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Tcp" />
 		<!-- The SqlDatabaseServer suite and the AddSqlServer verb test run over the
 		     in-memory Connections driver. -->

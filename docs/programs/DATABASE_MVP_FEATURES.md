@@ -25,6 +25,14 @@ Measured from source, not from the plan. Line counts are production code (`src/`
 | **Blob** | engine, chunked storage, catalog | 39 | **Working** *(landed `b97a9976`)*. Chunked persistence, atomic publication, streaming reads/writes proven at 128 MiB under a 64 MiB heap, crash-durable, container ownership enforced. No wire client — see #214. |
 | **Cache** | 6 lines | 6 | Out of MVP scope by prior decision. |
 
+**Phase 30 — SQL comparison (#1029):** predicates, ordering, DISTINCT, grouping and extrema
+share one comparator. Binary values order by unsigned byte sequence; floating comparisons
+retain adjacent values and the full finite range. Exact mixed numeric ordering and explicit
+NaN, signed-zero and infinity rules are recorded in the SQL dialect. Regression coverage drives
+the same data through filtering and ordering/deduplication, with binary and large-double
+predicates also exercised through the SQL server and client. The mapper builder restrictions
+and `COHMAP003` review remain deferred with mapper work (#1007/#1008).
+
 **Shared kernel — landed and in use by all five engines:** durable page store with CRC and crash
 recovery, write-ahead journal, MVCC with snapshot isolation and deadlock detection, the shared
 per-database MVCC composition (extracted in `31047f3a` before three engines could each grow their

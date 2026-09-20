@@ -119,8 +119,8 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>
-    /// Requires key equality to match evaluator equality. Floating values can
-    /// collapse on decimal comparison; timestamps encode kind/offset tie breakers
+    /// Requires key equality to match evaluator equality. Floating signed zeros
+    /// share SQL equality; timestamps encode kind/offset tie breakers
     /// ignored by comparison. Those types must scan even with an index present.
     /// </summary>
     private static bool CanSeekJoinEquality(DatabaseType inner, DatabaseType outer)
