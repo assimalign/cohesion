@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Database.Tests;
+using Assimalign.Cohesion.Database.Storage.Tests;
 
 /// <summary>
 /// A storage strategy for crash-simulation tests: every database's three streams

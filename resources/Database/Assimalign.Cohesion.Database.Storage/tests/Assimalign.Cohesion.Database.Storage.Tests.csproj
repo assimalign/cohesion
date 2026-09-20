@@ -33,7 +33,6 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.InMemory" />
-		<Compile Include="..\..\fixtures\SimulatedDurableFileHandle.cs" Link="TestObjects\SimulatedDurableFileHandle.cs" />
 	</ItemGroup>
 
 </Project>

@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Assimalign.Cohesion.FileSystem;
 
-namespace Assimalign.Cohesion.Database.Tests;
+namespace Assimalign.Cohesion.Database.Storage.Tests;
 
 /// <summary>
 /// Explicit simulated durability for harnesses that test transaction and recovery

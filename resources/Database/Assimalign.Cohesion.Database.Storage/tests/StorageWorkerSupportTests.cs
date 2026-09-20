@@ -7,7 +7,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
-using Assimalign.Cohesion.Database.Tests;
 using Assimalign.Cohesion.FileSystem;
 
 namespace Assimalign.Cohesion.Database.Storage.Tests;

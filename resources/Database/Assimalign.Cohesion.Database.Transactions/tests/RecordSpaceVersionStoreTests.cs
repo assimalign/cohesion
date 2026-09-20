@@ -10,7 +10,7 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Database.Tests;
+using Assimalign.Cohesion.Database.Storage.Tests;
 
 /// <summary>
 /// Exercises record-space undo through real storage brackets and the shared

@@ -4,8 +4,8 @@ using System.IO;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests;
 using Assimalign.Cohesion.Database.Transactions;
-using Assimalign.Cohesion.Database.Tests;
 using Assimalign.Cohesion.FileSystem;
 
 namespace Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;

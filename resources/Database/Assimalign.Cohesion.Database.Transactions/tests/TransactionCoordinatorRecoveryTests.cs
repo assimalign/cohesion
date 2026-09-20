@@ -8,7 +8,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Database.Tests;
+using Assimalign.Cohesion.Database.Storage.Tests;
 
 namespace Assimalign.Cohesion.Database.Transactions.Tests;
 

@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using Shouldly;
 using Xunit;
-using Assimalign.Cohesion.Database.Tests;
 
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Units;
