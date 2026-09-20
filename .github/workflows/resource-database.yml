@@ -22,7 +22,7 @@ jobs:
         # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
         # each of them - most importantly Database.Hosting, which nothing else pulls in
         # transitively. The as-yet source-less model scaffolds (Cache, plus
-        # Documents.Client/.Replication/.Security, Graph.Client/.Replication/.Security,
+        # Documents.Client/.Replication/.Security, Graph.Replication/.Security,
         # Blob.Replication/.Security and
         # KeyValuePair.Replication/.Security) and the post-MVP contract
         # shells (Replication, Sql.Replication, Sql.Security, Memory) are
@@ -44,6 +44,7 @@ jobs:
             'Assimalign.Cohesion.Database.Governance',
             'Assimalign.Cohesion.Database.Graph',
             'Assimalign.Cohesion.Database.Graph.Catalog',
+            'Assimalign.Cohesion.Database.Graph.Client',
             'Assimalign.Cohesion.Database.Graph.Language',
             'Assimalign.Cohesion.Database.Graph.Storage',
             'Assimalign.Cohesion.Database.Hosting',

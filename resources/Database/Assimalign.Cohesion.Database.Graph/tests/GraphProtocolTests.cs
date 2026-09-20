@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
-using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Protocol;
 
 using Shouldly;
@@ -27,19 +26,18 @@ public sealed class GraphProtocolTests
         var last = await database.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["name"] = "Bob" }, token);
         var edge = await database.CreateRelationshipAsync(session, first.Id, last.Id, "KNOWS",
             new Dictionary<string, object?> { ["years"] = 3, ["confidence"] = 0.75m }, token);
-        var pair = InMemoryConnectionPair.Create();
-        await using var clientConnection = pair.Client;
-        await using var serverConnection = pair.Server;
+        var listener = new InMemoryConnectionListener();
+        await using var server = GraphDatabaseServer.Create(engine, new() { Listener = listener });
+        await server.StartAsync(token);
+        await using var clientConnection = await listener.CreateFactory().ConnectAsync(listener.EndPoint, token);
         await using var client = new ProtocolChannel(clientConnection.AsStream(), GraphProtocol.Family, leaveOpen: true);
-        await using var server = new ProtocolChannel(serverConnection.AsStream(), GraphProtocol.Family, leaveOpen: true);
 
-        Task serverTask = RespondAsync();
         await WriteAsync(client, ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, "graph", "test").Encode(), token);
         (await ReadAsync(client, token)).Type.ShouldBe(ProtocolMessageType.Authenticate);
         await WriteAsync(client, ProtocolMessageType.AuthenticateResponse, [], token);
         (await ReadAsync(client, token)).Type.ShouldBe(ProtocolMessageType.Ready);
         await WriteAsync(client, (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths,
-            GraphProtocolExecuteMessage.Create("MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN a,r,b").Encode(), token);
+            GraphProtocolExecuteMessage.Create("MATCH p = (a:Person)-[r:KNOWS]->(b:Person) RETURN p").Encode(), token);
 
         var frame = await ReadAsync(client, token);
         frame.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.Path);
@@ -61,32 +59,6 @@ public sealed class GraphProtocolTests
         complete.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.PathsComplete);
         GraphProtocolPathsCompleteMessage.Decode(complete.Payload.Span).PathCount.ShouldBe(1);
         await WriteAsync(client, ProtocolMessageType.Terminate, [], token);
-        await serverTask;
-
-        async Task RespondAsync()
-        {
-            var startup = await ReadAsync(server, token);
-            startup.Type.ShouldBe(ProtocolMessageType.Startup);
-            ProtocolStartupMessage.Decode(startup.Payload.Span).Database.ShouldBe("graph");
-            await WriteAsync(server, ProtocolMessageType.Authenticate, [], token);
-            (await ReadAsync(server, token)).Type.ShouldBe(ProtocolMessageType.AuthenticateResponse);
-            await WriteAsync(server, ProtocolMessageType.Ready, [], token);
-            var request = await ReadAsync(server, token);
-            request.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ExecutePaths);
-            var message = GraphProtocolExecuteMessage.Decode(request.Payload.Span);
-            await using var results = (QueryResultSet)await session.ExecuteAsync(GraphQueryRequest.FromGql(message.Statement), token);
-            long count = 0;
-            await foreach (var item in results.GetRowsAsync(token))
-            {
-                var path = new GraphProtocolPathMessage([(GraphNode)item.GetValue(0)!, (GraphNode)item.GetValue(2)!],
-                    [(GraphRelationship)item.GetValue(1)!]);
-                await WriteAsync(server, (ProtocolMessageType)GraphProtocolMessageType.Path, path.Encode(), token);
-                count++;
-            }
-            await WriteAsync(server, (ProtocolMessageType)GraphProtocolMessageType.PathsComplete,
-                new GraphProtocolPathsCompleteMessage(count).Encode(), token);
-            (await ReadAsync(server, token)).Type.ShouldBe(ProtocolMessageType.Terminate);
-        }
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Protocol: paths preserve reverse direction and all scalar property types")]

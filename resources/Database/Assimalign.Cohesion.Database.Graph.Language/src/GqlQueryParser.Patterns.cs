@@ -7,11 +7,17 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 
 public sealed partial class GqlQueryParser
 {
-    private IReadOnlyList<GqlPathPattern> ParsePatterns()
+    private IReadOnlyList<GqlPathPattern> ParsePatterns(bool allowPathVariable = false)
     {
         List<GqlPathPattern> paths = [];
         do
         {
+            string? variable = null;
+            if (allowPathVariable && Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier)
+            {
+                variable = Identifier();
+                Expect(TokenType.Equals, "'='");
+            }
             List<GqlNodePattern> nodes = [ParseNode()];
             List<GqlRelationshipPattern> relationships = [];
             while (!Failed && Current.Type is TokenType.Minus or TokenType.LeftArrow)
@@ -24,7 +30,7 @@ public sealed partial class GqlQueryParser
                 relationships.Add(ParseRelationship());
                 nodes.Add(ParseNode());
             }
-            paths.Add(new GqlPathPattern(nodes.AsReadOnly(), relationships.AsReadOnly()));
+            paths.Add(new GqlPathPattern(nodes.AsReadOnly(), relationships.AsReadOnly()) { Variable = variable });
         } while (!Failed && Take(TokenType.Comma));
         return paths.AsReadOnly();
     }

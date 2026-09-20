@@ -206,6 +206,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Database/Assimalign.Cohesion.Database.Governance'
     'resources/Database/Assimalign.Cohesion.Database.Graph'
     'resources/Database/Assimalign.Cohesion.Database.Graph.Catalog'
+    'resources/Database/Assimalign.Cohesion.Database.Graph.Client'
     'resources/Database/Assimalign.Cohesion.Database.Graph.Language'
     'resources/Database/Assimalign.Cohesion.Database.Graph.Storage'
     'resources/Database/Assimalign.Cohesion.Database.Hosting'

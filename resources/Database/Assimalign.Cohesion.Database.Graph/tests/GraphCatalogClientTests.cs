@@ -106,11 +106,8 @@ public sealed class GraphCatalogClientTests
         error.Message.ShouldContain("GQL0007: Graph catalog introspection is read-only.", Case.Sensitive);
         (await connection.ExecuteAsync("SHOW LABELS", cancellationToken: timeout.Token)).Rows.ShouldBeEmpty();
 
-        var unsupported = await Should.ThrowAsync<DatabaseClientException>(async () =>
-            await connection.ExecuteAsync("CREATE (n:Injected)", cancellationToken: timeout.Token));
-        unsupported.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        unsupported.Message.ShouldContain("The graph wire server supports catalog SHOW statements only.", Case.Sensitive);
-        (await connection.ExecuteAsync("SHOW LABELS", cancellationToken: timeout.Token)).Rows.ShouldBeEmpty();
+        (await connection.ExecuteAsync("CREATE (n:Injected)", cancellationToken: timeout.Token)).AffectedCount.ShouldBe(1);
+        (await connection.ExecuteAsync("SHOW LABELS", cancellationToken: timeout.Token)).Rows.ShouldHaveSingleItem()[2].ShouldBe("Injected");
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Graph] - Catalog server: stop is terminal and engine ownership is retained")]

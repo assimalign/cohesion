@@ -20,7 +20,8 @@ shared Storage, Transactions and Indexing rather than another pager, journal or 
 
 | Package | Responsibility |
 | --- | --- |
-| `Database.Graph` | Engine, sessions, typed operations, planning, execution, catalog protocol server and path message family |
+| `Database.Graph` | Engine, sessions, typed operations, planning, scalar/path execution, and graph protocol server |
+| `Database.Graph.Client` | NuGet-only scalar and path client over the shared connection pool; references Graph and Database.Client |
 | `Database.Graph.Language` | ISO GQL subset, AST and syntax/capability diagnostics |
 | `Database.Graph.Catalog` | Snapshot-visible labels, types, property keys, index metadata and ownership |
 | `Database.Graph.Storage` | Record encoding, kernel adapter, adjacency and property B+Trees |
@@ -35,6 +36,8 @@ flowchart LR
     Engine --> Language["Graph.Language"]
     Engine --> Catalog["Graph.Catalog"]
     Engine --> Storage["Graph.Storage"]
+    Client["Graph.Client"] --> Engine
+    Client --> SharedClient["Database.Client"]
 ```
 
 No existing public interface changed. `IGraphDatabase` accepts an explicit `IDatabaseSession` for
@@ -118,8 +121,10 @@ owning logical transaction, including an explicit session transaction, as in Doc
 Snapshot and ReadCommitted isolation are supported. ReadCommitted captures and pins a statement
 snapshot, so metadata and each hop of a traversal share a visibility horizon. Serializable is
 rejected rather than silently weakened. Explicit transactions use the existing session API;
-GQL transaction-control syntax is outside the profile. Results materialize before the statement
-transaction is released, so result iteration cannot race record reclamation.
+GQL transaction-control syntax is outside the profile. Wire transactions are deliberately deferred:
+`BEGIN`/`COMMIT`/`ROLLBACK` do not parse and reserved `Transaction` byte 9 is rejected with
+`ProtocolViolation`. No connection-level transaction API is exposed. Results materialize before
+the statement transaction is released, so result iteration cannot race record reclamation.
 
 Open defers the storage checkpoint, performs physical WAL recovery, then invokes coordinator
 record scrub, opens catalog/store indexes, purges unproven index writers using the same recovery
@@ -154,6 +159,17 @@ GQL's projected `a,r,b` values expose the actual frozen `GraphNode`/`GraphRelati
 through `QueryRow.GetValue`. Property projections return scalars. This does not add a path member
 to the frozen traversal contract.
 
+`GraphPathsQueryRequest.FromGql` selects real path execution through the existing
+`IDatabaseSession.ExecuteAsync(QueryRequest)` boundary. Its `GraphPathsQueryResult.Paths` contains
+materialized `GraphPath` objects from the matcher's bound entities and traversal sequence, under
+the same pinned snapshot as scalar execution. Exactly one projection is required: a node variable
+produces a singleton path, a relationship variable produces its stored source and target nodes,
+and a named path (`MATCH p = (a)-[r:KNOWS]->(b) RETURN p`) preserves traversal order, including
+reverse traversal and legal cycles. Properties, labels, types and database-local identities are
+the actual engine values. Scalar projections, multiple projections, mutations and catalog queries
+are rejected as path requests before execution. This new request/result pair adds no members to
+existing public interfaces and does not infer paths from scalar rows.
+
 The [supported-clause matrix](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#supported-clause-matrix)
 is the single executable-language inventory: MATCH, WHERE, RETURN, INSERT, CREATE (compatibility
 extension), DELETE, DETACH DELETE and SHOW (catalog extension). Parameters, functions, variable-length paths, aggregations,
@@ -175,12 +191,15 @@ graph elements or persisted system data.
 model-owned catalog exchange over the shared `Database.Client` connection infrastructure. The composition root supplies an
 `IConnectionListener` through `GraphDatabaseServerOptions.Listener` and owns the engine lifecycle;
 the server owns the listener and its accepted sessions. Startup authentication binds each connection
-to one database. Typed scalar result columns and rows use the Graph-owned catalog codecs, including
-GUID identities and nullable ownership values. The catalog server deliberately supports only `SHOW`
-statements: other graph queries return `ExecutionFailure` with
-`The graph wire server supports catalog SHOW statements only.` The path codecs below provide graph
-element serialization for a subsequent query server/client; those clients remain outside this
-increment. No existing interface gained a transport member.
+to one database. Typed scalar result columns and rows use the Graph-owned codecs, including GUID
+identities and nullable ownership values. The same `Execute` exchange now serves scalar `MATCH`,
+`CREATE`, `DELETE` and `DETACH DELETE` through the engine session; ownership, cycle and mutation
+validation remain engine responsibilities. Entity and path projections use `ExecutePaths`, which
+dispatches a `GraphPathsQueryRequest` and writes one `Path` frame for each real engine path,
+followed by `PathsComplete`. Ordinary `Execute` rejects unsupported entity-shaped values instead
+of producing scalar stand-ins. [Graph.Client](../../Assimalign.Cohesion.Database.Graph.Client/docs/DESIGN.md)
+provides typed access to both exchanges. The catalog contracts below remain unchanged. No existing
+interface gained a transport member.
 
 Each statement has a fixed ordered column contract. All name columns are strings, identity columns
 are GUIDs, and `IS_REQUIRED` and `IS_UNIQUE` are Booleans.
@@ -259,10 +278,11 @@ grouped durability is configured. The flush worker still services the storage gr
 
 Names are single path components, directory lookup is case insensitive, and enumeration includes
 persisted databases not yet open in memory. Root-builder `AddGraph` captures a deferred
-engine factory without Hosting dependencies. The family is included in all solution, framework, CI and
-release-inventory surfaces. General graph wire queries, model security policies, replication,
-Hosting/ApplicationModel changes and compiled-schema provisioning remain out of scope. The catalog
-server uses the shared authenticator rather than adding graph-specific authentication contracts.
+engine factory without Hosting dependencies. Engine packages ship in the App.Database framework;
+Graph.Client ships separately as a NuGet-only package, with all solution, CI and release-inventory
+entries. Model security policies, replication, Hosting/ApplicationModel changes and compiled-schema
+provisioning remain out of scope. The graph server uses the shared authenticator rather than adding
+graph-specific authentication contracts.
 No reflection or runtime code generation is used.
 
 ## Graph wire family
@@ -287,8 +307,8 @@ followed by those bytes. There is no padding.
 | 5 (`Execute`) | Client → server | GQL string; `int32` parameter count; repeated parameter-name string, `int32` encoded-value byte length, value bytes |
 | 6 (`ResultHeader`) | Server → client | `int32` column count; repeated column-name string and one `DatabaseType` byte |
 | 7 (`ResultRow`) | Server → client | Concatenated self-describing scalar tuple components, exactly one per declared column |
-| 8 (`ResultComplete`) | Server → client | `int64` affected count; -1 for a catalog result set |
-| 9 (`Transaction`) | Client → server | Reserved legacy identifier; current catalog server rejects it as out of order |
+| 8 (`ResultComplete`) | Server → client | `int64` affected count; -1 for a result set |
+| 9 (`Transaction`) | Client → server | Reserved legacy identifier; server rejects it with `ProtocolViolation` |
 | 64 (`ExecutePaths`) | Client → server | The same GQL/parameter payload as byte 5, requesting path-shaped results |
 | 65 (`Path`) | Server → client | Ordered node and relationship sequences in the format below |
 | 66 (`PathsComplete`) | Server → client | Exactly eight bytes: nonnegative `int64` count of Path frames in this exchange |
@@ -298,11 +318,13 @@ numeric transforms and variable-length escaping are specified in
 [the unchanged SQL scalar wire encoding](../../Assimalign.Cohesion.Database.Sql/docs/WIRE-PROTOCOL.md).
 The catalog response is Header, zero or more Row frames, Complete; command responses may have only
 Complete. A shared Error ends the current exchange without Complete. Existing SHOW statements and
-their ordered column contracts above remain supported by `GraphDatabaseServer`. Its new channel
-is bound to `GraphProtocol.Family` once, before the handshake. Path messages are the public wire
-surface for subsequent graph query server/client work; sending ExecutePaths to the current catalog
-server produces shared `ProtocolViolation` and closes that session. The path tests use a test-owned
-responder executing the real engine and exchanging frames over `Connections.InMemory`.
+their ordered column contracts above remain supported by `GraphDatabaseServer`. Its channel is
+bound to `GraphProtocol.Family` once, before the handshake. Path messages transport the engine's
+real `GraphPathsQueryResult`, without changing the existing payload definitions. A path response
+contains zero or more Path frames and one PathsComplete; a shared Error terminates either exchange
+without a completion frame. Statement errors leave a completely consumed exchange reusable.
+Malformed or out-of-order frames are protocol violations. Server/client acceptance tests use the
+production `GraphDatabaseServer` and `Graph.Client` over `Connections.InMemory`.
 
 ### Path payload
 
@@ -378,9 +400,14 @@ Node labels and relationship types remain model strings; no fake table schema is
 
 After Ready, the path client sends ExecutePaths and consumes zero or more Path messages followed
 by one PathsComplete, or a shared Error with no completion. Requests are serialized. The completion
-count must match received paths; zero matches requires count zero. Each path fits one frame; this
-family does not impose Blob streaming on graph results. Codecs perform static, explicit encoding
-and decoding with no reflection or runtime serializer metadata.
+count must match received paths; zero matches requires count zero. Each path fits one frame.
+The client enumerates those frames through `IDatabaseStreamingExchange` and
+`ExecuteStreamingAsync`, keeping the shared connection lease until enumeration completes or is
+disposed. Consuming PathsComplete or a terminal statement Error permits reuse; cancellation or
+early disposal before terminal consumption leaves the exchange incomplete and discards the
+connection. Engine materialization is bounded by the existing traversal limits; the client does
+not promise unbounded graph traversal. Codecs perform static, explicit encoding and decoding with
+no reflection or runtime serializer metadata.
 
 The sequence shows the graph-owned path exchange within the shared connection lifecycle:
 

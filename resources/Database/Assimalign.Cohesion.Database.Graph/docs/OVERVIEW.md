@@ -25,9 +25,19 @@ built-in maintenance workers; application Start starts the nested servers.
 
 The engine references the area root and Graph.Language, Graph.Catalog and Graph.Storage. The
 storage and catalog compose the shared kernel. It is `net10.0`, AOT compatible, and uses neither
-reflection nor `Microsoft.Extensions.*`. There is no Graph wire client, security policy integration,
-replication or compiled-schema provisioning in this phase. See [DESIGN.md](DESIGN.md) for lifecycle,
+reflection nor `Microsoft.Extensions.*`. `GraphDatabaseServer` dispatches scalar GQL, mutations,
+catalog `SHOW`, and path queries to the same engine. The separate NuGet-only
+[Graph.Client](../../Assimalign.Cohesion.Database.Graph.Client/docs/OVERVIEW.md) package supplies
+pooled scalar execution and path streaming. Security policy integration, replication and
+compiled-schema provisioning remain outside this phase. See [DESIGN.md](DESIGN.md) for lifecycle,
 isolation, traversal bounds and the disk format.
+
+For real path results, pass `GraphPathsQueryRequest.FromGql(...)` to the existing session
+`ExecuteAsync` method and read `GraphPathsQueryResult.Paths`. A single projected node becomes a
+one-node path, a single relationship includes its stored endpoints, and
+`MATCH p = (a)-[r:KNOWS]->(b) RETURN p` preserves the matched traversal order. Scalar and mutation
+requests continue to use ordinary execution. Explicit transactions remain available through the
+in-process session API; Graph wire transaction control is deliberately deferred.
 
 `GraphDatabaseEngine.CreateBuilder()` returns the same model builder for
 standalone composition or the concrete hosting builder's build-aware engine

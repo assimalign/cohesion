@@ -16,7 +16,7 @@ public sealed partial class GqlQueryParser
         bool detach = false;
         if (Take("MATCH"))
         {
-            matches = ParsePatterns();
+            matches = ParsePatterns(allowPathVariable: true);
             if (!Failed && Take("WHERE")) { predicate = ParsePredicate(); }
         }
         if (!Failed && (Take("CREATE") || Take("INSERT"))) { creates = ParsePatterns(); }

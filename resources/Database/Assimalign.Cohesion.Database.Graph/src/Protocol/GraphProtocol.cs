@@ -12,13 +12,13 @@ public static class GraphProtocol
 /// <summary>Message identifiers scoped to graph endpoints.</summary>
 public enum GraphProtocolMessageType : byte
 {
-    /// <summary>A legacy catalog SHOW request.</summary>
+    /// <summary>A scalar graph statement or catalog SHOW request.</summary>
     Execute = 5,
-    /// <summary>Catalog result column names and scalar types.</summary>
+    /// <summary>Result column names and scalar types.</summary>
     ResultHeader = 6,
-    /// <summary>One catalog tuple.</summary>
+    /// <summary>One scalar result tuple.</summary>
     ResultRow = 7,
-    /// <summary>Catalog exchange completion and affected count.</summary>
+    /// <summary>Statement exchange completion and affected count.</summary>
     ResultComplete = 8,
     /// <summary>Reserved legacy transaction-control identifier.</summary>
     Transaction = 9,

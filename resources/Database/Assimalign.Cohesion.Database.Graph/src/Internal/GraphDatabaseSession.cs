@@ -76,7 +76,8 @@ internal sealed class GraphDatabaseSession : IDatabaseSession
         {
             throw new DatabaseException("A Graph session accepts only GQL statements.");
         }
-        return _database.RunAsync(this, operation => GraphPlanExecutor.ExecuteAsync(_database, operation, statement, request.Parameters, cancellationToken), cancellationToken);
+        return _database.RunAsync(this, operation => GraphPlanExecutor.ExecuteAsync(_database, operation, statement,
+            request.Parameters, cancellationToken, paths: request is GraphPathsQueryRequest), cancellationToken);
     }
     public ValueTask<QueryResult> ExecuteAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken cancellationToken = default)
     {

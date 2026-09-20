@@ -43,6 +43,8 @@ flowchart LR
     P2["Database.Client"]
     P3["Database.Hosting — runtime module"]
     P4["Database.Testing"]
+    GRAPH["Database.Graph"]
+    GRAPHCLI["Database.Graph.Client — NuGet-only"]
     CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
     APPMODEL["Assimalign.Cohesion.ApplicationModel — L2"]
@@ -52,6 +54,9 @@ flowchart LR
     P1 --> APPMODEL
     P1 --> HOSTFAM
     P2 --> P0
+    GRAPH --> P0
+    GRAPHCLI --> GRAPH
+    GRAPHCLI --> P2
     P3 --> P0
     P3 --> HOSTFAM
     P3 -->|"private"| PRIV
@@ -114,7 +119,8 @@ Each model follows the same matrix: root (engine + public interface), plus `.Lan
 | Documents language | `Assimalign.Cohesion.Database.Documents.Language` | Declared OQL query/index-DDL subset, AST, diagnostics, and conformance corpus |
 | Documents catalog | `Assimalign.Cohesion.Database.Documents.Catalog` | Versioned collections, document metadata, and eagerly maintained shared B+Tree indexes |
 | Documents storage | `Assimalign.Cohesion.Database.Documents.Storage` | UTF-8 JSON serialization and stamped chunk chains over shared storage and transactions |
-| Graph | `Assimalign.Cohesion.Database.Graph` | Durable graph engine, bounded traversal planning/execution, database-bound sessions, and root-builder composition |
+| Graph | `Assimalign.Cohesion.Database.Graph` | Durable graph engine, bounded traversal and path execution, database-bound sessions, transport-neutral `GraphDatabaseServer`, and root-builder composition |
+| Graph client | `Assimalign.Cohesion.Database.Graph.Client` | [NuGet-only typed client](Assimalign.Cohesion.Database.Graph.Client/docs/OVERVIEW.md) over shared pooling and handshake; scalar GQL results, graph mutations, `SHOW`, and streams of complete graph paths |
 | Graph language | `Assimalign.Cohesion.Database.Graph.Language` | Executable ISO/IEC 39075 GQL subset, pattern AST, diagnostics, and conformance corpus |
 | Graph storage | `Assimalign.Cohesion.Database.Graph.Storage` | Versioned nodes and relationships, durable endpoint adjacency, and shared B+Tree property indexes |
 | Graph catalog | `Assimalign.Cohesion.Database.Graph.Catalog` | Snapshot-visible labels, relationship types, property keys, indexes, and schema ownership enforcement |

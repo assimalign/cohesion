@@ -314,8 +314,10 @@
               satellites; the Blob engine, catalog, and storage ship above.
             - Documents.Client, Documents.Replication, and Documents.Security -
               deferred satellites; the Documents query and storage engine ships above.
-            - Graph.Client, Graph.Replication, and Graph.Security - deferred satellites;
-              the Graph engine, GQL subset, catalog, and adjacency storage ship above.
+            - Graph.Client - shipped as a NuGet-only client package, never a member
+              of the App.Database shared framework (resource-areas.md).
+            - Graph.Replication and Graph.Security - deferred satellites; the Graph
+              engine, GQL subset, catalog, and adjacency storage ship above.
             - Database.ApplicationModel - NuGet-only orchestration and default-control-plane
               package, injected by Sdk.Database only when CohesionApplicationModel=enabled.
             - Database.Memory - empty in-memory-strategy placeholder (no sources).

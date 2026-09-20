@@ -44,7 +44,8 @@ flowchart LR
 
 `GqlQueryExpression` carries match paths, an optional predicate, insertion paths, deletion variables,
 a detach flag, projections, and an optional `GqlCatalogSurface` for dedicated metadata statements.
-Catalog statements cannot carry graph clauses. Every path holds one more node than relationship. Anonymous nodes
+Catalog statements cannot carry graph clauses. `GqlPathPattern.Variable` optionally names a MATCH
+path; it is null for anonymous paths and insertion paths. Every path holds one more node than relationship. Anonymous nodes
 and relationships have a null variable. Relationship directions are relative to consecutive pattern
 nodes; incoming arrows reverse that relationship's endpoints. A scalar property reference always
 contains a variable and exactly one property key; qualified database names have no AST representation.
@@ -57,9 +58,9 @@ The builtin-function table is empty because the executor implements no functions
 
 | Clause | Accepted subset | Execution |
 | --- | --- | --- |
-| `MATCH` | Comma-separated finite node/relationship chains; optional labels, type, literal property maps | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails |
+| `MATCH` | Comma-separated finite node/relationship chains; optional `variable =` path assignment, labels, type, literal property maps | Planner chooses an indexed anchor when available; executor matches bounded relationship-unique trails and binds named paths in traversal order |
 | `WHERE` | Scalar `=`, `<>`, `!=`, `<`, `<=`, `>`, `>=` comparisons joined by `AND`; predicate parentheses | Filters bound properties against literal or property operands |
-| `RETURN` | Bound node/relationship variables or scalar properties, optional `AS` aliases | Projects elements or scalar values in source order |
+| `RETURN` | Bound node/relationship/path variables or scalar properties, optional `AS` aliases | Projects elements or scalar values in source order; the engine path-request API requires exactly one bound entity or path projection |
 | `INSERT` | Literal node/path insertion, optionally following a match | Inserts nodes and relationships transactionally |
 | `CREATE` | Same insertion grammar as `INSERT`; compatibility extension | Same transactional insertion path |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
@@ -76,10 +77,12 @@ property access, and return-after-delete are not accepted.
 The grammar is intentionally finite:
 
 ```text
-query       := [ MATCH paths [ WHERE predicate ] ]
+query       := [ MATCH match-paths [ WHERE predicate ] ]
                ( (INSERT | CREATE) paths [ RETURN projections ]
                | [ DETACH ] DELETE variables
                | RETURN projections )
+match-paths := match-path (',' match-path)*
+match-path  := [ variable '=' ] path
 paths       := path (',' path)*
 path        := node (relationship node)*
 predicate   := comparison ('AND' comparison)*
@@ -90,6 +93,12 @@ catalog     := SHOW (LABELS | RELATIONSHIP TYPES | PROPERTY KEYS | INDEXES | OBJ
 ```
 
 A mutation can start without `MATCH`; a read or deletion must bind variables through `MATCH`.
+Named assignment is a MATCH-only construct: `INSERT p = (...)` and `CREATE p = (...)` are
+unsupported. `MATCH p = (a)-[r:TYPE]->(b) RETURN p` captures the entire matched trail, including
+the order of nodes and relationships when an indexed anchor starts in the middle or a relationship
+is traversed in reverse. A path variable cannot be deleted or used as a scalar property owner;
+the planner rejects `DELETE p` and `RETURN p.name` rather than treating a path as an entity.
+A named path cannot rebind an existing variable, including a node or relationship binding.
 Pattern chains are limited to 64 relationships. Predicates are limited to 128 nesting levels and
 128 scalar comparisons, bounding left-associated conjunction trees as well as parentheses. Match execution
 also imposes a materialized-binding limit, documented in the Graph engine design. Quantified paths

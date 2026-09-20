@@ -351,6 +351,10 @@
 		<Project Path="Database/Assimalign.Cohesion.Database.Graph.Catalog/tests/Assimalign.Cohesion.Database.Graph.Catalog.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Graph.Client/" />
+	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Graph.Client/docs/">
+		<File Path="Database/Assimalign.Cohesion.Database.Graph.Client/docs/DESIGN.md" />
+		<File Path="Database/Assimalign.Cohesion.Database.Graph.Client/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/resources/Database/Assimalign.Cohesion.Database.Graph.Client/src/">
 		<Project Path="Database/Assimalign.Cohesion.Database.Graph.Client/src/Assimalign.Cohesion.Database.Graph.Client.csproj" />
 	</Folder>

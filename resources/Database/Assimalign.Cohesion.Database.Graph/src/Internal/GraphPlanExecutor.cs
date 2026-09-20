@@ -16,11 +16,18 @@ internal static class GraphPlanExecutor
     // Finite syntax guarantees termination; this cap also bounds materialization.
     private const int MaximumMatches = 100_000;
     internal static async ValueTask<QueryResult> ExecuteAsync(GraphDatabaseInstance database, GraphOperation operation,
-        GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
+        GqlQueryStatement statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token, bool paths = false)
     {
         operation.EnsureActive();
         var error = statement.Diagnostics.FirstOrDefault(item => item.Severity == DiagnosticSeverity.Error);
         if (error is not null) { throw new DatabaseParseException($"GQL parse error {error.Code}: {error.Message}"); }
+        if (paths)
+        {
+            var query = statement.GqlExpression;
+            if (query.CatalogSurface is not null || query.Matches.Count == 0 || query.Creates.Count != 0 ||
+                query.DeleteVariables.Count != 0 || query.DetachDelete || query.Projections.Count != 1 || query.Projections[0].Property is not null)
+            { throw new DatabaseException("COHDBG001: Path execution requires a read-only MATCH with exactly one path or bound entity projection."); }
+        }
         if (statement.GqlExpression.CatalogSurface is { } surface)
         {
             return GraphCatalogIntrospection.Execute(database, operation, statement.GqlExpression, surface, token);
@@ -38,6 +45,23 @@ internal static class GraphPlanExecutor
             bindings = matched;
         }
         bindings = bindings.Where(binding => plan.Query.Predicate is null || GraphExpressionEvaluator.Evaluate(plan.Query.Predicate, binding) is true).ToList();
+        if (paths)
+        {
+            string variable = plan.Query.Projections[0].Variable;
+            var results = new List<GraphPath>(bindings.Count);
+            foreach (var binding in bindings)
+            {
+                token.ThrowIfCancellationRequested();
+                results.Add(binding[variable] switch
+                {
+                    GraphPath path => path,
+                    GraphNode node => new GraphPath([node], []),
+                    GraphRelationship relationship => ProjectRelationship(database, operation, relationship),
+                    _ => throw new DatabaseException("COHDBG001: Path execution requires a path or bound entity projection."),
+                });
+            }
+            return new GraphPathsQueryResult(results.AsReadOnly());
+        }
         long affected = 0;
         foreach (var binding in bindings)
         {
@@ -99,15 +123,18 @@ internal static class GraphPlanExecutor
             if (!AcceptNode(path.Nodes[anchor.NodeIndex], node, bindings)) { continue; }
             var positions = new GraphNode[path.Nodes.Count];
             positions[anchor.NodeIndex] = node;
-            await Expand(0, positions, bindings, []).ConfigureAwait(false);
+            await Expand(0, positions, new GraphRelationship[path.Relationships.Count], bindings, []).ConfigureAwait(false);
         }
-        async ValueTask Expand(int step, GraphNode[] positions, Dictionary<string, object> bindings, HashSet<ulong> used)
+        async ValueTask Expand(int step, GraphNode[] positions, GraphRelationship[] relationships,
+            Dictionary<string, object> bindings, HashSet<ulong> used)
         {
             token.ThrowIfCancellationRequested();
             operation.EnsureActive();
             if (step == steps.Length)
             {
                 if (output.Count >= MaximumMatches) { throw new DatabaseException("COHDBG004: The query exceeded 100000 path matches."); }
+                if (path.Variable is { } pathVariable)
+                { bindings.Add(pathVariable, new GraphPath(Array.AsReadOnly(positions), Array.AsReadOnly(relationships))); }
                 output.Add(bindings);
                 return;
             }
@@ -132,10 +159,23 @@ internal static class GraphPlanExecutor
                 if (!AcceptNode(path.Nodes[current.To], node, copy)) { continue; }
                 var nextPositions = (GraphNode[])positions.Clone();
                 nextPositions[current.To] = node;
+                var nextRelationships = (GraphRelationship[])relationships.Clone();
+                nextRelationships[current.Edge] = relationship;
                 var nextUsed = new HashSet<ulong>(used) { edge.Id };
-                await Expand(step + 1, nextPositions, copy, nextUsed).ConfigureAwait(false);
+                await Expand(step + 1, nextPositions, nextRelationships, copy, nextUsed).ConfigureAwait(false);
             }
         }
+    }
+
+    private static GraphPath ProjectRelationship(GraphDatabaseInstance database, GraphOperation operation, GraphRelationship relationship)
+    {
+        // Resolve the bound relationship's endpoints in the same statement snapshot, including anonymous nodes.
+        // This projects an engine entity binding directly; scalar projection rows are never involved.
+        var snapshot = operation.Context.Snapshot;
+        if (database.Store.FindNode(relationship.From.Value, snapshot) is not { } from ||
+            database.Store.FindNode(relationship.To.Value, snapshot) is not { } to)
+        { throw new DatabaseException("COHDBG003: A matched relationship has a missing endpoint."); }
+        return new GraphPath([GraphDatabaseInstance.Materialize(from), GraphDatabaseInstance.Materialize(to)], [relationship]);
     }
 
     private static bool AcceptNode(GqlNodePattern pattern, GraphNode node, Dictionary<string, object> bindings)

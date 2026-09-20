@@ -14,7 +14,7 @@ internal sealed class GraphPlanner(GraphDatabaseInstance database, TransactionSn
 {
     internal GraphPlan Plan(GqlQueryExpression query)
     {
-        var variables = new Dictionary<string, bool>(StringComparer.Ordinal);
+        var variables = new Dictionary<string, BindingKind>(StringComparer.Ordinal);
         var paths = new List<GraphPathPlan>();
         foreach (var path in query.Matches)
         {
@@ -23,8 +23,8 @@ internal sealed class GraphPlanner(GraphDatabaseInstance database, TransactionSn
         }
         ValidateExpression(query.Predicate);
         foreach (var path in query.Creates) { Validate(path, creating: true); }
-        foreach (var variable in query.DeleteVariables) { RequireVariable(variable); }
-        foreach (var projection in query.Projections) { RequireVariable(projection.Variable); }
+        foreach (var variable in query.DeleteVariables) { RequireVariable(variable, entity: true); }
+        foreach (var projection in query.Projections) { RequireVariable(projection.Variable, entity: projection.Property is not null); }
         if (query.Matches.Count == 0 && query.Creates.Count == 0)
         { throw new DatabaseException("COHDBG001: A graph statement requires a match or insertion pattern."); }
         if (query.Creates.Count != 0 && query.DeleteVariables.Count != 0)
@@ -39,7 +39,7 @@ internal sealed class GraphPlanner(GraphDatabaseInstance database, TransactionSn
             { throw new DatabaseException("COHDBG001: A finite path requires one more node than relationships and at most 64 hops."); }
             foreach (var node in path.Nodes)
             {
-                Bind(node.Variable, relationship: false);
+                Bind(node.Variable, BindingKind.Node);
                 foreach (string label in node.Labels)
                 {
                     if (!creating && database.Catalog.FindLabel(label, snapshot) is null)
@@ -48,23 +48,30 @@ internal sealed class GraphPlanner(GraphDatabaseInstance database, TransactionSn
             }
             foreach (var relationship in path.Relationships)
             {
-                Bind(relationship.Variable, relationship: true);
+                Bind(relationship.Variable, BindingKind.Relationship);
                 if (!Enum.IsDefined(relationship.Direction) || creating && (relationship.Type is null || relationship.Direction == GqlPatternDirection.Undirected))
                 { throw new DatabaseException("COHDBG001: Inserted relationships require a type and a directed pattern."); }
                 if (!creating && relationship.Type is { } type && database.Catalog.FindRelationshipType(type, snapshot) is null)
                 { throw new DatabaseException($"COHDBG002: Unknown relationship type '{type}'."); }
             }
+            if (path.Variable is { } variable)
+            {
+                if (creating || !variables.TryAdd(variable, BindingKind.Path))
+                { throw new DatabaseException($"COHDBG003: Path variable '{variable}' must be a new MATCH binding."); }
+            }
         }
-        void Bind(string? variable, bool relationship)
+        void Bind(string? variable, BindingKind kind)
         {
             if (variable is null) { return; }
-            if (variables.TryGetValue(variable, out bool previous) && previous != relationship)
-            { throw new DatabaseException($"COHDBG003: Variable '{variable}' has incompatible node and relationship bindings."); }
-            variables[variable] = relationship;
+            if (variables.TryGetValue(variable, out var previous) && previous != kind)
+            { throw new DatabaseException($"COHDBG003: Variable '{variable}' has incompatible graph bindings."); }
+            variables[variable] = kind;
         }
-        void RequireVariable(string variable)
+        void RequireVariable(string variable, bool entity = false)
         {
-            if (!variables.ContainsKey(variable)) { throw new DatabaseException($"COHDBG001: Variable '{variable}' is not bound."); }
+            if (!variables.TryGetValue(variable, out var kind)) { throw new DatabaseException($"COHDBG001: Variable '{variable}' is not bound."); }
+            if (entity && kind == BindingKind.Path)
+            { throw new DatabaseException($"COHDBG003: Path variable '{variable}' cannot be deleted or used as a property owner."); }
         }
         void ValidateExpression(GqlExpression? expression, int depth = 0)
         {
@@ -72,13 +79,15 @@ internal sealed class GraphPlanner(GraphDatabaseInstance database, TransactionSn
             switch (expression)
             {
                 case null or GqlLiteralExpression: return;
-                case GqlPropertyExpression property: RequireVariable(property.Variable); return;
+                case GqlPropertyExpression property: RequireVariable(property.Variable, entity: true); return;
                 case GqlBinaryExpression binary when binary.Operator is "AND" or "=" or "<>" or "!=" or "<" or "<=" or ">" or ">=":
                     ValidateExpression(binary.Left, depth + 1); ValidateExpression(binary.Right, depth + 1); return;
                 default: throw new DatabaseException("COHDBG001: Unsupported graph predicate.");
             }
         }
     }
+
+    private enum BindingKind { Node, Relationship, Path }
 
     private GraphAnchor ChooseAnchor(GqlPathPattern path, GqlExpression? predicate)
     {

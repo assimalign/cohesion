@@ -272,6 +272,7 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             switch (frame.Value.Type)
             {
                 case (ProtocolMessageType)GraphProtocolMessageType.Execute:
+                case (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths:
                     // Executions run on the session lifetime token, not the soft-stop
                     // token: a drain lets in-flight statements finish.
                     await ExecuteAsync(frame.Value, rowWriter, _lifetimeSource.Token).ConfigureAwait(false);
@@ -315,16 +316,41 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             }
         }
 
-        QueryResult result;
-
         try
         {
-            var request = GraphQueryRequest.FromGql(message.Statement, parameters);
-            if (request.Statement.GqlExpression.CatalogSurface is null)
+            if (string.IsNullOrWhiteSpace(message.Statement))
             {
-                throw new DatabaseException("The graph wire server supports catalog SHOW statements only.");
+                throw new DatabaseParseException("A graph statement must not be empty.");
             }
-            result = await _databaseSession!.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+            if (frame.Type == (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths)
+            {
+                var request = GraphPathsQueryRequest.FromGql(message.Statement, parameters);
+                var result = await _databaseSession!.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+                if (result is not GraphPathsQueryResult paths)
+                {
+                    throw new DatabaseException("A path request did not produce a graph path result.");
+                }
+                foreach (GraphPath path in paths.Paths)
+                {
+                    await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.Path,
+                        new GraphProtocolPathMessage(path.Nodes, path.Relationships).Encode(), cancellationToken).ConfigureAwait(false);
+                }
+                await WriteFrameAsync((ProtocolMessageType)GraphProtocolMessageType.PathsComplete,
+                    new GraphProtocolPathsCompleteMessage(paths.Paths.Count).Encode(), cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                var request = GraphQueryRequest.FromGql(message.Statement, parameters);
+                foreach (var projection in request.Statement.GqlExpression.Projections)
+                {
+                    if (projection.Property is null)
+                    {
+                        throw new DatabaseException("Execute accepts scalar property projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.");
+                    }
+                }
+                var result = await _databaseSession!.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
+                await WriteResultAsync(result, rowWriter, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (DatabaseParseException exception)
         {
@@ -337,7 +363,14 @@ internal sealed class GraphDatabaseServerSession : IDatabaseServerSession
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, exception.Message, cancellationToken).ConfigureAwait(false);
             return;
         }
+        catch (DatabaseTypeException exception)
+        {
+            await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, exception.Message, cancellationToken).ConfigureAwait(false);
+        }
+    }
 
+    private async Task WriteResultAsync(QueryResult result, DatabaseKeyWriter rowWriter, CancellationToken cancellationToken)
+    {
         if (result is QueryResultSet resultSet)
         {
             await using (resultSet.ConfigureAwait(false))

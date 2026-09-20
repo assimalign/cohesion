@@ -13,12 +13,13 @@ using Assimalign.Cohesion.Database.Graph.Internal;
 namespace Assimalign.Cohesion.Database.Graph;
 
 /// <summary>
-/// Serves database-scoped graph catalog SHOW statements over the shared database protocol.
+/// Serves database-scoped graph statements and matched paths over the shared database protocol.
 /// </summary>
 /// <remarks>
-/// The shared database client reads typed scalar catalog results without a graph-specific
-/// client package. Other graph statements receive an execution failure; graph entity
-/// serialization and transaction frames are outside this catalog transport's scope.
+/// Execute serves scalar MATCH projections, graph mutations, and the existing catalog SHOW
+/// surface. ExecutePaths serves read-only MATCH projections of nodes, relationships, and paths.
+/// Explicit wire transaction control remains unsupported; each statement uses the engine's
+/// automatic transaction. The reserved Transaction frame is rejected as a protocol violation.
 /// This model owns its server machinery, following the SQL and Key-Value server design.
 /// <see cref="StartAsync"/> binds the configured listener; <see cref="StopAsync"/> drains
 /// sessions within <see cref="GraphDatabaseServerOptions.ShutdownDrainTimeout"/> before

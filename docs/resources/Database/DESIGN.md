@@ -153,11 +153,17 @@ facts it depicts are stated here in prose so the section stands without it:
 - **Engines share the kernel and never reference each other.** Both reach `Database.Storage`,
   `Database.Transactions`, and `Database.Indexing`; neither depends on the other. Writes serialize
   per database at the apply gate, so a write in one model never contends with a write in another.
-- **SQL, KeyValuePair, and Graph catalog ship servers today.** Blob and Documents remain
-  in-process engines, but now publish their own protocol families with Connections.InMemory
-  conformance exchanges. Blob bounds each content frame and acknowledges chunks; Documents
-  preserves JSON nesting; Graph preserves ordered nodes and relationships in paths. Their
-  production clients and additional server operations remain separate work items.
+- **SQL, KeyValuePair, Blob, and Graph ship servers and clients today.** Graph serves scalar
+  `MATCH` results, `CREATE`, `DELETE`, `DETACH DELETE`, and the existing read-only `SHOW` surface
+  through the engine's database-bound session. Its separate `ExecutePaths` request returns real
+  engine paths for a single bound node, relationship, or named MATCH path projection, preserving
+  identities, labels, relationship types, properties and traversal order. Paths are materialized
+  under one engine snapshot, then streamed as `Path` frames ending in `PathsComplete`. The shared
+  client decides connection reuse from the exchange's terminal-frame state. Explicit Graph
+  transactions remain in-process only: GQL transaction statements are unsupported and reserved
+  `Transaction` byte 9 is rejected with `ProtocolViolation`. Blob bounds each content frame and
+  acknowledges chunks. Documents publishes its nested JSON protocol family but still needs its
+  production server/client. `Graph.Client` ships as a NuGet package, outside `App.Database`.
 - **Transport selection belongs to the composition root.** All engine servers accept
   `IConnectionListener`; `Database.Sql.Tcp` supplies the existing `Listen(Uri)` convenience
   for consumers that choose TCP. Engine packages reference no concrete transport.

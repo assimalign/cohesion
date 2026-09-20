@@ -21,7 +21,7 @@ Measured from source, not from the plan. Line counts are production code (`src/`
 | **SQL** | ~14,300 lines at B1 baseline; B2 extends engine, language, catalog and schema | ~6,900 at B1 baseline; B2 and later phases add acceptance coverage | **Working within a measured subset: 33 of 49 declared clauses (Phase 22).** ORDER BY projection aliases (including nested expressions) and select-list ordinals execute over the wire, with alias-first collisions and precise invalid-ordinal errors (#1024). ALTER TABLE literal defaults now backfill populated-table reads and omitted inserts through the wire; unsupported expressions and invalid defaults reject atomically (#1023). Phase 18 adds uncorrelated `IN`/`NOT IN`, `EXISTS`/`NOT EXISTS`, scalar subqueries and transactional `INSERT ... SELECT`, including server/client execution (#1021). Phase 17 added executable column/expression `COLLATE`, persisted database defaults, and collation-consistent seeks, uniqueness, grouping and hashing (#1025). GROUP BY/HAVING, COUNT/SUM/AVG/MIN/MAX (#1020), SQL transactions, referential integrity, and the exact scalar CAST subset (#1022) execute. B2 and the dialect matrix state partial-support boundaries and the 16 excluded clauses. |
 | **Key-Value** | ~6,500 lines across engine, client, catalog, storage | ~2,700 | **Working.** Storage, commands, server, client all landed. |
 | **Documents** | engine, OQL parser, planner, chunked storage, catalog | 276 at engine baseline; Phase 13 adds execution conformance | **Working within a measured OQL subset: 8 of 12 declared clauses** *(engine landed `6085bad3`, `a4770b3f`)*. Phase 13 measures every advertised clause through a live engine, including grouping/aggregates/HAVING and `CREATE INDEX` / `DROP INDEX`, and fails CI for an unmapped profile addition. Nested documents, arrays, mixed-shape collections, collection ownership. |
-| **Graph** | engine, GQL parser, traversal planner, adjacency storage, catalog | 189 at engine baseline; Phase 13 adds execution conformance | **Working within a measured GQL subset: 8 of 27 declared clauses** *(engine landed `1092d6b2`)*. The old seven-clause figure omitted the later `SHOW` catalog extension. Phase 13 measures all eight against a live engine and guards against unmapped profile additions. Finite relationship-isomorphic traversal, scalar property/variable projections, conjunctive comparisons, graph creation, `DELETE` / `DETACH DELETE`, and catalog reads; this is not complete ISO/IEC 39075 support. |
+| **Graph** | engine, GQL parser, traversal planner, adjacency storage, catalog, server and typed client | 189 at engine baseline; Phase 13 adds execution conformance; Phase 31 adds client/server acceptance | **Working within a measured GQL subset: 8 of 27 declared clauses** *(engine landed `1092d6b2`)*. Phase 31 (#1013) serves scalar `MATCH`, `CREATE`, `DELETE` / `DETACH DELETE`, and unchanged catalog `SHOW` through `GraphDatabaseServer` and `Graph.Client`. The engine now produces real paths for a single bound node, relationship, or named MATCH path projection; `ExecutePaths` preserves identities, labels, types, properties and traversal order. Ownership, cycle, database-scoping and statement-failure reuse rules remain enforced. Wire transaction control is deliberately absent; explicit transactions remain an in-process session API. This is not complete ISO/IEC 39075 support. |
 | **Blob** | engine, chunked storage, catalog | 39 | **Working** *(landed `b97a9976`)*. Chunked persistence, atomic publication, streaming reads/writes proven at 128 MiB under a 64 MiB heap, crash-durable, container ownership enforced. No wire client — see #214. |
 | **Cache** | 6 lines | 6 | Out of MVP scope by prior decision. |
 
@@ -44,19 +44,20 @@ re-implementing paging, journaling, or locking, and each is crash-durable, owner
 scoped to a single database. Blob forced the kernel to grow large-object support it had been
 missing; nothing after it needed a kernel change.
 
-**What separates this from a usable platform** is one decision, not five: **three of the five
-engines have no wire server.** Documents, Blob, and Graph are in-process only, all blocked behind
-the same protocol limits — frames cap at 16 MiB, results are column/row shaped, and the startup
-handshake carries no model discriminator. That is a single coherent wire-format revision, and
-deciding the three cases separately risks three incompatible extensions to `ProtocolMessageType`.
-See feature D6's note and §3.4 of `docs/resources/Database/DESIGN.md`.
+**The wire-format decision is implemented** (#1015): each endpoint binds one immutable model
+family before startup, preserving the shared envelope and handshake. SQL, Key-Value, Blob, and
+Graph now have production servers and clients. Graph's Phase 31 transport dispatches its existing
+scalar and path message families to the real engine; it does not reconstruct paths from scalar
+rows. Documents still needs its production query server/client. Graph wire transaction control
+remains a deliberate limit: neither transaction statement text nor reserved byte 9 is supported.
+See §3.4 of `docs/resources/Database/DESIGN.md`.
 
 ### What is open in GitHub
 
 | Area | Open items | Note |
 |---|---|---|
 | Documents | #190–#192 + epics | #181–#189 close on merge (`6085bad3`). Client, security, replication remain |
-| Graph | #201–#204 + epics | #193–#200 close on merge (`1092d6b2`); **#193 answered: ISO/IEC 39075 GQL**. Security, client, replication remain |
+| Graph | #201–#204 + epics | #193–#200 close on merge (`1092d6b2`); **#193 answered: ISO/IEC 39075 GQL**. Phase 31 (#1013) delivers the server/client graph transport. Security, replication and wire transaction control remain |
 | Blob | #212, #214–#216 + epics | Engine landed (#211, #213 closed); client blocked on the wire-format decision |
 | Key-Value | #206, #919 (+ #208–#210 Cache, post-MVP) | Security and TTL only |
 | SQL | #176, #177 (+ 5 epics) | Security; migrations deferred |
@@ -226,7 +227,7 @@ over the wire — all through the shared kernel, never re-implementing paging, j
 | **D4** | **Key-Value expiration and security** | Per-entry TTL; authorization on key-value operations. | `OPEN` | #919, #206 |
 | **D5** ✅ | **Document engine** | Document persistence with versioned metadata, serialization rules for objects/arrays/scalars, secondary indexes, query planning with projection and aggregation, mutation semantics, and a client. **The largest single engine build on this list.** | `OPEN` | #184–#190 |
 | **D6** ✅ | **Blob engine** | Chunked large-object persistence, metadata catalog, lifecycle, streaming upload/download. **Engine landed `b97a9976`** (#211, #213). The **client (#214) is blocked on a wire-format decision**: the protocol caps a frame at 16 MiB and models results as columns and rows, so streaming needs either new `ProtocolMessageType` entries for chunked transfer or a separate channel. That choice affects every model's client, so it is not being made as a side effect of engine work. | `PARTIAL` | ~~#211~~ ~~#213~~ · #214 blocked |
-| **D7** ✅ | **Graph engine** | Durable adjacency storage, a catalog for labels and edge types, traversal execution, and a client. Gated on B4, which is gated on the #193 decision. | `OPEN` | #196–#200, #202 |
+| **D7** ✅ | **Graph engine** | Durable adjacency storage, a catalog for labels and edge types, traversal execution, and a typed wire client. Phase 31 adds scalar GQL and mutations over `Execute`, plus real in-process paths served over `ExecutePaths`; catalog reads and engine ownership/scoping semantics are retained. Explicit wire transactions remain deferred. | `DONE` within the declared GQL subset | #196–#200, #202, #1013 |
 | **D8** ✅ | **Per-model ownership enforcement** *(Blob containers landed `b97a9976` — first non-SQL proof)* | A1/A2 applied to each engine in its own terms — code-provisioned collections, containers, keyspaces, and graph types locked the same way relational tables are. Implementation varies; a model with no schema may only need the marker. | `DONE` | #1000 |
 
 ### Theme E — Durability and operations
