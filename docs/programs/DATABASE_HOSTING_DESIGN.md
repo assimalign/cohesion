@@ -265,9 +265,9 @@ engines. The document engine needs no server. Multiple engines of the **same** m
 supported by distinct names and separate storage roots. There is no “default engine” chosen by
 list position, no switch over EngineModel in hosting, and no cross-engine transaction promise.
 
-The five-engine demo under `resources/Database/samples/Assimalign.Cohesion.Database.Demo` can keep
-its five `await using ...Engine.Create(...)` declarations unchanged. Requiring a builder for that
-case would make the current simple path harder and serves no hosting need.
+An in-process consumer that composes engines directly — a console program holding five
+`await using ...Engine.Create(...)` declarations — keeps working unchanged. Requiring a builder for
+that case would make the current simple path harder and serves no hosting need.
 
 ### 4.4 Configuration and a service enter through hosting
 

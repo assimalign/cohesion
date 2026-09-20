@@ -29,7 +29,7 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 657 |
+| Projects indexed | 656 |
 | Shipped library/resource projects | 251 |
 | Library areas | 21 |
 | Resource areas | 18 |
@@ -1106,21 +1106,20 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 
 ## Harnesses
 
-297 test, sample, and example projects are indexed for fan-in but excluded from the
+296 test, sample, and example projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
 | Kind | Count |
 | --- | --- |
 | `examples/` | 5 |
-| `samples/` | 10 |
+| `samples/` | 9 |
 | `tests/` | 282 |
 
 Samples, which live in the repository-root `samples/` tree:
 
 | Sample | Path | References |
 | --- | --- | --- |
-| `Assimalign.Cohesion.Database.Demo` | `resources/Database/samples/Assimalign.Cohesion.Database.Demo/Assimalign.Cohesion.Database.Demo.csproj` | `Assimalign.Cohesion.Database.Blob`<br>`Assimalign.Cohesion.Database.Documents`<br>`Assimalign.Cohesion.Database.Graph`<br>`Assimalign.Cohesion.Database.KeyValuePair`<br>`Assimalign.Cohesion.Database.Sql` |
 | `Assimalign.Cohesion.IdentityModel.AotSample` | `libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/samples/Assimalign.Cohesion.IdentityModel.AotSample/Assimalign.Cohesion.IdentityModel.AotSample.csproj` | `Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Protocols`<br>`Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect`<br>`Assimalign.Cohesion.IdentityModel.Protocols.Saml`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.IdentityModel.Token.Saml` |
 | `Assimalign.Cohesion.ObjectMapping.AotSample` | `libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/samples/Assimalign.Cohesion.ObjectMapping.AotSample/Assimalign.Cohesion.ObjectMapping.AotSample.csproj` | `Assimalign.Cohesion.ObjectMapping` |
 | `Database` | `sdks/Assimalign.Cohesion.Sdk.Gateway/samples/GatewaySmoke/Database/Database.csproj` | _(SDK-delivered)_ |
