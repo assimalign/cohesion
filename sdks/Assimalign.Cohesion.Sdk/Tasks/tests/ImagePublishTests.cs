@@ -79,6 +79,55 @@ public sealed class ImagePublishTests
         File.GetLastWriteTimeUtc(archive).ShouldNotBe(timestamp);
     }
 
+    /// <summary>An arm64 Development image records the arm64 OCI platform and carries an AArch64 payload.</summary>
+    [Fact(DisplayName = "Cohesion Test [Sdk] - Image publish: Should create a linux-arm64 Debug archive with the arm64 platform")]
+    public async Task Publish_DebugArchiveArm64_ShouldRecordArm64PlatformAsync()
+    {
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        using ConsumerWorkspace workspace = CreateWeb();
+        string[] properties = ["CohesionOrganization=example", "RuntimeIdentifier=linux-arm64", "Version=1.4.0"];
+
+        DotNetBuildResult result = await workspace.PublishAsync("EnabledWeb", properties, cancellationToken: cancellation.Token);
+
+        result.ExitCode.ShouldBe(0, result.Output);
+        string imagePath = FindImage(workspace);
+        using JsonDocument image = JsonDocument.Parse(File.ReadAllText(imagePath));
+        JsonElement root = image.RootElement;
+        root.GetProperty("platform").GetString().ShouldBe("linux/arm64");
+        root.GetProperty("aot").GetBoolean().ShouldBeFalse();
+        root.GetProperty("baseImage").GetString().ShouldBe("mcr.microsoft.com/dotnet/runtime-deps:10.0");
+        string payload = Path.Combine(workspace.ProjectDirectory("EnabledWeb"), "bin", "Debug", "net10.0", "linux-arm64", "publish");
+        byte[] apphost = File.ReadAllBytes(Path.Combine(payload, "EnabledWeb"));
+        apphost[..4].ShouldBe(new byte[] { 0x7f, 0x45, 0x4c, 0x46 });
+        apphost[18].ShouldBe((byte)0xb7); // ELF e_machine = AArch64.
+    }
+
+    /// <summary>The index writer maps every supported runtime identifier to its lowercase OCI platform.</summary>
+    [Theory(DisplayName = "Cohesion Test [Sdk] - Image index: Should record the OCI platform of the runtime identifier")]
+    [InlineData("linux-x64", "linux/amd64")]
+    [InlineData("linux-musl-x64", "linux/amd64")]
+    [InlineData("linux-arm64", "linux/arm64")]
+    [InlineData("linux-musl-arm64", "linux/arm64")]
+    public async Task Write_RuntimeIdentifier_ShouldRecordOciPlatformAsync(string runtimeIdentifier, string platform)
+    {
+        using ConsumerWorkspace workspace = CreateWeb();
+        const string digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        string output = Path.Combine(workspace.RootDirectory, "platform-image.json");
+        XDocument project = XDocument.Load(workspace.ProjectFile("EnabledWeb"));
+        project.Root!.Add(new XElement("Target", new XAttribute("Name", "WritePlatformProbe"),
+            new XElement("CohesionWriteImageIndex", new XAttribute("OutputPath", output), new XAttribute("Resource", "worker"),
+                new XAttribute("Repository", "example/worker"), new XAttribute("Registry", "ghcr.io"), new XAttribute("Tag", "1.4.0"),
+                new XAttribute("Digest", digest), new XAttribute("Aot", "true"), new XAttribute("RuntimeIdentifier", runtimeIdentifier),
+                new XAttribute("BaseImage", "mcr.microsoft.com/dotnet/runtime-deps:10.0"))));
+        project.Save(workspace.ProjectFile("EnabledWeb"));
+
+        DotNetBuildResult result = await workspace.PublishAsync("EnabledWeb", target: "WritePlatformProbe");
+
+        result.ExitCode.ShouldBe(0, result.Output);
+        using JsonDocument image = JsonDocument.Parse(File.ReadAllText(output));
+        image.RootElement.GetProperty("platform").GetString().ShouldBe(platform);
+    }
+
     /// <summary>Invalid user properties never acquire an unrelated diagnostic code.</summary>
     [Theory(DisplayName = "Cohesion Test [Sdk] - Image publish: Should reject invalid inputs before image creation")]
     [InlineData("CohesionContainerRepository=team/API", "lowercase OCI repository")]

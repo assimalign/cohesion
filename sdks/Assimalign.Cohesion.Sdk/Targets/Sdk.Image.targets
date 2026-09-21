@@ -87,6 +87,6 @@
   <Target Name="_CohesionRecordPublishedImage" AfterTargets="_PublishSingleContainer" Condition="'$(_CohesionImageBuild)' == 'true'">
     <CohesionVerifyImageDigest Digest="$(GeneratedContainerDigest)" ArchivePath="$(ContainerArchiveOutputPath)" RegistryDigest="$(GeneratedContainerDigest)" />
     <CohesionWriteImageIndex OutputPath="$(CohesionImageManifestPath)" Resource="$(_CohesionResolvedResourceName)" Repository="$(ContainerRepository)"
-      Registry="$(ContainerRegistry)" Tag="$(Version)" Digest="$(GeneratedContainerDigest)" Aot="$(PublishAot)" BaseImage="$(ContainerBaseImage)" ArchivePath="$(ContainerArchiveOutputPath)" Fingerprint="$(_CohesionImageInputHash)" />
+      Registry="$(ContainerRegistry)" Tag="$(Version)" Digest="$(GeneratedContainerDigest)" Aot="$(PublishAot)" RuntimeIdentifier="$(RuntimeIdentifier)" BaseImage="$(ContainerBaseImage)" ArchivePath="$(ContainerArchiveOutputPath)" Fingerprint="$(_CohesionImageInputHash)" />
   </Target>
 </Project>

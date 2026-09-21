@@ -127,10 +127,12 @@ provisionally to package-only resources in the gateway gather and builds nothing
 `CohesionContainerBaseImage=auto`, `CohesionContainerPush=false`, and
 `CohesionContainerArchiveOutputPath=$(IntermediateOutputPath)cohesion/images/$(CohesionResourceName).tar`
 are the defaults. The frozen `cohesion/image/v1` index at
-`$(IntermediateOutputPath)cohesion/image.json` records the repository, verified digest,
-`linux/amd64`, `aot`, base image, and a contained relative archive. Registry is late-bound;
+`$(IntermediateOutputPath)cohesion/image.json` records the repository, verified digest, the OCI
+platform of the published runtime identifier (`linux/amd64` for `linux-x64`, `linux/arm64` for
+`linux-arm64`), `aot`, base image, and a contained relative archive. Registry is late-bound;
 an actual push pins only the authority. A registry sink omits `archive` entirely.
-`linux-musl-x64` currently uses `linux/amd64` plus an Alpine base identity; the variant decision is open.
+`linux-musl-x64` and `linux-musl-arm64` record the same platform as their glibc counterparts
+plus an Alpine base identity; the platform-variant decision is open.
 
 `CohesionPackImageArchive=true` ships the archive under `cohesion/images/` to preserve
 index containment. Uncontained archive destinations are errors. Framework-dependent

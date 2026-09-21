@@ -31,6 +31,8 @@ public sealed class CohesionWriteImageIndex : Task
     public string Digest { get; set; } = string.Empty;
     /// <summary>Gets or sets whether the entry point is NativeAOT.</summary>
     public bool Aot { get; set; }
+    /// <summary>Gets or sets the Linux runtime identifier the payload was published for; it selects the recorded OCI platform.</summary>
+    public string RuntimeIdentifier { get; set; } = "linux-x64";
     /// <summary>Gets or sets the base-image identity used by the publisher.</summary>
     [Required]
     public string BaseImage { get; set; } = string.Empty;
@@ -44,6 +46,11 @@ public sealed class CohesionWriteImageIndex : Task
     {
         try
         {
+            if (!ImageRuntimeIdentifiers.IsSupported(RuntimeIdentifier))
+            {
+                throw new InvalidDataException($"Cohesion images support {ImageRuntimeIdentifiers.SupportedList} RuntimeIdentifier.");
+            }
+
             ImageIndexFile.Repository(Repository);
             string digest = ImageIndexFile.Digest(Digest);
             if (Registry.Length != 0)
@@ -66,7 +73,7 @@ public sealed class CohesionWriteImageIndex : Task
             writer.WriteString("registry", Registry.Length == 0 ? null : Registry);
             writer.WriteString("tag", Tag.Length == 0 ? null : Tag);
             writer.WriteString("digest", digest);
-            writer.WriteString("platform", "linux/amd64");
+            writer.WriteString("platform", ImageRuntimeIdentifiers.GetOciPlatform(RuntimeIdentifier));
             writer.WriteBoolean("aot", Aot);
             writer.WriteString("baseImage", BaseImage);
             if (archive is not null)

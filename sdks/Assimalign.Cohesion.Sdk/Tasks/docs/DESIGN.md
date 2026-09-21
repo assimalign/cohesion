@@ -191,12 +191,18 @@ imports, generated source compilation, and incremental MSBuild behavior.
 `dotnet publish -c Release -t:CohesionPublishImage` is the per-resource entry point.
 It requires an enabled resource and runs through `CohesionBuildResourceContainersDependsOn`.
 A nested `dotnet publish` uses one global-property vector for its restore and publish of
-`linux-x64`, self-containment, and AOT. A fresh process avoids reusing the outer invocation's
-cached host-RID assets. Global consumer overrides flow through an argument list, without a shell.
-The outer Development build's host RID cannot leak into the image.
-`linux-musl-x64` is opt-in and selects the Alpine runtime-deps base when the base is auto.
-Both currently record `linux/amd64`; whether musl should use a platform variant is unresolved.
-The base-image identity preserves the libc distinction.
+the image runtime identifier (`linux-x64` by default), self-containment, and AOT. A fresh process
+avoids reusing the outer invocation's cached host-RID assets. Global consumer overrides flow
+through an argument list, without a shell. The outer Development build's host RID cannot leak
+into the image.
+`linux-arm64` is supported alongside `linux-x64` (added 2026-09-20 for arm64 development hosts
+and arm64 node pools; `ImageRuntimeIdentifiers` is the single allow-list). `linux-musl-x64` and
+`linux-musl-arm64` are opt-in and select the Alpine runtime-deps base when the base is auto.
+The index records the architecture as the lowercase OCI platform (`linux/amd64` or `linux/arm64`);
+the musl variants record the same platform as their glibc counterparts, and the base-image
+identity preserves the libc distinction. Release images remain NativeAOT and can only be built on
+a Linux host of the image's own architecture with a reachable clang, or through the in-container
+route; a Development (Debug, JIT) image builds on any host for either architecture.
 
 | Public property | Default and behavior |
 | --- | --- |

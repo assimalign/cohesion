@@ -70,9 +70,9 @@ public sealed class CohesionResolveImagePublish : Task
                 throw new InvalidDataException("CohesionImageAot=false in Release deviates from T12/O11: Release images must be NativeAOT. Use Debug for a self-contained JIT image.");
             }
 
-            if (RuntimeIdentifier is not ("linux-x64" or "linux-musl-x64"))
+            if (!ImageRuntimeIdentifiers.IsSupported(RuntimeIdentifier))
             {
-                throw new InvalidDataException("Cohesion images support linux-x64 or the opt-in linux-musl-x64 RuntimeIdentifier.");
+                throw new InvalidDataException($"Cohesion images support {ImageRuntimeIdentifiers.SupportedList} RuntimeIdentifier.");
             }
 
             if (string.IsNullOrWhiteSpace(Repository))
@@ -101,7 +101,7 @@ public sealed class CohesionResolveImagePublish : Task
             }
 
             ResolvedBaseImage = BaseImage is "" or "auto"
-                ? "mcr.microsoft.com/dotnet/runtime-deps:10.0" + (RuntimeIdentifier == "linux-musl-x64" ? "-alpine" : "")
+                ? "mcr.microsoft.com/dotnet/runtime-deps:10.0" + (ImageRuntimeIdentifiers.IsMusl(RuntimeIdentifier) ? "-alpine" : "")
                 : BaseImage;
             PublishAot = Aot == "true" || Configuration == "Release";
             if (!PublishAot && !InContainer)
@@ -109,13 +109,16 @@ public sealed class CohesionResolveImagePublish : Task
                 return true;
             }
 
-            bool nativeHost = OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture == Architecture.X64;
+            // NativeAOT cannot cross-compile across operating systems or architectures: only a Linux
+            // host of the image's own architecture with a reachable clang can build the payload directly.
+            bool nativeHost = OperatingSystem.IsLinux()
+                && RuntimeInformation.ProcessArchitecture == ImageRuntimeIdentifiers.GetArchitecture(RuntimeIdentifier);
             if (nativeHost && !InContainer && Probe("clang", ["--version"], out _))
             {
                 return true;
             }
 
-            string reason = nativeHost ? "the linux-x64 host has no reachable clang toolchain" : $"host '{RuntimeInformation.RuntimeIdentifier}' cannot build NativeAOT for '{RuntimeIdentifier}'";
+            string reason = nativeHost ? $"the {RuntimeIdentifier} host has no reachable clang toolchain" : $"host '{RuntimeInformation.RuntimeIdentifier}' cannot build NativeAOT for '{RuntimeIdentifier}'";
             if (!Probe("docker", ["info", "--format", "{{.OSType}}"], out string output) || output.Trim() != "linux")
             {
                 return Unavailable($"{reason}; no reachable Linux Docker daemon is available.");
