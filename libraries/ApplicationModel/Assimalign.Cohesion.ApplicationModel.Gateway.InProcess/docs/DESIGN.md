@@ -34,6 +34,19 @@ Composite. Malformed exposure mappings and unsupported transports are refused wi
 resource named. Admission is a build-time fact; the runtime does not scan or dynamically load
 assemblies to discover candidates.
 
+The entry binding itself is registered twice by generated code, in two registries with one
+lookup. The generated `Add<Name>()` verb binds the descriptor it returns
+(`InProcessResourceDescriptorExtensions.InProcess`, keyed by the built resource instance), and the
+generated `Gateway.CreateBuilder(args)` binds every enabled, composable project manifest
+(`InProcessResourceManifestExtensions.InProcess`, keyed by the manifest's application and resource
+names). The planned resource snapshots its manifest, so the manifest registry cannot key on the
+instance; identity is the only stable key. The second registry is what makes a resource added
+through the area verb (`builder.AddWeb(Manifests.DocsWeb)`) or a third-party application model's
+verb over the same manifest (`builder.AddViuWeb(Manifests.DocsWeb)`) colocatable: the generated
+verb is one caller of the binding, not its owner. Both registrations carry the same
+`DynamicDependency` root, so trimming keeps the entry point whichever path the apphost uses.
+Rebinding either key to a different assembly or content root is refused.
+
 ## Entry invocation and host adoption
 
 `ProcessHost` uses a start-on-add model. For each resource, in topological order, the

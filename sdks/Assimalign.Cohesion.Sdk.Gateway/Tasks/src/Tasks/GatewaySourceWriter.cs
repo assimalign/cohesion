@@ -33,7 +33,7 @@ internal static class GatewaySourceWriter
             .Append(Literal(applicationName))
             .AppendLine(")]");
         source.AppendLine();
-        WriteGateway(source, applicationName);
+        WriteGateway(source, applicationName, resources);
         WriteManifests(source, manifests);
         WriteExternals(source, externals);
         WriteApplications(source, applications);
@@ -81,8 +81,15 @@ internal static class GatewaySourceWriter
         return Identifier(manifest.Name);
     }
 
-    private static void WriteGateway(StringBuilder source, string applicationName)
+    private static void WriteGateway(
+        StringBuilder source,
+        string applicationName,
+        IReadOnlyList<GatewayManifest> resources)
     {
+        List<GatewayManifest> bound = resources
+            .Where(manifest => manifest.InProcessBinding is not null)
+            .OrderBy(manifest => manifest.MemberName, StringComparer.Ordinal)
+            .ToList();
         source.AppendLine("/// <summary>Creates the build-generated Cohesion application builder.</summary>");
         source.AppendLine("public static partial class Gateway");
         source.AppendLine("{");
@@ -90,9 +97,29 @@ internal static class GatewaySourceWriter
         source.AppendLine("    /// <param name=\"args\">The gateway command-line arguments.</param>");
         source.AppendLine("    /// <returns>The application builder.</returns>");
         source.AppendLine("    /// <exception cref=\"global::System.ArgumentNullException\"><paramref name=\"args\" /> is null.</exception>");
+        if (bound.Count > 0)
+        {
+            // The manifest bindings make every enabled, composable project resource colocatable
+            // whichever verb adds it (the generated verb, the area verb over Manifests.<Name>, or a
+            // third-party application model's verb), so the entry points are rooted here as well.
+            source.AppendLine("    /// <remarks>Registers the in-process entry binding of every enabled, composable project resource by manifest identity.</remarks>");
+            foreach (GatewayManifest manifest in bound)
+            {
+                WriteTrimmingRoot(source, manifest.InProcessBinding!, "    ");
+            }
+
+            WriteTrimmingSuppression(source, "    ");
+        }
+
         source.AppendLine("    public static global::Assimalign.Cohesion.ApplicationModel.IApplicationBuilder CreateBuilder(string[] args)");
         source.AppendLine("    {");
         source.AppendLine("        global::System.ArgumentNullException.ThrowIfNull(args);");
+        foreach (GatewayManifest manifest in bound)
+        {
+            source.Append("        Manifests.").Append(manifest.MemberName).Append(".InProcess(");
+            WriteBindingArguments(source, manifest.InProcessBinding!, "            ");
+        }
+
         source.Append("        return global::Assimalign.Cohesion.ApplicationModel.Application.CreateBuilder(")
             .Append("global::Assimalign.Cohesion.ApplicationModel.ApplicationName.Parse(")
             .Append(Literal(applicationName))
@@ -100,6 +127,43 @@ internal static class GatewaySourceWriter
         source.AppendLine("    }");
         source.AppendLine("}");
         source.AppendLine();
+    }
+
+    private static void WriteTrimmingRoot(
+        StringBuilder source,
+        GatewayInProcessBinding binding,
+        string indent)
+    {
+        source.Append(indent).AppendLine("[global::System.Diagnostics.CodeAnalysis.DynamicDependency(");
+        source.Append(indent).AppendLine("    global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicMethods |");
+        source.Append(indent).AppendLine("    global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.NonPublicMethods,");
+        source.Append(indent).Append("    ").Append(Literal(binding.EntryPointType)).AppendLine(",");
+        source.Append(indent).Append("    ").Append(Literal(binding.EntryAssemblyName)).AppendLine(")]");
+    }
+
+    private static void WriteTrimmingSuppression(StringBuilder source, string indent)
+    {
+        source.Append(indent).AppendLine("[global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(");
+        source.Append(indent).AppendLine("    \"Trimming\",");
+        source.Append(indent).AppendLine("    \"IL2026\",");
+        source.Append(indent).AppendLine("    Justification = \"The generated DynamicDependency roots the resource entry point used by the in-process binding.\")]");
+    }
+
+    private static void WriteBindingArguments(
+        StringBuilder source,
+        GatewayInProcessBinding binding,
+        string indent)
+    {
+        source.Append("typeof(global::")
+            .Append(binding.RootNamespace)
+            .Append('.')
+            .Append(EntryAnchorType(binding.EntryAssemblyName))
+            .AppendLine(").Assembly,");
+        source.Append(indent).AppendLine("global::System.IO.Path.Combine(");
+        source.Append(indent).AppendLine("    global::System.AppContext.BaseDirectory,");
+        source.Append(indent).AppendLine("    \"cohesion\",");
+        source.Append(indent).AppendLine("    \"resources\",");
+        source.Append(indent).Append("    ").Append(Literal(binding.ResourceName)).AppendLine("));");
     }
 
     private static void WriteManifests(StringBuilder source, IReadOnlyList<GatewayManifest> manifests)
@@ -235,15 +299,8 @@ internal static class GatewaySourceWriter
             source.AppendLine("        /// <returns>The resource descriptor, for adding dependency edges and resource commands.</returns>");
             if (manifest.InProcessBinding is GatewayInProcessBinding binding)
             {
-                source.AppendLine("        [global::System.Diagnostics.CodeAnalysis.DynamicDependency(");
-                source.AppendLine("            global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicMethods |");
-                source.AppendLine("            global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.NonPublicMethods,");
-                source.Append("            ").Append(Literal(binding.EntryPointType)).AppendLine(",");
-                source.Append("            ").Append(Literal(binding.EntryAssemblyName)).AppendLine(")]");
-                source.AppendLine("        [global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(");
-                source.AppendLine("            \"Trimming\",");
-                source.AppendLine("            \"IL2026\",");
-                source.AppendLine("            Justification = \"The generated DynamicDependency roots the resource entry point used by the in-process binding.\")]");
+                WriteTrimmingRoot(source, binding, "        ");
+                WriteTrimmingSuppression(source, "        ");
             }
             source.Append("        public ").Append(descriptorType).Append(" Add")
                 .Append(manifest.MemberName).Append("(global::System.Action<").Append(optionsType)
@@ -297,16 +354,8 @@ internal static class GatewaySourceWriter
         }
 
         source.AppendLine();
-        source.Append("            descriptor.InProcess(typeof(global::")
-            .Append(binding.RootNamespace)
-            .Append('.')
-            .Append(EntryAnchorType(binding.EntryAssemblyName))
-            .AppendLine(").Assembly,");
-        source.AppendLine("                    global::System.IO.Path.Combine(");
-        source.AppendLine("                        global::System.AppContext.BaseDirectory,");
-        source.AppendLine("                        \"cohesion\",");
-        source.AppendLine("                        \"resources\",");
-        source.Append("                        ").Append(Literal(binding.ResourceName)).AppendLine("));");
+        source.Append("            descriptor.InProcess(");
+        WriteBindingArguments(source, binding, "                    ");
     }
 
     private static void WriteProviderCatalog(StringBuilder source, IReadOnlyList<GatewayProvider> providers)

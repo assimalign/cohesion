@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -343,11 +344,17 @@ public sealed class GatewaySdkIntegrationTests
         source.ShouldContain("\"gateway-smoke-database\"));");
         source.ShouldContain("\"inprocess-named-entry\"));");
         source.ShouldNotContain(EntryAnchor("InProcessNonComposable", "InProcessNonComposable"));
-        source.Split(".InProcess(", StringSplitOptions.None).Length.ShouldBe(4);
+        // Three descriptor bindings on the generated verbs plus three manifest bindings that
+        // Gateway.CreateBuilder registers, each rooted by its own DynamicDependency.
+        source.ShouldContain("Manifests.GatewaySmokeWeb.InProcess(");
+        source.ShouldContain("Manifests.GatewaySmokeDatabase.InProcess(");
+        source.ShouldContain("Manifests.InprocessNamedEntry.InProcess(");
+        source.ShouldNotContain("Manifests.InprocessNoncomposable.InProcess(");
+        source.Split(".InProcess(", StringSplitOptions.None).Length.ShouldBe(7);
         source.Split("[global::System.Diagnostics.CodeAnalysis.DynamicDependency(", StringSplitOptions.None)
-            .Length.ShouldBe(4);
+            .Length.ShouldBe(7);
         source.Split("[global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(", StringSplitOptions.None)
-            .Length.ShouldBe(4);
+            .Length.ShouldBe(5);
         source.ShouldContain(
             "Justification = \"The generated DynamicDependency roots the resource entry point used by the in-process binding.\"");
 
@@ -437,6 +444,38 @@ public sealed class GatewaySdkIntegrationTests
             "Gateway.g.cs"));
         regeneratedSource.ShouldContain("\"InProcessNamedEntry.RenamedEntry\",");
         regeneratedSource.ShouldNotContain("\"InProcessNamedEntry.CustomEntry\",");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - InProcess binds a resource added through the area verb over its generated manifest")]
+    public async Task Describe_InProcessGateway_WithAreaVerbOverManifest_ShouldValidateBinding()
+    {
+        // Arrange: the apphost adds gateway-smoke-web with AddWeb(Manifests.GatewaySmokeWeb),
+        // never calling the generated AddGatewaySmokeWeb() verb that carries the descriptor binding.
+        using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
+            "GatewaySmokeDatabase",
+            "GatewaySmokeSupport",
+            "GatewaySmokeWeb",
+            "InProcessManifestVerb");
+        var environment = new Dictionary<string, string?>
+        {
+            ["COHESION_ENVIRONMENT"] = null,
+            ["DOTNET_ENVIRONMENT"] = null,
+            ["COHESION_GATEWAY"] = null,
+        };
+        DotNetBuildResult build = await workspace.BuildAsync("InProcessManifestVerb", cancellationSource.Token);
+        build.ExitCode.ShouldBe(0, build.Output);
+
+        // Act: Build() runs the selected gateway's validation before describe emits the model.
+        DotNetBuildResult describe = await workspace.RunBuiltProjectAsync(
+            "InProcessManifestVerb", ["--mode", "describe"], cancellationSource.Token, environment);
+
+        // Assert
+        describe.ExitCode.ShouldBe(0, describe.Output);
+        describe.Output.ShouldNotContain("no generated in-process entry binding");
+        using JsonDocument document = JsonDocument.Parse(describe.StandardOutput);
+        document.RootElement.GetProperty("gateway").GetString().ShouldBe("inprocess");
+        document.RootElement.GetProperty("environment").GetString().ShouldBe("Local");
     }
 
     [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - clean parallel InProcess builds use evaluation-time runtime references")]

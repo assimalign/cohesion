@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -139,6 +140,63 @@ public sealed class InProcessGatewayTests
 
         exception.Message.ShouldContain("unregistered-executable");
         exception.Message.ShouldContain("did not register an enabled resource entry point");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "manifest binding is found for a resource added without the generated verb")]
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "The test binds the executing test assembly, which needs no entry-point root.")]
+    public void Build_WithManifestBinding_ShouldResolveBindingByManifestIdentity()
+    {
+        // Arrange: the planned resource snapshots the manifest, so only the manifest's identity
+        // (application and resource names), never its instance, can carry the binding.
+        using var gateway = new DisposableGateway(new InProcessGateway());
+        IApplicationBuilder builder = Application.CreateBuilder(
+            (ApplicationName)"inprocess-tests",
+            Array.Empty<string>());
+        ResourceManifest manifest = TestManifest("manifest-bound-executable", mount: false);
+        manifest.InProcess(Assembly.GetExecutingAssembly(), Path.GetTempPath());
+        builder.AddResource(new ManifestResource(manifest));
+        builder.UseGateway(gateway.Value);
+
+        // Act
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(
+            () => builder.Build());
+
+        // Assert: validation got past the binding lookup and refused the unregistered entry.
+        exception.Message.ShouldContain("manifest-bound-executable");
+        exception.Message.ShouldNotContain("no generated in-process entry binding");
+        exception.Message.ShouldContain("did not register an enabled resource entry point");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "manifest rebinding to a different content root is refused")]
+    [UnconditionalSuppressMessage(
+        "Trimming",
+        "IL2026",
+        Justification = "The test binds the executing test assembly, which needs no entry-point root.")]
+    public void InProcess_RebindingManifestToDifferentRoot_ShouldThrow()
+    {
+        // Arrange
+        ResourceManifest manifest = TestManifest("manifest-rebound-executable", mount: false);
+        string root = CreateTemporaryDirectory();
+        try
+        {
+            manifest.InProcess(Assembly.GetExecutingAssembly(), root);
+            manifest.InProcess(Assembly.GetExecutingAssembly(), root);
+
+            // Act
+            InvalidOperationException exception = Should.Throw<InvalidOperationException>(
+                () => manifest.InProcess(Assembly.GetExecutingAssembly(), Path.GetTempPath()));
+
+            // Assert
+            exception.Message.ShouldContain("app/manifest-rebound-executable");
+            exception.Message.ShouldContain("different in-process entry binding");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact(DisplayName = DisplayPrefix + "compiler refuses Job and unsupported probe kinds with resource names")]

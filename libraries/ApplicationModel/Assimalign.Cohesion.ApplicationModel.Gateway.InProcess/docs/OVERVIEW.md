@@ -10,8 +10,11 @@ The package depends only on `ApplicationModel`, `ApplicationModel.Gateway`, plai
 Composite obtains those runtimes through enabled project references when
 `CohesionGatewayInProcess=true`.
 
-Select the provider with `--gateway inprocess`. Generated `Sdk.Gateway` verbs bind the
-same-application closure of enabled, composable project resources. Each member receives a resource-specific content root,
+Select the provider with `--gateway inprocess`. The generated `Gateway.CreateBuilder(args)` binds
+the same-application closure of enabled, composable project resources by manifest identity, and
+each generated `Add<Name>()` verb binds the descriptor it returns, so a resource is colocatable
+whether it was added through the generated verb, the area verb over `Manifests.<Name>`, or a
+third-party application model's verb. Each member receives a resource-specific content root,
 persisted loopback endpoints, resolved mounts and credentials, and observed dependency addresses
 through its ambient `ResourceContext`.
 

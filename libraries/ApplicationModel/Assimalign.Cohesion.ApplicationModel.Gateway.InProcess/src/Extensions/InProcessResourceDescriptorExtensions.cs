@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 
@@ -59,9 +61,16 @@ public static partial class InProcessResourceDescriptorExtensions
     }
 }
 
+/// <summary>
+/// Holds the in-process entry bindings of the current process. A descriptor binding is keyed by
+/// the built resource instance; a manifest binding is keyed by the manifest's application and
+/// resource names, so it is found whichever verb added the resource.
+/// </summary>
 internal static class InProcessResourceBindings
 {
     private static readonly ConditionalWeakTable<IApplicationResource, InProcessResourceBinding> Bindings = new();
+    private static readonly Dictionary<string, InProcessResourceBinding> ManifestBindings = new(StringComparer.Ordinal);
+    private static readonly Lock ManifestLock = new();
 
     internal static void Register(
         IApplicationResource resource,
@@ -72,8 +81,7 @@ internal static class InProcessResourceBindings
 
         if (Bindings.TryGetValue(resource, out InProcessResourceBinding? existing))
         {
-            if (ReferenceEquals(existing.EntryAssembly, binding.EntryAssembly)
-                && PathEquals(existing.ContentRootPath, binding.ContentRootPath))
+            if (existing.Matches(binding))
             {
                 return;
             }
@@ -85,21 +93,78 @@ internal static class InProcessResourceBindings
         Bindings.Add(resource, binding);
     }
 
+    internal static void RegisterManifest(
+        ResourceManifest manifest,
+        InProcessResourceBinding binding)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(binding);
+
+        string key = ManifestKey(manifest);
+        lock (ManifestLock)
+        {
+            if (ManifestBindings.TryGetValue(key, out InProcessResourceBinding? existing))
+            {
+                if (existing.Matches(binding))
+                {
+                    return;
+                }
+
+                throw new InvalidOperationException(
+                    $"Resource '{key}' already has a different in-process entry binding.");
+            }
+
+            ManifestBindings.Add(key, binding);
+        }
+    }
+
     internal static bool TryGet(
         IApplicationResource resource,
         [NotNullWhen(true)]
-        out InProcessResourceBinding? binding) =>
-        Bindings.TryGetValue(resource, out binding);
+        out InProcessResourceBinding? binding)
+    {
+        if (Bindings.TryGetValue(resource, out binding))
+        {
+            return true;
+        }
 
-    private static bool PathEquals(string left, string right) =>
-        string.Equals(
-            left,
-            right,
-            OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal);
+        if (resource is IManifestResource { Manifest: { } manifest })
+        {
+            lock (ManifestLock)
+            {
+                return ManifestBindings.TryGetValue(ManifestKey(manifest), out binding);
+            }
+        }
+
+        binding = null;
+        return false;
+    }
+
+    private static string ManifestKey(ResourceManifest manifest)
+    {
+        string application = manifest.Application.ToString();
+        string name = manifest.Name.ToString();
+        if (string.IsNullOrWhiteSpace(application) || string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException(
+                "An in-process manifest binding requires the manifest's application and resource names.",
+                nameof(manifest));
+        }
+
+        return application + "/" + name;
+    }
 }
 
 internal sealed record InProcessResourceBinding(
     Assembly EntryAssembly,
-    string ContentRootPath);
+    string ContentRootPath)
+{
+    internal bool Matches(InProcessResourceBinding other) =>
+        ReferenceEquals(EntryAssembly, other.EntryAssembly)
+        && string.Equals(
+            ContentRootPath,
+            other.ContentRootPath,
+            OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal);
+}
