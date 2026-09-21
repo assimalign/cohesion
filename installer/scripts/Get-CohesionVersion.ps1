@@ -31,7 +31,7 @@
     (which puts installer/scripts/ two levels under the root).
 
 .OUTPUTS
-    System.String. The version (e.g. "10.0.1-preview.3") emitted to stdout.
+    System.String. The version (e.g. "10.0.0-preview.1") emitted to stdout.
 
 .EXAMPLE
     $version = & ./installer/scripts/Get-CohesionVersion.ps1

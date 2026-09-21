@@ -88,7 +88,7 @@ directory to find the nearest `global.json`. If one is found, COHSDK002 requires
 every present, recognized `Assimalign.Cohesion.Sdk*` pin to use exactly the same
 version string and requires the pinned .NET SDK version to be `10.0.300` or
 newer. Exact string agreement deliberately accepts local identities such as
-`10.0.1-preview.3.local` when every Cohesion SDK pin uses that identity.
+`10.0.0-preview.1.local` when every Cohesion SDK pin uses that identity.
 
 A consumer with no `global.json` is unchanged. Tooling that must inspect a
 temporarily inconsistent tree can set `CohesionSkipSdkPinCheck=true`; normal

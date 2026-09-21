@@ -18,8 +18,8 @@ public sealed class SdkPinValidationTests
         using ConsumerWorkspace workspace = ConsumerWorkspace.Create("SdkPinValidationConsumer");
         Dictionary<string, string> pins = ConsumerWorkspace.CreateMatchingSdkPins();
         pins.Count.ShouldBe(20);
-        pins["Assimalign.Cohesion.Sdk.Gateway"] = "10.0.1-preview.3.gateway";
-        pins["Assimalign.Cohesion.Sdk.Web"] = "10.0.1-preview.3.web";
+        pins["Assimalign.Cohesion.Sdk.Gateway"] = "10.0.0-preview.1.gateway";
+        pins["Assimalign.Cohesion.Sdk.Web"] = "10.0.0-preview.1.web";
         workspace.WriteGlobalJson("10.0.300", pins);
 
         // Act
@@ -30,8 +30,8 @@ public sealed class SdkPinValidationTests
         // Assert
         invalidResult.ExitCode.ShouldNotBe(0, invalidResult.Output);
         invalidResult.Output.ShouldContain("COHSDK002");
-        invalidResult.Output.ShouldContain("Assimalign.Cohesion.Sdk.Gateway='10.0.1-preview.3.gateway'");
-        invalidResult.Output.ShouldContain("Assimalign.Cohesion.Sdk.Web='10.0.1-preview.3.web'");
+        invalidResult.Output.ShouldContain("Assimalign.Cohesion.Sdk.Gateway='10.0.0-preview.1.gateway'");
+        invalidResult.Output.ShouldContain("Assimalign.Cohesion.Sdk.Web='10.0.0-preview.1.web'");
         invalidResult.Output.ShouldContain($"expected '{ConsumerWorkspace.SdkPackageVersion}'");
 
         // Arrange
@@ -56,7 +56,7 @@ public sealed class SdkPinValidationTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         using ConsumerWorkspace workspace = ConsumerWorkspace.Create("SdkPinValidationConsumer");
         Dictionary<string, string> pins = ConsumerWorkspace.CreateMatchingSdkPins();
-        pins["Assimalign.Cohesion.Sdk.Gateway"] = "10.0.1-preview.3.mismatch";
+        pins["Assimalign.Cohesion.Sdk.Gateway"] = "10.0.0-preview.1.mismatch";
         workspace.WriteGlobalJson("10.0.200", pins);
 
         // Act
@@ -79,7 +79,7 @@ public sealed class SdkPinValidationTests
         Dictionary<string, string> pins = ConsumerWorkspace.CreateMatchingSdkPins();
         foreach (string packageId in new List<string>(pins.Keys))
         {
-            pins[packageId] = "10.0.1-preview.3.local";
+            pins[packageId] = "10.0.0-preview.1.local";
         }
         workspace.UseInlineBaseSdkVersion("SdkPinValidationConsumer");
         workspace.WriteGlobalJson("10.0.300", pins);

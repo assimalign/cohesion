@@ -30,7 +30,7 @@
     run.
 
 .PARAMETER Version
-    The SemVer package version to produce, for example 10.0.1 or 10.0.1-preview.3. Must match the
+    The SemVer package version to produce, for example 10.0.1 or 10.0.0-preview.1. Must match the
     canonical CohesionVersion; .github/workflows/release.yml enforces that against the release tag
     before calling this script.
 
@@ -55,7 +55,7 @@
     by its prepare job; local callers default to GITHUB_SHA and then the checked-out HEAD.
 
 .EXAMPLE
-    ./installer/scripts/Pack-Release.ps1 -Version 10.0.1-preview.3
+    ./installer/scripts/Pack-Release.ps1 -Version 10.0.0-preview.1
 #>
 [CmdletBinding()]
 param(
@@ -111,7 +111,7 @@ $versionSuffix = $versionMatch.Groups['suffix'].Value
 $versionPrefix = "$majorVersion.$minorVersion.$patchCoreVersion"
 
 # build/Targets/Build.Version.props treats CohesionPatchVersion as the patch number PLUS any
-# prerelease tag ("1-preview.3"), splitting the numeric core back out for AssemblyVersion. Feed it
+# prerelease tag ("0-preview.1"), splitting the numeric core back out for AssemblyVersion. Feed it
 # the same shape so the props file's own derivation stays self-consistent.
 $patchVersion = $patchCoreVersion
 if (-not [string]::IsNullOrWhiteSpace($versionSuffix)) {

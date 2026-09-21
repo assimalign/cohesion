@@ -163,7 +163,7 @@ Every recognized entry that is present under `msbuild-sdks` is compared with
 ordinal string equality. The base SDK's value is the expected value when it is
 present; otherwise the first recognized identity in ordinal name order is the
 anchor. This is agreement, not comparison with the repository's canonical
-package version: a full pin block using `10.0.1-preview.3.local` is valid.
+package version: a full pin block using `10.0.0-preview.1.local` is valid.
 
 When `sdk.version` is present, its numeric SDK version must be at least
 `10.0.300`. A lower or malformed version fails with COHSDK002. JSON comments and

@@ -67,8 +67,8 @@ not inherit an inline version, so a consumer must pin both SDK identities:
     "rollForward": "latestFeature"
   },
   "msbuild-sdks": {
-    "Assimalign.Cohesion.Sdk": "10.0.1-preview.3",
-    "Assimalign.Cohesion.Sdk.Gateway": "10.0.1-preview.3"
+    "Assimalign.Cohesion.Sdk": "10.0.0-preview.1",
+    "Assimalign.Cohesion.Sdk.Gateway": "10.0.0-preview.1"
   }
 }
 ```

@@ -22,7 +22,7 @@ no matching `Assimalign.Cohesion.App.Gateway` framework.
 The base SDK can be pinned inline:
 
 ```xml
-<Project Sdk="Assimalign.Cohesion.Sdk/10.0.1-preview.3">
+<Project Sdk="Assimalign.Cohesion.Sdk/10.0.0-preview.1">
 </Project>
 ```
 
@@ -50,8 +50,8 @@ minimum pin set is:
         "rollForward": "latestFeature"
     },
     "msbuild-sdks": {
-        "Assimalign.Cohesion.Sdk":         "10.0.1-preview.3",
-        "Assimalign.Cohesion.Sdk.Gateway": "10.0.1-preview.3"
+        "Assimalign.Cohesion.Sdk":         "10.0.0-preview.1",
+        "Assimalign.Cohesion.Sdk.Gateway": "10.0.0-preview.1"
     }
 }
 ```
@@ -64,7 +64,7 @@ installer, no admin rights, and no custom resolver.
 The base SDK validates the nearest `global.json` during restore and build. Every
 present Cohesion SDK pin must use one exact version string and the pinned .NET
 SDK must be `10.0.300` or newer; disagreement reports COHSDK002. This is exact
-agreement among the pins, so the local identity `10.0.1-preview.3.local` is valid
+agreement among the pins, so the local identity `10.0.0-preview.1.local` is valid
 when used consistently. Consumers without a `global.json` are unaffected. The
 `CohesionSkipSdkPinCheck=true` escape is reserved for tooling that must inspect a
 temporarily inconsistent tree.

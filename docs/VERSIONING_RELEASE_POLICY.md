@@ -19,10 +19,10 @@ the Cohesion version. The .NET target framework supplies the major version; the 
 minor version and the patch plus optional prerelease suffix. The current line is:
 
 ```xml
-<CohesionPatchVersion>1-preview.3</CohesionPatchVersion>
+<CohesionPatchVersion>0-preview.1</CohesionPatchVersion>
 ```
 
-That resolves to `10.0.1-preview.3`. Verify it without restoring or building:
+That resolves to `10.0.0-preview.1`. Verify it without restoring or building:
 
 ```powershell
 pwsh installer/scripts/Get-CohesionVersion.ps1
@@ -35,8 +35,8 @@ MSBuild properties, but it must preserve this single synchronized identity.
 
 | Channel | Version example | Publication policy |
 | --- | --- | --- |
-| Local development | `10.0.1-preview.3.local` | `Install-Local.ps1` only; written to `_out/packages/`; never published |
-| Staging | `10.0.1-preview.3` | Every published GitHub Release tagged `v$(CohesionVersion)` is validated, packed, and staged in GitHub Packages |
+| Local development | `10.0.0-preview.1.local` | `Install-Local.ps1` only; written to `_out/packages/`; never published |
+| Staging | `10.0.0-preview.1` | Every published GitHub Release tagged `v$(CohesionVersion)` is validated, packed, and staged in GitHub Packages |
 | Public preview or release candidate | `10.0.1-preview.N`, `10.0.1-rc.N` | Promoted from an already-published release only through an explicit manual dispatch and reviewer approval |
 | Alpha or beta | `10.0.1-alpha.N`, `10.0.1-beta.N` | Staging only |
 | Stable | `10.0.1` | Not opened by the current workflow; enabling stable promotion is a separate release decision |
@@ -63,7 +63,7 @@ until a configured required reviewer approves it. See GitHub's
 ## Local package identities and pruning
 
 `Install-Local.ps1` appends `.local` to the canonical prerelease, so
-`10.0.1-preview.3` becomes `10.0.1-preview.3.local`. In SemVer, that additional identifier sorts
+`10.0.0-preview.1` becomes `10.0.0-preview.1.local`. In SemVer, that additional identifier sorts
 after the canonical prerelease and cannot collide with its published package identity.
 
 A stable canonical line cannot safely acquire a local suffix: `10.0.1-local` would sort below
@@ -89,7 +89,7 @@ A consumer without `global.json` is unaffected.
 
 Pin agreement uses ordinal string equality among the Cohesion entries; it does not require equality
 with the canonical version in this repository. Consequently, an inner-loop consumer legitimately
-uses `10.0.1-preview.3.local` for every entry after `Install-Local.ps1` packs that local identity.
+uses `10.0.0-preview.1.local` for every entry after `Install-Local.ps1` packs that local identity.
 `CohesionSkipSdkPinCheck=true` exists only for tooling that must load an intentionally inconsistent
 tree and should not be set in normal builds.
 
@@ -108,7 +108,7 @@ tree and should not be set in normal builds.
    line before development resumes. After `preview.3`, use at least `preview.4`; after a stable
    `10.0.1`, move to a higher core such as `10.0.2-preview.1`. Local packs then add `.local` to that
    new line.
-6. After `10.0.1-preview.3` exists in staging, repin `cohesion-platforms` and
+6. After `10.0.0-preview.1` exists in staging, repin `cohesion-platforms` and
    `cohesion-examples` with their release floor plus sibling override. That cross-repository work
    belongs to design items 33 and 38 and is not part of this repository change.
 

@@ -221,9 +221,9 @@ Step 3d is guarded, not merely documented: `Assert-CohesionReleaseInventory` fai
 
 `$(CohesionVersion)` lives in `build/Targets/Build.Version.props` and is the single source of truth. Every Cohesion package — SDK, Ref pack, Runtime pack, library — shares this version. Bumping is a one-line edit.
 
-The current version line is `<CohesionPatchVersion>1-preview.3</CohesionPatchVersion>`, which resolves to `10.0.1-preview.3`. Rule of record: **cohesion's version never sorts below any version present on a feed.** Inspect GitHub Packages and nuget.org before selecting a line, and bump `main` immediately after tagging so development never moves behind a published version.
+The current version line is `<CohesionPatchVersion>0-preview.1</CohesionPatchVersion>`, which resolves to `10.0.0-preview.1`. Rule of record: **cohesion's version never sorts below any version present on a feed.** Inspect GitHub Packages and nuget.org before selecting a line, and bump `main` immediately after tagging so development never moves behind a published version.
 
-Local packages are distinct: `Install-Local.ps1` appends `.local` to the canonical prerelease (`10.0.1-preview.3.local`) and refuses a stable canonical line until its post-tag bump lands. Release packages reject the reserved `local` identifier. The complete staging, promotion, post-tag, and rate-limit policy is in [`docs/VERSIONING_RELEASE_POLICY.md`](../../docs/VERSIONING_RELEASE_POLICY.md).
+Local packages are distinct: `Install-Local.ps1` appends `.local` to the canonical prerelease (`10.0.0-preview.1.local`) and refuses a stable canonical line until its post-tag bump lands. Release packages reject the reserved `local` identifier. The complete staging, promotion, post-tag, and rate-limit policy is in [`docs/VERSIONING_RELEASE_POLICY.md`](../../docs/VERSIONING_RELEASE_POLICY.md).
 
 `frameworks/Directory.Build.props` sets `VersionPrefix` and `VersionSuffix` from `CohesionVersionPrefix` and `CohesionVersionSuffix` so Microsoft.NET.Sdk's default `VersionPrefix=1.0.0` doesn't win. **Don't remove that mapping** — it is what keeps framework `.nupkg` versions aligned with the SDK without feeding a prerelease suffix to `AssemblyVersion`.
 

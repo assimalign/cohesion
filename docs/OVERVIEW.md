@@ -8,6 +8,7 @@ Repository-level documentation for the Cohesion mono repository. Coding standard
 - [Service Layer Design](./SERVICE_LAYER_DESIGN.md) — high-level design for each service under `resources/`
 - [Service Story Requirements](./programs/SERVICE_STORY_REQUIREMENTS.md) — implementation requirements for service-level backlog stories
 - [Developer Experience Design](./DEVELOPER_EXPERIENCE_DESIGN.md) — authoritative gateway, discovery, trust, and application-set contracts
+- [Application Model Build and Deploy](./APPLICATION_MODEL_BUILD_AND_DEPLOY.md) — the build plane, gateway selection, and the local versus live-cluster realizations, drawn
 - Build
   - [Cohesion Custom MSBuild Items](./build/MSBUILD_COHESION_PROPS.md) — `CohesionProjectReference`, `CohesionPackageReference`, code generation
   - [Common MSBuild Properties](./build/MSBUILD_COMMON_PROPS.md) — where shared build properties are defined

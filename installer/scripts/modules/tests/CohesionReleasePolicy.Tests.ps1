@@ -30,12 +30,12 @@ AfterAll {
 
 Describe 'Cohesion local package versions' {
     It 'appends the reserved local identifier to a canonical prerelease' {
-        $version = Get-CohesionLocalPackageVersion -Version '10.0.1-preview.3'
+        $version = Get-CohesionLocalPackageVersion -Version '10.0.0-preview.1'
 
-        $version.Version | Should -Be '10.0.1-preview.3.local'
-        $version.VersionPrefix | Should -Be '10.0.1'
-        $version.VersionSuffix | Should -Be 'preview.3.local'
-        $version.PatchVersion | Should -Be '1-preview.3.local'
+        $version.Version | Should -Be '10.0.0-preview.1.local'
+        $version.VersionPrefix | Should -Be '10.0.0'
+        $version.VersionSuffix | Should -Be 'preview.1.local'
+        $version.PatchVersion | Should -Be '0-preview.1.local'
     }
 
     It 'rejects a stable canonical version until the post-tag bump lands' {
@@ -65,7 +65,7 @@ Describe 'Cohesion local package versions' {
     }
 
     It 'rejects the local identifier on the canonical version line' {
-        { Get-CohesionLocalPackageVersion -Version '10.0.1-preview.3.local' } |
+        { Get-CohesionLocalPackageVersion -Version '10.0.0-preview.1.local' } |
             Should -Throw -ExpectedMessage '*reserved local identifier*'
     }
 
@@ -77,7 +77,7 @@ Describe 'Cohesion local package versions' {
     It 'rejects a local-only identity in the release packer' {
         $releasePacker = Join-Path $repositoryDirectory 'installer/scripts/Pack-Release.ps1'
 
-        { & $releasePacker -Version '10.0.1-preview.3.local' } |
+        { & $releasePacker -Version '10.0.0-preview.1.local' } |
             Should -Throw -ExpectedMessage '*cannot be release-packed*'
     }
 }
@@ -87,12 +87,12 @@ Describe 'Cohesion local library package pruning' {
         $packageDirectory = Join-Path $TestDrive 'packages'
         $null = New-Item -Path $packageDirectory -ItemType Directory
         $fileName = @(
-            'Assimalign.Cohesion.Core.10.0.1-preview.2.nupkg'
-            'Assimalign.Cohesion.Core.10.0.1-preview.3.local.nupkg'
-            'Assimalign.Cohesion.Http.10.0.1-preview.3.local.snupkg'
-            'Assimalign.Cohesion.Http.10.0.1-preview.3.local.symbols.nupkg'
-            'Assimalign.Cohesion.Core.Extensions.10.0.1-preview.2.nupkg'
-            'Assimalign.Cohesion.Sdk.10.0.1-preview.2.nupkg'
+            'Assimalign.Cohesion.Core.10.0.0-beta.1.nupkg'
+            'Assimalign.Cohesion.Core.10.0.0-preview.1.local.nupkg'
+            'Assimalign.Cohesion.Http.10.0.0-preview.1.local.snupkg'
+            'Assimalign.Cohesion.Http.10.0.0-preview.1.local.symbols.nupkg'
+            'Assimalign.Cohesion.Core.Extensions.10.0.0-beta.1.nupkg'
+            'Assimalign.Cohesion.Sdk.10.0.0-beta.1.nupkg'
             'Assimalign.Cohesion.Core.notes.nupkg'
             'README.txt'
         )
@@ -107,13 +107,13 @@ Describe 'Cohesion local library package pruning' {
         ) | ForEach-Object { Split-Path -Leaf $_ }
 
         $removed | Should -Be @(
-            'Assimalign.Cohesion.Core.10.0.1-preview.2.nupkg'
-            'Assimalign.Cohesion.Core.10.0.1-preview.3.local.nupkg'
-            'Assimalign.Cohesion.Http.10.0.1-preview.3.local.snupkg'
-            'Assimalign.Cohesion.Http.10.0.1-preview.3.local.symbols.nupkg'
+            'Assimalign.Cohesion.Core.10.0.0-beta.1.nupkg'
+            'Assimalign.Cohesion.Core.10.0.0-preview.1.local.nupkg'
+            'Assimalign.Cohesion.Http.10.0.0-preview.1.local.snupkg'
+            'Assimalign.Cohesion.Http.10.0.0-preview.1.local.symbols.nupkg'
         )
-        (Test-Path -LiteralPath (Join-Path $packageDirectory 'Assimalign.Cohesion.Core.Extensions.10.0.1-preview.2.nupkg')) | Should -BeTrue
-        (Test-Path -LiteralPath (Join-Path $packageDirectory 'Assimalign.Cohesion.Sdk.10.0.1-preview.2.nupkg')) | Should -BeTrue
+        (Test-Path -LiteralPath (Join-Path $packageDirectory 'Assimalign.Cohesion.Core.Extensions.10.0.0-beta.1.nupkg')) | Should -BeTrue
+        (Test-Path -LiteralPath (Join-Path $packageDirectory 'Assimalign.Cohesion.Sdk.10.0.0-beta.1.nupkg')) | Should -BeTrue
         (Test-Path -LiteralPath (Join-Path $packageDirectory 'Assimalign.Cohesion.Core.notes.nupkg')) | Should -BeTrue
         (Test-Path -LiteralPath (Join-Path $packageDirectory 'README.txt')) | Should -BeTrue
     }
@@ -132,7 +132,7 @@ Describe 'Cohesion release policy wiring' {
         $version = & (Join-Path $repositoryDirectory 'installer/scripts/Get-CohesionVersion.ps1') `
             -RepoRoot $repositoryDirectory
 
-        $version | Should -Be '10.0.1-preview.3'
+        $version | Should -Be '10.0.0-preview.1'
     }
 
     It 'declares promotion as an opt-in manual dispatch' {

@@ -25,7 +25,7 @@
             ... one per project in the curated release inventory
 
     Local packages append a final .local prerelease identifier to the canonical
-    version (for example, 10.0.1-preview.3.local). They are never release artifacts.
+    version (for example, 10.0.0-preview.1.local). They are never release artifacts.
     Release packaging and the three-OS SDK smoke use the strict Pack-Release.ps1
     path. This script's canonical-identity mode remains only as a clean-runner
     bootstrap for area tests that need SDK/framework packages before release packing.

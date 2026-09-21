@@ -415,10 +415,10 @@ public sealed class CommandMappingTests
 
         (await fixture.Application().ExecuteAsync(["--version"], CancellationToken.None)).ShouldBe(0);
 
-        CliApplication.StripBuildMetadata("10.0.1-preview.3+abc123").ShouldBe("10.0.1-preview.3");
+        CliApplication.StripBuildMetadata("10.0.0-preview.1+abc123").ShouldBe("10.0.0-preview.1");
         fixture.Output.ToString().Trim().ShouldBe(informational.Split('+')[0]);
         fixture.Output.ToString().ShouldNotContain("+");
-        CliApplication.Version.ShouldBe("10.0.1-preview.3");
+        CliApplication.Version.ShouldBe("10.0.0-preview.1");
     }
 
     /// <summary>Help and malformed commands never start a process.</summary>
