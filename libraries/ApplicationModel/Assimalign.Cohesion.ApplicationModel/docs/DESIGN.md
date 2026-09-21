@@ -40,21 +40,17 @@ identity wrappers `ResourceName`/`ResourceId` and `ApplicationName`/`Environment
 The mutable authoring builder, descriptors, and collection remain internal; `Build()`
 copies descriptor edges and manifest collections into the immutable model snapshot.
 
-The internal application-environment implementation delegates process resolution to Core's
-`AppEnvironment`. That keeps the frozen Cohesion variable name and the
-`COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"` precedence rule out of the
-orchestration package.
+The internal application-environment implementation delegates explicit process values to Core's
+`AppEnvironment`. With neither process variable nor `--environment` set, the apphost defaults to
+`Local` before gateway selection (O36). Core's resource-runtime unset default stays `Production`.
 
 `Local` identifies developer-machine execution; `Development` is a named deployed environment
 with the same strict behavior as Staging and Production. `IsLocal` alone selects relaxed
 realization, naming, and executable model-resolution paths; `IsDevelopment` identifies the
-deployed name. `Application.CreateSet` and `ApplicationBuilder.UseGateway` default local and
-inprocess gateways to Local only when no explicit environment option or nonblank process
-environment value exists. Other gateways retain Core's Production default. Gateway reselection
-resolves the environment again, so changing to Docker cannot carry a prior implicit Local value.
-Host resolution preserves Core's raw value, including whitespace, until gateway selection;
-only explicit names are validated immediately. This allows the gateway-aware Local default to
-handle blank process values without changing Core's precedence or introducing another fallback.
+deployed name. `Application.CreateSet` and `ApplicationBuilder.UseGateway` retain the apphost's
+Local default for every gateway, including Docker and Kubernetes. Gateway reselection resolves
+explicit values again. Host resolution preserves Core's raw explicit value, including whitespace;
+Local and InProcess additionally retain their existing blank-process-value fallback to Local.
 
 `CohesionApplicationAttribute` records the SDK-selected application name in gateway assembly
 metadata for build and tooling inspection. It is not a runtime discovery mechanism: generated

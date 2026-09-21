@@ -119,6 +119,13 @@ uses a self-contained Linux x64 apphost and the .NET 10 runtime-deps base. Relea
 NativeAOT; the SDK probes host capability and the in-container CLI route, and reports COHSDK003
 when unavailable. The in-container build recipe is still awaiting specification.
 
+`CohesionImageRuntimeIdentifier` selects the image target, defaulting to an explicitly supplied
+`RuntimeIdentifier`, then `linux-x64` before the SDK supplies a host-build RID. For example,
+`dotnet publish -c Debug -t:CohesionPublishImages -p:CohesionImageRuntimeIdentifier=linux-arm64`
+on an apphost forwards that image RID to every source member's `CohesionPublishImage` while
+removing the apphost's build `RuntimeIdentifier`. The image index records `linux/arm64`, and
+the existing input fingerprint decides whether image creation can be skipped.
+
 `CohesionImageAot=auto|true|false` follows the [decision table](./DESIGN.md#container-image-production).
 Release `false` is diagnosed as a deviation. `CohesionImageFreshness=Rebuild` hashes publish
 inputs and verifies cached image artifacts before skipping image creation. `Pinned` applies

@@ -30,13 +30,13 @@ public sealed class ApplicationEnvironmentTests
         environment.IsDevelopment.ShouldBe(isDevelopment);
     }
 
-    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Gateway defaults apply only to local and inprocess")]
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Unset apphost environment is Local before and after gateway selection")]
     [InlineData("local", AppEnvironment.Keys.Local)]
     [InlineData("LoCaL", AppEnvironment.Keys.Local)]
     [InlineData("inprocess", AppEnvironment.Keys.Local)]
     [InlineData("InPrOcEsS", AppEnvironment.Keys.Local)]
-    [InlineData("docker", AppEnvironment.Keys.Production)]
-    [InlineData("kubernetes", AppEnvironment.Keys.Production)]
+    [InlineData("docker", AppEnvironment.Keys.Local)]
+    [InlineData("kubernetes", AppEnvironment.Keys.Local)]
     public void SelectGateway_UnsetEnvironment_ShouldUseGatewayDefault(string gateway, string expected)
     {
         WithEnvironment(null, null, () =>
@@ -44,7 +44,9 @@ public sealed class ApplicationEnvironmentTests
             // Arrange
             IApplicationBuilder builder = Application.CreateBuilder("appa", []);
             builder.AddResource(TestManifestFactory.Create("worker"));
-            builder.Environment.Name.ToString().ShouldBe(AppEnvironment.Keys.Production);
+            builder.Environment.Name.ToString().ShouldBe(AppEnvironment.Keys.Local);
+            builder.Environment.IsLocal.ShouldBeTrue();
+            AppEnvironment.GetEnvironmentName().ShouldBe(AppEnvironment.Keys.Production);
 
             // Act
             builder.UseGateway(new FakeMultiModelGateway(gateway));
@@ -104,8 +106,8 @@ public sealed class ApplicationEnvironmentTests
         });
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Selecting Docker after Local resets an implicit Local environment")]
-    public void UseGateway_ReselectDocker_ShouldDiscardImplicitLocalDefault()
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Selecting Docker preserves the apphost Local default")]
+    public void UseGateway_ReselectDocker_ShouldPreserveImplicitLocalDefault()
     {
         WithEnvironment(null, null, () =>
         {
@@ -117,8 +119,8 @@ public sealed class ApplicationEnvironmentTests
             builder.UseGateway(new FakeGateway("docker"));
 
             // Assert
-            builder.Environment.Name.ToString().ShouldBe(AppEnvironment.Keys.Production);
-            builder.Environment.IsLocal.ShouldBeFalse();
+            builder.Environment.Name.ToString().ShouldBe(AppEnvironment.Keys.Local);
+            builder.Environment.IsLocal.ShouldBeTrue();
         });
     }
 

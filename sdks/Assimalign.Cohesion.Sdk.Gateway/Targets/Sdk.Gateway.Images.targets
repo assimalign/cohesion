@@ -15,6 +15,7 @@
       <_CohesionGatewayOnlyInProcess Condition="'$(_CohesionGatewayInProcessActive)' == 'true' and '@(_CohesionImageOtherGateway)' == ''">true</_CohesionGatewayOnlyInProcess>
     </PropertyGroup>
     <MSBuild Projects="@(_CohesionImageProjects)" Targets="CohesionPublishImage" BuildInParallel="false"
+      Properties="CohesionImageRuntimeIdentifier=$(CohesionImageRuntimeIdentifier)"
       RemoveProperties="OutDir;PublishDir;CohesionImageManifestPath;CohesionContainerArchiveOutputPath;CohesionContainerRepository;PublishAot;RuntimeIdentifier;SelfContained"
       Condition="'$(_CohesionGatewayOnlyInProcess)' != 'true' and '@(_CohesionImageProjects)' != ''">
       <Output TaskParameter="TargetOutputs" ItemName="_CohesionMemberImages" />

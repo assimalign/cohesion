@@ -278,6 +278,10 @@ public sealed class CohesionCreateResourceManifest : Task
             ApplicationModel = string.IsNullOrWhiteSpace(ApplicationModelName)
                 ? $"Assimalign.Cohesion.{ResolvedResourceKind}.ApplicationModel"
                 : ApplicationModelName.Trim(),
+            // Source-built manifests deliberately have no image identity. The gateway
+            // resolves ArtifactRef.Self through application.images.json during gather.
+            // A populated artifact.image is reserved for package manifests shipping a
+            // published image; CohesionImageRequired validates that pack-time image contract.
             Artifact = new ResourceArtifactModel(
                 AssemblyName,
                 composable,

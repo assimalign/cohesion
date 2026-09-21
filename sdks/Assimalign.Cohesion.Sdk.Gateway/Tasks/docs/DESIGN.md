@@ -126,7 +126,10 @@ is:
 | `RequiresJit` | Whether including the provider makes the gateway executable ineligible for NativeAOT. |
 
 `UseGateway(args)` honors the builder's parsed request, then `COHESION_GATEWAY`, then the
-Local-only Local default. Unknown or unavailable providers fail with the generated
+first `CohesionGateways` entry in declaration order when the apphost environment is Local.
+An unset apphost environment is Local; an explicit deployed environment requires a selection.
+The SDK keeps its `Local` provider default because `CohesionGatewayInProcess` remains opt-in;
+composable templates explicitly put `InProcess` first and enable it. Unknown or unavailable providers fail with the generated
 set of valid names. The overload taking `Action<CohesionGatewayProviders>` executes only
 the callback for the selected provider. After common arguments are applied, generated code
 calls the selected provider's optional `CommandLineApplyMethod` with the original, unfiltered
@@ -268,6 +271,13 @@ image fields without `schema`; duplicate resource ownership is an error and an e
 Archives are digest-verified, copied beneath `images/<ordinal>/`, and their relative paths
 rewritten against the application document. Paths cannot escape that directory. Missing
 archives are not silently ignored; a registry-only entry omits `archive` entirely.
+
+Source-built manifests intentionally leave `artifact.image` empty: gather owns the lookup of
+`ArtifactRef.Self` in this index; generated `Manifests.<Name>` members never acquire a digest.
+`CohesionPublishImages` passes `CohesionImageRuntimeIdentifier` to every member while removing
+the apphost's build `RuntimeIdentifier`. The dedicated image RID defaults to the explicitly
+supplied `RuntimeIdentifier`, then `linux-x64`, before host-build defaults are applied. Local
+container gateways request the node/engine RID and reuse the SDK fingerprint for freshness (O38).
 
 Only an active gateway whose selected provider set is solely `InProcess` uses one composite
 entry owned by the gateway's own `CohesionResourceName`. Selecting InProcess among other

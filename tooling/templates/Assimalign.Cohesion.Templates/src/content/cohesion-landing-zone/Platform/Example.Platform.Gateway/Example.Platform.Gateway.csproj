@@ -1,7 +1,7 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
   <PropertyGroup>
     <CohesionApplicationName>platform</CohesionApplicationName>
-    <CohesionGateways>Local;InProcess</CohesionGateways>
+    <CohesionGateways>InProcess;Local</CohesionGateways>
     <CohesionGatewayInProcess>true</CohesionGatewayInProcess>
   </PropertyGroup>
   <ItemGroup>

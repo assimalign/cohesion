@@ -13,6 +13,49 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 public class ApplicationGatewayTests
 {
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Source image identity is resolved during gather after validation")]
+    public async Task StartAsync_SourceManifestWithoutImage_ShouldReachGatherWithManifestAsync()
+    {
+        // Arrange: the index belongs to the gateway; the source manifest has no image.
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var images = new Dictionary<string, string>
+        {
+            ["worker"] = "example/worker@sha256:" + new string('a', 64),
+        };
+        string? resolved = null;
+        var reconciled = new List<string>();
+        var gateway = new TestGateway(new InMemoryResourceStateManager(),
+            [new RecordingController(reconciled, new List<string>())])
+        {
+            OnGather = resource =>
+            {
+                ResourceManifest manifest = resource.ShouldBeAssignableTo<IManifestResource>().Manifest;
+                manifest.Artifact.Image.ShouldBeNull();
+                resolved = images[manifest.Name.ToString()];
+            },
+        };
+
+        // Act: Build validates the model before StartAsync can gather anything.
+        IApplicationModel model = BuildWorkload(gateway, WorkloadKind.Deployment);
+        gateway.Gathered.ShouldBeEmpty();
+        model.Plans[0].Container.Artifact.ShouldBe(ArtifactRef.Self);
+        IApplicationGateway control = gateway;
+        try
+        {
+            await control.StartAsync(model, cancellation.Token);
+
+            // Assert: the unchanged public resource seam carries the lookup identity.
+            resolved.ShouldBe(images["worker"]);
+            gateway.Gathered.ShouldBe(new[] { "worker" });
+            reconciled.ShouldBe(new[] { "worker" });
+            model.Manifests[0].Artifact.Image.ShouldBeNull();
+        }
+        finally
+        {
+            await control.StopAsync(CancellationToken.None);
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - StartAsync: Should reconcile in dependency order")]
     public async Task StartAsync_ProvisionsInDependencyOrder()
     {

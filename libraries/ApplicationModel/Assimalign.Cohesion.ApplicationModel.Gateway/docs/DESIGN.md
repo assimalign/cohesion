@@ -277,6 +277,14 @@ The one-shot gateway command modes are the low-level surface used by later CLI w
 
 ### Opaque executable and container entry points
 
+Source-built manifests deliberately have no `artifact.image`. Base validation checks plans and
+controller support before `GatherAsync`, without requiring an image. The gather hook receives the
+resource, whose existing `IManifestResource` supplies the manifest and resource name; container
+gateways resolve `ArtifactRef.Self` from `application.images.json` there and give the resulting
+digest-pinned reference to `IImageRealizer`. Only package manifests shipping a published image
+may carry that identity themselves; the SDK currently ships it in the package's image index.
+No generated manifest is rebound from the gathered index (O37).
+
 - `AddExecutable(...)` is the explicit LocalGateway-only escape hatch for a plain apphost or
   native executable with no manifest/control plane. It requires either an enabled readiness
   probe or a stdout ready marker and can configure endpoints, probes, environment, restart

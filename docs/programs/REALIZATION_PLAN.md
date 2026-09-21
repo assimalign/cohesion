@@ -230,7 +230,7 @@ There is exactly one exposure for each public endpoint and none for a private en
 | `lifecycle.stopGraceSeconds` | `workload.stopGraceSeconds`; default 30 seconds. |
 | `lifecycle.restartPolicy` | `workload.restartPolicy`, unchanged. |
 | `controlPlane` | `controlPlane.endpoint` and `controlPlane.path`, unchanged. |
-| `artifact` | `container.artifact = "self"`; platform artifact identity stays outside the plan. |
+| `artifact` | `container.artifact = "self"`; platform artifact identity stays outside the plan. Source manifests leave `artifact.image` empty; the gateway resolves the image through `application.images.json` during gather. |
 | endpoint | One `PortBinding`, including its URI scheme and certificate mount, and one endpoint `ServiceSpec`, in declaration order. |
 | public endpoint | One `ExposureSpec` backed by its endpoint service. |
 | Configuration or Secret mount | One `MountBinding`; no `VolumeSpec`. The gateway resolves its source. |

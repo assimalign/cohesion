@@ -147,7 +147,7 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
                 bool localOnly = template == "cohesion-landing-zone"
                     && (relativeProject.StartsWith("Networking/", StringComparison.Ordinal)
                         || relativeProject.StartsWith("Gateway/", StringComparison.Ordinal));
-                document.Descendants("CohesionGateways").Single().Value.ShouldBe(localOnly ? "Local" : "Local;InProcess");
+                document.Descendants("CohesionGateways").Single().Value.ShouldBe(localOnly ? "Local" : "InProcess;Local");
                 if (!localOnly)
                 {
                     document.Descendants("CohesionGatewayInProcess").Single().Value.ShouldBe("true");
@@ -231,6 +231,13 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
         JsonProperty profile = document.RootElement.GetProperty("profiles").EnumerateObject().Single();
         profile.Name.ShouldBe(Path.GetFileNameWithoutExtension(project));
         profile.Value.GetProperty("commandName").GetString().ShouldBe("Project");
+        if (XDocument.Load(project).Root!.Attribute("Sdk")!.Value == "Assimalign.Cohesion.Sdk.Gateway")
+        {
+            // The apphost supplies Local when unset; a profile must not override
+            // an explicit COHESION_ENVIRONMENT supplied by the caller.
+            profile.Value.TryGetProperty("environmentVariables", out _).ShouldBeFalse();
+            return;
+        }
         JsonProperty environment = profile.Value.GetProperty("environmentVariables").EnumerateObject().Single();
         environment.Name.ShouldBe("COHESION_ENVIRONMENT");
         environment.Value.GetString().ShouldBe("Local");

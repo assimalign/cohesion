@@ -468,9 +468,8 @@ public sealed class CohesionCreateResourceVerbs : Task
 
     private List<GatewayProvider> ReadProviders()
     {
-        var selected = new HashSet<string>(
-            Gateways.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-            StringComparer.OrdinalIgnoreCase);
+        string[] declarationOrder = Gateways.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var selected = new HashSet<string>(declarationOrder, StringComparer.OrdinalIgnoreCase);
         var result = new List<GatewayProvider>(GatewayProviders.Length);
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var members = new HashSet<string>(StringComparer.Ordinal);
@@ -532,7 +531,20 @@ public sealed class CohesionCreateResourceVerbs : Task
                     "a matching CohesionGatewayProvider item. Restore the project and verify the platform package.");
             }
         }
-        return result.OrderBy(provider => provider.Name, StringComparer.Ordinal).ToList();
+        // Package import order is not selection order. The first declared gateway
+        // is the Local default, including when a provider uses a different CLI name.
+        var ordered = new List<GatewayProvider>(result.Count);
+        foreach (string name in declarationOrder)
+        {
+            GatewayProvider? provider = result.FirstOrDefault(provider =>
+                string.Equals(provider.Name, name, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(provider.MemberName, GatewaySourceWriter.Identifier(name), StringComparison.Ordinal));
+            if (provider is not null && !ordered.Contains(provider))
+            {
+                ordered.Add(provider);
+            }
+        }
+        return ordered;
     }
 
     private List<GatewayClientKind> ReadClientKinds()

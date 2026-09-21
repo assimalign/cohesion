@@ -30,8 +30,7 @@
     <Error Condition="'$(_CohesionImageSelfContainedInput)' == 'false' or '$(_CohesionImagePublishSelfContainedInput)' == 'false'" Code="COHSDK005" Text="Cohesion PublishContainer requires SelfContained=true; MCR images do not contain Cohesion shared frameworks." />
     <Error Condition="'$(CohesionImageAot)' != 'auto' and '$(CohesionImageAot)' != 'true' and '$(CohesionImageAot)' != 'false'" Text="CohesionImageAot must be auto, true, or false." />
     <PropertyGroup>
-      <_CohesionImageRid>linux-x64</_CohesionImageRid>
-      <_CohesionImageRid Condition="'$(_CohesionImageRuntimeIdentifierInput)' != ''">$(_CohesionImageRuntimeIdentifierInput)</_CohesionImageRid>
+      <_CohesionImageRid>$(CohesionImageRuntimeIdentifier)</_CohesionImageRid>
       <!-- [MSBuild]::NormalizePath, not the two-argument Path.GetFullPath: Visual Studio evaluates
            projects with .NET Framework MSBuild, which has no GetFullPath(path, basePath) overload
            and fails project load with "Invalid static method invocation syntax". -->

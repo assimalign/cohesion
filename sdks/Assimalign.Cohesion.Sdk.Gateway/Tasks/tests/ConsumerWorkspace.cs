@@ -239,7 +239,8 @@ internal sealed class ConsumerWorkspace : IDisposable
     public Task<DotNetBuildResult> PublishAsync(
         string fixtureName,
         CancellationToken cancellationToken = default,
-        string? target = null)
+        string? target = null,
+        IEnumerable<string>? properties = null)
     {
         var arguments = new List<string>
         {
@@ -256,6 +257,10 @@ internal sealed class ConsumerWorkspace : IDisposable
         {
             arguments.Remove("--no-restore");
             arguments.Add("-t:" + target);
+        }
+        if (properties is not null)
+        {
+            arguments.AddRange(properties.Select(property => "-p:" + property));
         }
         return RunDotNetAsync(RootDirectory, arguments, cancellationToken);
     }
@@ -287,7 +292,8 @@ internal sealed class ConsumerWorkspace : IDisposable
     public Task<DotNetBuildResult> RunBuiltProjectAsync(
         string fixtureName,
         IEnumerable<string> arguments,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string?>? environment = null)
     {
         string assemblyPath = Path.Combine(
             BuildOutputDirectory(fixtureName),
@@ -301,7 +307,7 @@ internal sealed class ConsumerWorkspace : IDisposable
 
         var processArguments = new List<string> { assemblyPath };
         processArguments.AddRange(arguments);
-        return RunDotNetAsync(ProjectDirectory(fixtureName), processArguments, cancellationToken);
+        return RunDotNetAsync(ProjectDirectory(fixtureName), processArguments, cancellationToken, environment);
     }
 
     public void Dispose()
@@ -326,7 +332,8 @@ internal sealed class ConsumerWorkspace : IDisposable
     private static async Task<DotNetBuildResult> RunDotNetAsync(
         string workingDirectory,
         IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string?>? environment = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -349,6 +356,20 @@ internal sealed class ConsumerWorkspace : IDisposable
         startInfo.Environment["DOTNET_GENERATE_ASPNET_CERTIFICATE"] = "false";
         startInfo.Environment["MSBUILDDISABLENODEREUSE"] = "1";
         startInfo.Environment["NUGET_PACKAGES"] = Path.Combine(workingDirectory, ".nuget", "packages");
+        if (environment is not null)
+        {
+            foreach ((string name, string? value) in environment)
+            {
+                if (value is null)
+                {
+                    startInfo.Environment.Remove(name);
+                }
+                else
+                {
+                    startInfo.Environment[name] = value;
+                }
+            }
+        }
 
         using Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start the dotnet process.");

@@ -448,11 +448,15 @@ internal static class GatewaySourceWriter
         source.AppendLine("        }");
         source.AppendLine("        if (global::System.String.IsNullOrWhiteSpace(selected) && builder.Environment.IsLocal)");
         source.AppendLine("        {");
-        source.AppendLine("            selected = \"local\";");
+        source.Append("            selected = ").Append(Literal(providers[0].Name)).AppendLine(";");
         source.AppendLine("        }");
         source.AppendLine("        return global::System.String.IsNullOrWhiteSpace(selected)");
         source.AppendLine("            ? throw new global::System.InvalidOperationException(");
-        source.AppendLine("                \"No Cohesion gateway was selected. Pass --gateway, set COHESION_GATEWAY, or use Local for the local default.\")");
+        source.Append("                ").Append(Literal(
+            "No Cohesion gateway was selected. Pass --gateway <name> or set COHESION_GATEWAY. " +
+            "Accepted names (case-insensitive): " + string.Join(", ", providers.Select(provider => provider.Name)) +
+            ". Local defaults to '" + providers[0].Name + "' (the first CohesionGateways entry); " +
+            "set --environment Local to use that default.")).AppendLine(")");
         source.AppendLine("            : selected;");
         source.AppendLine("    }");
         source.AppendLine();
@@ -466,7 +470,7 @@ internal static class GatewaySourceWriter
         int spaces)
     {
         string indent = new(' ', spaces);
-        string expected = string.Join(", ", providers.Select(provider => provider.Name).OrderBy(value => value, StringComparer.Ordinal));
+        string expected = string.Join(", ", providers.Select(provider => provider.Name));
         source.Append(indent).AppendLine("private static global::System.Exception UnknownGateway(string selected)");
         source.Append(indent).AppendLine("{");
         source.Append(indent).Append("    return new global::System.InvalidOperationException($\"Unknown Cohesion gateway '{selected}'. Expected ")

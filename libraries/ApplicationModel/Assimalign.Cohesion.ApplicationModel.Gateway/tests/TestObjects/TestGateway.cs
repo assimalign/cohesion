@@ -23,6 +23,8 @@ internal sealed class TestGateway : ApplicationGateway
 
     public List<string> Gathered { get; } = new();
 
+    public Action<IApplicationResource>? OnGather { get; set; }
+
     public ApplicationExportDocument? LastExport { get; private set; }
 
     public Func<IApplicationModel, IApplicationResource, IResourceControlPlane?>? DirectControlPlane { get; set; }
@@ -65,6 +67,7 @@ internal sealed class TestGateway : ApplicationGateway
     protected override Task<IResourceArtifact> GatherAsync(IApplicationResource resource, CancellationToken cancellationToken)
     {
         Gathered.Add(resource.Name.ToString());
+        OnGather?.Invoke(resource);
         return Task.FromResult<IResourceArtifact>(new TestArtifact(resource.Id));
     }
 

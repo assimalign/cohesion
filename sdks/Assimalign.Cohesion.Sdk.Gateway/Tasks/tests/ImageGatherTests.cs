@@ -18,18 +18,33 @@ namespace Assimalign.Cohesion.Sdk.Gateway.Tests;
 public sealed class ImageGatherTests
 {
     /// <summary>Real project producers exercise the complete restore, source closure, and gather boundary.</summary>
-    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - Images: Should publish and gather real referenced Linux resource archives")]
-    public async Task Publish_SourceClosure_ShouldGatherRealArchivesAsync()
+    [Theory(DisplayName = "Cohesion Test [Sdk.Gateway] - Images: Should forward the target RID and gather real referenced Linux resource archives")]
+    [InlineData("CohesionImageRuntimeIdentifier=linux-arm64")]
+    [InlineData("RuntimeIdentifier=linux-arm64")]
+    public async Task Publish_SourceClosure_ShouldGatherRealArchivesAsync(string imageProperty)
     {
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         using ConsumerWorkspace workspace = ConsumerWorkspace.Create("AppAGateway", "AppAWeb", "PlatformDatabase");
         File.WriteAllText(Path.Combine(workspace.RootDirectory, "Directory.Build.props"),
-            "<Project><PropertyGroup><CohesionOrganization>example</CohesionOrganization></PropertyGroup></Project>");
+            "<Project><PropertyGroup><CohesionOrganization>example</CohesionOrganization>" +
+            "<DisableTransitiveFrameworkReferenceDownloads>true</DisableTransitiveFrameworkReferenceDownloads>" +
+            "</PropertyGroup></Project>");
+        foreach (string member in new[] { "AppAWeb", "PlatformDatabase" })
+        {
+            string path = workspace.ProjectFile(member);
+            XDocument project = XDocument.Load(path);
+            project.Root!.Add(new XElement("PropertyGroup", new XElement("RuntimeIdentifier",
+                new XAttribute("Condition", "'$(RuntimeIdentifier)' == ''"), ConsumerWorkspace.HostRuntimeIdentifier)));
+            project.Save(path);
+        }
 
-        DotNetBuildResult result = await workspace.PublishAsync("AppAGateway", cancellation.Token, "CohesionPublishImages");
+        DotNetBuildResult result = await workspace.PublishAsync("AppAGateway", cancellation.Token,
+            "CohesionPublishImages", imageProperty.StartsWith("CohesionImageRuntimeIdentifier=", StringComparison.Ordinal)
+                ? ["RuntimeIdentifier=" + ConsumerWorkspace.HostRuntimeIdentifier, imageProperty]
+                : [imageProperty]);
 
         result.ExitCode.ShouldBe(0, result.Output);
-        string output = Path.Combine(workspace.PublishOutputDirectory("AppAGateway"), "application.images.json");
+        string output = Directory.GetFiles(workspace.ProjectDirectory("AppAGateway"), "application.images.json", SearchOption.AllDirectories).Single();
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(output));
         JsonElement images = document.RootElement.GetProperty("images");
         images.GetArrayLength().ShouldBe(2);
@@ -37,10 +52,28 @@ public sealed class ImageGatherTests
         images[1].GetProperty("resource").GetString().ShouldBe("platform-configuration-store");
         foreach (JsonElement image in images.EnumerateArray())
         {
-            image.GetProperty("platform").GetString().ShouldBe("linux/amd64");
+            image.GetProperty("platform").GetString().ShouldBe("linux/arm64");
             image.GetProperty("aot").GetBoolean().ShouldBeFalse();
             image.TryGetProperty("schema", out _).ShouldBeFalse();
             File.Exists(Path.Combine(Path.GetDirectoryName(output)!, image.GetProperty("archive").GetString()!)).ShouldBeTrue();
+        }
+        foreach (string member in new[] { "AppAWeb", "PlatformDatabase" })
+        {
+            string imagePath = Directory.GetFiles(Path.Combine(workspace.ProjectDirectory(member), "obj"),
+                "image.json", SearchOption.AllDirectories).Single();
+            using JsonDocument image = JsonDocument.Parse(File.ReadAllText(imagePath));
+            image.RootElement.GetProperty("platform").GetString().ShouldBe("linux/arm64");
+            byte[] apphost = File.ReadAllBytes(Path.Combine(workspace.PublishOutputDirectory(member, "linux-arm64"), member));
+            apphost[..4].ShouldBe(new byte[] { 0x7f, 0x45, 0x4c, 0x46 });
+            apphost[5].ShouldBe((byte)1); // ELF little endian.
+            apphost[18].ShouldBe((byte)0xb7); // ELF e_machine = AArch64 (183).
+            apphost[19].ShouldBe((byte)0);
+            foreach (string manifestPath in Directory.GetFiles(Path.Combine(workspace.ProjectDirectory(member), "obj"),
+                "resource.json", SearchOption.AllDirectories))
+            {
+                using JsonDocument manifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
+                manifest.RootElement.GetProperty("artifact").GetProperty("image").ValueKind.ShouldBe(JsonValueKind.Null);
+            }
         }
     }
 

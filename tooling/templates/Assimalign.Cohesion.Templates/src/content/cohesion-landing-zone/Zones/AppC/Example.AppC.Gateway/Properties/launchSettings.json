@@ -1,10 +1,7 @@
 {
   "profiles": {
     "Example.AppC.Gateway": {
-      "commandName": "Project",
-      "environmentVariables": {
-        "COHESION_ENVIRONMENT": "Local"
-      }
+      "commandName": "Project"
     }
   }
 }

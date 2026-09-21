@@ -21,8 +21,9 @@ public static class Application
     /// another gateway.
     /// </exception>
     /// <remarks>
-    /// Local and InProcess gateways use the Local environment when no environment option or
-    /// nonblank process environment variable is supplied. Explicit environment values are preserved.
+    /// Apphosts use the Local environment when no environment option or process environment
+    /// variable is supplied. Explicit environment values are preserved. Local and InProcess
+    /// gateways also treat blank process environment values as Local.
     /// </remarks>
     public static IApplicationSet CreateSet(IApplicationGateway gateway, string[] args)
     {

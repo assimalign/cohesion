@@ -23,8 +23,11 @@ internal sealed class ApplicationEnvironment : IApplicationEnvironment
 
     public static ApplicationEnvironment FromHost()
     {
-        // Preserve Core's raw host value until the selected gateway can apply its default.
-        return Create(AppEnvironment.GetEnvironmentName());
+        // Apphosts default to Local before gateway selection. Core's resource-runtime
+        // default remains Production; preserve every explicit host value unchanged.
+        bool isUnset = Environment.GetEnvironmentVariable(AppEnvironment.Keys.EnvironmentKey) is null
+            && Environment.GetEnvironmentVariable(AppEnvironment.Keys.DotNetEnvironmentKey) is null;
+        return Create(isUnset ? AppEnvironment.Keys.Local : AppEnvironment.GetEnvironmentName());
     }
 
     public static ApplicationEnvironment FromName(string name)

@@ -2,7 +2,7 @@
   <PropertyGroup>
     <CohesionApplicationName>__APPLICATION_NAME__</CohesionApplicationName>
     <CohesionResourceName>__RESOURCE_NAME__</CohesionResourceName>
-    <CohesionGateways>Local;InProcess</CohesionGateways>
+    <CohesionGateways>InProcess;Local</CohesionGateways>
     <CohesionGatewayInProcess>true</CohesionGatewayInProcess>
   </PropertyGroup>
   <ItemGroup>

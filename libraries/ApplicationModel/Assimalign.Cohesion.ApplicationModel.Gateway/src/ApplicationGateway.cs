@@ -84,6 +84,12 @@ public abstract partial class ApplicationGateway :
     /// <param name="resource">The resource to gather an artifact for.</param>
     /// <param name="cancellationToken">Signals that gathering should be abandoned.</param>
     /// <returns>The gathered artifact.</returns>
+    /// <remarks>
+    /// Source-built resources expose their manifest through <see cref="IManifestResource"/>
+    /// with no image identity. Container gateways resolve <see cref="ArtifactRef.Self"/>
+    /// from their image index here, then pass the digest-pinned reference to <see cref="IImageRealizer"/>.
+    /// Validation must not require the source manifest's image before this hook runs.
+    /// </remarks>
     protected abstract Task<IResourceArtifact> GatherAsync(
         IApplicationResource resource,
         CancellationToken cancellationToken);

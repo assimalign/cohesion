@@ -8,7 +8,7 @@
   -->
   <PropertyGroup>
     <CohesionApplicationName>appb</CohesionApplicationName>
-    <CohesionGateways>Local;InProcess</CohesionGateways>
+    <CohesionGateways>InProcess;Local</CohesionGateways>
     <CohesionGatewayInProcess>true</CohesionGatewayInProcess>                <!-- sanctioned composition root: the in-process gateway runs every resource's entry in this process under its own ResourceContext -->
   </PropertyGroup>
   <ItemGroup>

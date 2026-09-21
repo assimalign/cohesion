@@ -2,7 +2,9 @@
 	<PropertyGroup>
 		<_CohesionImageSelfContainedInput>$(SelfContained)</_CohesionImageSelfContainedInput>
 		<_CohesionImagePublishSelfContainedInput>$(PublishSelfContained)</_CohesionImagePublishSelfContainedInput>
-		<_CohesionImageRuntimeIdentifierInput>$(RuntimeIdentifier)</_CohesionImageRuntimeIdentifierInput>
+		<!-- Capture the image RID before the SDK supplies a host-build RID. -->
+		<CohesionImageRuntimeIdentifier Condition="'$(CohesionImageRuntimeIdentifier)' == ''">$(RuntimeIdentifier)</CohesionImageRuntimeIdentifier>
+		<CohesionImageRuntimeIdentifier Condition="'$(CohesionImageRuntimeIdentifier)' == ''">linux-x64</CohesionImageRuntimeIdentifier>
 	</PropertyGroup>
 	<!--
 		Enabled resource executables use one Development runtime posture on every
