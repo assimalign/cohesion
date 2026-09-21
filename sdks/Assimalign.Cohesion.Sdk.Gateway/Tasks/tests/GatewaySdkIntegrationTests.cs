@@ -565,9 +565,13 @@ public sealed class GatewaySdkIntegrationTests
         source.ShouldContain("AddGatewaySmokeDatabase(");
         source.ShouldContain(EntryAnchor("GatewaySmokeWeb", "GatewaySmokeWeb"));
         source.ShouldContain(EntryAnchor("GatewaySmokeDatabase", "GatewaySmokeDatabase"));
-        source.Split(".InProcess(", StringSplitOptions.None).Length.ShouldBe(3);
+        // Two descriptor bindings on the generated verbs plus the two manifest bindings that
+        // Gateway.CreateBuilder registers for the direct and transitive members.
+        source.ShouldContain("Manifests.GatewaySmokeWeb.InProcess(");
+        source.ShouldContain("Manifests.GatewaySmokeDatabase.InProcess(");
+        source.Split(".InProcess(", StringSplitOptions.None).Length.ShouldBe(5);
         source.Split("[global::System.Diagnostics.CodeAnalysis.DynamicDependency(", StringSplitOptions.None)
-            .Length.ShouldBe(3);
+            .Length.ShouldBe(5);
 
         string publishDirectory = workspace.PublishOutputDirectory(
             "InProcessTransitiveGateway",
