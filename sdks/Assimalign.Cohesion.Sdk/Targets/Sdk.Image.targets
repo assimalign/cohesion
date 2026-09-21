@@ -32,8 +32,11 @@
     <PropertyGroup>
       <_CohesionImageRid>linux-x64</_CohesionImageRid>
       <_CohesionImageRid Condition="'$(_CohesionImageRuntimeIdentifierInput)' != ''">$(_CohesionImageRuntimeIdentifierInput)</_CohesionImageRid>
-      <_CohesionImageFullPath>$([System.IO.Path]::GetFullPath('$(CohesionImageManifestPath)', '$(MSBuildProjectDirectory)'))</_CohesionImageFullPath>
-      <_CohesionArchiveFullPath>$([System.IO.Path]::GetFullPath('$(CohesionContainerArchiveOutputPath)', '$(MSBuildProjectDirectory)'))</_CohesionArchiveFullPath>
+      <!-- [MSBuild]::NormalizePath, not the two-argument Path.GetFullPath: Visual Studio evaluates
+           projects with .NET Framework MSBuild, which has no GetFullPath(path, basePath) overload
+           and fails project load with "Invalid static method invocation syntax". -->
+      <_CohesionImageFullPath>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(CohesionImageManifestPath)'))</_CohesionImageFullPath>
+      <_CohesionArchiveFullPath>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(CohesionContainerArchiveOutputPath)'))</_CohesionArchiveFullPath>
     </PropertyGroup>
     <CohesionResolveImagePublish Configuration="$(Configuration)" Aot="$(CohesionImageAot)" ProjectPath="$(MSBuildProjectFullPath)"
       RuntimeIdentifier="$(_CohesionImageRid)" Repository="$(CohesionContainerRepository)" Registry="$(CohesionContainerRegistry)"

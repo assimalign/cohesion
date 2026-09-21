@@ -34,6 +34,27 @@ When in doubt: search for the property name in `build/Targets/` first. If it's a
 
 When editing project files, prefer Cohesion-specific MSBuild items over stock items wherever one exists — not just the ones enumerated here.
 
+### Shipped props and targets must evaluate under Visual Studio's MSBuild
+
+Visual Studio evaluates projects with the **.NET Framework** MSBuild inside `devenv`, while every
+command-line loop here (`dotnet build`, `dotnet test`, the SDK package-boundary tests) uses Core
+MSBuild. A property function that exists only on .NET Core evaluates cleanly on the command line
+and then fails **every** consumer's project load in the IDE with MSB4186 "Invalid static method
+invocation syntax". The one that bit twice is the two-argument `Path.GetFullPath`:
+
+```xml
+<!-- Wrong: .NET Framework has no GetFullPath(path, basePath) overload. -->
+<_Full>$([System.IO.Path]::GetFullPath('$(Relative)', '$(MSBuildProjectDirectory)'))</_Full>
+<!-- Right: MSBuild's own helper, identical semantics on both runtimes. -->
+<_Full>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(Relative)'))</_Full>
+```
+
+Use `[MSBuild]::NormalizePath` / `NormalizeDirectory` for relative-to-absolute path math in any
+shipped `.props` or `.targets`. `sdks/Assimalign.Cohesion.Sdk/Tasks/tests/VisualStudioMsBuildCompatibilityTests.cs`
+scans `sdks/**` for the two-argument form; before declaring MSBuild work done, also evaluate one
+consumer with Visual Studio's MSBuild (`vswhere -latest -prerelease -find MSBuild\**\Bin\MSBuild.exe`,
+then `MSBuild.exe <consumer>.csproj -t:Restore`), because nothing else in the loop runs it.
+
 ## The consumer experience
 
 ```xml

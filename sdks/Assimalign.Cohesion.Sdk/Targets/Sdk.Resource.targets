@@ -30,7 +30,10 @@
 		<CohesionImageManifestPath Condition="'$(CohesionImageManifestPath)' == ''">$(IntermediateOutputPath)cohesion/image.json</CohesionImageManifestPath>
 		<CohesionPackResourceManifestPath Condition="'$(CohesionPackResourceManifestPath)' == ''">$(IntermediateOutputPath)cohesion/pack/resource.json</CohesionPackResourceManifestPath>
 		<_CohesionPackImageManifestPath>$(IntermediateOutputPath)cohesion/pack/image.json</_CohesionPackImageManifestPath>
-		<_CohesionResourceManifestFullPath>$([System.IO.Path]::GetFullPath('$(CohesionResourceManifestPath)', '$(MSBuildProjectDirectory)'))</_CohesionResourceManifestFullPath>
+		<!-- [MSBuild]::NormalizePath, not the two-argument Path.GetFullPath: Visual Studio evaluates
+		     projects with .NET Framework MSBuild, which has no GetFullPath(path, basePath) overload
+		     and fails project load with MSB4186 "Invalid static method invocation syntax". -->
+		<_CohesionResourceManifestFullPath>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(CohesionResourceManifestPath)'))</_CohesionResourceManifestFullPath>
 
 		<_CohesionPackManifest Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(_CohesionRuntimePack)' != 'true'">true</_CohesionPackManifest>
 		<CohesionManifestPackageId Condition="'$(CohesionManifestPackageId)' == ''">$(AssemblyName).Manifest</CohesionManifestPackageId>
@@ -292,7 +295,7 @@
 		Returns="@(_CohesionInProcessContentResult)"
 		Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(CohesionResourceComposable)' == 'true'">
 		<PropertyGroup>
-			<_CohesionIntermediateAppHostFullPath Condition="'$(AppHostIntermediatePath)' != ''">$([System.IO.Path]::GetFullPath('$(AppHostIntermediatePath)', '$(MSBuildProjectDirectory)'))</_CohesionIntermediateAppHostFullPath>
+			<_CohesionIntermediateAppHostFullPath Condition="'$(AppHostIntermediatePath)' != ''">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(AppHostIntermediatePath)'))</_CohesionIntermediateAppHostFullPath>
 		</PropertyGroup>
 		<ItemGroup>
 			<_CohesionInProcessContentCandidate
