@@ -39,7 +39,7 @@
 	-->
 	<Import Project="..\..\Assimalign.Cohesion.App.props" />
 	<ItemGroup>
-		<CohesionProjectReference Include="@(CohesionFrameworkAssembly)"
+		<CohesionProjectReference Include="@(CohesionAppKernelRoot)"
 		                          Exclude="$(AssemblyName)" />
 	</ItemGroup>
 

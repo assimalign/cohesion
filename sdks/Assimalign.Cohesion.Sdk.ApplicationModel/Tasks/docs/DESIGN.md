@@ -188,8 +188,12 @@ COHSDK002 and COHSDK011 remain base-SDK diagnostics.
 
 ## Extending and testing
 
-To add a third-party area SDK, import base props, set area defaults in the area's
-props, use the exact conditional and marker-guarded imports shown in the overview.
+To add a third-party area SDK, set `_CohesionResourceSdk=true` before importing
+the base props, add App plus App.<Area> under the shared auto-include condition,
+set area defaults in the area's props, and use the exact conditional and
+marker-guarded targets imports shown in the overview. App supplies Connections
+once for the generated resource accessors and every area hosting module; do not
+duplicate Connections in App.<Area>.
 To add typed Gateway behavior, ship the item contribution with the
 ApplicationModel package; changing `Sdk.Gateway` is not required.
 

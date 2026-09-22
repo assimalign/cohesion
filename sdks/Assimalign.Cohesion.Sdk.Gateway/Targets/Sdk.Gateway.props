@@ -5,7 +5,7 @@
 		Runtime="NET" />
 
 	<PropertyGroup>
-		<!-- The base SDK defaults OutputType to Exe. -->
+		<!-- Gateway targets force OutputType to Exe after the consumer project body. -->
 		<IsAotCompatible>true</IsAotCompatible>
 		<CohesionApplicationModel>enabled</CohesionApplicationModel>
 		<CohesionResourceKind>Composite</CohesionResourceKind>

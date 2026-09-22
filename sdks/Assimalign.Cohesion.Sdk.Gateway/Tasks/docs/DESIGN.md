@@ -34,10 +34,12 @@ imports `Assimalign.Cohesion.Sdk`, but it does not create or reference an
 `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane`, optional provider packages, and the
 narrow client packages required to resolve protected mount sources and deliver commands.
 
-The Gateway props must set `CohesionAutoIncludeAppFramework=false` before importing the
-base SDK. Otherwise the base props add `Assimalign.Cohesion.App` during evaluation and
-the claimed NuGet-only boundary is false. The sanctioned in-process mode adds explicit
-framework references for the resource areas it actually nests; out-of-process gateways
+The Gateway props retain `CohesionAutoIncludeAppFramework=false` before importing the
+base SDK, matching the switch understood by resource-area SDKs. The base SDK itself
+adds no framework reference. The sanctioned in-process mode adds explicit App and
+resource-area framework references for the resources it actually nests;
+App supplies Connections as part of its kernel because generated resource
+accessors and every area hosting module depend on it. Out-of-process gateways
 reject resolved `*.Hosting` assemblies with `COHGW001`.
 
 ## Evaluation and target ordering
@@ -48,9 +50,9 @@ The base SDK first supplies the seven [project defaults](../../../Assimalign.Coh
 before importing Microsoft's SDK props. Gateway inherits these defaults and preserves
 its stricter behavior: `Targets/Sdk.Gateway.props` unconditionally sets
 `IsAotCompatible=true` after the consumer's `Directory.Build.props`, and its targets
-force `OutputType=Exe` after the consumer body. The base default supplies the initial
-`OutputType` value. Library-style base-SDK dependencies such as `GatewaySmokeSupport`
-explicitly declare `OutputType=Library`.
+force `OutputType=Exe` after the consumer body. Until that target runs, the base SDK
+follows Microsoft.NET.Sdk's `OutputType=Library` default. Library-style base-SDK
+dependencies such as `GatewaySmokeSupport` therefore need no explicit output type.
 
 That ordering is load-bearing:
 

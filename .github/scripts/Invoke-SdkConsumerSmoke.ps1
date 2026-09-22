@@ -6,8 +6,8 @@
 .DESCRIPTION
     Copies package-only consumers for the base, Web, and Database SDKs plus an analyzer-bearing
     base-SDK profile. Each consumer is built, published self-contained for the supplied runtime
-    identifier, and run. The analyzer profile also proves that generated output arrived through
-    the SDK -> framework targeting-pack chain.
+    identifier, and run. The analyzer profile also proves that an ordinary ObjectMapping package
+    reference delivers its generator after ObjectMapping leaves the App hosting kernel.
 
 .PARAMETER PackageDirectory
     Directory containing the Cohesion SDK and framework .nupkg files to validate.
@@ -78,6 +78,8 @@ $requiredPackageId = @(
     'Assimalign.Cohesion.Sdk.ApplicationModel'
     'Assimalign.Cohesion.Sdk.Web'
     'Assimalign.Cohesion.Sdk.Database'
+    'Assimalign.Cohesion.Core'
+    'Assimalign.Cohesion.ObjectMapping'
     'Assimalign.Cohesion.App.Ref'
     "Assimalign.Cohesion.App.Runtime.$RuntimeIdentifier"
     'Assimalign.Cohesion.App.Web.Ref'

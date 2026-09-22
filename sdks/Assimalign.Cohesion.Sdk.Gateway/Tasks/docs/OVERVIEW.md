@@ -59,8 +59,9 @@ ApplicationModel package can produce a typed verb without changing this SDK. See
 [ApplicationModel SDK contract](../../../Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/docs/DESIGN.md#typed-gateway-resource-kind-contract).
 
 Gateway inherits the base SDK's [project defaults](../../../Assimalign.Cohesion.Sdk/Tasks/docs/OVERVIEW.md#project-defaults):
-`Exe`, `net10.0`, preview language/features, disabled implicit usings, enabled
-nullable analysis, and AOT compatibility. It retains unconditional
+`net10.0`, preview language/features, disabled implicit usings, enabled nullable
+analysis, and AOT compatibility. The base follows Microsoft's library default;
+Gateway retains unconditional
 `IsAotCompatible=true` in its props (after consumer `Directory.Build.props`) and
 `OutputType=Exe` in its targets (after the csproj body). The other base defaults
 follow the normal consumer override rules and documented language/TFM constraints.
@@ -145,10 +146,11 @@ contracts are available and covered by package-boundary CI:
   and ConfigurationStore clients stay restore-visible for every gateway because mount sources
   and command targets can name a store no referenced project introduces; T11's restore-visible
   producer descriptor remains the future contract for them.
-- The NuGet-only boundary requires the Gateway SDK to suppress the base SDK's implicit
-  `Assimalign.Cohesion.App` reference before the base props import. An in-process gateway
-  references `Assimalign.Cohesion.App` plus `App.<Area>` for exactly the referenced areas; an
-  out-of-process gateway references no framework.
+- The base SDK has no implicit framework reference, and Gateway keeps the shared
+  auto-include switch disabled. An in-process gateway references
+  `Assimalign.Cohesion.App` plus `App.<Area>` for exactly the referenced areas; App
+  supplies Connections once for generated resource accessors and every area hosting
+  module. An out-of-process gateway references no framework.
 
 See [Design](./DESIGN.md) for the build ordering, dependency boundary, and recommended
 first-restore contract.

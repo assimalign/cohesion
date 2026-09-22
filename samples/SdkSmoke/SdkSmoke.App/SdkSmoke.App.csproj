@@ -1,6 +1,10 @@
 <Project Sdk="Assimalign.Cohesion.Sdk">
   <PropertyGroup>
+    <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
-    
   </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Assimalign.Cohesion.App" />
+  </ItemGroup>
 </Project>

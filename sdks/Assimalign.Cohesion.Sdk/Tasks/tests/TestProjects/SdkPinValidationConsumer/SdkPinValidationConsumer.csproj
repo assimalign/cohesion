@@ -1,7 +1,6 @@
 <Project Sdk="Assimalign.Cohesion.Sdk">
 
   <PropertyGroup>
-    <OutputType>Library</OutputType>
     <RootNamespace>SdkPinValidationConsumer</RootNamespace>
   </PropertyGroup>
 

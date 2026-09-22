@@ -9,7 +9,7 @@ Pick the SDK that matches what you're building:
 
 | SDK | Use when… |
 | --- | --- |
-| `Assimalign.Cohesion.Sdk`          | Generic Cohesion executable or library with no resource behavior. |
+| `Assimalign.Cohesion.Sdk`          | Cohesion library, or an explicitly configured executable with no resource-area behavior. |
 | `Assimalign.Cohesion.Sdk.ApplicationModel` | Resource manifest, generated resource surface, and image tooling for area-SDK authors. |
 | `Assimalign.Cohesion.Sdk.Web`      | HTTP / web-surface application. |
 | `Assimalign.Cohesion.Sdk.Database` | Database-resident application (migrations, seeded schemas, etc.). |
@@ -29,17 +29,17 @@ The base SDK can be pinned inline:
 </Project>
 ```
 
-Add a `Program.cs` entry point. The base SDK and every layered SDK supply
-`OutputType=Exe`, `TargetFramework=net10.0`, `LangVersion=Preview`,
-`EnablePreviewFeatures=true`, `ImplicitUsings=disable`, `Nullable=enable`, and
-`IsAotCompatible=true`. Base defaults are conditional on empty values; `-p:`
-properties are honored, and later consumer `Directory.Build.props` or csproj
-assignments override them. An ordinary `Directory.Build.props` carries identity
-only. Library-style base-SDK consumers explicitly set `OutputType=Library`.
-Resource executables do not multi-target, and a language-version override also
-requires overriding `EnablePreviewFeatures`. Gateway retains unconditional
-`IsAotCompatible=true` in its props and `OutputType=Exe` in its targets. See the
-base SDK's [project defaults](./Assimalign.Cohesion.Sdk/Tasks/docs/DESIGN.md#project-defaults)
+The base SDK follows `Microsoft.NET.Sdk` and defaults `OutputType` to `Library`.
+Every resource-area SDK marks itself before importing the base props, which selects
+the base file's pre-.NET `OutputType=Exe` default; a consumer's `OutputType` in its
+project body still wins. All of them supply `TargetFramework=net10.0`,
+`LangVersion=Preview`, `EnablePreviewFeatures=true`, `ImplicitUsings=disable`,
+`Nullable=enable`, and `IsAotCompatible=true`. Defaults are conditional on empty
+values, so `-p:` properties and later consumer assignments are honored. Resource
+executables do not multi-target, and a language-version override also requires
+overriding `EnablePreviewFeatures`. Gateway remains an executable independently of
+the area-SDK marker. See the base SDK's
+[project defaults](./Assimalign.Cohesion.Sdk/Tasks/docs/DESIGN.md#project-defaults-and-evaluation)
 for import ordering and override constraints.
 
 Layered Cohesion SDKs import the base SDK without an inline version. Pin the
@@ -154,13 +154,37 @@ must not be expanded to every area merely to hide the restore-order gap; see
 [`Sdk.Gateway` design](./Assimalign.Cohesion.Sdk.Gateway/Tasks/docs/DESIGN.md) for the
 required restore-visible producer contract and release gates.
 
-## Implicit Cohesion.App framework reference
+## Framework reference policy and the App hosting kernel
 
-The base and resource-area Cohesion SDKs implicitly include
-`<FrameworkReference Include="Assimalign.Cohesion.App" />`. `Sdk.Gateway` is the
-exception: it suppresses that implicit reference to preserve its NuGet-only
-orchestration boundary, and in-process composition adds required area frameworks
-explicitly. The base framework reference resolves — via the
+The base SDK includes no framework reference by default. It is a library SDK with
+additional Cohesion build tooling: strongly typed settings, name-only references,
+pin validation, language/AOT defaults, and the complete framework registration
+table. A base-SDK executable opts into the hosting kernel explicitly:
+
+```xml
+<PropertyGroup>
+    <OutputType>Exe</OutputType>
+</PropertyGroup>
+<ItemGroup>
+    <FrameworkReference Include="Assimalign.Cohesion.App" />
+</ItemGroup>
+```
+
+Each of the 18 resource-area SDKs defaults to executable output and implicitly
+includes both `Assimalign.Cohesion.App` and `Assimalign.Cohesion.App.<Area>` under
+the same `CohesionAutoIncludeAppFramework` switch. `Sdk.Gateway` stays NuGet-only
+unless in-process composition is active, when it adds App plus only the referenced
+areas' frameworks.
+
+`Assimalign.Cohesion.App` is the hosting kernel, not the general library catalog.
+Its single root list names Hosting and its Health, Resources, and Telemetry siblings;
+the CommandLine, EnvironmentVariables, FileSystem, and Json configuration providers;
+Logging.Console; OpenTelemetry; DependencyInjection; FileSystem.Physical; and
+Connections. Generated resource accessors and every area hosting module depend on
+Connections, so the shared kernel carries it once. The
+pack manifest is derived from their transitive Assimalign project-reference closure
+plus the App umbrella assembly. Libraries outside that closure remain ordinary
+NuGet packages and are referenced when used. The framework reference resolves — via the
 `KnownFrameworkReference` registration
 in [Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props](./Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props) —
 to two NuGet packages:
@@ -170,18 +194,16 @@ to two NuGet packages:
 | `Assimalign.Cohesion.App.Ref` | Reference assemblies (`ref/<tfm>/`) + `data/FrameworkList.xml` | Compile time |
 | `Assimalign.Cohesion.App.Runtime.<rid>` | Implementation assemblies (`runtimes/<rid>/lib/<tfm>/`) + `data/RuntimeList.xml` | Publish time (when self-contained) |
 
-This is the same shape Microsoft uses for `Microsoft.AspNetCore.App.Ref` /
-`.Runtime.<rid>`. It gives consumers a single one-line reference that pulls in
-the whole Cohesion framework while keeping per-consumer disk footprint small
-(no duplicating all framework DLLs into every consumer's `bin/`) and giving the
-trimmer a recognizable framework boundary.
+This is the same targeting-pack/runtime-pack shape Microsoft uses for
+`Microsoft.AspNetCore.App.Ref` / `.Runtime.<rid>` and gives the trimmer a
+recognizable framework boundary.
 
 ### Opting out / pinning independently
 
 ```xml
 <PropertyGroup>
-    <!-- Skip the implicit FrameworkReference. The KnownFrameworkReference
-         registration stays, so an explicit <FrameworkReference> still works. -->
+    <!-- On a resource-area SDK, skip both implicit FrameworkReferences. The
+         registrations stay, so explicit <FrameworkReference> items still work. -->
     <CohesionAutoIncludeAppFramework>false</CohesionAutoIncludeAppFramework>
 
     <!-- Pin the App framework to a version different from the SDK's. -->

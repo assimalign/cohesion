@@ -149,7 +149,7 @@ jobs:
           "rid=$rid" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "SDK consumer identity: $version / $rid"
 
-      - name: Strict-pack SDK and framework closure for host RID
+      - name: Strict-pack SDK, framework closure, and explicit sample packages for host RID
         shell: pwsh
         env:
           COHESION_VERSION: ${{ steps.identity.outputs.version }}
@@ -165,6 +165,35 @@ jobs:
               -RepositoryCommit $commit `
               -RuntimeIdentifier $env:COHESION_HOST_RID `
               -SkipLibraries
+
+          dotnet pack `
+              ./libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj `
+              --configuration Release `
+              --nologo `
+              -p:PackageOutputPath=./_out/release/packages
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packing Assimalign.Cohesion.Core failed with exit code $LASTEXITCODE."
+          }
+
+          dotnet pack `
+              ./libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/src/Assimalign.Cohesion.ObjectMapping.csproj `
+              --configuration Release `
+              --nologo `
+              -p:PackageOutputPath=./_out/release/packages
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packing Assimalign.Cohesion.ObjectMapping failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Run framework manifest tests
+        shell: pwsh
+        run: |
+          dotnet test `
+              ./frameworks/Assimalign.Cohesion.App.Runtime/tests/Assimalign.Cohesion.App.Runtime.Tests.csproj `
+              --configuration Release `
+              --nologo
+          if ($LASTEXITCODE -ne 0) {
+            throw "Framework manifest tests failed with exit code $LASTEXITCODE."
+          }
 
       - name: Build, publish, run, and assert package-only consumers
         shell: pwsh

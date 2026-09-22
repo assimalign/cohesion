@@ -11,8 +11,10 @@
             Ref     -> produce ref/<tfm>/<dll> + data/FrameworkList.xml
             Runtime -> produce runtimes/<rid>/lib/<tfm>/<dll> + data/RuntimeList.xml
 
-        Driven by two item lists declared in Assimalign.Cohesion.App.props
-        (sibling file):
+        Driven by item policy declared in Assimalign.Cohesion.App.props
+        (sibling file). App's public list is materialized from
+        @(CohesionAppKernelRoot) by CohesionResolveAppKernelManifest; area
+        frameworks declare their public/private items directly:
 
             @(CohesionFrameworkAssembly)        - public. Ref pack + Runtime
                                                   pack. Visible to consumers.
@@ -39,8 +41,8 @@
             frameworks/<FrameworkName>.Runtime/src/. The Refs project
             for the same framework reads bin/ from there to collect
             assemblies. Compute the path from $(CohesionFrameworkName)
-            so the same targets file serves all three frameworks
-            (App, App.Web, App.Database) without per-framework branches.
+            so the same targets file serves the complete framework family
+            without per-framework branches.
         -->
         <_CohesionRuntimeProjectDir>$(CohesionRepositoryDirectory)frameworks\$(CohesionFrameworkName).Runtime\src\</_CohesionRuntimeProjectDir>
 
@@ -70,6 +72,141 @@
     <PropertyGroup>
         <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);CohesionCollectFrameworkPack</TargetsForTfmSpecificContentInPackage>
     </PropertyGroup>
+
+    <!--
+        Derive the App hosting kernel from its named roots and the same libraries/resources
+        project index used by Build.References.Projects.targets. Runtime builds need project
+        references only to the roots; ordinary transitive ProjectReference behavior builds and
+        CopyLocals their closure. This task materializes the matching framework manifest names
+        without maintaining a second assembly list.
+    -->
+    <UsingTask TaskName="CohesionComputeProjectReferenceClosure"
+               TaskFactory="RoslynCodeTaskFactory"
+               AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+        <ParameterGroup>
+            <ProjectFiles ParameterType="System.String[]" Required="true" />
+            <RootAssemblyNames ParameterType="System.String[]" Required="true" />
+            <AssemblyNames ParameterType="System.String[]" Output="true" />
+        </ParameterGroup>
+        <Task>
+            <Using Namespace="System" />
+            <Using Namespace="System.Collections.Generic" />
+            <Using Namespace="System.IO" />
+            <Using Namespace="System.Linq" />
+            <Using Namespace="System.Xml.Linq" />
+            <Code Type="Fragment" Language="cs"><![CDATA[
+                var projectsByAssembly = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var assembliesByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var documentsByPath = new Dictionary<string, XDocument>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (string projectFile in ProjectFiles.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    string fullPath = Path.GetFullPath(projectFile);
+                    var document = XDocument.Load(fullPath, LoadOptions.None);
+                    string assemblyName = document
+                        .Descendants()
+                        .Where(element => element.Name.LocalName == "AssemblyName")
+                        .Select(element => element.Value.Trim())
+                        .FirstOrDefault(value => value.Length != 0 && !value.Contains("$("))
+                        ?? Path.GetFileNameWithoutExtension(fullPath);
+
+                    projectsByAssembly[assemblyName] = fullPath;
+                    assembliesByPath[fullPath] = assemblyName;
+                    documentsByPath[fullPath] = document;
+                }
+
+                var referencesByAssembly = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+                foreach (var project in projectsByAssembly)
+                {
+                    string projectDirectory = Path.GetDirectoryName(project.Value);
+                    XDocument document = documentsByPath[project.Value];
+                    var references = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                    foreach (XElement element in document.Descendants().Where(element =>
+                        element.Name.LocalName == "CohesionProjectReference" ||
+                        element.Name.LocalName == "CohesionPrivateProjectReference"))
+                    {
+                        string include = (string)element.Attribute("Include") ?? "";
+                        foreach (string name in include.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+                        {
+                            string trimmed = name.Trim();
+                            if (trimmed.Length != 0 && !trimmed.Contains("$(") && !trimmed.Contains("@("))
+                            {
+                                references.Add(trimmed);
+                            }
+                        }
+                    }
+
+                    foreach (XElement element in document.Descendants().Where(element => element.Name.LocalName == "ProjectReference"))
+                    {
+                        string include = (string)element.Attribute("Include") ?? "";
+                        if (include.Length == 0 || include.Contains("$(") || include.Contains("@("))
+                        {
+                            continue;
+                        }
+
+                        string normalizedInclude = include.Replace('\\', Path.DirectorySeparatorChar);
+                        string referencePath = Path.GetFullPath(Path.Combine(projectDirectory, normalizedInclude));
+                        string referenceName;
+                        if (assembliesByPath.TryGetValue(referencePath, out referenceName))
+                        {
+                            references.Add(referenceName);
+                        }
+                    }
+
+                    referencesByAssembly[project.Key] = references.ToArray();
+                }
+
+                var closure = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var pending = new Queue<string>(RootAssemblyNames);
+                while (pending.Count != 0)
+                {
+                    string assemblyName = pending.Dequeue();
+                    if (!closure.Add(assemblyName))
+                    {
+                        continue;
+                    }
+
+                    string[] references;
+                    if (!referencesByAssembly.TryGetValue(assemblyName, out references))
+                    {
+                        Log.LogError("Kernel root or dependency '{0}' does not resolve through the Cohesion project index.", assemblyName);
+                        continue;
+                    }
+
+                    foreach (string reference in references.Where(reference =>
+                        reference.StartsWith("Assimalign.Cohesion.", StringComparison.Ordinal)))
+                    {
+                        pending.Enqueue(reference);
+                    }
+                }
+
+                AssemblyNames = closure.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+                if (Log.HasLoggedErrors)
+                {
+                    return false;
+                }
+            ]]></Code>
+        </Task>
+    </UsingTask>
+
+    <Target Name="CohesionResolveAppKernelManifest"
+            Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App'">
+        <ItemGroup>
+            <_CohesionKernelProject Include="$(CohesionRepositoryDirectory)libraries\**\*.csproj;$(CohesionRepositoryDirectory)resources\**\*.csproj" />
+        </ItemGroup>
+        <CohesionComputeProjectReferenceClosure
+            ProjectFiles="@(_CohesionKernelProject)"
+            RootAssemblyNames="@(CohesionAppKernelRoot)">
+            <Output TaskParameter="AssemblyNames" ItemName="_CohesionAppKernelAssembly" />
+        </CohesionComputeProjectReferenceClosure>
+        <ItemGroup>
+            <CohesionFrameworkAssembly Remove="@(CohesionFrameworkAssembly)" />
+            <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App;@(_CohesionAppKernelAssembly)" />
+            <_CohesionKernelProject Remove="@(_CohesionKernelProject)" />
+            <_CohesionAppKernelAssembly Remove="@(_CohesionAppKernelAssembly)" />
+        </ItemGroup>
+    </Target>
 
     <!--
         Resolve <CohesionFrameworkAnalyzer> items declared in App.props (per-framework)
@@ -228,7 +365,7 @@
         </Task>
     </UsingTask>
 
-    <Target Name="CohesionCollectFrameworkPack" DependsOnTargets="ResolveProjectReferences">
+    <Target Name="CohesionCollectFrameworkPack" DependsOnTargets="ResolveProjectReferences;CohesionResolveAppKernelManifest">
 
         <!--
             Resolve the source directory at execution time:

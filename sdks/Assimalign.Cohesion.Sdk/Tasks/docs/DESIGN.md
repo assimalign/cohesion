@@ -26,8 +26,12 @@ base props path but does not import the base targets a second time.
 ## Project defaults and evaluation
 
 `Targets/Assimalign.Cohesion.Sdk.Defaults.props` is imported before
-`Microsoft.NET.Sdk` props so the Cohesion executable and target-framework
-defaults can win only when a consumer supplied no value. The base keeps
+`Microsoft.NET.Sdk` props. A direct base-SDK consumer therefore receives the
+Microsoft default `OutputType=Library`. Each resource-area SDK sets the private
+`_CohesionResourceSdk` marker before importing the base props, which lets that
+same file set `OutputType=Exe` before Microsoft defaults it; a consumer assignment
+in the project body still wins. Target-framework, language, nullable, implicit-
+using, and AOT defaults remain general base-SDK policy. The base also keeps
 `CohesionApplicationModel=disabled` in common props, making the switch visible
 to every area SDK without adding application-model behavior.
 
@@ -94,10 +98,15 @@ public CLR interface members and no `InternalsVisibleTo` relationship.
 
 ## Framework boundary
 
-The base continues to register all `KnownFrameworkReference` entries and, unless
-suppressed, auto-includes `Assimalign.Cohesion.App`. Gateway suppresses that
-implicit framework because its orchestration plane is NuGet-only. Removing the
-base auto-include or shrinking the App framework is outside this split.
+The base registers every `KnownFrameworkReference` but auto-includes none. It is
+a library SDK like `Microsoft.NET.Sdk`; a direct executable names App explicitly.
+Each resource-area SDK adds App plus App.<Area> under one
+`CohesionAutoIncludeAppFramework` condition. Gateway remains NuGet-only unless
+in-process composition adds App and the referenced areas. App itself is the
+transitive Assimalign project-reference closure of the hosting-kernel roots in
+`frameworks/Assimalign.Cohesion.App.props`, plus its umbrella assembly. Connections
+is a kernel root because generated resource accessors and every area hosting module
+depend on it. Other libraries are consumed as ordinary packages.
 
 ## Diagnostics
 

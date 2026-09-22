@@ -1,9 +1,10 @@
 # SDK consumer smoke
 
-These package-only consumers exercise the base, Web, and Database SDKs plus the base SDK's
-ObjectMapping generator. Each project is non-packable and leaves `TargetFramework` to its SDK.
-The Analyzer project emits compiler-generated files in Release and suppresses `CA2252` for its
-preview API usage.
+These package-only consumers exercise the base, Web, and Database SDKs. The two base-SDK
+executables opt into the App hosting kernel explicitly; the analyzer consumer also references the
+ordinary ObjectMapping package, which delivers its own generator. Each project is non-packable
+and leaves `TargetFramework` to its SDK. The Analyzer project emits compiler-generated files in
+Release and suppresses `CA2252` for its preview API usage.
 
 From the repository root, prepare the host-RID feed and run the smoke:
 
@@ -12,6 +13,8 @@ $version = (& ./installer/scripts/Get-CohesionVersion.ps1).Trim()
 $commit = (git rev-parse HEAD).Trim()
 $rid = (dotnet --info | Select-String '^\s*RID:\s*(\S+)').Matches[0].Groups[1].Value
 ./installer/scripts/Pack-Release.ps1 -Version $version -RepositoryCommit $commit -RuntimeIdentifier $rid -SkipLibraries
+dotnet pack ./libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj -c Release -p:PackageOutputPath=./_out/release/packages
+dotnet pack ./libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/src/Assimalign.Cohesion.ObjectMapping.csproj -c Release -p:PackageOutputPath=./_out/release/packages
 ./.github/scripts/Invoke-SdkConsumerSmoke.ps1 -PackageDirectory ./_out/release/packages -Version $version -RuntimeIdentifier $rid
 ```
 

@@ -1,19 +1,23 @@
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<!-- This marker must precede the base Sdk.props import so its pre-.NET defaults select Exe. -->
+	<PropertyGroup>
+		<_CohesionResourceSdk>true</_CohesionResourceSdk>
+	</PropertyGroup>
 	<!--
-		Chain to the base Cohesion SDK (registers all three+ Cohesion
-		KnownFrameworkReferences and auto-includes the App framework).
+		Chain to the base Cohesion SDK, which registers the complete Cohesion
+		framework family but auto-includes no framework itself.
 	-->
 	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.props" />
 
 	<!--
-		Layer the VpnGateway-specific framework on top. Consumer gets
-		App + App.VpnGateway.
+		A VpnGateway resource receives the hosting kernel and its area framework.
 
 		Note: <Import Sdk> doesn't honor inline-version syntax; consumers
 		of Sdk.VpnGateway must pin Assimalign.Cohesion.Sdk in their global.json
 		alongside Sdk.VpnGateway.
 	-->
 	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
+		<FrameworkReference Include="Assimalign.Cohesion.App" />
 		<FrameworkReference Include="Assimalign.Cohesion.App.VpnGateway" />
 	</ItemGroup>
 

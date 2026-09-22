@@ -1,10 +1,11 @@
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" >
 	<!--
-		Every Cohesion framework a project needs is referenced explicitly by its SDK (App,
-		the area SDK's App.<Area>, and the Gateway SDK's per-referenced-area set), so no
-		transitive framework reference ever needs its own runtime-pack download. Without
-		this, a RID-specific or self-contained restore downloads the runtime pack of every
-		registered area.
+		Every Cohesion framework a project needs is explicit: resource-area SDKs add App and
+		App.<Area>, a direct base-SDK consumer names its own framework references, and Gateway
+		adds App plus its referenced areas only for in-process composition. No transitive
+		framework reference therefore needs its own runtime-pack download. Without this, a
+		RID-specific or self-contained restore downloads the runtime pack of every registered
+		area.
 	-->
 	<PropertyGroup>
 		<DisableTransitiveFrameworkReferenceDownloads Condition="'$(DisableTransitiveFrameworkReferenceDownloads)' == ''">true</DisableTransitiveFrameworkReferenceDownloads>

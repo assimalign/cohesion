@@ -60,7 +60,6 @@ then `MSBuild.exe <consumer>.csproj -t:Restore`), because nothing else in the lo
 ```xml
 <Project Sdk="Assimalign.Cohesion.Sdk.Web">
     <PropertyGroup>
-        <OutputType>Exe</OutputType>
         <TargetFramework>net10.0</TargetFramework>
     </PropertyGroup>
 </Project>
@@ -83,18 +82,18 @@ Plus a `global.json` pinning every Cohesion SDK in the chain:
 
 The SDK pin check in `sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.PinValidation.targets` requires .NET SDK >= 10.0.300 (`COHSDK002`); the repository's `global.json` is the canonical example.
 
-No installer required. Consumers get every Cohesion library belonging to the chosen framework(s) automatically through the chain `Sdk.<Domain>` → `Sdk` (base) → `Microsoft.NET.Sdk`.
+No installer required. Resource consumers get the hosting kernel and their area framework through the chain `Sdk.<Domain>` → `Sdk` (base) → `Microsoft.NET.Sdk`. Direct base-SDK consumers get build tooling only and choose packages/frameworks explicitly.
 
 ## Each SDK auto-includes one or more `<FrameworkReference>`s
 
 | Consumer SDK | Auto-included frameworks |
 | --- | --- |
-| `Assimalign.Cohesion.Sdk` | `App` |
+| `Assimalign.Cohesion.Sdk` | none |
 | `Assimalign.Cohesion.Sdk.Web` | `App` + `App.Web` |
 | `Assimalign.Cohesion.Sdk.Database` | `App` + `App.Database` |
 | `Assimalign.Cohesion.Sdk.<Domain>` | `App` + `App.<Domain>` |
 
-The base SDK declares `KnownFrameworkReference` entries for every framework in `sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props`. Chained SDKs only add the additional auto-`<FrameworkReference>` on top of the base.
+The base SDK declares `KnownFrameworkReference` entries for every framework in `sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props`, so explicit references resolve even in a base-only project. Each resource-area SDK sets its executable marker before importing the base props, then adds both implicit references under `CohesionAutoIncludeAppFramework != false`. Gateway remains NuGet-only unless in-process composition adds App plus the referenced areas.
 
 ## Each framework is two NuGet packages
 
@@ -119,23 +118,28 @@ The .NET SDK's `ProcessFrameworkReferences` machinery resolves these at restore 
 
 Property-based conditions are used (not `%(Framework)` metadata) because MSBuild forbids item-metadata references in top-level `ItemGroup` conditions (MSB4190).
 
-## Adding a library to a framework
+## Adding a library to an area framework
 
-A one-line edit to `App.props`:
+Add the library to its `App.<Area>` group in `App.props`:
 
 ```xml
 <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Jobs" />
 ```
 
-The Runtime csproj converts the list to `<CohesionProjectReference>` items, which `build/Targets/Build.References.Projects.targets` resolves to matching csprojs under `libraries/**` or `resources/**`. CopyLocal puts the library's DLL into the Runtime project's bin, and `App.targets` packs it into the framework's NuGet packs along with matching entries in `FrameworkList.xml` and `RuntimeList.xml`. Validation in `App.targets` hard-fails if a listed assembly isn't on disk after the build, so a typo or missing project surfaces loudly.
+The Runtime csproj converts the list to `<CohesionProjectReference>` items, which `build/Targets/Build.References.Projects.targets` resolves to matching csprojs under `libraries/**` or `resources/**`. CopyLocal puts the library's DLL into the Runtime project's bin, and `App.targets` packs it into the framework's NuGet packs along with matching entries in `FrameworkList.xml` and `RuntimeList.xml`. Validation in `App.targets` hard-fails if a listed assembly isn't on disk after the build, so a typo or missing project surfaces loudly. The framework tests compute every area's shipped closure and reject a missing public/private entry.
+
+Base App is different: never add a library directly to its assembly list. `@(CohesionAppKernelRoot)` in `App.props` is the sole policy input, and `App.targets` derives the transitive Assimalign project-reference closure plus the umbrella assembly. The roots are Hosting and its Health/Resources/Telemetry siblings, Connections, the host-composed configuration providers, Logging.Console, OpenTelemetry, DependencyInjection, and FileSystem.Physical. Connections is a kernel root because generated resource accessors and every area hosting module depend on it. Everything outside that hosting kernel remains an ordinary package.
 
 The Hosting-area package graph is exact: `Assimalign.Cohesion.Hosting.Health` references Core only;
 `Assimalign.Cohesion.Hosting.Resources` references Core, plain Hosting, Hosting.Health, and the
-ProtectedData facade; plain Hosting references neither sibling. The base `Assimalign.Cohesion.App`
-framework carries both opt-in siblings. All 18 resource SDKs emit generated code that references
+ProtectedData facade; plain Hosting references neither sibling. The `Assimalign.Cohesion.App`
+hosting kernel carries both opt-in siblings. All 18 resource SDKs emit generated code that references
 `Assimalign.Cohesion.Hosting.Resources.ResourceRuntime`, so Resources belongs beside the
 already-shared plain Hosting assembly; Health follows because Resources references it. This
 framework-level delivery does not add direct project references to the 16 filler resource areas.
+Those generated accessors also expose `Assimalign.Cohesion.Connections.ConnectionString`, and
+every area hosting module reaches Connections, so Connections is carried once by App rather than
+repeated in all 18 area frameworks.
 
 ## Cross-resource dependencies (private implementation details)
 
@@ -290,7 +294,7 @@ Every external `uses:` in `release.yml`, `sdk-smoke.yml`, and `.github/actions/b
 
 ### SDK consumer smoke — `.github/workflows/sdk-smoke.yml`
 
-On pull requests and relevant pushes, a three-OS matrix runs strict `Pack-Release.ps1 -SkipLibraries` for the host RID. The shared `.github/scripts/Invoke-SdkConsumerSmoke.ps1` harness then materializes isolated base, Web, Database, and analyzer-bearing consumers against that feed; builds them against the targeting packs; asserts the analyzer-generated source; publishes each self-contained against the host runtime packs; runs each apphost; and asserts its output.
+On pull requests and relevant pushes, a three-OS matrix runs strict `Pack-Release.ps1 -SkipLibraries` for the host RID and packs the Core/ObjectMapping packages used by the analyzer sample. The shared `.github/scripts/Invoke-SdkConsumerSmoke.ps1` harness then materializes isolated base, Web, Database, and analyzer-bearing consumers against that feed. The base executables explicitly reference App; the analyzer references ObjectMapping as an ordinary package. The harness builds, asserts generated source, publishes self-contained, runs each apphost, and asserts its output. The same job runs the framework manifest closure tests.
 
 The workflow retains the broader `Sdk.Gateway` package-boundary, in-process, NativeAOT, and container smoke added with that SDK. Its permissions remain `contents: read`; artifact uploads are run-local test inputs, never package-feed publication.
 

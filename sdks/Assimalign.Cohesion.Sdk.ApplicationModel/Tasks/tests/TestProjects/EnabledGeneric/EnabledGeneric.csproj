@@ -1,6 +1,7 @@
 <Project Sdk="Assimalign.Cohesion.Sdk">
 
   <PropertyGroup>
+    <OutputType>Exe</OutputType>
     <RootNamespace>EnabledGeneric</RootNamespace>
     <CohesionApplicationModel>enabled</CohesionApplicationModel>
     <CohesionApplication>inventory</CohesionApplication>
@@ -12,6 +13,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Assimalign.Cohesion.App" />
     <CohesionEndpoint Include="http" Scheme="http" ContainerPort="8082" DevPort="18082" />
   </ItemGroup>
 

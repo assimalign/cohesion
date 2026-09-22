@@ -13,7 +13,7 @@ The base SDK supplies conditional defaults for every base and layered consumer:
 
 | Property | Default |
 | --- | --- |
-| `OutputType` | `Exe` |
+| `OutputType` | `Library` (from `Microsoft.NET.Sdk`; area SDKs select `Exe`) |
 | `TargetFramework` | `net10.0` |
 | `LangVersion` | `Preview` |
 | `EnablePreviewFeatures` | `true` |
@@ -25,11 +25,15 @@ The base SDK supplies conditional defaults for every base and layered consumer:
 
 Every ordinary default is conditional on an empty value. Command-line global
 properties are honored, and later assignments in a consumer project can
-override the props-time values. Library consumers set `OutputType=Library`.
+override the props-time values. Resource-area SDKs set a private marker before
+the base import so the pre-.NET default is `OutputType=Exe`.
 
-The base SDK still registers Cohesion frameworks and implicitly includes
-`Assimalign.Cohesion.App` unless `CohesionAutoIncludeAppFramework=false`. Moving
-that framework behavior is a separate change.
+The base SDK registers every Cohesion framework but includes none implicitly.
+An executable that uses the base SDK opts into the hosting kernel with an
+explicit `FrameworkReference`; resource-area SDKs add the kernel and their area
+framework unless `CohesionAutoIncludeAppFramework=false`. The kernel carries
+Connections once because generated resource accessors and every area hosting
+module depend on it.
 
 ## Base build tooling
 
@@ -39,8 +43,8 @@ The package owns these behaviors:
   `CohesionAppSettingsClass`;
 - name-only `CohesionProjectReference` resolution;
 - agreement validation for Cohesion SDK pins in the nearest `global.json`;
-- Cohesion framework registration and the current implicit App framework;
-- common language, target-framework, executable, and build defaults.
+- Cohesion framework registration without an implicit framework reference;
+- common language, target-framework, AOT, and build defaults.
 
 Strongly typed settings emit public, nullable-aware types and an AOT-safe
 `Bind(IConfiguration)` method made from explicit configuration reads. No source

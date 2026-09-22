@@ -27,8 +27,11 @@ ApplicationModel SDK entry to `global.json`.
 ## Third-party area SDKs
 
 A third-party area SDK can use only the shipped packages. Its `Sdk.props` imports
-the base props, then its `Sdk.targets` uses this order after the consumer project
-body:
+the base props after setting `_CohesionResourceSdk=true`, and adds App plus
+App.<Area> under the shared `CohesionAutoIncludeAppFramework` condition. App
+already carries Connections because generated resource accessors and every area
+hosting module depend on it; the area framework does not repeat that entry. Its
+`Sdk.targets` then uses this order after the consumer project body:
 
 ```xml
 <Import Project="Sdk.targets"

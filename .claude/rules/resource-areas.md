@@ -266,10 +266,16 @@ happen to compose.
   is the area's sole explicit `CohesionHostingIsolationExemptions` holder.
 - `Assimalign.Cohesion.<Area>.<Feature>` — feature libraries; builder verbs ship here, not in
   hosting.
-- Framework delivery: shippable area assemblies (and their outside-area transitive closure)
-  belong in the `App.<Area>` ItemGroup of `frameworks/Assimalign.Cohesion.App.props`, so
-  applications get the family through the SDK without project wiring. Validate with
+- Framework delivery: `Sdk.<Area>` defaults to executable output and includes both the App
+  hosting kernel and `App.<Area>` under `CohesionAutoIncludeAppFramework`. Shippable area
+  assemblies (and their outside-area transitive closure that App does not carry) belong in the
+  `App.<Area>` public/private ItemGroups of `frameworks/Assimalign.Cohesion.App.props`, so
+  applications get the family without project wiring. The framework closure tests guard every
+  area, including feature dependencies such as Web.Caching → Caching/InMemory. Validate with
   `dotnet pack frameworks/Assimalign.Cohesion.App.<Area>.Runtime/src/...csproj`.
+  App carries `Assimalign.Cohesion.Connections` because every generated resource accessor exposes
+  its `ConnectionString` type and every area hosting module depends on it; area frameworks must
+  not duplicate that kernel entry.
   `<Area>.ApplicationModel` and `<Area>.Client` packages are NuGet-only, injected by
   `Sdk.<Area>` (its own area) and `Sdk.Gateway` (the areas of its referenced resource projects),
   and never members of an `App.<Area>` shared framework (owner-signed developer-experience
