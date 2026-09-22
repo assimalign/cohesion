@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.SecretStore.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
 /// Composition extensions for adding secret-store manifests to an application model.

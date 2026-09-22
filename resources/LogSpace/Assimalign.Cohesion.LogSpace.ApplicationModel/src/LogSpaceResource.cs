@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.LogSpace.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Represents a manifest-backed LogSpace workload in an application graph.</summary>
 public sealed class LogSpaceResource : PlannedResource

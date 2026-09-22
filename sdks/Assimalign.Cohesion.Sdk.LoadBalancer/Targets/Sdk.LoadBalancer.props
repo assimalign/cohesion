@@ -7,7 +7,7 @@
 	-->
 	<PropertyGroup>
 		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.LoadBalancer.ApplicationModel</CohesionResourceApplicationModel>
-		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.LoadBalancer.ApplicationModel.LoadBalancerResourceControlPlane</CohesionResourceControlPlaneType>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.ApplicationModel.LoadBalancerResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">LoadBalancer</CohesionResourceKind>
 		<CohesionResourceComposable>false</CohesionResourceComposable>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">http</CohesionControlPlaneEndpoint>

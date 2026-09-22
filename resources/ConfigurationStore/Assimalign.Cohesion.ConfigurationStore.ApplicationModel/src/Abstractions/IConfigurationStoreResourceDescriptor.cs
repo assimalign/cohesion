@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.ConfigurationStore.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>A typed ConfigurationStore graph descriptor for declaring dependencies and resource commands.</summary>
 public interface IConfigurationStoreResourceDescriptor : IResourceCommandDescriptor

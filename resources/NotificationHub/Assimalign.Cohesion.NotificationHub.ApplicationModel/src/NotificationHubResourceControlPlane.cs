@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.NotificationHub.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Creates the default control plane for enabled NotificationHub resources.</summary>
 public static class NotificationHubResourceControlPlane

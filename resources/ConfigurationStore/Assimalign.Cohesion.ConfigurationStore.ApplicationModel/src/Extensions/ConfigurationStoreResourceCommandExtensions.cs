@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 
-namespace Assimalign.Cohesion.ConfigurationStore.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Declares configuration namespaces and values for the target's default control plane.</summary>
 public static partial class ConfigurationStoreResourceCommandExtensions

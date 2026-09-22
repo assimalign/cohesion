@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.SecretStore.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
 /// Represents a manifest-backed Cohesion secret store in an application graph.

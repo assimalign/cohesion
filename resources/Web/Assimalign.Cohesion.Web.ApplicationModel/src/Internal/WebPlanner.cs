@@ -1,7 +1,7 @@
 using System;
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.Web.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 internal static class WebPlanner
 {

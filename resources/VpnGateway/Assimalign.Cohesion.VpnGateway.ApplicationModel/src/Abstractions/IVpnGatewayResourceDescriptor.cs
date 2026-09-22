@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.VpnGateway.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
 /// Describes a VpnGateway resource together with its application-graph dependencies.

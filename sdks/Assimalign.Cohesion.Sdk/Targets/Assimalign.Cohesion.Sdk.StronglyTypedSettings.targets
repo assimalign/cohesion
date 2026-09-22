@@ -7,18 +7,13 @@
         <_StronglyTypedSettingsTaskAssembly>$(MSBuildThisFileDirectory)..\Tasks\Assimalign.Cohesion.Sdk.Tasks.dll</_StronglyTypedSettingsTaskAssembly>
     </PropertyGroup>
 
+    <!--
+        The generated settings source is a build output: its Compile item is added by the
+        target that produces it, so it is never an evaluation-time item under obj that
+        Visual Studio would display.
+    -->
     <ItemGroup Condition="'$(CohesionAppSettingsClass)' != ''">
         <_AppSettings Include="$(MSBuildProjectDirectory)\appsettings*.json" />
-        <Compile Include="$(_StronglyTypedSettingsOutput)">
-            <AutoGen>true</AutoGen>
-            <DesignTime>true</DesignTime>
-            <Visible>false</Visible>
-        </Compile>
-    </ItemGroup>
-
-    <ItemGroup>
-        <_StronglyTypedSettingsGeneratedArtifact Include="$(IntermediateOutputPath)Cohesion\*.generated.cs" />
-        <_StronglyTypedSettingsGeneratedArtifact Include="$(IntermediateOutputPath)Cohesion\*.generated.inputs" />
     </ItemGroup>
 
     <Target Name="_CollectStronglyTypedSettingsInputs"
@@ -47,10 +42,19 @@
             AppSettingsNamespace="$(CohesionAppSettingsNamespace)"
             AppSettingsFiles="@(_AppSettings)"
             AppSettingsOutputPath="$(_StronglyTypedSettingsOutput)" />
+        <ItemGroup>
+            <Compile Include="$(_StronglyTypedSettingsOutput)" AutoGen="true" DesignTime="true" />
+            <FileWrites Include="$(_StronglyTypedSettingsOutput);$(_StronglyTypedSettingsInputsCache)" />
+        </ItemGroup>
     </Target>
 
-    <Target Name="_CleanStronglyTypedAppSettings"
-            AfterTargets="Clean">
-        <Delete Files="@(_StronglyTypedSettingsGeneratedArtifact)" />
-    </Target>
+    <!--
+        CoreClean deletes the generated source with the other file writes; Clean then
+        regenerates it so IntelliSense keeps the settings type between a clean and the
+        next build.
+    -->
+    <Target Name="_RegenerateStronglyTypedAppSettingsAfterClean"
+            AfterTargets="Clean"
+            DependsOnTargets="_GeneratedStronglyTypedAppSettings"
+            Condition="'$(CohesionAppSettingsClass)' != ''" />
 </Project>

@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.Scheduler.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Represents a manifest-backed Scheduler workload in an application graph.</summary>
 public sealed class SchedulerResource : PlannedResource

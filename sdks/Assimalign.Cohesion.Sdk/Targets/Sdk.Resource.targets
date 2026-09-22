@@ -112,9 +112,13 @@
 			Include="@(_CohesionResourcePackageReference)"
 			PrivateAssets="all" />
 
-		<Compile Include="$(CohesionResourceSourcePath)" Link="Resource.g.cs" Visible="false" />
-		<Compile Include="$(CohesionResourceControlPlaneSourcePath)" Link="ResourceControlPlane.g.cs" Visible="false" />
-		<EmbeddedResource Include="$(CohesionResourceManifestPath)" LogicalName="cohesion/resource.json" Visible="false" />
+		<!--
+			The generated sources and the embedded manifest are build outputs, so their items are
+			added by the targets that produce them (CohesionCreateResourceManifest and
+			CohesionAddResourceManifestItems), the way Microsoft.NET.Sdk adds its generated
+			AssemblyInfo. Nothing under the intermediate directory is a project item at
+			evaluation time, so Visual Studio never shows an obj folder for them.
+		-->
 		<ContainerLabel Include="org.cohesion.manifest" Value="cohesion/resource.json" />
 		<CohesionResourceManifest Include="$(CohesionResourceManifestPath)" IsSelf="true" />
 		<CohesionResourcePackAsset
@@ -137,10 +141,31 @@
 		</MSBuild>
 	</Target>
 
+	<!--
+		The manifest is embedded as a resource, so its item must exist before
+		AssignTargetPaths and the culture split that feed CoreCompile's resource inputs.
+		The file itself is produced by CohesionCreateResourceManifest before CoreCompile.
+	-->
+	<Target
+		Name="CohesionAddResourceManifestItems"
+		BeforeTargets="AssignTargetPaths"
+		Condition="'$(_CohesionResourceEnabled)' == 'true'">
+		<ItemGroup>
+			<EmbeddedResource Include="$(CohesionResourceManifestPath)" LogicalName="cohesion/resource.json" Visible="false" />
+		</ItemGroup>
+	</Target>
+
+	<!--
+		Runs before BeforeCompile so the generated sources are part of the compile
+		dependency cache, and in design-time builds so Visual Studio compiles them after a
+		clean. ResolveProjectReferences is deliberately not a dependency: manifests are
+		evaluated project facts, and after a Clean this target regenerates them without
+		building the referenced projects.
+	-->
 	<Target
 		Name="CohesionCreateResourceManifest"
-		BeforeTargets="PrepareResourceNames;CoreCompile"
-		DependsOnTargets="CohesionValidateApplicationModel;ResolveProjectReferences;CohesionResolveResourceReferences"
+		BeforeTargets="PrepareResourceNames;BeforeCompile;CoreCompile"
+		DependsOnTargets="CohesionValidateApplicationModel;CohesionResolveResourceReferences"
 		Inputs="$(MSBuildProjectFullPath);$(MSBuildAllProjects);@(_CohesionReferencedManifest)"
 		Outputs="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath)"
 		Condition="'$(_CohesionResourceEnabled)' == 'true'">
@@ -182,6 +207,8 @@
 		</CohesionCreateResourceManifest>
 
 		<ItemGroup>
+			<Compile Include="$(CohesionResourceSourcePath)" />
+			<Compile Include="$(CohesionResourceControlPlaneSourcePath)" />
 			<FileWrites Include="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath)" />
 		</ItemGroup>
 	</Target>
@@ -380,7 +407,17 @@
 		</ItemGroup>
 	</Target>
 
-	<Target Name="CohesionCleanResourceManifest" AfterTargets="Clean">
-		<Delete Files="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath);$(CohesionPackResourceManifestPath);$(_CohesionPackImageManifestPath)" />
-	</Target>
+	<!--
+		CoreClean deletes the generated manifest and sources with every other file write.
+		They are derived from the project and its referenced manifests, and IntelliSense
+		compiles them, so Clean regenerates them once it has finished removing outputs;
+		an editor that watched them disappear sees them return in the same command. The
+		pack manifests are ordinary file writes and stay deleted. A project that was never
+		restored has nothing an editor could have seen, so Clean leaves it alone.
+	-->
+	<Target
+		Name="CohesionRegenerateResourceManifestAfterClean"
+		AfterTargets="Clean"
+		DependsOnTargets="CohesionCreateResourceManifest"
+		Condition="'$(_CohesionResourceEnabled)' == 'true' and Exists('$(ProjectAssetsFile)')" />
 </Project>

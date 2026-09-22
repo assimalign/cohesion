@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.MessageHub.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
 /// Describes a MessageHub resource together with its application-graph dependencies.

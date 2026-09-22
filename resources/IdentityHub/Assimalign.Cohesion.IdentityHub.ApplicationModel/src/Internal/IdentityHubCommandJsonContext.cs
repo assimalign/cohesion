@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Assimalign.Cohesion.IdentityHub.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(AddAudienceCommandPayload))]

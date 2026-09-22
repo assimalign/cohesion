@@ -15,8 +15,10 @@ using Xunit;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
+// The shared ApplicationModel namespace also declares a ResourceMount; this file means the runtime one.
+using ResourceMount = Assimalign.Cohesion.Hosting.Resources.ResourceMount;
 using Assimalign.Cohesion.IdentityHub;
-using Assimalign.Cohesion.IdentityHub.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.IdentityHub.Hosting;
 
 namespace Assimalign.Cohesion.IdentityHub.Client.Tests;

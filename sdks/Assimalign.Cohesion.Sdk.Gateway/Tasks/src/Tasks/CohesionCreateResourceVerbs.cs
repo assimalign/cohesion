@@ -38,6 +38,13 @@ public sealed class CohesionCreateResourceVerbs : Task
     /// <summary>Gets or sets area-specific typed resource verb metadata.</summary>
     public ITaskItem[] ResourceKinds { get; set; } = [];
 
+    /// <summary>
+    /// Gets or sets the ApplicationModel assemblies the gateway project references. A typed
+    /// verb is generated only for a kind whose ApplicationModel is among them; every other
+    /// resource receives the untyped verb.
+    /// </summary>
+    public ITaskItem[] AvailableApplicationModels { get; set; } = [];
+
     /// <summary>Gets or sets gateway providers contributed by platform packages.</summary>
     public ITaskItem[] GatewayProviders { get; set; } = [];
 
@@ -95,6 +102,7 @@ public sealed class CohesionCreateResourceVerbs : Task
                     manifest.Application,
                     application,
                     StringComparison.OrdinalIgnoreCase)).ToList());
+            resourceKinds = SelectAvailableResourceKinds(resourceKinds, resources);
             ResolveInProcessBindings(resources);
             List<GatewayExternal> externals = CreateExternals(manifests, resources, application);
             List<GatewayManifest> applications = manifests
@@ -444,6 +452,53 @@ public sealed class CohesionCreateResourceVerbs : Task
             Log.LogWarning(
                 $"Sdk.Gateway found no resource manifest owned by application '{application}'; Build() will reject a zero-resource application.");
         }
+    }
+
+    /// <summary>
+    /// Keeps the typed kinds whose ApplicationModel this gateway references and warns once per
+    /// same-application resource that loses its typed verb because the assembly is absent.
+    /// </summary>
+    private List<GatewayResourceKind> SelectAvailableResourceKinds(
+        IReadOnlyList<GatewayResourceKind> resourceKinds,
+        IReadOnlyList<GatewayManifest> resources)
+    {
+        var available = new HashSet<string>(
+            AvailableApplicationModels.Select(item => item.ItemSpec.Trim()),
+            StringComparer.OrdinalIgnoreCase);
+        var selected = new List<GatewayResourceKind>(resourceKinds.Count);
+        var missing = new List<GatewayResourceKind>();
+        foreach (GatewayResourceKind kind in resourceKinds)
+        {
+            (available.Contains(kind.ApplicationModel) ? selected : missing).Add(kind);
+        }
+
+        foreach (GatewayManifest manifest in resources)
+        {
+            GatewayResourceKind? kind = missing.FirstOrDefault(candidate => string.Equals(
+                candidate.ApplicationModel,
+                manifest.ApplicationModel,
+                StringComparison.OrdinalIgnoreCase));
+            if (kind is null)
+            {
+                continue;
+            }
+
+            Log.LogWarning(
+                subcategory: null,
+                warningCode: "COHGW003",
+                helpKeyword: null,
+                file: ProjectFullPath,
+                lineNumber: 0,
+                columnNumber: 0,
+                endLineNumber: 0,
+                endColumnNumber: 0,
+                message: $"Resource '{manifest.Application}/{manifest.Name}' is a {kind.Kind} resource, but this gateway does not " +
+                    $"reference '{kind.ApplicationModel}', so Add{manifest.MemberName}() is generated over the untyped " +
+                    "AddResource path. Reference the area's resource project or add a PackageReference to " +
+                    $"'{kind.ApplicationModel}' for the typed verb.");
+        }
+
+        return selected;
     }
 
     private List<GatewayResourceKind> ReadResourceKinds()

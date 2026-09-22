@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.IdentityHub.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
 /// Creates the default control plane shared by enabled identity-hub resources.

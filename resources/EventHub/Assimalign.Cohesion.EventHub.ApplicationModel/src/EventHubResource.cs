@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.EventHub.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Represents a manifest-backed EventHub workload in an application graph.</summary>
 public sealed class EventHubResource : PlannedResource

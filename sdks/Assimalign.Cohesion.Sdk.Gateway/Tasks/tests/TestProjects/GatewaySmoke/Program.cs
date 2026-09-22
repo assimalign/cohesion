@@ -13,7 +13,8 @@ if (Array.Exists(args, static argument => argument == "--typed-verbs"))
 }
 else
 {
-    builder.AddAllResources();
+    builder.AddGatewaySmokeDatabase();
+    builder.AddGatewaySmokeWeb();
 }
 
 if (Array.Exists(args, static argument => argument == "--configure-provider"))

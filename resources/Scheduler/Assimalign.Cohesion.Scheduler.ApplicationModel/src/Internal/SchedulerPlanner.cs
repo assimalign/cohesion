@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.Scheduler.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 internal static class SchedulerPlanner
 {

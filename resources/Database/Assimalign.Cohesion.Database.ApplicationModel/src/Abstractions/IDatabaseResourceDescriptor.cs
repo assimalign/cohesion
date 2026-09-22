@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.Database.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>A typed Database graph descriptor for declaring dependencies and resource commands.</summary>
 public interface IDatabaseResourceDescriptor : IResourceCommandDescriptor

@@ -7,7 +7,7 @@
 	-->
 	<PropertyGroup>
 		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.MessageHub.ApplicationModel</CohesionResourceApplicationModel>
-		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.MessageHub.ApplicationModel.MessageHubResourceControlPlane</CohesionResourceControlPlaneType>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.ApplicationModel.MessageHubResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">MessageHub</CohesionResourceKind>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">http</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>

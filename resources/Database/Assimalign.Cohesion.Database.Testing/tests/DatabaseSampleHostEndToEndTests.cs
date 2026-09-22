@@ -15,7 +15,7 @@ using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Gateway;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Core;
-using Assimalign.Cohesion.Database.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Sql.Client;
 

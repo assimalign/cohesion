@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.SecretStore.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Describes a SecretStore resource, its dependencies, and its declarative commands.</summary>
 public interface ISecretStoreResourceDescriptor : IResourceCommandDescriptor

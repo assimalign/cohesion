@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.NatGateway.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Represents a manifest-backed NatGateway workload in an application graph.</summary>
 public sealed class NatGatewayResource : PlannedResource

@@ -28,10 +28,10 @@ public sealed class ResourceCommandSdkIntegrationTests
         string sourcePath = Directory.EnumerateFiles(
             Path.Combine(directory, "obj"), "Gateway.g.cs", SearchOption.AllDirectories).Single();
         string source = File.ReadAllText(sourcePath);
-        source.ShouldContain("public global::Assimalign.Cohesion.Database.ApplicationModel.IDatabaseResourceDescriptor AddGatewaySmokeDatabase(", Case.Sensitive);
-        source.ShouldContain("public global::Assimalign.Cohesion.ConfigurationStore.ApplicationModel.IConfigurationStoreResourceDescriptor AddCommandConfiguration(", Case.Sensitive);
-        source.ShouldContain("public global::Assimalign.Cohesion.SecretStore.ApplicationModel.ISecretStoreResourceDescriptor AddCommandSecrets(global::System.Action<global::Assimalign.Cohesion.SecretStore.ApplicationModel.SecretStoreResourceOptions>? configure = null)", Case.Sensitive);
-        source.ShouldContain("global::Assimalign.Cohesion.SecretStore.ApplicationModel.SecretStoreResourceExtensions.AddSecretStore(builder, Manifests.CommandSecrets, options)", Case.Sensitive);
+        source.ShouldContain("public global::Assimalign.Cohesion.ApplicationModel.IDatabaseResourceDescriptor AddGatewaySmokeDatabase(", Case.Sensitive);
+        source.ShouldContain("public global::Assimalign.Cohesion.ApplicationModel.IConfigurationStoreResourceDescriptor AddCommandConfiguration(", Case.Sensitive);
+        source.ShouldContain("public global::Assimalign.Cohesion.ApplicationModel.ISecretStoreResourceDescriptor AddCommandSecrets(global::System.Action<global::Assimalign.Cohesion.ApplicationModel.SecretStoreResourceOptions>? configure = null)", Case.Sensitive);
+        source.ShouldContain("global::Assimalign.Cohesion.ApplicationModel.SecretStoreResourceExtensions.AddSecretStore(builder, Manifests.CommandSecrets, options)", Case.Sensitive);
         source.ShouldNotContain("builder.AddResource(", Case.Sensitive);
         File.ReadAllLines(Path.Combine(directory, "obj", "command-clients.txt"))
             .ShouldBe(new[]

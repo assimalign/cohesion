@@ -111,7 +111,7 @@ contract.
 Generation is incremental over a fingerprint of the class, namespace, and input
 paths plus MSBuild timestamp tracking for each settings file and the task
 assembly. Outputs live beneath the target-framework-specific intermediate path,
-and Clean removes generated settings source and fingerprints even after opt-out.
+and Clean regenerates the settings source after removing it with the other file writes, so IntelliSense keeps the type; after opt-out the orphaned files leave with the next incremental clean.
 
 ## Resource command advertisements
 

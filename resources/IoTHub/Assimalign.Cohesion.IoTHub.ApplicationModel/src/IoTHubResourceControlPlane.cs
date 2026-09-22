@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.IoTHub.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Creates the default control plane for enabled IoTHub resources.</summary>
 public static class IoTHubResourceControlPlane

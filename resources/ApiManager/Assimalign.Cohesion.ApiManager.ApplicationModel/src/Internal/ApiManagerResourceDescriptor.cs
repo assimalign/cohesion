@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.ApiManager.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 internal sealed class ApiManagerResourceDescriptor : IApiManagerResourceDescriptor
 {

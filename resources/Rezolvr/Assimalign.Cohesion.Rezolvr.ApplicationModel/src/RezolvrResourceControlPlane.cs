@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.Rezolvr.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Creates the default control plane for enabled Rezolvr resources.</summary>
 public static class RezolvrResourceControlPlane

@@ -7,7 +7,7 @@
 	-->
 	<PropertyGroup>
 		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.LogSpace.ApplicationModel</CohesionResourceApplicationModel>
-		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.LogSpace.ApplicationModel.LogSpaceResourceControlPlane</CohesionResourceControlPlaneType>
+		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.ApplicationModel.LogSpaceResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">LogSpace</CohesionResourceKind>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">query</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>

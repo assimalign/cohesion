@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.EventHub.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Creates the default control plane for enabled EventHub resources.</summary>
 public static class EventHubResourceControlPlane

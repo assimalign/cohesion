@@ -4,7 +4,7 @@ using System.Text.Json.Serialization.Metadata;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.Rezolvr.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 internal sealed class RezolvrResourceDescriptor : IRezolvrResourceDescriptor
 {

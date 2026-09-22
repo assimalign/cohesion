@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Assimalign.Cohesion.Rezolvr.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(AddARecordCommandPayload))]

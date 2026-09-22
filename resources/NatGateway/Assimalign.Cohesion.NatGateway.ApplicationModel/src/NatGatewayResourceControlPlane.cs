@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.NatGateway.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Creates the default control plane for enabled NatGateway resources.</summary>
 public static class NatGatewayResourceControlPlane

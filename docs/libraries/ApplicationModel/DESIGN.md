@@ -260,7 +260,10 @@ contract/factory**. Its direct Cohesion references are `ApplicationModel` and
 `Hosting.Resources` only. It never references the area's hosting runtime.
 
 These packages and `<Area>.Client` packages are **NuGet-only**, injected by
-`Sdk.<Area>` / `Sdk.Gateway`, never members of `App.<Area>`. Generated consumer code
+`Sdk.<Area>` (its own area) and `Sdk.Gateway` (the areas of the resource projects a gateway
+names in `CohesionResourceReference`), never members of `App.<Area>`. Every ApplicationModel
+package declares the shared `Assimalign.Cohesion.ApplicationModel` namespace with area-prefixed
+type names, so an apphost composes every area with one `using`. Generated consumer code
 registers the default control plane through `ResourceRuntime` when orchestration is
 enabled. The [resource-area rule](../../../.claude/rules/resource-areas.md) owns enforcement.
 
@@ -273,7 +276,7 @@ consumer configured for InProcess realization of its referenced members:
 using Assimalign.Cohesion.ApplicationModel;
 
 IApplicationBuilder builder = Gateway.CreateBuilder(args);
-builder.AddAllResources();
+builder.AddApi();
 builder.UseGateway(args);
 
 await builder.Build().RunAsync();
@@ -281,6 +284,9 @@ await builder.Build().RunAsync();
 
 The project's SDK selects Composite and the default `Gateway.ControlPlane`; the
 generated verbs and application/external declarations come from the referenced manifests.
+A gateway names what it composes, one generated verb per resource; there is no
+`AddAllResources()`, and the externals a composed manifest references are declared by the
+builder when the model is built.
 Each member retains its own `Program.cs` over `<Area>Application.CreateBuilder(args)`.
 `AddRezolvr` is the typed area verb described in §4.4, not `AddDns` or `AddWebApp`.
 No `Resource.cs`, `Compose`, `CreateHost`, `Gateway.cs`, or `Program.g.cs` entry-point

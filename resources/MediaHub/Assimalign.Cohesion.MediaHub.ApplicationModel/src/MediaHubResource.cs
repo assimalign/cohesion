@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.MediaHub.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Represents a manifest-backed MediaHub workload in an application graph.</summary>
 public sealed class MediaHubResource : PlannedResource

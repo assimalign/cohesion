@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Database.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Declares database mutations for the target's default control plane.</summary>
 public static partial class DatabaseResourceCommandExtensions

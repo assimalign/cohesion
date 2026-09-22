@@ -153,20 +153,26 @@ The minimal honest implementation is therefore:
 
 1. Inject only the fixed ApplicationModel/Gateway packages and explicitly selected
    provider packages during evaluation.
-2. Keep the finite bootstrap explicit: the seven Web, Database, ConfigurationStore,
-   SecretStore, IdentityHub, Rezolvr, and LogSpace ApplicationModel packages plus the
-   three SecretStore, Database, and ConfigurationStore client packages, all pinned at
-   `$(CohesionVersion)`. Every gateway restores this set, regardless of its manifests.
-3. Validate the manifest-derived requirement set after resolution and fail with an
-   actionable diagnostic when a required compile dependency is unavailable.
-4. Preserve the existing Web mapping and add rows and injected packages for areas whose
-   ApplicationModel ships a typed descriptor with command verbs, plus LogSpace for typed
-   options on the telemetry sink. Every other area stays on the generic
-   `ResourceOptions`/`AddResource` path. This seven-area bootstrap is the shipped shape;
-   T11's manifest-derived injection remains the documented future shape. Keeping the
-   list finite and explicit avoids injecting every current and future area or client
-   package, which would hide the restore-order defect, bloat every gateway, and weaken
-   the package boundary.
+2. Derive the area set at evaluation time from what the gateway can already see: each
+   `CohesionResourceReference` that names a `.csproj` is read with `File::ReadAllText` and its
+   `Project Sdk="Assimalign.Cohesion.Sdk.<Area>"` attribute is the area, overridable by `Area`
+   metadata on the reference. Exactly those areas' `<Area>.ApplicationModel` packages are
+   injected, pinned at `$(CohesionVersion)` (repository projects inside cohesion). Nothing is
+   injected for a manifest package, a missing project, a base-SDK project, or a referenced
+   gateway. The same set drives the in-process framework references (`App` plus one
+   `App.<Area>` per referenced area). The three SecretStore, Database, and ConfigurationStore
+   client packages stay restore-visible for every gateway: mount sources and command targets
+   can name a store that no referenced project introduces.
+3. Validate the manifest-derived requirement set after resolution: a typed kind whose
+   ApplicationModel is not among the gateway's `PackageReference`/`ProjectReference` items
+   (derived or consumer-added) is generated on the untyped `AddResource` path with the
+   actionable `COHGW003` warning naming the package to reference.
+4. Preserve the existing Web mapping and the rows for areas whose ApplicationModel ships a
+   typed descriptor with command verbs, plus LogSpace for typed options on the telemetry
+   sink. Every other area stays on the generic `ResourceOptions`/`AddResource` path. Deriving
+   the injected set from project references keeps every gateway's restore graph as small as
+   its composition without a second restore; T11's restore-visible producer descriptor remains
+   the documented future shape for manifest packages and for the clients.
 
 The recommended complete fix is a producer-authored, restore-visible dependency
 descriptor. A manifest package should place only its orchestration ApplicationModel and
@@ -198,10 +204,11 @@ a deliberate consumer override and should produce a visible build diagnostic.
 Outside in-process mode, every resource project reference remains manifest-only:
 `ReferenceOutputAssembly=false` and `OutputItemType=CohesionResourceManifest`. In-process
 mode turns resource project references into real assembly references during evaluation,
-before `ResolveProjectReferences`, and adds the App, Web, and Database frameworks during
-that same evaluation. It also sets
+before `ResolveProjectReferences`, and adds the `App` framework plus `App.<Area>` for each
+referenced area during that same evaluation. It also sets
 `ValidateExecutableReferencesMatchSelfContained=false`; the base SDK supplies enabled
-Debug resource executables with the design's self-contained host-RID defaults. Manifest-package
+resource executables, in every configuration, with the design's self-contained host-RID
+defaults and `DisableTransitiveFrameworkReferenceDownloads=true`. Manifest-package
 resources cannot be nested because they have no local executable binding.
 
 These SDK-owned defaults make the examples' temporary consumer bridge removable. Delete
@@ -209,8 +216,17 @@ These SDK-owned defaults make the examples' temporary consumer bridge removable.
 `examples/single-app/Acme.Gateway/Acme.Gateway.csproj` and from the Identity, Platform, and
 Zones/AppA, AppB, and AppC gateway projects under both `examples/k8s` and
 `examples/k8s-federated`. The root `Directory.Build.targets` is also removable in full:
-its Debug `SelfContained`, `RuntimeIdentifier`, and
+its `SelfContained`, `RuntimeIdentifier`, and
 `ValidateExecutableReferencesMatchSelfContained` properties are now SDK defaults.
+
+Generated sources are build outputs. `Gateway.g.cs` is added to `Compile` by the target that
+writes it, never as an evaluation-time item under the intermediate directory, so Visual
+Studio shows no obj folder for it and the design-time build compiles it. `Clean` deletes it
+with the other file writes and then regenerates it (without the in-process pass, whose member
+assemblies are gone until the next build) so IntelliSense keeps the generated verbs. A
+design-time build (`DesignTimeBuild=true`) never builds the members, so it keeps an existing
+`Gateway.g.cs` untouched and, when none exists, generates the surface without the in-process
+pass; the real build regenerates it with the bindings.
 
 This exception remains guarded by explicit `CohesionGatewayInProcess=true`, `COHGW001`,
 content-root isolation, and an ambient `ResourceContext` per invocation. Generated bindings use

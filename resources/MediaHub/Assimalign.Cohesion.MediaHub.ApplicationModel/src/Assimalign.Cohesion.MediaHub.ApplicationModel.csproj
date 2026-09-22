@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <RootNamespace>Assimalign.Cohesion.MediaHub.ApplicationModel</RootNamespace>
+    <RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>
     <CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>
   </PropertyGroup>
   <ItemGroup>

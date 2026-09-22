@@ -92,7 +92,11 @@ SDK [overview](./Assimalign.Cohesion.Sdk/Tasks/docs/OVERVIEW.md) and
 builds an executable Composite resource. Its MSBuild task reads referenced
 `resource.json` documents and generates `Gateway.CreateBuilder(args)`, manifest
 constants, same-application `Add*` verbs, boundary-crossing `Externals`, referenced
-gateway `Applications`, `AddAllResources()`, and provider-driven `UseGateway(args)`.
+gateway `Applications`, and provider-driven `UseGateway(args)`. There is no
+`AddAllResources()`: a gateway names what it composes, one verb per resource. The SDK
+injects an area's ApplicationModel package (and, in process, its `App.<Area>` framework)
+only for the areas of the resource projects the gateway references; any other area
+package is the gateway's own explicit reference.
 
 Providers are not discovered by reflection. Packages contribute
 `CohesionGatewayProvider` items through `buildTransitive` props; the

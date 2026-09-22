@@ -2,7 +2,7 @@ using System;
 using System.Net;
 using System.Net.Sockets;
 
-namespace Assimalign.Cohesion.Rezolvr.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Declares records stored by the Rezolvr default control plane.</summary>
 public static partial class RezolvrResourceCommandExtensions

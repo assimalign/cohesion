@@ -7,14 +7,28 @@
 		<CohesionImageRuntimeIdentifier Condition="'$(CohesionImageRuntimeIdentifier)' == ''">linux-x64</CohesionImageRuntimeIdentifier>
 	</PropertyGroup>
 	<!--
-		Enabled resource executables use one Development runtime posture on every
-		host. Set these defaults after the consumer project has been evaluated but
-		before Microsoft.NET.Sdk imports its target-time RID and apphost logic.
+		Enabled resource executables use one self-contained host-runtime posture on every
+		host and in every configuration: the Cohesion shared frameworks exist only as NuGet
+		Ref/Runtime packs, so a framework-dependent build cannot start on a machine without
+		the installed framework layout. Set these defaults after the consumer project has
+		been evaluated but before Microsoft.NET.Sdk imports its target-time RID and apphost
+		logic. Project files no longer repeat them; a consumer assignment or a command-line
+		property still wins, and image publication supplies its own RID and posture.
 	-->
-	<PropertyGroup Condition="'$(Configuration)' == 'Debug' and '$(CohesionApplicationModel)' == 'enabled'">
+	<PropertyGroup Condition="'$(CohesionApplicationModel)' == 'enabled'">
 		<SelfContained Condition="'$(SelfContained)' == ''">true</SelfContained>
 		<RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>
 		<ValidateExecutableReferencesMatchSelfContained Condition="'$(ValidateExecutableReferencesMatchSelfContained)' == ''">false</ValidateExecutableReferencesMatchSelfContained>
+	</PropertyGroup>
+	<!--
+		Every Cohesion framework a project needs is referenced explicitly by its SDK (App,
+		the area SDK's App.<Area>, and the Gateway SDK's per-referenced-area set), so no
+		transitive framework reference ever needs its own runtime-pack download. Without
+		this, a RID-specific or self-contained restore downloads the runtime pack of every
+		registered area.
+	-->
+	<PropertyGroup>
+		<DisableTransitiveFrameworkReferenceDownloads Condition="'$(DisableTransitiveFrameworkReferenceDownloads)' == ''">true</DisableTransitiveFrameworkReferenceDownloads>
 	</PropertyGroup>
 
     <Import Sdk="Microsoft.NET.Sdk" Project="Sdk.targets" />

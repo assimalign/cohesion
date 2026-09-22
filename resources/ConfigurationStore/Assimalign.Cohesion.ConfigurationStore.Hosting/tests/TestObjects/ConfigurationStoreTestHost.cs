@@ -7,8 +7,10 @@ using System.Runtime.CompilerServices;
 using System.Text;
 
 using Assimalign.Cohesion.ConfigurationStore;
-using Assimalign.Cohesion.ConfigurationStore.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.Hosting.Resources;
+// The shared ApplicationModel namespace also declares a ResourceMount; this file means the runtime one.
+using ResourceMount = Assimalign.Cohesion.Hosting.Resources.ResourceMount;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Tests;
 

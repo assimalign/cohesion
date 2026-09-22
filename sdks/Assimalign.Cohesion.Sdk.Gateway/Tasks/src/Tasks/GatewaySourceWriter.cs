@@ -38,7 +38,7 @@ internal static class GatewaySourceWriter
         WriteExternals(source, externals);
         WriteApplications(source, applications);
         WriteReferences(source, applications);
-        WriteResourceExtensions(source, resources, externals, resourceKinds);
+        WriteResourceExtensions(source, resources, resourceKinds);
         WriteProviderCatalog(source, providers);
         WriteGatewayExtensions(source, providers);
         WriteIfChanged(outputPath, source.ToString());
@@ -279,16 +279,24 @@ internal static class GatewaySourceWriter
     private static void WriteResourceExtensions(
         StringBuilder source,
         IReadOnlyList<GatewayManifest> resources,
-        IReadOnlyList<GatewayExternal> externals,
         IReadOnlyList<GatewayResourceKind> resourceKinds)
     {
+        // One verb per same-application resource and nothing broader: the gateway's Program.cs
+        // names what it composes. Boundary externals need no verb; the builder declares the
+        // externals a composed manifest references when the model is built.
         source.AppendLine("/// <summary>Build-generated resource composition verbs.</summary>");
         source.AppendLine("public static class CohesionGatewayResourceExtensions");
         source.AppendLine("{");
         source.AppendLine("    extension(global::Assimalign.Cohesion.ApplicationModel.IApplicationBuilder builder)");
         source.AppendLine("    {");
-        foreach (GatewayManifest manifest in resources)
+        for (int index = 0; index < resources.Count; index++)
         {
+            GatewayManifest manifest = resources[index];
+            if (index > 0)
+            {
+                source.AppendLine();
+            }
+
             GatewayResourceKind? kind = resourceKinds.FirstOrDefault(
                 candidate => string.Equals(candidate.ApplicationModel, manifest.ApplicationModel, StringComparison.OrdinalIgnoreCase));
             string optionsType = kind?.OptionsType ?? "global::Assimalign.Cohesion.ApplicationModel.ResourceOptions";
@@ -322,23 +330,8 @@ internal static class GatewaySourceWriter
             WriteInProcessBinding(source, manifest.InProcessBinding);
             source.AppendLine("            return descriptor;");
             source.AppendLine("        }");
-            source.AppendLine();
         }
 
-        source.AppendLine("        /// <summary>Adds every same-application resource and embeds every boundary external.</summary>");
-        source.AppendLine("        /// <returns>The builder, for chaining.</returns>");
-        source.AppendLine("        public global::Assimalign.Cohesion.ApplicationModel.IApplicationBuilder AddAllResources()");
-        source.AppendLine("        {");
-        foreach (GatewayManifest manifest in resources)
-        {
-            source.Append("            builder.Add").Append(manifest.MemberName).AppendLine("();");
-        }
-        foreach (GatewayExternal external in externals.OrderBy(value => value.MemberName, StringComparer.Ordinal))
-        {
-            source.Append("            builder.AddExternal(Externals.").Append(external.MemberName).AppendLine(");");
-        }
-        source.AppendLine("            return builder;");
-        source.AppendLine("        }");
         source.AppendLine("    }");
         source.AppendLine("}");
         source.AppendLine();

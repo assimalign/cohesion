@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Assimalign.Cohesion.SecretStore.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Declares secret sources and certificate requests without carrying secret material.</summary>
 public static partial class SecretStoreResourceCommandExtensions

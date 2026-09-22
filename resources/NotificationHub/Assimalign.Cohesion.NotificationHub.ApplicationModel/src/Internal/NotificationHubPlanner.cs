@@ -3,7 +3,7 @@ using System.Linq;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.NotificationHub.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 internal static class NotificationHubPlanner
 {

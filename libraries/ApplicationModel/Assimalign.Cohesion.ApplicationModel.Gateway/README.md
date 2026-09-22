@@ -25,7 +25,7 @@ An `Sdk.Gateway` consumer keeps its real `Program.cs`:
 using Assimalign.Cohesion.ApplicationModel;
 
 IApplicationBuilder builder = Gateway.CreateBuilder(args);
-builder.AddAllResources();
+builder.AddApi();       // one generated verb per referenced resource; the gateway names what it composes
 builder.UseGateway(args);
 await builder.Build().RunAsync();
 ```

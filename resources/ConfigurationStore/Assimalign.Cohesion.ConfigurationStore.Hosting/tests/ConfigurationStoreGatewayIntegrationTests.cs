@@ -12,7 +12,7 @@ using Xunit;
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Gateway;
 using Assimalign.Cohesion.ConfigurationStore;
-using Assimalign.Cohesion.ConfigurationStore.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 

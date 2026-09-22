@@ -42,7 +42,8 @@ public sealed class TypedResourceSdkIntegrationTests
             "Gateway.g.cs",
             SearchOption.AllDirectories).Single();
         string source = File.ReadAllText(sourcePath);
-        string areaNamespace = $"global::Assimalign.Cohesion.{area}.ApplicationModel";
+        // Every area ApplicationModel package declares the shared namespace; the type names carry the area.
+        string areaNamespace = "global::Assimalign.Cohesion.ApplicationModel";
         source.ShouldContain(
             $"public {areaNamespace}.I{area}ResourceDescriptor Add{member}(global::System.Action<{areaNamespace}.{area}ResourceOptions>? configure = null)",
             Case.Sensitive);

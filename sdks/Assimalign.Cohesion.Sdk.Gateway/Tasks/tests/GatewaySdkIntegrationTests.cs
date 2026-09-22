@@ -94,13 +94,13 @@ public sealed class GatewaySdkIntegrationTests
             "public static readonly global::Assimalign.Cohesion.ApplicationModel.ResourceManifest GatewaySmokeWeb");
         source.ShouldContain("AddGatewaySmokeDatabase(");
         source.ShouldContain("DatabaseResourceOptions");
-        source.ShouldContain("public global::Assimalign.Cohesion.Database.ApplicationModel.IDatabaseResourceDescriptor AddGatewaySmokeDatabase(", Case.Sensitive);
+        source.ShouldContain("public global::Assimalign.Cohesion.ApplicationModel.IDatabaseResourceDescriptor AddGatewaySmokeDatabase(", Case.Sensitive);
         source.ShouldContain("DatabaseResourceExtensions.AddDatabase(builder, Manifests.GatewaySmokeDatabase");
         source.ShouldContain("AddGatewaySmokeWeb(");
         source.ShouldContain("WebResourceOptions");
-        source.ShouldContain("public global::Assimalign.Cohesion.Web.ApplicationModel.IWebResourceDescriptor AddGatewaySmokeWeb(", Case.Sensitive);
+        source.ShouldContain("public global::Assimalign.Cohesion.ApplicationModel.IWebResourceDescriptor AddGatewaySmokeWeb(", Case.Sensitive);
         source.ShouldContain("WebResourceExtensions.AddWeb(builder, Manifests.GatewaySmokeWeb");
-        source.ShouldContain("AddAllResources()");
+        source.ShouldNotContain("AddAllResources");
         source.ShouldContain("UseGateway(string[] args)");
         source.ShouldContain("global::System.Action<CohesionGatewayProviders> configure");
         source.ShouldContain("ApplicationGatewayCommandLine.Apply(options, args)");
@@ -519,9 +519,11 @@ public sealed class GatewaySdkIntegrationTests
             string[] frameworkReferences = File.ReadAllLines(Path.Combine(
                 captureDirectory,
                 "inprocess-framework-references.txt"));
+            // Every referenced resource project is a Web resource, so the in-process gateway gets
+            // the base framework plus App.Web and nothing for areas it does not reference.
             frameworkReferences.ShouldContain("Assimalign.Cohesion.App");
             frameworkReferences.ShouldContain("Assimalign.Cohesion.App.Web");
-            frameworkReferences.ShouldContain("Assimalign.Cohesion.App.Database");
+            frameworkReferences.ShouldNotContain("Assimalign.Cohesion.App.Database");
 
             string[] properties = File.ReadAllText(Path.Combine(
                     captureDirectory,

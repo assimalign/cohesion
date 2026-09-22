@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Assimalign.Cohesion.IdentityHub.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Declares IdentityHub audiences and clients owned by the claiming application.</summary>
 public static partial class IdentityHubResourceCommandExtensions

@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.Web.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>A typed Web graph descriptor for declaring dependencies and resource commands.</summary>
 public interface IWebResourceDescriptor : IResourceCommandDescriptor

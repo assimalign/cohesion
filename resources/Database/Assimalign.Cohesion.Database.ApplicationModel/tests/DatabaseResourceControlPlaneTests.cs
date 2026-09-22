@@ -1,3 +1,4 @@
+using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.Hosting.Resources;
 
 using Shouldly;

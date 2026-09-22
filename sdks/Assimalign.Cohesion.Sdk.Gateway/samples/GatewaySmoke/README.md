@@ -10,7 +10,7 @@ dotnet run --project Gateway/Gateway.csproj -- --mode describe --gateway local
 ```
 
 The generated gateway surface supplies `Gateway.CreateBuilder(args)`, typed `Add*`
-verbs, `AddAllResources()`, manifest constants, and provider selection. The Web manifest
+verbs, manifest constants, and provider selection. The Web manifest
 references the Database manifest, so the described model contains the inferred edge.
 
 Run the bounded in-process smoke path with:

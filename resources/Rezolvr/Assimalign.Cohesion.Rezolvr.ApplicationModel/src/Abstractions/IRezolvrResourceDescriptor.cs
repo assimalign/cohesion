@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.Rezolvr.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Describes a Rezolvr resource, its dependencies, and its declarative commands.</summary>
 public interface IRezolvrResourceDescriptor : IResourceCommandDescriptor

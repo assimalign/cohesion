@@ -4,7 +4,7 @@ using System.Text.Json.Serialization.Metadata;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.Database.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 internal sealed class DatabaseResourceDescriptor : IDatabaseResourceDescriptor
 {

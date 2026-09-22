@@ -45,6 +45,11 @@
 	          The explicit CohesionApplicationModelGuard=true rollout gate is
 	          required because Web.ApplicationModel is not clean yet.
 
+	        * COHAM002 - A resources/ assembly whose name ends in .ApplicationModel
+	          declares the shared Assimalign.Cohesion.ApplicationModel namespace
+	          (RootNamespace is the checked proxy; the type names carry the area
+	          prefix instead). An apphost composes every area with one using.
+
 	    Scope: shipped projects under resources/<Area>/ only. Test, example, and
 	    sample projects are exempt - the rule constrains shipped artifacts, not
 	    harnesses. The gate deliberately keys on those harness folders rather than
@@ -175,6 +180,18 @@
 	<ItemGroup Condition="'$(_CohesionHostingRuleApplies)' == 'true'">
 		<_CohesionDirectProjectReference Include="@(ProjectReference)" />
 	</ItemGroup>
+
+	<!-- COHAM002: the shared ApplicationModel namespace, checked through RootNamespace. -->
+	<Target Name="ValidateCohesionApplicationModelNamespace"
+	        BeforeTargets="CoreCompile"
+	        Condition="'$(_CohesionResourceBoundaryRulesApply)' == 'true'
+	                   AND '$(AssemblyName)' != ''
+	                   AND $([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel'))">
+		<Error Condition="'$(RootNamespace)' != 'Assimalign.Cohesion.ApplicationModel'"
+		       Code="COHAM002"
+		       File="$(MSBuildProjectFullPath)"
+		       Text="$(MSBuildProjectName) is a resource ApplicationModel package whose RootNamespace is '$(RootNamespace)'. Every ApplicationModel package declares the shared Assimalign.Cohesion.ApplicationModel namespace with area-prefixed type names (.claude/rules/resource-areas.md)." />
+	</Target>
 
 	<Target Name="ValidateCohesionHostingIsolationRule"
 	        BeforeTargets="ResolveProjectReferences;CoreCompile"

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.Database.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 internal static class DatabasePlanner
 {

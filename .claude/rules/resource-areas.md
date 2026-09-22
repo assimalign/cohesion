@@ -247,6 +247,19 @@ happen to compose.
   `Assimalign.Cohesion.ApplicationModel` and `Assimalign.Cohesion.Hosting.Resources`. It never
   references `<Area>.Hosting`; generated code in an enabled consumer executable registers the two
   sides through `Assimalign.Cohesion.Hosting.Resources.ResourceRuntime`.
+  **Every ApplicationModel package declares the `Assimalign.Cohesion.ApplicationModel` namespace**
+  (`RootNamespace` and every `namespace` directive; `COHAM002` checks the project property), never
+  `Assimalign.Cohesion.<Area>.ApplicationModel`: an apphost's `Program.cs` composes every area with
+  one `using`, the way the base library's own verbs work. The package and assembly names keep the
+  area segment, so types are area-prefixed (`WebResourceOptions`, `IDatabaseResourceDescriptor`,
+  `AddIdentityHub`) to stay unambiguous inside the shared namespace. The same rule binds
+  companion-repository ApplicationModel packages such as `Assimalign.Cohesion.Viu.ApplicationModel`.
+  `Sdk.Gateway` injects an area's ApplicationModel only for the areas of the resource projects a
+  gateway names in `CohesionResourceReference` (read from each project's `Sdk="Assimalign.Cohesion.Sdk.<Area>"`
+  attribute, or the reference's `Area` metadata), and in-process gateways get exactly those areas'
+  `App.<Area>` frameworks; any other area package is the gateway's own explicit reference, and the
+  generated verb for a resource whose ApplicationModel is not referenced falls back to the untyped
+  `AddResource` path with warning `COHGW003`.
 - `Assimalign.Cohesion.<Area>.Testing` — the optional shippable test factory that invokes a
   consumer's real `Program.cs` under a test-scoped ambient resource context. When present, this
   is the area's sole explicit `CohesionHostingIsolationExemptions` holder.
@@ -257,8 +270,9 @@ happen to compose.
   applications get the family through the SDK without project wiring. Validate with
   `dotnet pack frameworks/Assimalign.Cohesion.App.<Area>.Runtime/src/...csproj`.
   `<Area>.ApplicationModel` and `<Area>.Client` packages are NuGet-only, injected by
-  `Sdk.<Area>` / `Sdk.Gateway`, and never members of an `App.<Area>` shared framework
-  (owner-signed developer-experience design O2/O27).
+  `Sdk.<Area>` (its own area) and `Sdk.Gateway` (the areas of its referenced resource projects),
+  and never members of an `App.<Area>` shared framework (owner-signed developer-experience
+  design O2/O27).
 
 Relaxing the rule itself (beyond a per-project exemption) is an architectural decision: change
 `build/Targets/Build.Rules.targets`, this file, and the owning area's README in the same commit,

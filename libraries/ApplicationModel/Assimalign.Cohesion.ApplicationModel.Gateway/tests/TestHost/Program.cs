@@ -84,9 +84,9 @@ internal static class Program
         using IDisposable scope = Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.CreateScope(context);
         Func<Assimalign.Cohesion.Hosting.Resources.IResourceControlPlane> factory = area switch
         {
-            "IdentityHub" => Assimalign.Cohesion.IdentityHub.ApplicationModel.IdentityHubResourceControlPlane.Create,
-            "Rezolvr" => Assimalign.Cohesion.Rezolvr.ApplicationModel.RezolvrResourceControlPlane.Create,
-            "SecretStore" => Assimalign.Cohesion.SecretStore.ApplicationModel.SecretStoreResourceControlPlane.Create,
+            "IdentityHub" => Assimalign.Cohesion.ApplicationModel.IdentityHubResourceControlPlane.Create,
+            "Rezolvr" => Assimalign.Cohesion.ApplicationModel.RezolvrResourceControlPlane.Create,
+            "SecretStore" => Assimalign.Cohesion.ApplicationModel.SecretStoreResourceControlPlane.Create,
             _ => throw new ArgumentException("Unknown test resource area.", nameof(area)),
         };
         Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.RegisterControlPlane(typeof(Program).Assembly, factory);

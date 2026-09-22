@@ -96,7 +96,7 @@ public sealed class ResourceManifestSdkIntegrationTests
         webControlPlaneSource.ShouldContain(
             "global::Assimalign.Cohesion.Hosting.Resources.ResourceContext context = global::Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.Current;");
         webControlPlaneSource.ShouldContain(
-            "global::Assimalign.Cohesion.Web.ApplicationModel.WebResourceControlPlane.Create()");
+            "global::Assimalign.Cohesion.ApplicationModel.WebResourceControlPlane.Create()");
         webControlPlaneSource.ShouldContain("context.TryGetEndpoint(\"http\", \"http\", 18080");
         webControlPlaneSource.ShouldContain("out global::System.Uri? endpoint0");
         webControlPlaneSource.ShouldNotContain("global::Assimalign.Cohesion.Core.Endpoint" + "Address");
@@ -106,7 +106,7 @@ public sealed class ResourceManifestSdkIntegrationTests
 
         string databaseControlPlaneSource = File.ReadAllText(GeneratedOutput(databaseProject, "ResourceControlPlane.g.cs"));
         databaseControlPlaneSource.ShouldContain(
-            "global::Assimalign.Cohesion.Database.ApplicationModel.DatabaseResourceControlPlane.Create()");
+            "global::Assimalign.Cohesion.ApplicationModel.DatabaseResourceControlPlane.Create()");
         databaseControlPlaneSource.ShouldContain("context.TryGetEndpoint(\"db\", \"cohesion-db\", 15740");
         databaseControlPlaneSource.ShouldContain("context.TryGetEndpoint(\"admin\", \"http\", null");
         string databaseResourceSource = File.ReadAllText(GeneratedOutput(databaseProject, "Resource.g.cs"));

@@ -34,7 +34,8 @@ gateway therefore produces its own Composite resource manifest as well as genera
 gateway source. The generated surface includes:
 
 - `Gateway.CreateBuilder(args)` with the application name compiled into the call;
-- `Manifests`, same-application `Add*` verbs, and `AddAllResources()`;
+- `Manifests` and one same-application `Add<Name>()` verb per resource (there is no
+  `AddAllResources()`: the gateway names what it composes);
 - `Externals` for references that cross an application boundary;
 - `Applications.<Name>` for referenced gateway applications;
 - `UseGateway(args)` and the provider-specific configuration overload.
@@ -121,15 +122,22 @@ contracts are available and covered by package-boundary CI:
   the typed area ApplicationModel mappings. The set preserves Web and covers typed
   descriptors with command verbs, plus LogSpace's telemetry-sink options. Every other
   manifest kind uses the generic `ResourceOptions`/`AddResource` path.
-- Manifest-derived ApplicationModel and mount/command-client requirements become known after
-  restore. The shipped bootstrap restores all seven mapped ApplicationModel packages and
-  the SecretStore, Database, and ConfigurationStore clients up front at `$(CohesionVersion)`.
-  T11's manifest-derived injection remains the future contract; the finite explicit list
-  avoids bloating every gateway with every current and future area package.
+- Area injection is derived from the resource projects a gateway references. Each
+  `CohesionResourceReference` project is read at evaluation time (so every restore engine,
+  including Visual Studio's, sees the result) and its `Sdk="Assimalign.Cohesion.Sdk.<Area>"`
+  attribute names the area; `Area` metadata on the reference wins over the attribute. Exactly
+  those areas' `<Area>.ApplicationModel` packages are restored, at `$(CohesionVersion)` (or as
+  repository projects inside cohesion). A gateway that composes an area it does not reference
+  as a project, for example a resource that reaches it only through another project's closure,
+  adds that area's ApplicationModel package itself; until it does, the generated verb for that
+  resource uses the untyped path and the build reports `COHGW003`. The SecretStore, Database,
+  and ConfigurationStore clients stay restore-visible for every gateway because mount sources
+  and command targets can name a store no referenced project introduces; T11's restore-visible
+  producer descriptor remains the future contract for them.
 - The NuGet-only boundary requires the Gateway SDK to suppress the base SDK's implicit
-  `Assimalign.Cohesion.App` reference before the base props import. The in-process bridge
-  currently names the shipped Web and Database frameworks; selective per-manifest framework
-  injection remains future work as more typed areas ship.
+  `Assimalign.Cohesion.App` reference before the base props import. An in-process gateway
+  references `Assimalign.Cohesion.App` plus `App.<Area>` for exactly the referenced areas; an
+  out-of-process gateway references no framework.
 
 See [Design](./DESIGN.md) for the build ordering, dependency boundary, and recommended
 first-restore contract.

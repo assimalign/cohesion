@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.IdentityHub.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Describes an IdentityHub resource, its dependencies, and its declarative commands.</summary>
 public interface IIdentityHubResourceDescriptor : IResourceCommandDescriptor

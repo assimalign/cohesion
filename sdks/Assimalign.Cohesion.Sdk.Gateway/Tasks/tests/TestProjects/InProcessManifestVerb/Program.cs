@@ -1,5 +1,4 @@
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Web.ApplicationModel;
 
 IApplicationBuilder builder = Gateway.CreateBuilder(args);
 // The area verb over the generated manifest instead of the generated AddGatewaySmokeWeb() verb:

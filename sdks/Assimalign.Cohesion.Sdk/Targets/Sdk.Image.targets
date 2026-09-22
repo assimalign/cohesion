@@ -16,6 +16,15 @@
     <CohesionBuildResourceContainersDependsOn>$(CohesionBuildResourceContainersDependsOn);_CohesionPublishResourceImage</CohesionBuildResourceContainersDependsOn>
   </PropertyGroup>
 
+  <!--
+    Image publication writes outside the file-write list: the archive under the default
+    images directory and the image manifest. Clean removes them with the other outputs.
+  -->
+  <Target Name="CohesionCleanImageArtifacts" AfterTargets="CoreClean" Condition="'$(_CohesionResourceEnabled)' == 'true'">
+    <Delete Files="$(CohesionImageManifestPath);$(CohesionContainerArchiveOutputPath)" />
+    <RemoveDir Directories="$(IntermediateOutputPath)cohesion/images" Condition="Exists('$(IntermediateOutputPath)cohesion/images')" />
+  </Target>
+
   <!-- This guard also applies to raw PublishContainer; repository validation is opt-in only. -->
   <Target Name="CohesionValidateContainerRuntime" BeforeTargets="PublishContainer;_PublishSingleContainer" Condition="'$(_CohesionResourceEnabled)' == 'true'">
     <Error Condition="'$(SelfContained)' != 'true' or '$(PublishSelfContained)' == 'false'" Code="COHSDK005" File="$(MSBuildProjectFullPath)"

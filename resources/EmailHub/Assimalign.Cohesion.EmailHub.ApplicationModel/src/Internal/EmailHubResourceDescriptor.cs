@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.ApplicationModel;
 
-namespace Assimalign.Cohesion.EmailHub.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 internal sealed class EmailHubResourceDescriptor : IEmailHubResourceDescriptor
 {

@@ -6,8 +6,8 @@ IApplicationBuilder builder = Gateway.CreateBuilder(args);
 builder.RemoteReference(
     Externals.PlatformSecretStore,
     remote => remote.Endpoint("api", "https://localhost:18444"));
-// The enabled resource projects provide their area-owned manifest and default control plane.
-builder.AddAllResources();
+// The enabled resource project provides its area-owned manifest and default control plane.
+builder.AddIdentityHub();
 builder.UseGateway(args);
 
 await builder.Build().RunAsync();

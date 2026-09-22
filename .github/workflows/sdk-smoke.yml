@@ -517,10 +517,13 @@ jobs:
           }
 
           $source = Get-Content -LiteralPath $generated[0].FullName -Raw
-          foreach ($expected in @("CreateBuilder", "AddAllResources", "UseGateway")) {
+          foreach ($expected in @("CreateBuilder", "AddGatewaySmokeWeb", "AddGatewaySmokeDatabase", "UseGateway")) {
             if (-not $source.Contains($expected, [System.StringComparison]::Ordinal)) {
               throw "Generated Gateway.g.cs is missing '$expected'."
             }
+          }
+          if ($source.Contains("AddAllResources", [System.StringComparison]::Ordinal)) {
+            throw "Generated Gateway.g.cs still emits AddAllResources; the gateway names what it composes."
           }
 
           $publishDirectory = Join-Path $env:RUNNER_TEMP "cohesion-gateway-publish-${{ matrix.rid }}"

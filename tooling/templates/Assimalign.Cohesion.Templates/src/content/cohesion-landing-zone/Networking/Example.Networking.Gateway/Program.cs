@@ -9,8 +9,9 @@ builder.RemoteReference(
 builder.RemoteReference(
     Externals.PlatformConfigurationStore,
     remote => remote.Endpoint("api", "https://localhost:18443"));
-// The enabled resource projects provide their area-owned manifest and default control plane.
-builder.AddAllResources();
+// The enabled resource projects provide their area-owned manifests and default control planes.
+builder.AddNetworkingRezolvr();
+builder.AddNetworkingVpnGateway();
 builder.UseGateway(args);
 
 await builder.Build().RunAsync();
