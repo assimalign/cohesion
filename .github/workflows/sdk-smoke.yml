@@ -188,6 +188,7 @@ jobs:
         # project matrix also makes them visible to the release inventory guard.
         projects: [
             "Assimalign.Cohesion.Sdk.Tasks",
+            "Assimalign.Cohesion.Sdk.ApplicationModel.Tasks",
             "Assimalign.Cohesion.Sdk.Database.Tasks",
             "Assimalign.Cohesion.Sdk.Gateway.Tasks"
           ]
@@ -366,6 +367,7 @@ jobs:
             "Assimalign.Cohesion.Rezolvr.ApplicationModel"
             "Assimalign.Cohesion.Rezolvr.Client"
             "Assimalign.Cohesion.Sdk"
+            "Assimalign.Cohesion.Sdk.ApplicationModel"
             "Assimalign.Cohesion.Sdk.ConfigurationStore"
             "Assimalign.Cohesion.Sdk.Database"
             "Assimalign.Cohesion.Sdk.Gateway"
@@ -444,6 +446,17 @@ jobs:
               --nologo
           if ($LASTEXITCODE -ne 0) {
             throw "Base SDK package-boundary tests failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Run ApplicationModel SDK package-boundary tests
+        shell: pwsh
+        run: |
+          dotnet test `
+              ./sdks/Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/tests/Assimalign.Cohesion.Sdk.ApplicationModel.Tests.csproj `
+              --configuration Release `
+              --nologo
+          if ($LASTEXITCODE -ne 0) {
+            throw "ApplicationModel SDK package-boundary tests failed with exit code $LASTEXITCODE."
           }
 
       - name: Run Database SDK tests

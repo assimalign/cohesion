@@ -29,7 +29,7 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 657 |
+| Projects indexed | 663 |
 | Shipped library/resource projects | 251 |
 | Library areas | 21 |
 | Resource areas | 18 |
@@ -47,7 +47,7 @@ ambiguous and the winner is whichever the resolver indexed last. Where a name is
 | Name | Files |
 | --- | --- |
 | `Assimalign.Cohesion.Database.Cache.Tests` | `resources/Database/Assimalign.Cohesion.Database.Cache/src/Assimalign.Cohesion.Database.Cache.Tests.csproj`<br>`resources/Database/Assimalign.Cohesion.Database.Cache/tests/Assimalign.Cohesion.Database.Cache.Tests.csproj` |
-| `DisabledResource` | `sdks/Assimalign.Cohesion.Sdk.Gateway/Tasks/tests/TestProjects/DisabledResource/DisabledResource.csproj`<br>`sdks/Assimalign.Cohesion.Sdk/Tasks/tests/TestProjects/DisabledResource/DisabledResource.csproj` |
+| `DisabledResource` | `sdks/Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/tests/TestProjects/DisabledResource/DisabledResource.csproj`<br>`sdks/Assimalign.Cohesion.Sdk.Gateway/Tasks/tests/TestProjects/DisabledResource/DisabledResource.csproj` |
 | `CohesionProject` | `tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-composite/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-configurationstore/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-database/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-gateway/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-identityhub/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-rezolvr/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-secretstore/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-spa/CohesionProject.csproj`<br>`tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-web/CohesionProject.csproj` |
 
 ## Area roll-up
@@ -1106,7 +1106,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 
 ## Harnesses
 
-297 test, sample, and example projects are indexed for fan-in but excluded from the
+302 test, sample, and example projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
@@ -1114,7 +1114,7 @@ graph, and the dependency guards exempt them by path.
 | --- | --- |
 | `examples/` | 5 |
 | `samples/` | 9 |
-| `tests/` | 283 |
+| `tests/` | 288 |
 
 Samples, which live in the repository-root `samples/` tree:
 

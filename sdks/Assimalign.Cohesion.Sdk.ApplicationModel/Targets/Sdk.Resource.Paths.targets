@@ -1,0 +1,26 @@
+<Project>
+	<!--
+		These paths are evaluated after Microsoft.NET.Sdk.targets has established the
+		target-framework- and RID-specific IntermediateOutputPath. Resource references
+		and package references are evaluated earlier in Sdk.Resource.targets so the base
+		SDK's name-only reference converter can project them for restore.
+	-->
+	<PropertyGroup>
+		<CohesionResourceManifestPath Condition="'$(CohesionResourceManifestPath)' == ''">$(IntermediateOutputPath)cohesion/resource.json</CohesionResourceManifestPath>
+		<CohesionResourceSourcePath Condition="'$(CohesionResourceSourcePath)' == ''">$(IntermediateOutputPath)cohesion/Resource.g.cs</CohesionResourceSourcePath>
+		<CohesionResourceControlPlaneSourcePath Condition="'$(CohesionResourceControlPlaneSourcePath)' == ''">$(IntermediateOutputPath)cohesion/ResourceControlPlane.g.cs</CohesionResourceControlPlaneSourcePath>
+		<CohesionImageManifestPath Condition="'$(CohesionImageManifestPath)' == ''">$(IntermediateOutputPath)cohesion/image.json</CohesionImageManifestPath>
+		<CohesionPackResourceManifestPath Condition="'$(CohesionPackResourceManifestPath)' == ''">$(IntermediateOutputPath)cohesion/pack/resource.json</CohesionPackResourceManifestPath>
+		<_CohesionPackImageManifestPath>$(IntermediateOutputPath)cohesion/pack/image.json</_CohesionPackImageManifestPath>
+		<!-- [MSBuild]::NormalizePath is available to Visual Studio's .NET Framework MSBuild. -->
+		<_CohesionResourceManifestFullPath>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(CohesionResourceManifestPath)'))</_CohesionResourceManifestFullPath>
+	</PropertyGroup>
+
+	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
+		<CohesionResourceManifest Include="$(CohesionResourceManifestPath)" IsSelf="true" />
+		<CohesionResourcePackAsset
+			Include="$(CohesionPackResourceManifestPath)"
+			PackagePath="cohesion/resource.json"
+			Condition="'$(_CohesionPackManifest)' == 'true'" />
+	</ItemGroup>
+</Project>

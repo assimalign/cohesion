@@ -26,7 +26,8 @@ Targets/Sdk.Gateway.targets
 Tasks/Assimalign.Cohesion.Sdk.Gateway.Tasks.dll
 ```
 
-It imports `Assimalign.Cohesion.Sdk`, but it does not create or reference an
+It imports `Assimalign.Cohesion.Sdk.ApplicationModel` unconditionally and then
+imports `Assimalign.Cohesion.Sdk`, but it does not create or reference an
 `Assimalign.Cohesion.App.Gateway` framework. The orchestration plane consists of
 `Assimalign.Cohesion.ApplicationModel`,
 `Assimalign.Cohesion.ApplicationModel.Gateway`,
@@ -58,15 +59,16 @@ That ordering is load-bearing:
 2. The consumer declares `CohesionApplicationName`, `CohesionGateways`, and
    `CohesionResourceReference` items.
 3. Gateway `Sdk.targets` unconditionally restores `OutputType=Exe`,
-   `CohesionApplicationModel=enabled`, and `CohesionResourceKind=Composite` before it
-   imports the base targets. The base resource targets compute their enabled state while
-   being imported; forcing these values afterward would be too late.
-4. The base `CohesionResolveResourceReferences` target builds project references only
+   `CohesionApplicationModel=enabled`, and `CohesionResourceKind=Composite`, imports
+   the ApplicationModel SDK at `Version="$(CohesionVersion)"`, and then imports the
+   base targets. The ApplicationModel import must precede Microsoft's targets because
+   enabled-resource self-contained and RID defaults are consumed there.
+4. The ApplicationModel `CohesionResolveResourceReferences` target builds project references only
    far enough to obtain their manifests. Resource assemblies are not compilation
    references outside the explicit in-process exception.
 5. `CohesionCreateResourceVerbs` depends on that target, reads project and package
    manifests, and writes `Gateway.g.cs` before `CoreCompile`.
-6. The base resource task independently writes the gateway's Composite manifest and
+6. The ApplicationModel resource task independently writes the gateway's Composite manifest and
    lifts same-application member endpoints, mounts, and lifecycle constraints.
 
 `CohesionCreateResourceVerbs` must use an explicit dependency on
@@ -79,7 +81,7 @@ The task consumes JSON manifests, not referenced compilations. It validates iden
 application boundaries, duplicate providers, provider metadata, and protected
 mount-source mappings before emitting source.
 
-Gateway members use the base SDK's shared generated-identifier contract: non-alphanumeric
+Gateway members use the ApplicationModel SDK's shared generated-identifier contract: non-alphanumeric
 separators delimit Pascal-cased segments, `appa` becomes `AppA`, and
 `platform-configuration-store` becomes `PlatformConfigurationStore`. The rule applies uniformly to
 `Applications`, `Externals`, `References`, manifest members, resource verbs, and provider members.
@@ -107,6 +109,15 @@ existing typed planner; LogSpace provides typed options and a named telemetry-si
 descriptor without command verbs. Custom mappings that omit `DescriptorType` keep
 `IApplicationResourceDescriptor`. In-process binding is applied after constructing
 the descriptor, and the original typed descriptor is returned.
+
+`CohesionGatewayResourceKind` is defined by the ApplicationModel SDK rather than
+closed inside Gateway. `Sdk.Gateway.props` contributes the first-party rows. Normal
+NuGet evaluation unions those rows with contributions from referenced packages'
+`build` and `buildTransitive` props before `CohesionCreateResourceVerbs` snapshots the
+items. The item identity is the resource kind; `ApplicationModel`, `OptionsType`, and
+`AddMethod` are required, while `DescriptorType` defaults to
+`IApplicationResourceDescriptor`. The generator matches on ApplicationModel identity
+because the manifest carries that identity across the package boundary.
 
 `CohesionGatewayClientKind` maps both mount sources and command targets to narrow
 client packages. A manifest with a non-empty `commands` array requires its kind's
@@ -206,7 +217,7 @@ Outside in-process mode, every resource project reference remains manifest-only:
 mode turns resource project references into real assembly references during evaluation,
 before `ResolveProjectReferences`, and adds the `App` framework plus `App.<Area>` for each
 referenced area during that same evaluation. It also sets
-`ValidateExecutableReferencesMatchSelfContained=false`; the base SDK supplies enabled
+`ValidateExecutableReferencesMatchSelfContained=false`; the ApplicationModel SDK supplies enabled
 resource executables, in every configuration, with the design's self-contained host-RID
 defaults and `DisableTransitiveFrameworkReferenceDownloads=true`. Manifest-package
 resources cannot be nested because they have no local executable binding.
@@ -274,7 +285,7 @@ permit package publication.
 
 ## Application image gather
 
-`CohesionPublishImages` publishes referenced source resources through the base SDK's singular
+`CohesionPublishImages` publishes referenced source resources through the ApplicationModel SDK's singular
 `CohesionPublishImage` and reads sources-absent resources from restored manifest packages'
 `cohesion/image.json`. Package resources are provisionally the `Pinned` boundary; source
 projects use incremental `Rebuild`. The design lists freshness among resource-project inputs,
@@ -303,4 +314,4 @@ InProcess sets append the composite after the member entries; indirect project r
 direct declarations in the existing manifest-closure order.
 
 The SDK uses the existing single-RID OCI producer, configuration/capability AOT decisions,
-and release-only push policy documented in the base SDK. It adds no workflow push step.
+and release-only push policy documented in the ApplicationModel SDK. It adds no workflow push step.

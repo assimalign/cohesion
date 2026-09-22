@@ -10,16 +10,26 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 
+#if COHESION_APPLICATION_MODEL_TESTS
+namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tests;
+#else
 namespace Assimalign.Cohesion.Sdk.Tests;
+#endif
 
 internal sealed class ConsumerWorkspace : IDisposable
 {
     private const string BaseSdkPackageId = "Assimalign.Cohesion.Sdk";
+#if COHESION_APPLICATION_MODEL_TESTS
+    private const string TestSdkPackageId = "Assimalign.Cohesion.Sdk.ApplicationModel";
+#else
+    private const string TestSdkPackageId = BaseSdkPackageId;
+#endif
     private const string TestFeedEnvironmentVariable = "COHESION_SDK_TEST_FEED";
     private const string TestPackageVersionEnvironmentVariable = "COHESION_SDK_TEST_PACKAGE_VERSION";
     private static readonly string[] RequiredSdkPackageIds =
     [
         BaseSdkPackageId,
+        "Assimalign.Cohesion.Sdk.ApplicationModel",
         "Assimalign.Cohesion.Sdk.Web",
         "Assimalign.Cohesion.Sdk.ConfigurationStore",
         "Assimalign.Cohesion.Sdk.Database"
@@ -31,7 +41,7 @@ internal sealed class ConsumerWorkspace : IDisposable
     private static readonly string TestProjectsRoot = Path.Combine(
         RepositoryRoot,
         "sdks",
-        BaseSdkPackageId,
+        TestSdkPackageId,
         "Tasks",
         "tests",
         "TestProjects");

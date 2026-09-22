@@ -12,11 +12,14 @@ view, not the only one.
 
 A resource is an ordinary executable on an area SDK with `CohesionApplicationModel=enabled`. A
 gateway is an executable on `Sdk.Gateway` that references those resources. Nothing about a target
-platform is decided at build time.
+platform is decided at build time. The general-purpose `Assimalign.Cohesion.Sdk` supplies common
+.NET build tooling; the area SDK conditionally imports
+`Assimalign.Cohesion.Sdk.ApplicationModel` to generate the resource outputs. Gateway imports that
+SDK unconditionally because it is itself a Composite resource.
 
 ```mermaid
 flowchart TD
-    Resource["Resource project (Sdk.Web, Sdk.Database, …) with CohesionApplicationModel=enabled"] --> Manifest["resource.json — kind, endpoints, probes, control plane, mounts, references, properties"]
+    Resource["Resource project (area SDK + Sdk.ApplicationModel) with CohesionApplicationModel=enabled"] --> Manifest["resource.json — kind, endpoints, probes, control plane, mounts, references, properties"]
     Resource --> ResourceCode["Resource.g.cs + ResourceControlPlane.g.cs — typed accessors over the ambient ResourceContext, default control plane"]
     Gateway["Gateway project (Sdk.Gateway) with CohesionResourceReference items"] --> Manifest
     Gateway --> GatewayCode["Gateway.g.cs — Manifests members, typed Add verbs, in-process bindings, UseGateway(args) selector"]
@@ -26,11 +29,15 @@ flowchart TD
 ```
 
 - The resource build writes `resource.json` and the generated `Resource` and `ResourceControlPlane`
-  classes. `artifact.image` stays empty: image identity is gateway-owned (O37).
+  classes through `Assimalign.Cohesion.Sdk.ApplicationModel`. `artifact.image` stays empty: image
+  identity is gateway-owned (O37).
 - The gateway build reads every referenced manifest and emits `Gateway.g.cs`: the `Manifests`
   members, one typed `Add<Name>()` verb per resource, the in-process entry bindings (registered by
   both the verb and `Gateway.CreateBuilder`, B38), and the `UseGateway(args)` selector over the
   providers that the platform packages contribute. Cohesion source never names a platform type.
+- Referenced packages may contribute `CohesionGatewayResourceKind` rows through restore-visible
+  props. Those rows join Gateway's first-party table and allow third-party ApplicationModel
+  packages to produce typed resource verbs without a Gateway SDK change.
 - With `CohesionGatewayInProcess=true`, the referenced resources become real runtime references and
   their declared content is staged under `bin/cohesion/resources/<name>/`.
 

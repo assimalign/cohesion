@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
-using Assimalign.Cohesion.Sdk.Tasks.Internal;
+using Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.Internal;
 
 namespace Assimalign.Cohesion.Sdk.Gateway.Tasks;
 

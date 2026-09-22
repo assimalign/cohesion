@@ -108,8 +108,10 @@ $SdkPropsTemplate = @'
 
 $SdkTargetsTemplate = @'
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-	<!-- Version resolved via consumer's global.json msbuild-sdks pin. -->
-	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.targets" />
+	<!-- The sibling ApplicationModel SDK resolves at this area's exact frozen version. -->
+	<Import Project="Sdk.targets" Sdk="Assimalign.Cohesion.Sdk.ApplicationModel" Version="$(CohesionVersion)" Condition="'$(CohesionApplicationModel)' == 'enabled'" />
+	<!-- Enabled projects receive the base targets through ApplicationModel; disabled projects import them here. -->
+	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.targets" Condition="'$(_CohesionApplicationModelSdkImported)' != 'true'" />
 </Project>
 '@
 

@@ -347,6 +347,7 @@ $script:CohesionReleaseLibrary = @(
 # sdks/<name>/Tasks/src/<name>.Tasks.csproj and packs as the NuGet id <name>.
 $script:CohesionReleaseSdk = @(
     'Assimalign.Cohesion.Sdk'
+    'Assimalign.Cohesion.Sdk.ApplicationModel'
     'Assimalign.Cohesion.Sdk.Web'
     'Assimalign.Cohesion.Sdk.Database'
     'Assimalign.Cohesion.Sdk.Gateway'

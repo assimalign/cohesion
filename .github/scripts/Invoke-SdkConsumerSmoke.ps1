@@ -75,6 +75,7 @@ New-Item -ItemType Directory -Path $workspace -Force | Out-Null
 
 $requiredPackageId = @(
     'Assimalign.Cohesion.Sdk'
+    'Assimalign.Cohesion.Sdk.ApplicationModel'
     'Assimalign.Cohesion.Sdk.Web'
     'Assimalign.Cohesion.Sdk.Database'
     'Assimalign.Cohesion.App.Ref'

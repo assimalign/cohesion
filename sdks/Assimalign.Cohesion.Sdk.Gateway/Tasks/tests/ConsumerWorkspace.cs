@@ -31,6 +31,7 @@ internal sealed class ConsumerWorkspace : IDisposable
     private static readonly string[] RequiredPackageIds =
     [
         .. RequiredSdkPackageIds,
+        "Assimalign.Cohesion.Sdk.ApplicationModel",
         "Assimalign.Cohesion.Core",
         "Assimalign.Cohesion.ApplicationModel",
         "Assimalign.Cohesion.ApplicationModel.Gateway",
@@ -91,12 +92,15 @@ internal sealed class ConsumerWorkspace : IDisposable
         "tests",
         "TestProjects");
 
-    private ConsumerWorkspace(string rootDirectory)
+    private ConsumerWorkspace(string rootDirectory, string localPackageFeedDirectory)
     {
         RootDirectory = rootDirectory;
+        LocalPackageFeedDirectory = localPackageFeedDirectory;
     }
 
     public string RootDirectory { get; }
+
+    public string LocalPackageFeedDirectory { get; }
 
     public static ConsumerWorkspace Create(params string[] fixtureNames)
     {
@@ -120,10 +124,12 @@ internal sealed class ConsumerWorkspace : IDisposable
         string workspaceId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
         string rootDirectory = Path.Combine(
             RepositoryRoot, "_out", "g15", workspaceId[..8]);
+        string localPackageFeedDirectory = Path.Combine(rootDirectory, "packages");
         Directory.CreateDirectory(rootDirectory);
+        Directory.CreateDirectory(localPackageFeedDirectory);
         File.WriteAllText(Path.Combine(rootDirectory, "Directory.Build.props"), "<Project />");
 
-        var workspace = new ConsumerWorkspace(rootDirectory);
+        var workspace = new ConsumerWorkspace(rootDirectory, localPackageFeedDirectory);
         try
         {
             foreach (string fixtureName in fixtureNames)
@@ -191,6 +197,26 @@ internal sealed class ConsumerWorkspace : IDisposable
             "Debug",
             "--nologo",
             "--verbosity:minimal"
+        };
+        return RunDotNetAsync(RootDirectory, arguments, cancellationToken);
+    }
+
+    public Task<DotNetBuildResult> PackAsync(
+        string fixtureName,
+        CancellationToken cancellationToken = default)
+    {
+        var arguments = new List<string>
+        {
+            "pack",
+            ProjectFile(fixtureName),
+            "--configuration",
+            "Debug",
+            "--output",
+            LocalPackageFeedDirectory,
+            "--nologo",
+            "--verbosity:minimal",
+            "-p:IsPackable=true",
+            $"-p:PackageVersion={PackageVersion}"
         };
         return RunDotNetAsync(RootDirectory, arguments, cancellationToken);
     }
@@ -519,6 +545,7 @@ internal sealed class ConsumerWorkspace : IDisposable
                 new XElement(
                     "packageSources",
                     new XElement("clear"),
+                    new XElement("add", new XAttribute("key", "gateway-test"), new XAttribute("value", LocalPackageFeedDirectory)),
                     new XElement("add", new XAttribute("key", "cohesion-local"), new XAttribute("value", feedDirectory)),
                     new XElement(
                         "add",
@@ -527,6 +554,10 @@ internal sealed class ConsumerWorkspace : IDisposable
                         new XAttribute("protocolVersion", "3"))),
                 new XElement(
                     "packageSourceMapping",
+                    new XElement(
+                        "packageSource",
+                        new XAttribute("key", "gateway-test"),
+                        new XElement("package", new XAttribute("pattern", "ThirdParty.*"))),
                     new XElement(
                         "packageSource",
                         new XAttribute("key", "cohesion-local"),

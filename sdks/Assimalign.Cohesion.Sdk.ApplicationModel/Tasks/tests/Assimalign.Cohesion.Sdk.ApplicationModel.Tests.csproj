@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <GenerateDependencyFile>true</GenerateDependencyFile>
+    <IncludeBuildOutput>true</IncludeBuildOutput>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <DefineConstants>$(DefineConstants);COHESION_APPLICATION_MODEL_TESTS</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionPackageReference Include="coverlet.collector" />
+    <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+    <CohesionPackageReference Include="Shouldly" />
+    <CohesionPackageReference Include="xunit" />
+    <CohesionPackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\..\Assimalign.Cohesion.Sdk\Tasks\tests\ConsumerWorkspace.cs" Link="Shared\ConsumerWorkspace.cs" />
+    <Compile Include="..\..\..\Assimalign.Cohesion.Sdk\Tasks\tests\DotNetBuildResult.cs" Link="Shared\DotNetBuildResult.cs" />
+    <Compile Remove="TestProjects\**\*.cs" />
+  </ItemGroup>
+
+</Project>

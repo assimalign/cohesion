@@ -1,14 +1,15 @@
 # Assimalign.Cohesion.Sdk
 
-`Assimalign.Cohesion.Sdk` is the common MSBuild SDK for Cohesion applications and
-the base imported by every resource-area SDK. It chains to `Microsoft.NET.Sdk`,
-adds the Cohesion application framework reference, and owns common source
-generation and validation.
+`Assimalign.Cohesion.Sdk` is Cohesion's general-purpose base MSBuild SDK. It
+chains to `Microsoft.NET.Sdk` and can be used for ordinary libraries and
+executables. Resource manifests, generated resource APIs, container images, and
+orchestration belong to the separate
+[`Assimalign.Cohesion.Sdk.ApplicationModel`](../../../Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/docs/OVERVIEW.md)
+package.
 
 ## Project defaults
 
-The base SDK supplies the following defaults to every `Assimalign.Cohesion.Sdk`
-and `Sdk.<Area>` consumer, including Gateway:
+The base SDK supplies conditional defaults for every base and layered consumer:
 
 | Property | Default |
 | --- | --- |
@@ -19,130 +20,62 @@ and `Sdk.<Area>` consumer, including Gateway:
 | `ImplicitUsings` | `disable` |
 | `Nullable` | `enable` |
 | `IsAotCompatible` | `true` |
+| `CohesionApplicationModel` | `disabled` |
+| `DisableTransitiveFrameworkReferenceDownloads` | `true` |
 
-Each base default uses `Condition="'$(PropertyName)' == ''"` and is overridable.
-The conditions honor command-line `-p:` global properties. A consumer's
-`Directory.Build.props` and csproj body are evaluated later and override the
-defaults through MSBuild's last-assignment-wins rule; those consumer values are
-not visible when the conditions run.
+Every ordinary default is conditional on an empty value. Command-line global
+properties are honored, and later assignments in a consumer project can
+override the props-time values. Library consumers set `OutputType=Library`.
 
-`Targets/Assimalign.Cohesion.Sdk.Defaults.props` is the first import in the base
-`Sdk.props`, before `Microsoft.NET.Sdk`'s `Sdk.props`. Microsoft's props already
-default `OutputType` to `Library`, so an emptiness condition after that import
-would never select `Exe`. The shipped TFM is a literal because the repository's
-`build/Targets/Build.TargetFramework.props` is not shipped. That repository-side
-source, this literal, and the SDK's `KnownFrameworkReference` TFMs must move together.
+The base SDK still registers Cohesion frameworks and implicitly includes
+`Assimalign.Cohesion.App` unless `CohesionAutoIncludeAppFramework=false`. Moving
+that framework behavior is a separate change.
 
-This implements developer-experience design §4.1: `Directory.Build.props` carries
-identity only (`CohesionOrganization`, `CohesionContainerRegistry`, `VersionPrefix`).
-A resource needs its SDK declaration, Cohesion items/properties, and `Program.cs`.
-Library-style base-SDK consumers pulled in through `CohesionProjectReference`
-declare `<OutputType>Library</OutputType>` explicitly; the
-`Sdk.Gateway/tests/TestProjects/GatewaySmokeSupport` fixture is an in-repo example.
+## Base build tooling
 
-Two constraints apply:
+The package owns these behaviors:
 
-- A consumer's `TargetFrameworks` (plural) is invisible at props time. Setting it
-  leaves both `TargetFramework` and `TargetFrameworks` populated, so Microsoft's
-  `Sdk.targets` does not set `IsCrossTargetingBuild=true`. Resource executables
-  never multi-target (design R3).
-- On the latest TFM, `Microsoft.NET.Sdk.Common.targets` forces
-  `LangVersion=Preview` whenever `EnablePreviewFeatures=true`. The base SDK's
-  language default is therefore effectively redundant: override `LangVersion`
-  together with `EnablePreviewFeatures` (for example, `14.0` and `false`).
+- strongly typed settings generation from `appsettings*.json`, enabled by
+  `CohesionAppSettingsClass`;
+- name-only `CohesionProjectReference` resolution;
+- agreement validation for Cohesion SDK pins in the nearest `global.json`;
+- Cohesion framework registration and the current implicit App framework;
+- common language, target-framework, executable, and build defaults.
 
-Gateway preserves two stricter assignments: `Targets/Sdk.Gateway.props` sets
-`IsAotCompatible=true` unconditionally after the consumer's
-`Directory.Build.props`, and `Sdk/Sdk.targets` forces `OutputType=Exe` after
-the csproj body. These Gateway assignments are not conditional base defaults;
-in particular, a csproj `OutputType=Library` cannot turn a gateway into a library.
+Strongly typed settings emit public, nullable-aware types and an AOT-safe
+`Bind(IConfiguration)` method made from explicit configuration reads. No source
+is generated when `CohesionAppSettingsClass` is absent.
 
-## Strongly typed settings
+## Application-model boundary
 
-Settings generation is opt-in. Set the generated root type name in the consumer
-project:
+An area SDK imports `Assimalign.Cohesion.Sdk.ApplicationModel` when the consumer
+sets `CohesionApplicationModel=enabled`; Gateway imports it unconditionally.
+The auxiliary SDK is resolved at the area SDK's exact `$(CohesionVersion)` and
+does not need another `global.json` pin.
 
-```xml
-<PropertyGroup>
-    <CohesionAppSettingsClass>CatalogSettings</CohesionAppSettingsClass>
-</PropertyGroup>
-```
-
-The namespace defaults to `RootNamespace`; set
-`CohesionAppSettingsNamespace` to override it. When
-`CohesionAppSettingsClass` is unset, the SDK generates no settings source and
-adds no generated settings file to `Compile`.
-
-At build time the SDK merges the shapes of `appsettings*.json` and generates a
-public root class, public nested classes, and an instance
-`Bind(IConfiguration)` method. Objects, arrays, strings, Boolean values, integer
-values, and floating-point values are supported. `Bind` reads each known leaf by
-its full Cohesion configuration path through `IConfiguration.GetEntry`; it does
-not use reflection or the reflection-based `ConfigurationBinder`. A missing
-configuration leaf leaves the corresponding property unchanged.
+A project that enables the application model while using only the base SDK fails
+with COHSDK011. Use a resource-area SDK or add the explicit import documented by
+the ApplicationModel SDK. This guard prevents an enabled-looking project from
+silently omitting manifests and generated source.
 
 ## SDK pin validation
 
-During restore and build, the base SDK walks upward from the consumer project
-directory to find the nearest `global.json`. If one is found, COHSDK002 requires
-every present, recognized `Assimalign.Cohesion.Sdk*` pin to use exactly the same
-version string and requires the pinned .NET SDK version to be `10.0.300` or
-newer. Exact string agreement deliberately accepts local identities such as
-`10.0.0-preview.1.local` when every Cohesion SDK pin uses that identity.
-
-A consumer with no `global.json` is unchanged. Tooling that must inspect a
-temporarily inconsistent tree can set `CohesionSkipSdkPinCheck=true`; normal
-builds should not set the escape property.
+During restore and build, the base SDK walks upward to the nearest `global.json`.
+When present, COHSDK002 requires all recognized Cohesion SDK pins that are
+present to use the same exact version string and requires the pinned .NET SDK to
+be `10.0.300` or newer. Local identities such as
+`10.0.0-preview.1.local` are valid when the pins agree. Consumers without a
+`global.json` are unchanged. `CohesionSkipSdkPinCheck=true` is reserved for
+tooling that must inspect a temporarily inconsistent tree.
 
 ## Diagnostics
 
 | Code | Severity | Meaning |
 | --- | --- | --- |
-| COHSDK001 | Error | A referenced resource project has `CohesionApplicationModel` disabled. |
-| COHSDK002 | Error | Cohesion SDK pins disagree, the pinned .NET SDK is invalid or below `10.0.300`, or the nearest `global.json` cannot be read. |
-| COHSDK003 | Error | NativeAOT image production has no available host or in-container route. |
-| COHSDK004 | Warning or error | A packed resource lacks a digest-pinned image; `CohesionImageRequired=true` promotes the diagnostic to an error. |
-| COHSDK005 | Error | A framework-dependent container cannot start because its base lacks Cohesion shared frameworks. |
-| COHSDK008 | Error | `CohesionApplicationModel` is enabled for a project whose output is not an executable. |
-| COHSDK009 | Error | A `CohesionResourceProperty` key does not use the current resource kind's prefix. |
-| COHSDK010 | Error | HTTPS Certificate must name a declared Secret mount; non-HTTPS Certificate metadata is rejected. Reserved `public` is exempt. |
+| COHSDK002 | Error | Cohesion SDK pins disagree, or the nearest pinned .NET SDK is invalid or too old. |
+| COHSDK011 | Error | `CohesionApplicationModel=enabled` but the ApplicationModel SDK was not imported. |
 
-See [DESIGN.md](./DESIGN.md) for the implementation contracts and
-[`docs/VERSIONING_RELEASE_POLICY.md`](../../../../docs/VERSIONING_RELEASE_POLICY.md) for repository-wide package
-and pin versioning rules.
+Resource, manifest, certificate, and image diagnostics are documented by the
+[ApplicationModel SDK](../../../Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/docs/DESIGN.md#diagnostics).
 
-## Publishing images
-
-Set `CohesionOrganization` (or an explicit lowercase `CohesionContainerRepository`) and run
-`dotnet publish -c Debug -t:CohesionPublishImage` for a daemon-free OCI archive. The image
-uses a self-contained Linux x64 apphost and the .NET 10 runtime-deps base. Release requires
-NativeAOT; the SDK probes host capability and the in-container CLI route, and reports COHSDK003
-when unavailable. The in-container build recipe is still awaiting specification.
-
-`CohesionImageRuntimeIdentifier` selects the image target, defaulting to an explicitly supplied
-`RuntimeIdentifier`, then `linux-x64` before the SDK supplies a host-build RID. For example,
-`dotnet publish -c Debug -t:CohesionPublishImages -p:CohesionImageRuntimeIdentifier=linux-arm64`
-on an apphost forwards that image RID to every source member's `CohesionPublishImage` while
-removing the apphost's build `RuntimeIdentifier`. The image index records `linux/arm64`, and
-the existing input fingerprint decides whether image creation can be skipped.
-
-`CohesionImageAot=auto|true|false` follows the [decision table](./DESIGN.md#container-image-production).
-Release `false` is diagnosed as a deviation. `CohesionImageFreshness=Rebuild` hashes publish
-inputs and verifies cached image artifacts before skipping image creation. `Pinned` applies
-provisionally to package-only resources in the gateway gather and builds nothing.
-
-`CohesionContainerBaseImage=auto`, `CohesionContainerPush=false`, and
-`CohesionContainerArchiveOutputPath=$(IntermediateOutputPath)cohesion/images/$(CohesionResourceName).tar`
-are the defaults. The frozen `cohesion/image/v1` index at
-`$(IntermediateOutputPath)cohesion/image.json` records the repository, verified digest, the OCI
-platform of the published runtime identifier (`linux/amd64` for `linux-x64`, `linux/arm64` for
-`linux-arm64`), `aot`, base image, and a contained relative archive. Registry is late-bound;
-an actual push pins only the authority. A registry sink omits `archive` entirely.
-`linux-musl-x64` and `linux-musl-arm64` record the same platform as their glibc counterparts
-plus an Alpine base identity; the platform-variant decision is open.
-
-`CohesionPackImageArchive=true` ships the archive under `cohesion/images/` to preserve
-index containment. Uncontained archive destinations are errors. Framework-dependent
-`PublishContainer` is COHSDK005. Exactly one SDK image creation selects archive or registry.
-Digest-preserving `CohesionContainerPushTool` transfer is deferred; Cohesion's own images
-push only from `release.yml`.
+See [DESIGN.md](./DESIGN.md) for import ordering and implementation contracts.

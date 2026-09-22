@@ -7,6 +7,8 @@ using System.Text.Json;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 
+using Assimalign.Cohesion.Sdk.ApplicationModel.Tasks;
+
 namespace Assimalign.Cohesion.Sdk.Gateway.Tasks;
 
 /// <summary>Gathers ordered resource indexes and relocates verified archives beneath the application index.</summary>

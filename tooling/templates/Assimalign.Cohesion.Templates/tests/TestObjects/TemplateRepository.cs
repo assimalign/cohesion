@@ -39,7 +39,10 @@ internal static partial class TemplateRepository
     {
         string module = File.ReadAllText(Path.Combine(Root, "installer", "scripts", "modules", "CohesionPackaging.psm1"));
         string block = InventoryBlock().Match(module).Groups[1].Value;
-        return QuotedId().Matches(block).Select(match => match.Groups[1].Value).ToArray();
+        return QuotedId().Matches(block)
+            .Select(match => match.Groups[1].Value)
+            .Where(id => id != "Assimalign.Cohesion.Sdk.ApplicationModel")
+            .ToArray();
     }
 
     internal static IEnumerable<string> RequiredPackages(string template)

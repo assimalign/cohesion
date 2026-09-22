@@ -2,5 +2,6 @@
     <PropertyGroup>
         <_CohesionSdk>true</_CohesionSdk>
         <_CohesionIntermediateOutputPath>$(IntermediateOutputPath)\Cohesion</_CohesionIntermediateOutputPath>
+		<CohesionApplicationModel Condition="'$(CohesionApplicationModel)' == ''">disabled</CohesionApplicationModel>
     </PropertyGroup>
 </Project>

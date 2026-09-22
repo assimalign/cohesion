@@ -133,8 +133,9 @@ code, not a generated entry point or a framework-owned apphost.
 
 Orchestration is an opt-in build behavior on that executable:
 
-- With `<CohesionApplicationModel>enabled</CohesionApplicationModel>`, the SDK emits
-  `resource.json`, typed `Resource.g.cs` accessors over the ambient
+- With `<CohesionApplicationModel>enabled</CohesionApplicationModel>`, the area SDK
+  imports `Assimalign.Cohesion.Sdk.ApplicationModel`; that SDK emits `resource.json`,
+  typed `Resource.g.cs` accessors over the ambient
   `Assimalign.Cohesion.Hosting.Resources.ResourceContext`, and
   `ResourceControlPlane.g.cs`, which registers the default control plane supplied by the area's
   `<Area>.ApplicationModel` package.

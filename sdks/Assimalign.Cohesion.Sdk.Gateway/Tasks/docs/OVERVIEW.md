@@ -30,7 +30,8 @@ resource roots:
 ```
 
 `CohesionApplicationModel` is always `enabled`; a consumer cannot turn it off. The
-gateway therefore produces its own Composite resource manifest as well as generated
+Gateway SDK therefore imports `Assimalign.Cohesion.Sdk.ApplicationModel`
+unconditionally and produces its own Composite resource manifest as well as generated
 gateway source. The generated surface includes:
 
 - `Gateway.CreateBuilder(args)` with the application name compiled into the call;
@@ -49,6 +50,14 @@ LogSpace supplies typed options for the telemetry sink without command verbs.
 Command-bearing manifests advertise accepted kinds as bare strings in `commands` and
 require their narrow client package, even when they are not used as mount sources.
 
+The typed-kind table is open. `Targets/Sdk.Gateway.props` contributes the first-party
+`CohesionGatewayResourceKind` rows, and referenced packages may contribute their own
+rows from `build` or `buildTransitive` props. Each row names its resource kind,
+ApplicationModel package, options type, optional descriptor type, and static add
+method. Gateway unions all rows before source generation, so a third-party
+ApplicationModel package can produce a typed verb without changing this SDK. See the
+[ApplicationModel SDK contract](../../../Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/docs/DESIGN.md#typed-gateway-resource-kind-contract).
+
 Gateway inherits the base SDK's [project defaults](../../../Assimalign.Cohesion.Sdk/Tasks/docs/OVERVIEW.md#project-defaults):
 `Exe`, `net10.0`, preview language/features, disabled implicit usings, enabled
 nullable analysis, and AOT compatibility. It retains unconditional
@@ -58,8 +67,8 @@ follow the normal consumer override rules and documented language/TFM constraint
 
 ## SDK pins
 
-The Gateway SDK imports the base Cohesion SDK. NuGet's nested MSBuild SDK import does
-not inherit an inline version, so a consumer must pin both SDK identities:
+The Gateway SDK imports the base Cohesion SDK. NuGet's nested base-SDK import does
+not inherit an inline version, so a consumer must pin the base and Gateway identities:
 
 ```json
 {
@@ -74,8 +83,10 @@ not inherit an inline version, so a consumer must pin both SDK identities:
 }
 ```
 
-The two Cohesion versions must agree. Repositories that use other Cohesion SDKs pin
-those identities at the same version as well.
+The two Cohesion versions must agree. Gateway imports the sibling ApplicationModel
+SDK with `Version="$(CohesionVersion)"`, so that package needs no `global.json` pin.
+Repositories that use other Cohesion SDKs pin those selected identities at the same
+version as well.
 
 ## Provider channel
 
@@ -119,9 +130,9 @@ contracts are available and covered by package-boundary CI:
   contributions live outside this repository and require an agreed
   `CohesionPlatformsVersion`.
 - Web, Database, ConfigurationStore, SecretStore, IdentityHub, Rezolvr, and LogSpace are
-  the typed area ApplicationModel mappings. The set preserves Web and covers typed
-  descriptors with command verbs, plus LogSpace's telemetry-sink options. Every other
-  manifest kind uses the generic `ResourceOptions`/`AddResource` path.
+  the first-party typed ApplicationModel mappings. Referenced packages may add more
+  `CohesionGatewayResourceKind` rows. A manifest with no matching restore-visible row
+  uses the generic `ResourceOptions`/`AddResource` path.
 - Area injection is derived from the resource projects a gateway references. Each
   `CohesionResourceReference` project is read at evaluation time (so every restore engine,
   including Visual Studio's, sees the result) and its `Sdk="Assimalign.Cohesion.Sdk.<Area>"`
@@ -147,7 +158,7 @@ first-restore contract.
 Run `dotnet publish -c Debug -p:CohesionGatewayAot=false -t:CohesionPublishImages` to publish source resources incrementally
 and gather `application.images.json` beside the gateway publish output. Manifest-package
 resources use their pinned `cohesion/image.json` without rebuilding. Release resources require
-NativeAOT under the base SDK's COHSDK003/005 rules.
+NativeAOT under the ApplicationModel SDK's COHSDK003/005 rules.
 
 The frozen `cohesion/images/v1` document keeps declaration order, unique resource names,
 and the application's name. Entries omit `schema`. Referenced archives are copied under the

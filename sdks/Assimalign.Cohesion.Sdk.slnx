@@ -16,6 +16,13 @@
 	<Folder Name="/sdks/Assimalign.Cohesion.Sdk/Tasks/tests/">
 		<Project Path="Assimalign.Cohesion.Sdk/Tasks/tests/Assimalign.Cohesion.Sdk.Tests.csproj" />
 	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.ApplicationModel/" />
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/">
+		<Project Path="Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/src/Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.csproj" />
+	</Folder>
+	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/tests/">
+		<Project Path="Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/tests/Assimalign.Cohesion.Sdk.ApplicationModel.Tests.csproj" />
+	</Folder>
 	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.ApiManager/" />
 	<Folder Name="/sdks/Assimalign.Cohesion.Sdk.ApiManager/Tasks/">
 		<Project Path="Assimalign.Cohesion.Sdk.ApiManager/Tasks/src/Assimalign.Cohesion.Sdk.ApiManager.Tasks.csproj" />

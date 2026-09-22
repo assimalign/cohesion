@@ -325,11 +325,14 @@ sdks/Assimalign.Cohesion.Sdk/Targets/      ← base SDK only
 ├── ...Sdk.NameOnly.ProjectReference.targets
 ├── ...Sdk.StronglyTypedSettings.props / .targets
 ├── ...Sdk.Defaults.props                  ← SDK-owned consumer project defaults
-├── ...Sdk.PinValidation.targets           ← SDK and platform version-pin validation
+└── ...Sdk.PinValidation.targets           ← SDK and platform version-pin validation
+
+sdks/Assimalign.Cohesion.Sdk.ApplicationModel/Targets/
 ├── ...Sdk.ResourceManifest.props          ← resource manifest metadata defaults
 ├── RESOURCE_MANIFEST_README.md            ← resource manifest build contract
 ├── Sdk.Image.targets                     ← OCI image production and publication gather
 ├── Sdk.Resource.props                    ← resource opt-in properties
+├── Sdk.Resource.Paths.targets            ← late RID/TFM intermediate-path defaults
 ├── Sdk.Resource.targets                  ← manifest and resource surface generation
 └── ...Sdk.ApplicationModel.Build.targets
 

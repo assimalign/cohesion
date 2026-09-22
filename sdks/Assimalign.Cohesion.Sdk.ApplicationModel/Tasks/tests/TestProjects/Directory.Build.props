@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Repository-owned SDK integration-test fixtures are never release packages. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,9 @@
+<Project>
+  <ItemGroup>
+    <CohesionGatewayResourceKind Include="ThirdParty"
+      ApplicationModel="ThirdParty.ApplicationModel"
+      OptionsType="global::Assimalign.Cohesion.ApplicationModel.ThirdPartyResourceOptions"
+      DescriptorType="global::Assimalign.Cohesion.ApplicationModel.IApplicationResourceDescriptor"
+      AddMethod="global::Assimalign.Cohesion.ApplicationModel.ThirdPartyResourceExtensions.AddThirdParty" />
+  </ItemGroup>
+</Project>

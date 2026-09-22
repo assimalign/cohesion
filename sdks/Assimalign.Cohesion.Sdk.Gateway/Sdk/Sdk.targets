@@ -134,6 +134,9 @@
 		<PublishAot Condition="'$(CohesionGatewayAot)' == 'auto' and '$(_CohesionGatewayAutoAotKnownSafe)' == 'True'">true</PublishAot>
 	</PropertyGroup>
 
-	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.targets" />
+	<!-- The sibling ApplicationModel SDK resolves at this area's exact frozen version. -->
+	<!-- Gateway receives the base targets through ApplicationModel's unconditional import. -->
+	<Import Project="Sdk.targets" Sdk="Assimalign.Cohesion.Sdk.ApplicationModel" Version="$(CohesionVersion)" />
+	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.targets" Condition="'$(_CohesionApplicationModelSdkImported)' != 'true'" />
 	<Import Project="..\Targets\Sdk.Gateway.targets" />
 </Project>

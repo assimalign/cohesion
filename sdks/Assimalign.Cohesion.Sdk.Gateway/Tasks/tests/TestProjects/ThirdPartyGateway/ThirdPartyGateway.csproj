@@ -1,0 +1,11 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <PropertyGroup>
+    <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
+    <CohesionResourceName>third-party-gateway</CohesionResourceName>
+    <CohesionGatewayAot>false</CohesionGatewayAot>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionPackageReference Include="ThirdParty.ApplicationModel" Version="$(CohesionVersion)" />
+    <CohesionResourceReference Include="..\ThirdPartyResource\ThirdPartyResource.csproj" />
+  </ItemGroup>
+</Project>
