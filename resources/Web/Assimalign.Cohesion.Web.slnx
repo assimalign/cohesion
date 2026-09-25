@@ -632,4 +632,16 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Resources/tests/">
 		<Project Path="Assimalign.Cohesion.Web.Hosting.Resources/tests/Assimalign.Cohesion.Web.Hosting.Resources.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Refs/">
+		<File Path="Assimalign.Cohesion.Web.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Refs/src/">
+		<Project Path="Assimalign.Cohesion.Web.Refs/src/Assimalign.Cohesion.Web.Refs.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Runtime/">
+		<File Path="Assimalign.Cohesion.Web.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.Web.Runtime/src/Assimalign.Cohesion.Web.Runtime.csproj" />
+	</Folder>
 </Solution>

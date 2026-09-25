@@ -63,4 +63,16 @@
 	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/docs/Assembly/Assimalign.Cohesion.LogSpace.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.LogSpace.ApplicationModel/docs/Assembly/Assimalign.Cohesion.LogSpace.ApplicationModel/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Refs/">
+		<File Path="Assimalign.Cohesion.LogSpace.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Refs/src/">
+		<Project Path="Assimalign.Cohesion.LogSpace.Refs/src/Assimalign.Cohesion.LogSpace.Refs.csproj" />
+	</Folder>
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Runtime/">
+		<File Path="Assimalign.Cohesion.LogSpace.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.LogSpace.Runtime/src/Assimalign.Cohesion.LogSpace.Runtime.csproj" />
+	</Folder>
 </Solution>

@@ -31,9 +31,10 @@
                                             should not expose X to its consumers".
                                             Pair with a matching
                                             <CohesionFrameworkPrivateAssembly>
-                                            entry in
-                                            frameworks/Assimalign.Cohesion.App.props
-                                            so the containing framework's
+                                            entry in the containing framework's
+                                            list (resources/<Area>/
+                                            Assimalign.Cohesion.<Area>.Runtime/
+                                            Directory.Build.props) so its
                                             Runtime pack still ships X.dll at
                                             run time.
     -->

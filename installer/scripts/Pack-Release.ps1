@@ -20,7 +20,8 @@
         build/Targets/Build.Version.props currently says. Here the caller passes the version the
         release tag asserted, and every layer of the version props is pinned to it by global
         MSBuild property - the layering means a stray SDK default otherwise lands a package at
-        1.0.0 (see frameworks/Directory.Build.props for that exact bug).
+        1.0.0 (see the framework producer defaults in libraries/App/Assimalign.Cohesion.App.props
+        for that exact bug).
 
       * It emits a publication manifest. package-order.txt and checksums.sha256 are what the
         publish jobs in .github/workflows/release.yml consume; they never check out the
@@ -204,8 +205,9 @@ Get-ChildItem -LiteralPath $packageDirectory -File |
 
 # Passed on the command line, which makes them GLOBAL properties: a <PropertyGroup> in any
 # Directory.Build.props cannot override them. That is the point - the version reaches every one of
-# the layered props files (build/Targets/Build.Version.props, libraries/, frameworks/, sdks/)
-# identically, instead of each re-deriving it and one of them getting it wrong.
+# the layered props files (build/Targets/Build.Version.props, libraries/, resources/, sdks/, and
+# the framework producer defaults in libraries/App/Assimalign.Cohesion.App.props) identically,
+# instead of each re-deriving it and one of them getting it wrong.
 $buildProperties = @(
     "-p:CohesionMajorVersion=$majorVersion"
     "-p:CohesionMinorVersion=$minorVersion"

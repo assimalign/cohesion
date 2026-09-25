@@ -60,4 +60,16 @@
 	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.EventHub.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.EventHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.EventHub.ApplicationModel/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.Refs/">
+		<File Path="Assimalign.Cohesion.EventHub.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.Refs/src/">
+		<Project Path="Assimalign.Cohesion.EventHub.Refs/src/Assimalign.Cohesion.EventHub.Refs.csproj" />
+	</Folder>
+	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.Runtime/">
+		<File Path="Assimalign.Cohesion.EventHub.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.EventHub.Runtime/src/Assimalign.Cohesion.EventHub.Runtime.csproj" />
+	</Folder>
 </Solution>

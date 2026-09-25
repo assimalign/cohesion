@@ -7,8 +7,8 @@ on:
       - ".github/scripts/Invoke-SdkConsumerSmoke.ps1"
       - "analyzers/**"
       - "build/**"
-      - "frameworks/**"
       - "installer/scripts/**"
+      - "libraries/App/**"
       - "libraries/ApplicationModel/**"
       - "libraries/Connections/**"
       - "libraries/Core/**"
@@ -16,6 +16,8 @@ on:
       - "libraries/Http/**"
       - "libraries/ObjectMapping/**"
       - "libraries/Security/Assimalign.Cohesion.Security.DataProtection/**"
+      - "resources/*/Assimalign.Cohesion.*.Refs/**"
+      - "resources/*/Assimalign.Cohesion.*.Runtime/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/**"
@@ -56,8 +58,8 @@ on:
       - ".github/scripts/Invoke-SdkConsumerSmoke.ps1"
       - "analyzers/**"
       - "build/**"
-      - "frameworks/**"
       - "installer/scripts/**"
+      - "libraries/App/**"
       - "libraries/ApplicationModel/**"
       - "libraries/Connections/**"
       - "libraries/Core/**"
@@ -65,6 +67,8 @@ on:
       - "libraries/Http/**"
       - "libraries/ObjectMapping/**"
       - "libraries/Security/Assimalign.Cohesion.Security.DataProtection/**"
+      - "resources/*/Assimalign.Cohesion.*.Refs/**"
+      - "resources/*/Assimalign.Cohesion.*.Runtime/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/**"
@@ -188,7 +192,7 @@ jobs:
         shell: pwsh
         run: |
           dotnet test `
-              ./frameworks/Assimalign.Cohesion.App.Runtime/tests/Assimalign.Cohesion.App.Runtime.Tests.csproj `
+              ./libraries/App/Assimalign.Cohesion.App.Runtime/tests/Assimalign.Cohesion.App.Runtime.Tests.csproj `
               --configuration Release `
               --nologo
           if ($LASTEXITCODE -ne 0) {

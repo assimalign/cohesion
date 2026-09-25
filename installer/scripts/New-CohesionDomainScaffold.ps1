@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     For each resource name (e.g. "Scheduler", "IdentityHub", ...), creates
-    nine files following the existing Web / Database conventions:
+    twelve files following the existing Web / Database conventions:
 
         sdks/Assimalign.Cohesion.Sdk.<Name>/
             Sdk/Sdk.props
@@ -15,19 +15,34 @@
             Targets/Sdk.<Name>.targets
             Tasks/src/Assimalign.Cohesion.Sdk.<Name>.Tasks.csproj
 
-        frameworks/Assimalign.Cohesion.App.<Name>.Refs/src/Assimalign.Cohesion.App.<Name>.Refs.csproj
-        frameworks/Assimalign.Cohesion.App.<Name>.Runtime/src/Assimalign.Cohesion.App.<Name>.Runtime.csproj
+        resources/<Name>/Directory.Build.props
+
+        resources/<Name>/Assimalign.Cohesion.<Name>.Refs/
+            Directory.Build.props
+            src/Assimalign.Cohesion.<Name>.Refs.csproj
+
+        resources/<Name>/Assimalign.Cohesion.<Name>.Runtime/
+            Directory.Build.props
+            src/Assimalign.Cohesion.<Name>.Runtime.csproj
 
         resources/<Name>/Assimalign.Cohesion.<Name>.ApplicationModel/
             src/Assimalign.Cohesion.<Name>.ApplicationModel.csproj
             src/<Name>ResourceControlPlane.cs
 
-    The framework starts with just the umbrella assembly (App.<Name>.dll).
-    Categorize libraries from resources/<Name>/ into this framework by
-    adding <CohesionFrameworkAssembly> entries to the corresponding
-    ItemGroup in frameworks/Assimalign.Cohesion.App.props (a separate
-    script step appends an empty placeholder ItemGroup for each new
-    framework so you can fill them in incrementally).
+    The two framework producers follow the naming convention in
+    .claude/rules/build-system.md ("Framework producer projects"): the
+    project is named for its area, while the assembly, package, and
+    framework names keep the App segment (Assimalign.Cohesion.App.<Name>,
+    Assimalign.Cohesion.App.<Name>.Ref, Assimalign.Cohesion.App.<Name>.Runtime.<rid>).
+
+    The framework's membership list is the Runtime producer's
+    Directory.Build.props; the Refs producer's Directory.Build.props imports
+    it, so both producers read one list. It starts with just the umbrella
+    assembly (Assimalign.Cohesion.App.<Name>). Add the area's libraries to it
+    as <CohesionFrameworkAssembly> entries, or as
+    <CohesionFrameworkPrivateAssembly> for a runtime-only implementation
+    detail. That file imports the area's own Directory.Build.props, which
+    the scaffold writes too when the area has none.
 
     Existing files are not overwritten unless -Force is passed.
 
@@ -36,7 +51,9 @@
     resources/* (excluding Web and Database which already exist).
 
 .PARAMETER Force
-    Overwrite existing files. Use with care.
+    Overwrite existing files. Use with care. The Runtime producer's
+    Directory.Build.props is never overwritten: it holds the hand-curated
+    membership list.
 
 .EXAMPLE
     pwsh installer\scripts\New-CohesionDomainScaffold.ps1
@@ -66,8 +83,10 @@ if (-not $Name -or $Name.Count -eq 0) {
 }
 
 # ---------------------------------------------------------------------------
-# Templates. Each takes one parameter ($n) - the resource Name. Tabs match
-# the existing files' indentation (tabs for csproj/props/targets bodies).
+# Templates. Each takes one parameter ($n) - the resource Name - except the
+# area's Directory.Build.props, which is the same in every area. Tabs match
+# the existing files' indentation (tabs for csproj/props/targets bodies;
+# the producers' Directory.Build.props use four spaces, noted below).
 # ---------------------------------------------------------------------------
 
 $TasksCsprojTemplate = @'
@@ -154,13 +173,13 @@ $RuntimeCsprojTemplate = @'
 		<CohesionFrameworkKind>Runtime</CohesionFrameworkKind>
 	</PropertyGroup>
 
-	<Import Project="..\..\Assimalign.Cohesion.App.props" />
+	<Import Project="$(CohesionRepositoryDirectory)libraries\App\Assimalign.Cohesion.App.props" />
 	<ItemGroup>
 		<CohesionProjectReference Include="@(CohesionFrameworkAssembly)"
 		                          Exclude="$(AssemblyName)" />
 	</ItemGroup>
 
-	<Import Project="..\..\Assimalign.Cohesion.App.targets" />
+	<Import Project="$(CohesionRepositoryDirectory)libraries\App\Assimalign.Cohesion.App.targets" />
 </Project>
 '@
 
@@ -169,6 +188,7 @@ $RefsCsprojTemplate = @'
 	<PropertyGroup>
 		
 		<RootNamespace>Assimalign.Cohesion</RootNamespace>
+		<AssemblyName>Assimalign.Cohesion.App.{NAME}.Refs</AssemblyName>
 
 		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
 		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
@@ -184,14 +204,56 @@ $RefsCsprojTemplate = @'
 	</PropertyGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\..\Assimalign.Cohesion.App.{NAME}.Runtime\src\Assimalign.Cohesion.App.{NAME}.Runtime.csproj"
+		<ProjectReference Include="..\..\Assimalign.Cohesion.{NAME}.Runtime\src\Assimalign.Cohesion.{NAME}.Runtime.csproj"
 			ReferenceOutputAssembly="false"
 			SkipGetTargetFrameworkProperties="true"
 			UndefineProperties="TargetFramework;RuntimeIdentifier" />
 	</ItemGroup>
 
-	<Import Project="..\..\Assimalign.Cohesion.App.props" />
-	<Import Project="..\..\Assimalign.Cohesion.App.targets" />
+	<Import Project="$(CohesionRepositoryDirectory)libraries\App\Assimalign.Cohesion.App.props" />
+	<Import Project="$(CohesionRepositoryDirectory)libraries\App\Assimalign.Cohesion.App.targets" />
+</Project>
+'@
+
+# The area's own Directory.Build.props, which the Runtime producer's imports.
+$AreaPropsTemplate = @'
+<Project>
+	<Import Project="..\Directory.Build.props" />
+</Project>
+'@
+
+# The framework's membership list. Unlike the other templates these two use
+# four-space indentation, matching every area's copy.
+$RuntimePropsTemplate = @'
+<Project>
+    <!--
+        Assimalign.Cohesion.App.{NAME} membership: every assembly the framework ships.
+
+        CohesionFrameworkAssembly items are public: listed in the Ref pack's FrameworkList.xml
+        and shipped in the Runtime pack. CohesionFrameworkPrivateAssembly items are runtime-only:
+        shipped in the Runtime pack and listed in RuntimeList.xml, but absent from the Ref pack.
+        The first entry is the framework's umbrella assembly, this producer's own output.
+
+        This Runtime producer references every entry. Its sibling Refs producer imports this
+        file as its own Directory.Build.props, so both producers read this one list.
+        Rules: .claude/rules/build-system.md, "Framework membership".
+    -->
+    <Import Project="..\Directory.Build.props" />
+
+    <ItemGroup>
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.{NAME}" />
+    </ItemGroup>
+</Project>
+'@
+
+$RefsPropsTemplate = @'
+<Project>
+    <!--
+        The Refs producer packs the framework its Runtime sibling defines: importing that
+        sibling's Directory.Build.props, which imports the parent chain, gives this project
+        the same Assimalign.Cohesion.App.{NAME} membership list.
+    -->
+    <Import Project="..\Assimalign.Cohesion.{NAME}.Runtime\Directory.Build.props" />
 </Project>
 '@
 
@@ -230,8 +292,9 @@ public static class {NAME}ResourceControlPlane
 '@
 
 function Write-IfNotExists {
-    param([string]$Path, [string]$Content)
-    if ((Test-Path -LiteralPath $Path) -and -not $Force) {
+    # -NeverOverwrite keeps an existing file even under -Force.
+    param([string]$Path, [string]$Content, [switch]$NeverOverwrite)
+    if ((Test-Path -LiteralPath $Path) -and ($NeverOverwrite -or -not $Force)) {
         Write-Host "  exists: $Path" -ForegroundColor DarkGray
         return
     }
@@ -253,8 +316,8 @@ foreach ($n in $Name) {
     Write-Host "[$n]" -ForegroundColor Cyan
 
     $sdkRoot       = Join-Path $repoRoot "sdks\Assimalign.Cohesion.Sdk.$n"
-    $frameworkRoot = Join-Path $repoRoot "frameworks"
-    $applicationModelRoot = Join-Path $repoRoot "resources\$n\Assimalign.Cohesion.$n.ApplicationModel"
+    $areaRoot      = Join-Path $repoRoot "resources\$n"
+    $applicationModelRoot = Join-Path $areaRoot "Assimalign.Cohesion.$n.ApplicationModel"
 
     # SDK ---------------------------------------------------------------
     Write-IfNotExists -Path (Join-Path $sdkRoot "Tasks\src\Assimalign.Cohesion.Sdk.$n.Tasks.csproj") `
@@ -272,11 +335,20 @@ foreach ($n in $Name) {
     Write-IfNotExists -Path (Join-Path $sdkRoot "Targets\Sdk.$n.targets") `
                      -Content $DomainTargetsTemplate.Replace('{NAME}', $n)
 
-    # Framework ---------------------------------------------------------
-    Write-IfNotExists -Path (Join-Path $frameworkRoot "Assimalign.Cohesion.App.$n.Runtime\src\Assimalign.Cohesion.App.$n.Runtime.csproj") `
+    # Framework producers (named for the area; build-system.md) ----------
+    Write-IfNotExists -Path (Join-Path $areaRoot "Directory.Build.props") `
+                     -Content $AreaPropsTemplate
+
+    Write-IfNotExists -Path (Join-Path $areaRoot "Assimalign.Cohesion.$n.Runtime\Directory.Build.props") `
+                     -Content $RuntimePropsTemplate.Replace('{NAME}', $n) -NeverOverwrite
+
+    Write-IfNotExists -Path (Join-Path $areaRoot "Assimalign.Cohesion.$n.Runtime\src\Assimalign.Cohesion.$n.Runtime.csproj") `
                      -Content $RuntimeCsprojTemplate.Replace('{NAME}', $n)
 
-    Write-IfNotExists -Path (Join-Path $frameworkRoot "Assimalign.Cohesion.App.$n.Refs\src\Assimalign.Cohesion.App.$n.Refs.csproj") `
+    Write-IfNotExists -Path (Join-Path $areaRoot "Assimalign.Cohesion.$n.Refs\Directory.Build.props") `
+                     -Content $RefsPropsTemplate.Replace('{NAME}', $n)
+
+    Write-IfNotExists -Path (Join-Path $areaRoot "Assimalign.Cohesion.$n.Refs\src\Assimalign.Cohesion.$n.Refs.csproj") `
                      -Content $RefsCsprojTemplate.Replace('{NAME}', $n)
 
     # ApplicationModel -------------------------------------------------
@@ -293,9 +365,11 @@ Write-Host ""
 Write-Host "Next steps (these are not yet automated):" -ForegroundColor DarkGray
 Write-Host "  1. Add a KnownFrameworkReference per new framework in" -ForegroundColor DarkGray
 Write-Host "     sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props" -ForegroundColor DarkGray
-Write-Host "  2. Add an ItemGroup placeholder per new framework in" -ForegroundColor DarkGray
-Write-Host "     frameworks/Assimalign.Cohesion.App.props" -ForegroundColor DarkGray
+Write-Host "  2. List each new framework's members after its umbrella assembly in" -ForegroundColor DarkGray
+Write-Host "     resources/<Name>/Assimalign.Cohesion.<Name>.Runtime/Directory.Build.props" -ForegroundColor DarkGray
 Write-Host "  3. Add each new framework and SDK to the release inventory in" -ForegroundColor DarkGray
 Write-Host "     installer/scripts/modules/CohesionPackaging.psm1" -ForegroundColor DarkGray
-Write-Host "  4. Add each new project pair to frameworks/Assimalign.Cohesion.Frameworks.slnx" -ForegroundColor DarkGray
+Write-Host "  4. Add each new producer pair and the new Directory.Build.props files to" -ForegroundColor DarkGray
+Write-Host "     resources/<Name>/Assimalign.Cohesion.<Name>.slnx, resources/Assimalign.Cohesion.Resources.slnx," -ForegroundColor DarkGray
+Write-Host "     and the root Assimalign.Cohesion.slnx" -ForegroundColor DarkGray
 Write-Host "  5. Add each new ApplicationModel project to the resource solutions and release inventory" -ForegroundColor DarkGray

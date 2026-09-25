@@ -94,4 +94,16 @@
 		<Project Path="../../libraries/Configuration/Assimalign.Cohesion.Configuration/src/Assimalign.Cohesion.Configuration.csproj" />
 		<Project Path="../../libraries/FileSystem/Assimalign.Cohesion.FileSystem/src/Assimalign.Cohesion.FileSystem.csproj" />
 	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Refs/">
+		<File Path="Assimalign.Cohesion.Scheduler.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Refs/src/">
+		<Project Path="Assimalign.Cohesion.Scheduler.Refs/src/Assimalign.Cohesion.Scheduler.Refs.csproj" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Runtime/">
+		<File Path="Assimalign.Cohesion.Scheduler.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.Scheduler.Runtime/src/Assimalign.Cohesion.Scheduler.Runtime.csproj" />
+	</Folder>
 </Solution>

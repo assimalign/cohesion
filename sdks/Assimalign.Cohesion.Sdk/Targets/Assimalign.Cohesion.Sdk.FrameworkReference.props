@@ -69,7 +69,8 @@
         <!-- ============================================================
              Resource-domain frameworks. Each corresponds to a folder under
              resources/ and is auto-included together with App by its matching
-             Sdk.<Name>. App.props owns each framework's assembly inventory.
+             Sdk.<Name>. Each framework's assembly inventory lives in
+             resources/<Name>/Assimalign.Cohesion.<Name>.Runtime/Directory.Build.props.
              ============================================================ -->
         <KnownFrameworkReference Include="Assimalign.Cohesion.App.ApiManager"
             TargetFramework="net10.0"

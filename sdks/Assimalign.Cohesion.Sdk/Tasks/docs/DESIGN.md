@@ -104,7 +104,7 @@ Each resource-area SDK adds App plus App.<Area> under one
 `CohesionAutoIncludeAppFramework` condition. Gateway remains NuGet-only unless
 in-process composition adds App and the referenced areas. App itself is the
 transitive Assimalign project-reference closure of the hosting-kernel roots in
-`frameworks/Assimalign.Cohesion.App.props`, plus its umbrella assembly. Connections
+`libraries/App/Assimalign.Cohesion.App.props`, plus its umbrella assembly. Connections
 is a kernel root because generated resource accessors and every area hosting module
 depend on it. Other libraries are consumed as ordinary packages.
 

@@ -91,4 +91,16 @@
 	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/ConfigurationStoreResourceCommandExtensions/">
 		<File Path="Assimalign.Cohesion.ConfigurationStore.ApplicationModel/docs/Assembly/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/ConfigurationStoreResourceCommandExtensions/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Refs/">
+		<File Path="Assimalign.Cohesion.ConfigurationStore.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Refs/src/">
+		<Project Path="Assimalign.Cohesion.ConfigurationStore.Refs/src/Assimalign.Cohesion.ConfigurationStore.Refs.csproj" />
+	</Folder>
+	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Runtime/">
+		<File Path="Assimalign.Cohesion.ConfigurationStore.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.ConfigurationStore.Runtime/src/Assimalign.Cohesion.ConfigurationStore.Runtime.csproj" />
+	</Folder>
 </Solution>

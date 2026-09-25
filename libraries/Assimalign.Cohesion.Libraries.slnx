@@ -32,6 +32,26 @@
 	<Folder Name="/libraries/Amqp/Assimalign.Cohesion.Amqp.Connections/tests/">
 		<Project Path="Amqp/Assimalign.Cohesion.Amqp.Connections/tests/Assimalign.Cohesion.Amqp.Connections.Tests.csproj" />
 	</Folder>
+	<Folder Name="/libraries/App/">
+		<File Path="App/Assimalign.Cohesion.App.props" />
+		<File Path="App/Assimalign.Cohesion.App.targets" />
+		<File Path="App/Directory.Build.props" />
+		<File Path="App/Directory.Build.targets" />
+		<File Path="App/README.md" />
+	</Folder>
+	<Folder Name="/libraries/App/Assimalign.Cohesion.App.Refs/" />
+	<Folder Name="/libraries/App/Assimalign.Cohesion.App.Refs/src/">
+		<Project Path="App/Assimalign.Cohesion.App.Refs/src/Assimalign.Cohesion.App.Refs.csproj" />
+	</Folder>
+	<Folder Name="/libraries/App/Assimalign.Cohesion.App.Runtime/">
+		<File Path="App/Assimalign.Cohesion.App.Runtime/README.md" />
+	</Folder>
+	<Folder Name="/libraries/App/Assimalign.Cohesion.App.Runtime/src/">
+		<Project Path="App/Assimalign.Cohesion.App.Runtime/src/Assimalign.Cohesion.App.Runtime.csproj" />
+	</Folder>
+	<Folder Name="/libraries/App/Assimalign.Cohesion.App.Runtime/tests/">
+		<Project Path="App/Assimalign.Cohesion.App.Runtime/tests/Assimalign.Cohesion.App.Runtime.Tests.csproj" />
+	</Folder>
 	<Folder Name="/libraries/ApplicationModel/">
 		<File Path="../docs/libraries/ApplicationModel/DESIGN.md" />
 		<File Path="ApplicationModel/Directory.Build.props" />

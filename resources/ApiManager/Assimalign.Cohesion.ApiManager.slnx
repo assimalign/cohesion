@@ -59,4 +59,16 @@
 	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/docs/Assembly/Assimalign.Cohesion.ApiManager.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.ApiManager.ApplicationModel/docs/Assembly/Assimalign.Cohesion.ApiManager.ApplicationModel/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Refs/">
+		<File Path="Assimalign.Cohesion.ApiManager.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Refs/src/">
+		<Project Path="Assimalign.Cohesion.ApiManager.Refs/src/Assimalign.Cohesion.ApiManager.Refs.csproj" />
+	</Folder>
+	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Runtime/">
+		<File Path="Assimalign.Cohesion.ApiManager.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.ApiManager.Runtime/src/Assimalign.Cohesion.ApiManager.Runtime.csproj" />
+	</Folder>
 </Solution>

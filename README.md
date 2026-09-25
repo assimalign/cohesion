@@ -77,10 +77,9 @@ Cohesion is a mono repository that contains all the source code, extensions, and
 | `./build`       | Custom MSBuild infrastructure: centralized targets, package versions, and build tasks shared by every project. |
 | `./docs`        | Repository-level documentation (delivery roadmap, service design, build system, versioning).               |
 | `./extensions`  | IDE and platform integrations (Visual Studio extension); `dotnet new` templates moved to `./tooling/templates`. |
-| `./frameworks`  | Shared-framework producer projects (`App[.Domain]` Ref + Runtime packs) and the framework membership manifest. |
 | `./installer`   | WiX MSI source and delivery scripts (`Install-Local.ps1`, domain scaffolding).                              |
-| `./libraries`   | Foundation libraries (L1) — every Cohesion building block.                                                  |
-| `./resources`   | Service/resource implementations (L3), each paired with an `Sdk.<Name>` + `App.<Name>` framework family.   |
+| `./libraries`   | Foundation libraries (L1) — every Cohesion building block. `libraries/App` produces the `App` hosting-kernel framework and holds the pack logic every framework shares. |
+| `./resources`   | Service/resource implementations (L3), each paired with an `Sdk.<Name>` + `App.<Name>` framework family. Each area produces its own framework; its members are listed in the area's `.Runtime/Directory.Build.props`. |
 | `./sdks`        | MSBuild SDK projects (`Assimalign.Cohesion.Sdk[.Domain]`).                                                  |
 | `./tooling`     | Developer tooling (`cohesion` CLI, dev scripts, `dotnet new` templates in `templates/`).                    |
 

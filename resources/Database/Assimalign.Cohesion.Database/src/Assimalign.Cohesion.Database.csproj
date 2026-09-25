@@ -24,7 +24,7 @@
 			showing up in Assimalign.Cohesion.Database.nupkg's .nuspec dependency
 			list. The framework-pack distribution path still ships Web.dll at run
 			time because App.Database declares Web via CohesionFrameworkPrivateAssembly
-			in frameworks/Assimalign.Cohesion.App.props.
+			in resources/Database/Assimalign.Cohesion.Database.Runtime/Directory.Build.props.
 		-->
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
 	</ItemGroup>

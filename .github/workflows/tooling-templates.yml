@@ -4,7 +4,9 @@ on:
     paths:
       - "tooling/templates/**"
       - "sdks/**"
-      - "frameworks/**"
+      - "libraries/App/**"
+      - "resources/*/Assimalign.Cohesion.*.Refs/**"
+      - "resources/*/Assimalign.Cohesion.*.Runtime/**"
       - "build/**"
       - "installer/scripts/**"
       - ".github/workflows/tooling-templates.yml"
@@ -12,7 +14,9 @@ on:
     paths:
       - "tooling/templates/**"
       - "sdks/**"
-      - "frameworks/**"
+      - "libraries/App/**"
+      - "resources/*/Assimalign.Cohesion.*.Refs/**"
+      - "resources/*/Assimalign.Cohesion.*.Runtime/**"
       - "build/**"
       - "installer/scripts/**"
       - ".github/workflows/tooling-templates.yml"

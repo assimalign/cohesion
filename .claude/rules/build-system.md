@@ -6,7 +6,7 @@ paths:
   - "**/*.slnx"
   - "global.json"
   - "build/**"
-  - "frameworks/**"
+  - "libraries/App/**"
   - "sdks/**"
   - "installer/**"
   - ".github/workflows/**"
@@ -14,7 +14,7 @@ paths:
 
 # Build System
 
-Cohesion ships as a family of MSBuild SDKs paired with NuGet-distributed shared frameworks, modeled on `Microsoft.NET.Sdk` + `Microsoft.NETCore.App` / `Microsoft.AspNetCore.App`. Understanding this is essential when touching anything under `sdks/`, `frameworks/`, `installer/scripts/`, `.github/workflows/sdk-smoke.yml`, `.github/workflows/release.yml`, or any `*.props` / `*.targets` file in `build/`.
+Cohesion ships as a family of MSBuild SDKs paired with NuGet-distributed shared frameworks, modeled on `Microsoft.NET.Sdk` + `Microsoft.NETCore.App` / `Microsoft.AspNetCore.App`. Understanding this is essential when touching anything under `sdks/`, `libraries/App/`, a framework producer (`resources/<Area>/Assimalign.Cohesion.<Area>.Refs` / `.Runtime`), `installer/scripts/`, `.github/workflows/sdk-smoke.yml`, `.github/workflows/release.yml`, or any `*.props` / `*.targets` file in `build/`.
 
 ## Centralized MSBuild logic — the most drift-prone area
 
@@ -24,7 +24,8 @@ Concrete rules:
 - Before adding a `<PropertyGroup>` or `<ItemGroup>` to a csproj, check whether the same setup exists (or should exist) in:
   - `build/Targets/*.props` / `build/Targets/*.targets` — repo-wide build logic
   - `Directory.Build.props` / `Directory.Build.targets` in the relevant folder — scoped to a subtree
-  - `frameworks/Assimalign.Cohesion.App.props` — framework membership manifest
+  - `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props` — an area framework's member list
+  - `libraries/App/Assimalign.Cohesion.App.props` — App's kernel roots and the defaults every framework producer shares
 - If two or more sibling csprojs would carry the same block, the block belongs in shared build config. Lift it.
 - Per-project `<Version>` overrides are forbidden — `$(CohesionVersion)` in `build/Targets/Build.Version.props` is the single source of truth.
 - `TargetFramework`, `LangVersion`, `EnablePreviewFeatures`, `IsAotCompatible`, etc. are centrally set. Don't duplicate them per project unless the project genuinely deviates from the repo default.
@@ -104,29 +105,72 @@ For framework `Assimalign.Cohesion.App.<Domain>`:
 
 The .NET SDK's `ProcessFrameworkReferences` machinery resolves these at restore time and auto-restores from configured NuGet feeds when not already extracted.
 
-## Single source of truth for framework contents
+## Framework producer projects
 
-`frameworks/Assimalign.Cohesion.App.props` lists every assembly that ships in every framework. ItemGroups are conditioned on `$(CohesionFrameworkName)` so each framework's Refs/Runtime project sees only its own assemblies:
+Each framework's two packages come from two **producer** projects: a Refs producer for the targeting pack and a Runtime producer for the per-RID runtime packs. A producer is a packaging shell, not a library. It compiles nothing of its own, and its framework membership comes from the framework's member list (see *Framework membership*), not from references written in the csproj.
+
+**Naming convention.** A producer project is named for the area that owns it, not for the framework it produces. Everything a consumer sees (the assembly, the package ids, the framework name) keeps the `App` segment and does not change when a project is renamed or moved:
+
+| | App framework | Area framework (`<Area>` = a folder under `resources/`) |
+| --- | --- | --- |
+| Framework (`CohesionFrameworkName`) | `Assimalign.Cohesion.App` | `Assimalign.Cohesion.App.<Area>` |
+| Refs producer | `libraries/App/Assimalign.Cohesion.App.Refs/src/Assimalign.Cohesion.App.Refs.csproj` | `resources/<Area>/Assimalign.Cohesion.<Area>.Refs/src/Assimalign.Cohesion.<Area>.Refs.csproj` |
+| Refs `AssemblyName` | `Assimalign.Cohesion.App.Refs` | `Assimalign.Cohesion.App.<Area>.Refs` |
+| Refs `PackageId` | `Assimalign.Cohesion.App.Ref` | `Assimalign.Cohesion.App.<Area>.Ref` |
+| Runtime producer | `libraries/App/Assimalign.Cohesion.App.Runtime/src/Assimalign.Cohesion.App.Runtime.csproj` | `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/src/Assimalign.Cohesion.<Area>.Runtime.csproj` |
+| Runtime `AssemblyName` (the umbrella DLL) | `Assimalign.Cohesion.App` | `Assimalign.Cohesion.App.<Area>` |
+| Runtime `PackageId` | `Assimalign.Cohesion.App.Runtime.<rid>` | `Assimalign.Cohesion.App.<Area>.Runtime.<rid>` |
+
+What follows from it:
+
+- **Both producers declare `AssemblyName`.** The project name has no `App` segment, so the default assembly name would drift to `Assimalign.Cohesion.<Area>.Refs`. The Runtime producer's assembly is the framework's umbrella DLL, which the member list names; the Refs producer's is the framework name plus `.Refs`.
+- **Both declare `CohesionFrameworkName` and `CohesionFrameworkKind`** (`Ref` or `Runtime`) and import `$(CohesionRepositoryDirectory)libraries\App\Assimalign.Cohesion.App.props` and `.targets`. The props carry the producer defaults: the framework TFM, the `VersionPrefix`/`VersionSuffix` mapping, and a package `Description` worded from the framework name instead of the project name.
+- **The Refs producer references its sibling Runtime producer** (`..\..\Assimalign.Cohesion.<Area>.Runtime\src\Assimalign.Cohesion.<Area>.Runtime.csproj` with `ReferenceOutputAssembly="false"`), and `App.targets` locates that sibling's `bin/` by the same convention. A Refs producer with no `.Runtime` sibling cannot pack.
+- **An area's producers carry a `Directory.Build.props` each.** The Runtime producer's holds the `App.<Area>` member list; the Refs producer's only imports it (*Framework membership*).
+- **`Assimalign.Cohesion.<Area>.Refs` and `Assimalign.Cohesion.<Area>.Runtime` are reserved project names** in every area. No library may use them.
+- **The resource guards skip an area's two producers by exact identity**: the conventional name for that area and kind, declaring that area's framework. The Runtime producer references the whole framework, the hosting module and the `Hosting.*` closure included, so COHRES001, COHRES002, and COHRES004 do not apply to it. COHRES003 still does, because no shared framework may carry a Gateway assembly. A project that matches only part of that identity is guarded like any library (`resource-areas.md`).
+- **One function resolves producer paths:** `Get-CohesionFrameworkProjectPath` in `installer/scripts/modules/CohesionPackaging.psm1`, used by `Install-Local.ps1`, the release pack plan, and `Assert-CohesionReleaseInventory`. The inventory check fails for any csproj that declares a `CohesionFrameworkName` but sits off its conventional path, declares a different `AssemblyName`, or belongs to a family the release does not ship. That includes a producer recreated under the retired top-level `frameworks/` folder.
+- **Producers stay out of the area workflows' `projects` matrices.** `sdk-smoke.yml` packs every framework (`Pack-Release.ps1 -SkipLibraries`) and consumer-tests App, App.Web, and App.Database; `release.yml` packs them for release. They have no source files, so the blind-spot census does not ask for a matrix entry either.
+
+## Framework membership
+
+Each area framework's member list is written by hand, once, beside the producer that ships it. There is no generator, no generated file, and no maintenance command.
+
+- **An area framework's list lives in its Runtime producer:** `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props`. The file imports the area's own `..\Directory.Build.props`, then declares one unconditioned `<ItemGroup>` whose first entry is the umbrella assembly, `Assimalign.Cohesion.App.<Area>`.
+- **The Refs producer reads the same list.** `resources/<Area>/Assimalign.Cohesion.<Area>.Refs/Directory.Build.props` is a one-line import of `..\Assimalign.Cohesion.<Area>.Runtime\Directory.Build.props`, so both producers see one list and the area chain is imported once.
+- **The list takes no condition.** MSBuild reads `Directory.Build.props` before the csproj body sets `$(CohesionFrameworkName)`, so a condition on it would never match there; the file's location already scopes the list to the area's two producers.
+- **App's group and the producer defaults stay in `libraries/App/Assimalign.Cohesion.App.props`**, which every producer imports from its body. App's group (kernel roots, umbrella, ComponentModel analyzer) is conditioned on `$(CohesionFrameworkName)` so it lights up only in App's producers. The condition is property-based, not `%(Framework)` metadata, because MSBuild forbids item-metadata references in top-level `ItemGroup` conditions (MSB4190).
+
+An area list uses three items:
+
+| Item | Ref pack | Runtime pack |
+| --- | --- | --- |
+| `CohesionFrameworkAssembly` (public) | shipped, listed in `FrameworkList.xml` | shipped, listed in `RuntimeList.xml` |
+| `CohesionFrameworkPrivateAssembly` (runtime-only) | absent | shipped, listed in `RuntimeList.xml` |
+| `CohesionFrameworkAnalyzer` | bundled under `analyzers/dotnet/cs` | — |
 
 ```xml
-<ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.Web'">
-    <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Web" />
-    <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http" />
-    <!-- ...etc... -->
-</ItemGroup>
+<!-- resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props -->
+<Project>
+    <Import Project="..\Directory.Build.props" />
+    <ItemGroup>
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Web" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http" />
+        <!-- ...etc... -->
+        <CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration.Web" />
+    </ItemGroup>
+</Project>
 ```
 
-Property-based conditions are used (not `%(Framework)` metadata) because MSBuild forbids item-metadata references in top-level `ItemGroup` conditions (MSB4190).
+### Adding a library to an area framework
 
-## Adding a library to an area framework
-
-Add the library to its `App.<Area>` group in `App.props`:
+Add a line to the area's Runtime `Directory.Build.props`: `CohesionFrameworkAssembly` for a public member, `CohesionFrameworkPrivateAssembly` for a runtime-only implementation detail.
 
 ```xml
 <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Jobs" />
 ```
 
-The Runtime csproj converts the list to `<CohesionProjectReference>` items, which `build/Targets/Build.References.Projects.targets` resolves to matching csprojs under `libraries/**` or `resources/**`. CopyLocal puts the library's DLL into the Runtime project's bin, and `App.targets` packs it into the framework's NuGet packs along with matching entries in `FrameworkList.xml` and `RuntimeList.xml`. Validation in `App.targets` hard-fails if a listed assembly isn't on disk after the build, so a typo or missing project surfaces loudly. The framework tests compute every area's shipped closure and reject a missing public/private entry.
+The Runtime csproj converts the public items to `<CohesionProjectReference>` items and `App.targets` adds the private ones; `build/Targets/Build.References.Projects.targets` resolves both to matching csprojs under `libraries/**` or `resources/**`. CopyLocal puts the library's DLL into the Runtime project's bin, and `App.targets` packs it into the framework's NuGet packs along with matching entries in `FrameworkList.xml` and `RuntimeList.xml`. Validation in `App.targets` hard-fails if a listed assembly isn't on disk after the build, so a typo or missing project surfaces loudly. The framework tests compute every area's shipped closure and reject a missing public/private entry.
 
 Base App is different: never add a library directly to its assembly list. `@(CohesionAppKernelRoot)` in `App.props` is the sole policy input, and `App.targets` derives the transitive Assimalign project-reference closure plus the umbrella assembly. The roots are Hosting and its Health/Resources/Telemetry siblings, Connections, the host-composed configuration providers, Logging.Console, OpenTelemetry, DependencyInjection, and FileSystem.Physical. Connections is a kernel root because generated resource accessors and every area hosting module depend on it. Everything outside that hosting kernel remains an ordinary package.
 
@@ -146,12 +190,12 @@ repeated in all 18 area frameworks.
 A library sometimes needs another library as an internal implementation detail without exposing that dependency to its consumers (canonical example: `Assimalign.Cohesion.Database` uses `Assimalign.Cohesion.Web` for HTTP transport, but `Sdk.Database` consumers should see database types only). Two coordinated items make this work:
 
 - **`CohesionPrivateProjectReference`** (in the library csproj) — resolves by name like `CohesionProjectReference`, but emits `PrivateAssets="all"`: compiles in and CopyLocals, yet never appears as a `<dependency>` in the library's `.nupkg`.
-- **`CohesionFrameworkPrivateAssembly`** (in `frameworks/Assimalign.Cohesion.App.props`) — the framework's Runtime pack ships the DLL (listed in `RuntimeList.xml`), but the Ref pack omits it, so consumers never see the types in IntelliSense while the host resolves them at run time.
+- **`CohesionFrameworkPrivateAssembly`** (in the owning framework's list, `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props`) — the framework's Runtime pack ships the DLL (listed in `RuntimeList.xml`), but the Ref pack omits it, so consumers never see the types in IntelliSense while the host resolves them at run time.
 
 ```xml
 <!-- library csproj -->
 <CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
-<!-- frameworks/Assimalign.Cohesion.App.props, in the owning framework's ItemGroup -->
+<!-- resources/Database/Assimalign.Cohesion.Database.Runtime/Directory.Build.props -->
 <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
 ```
 
@@ -189,29 +233,37 @@ orchestration gateway:
 All three guards inspect the direct/transitive project-reference graph before assembly resolution and
 the complete `ReferencePath` closure after `ResolveAssemblyReferences`. The latter catches package
 assets and raw `<Reference>`+`HintPath` routes. Tests, examples, and samples are exempt; error text
-names each offending assembly so the dependency can be removed at its source.
+names each offending assembly so the dependency can be removed at its source. An area's two
+framework producers are exempt from COHRES004 (and from COHRES001/002) by exact identity, never by
+path; COHRES003 still applies to them (see *Framework producer projects*).
 
 ## Adding a new framework + SDK domain
 
 ```powershell
 # 1. Create the resources/<Name>/ folder if it doesn't exist.
 
-# 2. Generate the SDK + Framework scaffold (7 files):
+# 2. Generate the SDK, framework producer, and ApplicationModel scaffold (12 files).
+#    The producers land at resources/<Name>/Assimalign.Cohesion.<Name>.Refs and
+#    .Runtime, named per "Framework producer projects" above, each with its
+#    Directory.Build.props; the area's own Directory.Build.props is written
+#    when missing:
 pwsh installer/scripts/New-CohesionDomainScaffold.ps1 -Name <Name>
 
 # 3. Wire it up (currently manual; mirrors existing entries):
 #    a. Add a KnownFrameworkReference block to
 #       sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props
-#    b. Add a property-conditioned ItemGroup to
-#       frameworks/Assimalign.Cohesion.App.props
-#    c. Add the framework name to $cohesionFrameworks and the SDK name to
-#       $cohesionSdks in installer/scripts/Install-Local.ps1
-#    d. Add the same two names to $script:CohesionReleaseFramework and
-#       $script:CohesionReleaseSdk in
-#       installer/scripts/modules/CohesionPackaging.psm1 -- otherwise the new
+#    b. List the framework's members in the new Runtime producer's
+#       resources/<Name>/Assimalign.Cohesion.<Name>.Runtime/Directory.Build.props
+#       (see "Framework membership")
+#    c. Add the framework name to $script:CohesionReleaseFramework and the SDK
+#       name to $script:CohesionReleaseSdk in
+#       installer/scripts/modules/CohesionPackaging.psm1. Install-Local.ps1 and
+#       the release pack plan both read those lists; without the entries the new
 #       family builds locally but never ships
-#    e. Add the new Refs + Runtime folder/project entries to
-#       frameworks/Assimalign.Cohesion.Frameworks.slnx
+#    d. Add the producer pair and the new Directory.Build.props files to
+#       resources/<Name>/Assimalign.Cohesion.<Name>.slnx,
+#       resources/Assimalign.Cohesion.Resources.slnx, and the root
+#       Assimalign.Cohesion.slnx
 
 # 4. Verify locally:
 pwsh installer/scripts/Install-Local.ps1
@@ -219,7 +271,7 @@ pwsh installer/scripts/Install-Local.ps1
 
 The scaffold script is idempotent: re-running skips anything already on disk.
 
-Step 3d is guarded, not merely documented: `Assert-CohesionReleaseInventory` fails if a `sdks/<name>` or `frameworks/<family>.{Refs,Runtime}` project exists on disk but is missing from the release lists, so forgetting it turns the next release red rather than shipping a family short.
+Step 3c is guarded, not merely documented: `Assert-CohesionReleaseInventory` fails if an `sdks/<name>` SDK or a framework producer exists on disk but is missing from the release lists, so forgetting it turns the next release red rather than shipping a family short. The same check fails a producer that sits off its conventional path or declares a different `AssemblyName`.
 
 ## Versioning
 
@@ -229,7 +281,7 @@ The current version line is `<CohesionPatchVersion>0-preview.1</CohesionPatchVer
 
 Local packages are distinct: `Install-Local.ps1` appends `.local` to the canonical prerelease (`10.0.0-preview.1.local`) and refuses a stable canonical line until its post-tag bump lands. Release packages reject the reserved `local` identifier. The complete staging, promotion, post-tag, and rate-limit policy is in [`docs/VERSIONING_RELEASE_POLICY.md`](../../docs/VERSIONING_RELEASE_POLICY.md).
 
-`frameworks/Directory.Build.props` sets `VersionPrefix` and `VersionSuffix` from `CohesionVersionPrefix` and `CohesionVersionSuffix` so Microsoft.NET.Sdk's default `VersionPrefix=1.0.0` doesn't win. **Don't remove that mapping** — it is what keeps framework `.nupkg` versions aligned with the SDK without feeding a prerelease suffix to `AssemblyVersion`.
+The framework producer defaults in `libraries/App/Assimalign.Cohesion.App.props`, which every producer imports, set `VersionPrefix` and `VersionSuffix` from `CohesionVersionPrefix` and `CohesionVersionSuffix` so Microsoft.NET.Sdk's default `VersionPrefix=1.0.0` doesn't win. **Don't remove that mapping** — it is what keeps framework `.nupkg` versions aligned with the SDK without feeding a prerelease suffix to `AssemblyVersion`. It lived in `frameworks/Directory.Build.props` until the producers moved into their areas.
 
 ## Dev loop: `Install-Local.ps1`
 
@@ -280,7 +332,7 @@ A package ships only if **(1)** a per-area CI workflow builds it, **(2)** it is 
 
 - **Dependency closure.** A public `CohesionProjectReference` becomes a `<dependency>` in the `.nuspec`. If the target is not itself shipped, the package publishes green and then restores to NU1101 for every consumer — permanently, since nuget.org unlists but never deletes. A name that resolves to no project at all is dropped silently by the reference resolver, so that case warns rather than fails.
 - **No empty packages.** Seven projects under `libraries/` and `resources/` currently compile to an empty assembly. They stay in CI and still reach consumers inside the framework packs, but the release publishes no standalone package for them; `$script:CohesionReleaseSourcelessPackage` is the deliberate opt-in for reserving such an id anyway.
-- **No matrix blind spots.** Every packable project with source under `libraries/`, `resources/`, `sdks/`, `frameworks/`, `analyzers/`, `tooling/`, or `extensions/` must appear in a workflow's static `projects` matrix or have an exact-path entry with a non-empty reason in `$script:CohesionCiMatrixExclusion`. This catches a project omitted from both the inventory and CI, which the two-way set comparison cannot see. Existing gaps are recorded individually rather than hidden by path or name wildcards.
+- **No matrix blind spots.** Every packable project with source under `libraries/`, `resources/`, `sdks/`, `analyzers/`, `tooling/`, or `extensions/` must appear in a workflow's static `projects` matrix or have an exact-path entry with a non-empty reason in `$script:CohesionCiMatrixExclusion`. This catches a project omitted from both the inventory and CI, which the two-way set comparison cannot see. Existing gaps are recorded individually rather than hidden by path or name wildcards.
 
 Note what (1) does *not* claim: 12 shipping entries have no tests csproj beside them, so "CI builds it" is the guarantee and "CI tests it" is true of most, not all.
 
@@ -294,7 +346,7 @@ Every external `uses:` in `release.yml`, `sdk-smoke.yml`, and `.github/actions/b
 
 ### SDK consumer smoke — `.github/workflows/sdk-smoke.yml`
 
-On pull requests and relevant pushes, a three-OS matrix runs strict `Pack-Release.ps1 -SkipLibraries` for the host RID and packs the Core/ObjectMapping packages used by the analyzer sample. The shared `.github/scripts/Invoke-SdkConsumerSmoke.ps1` harness then materializes isolated base, Web, Database, and analyzer-bearing consumers against that feed. The base executables explicitly reference App; the analyzer references ObjectMapping as an ordinary package. The harness builds, asserts generated source, publishes self-contained, runs each apphost, and asserts its output. The same job runs the framework manifest closure tests.
+On pull requests and relevant pushes, a three-OS matrix runs strict `Pack-Release.ps1 -SkipLibraries` for the host RID and packs the Core/ObjectMapping packages used by the analyzer sample. The shared `.github/scripts/Invoke-SdkConsumerSmoke.ps1` harness then materializes isolated base, Web, Database, and analyzer-bearing consumers against that feed. The base executables explicitly reference App; the analyzer references ObjectMapping as an ordinary package. The harness builds, asserts generated source, publishes self-contained, runs each apphost, and asserts its output. The same job runs the framework closure tests, which check each area's member list against its project-graph closure.
 
 The workflow retains the broader `Sdk.Gateway` package-boundary, in-process, NativeAOT, and container smoke added with that SDK. Its permissions remain `contents: read`; artifact uploads are run-local test inputs, never package-feed publication.
 
@@ -303,14 +355,22 @@ The workflow retains the broader `Sdk.Gateway` package-boundary, in-process, Nat
 ## File layout reference
 
 ```
-frameworks/
-├── Assimalign.Cohesion.App.props          ← framework membership manifest
+libraries/App/
+├── Assimalign.Cohesion.App.props          ← App kernel roots + producer defaults
 ├── Assimalign.Cohesion.App.targets        ← collection + manifest writer logic
-├── Directory.Build.props                  ← sets VersionPrefix for framework projects
-├── Assimalign.Cohesion.App[.Domain].Refs/
-│   └── src/...Refs.csproj                 ← produces the .Ref targeting pack
-└── Assimalign.Cohesion.App[.Domain].Runtime/
-    └── src/...Runtime.csproj              ← produces the .Runtime.<rid> runtime pack(s)
+├── Assimalign.Cohesion.App.Refs/
+│   └── src/...Refs.csproj                 ← produces Assimalign.Cohesion.App.Ref
+└── Assimalign.Cohesion.App.Runtime/
+    ├── src/...Runtime.csproj              ← produces Assimalign.Cohesion.App.Runtime.<rid>
+    └── tests/                             ← framework manifest tests (every framework)
+
+resources/<Area>/
+├── Assimalign.Cohesion.<Area>.Refs/
+│   ├── Directory.Build.props              ← imports the Runtime sibling's member list
+│   └── src/...Refs.csproj                 ← produces Assimalign.Cohesion.App.<Area>.Ref
+└── Assimalign.Cohesion.<Area>.Runtime/
+    ├── Directory.Build.props              ← App.<Area> member list (hand-curated)
+    └── src/...Runtime.csproj              ← produces Assimalign.Cohesion.App.<Area>.Runtime.<rid>
 
 sdks/
 └── Assimalign.Cohesion.Sdk[.Domain]/
@@ -392,7 +452,7 @@ inventory in `CohesionPackaging.psm1` and `Install-Local.ps1` both resolve
 ## Architecture rules (hard constraints)
 
 1. **Never hardcode a version in a chained `<Import Sdk>` element.** That syntax (`Sdk="X/version"`) is not honored on `<Import Sdk>`; only on `<Project Sdk>`. The consumer's `global.json` pins the version.
-2. **Never put a framework's full content under one csproj.** Each Cohesion library is its own project under `libraries/` or `resources/`; the framework's Runtime project is purely a packaging shell whose `<CohesionProjectReference>` items come from the declarative `App.props`.
+2. **Never put a framework's full content under one csproj.** Each Cohesion library is its own project under `libraries/` or `resources/`; the framework's Runtime project is purely a packaging shell whose `<CohesionProjectReference>` items come from its declarative member list (an area's Runtime `Directory.Build.props`; App's kernel roots in `App.props`).
 3. **Never bypass the `$(CohesionVersion)` chain.** No per-project `<Version>` overrides. If a project needs a different version, that's a sign it should ship outside the framework, not inside it.
 4. **`FrameworkList.xml` and `RuntimeList.xml` are build artifacts.** They're in `.gitignore`. The collection target in `App.targets` regenerates them on every pack; never edit them by hand.
 5. **The base `Sdk` registers every framework's `KnownFrameworkReference`.** Adding the registration in a chained SDK (`Sdk.Web`, etc.) doesn't propagate to consumers using only the base SDK; everything goes through the base.

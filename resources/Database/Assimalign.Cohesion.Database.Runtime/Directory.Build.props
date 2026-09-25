@@ -1,0 +1,140 @@
+<Project>
+    <!--
+        Assimalign.Cohesion.App.Database membership: every assembly the framework ships.
+
+        CohesionFrameworkAssembly items are public: listed in the Ref pack's FrameworkList.xml
+        and shipped in the Runtime pack. CohesionFrameworkPrivateAssembly items are runtime-only:
+        shipped in the Runtime pack and listed in RuntimeList.xml, but absent from the Ref pack.
+        The first entry is the framework's umbrella assembly, this producer's own output.
+
+        This Runtime producer references every entry. Its sibling Refs producer imports this
+        file as its own Directory.Build.props, so both producers read this one list.
+        Rules: .claude/rules/build-system.md, "Framework membership".
+    -->
+    <Import Project="..\Directory.Build.props" />
+
+    <!-- ================================================================
+         Assimalign.Cohesion.App.Database: database extension. Added on top
+         of App by Sdk.Database. Starts with just the umbrella.
+         ================================================================ -->
+    <ItemGroup>
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Database" />
+
+        <!-- The kernel: the contract root plus the child roots it rolls up
+             (storage/durability, the ACID substrate, types, execution, the shared
+             language infra, wire protocol, security, governance - the root
+             REFERENCES all of them, so every child root in the root's closure
+             must ship), and indexing (a kernel consumer of the root). -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Types" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Language" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Storage" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Transactions" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Indexing" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Execution" />
+        <!-- Governance is a near-empty contracts shell (#167 fills it), but the
+             child-root inversion (2026-07-13) put it in the root's reference
+             closure, so the framework must deliver it. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Governance" />
+
+        <!-- Service surface: wire protocol, client core, security, the embedded
+             facade, and the composition-only hosting module. Servers are per-model
+             and ship inside their model package, each carrying its own copy of the
+             server machinery (owner decision 2026-07-14 - the root contract is the
+             only area-wide server requirement; there is no shared server library). -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Protocol" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Security" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Client" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Embedded" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Hosting" />
+
+        <!-- The SQL model family (the MVP engine): engine + wire-protocol server,
+             dialect, catalog, model storage, and the typed client. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Tcp" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Language" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Catalog" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Schema" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Storage" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Sql.Client" />
+
+        <!-- The KeyValuePair model family (the second model - the kernel-generality
+             proof): engine + wire-protocol server, model storage, the minimal
+             catalog, and the typed client. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Storage" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Catalog" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.KeyValuePair.Client" />
+
+        <!-- The Blob model family: streaming chunk persistence, metadata catalog,
+             transport-neutral server, and typed streaming wire client. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Blob" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Blob.Storage" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Blob.Catalog" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Blob.Client" />
+
+        <!-- The Documents engine, OQL language, collection catalog, and chunk storage. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Documents" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Documents.Language" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Documents.Catalog" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Documents.Storage" />
+
+        <!-- The Graph engine, ISO GQL subset, definition catalog, and adjacency storage. -->
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Language" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Catalog" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Database.Graph.Storage" />
+
+        <!--
+            Deliberately EXCLUDED from the MVP framework:
+            - Database.Testing - the packaged resource-program test harness. It
+              drives Database.Hosting under a test-scoped ResourceContext but is
+              tooling for tests, never part of an application's runtime closure.
+            - Database.SampleHost - the non-packable real-process E2E resource
+              executable under the repository-root samples/ tree; never shipped.
+            - The Cache model family - engine scaffolds
+              without shipping surface yet. (KeyValuePair graduated into the
+              shipping set 2026-07-14; its still-source-less satellites -
+              KeyValuePair.Replication and KeyValuePair.Security - stay excluded
+              until they ship.)
+            - Blob.Client, Blob.Replication, and Blob.Security - deferred model
+              satellites; the Blob engine, catalog, and storage ship above.
+            - Documents.Client, Documents.Replication, and Documents.Security -
+              deferred satellites; the Documents query and storage engine ships above.
+            - Graph.Client - shipped as a NuGet-only client package, never a member
+              of the App.Database shared framework (resource-areas.md).
+            - Graph.Replication and Graph.Security - deferred satellites; the Graph
+              engine, GQL subset, catalog, and adjacency storage ship above.
+            - Database.ApplicationModel - NuGet-only orchestration and default-control-plane
+              package, injected by Sdk.Database only when CohesionApplicationModel=enabled.
+            - Database.Memory - empty in-memory-strategy placeholder (no sources).
+            - Database.Replication, Database.Sql.Replication, Database.Sql.Security
+              - post-MVP contracts-only/empty shells (replication / #177). Add each
+              when its feature ships. (Database.Governance graduated into the
+              shipping set with the child-root inversion - see the kernel group.)
+
+            Private implementation dependencies. Shipped in App.Database's Runtime
+            pack but NOT listed on its Ref pack - consumers of Sdk.Database never
+            see these in IntelliSense, but the host resolves them at run time.
+
+            Pairs with the Database area's private Web references: the runtime pack
+            carries the HTTP control-plane implementation without exposing it through
+            the Database reference pack.
+        -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Health" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Health" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Routing" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+    </ItemGroup>
+</Project>

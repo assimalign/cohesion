@@ -41,8 +41,9 @@ The implementing PR will:
    (`AddDotDnsTransport`) for the resolver builder.
 3. Add the assembly to the CI matrix in
    `.github/workflows/library-dns.yml`.
-4. Add the assembly to `frameworks/Assimalign.Cohesion.App.props`
-   under the active block.
+4. Add the project to `$script:CohesionReleaseLibrary` in
+   `installer/scripts/modules/CohesionPackaging.psm1`; it ships as an
+   ordinary NuGet package (no shared framework lists the Dns family).
 5. Replace this OVERVIEW with the post-implementation version (status,
    public surface, etc.) and either freeze `REQUIREMENTS.md` or fold
    it into the DESIGN doc.

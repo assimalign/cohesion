@@ -89,6 +89,15 @@ projects outside `resources/` are untouched). Violations fail the build:
   harnesses. This path-based exclusion applies to COHRES001–004 and COHAM001; everything else in an
   area is guarded regardless of folder layout. It is distinct from holding an explicit
   `CohesionHostingIsolationExemptions` waiver.
+- The area's two **framework producers**, `Assimalign.Cohesion.<Area>.Refs` and
+  `Assimalign.Cohesion.<Area>.Runtime`, are packaging shells, not libraries: the Runtime producer
+  references the whole `App.<Area>` framework, hosting module and `Hosting.*` closure included.
+  COHRES001, COHRES002, and COHRES004 skip them by **exact identity**, never by path: the
+  conventional project name for this area, `CohesionFrameworkName=Assimalign.Cohesion.App.<Area>`,
+  and the matching `CohesionFrameworkKind` (`Ref`/`Runtime`). A project matching only part of that
+  identity is guarded like any library, so the property cannot be used as an opt-out. COHRES003
+  still applies to both producers. Owner decision, 2026-09-22; naming convention and details in
+  `build-system.md` ("Framework producer projects").
 
 ## Opting out — `CohesionHostingIsolationExemptions`
 
@@ -266,13 +275,23 @@ happen to compose.
   is the area's sole explicit `CohesionHostingIsolationExemptions` holder.
 - `Assimalign.Cohesion.<Area>.<Feature>` — feature libraries; builder verbs ship here, not in
   hosting.
+- `Assimalign.Cohesion.<Area>.Refs` and `Assimalign.Cohesion.<Area>.Runtime` — the producers of
+  the area's `App.<Area>` shared framework, named for the area while their assembly and package
+  names keep the `App` segment (`Assimalign.Cohesion.App.<Area>.Refs` / `Assimalign.Cohesion.App.<Area>`,
+  packages `Assimalign.Cohesion.App.<Area>.Ref` / `.Runtime.<rid>`). They compile nothing and are
+  exempt from COHRES001/002/004 by exact identity (above). Both names are reserved in every area;
+  the naming convention is `build-system.md`, "Framework producer projects". The Runtime
+  producer's folder holds the framework's hand-curated member list in its `Directory.Build.props`,
+  which the Refs producer's own `Directory.Build.props` imports (`build-system.md`, "Framework
+  membership").
 - Framework delivery: `Sdk.<Area>` defaults to executable output and includes both the App
   hosting kernel and `App.<Area>` under `CohesionAutoIncludeAppFramework`. Shippable area
   assemblies (and their outside-area transitive closure that App does not carry) belong in the
-  `App.<Area>` public/private ItemGroups of `frameworks/Assimalign.Cohesion.App.props`, so
-  applications get the family without project wiring. The framework closure tests guard every
+  `App.<Area>` public/private items of
+  `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props`, so applications
+  get the family without project wiring. The framework closure tests guard every
   area, including feature dependencies such as Web.Caching → Caching/InMemory. Validate with
-  `dotnet pack frameworks/Assimalign.Cohesion.App.<Area>.Runtime/src/...csproj`.
+  `dotnet pack resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/src/Assimalign.Cohesion.<Area>.Runtime.csproj`.
   App carries `Assimalign.Cohesion.Connections` because every generated resource accessor exposes
   its `ConnectionString` type and every area hosting module depends on it; area frameworks must
   not duplicate that kernel entry.

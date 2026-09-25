@@ -64,4 +64,16 @@
 	<Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.EmailHub.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.EmailHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.EmailHub.ApplicationModel/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub.Refs/">
+		<File Path="Assimalign.Cohesion.EmailHub.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub.Refs/src/">
+		<Project Path="Assimalign.Cohesion.EmailHub.Refs/src/Assimalign.Cohesion.EmailHub.Refs.csproj" />
+	</Folder>
+	<Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub.Runtime/">
+		<File Path="Assimalign.Cohesion.EmailHub.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/EmailHub/Assimalign.Cohesion.EmailHub.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.EmailHub.Runtime/src/Assimalign.Cohesion.EmailHub.Runtime.csproj" />
+	</Folder>
 </Solution>

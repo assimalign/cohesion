@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Walks every csproj under libraries/, resources/, analyzers/, tooling/, extensions/,
-    sdks/, frameworks/, build/ and samples/, reads the Cohesion reference items
+    sdks/, build/ and samples/, reads the Cohesion reference items
     (CohesionProjectReference, CohesionPrivateProjectReference, CohesionAnalyzerReference,
     CohesionAnalyzerAsProjectReference, CohesionPackageReference, CohesionSharedSource) plus raw
     ProjectReference and PackageReference, and writes a single generated document: per-area mermaid graphs, per-area
@@ -53,7 +53,7 @@ if (-not $OutputPath) {
 }
 
 # Roots scanned, in the order their sections appear in the document.
-$scanRoots = @('libraries', 'resources', 'analyzers', 'sdks', 'frameworks', 'tooling', 'extensions', 'build', 'samples')
+$scanRoots = @('libraries', 'resources', 'analyzers', 'sdks', 'tooling', 'extensions', 'build', 'samples')
 
 # ---------------------------------------------------------------------------
 # 1. Index every project.
@@ -121,6 +121,7 @@ foreach ($relative in $orderedPaths) {
         Root         = $entry.Root
         Area         = Get-ProjectArea $relative
         Kind         = Get-ProjectKind $relative
+        Producer     = $false
         Project      = @()
         Private      = @()
         Shared       = @()
@@ -168,6 +169,11 @@ foreach ($project in $projects.Values) {
     $projectRefs += @(Get-IncludeValues $xml 'ProjectReference' |
         ForEach-Object { [System.IO.Path]::GetFileNameWithoutExtension(($_ -replace '\\', '/')) })
 
+    # A shared-framework producer (Assimalign.Cohesion.<Owner>.Refs/.Runtime) is a packaging shell:
+    # its membership is a framework item list, not a declared reference, so it is indexed for
+    # fan-in but kept out of the product graph, as it was when producers lived under frameworks/.
+    $project.Producer = $xml.SelectNodes('//CohesionFrameworkName').Count -gt 0
+
     $project.Project  = @($projectRefs  | Sort-Object -Unique)
     $project.Private  = @($privateRefs  | Sort-Object -Unique)
     $project.Shared   = @($sharedRefs   | Sort-Object -Unique)
@@ -180,7 +186,7 @@ foreach ($project in $projects.Values) {
 # ---------------------------------------------------------------------------
 
 # Only shipped/buildable code participates in the graph; harnesses are listed separately.
-$graphProjects = @($projects.Values | Where-Object { $_.Kind -in @('src', 'other') -and $_.Root -in @('libraries', 'resources') })
+$graphProjects = @($projects.Values | Where-Object { $_.Kind -in @('src', 'other') -and $_.Root -in @('libraries', 'resources') -and -not $_.Producer })
 
 # Name -> project, for resolving a CohesionProjectReference's Include back to a project. Built
 # over the ordinally-sorted index, preferring a src/ project over a harness when a base name is
@@ -219,7 +225,7 @@ $edges = foreach ($project in $projects.Values) {
             FromArea  = $project.Area
             To        = $target
             ToArea    = Get-AreaOf $target
-            InGraph   = ($project.Kind -in @('src', 'other') -and $project.Root -in @('libraries', 'resources'))
+            InGraph   = ($project.Kind -in @('src', 'other') -and $project.Root -in @('libraries', 'resources') -and -not $project.Producer)
         }
     }
 }
@@ -463,6 +469,15 @@ Add-Line "$($harnesses.Count) test, sample, and example projects are indexed for
 Add-Line 'area graphs above: they consume the shipped assemblies rather than forming part of the product'
 Add-Line 'graph, and the dependency guards exempt them by path.'
 Add-Line ''
+$producers = @($projects.Values | Where-Object { $_.Producer })
+if ($producers.Count) {
+    Add-Line "$($producers.Count) shared-framework producer projects (``Assimalign.Cohesion.<Owner>.Refs`` / ``.Runtime``) are"
+    Add-Line 'likewise indexed but kept out of the area graphs: they are packaging shells whose framework'
+    Add-Line 'membership is an item list, not a project reference: App''s kernel roots in'
+    Add-Line '`libraries/App/Assimalign.Cohesion.App.props`, and each area''s members in'
+    Add-Line '`resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props`.'
+    Add-Line ''
+}
 Add-Line '| Kind | Count |'
 Add-Line '| --- | --- |'
 foreach ($group in ($harnesses | Group-Object Kind | Sort-Object Name)) {

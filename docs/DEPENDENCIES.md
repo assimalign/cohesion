@@ -1110,6 +1110,12 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
+38 shared-framework producer projects (`Assimalign.Cohesion.<Owner>.Refs` / `.Runtime`) are
+likewise indexed but kept out of the area graphs: they are packaging shells whose framework
+membership is an item list, not a project reference: App's kernel roots in
+`libraries/App/Assimalign.Cohesion.App.props`, and each area's members in
+`resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props`.
+
 | Kind | Count |
 | --- | --- |
 | `examples/` | 5 |

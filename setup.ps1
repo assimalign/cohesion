@@ -29,7 +29,6 @@ $IgnorePaths = @(
 )
 $Solutions = @(
     # "$BasePath\Assimalign.Cohesion.slnx",
-    @{ Path = "$BasePath\frameworks\Assimalign.Cohesion.Frameworks.slnx" },
     @{ Path = "$BasePath\libraries\Assimalign.Cohesion.Libraries.slnx" },
     @{ Path = "$BasePath\resources\Assimalign.Cohesion.Resources.slnx" },
     @{ Path = "$BasePath\sdks\Assimalign.Cohesion.Sdk.slnx" }

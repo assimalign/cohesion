@@ -1,0 +1,37 @@
+<Project>
+    <!--
+        Assimalign.Cohesion.App.Scheduler membership: every assembly the framework ships.
+
+        CohesionFrameworkAssembly items are public: listed in the Ref pack's FrameworkList.xml
+        and shipped in the Runtime pack. CohesionFrameworkPrivateAssembly items are runtime-only:
+        shipped in the Runtime pack and listed in RuntimeList.xml, but absent from the Ref pack.
+        The first entry is the framework's umbrella assembly, this producer's own output.
+
+        This Runtime producer references every entry. Its sibling Refs producer imports this
+        file as its own Directory.Build.props, so both producers read this one list.
+        Rules: .claude/rules/build-system.md, "Framework membership".
+    -->
+    <Import Project="..\Directory.Build.props" />
+
+    <ItemGroup>
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Scheduler" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Cron" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Scheduler.Timer" />
+
+        <!-- Scheduler.ApplicationModel is NuGet-only. -->
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting.Resources" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
+        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+    </ItemGroup>
+</Project>

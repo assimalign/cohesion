@@ -60,4 +60,16 @@
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IoTHub.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.IoTHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IoTHub.ApplicationModel/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Refs/">
+		<File Path="Assimalign.Cohesion.IoTHub.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Refs/src/">
+		<Project Path="Assimalign.Cohesion.IoTHub.Refs/src/Assimalign.Cohesion.IoTHub.Refs.csproj" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Runtime/">
+		<File Path="Assimalign.Cohesion.IoTHub.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.IoTHub.Runtime/src/Assimalign.Cohesion.IoTHub.Runtime.csproj" />
+	</Folder>
 </Solution>

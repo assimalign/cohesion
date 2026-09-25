@@ -68,4 +68,16 @@
 	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.NotificationHub.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.NotificationHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.NotificationHub.ApplicationModel/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.Refs/">
+		<File Path="Assimalign.Cohesion.NotificationHub.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.Refs/src/">
+		<Project Path="Assimalign.Cohesion.NotificationHub.Refs/src/Assimalign.Cohesion.NotificationHub.Refs.csproj" />
+	</Folder>
+	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.Runtime/">
+		<File Path="Assimalign.Cohesion.NotificationHub.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/NotificationHub/Assimalign.Cohesion.NotificationHub.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.NotificationHub.Runtime/src/Assimalign.Cohesion.NotificationHub.Runtime.csproj" />
+	</Folder>
 </Solution>

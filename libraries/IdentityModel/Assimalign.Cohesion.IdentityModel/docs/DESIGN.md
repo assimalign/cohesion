@@ -126,7 +126,12 @@ A new identity protocol (say, WS-Federation or a future protocol) is a new
    `Assimalign.Cohesion.IdentityModel.Protocols` for `EndpointLocation`. The sources
    live in each owner's `shared/` folder beside `src/`; never grant another shipped
    assembly internal visibility or copy a helper body into the branch.
-3. Register the assembly in `frameworks/Assimalign.Cohesion.App.props`, add it
+3. Add the project to `$script:CohesionReleaseLibrary` in
+   `installer/scripts/modules/CohesionPackaging.psm1`; protocol packages ship as
+   ordinary NuGet packages. Only when an area framework should carry it, add a
+   `CohesionFrameworkAssembly` line to that area's
+   `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props` (the
+   `App.Web` list keeps today's protocol packages as commented candidates). Add it
    to both `.slnx` files, and add a branch entry to
    `IdentityModelFamilyBoundaryTests` / `IdentityModelNamespaceAlignmentTests`.
 4. Add `docs/OVERVIEW.md` + `docs/DESIGN.md`; the deep family-level rationale

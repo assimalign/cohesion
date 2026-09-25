@@ -562,6 +562,21 @@
 	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Types/tests/">
 		<Project Path="Assimalign.Cohesion.Database.Types/tests/Assimalign.Cohesion.Database.Types.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Refs/">
+		<File Path="Assimalign.Cohesion.Database.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Refs/src/">
+		<Project Path="Assimalign.Cohesion.Database.Refs/src/Assimalign.Cohesion.Database.Refs.csproj" />
+	</Folder>
+	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Runtime/">
+		<File Path="Assimalign.Cohesion.Database.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Runtime/docs/">
+		<File Path="Assimalign.Cohesion.Database.Runtime/docs/DESIGN.md" />
+	</Folder>
+	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.Database.Runtime/src/Assimalign.Cohesion.Database.Runtime.csproj" />
+	</Folder>
 	<Folder Name="/Database/refs/" >
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../../libraries/Connections/Assimalign.Cohesion.Connections.Tcp/src/Assimalign.Cohesion.Connections.Tcp.csproj" />

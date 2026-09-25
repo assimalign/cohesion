@@ -55,9 +55,18 @@
 	    harnesses. The gate deliberately keys on those harness folders rather than
 	    on a 'src' folder name, so a project scaffolded with a nonstandard layout
 	    is guarded rather than silently exempt. Projects outside resources/
-	    (libraries/, frameworks/, sdks/, build/) are untouched; in particular the
-	    framework Runtime packaging shells reference hosting AND feature libraries
-	    by design and live under frameworks/.
+	    (libraries/, sdks/, build/) are untouched.
+
+	    Framework producers are inside an area but are not libraries.
+	    resources/<Area>/Assimalign.Cohesion.<Area>.Refs and .Runtime are the
+	    packaging shells of the App.<Area> shared framework, and the Runtime
+	    shell references hosting AND feature libraries by design, so COHRES001,
+	    COHRES002, and COHRES004 skip them. They are recognized by exact
+	    identity - the conventional project name for the area AND the matching
+	    CohesionFrameworkName/CohesionFrameworkKind - so setting a property
+	    cannot exempt an ordinary library. COHRES003 still applies to them: no
+	    shared framework may carry a Gateway assembly. Naming convention:
+	    .claude/rules/build-system.md, "Framework producer projects".
 
 	    Opting out - CohesionHostingIsolationExemptions:
 
@@ -130,6 +139,15 @@
 		     may not match the on-disk name). -->
 		<_CohesionAreaPrefixLower Condition="'$(_CohesionResourceArea)' != ''">$(_CohesionAreaRootProject.ToLowerInvariant()).</_CohesionAreaPrefixLower>
 
+		<!-- The area's two framework producers (packaging shells, not libraries - see the header).
+		     Exact identity only: the conventional name for THIS area and kind, declaring THIS area's
+		     framework. A project matching one half of that is guarded like any other. -->
+		<_CohesionIsFrameworkProducerProject>false</_CohesionIsFrameworkProducerProject>
+		<_CohesionIsFrameworkProducerProject Condition="'$(_CohesionResourceArea)' != ''
+		                                             AND '$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App.$(_CohesionResourceArea)'
+		                                             AND (('$(MSBuildProjectName)' == '$(_CohesionAreaRootProject).Refs' AND '$(CohesionFrameworkKind)' == 'Ref')
+		                                             OR ('$(MSBuildProjectName)' == '$(_CohesionAreaRootProject).Runtime' AND '$(CohesionFrameworkKind)' == 'Runtime'))">true</_CohesionIsFrameworkProducerProject>
+
 		<!-- Library projects only: tests/, examples/, samples/, and fixtures/ trees are harnesses.
 
 		     fixtures/ holds the executable acceptance fixtures a test project drives - a real
@@ -138,6 +156,7 @@
 		     same terms as tests/ itself. See .claude/rules/resource-areas.md. -->
 		<_CohesionHostingRuleApplies>false</_CohesionHostingRuleApplies>
 		<_CohesionHostingRuleApplies Condition="'$(_CohesionResourceArea)' != ''
+		                                        AND '$(_CohesionIsFrameworkProducerProject)' != 'true'
 		                                        AND '$([System.IO.Path]::GetFileName($(MSBuildProjectDirectory)))' != 'tests'
 		                                        AND !$(MSBuildProjectDirectory.Contains('examples'))
 		                                        AND !$(MSBuildProjectDirectory.Contains('samples'))
@@ -159,6 +178,7 @@
 		                                                AND $([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel'))">true</_CohesionApplicationModelRuleApplies>
 		<_CohesionHostingLibraryRuleApplies>false</_CohesionHostingLibraryRuleApplies>
 		<_CohesionHostingLibraryRuleApplies Condition="'$(_CohesionResourceBoundaryRulesApply)' == 'true'
+		                                             AND '$(_CohesionIsFrameworkProducerProject)' != 'true'
 		                                             AND '$(_CohesionIsHostingFamilyProject)' != 'true'
 		                                             AND '$(MSBuildProjectName)' != '$(_CohesionAreaRootProject).Testing'
 		                                             AND !$([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel'))">true</_CohesionHostingLibraryRuleApplies>

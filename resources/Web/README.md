@@ -30,10 +30,11 @@ Why the rule exists:
   logging, and transport wiring. A feature library that referenced it would drag that whole
   composition surface into every consumer and push users toward container-driven design — the
   opposite of the repo's dependency-free feature-package philosophy.
-- **Web.Hosting depends on no feature library** because the `App.Web` framework
-  (`frameworks/Assimalign.Cohesion.App.props`) is what delivers the family to applications: an
-  app using `Sdk.Web` sees every Web assembly without any project wiring, so the runtime never
-  needs compile-time knowledge of the features it hosts. Builder verbs ship with their feature
+- **Web.Hosting depends on no feature library** because the `App.Web` framework (members listed in
+  [`Assimalign.Cohesion.Web.Runtime/Directory.Build.props`](Assimalign.Cohesion.Web.Runtime/Directory.Build.props))
+  is what delivers the family to applications: an app using `Sdk.Web` sees every Web assembly
+  without any project wiring, so the runtime never needs compile-time knowledge of the features
+  it hosts. Builder verbs ship with their feature
   (`AddAuthentication` in Web.Authentication, `AddCookie` in Web.Authentication.Cookie,
   `AddJwtBearer` in Web.Authentication.Bearer, `AddRouting`/`UseRouting` in Web.Routing, …) and
   compose against the root project's `IWebApplicationBuilder`/`IWebApplicationPipelineBuilder`
@@ -48,8 +49,12 @@ assembly closure), and the hosting module may directly reference no same-area li
 area root and its own hosting family (`COHRES002`). A project with a sanctioned, user-approved exception opts out
 per-assembly via the `CohesionHostingIsolationExemptions` property in its own csproj —
 `Web.Testing` declares the standing exemption this way. Test, example, and sample projects are
-exempt — the rule constrains shipped libraries, not harnesses — and every Web project builds in
-CI (`.github/workflows/resource-web.yml`) so the guard executes on each push.
+exempt — the rule constrains shipped libraries, not harnesses — and every Web library builds in
+CI (`.github/workflows/resource-web.yml`) so the guard executes on each push. The `App.Web`
+framework producers, `Assimalign.Cohesion.Web.Refs` and `Assimalign.Cohesion.Web.Runtime`, are
+packaging shells rather than libraries: the Runtime producer references the whole framework,
+`Web.Hosting` included, so the guard skips both by exact identity (`COHRES003` still applies), and
+`sdk-smoke.yml` packs them.
 
 ## Adding a new Web feature library
 
@@ -60,9 +65,10 @@ A new `Assimalign.Cohesion.Web.<Feature>` or `Web.Hosting.<Suffix>` project is n
    ship in the package itself, composing against the root `IWebApplicationBuilder` /
    `IWebApplicationPipelineBuilder` seams with dependency-free registration (typed features and
    values — no DI, no configuration binding).
-2. **Framework manifest** — `frameworks/Assimalign.Cohesion.App.props`, `App.Web` group, plus any
-   new outside-area transitive dependencies. Validate by packing
-   `frameworks/Assimalign.Cohesion.App.Web.Runtime` (hard-fails on unresolvable assemblies).
+2. **Framework membership** — a `CohesionFrameworkAssembly` line in
+   [`Assimalign.Cohesion.Web.Runtime/Directory.Build.props`](Assimalign.Cohesion.Web.Runtime/Directory.Build.props),
+   plus any new outside-area transitive dependencies App does not carry. Validate by packing
+   `resources/Web/Assimalign.Cohesion.Web.Runtime` (hard-fails on unresolvable assemblies).
 3. **Solutions** — `resources/Web/Assimalign.Cohesion.Web.slnx`,
    `resources/Assimalign.Cohesion.Resources.slnx`, and the root
    `Assimalign.Cohesion.slnx`.
@@ -116,6 +122,7 @@ flowchart LR
 | `Assimalign.Cohesion.Web.Diagnostics` | HTTP request/response logging middleware (field flags, allowlist redaction, bounded body capture) + the W3C/NCSA access-log file provider riding `Assimalign.Cohesion.Logging` |
 | `Assimalign.Cohesion.Web.Testing` | In-memory test factory for the runtime (sanctioned Web.Hosting reference) |
 | `Assimalign.Cohesion.Web.ApplicationModel` | Declarative Web resource model and the enabled resource's default control-plane factory |
+| `Assimalign.Cohesion.Web.Refs` / `.Runtime` | Producers of the `App.Web` shared framework: the `Assimalign.Cohesion.App.Web.Ref` targeting pack and the `Assimalign.Cohesion.App.Web.Runtime.<rid>` runtime packs, built from the member list in the Runtime producer's `Directory.Build.props`, which the Refs producer imports. Assembly and package names keep the `App` segment (`.claude/rules/build-system.md`, "Framework producer projects") |
 
 Layering: L3 platform. Everything here builds on the L1 protocol stack (`libraries/Http`,
 `libraries/Connections`, `libraries/Security`). The root and feature libraries reference

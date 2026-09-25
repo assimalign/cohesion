@@ -58,8 +58,8 @@ The generator is consumed exactly like the base `SourceGeneration` generator:
   which activates the analyzer at compile time and bundles the DLL into the consuming library's own
   `.nupkg`.
 - Sdk.Web consumers get it through the `<CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration.Web" />`
-  entry in the `App.Web` group of `frameworks/Assimalign.Cohesion.App.props`, bundled at
-  `analyzers/dotnet/cs/` inside `App.Web.Ref`.
+  entry in the `App.Web` member list (`resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props`),
+  bundled at `analyzers/dotnet/cs/` inside `App.Web.Ref`.
 
 Consumers must allow-list the generated namespace with
 `<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>`

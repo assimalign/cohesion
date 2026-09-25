@@ -108,4 +108,16 @@
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IIdentityHubResourceDescriptor/">
 		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IIdentityHubResourceDescriptor/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Refs/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Refs/src/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Refs/src/Assimalign.Cohesion.IdentityHub.Refs.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Runtime/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Runtime/src/Assimalign.Cohesion.IdentityHub.Runtime.csproj" />
+	</Folder>
 </Solution>

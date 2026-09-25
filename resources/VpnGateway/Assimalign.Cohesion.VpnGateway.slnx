@@ -59,4 +59,16 @@
 	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/Assembly/Assimalign.Cohesion.VpnGateway.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/Assembly/Assimalign.Cohesion.VpnGateway.ApplicationModel/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.Refs/">
+		<File Path="Assimalign.Cohesion.VpnGateway.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.Refs/src/">
+		<Project Path="Assimalign.Cohesion.VpnGateway.Refs/src/Assimalign.Cohesion.VpnGateway.Refs.csproj" />
+	</Folder>
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.Runtime/">
+		<File Path="Assimalign.Cohesion.VpnGateway.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.VpnGateway.Runtime/src/Assimalign.Cohesion.VpnGateway.Runtime.csproj" />
+	</Folder>
 </Solution>

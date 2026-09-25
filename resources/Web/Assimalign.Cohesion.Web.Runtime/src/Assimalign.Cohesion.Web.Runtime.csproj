@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		
+		<RootNamespace>Assimalign.Cohesion</RootNamespace>
+		<AssemblyName>Assimalign.Cohesion.App.Web</AssemblyName>
+
+		<ProduceReferenceAssembly>true</ProduceReferenceAssembly>
+		<IsAotCompatible>true</IsAotCompatible>
+
+		<PackageId Condition="'$(RuntimeIdentifier)' != ''">Assimalign.Cohesion.App.Web.Runtime.$(RuntimeIdentifier)</PackageId>
+		<PackageId Condition="'$(RuntimeIdentifier)' == ''">Assimalign.Cohesion.App.Web.Runtime</PackageId>
+
+		<IsPackable>true</IsPackable>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<NoWarn>$(NoWarn);NU5128;NU5100;NU5131</NoWarn>
+
+		<CohesionFrameworkName>Assimalign.Cohesion.App.Web</CohesionFrameworkName>
+		<CohesionFrameworkKind>Runtime</CohesionFrameworkKind>
+	</PropertyGroup>
+
+	<!--
+		The Web framework's assembly list comes from Directory.Build.props
+		beside this project's folder; this generates <CohesionProjectReference>
+		items for every non-self entry. App.props supplies the producer
+		defaults, and gates App's own list on $(CohesionFrameworkName) so base
+		App items don't leak into this evaluation.
+	-->
+	<Import Project="$(CohesionRepositoryDirectory)libraries\App\Assimalign.Cohesion.App.props" />
+	<ItemGroup>
+		<CohesionProjectReference Include="@(CohesionFrameworkAssembly)"
+		                          Exclude="$(AssemblyName)" />
+	</ItemGroup>
+
+	<Import Project="$(CohesionRepositoryDirectory)libraries\App\Assimalign.Cohesion.App.targets" />
+</Project>

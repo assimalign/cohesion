@@ -36,8 +36,11 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 see `resource-areas.md` for the general rule, the `COHRES001`/`COHRES002`/`COHRES004` build errors, the
 two-layer check semantics, COHRES002 own-hosting-family exclusion, and the per-project `CohesionHostingIsolationExemptions` opt-out
 (deviation protocol required; `Web.Testing` is the standing exemption, declared in its own
-csproj). Every Web project is in the `.github/workflows/resource-web.yml` matrix so the guard
-executes in CI.
+csproj). Every Web library is in the `.github/workflows/resource-web.yml` matrix so the guard
+executes in CI. The two framework producers, `Assimalign.Cohesion.Web.Refs` and
+`Assimalign.Cohesion.Web.Runtime`, are neither libraries nor exemption holders: they are the
+`App.Web` packaging shells, which the guard skips by exact identity, and `sdk-smoke.yml` packs them
+instead of the area matrix (`build-system.md`, "Framework producer projects").
 
 ## Builder verbs ship with their feature
 
@@ -66,12 +69,13 @@ A new `resources/Web/Assimalign.Cohesion.Web.<Feature>/` or `Web.Hosting.<Suffix
 are updated (each has bitten before):
 
 1. **csproj** — references per the dependency rule above; `CohesionProjectReference` only.
-2. **Framework manifest** — add the assembly to the `Assimalign.Cohesion.App.Web` ItemGroup in
-   `frameworks/Assimalign.Cohesion.App.props`, plus any new outside-area transitive dependencies
-   the App/App.Web lists don't already carry. Validate with
-   `dotnet pack frameworks/Assimalign.Cohesion.App.Web.Runtime/src/Assimalign.Cohesion.App.Web.Runtime.csproj`
-   (its collection target hard-fails on unresolvable assemblies). Exclusions from the manifest
-   (test harnesses, source-less placeholders) are documented in the manifest comment.
+2. **Framework membership** — add the assembly to the `Assimalign.Cohesion.App.Web` list in
+   `resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props` (the Refs producer
+   imports the same file), plus any new outside-area transitive dependencies the App/App.Web
+   lists don't already carry. Validate with
+   `dotnet pack resources/Web/Assimalign.Cohesion.Web.Runtime/src/Assimalign.Cohesion.Web.Runtime.csproj`
+   (its collection target hard-fails on unresolvable assemblies). Exclusions from the list are
+   documented in that file's comment.
 3. **Solutions** — entries in `resources/Web/Assimalign.Cohesion.Web.slnx`,
    `resources/Assimalign.Cohesion.Resources.slnx`, and the root `Assimalign.Cohesion.slnx`
    (src, tests, docs files).

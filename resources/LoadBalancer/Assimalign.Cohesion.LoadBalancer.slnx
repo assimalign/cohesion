@@ -60,4 +60,16 @@
 	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/Assembly/Assimalign.Cohesion.LoadBalancer.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/Assembly/Assimalign.Cohesion.LoadBalancer.ApplicationModel/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Refs/">
+		<File Path="Assimalign.Cohesion.LoadBalancer.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Refs/src/">
+		<Project Path="Assimalign.Cohesion.LoadBalancer.Refs/src/Assimalign.Cohesion.LoadBalancer.Refs.csproj" />
+	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Runtime/">
+		<File Path="Assimalign.Cohesion.LoadBalancer.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.LoadBalancer.Runtime/src/Assimalign.Cohesion.LoadBalancer.Runtime.csproj" />
+	</Folder>
 </Solution>

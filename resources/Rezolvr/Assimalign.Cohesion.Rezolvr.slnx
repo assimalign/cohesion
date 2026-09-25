@@ -95,4 +95,16 @@
 	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/RezolvrResourceCommandExtensions/">
 		<File Path="Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Rezolvr.ApplicationModel/RezolvrResourceCommandExtensions/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Refs/">
+		<File Path="Assimalign.Cohesion.Rezolvr.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Refs/src/">
+		<Project Path="Assimalign.Cohesion.Rezolvr.Refs/src/Assimalign.Cohesion.Rezolvr.Refs.csproj" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Runtime/">
+		<File Path="Assimalign.Cohesion.Rezolvr.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.Rezolvr.Runtime/src/Assimalign.Cohesion.Rezolvr.Runtime.csproj" />
+	</Folder>
 </Solution>

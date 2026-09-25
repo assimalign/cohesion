@@ -16,7 +16,6 @@ BeforeAll {
                 'libraries',
                 'resources',
                 'sdks',
-                'frameworks',
                 'analyzers',
                 'tooling',
                 'extensions')) {
@@ -206,7 +205,7 @@ Describe 'CohesionPackaging packable source-bearing blind-spot guard' {
 
     It 'reports an unmatrixed project under every guarded root' {
         $projectPath = @{}
-        foreach ($root in @('libraries', 'resources', 'sdks', 'frameworks', 'analyzers', 'tooling', 'extensions')) {
+        foreach ($root in @('libraries', 'resources', 'sdks', 'analyzers', 'tooling', 'extensions')) {
             $name = "Test.$root"
             $projectPath[$root] = Add-CohesionTestProject `
                 -RepositoryDirectory $repository `
@@ -413,7 +412,7 @@ jobs:
             -Source 'None'
         $null = Add-CohesionTestProject `
             -RepositoryDirectory $repository `
-            -Root 'frameworks' `
+            -Root 'extensions' `
             -Name 'Test.ObjOnly' `
             -Source 'Obj'
         $null = Add-CohesionTestProject `
@@ -580,5 +579,161 @@ Describe 'CohesionPackaging inventory and area-matrix equality' {
 
         { Assert-CohesionReleaseInventory -RepositoryDirectory $repository } |
             Should -Throw -ExpectedMessage '*release inventory does not ship it*'
+    }
+}
+
+Describe 'CohesionPackaging framework producer convention' {
+    BeforeAll {
+        function Add-CohesionTestFrameworkProducer {
+            param(
+                [Parameter(Mandatory)]
+                [string] $RepositoryDirectory,
+
+                [Parameter(Mandatory)]
+                [string] $RelativePath,
+
+                [Parameter(Mandatory)]
+                [string] $Framework,
+
+                [Parameter(Mandatory)]
+                [ValidateSet('Ref', 'Runtime')]
+                [string] $Kind,
+
+                [string] $AssemblyName
+            )
+
+            $projectPath = Join-Path $RepositoryDirectory ($RelativePath -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+            $null = New-Item -Path (Split-Path -Parent $projectPath) -ItemType Directory -Force
+            $assemblyNameProperty = if ($AssemblyName) { "<AssemblyName>$AssemblyName</AssemblyName>" } else { '' }
+            Set-Content -LiteralPath $projectPath -NoNewline -Value @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    $assemblyNameProperty
+    <IsPackable>true</IsPackable>
+    <CohesionFrameworkName>$Framework</CohesionFrameworkName>
+    <CohesionFrameworkKind>$Kind</CohesionFrameworkKind>
+  </PropertyGroup>
+</Project>
+"@
+        }
+
+        function Add-CohesionTestFrameworkFamily {
+            param(
+                [Parameter(Mandatory)]
+                [string] $RepositoryDirectory,
+
+                [Parameter(Mandatory)]
+                [string] $Framework
+            )
+
+            Add-CohesionTestFrameworkProducer `
+                -RepositoryDirectory $RepositoryDirectory `
+                -RelativePath (Get-CohesionFrameworkProjectPath -Framework $Framework -Kind Refs) `
+                -Framework $Framework `
+                -Kind Ref `
+                -AssemblyName "$Framework.Refs"
+            Add-CohesionTestFrameworkProducer `
+                -RepositoryDirectory $RepositoryDirectory `
+                -RelativePath (Get-CohesionFrameworkProjectPath -Framework $Framework -Kind Runtime) `
+                -Framework $Framework `
+                -Kind Runtime `
+                -AssemblyName $Framework
+        }
+
+        function Set-CohesionTestReleaseFramework {
+            param(
+                [string[]] $Framework
+            )
+
+            InModuleScope CohesionPackaging -Parameters @{ Framework = $Framework } {
+                param($Framework)
+                $script:CohesionReleaseFramework = @($Framework)
+            }
+        }
+    }
+
+    BeforeEach {
+        $repository = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        Initialize-CohesionTestRepository -Path $repository
+        Initialize-CohesionTestInventory
+    }
+
+    It 'maps <Framework> <Kind> to <Expected>' -TestCases @(
+        @{ Framework = 'Assimalign.Cohesion.App'; Kind = 'Refs'; Expected = 'libraries/App/Assimalign.Cohesion.App.Refs/src/Assimalign.Cohesion.App.Refs.csproj' }
+        @{ Framework = 'Assimalign.Cohesion.App'; Kind = 'Runtime'; Expected = 'libraries/App/Assimalign.Cohesion.App.Runtime/src/Assimalign.Cohesion.App.Runtime.csproj' }
+        @{ Framework = 'Assimalign.Cohesion.App.Web'; Kind = 'Refs'; Expected = 'resources/Web/Assimalign.Cohesion.Web.Refs/src/Assimalign.Cohesion.Web.Refs.csproj' }
+        @{ Framework = 'Assimalign.Cohesion.App.Web'; Kind = 'Runtime'; Expected = 'resources/Web/Assimalign.Cohesion.Web.Runtime/src/Assimalign.Cohesion.Web.Runtime.csproj' }
+    ) {
+        Get-CohesionFrameworkProjectPath -Framework $Framework -Kind $Kind | Should -BeExactly $Expected
+    }
+
+    It 'rejects <Framework> as a framework family name' -TestCases @(
+        @{ Framework = 'Assimalign.Cohesion.Web' }
+        @{ Framework = 'Assimalign.Cohesion.App.' }
+        @{ Framework = 'Assimalign.Cohesion.App.Web.Hosting' }
+    ) {
+        { Get-CohesionFrameworkProjectPath -Framework $Framework -Kind Runtime } |
+            Should -Throw -ExpectedMessage '*is not a shared-framework family name*'
+    }
+
+    It 'accepts App and area producers at their conventional paths' {
+        Set-CohesionTestReleaseFramework -Framework 'Assimalign.Cohesion.App', 'Assimalign.Cohesion.App.Test'
+        Add-CohesionTestFrameworkFamily -RepositoryDirectory $repository -Framework 'Assimalign.Cohesion.App'
+        Add-CohesionTestFrameworkFamily -RepositoryDirectory $repository -Framework 'Assimalign.Cohesion.App.Test'
+
+        { Assert-CohesionReleaseInventory -RepositoryDirectory $repository } | Should -Not -Throw
+    }
+
+    It 'rejects a producer named for its framework instead of its area' {
+        Set-CohesionTestReleaseFramework -Framework 'Assimalign.Cohesion.App.Test'
+        Add-CohesionTestFrameworkFamily -RepositoryDirectory $repository -Framework 'Assimalign.Cohesion.App.Test'
+        Add-CohesionTestFrameworkProducer `
+            -RepositoryDirectory $repository `
+            -RelativePath 'resources/Test/Assimalign.Cohesion.App.Test.Runtime/src/Assimalign.Cohesion.App.Test.Runtime.csproj' `
+            -Framework 'Assimalign.Cohesion.App.Test' `
+            -Kind Runtime `
+            -AssemblyName 'Assimalign.Cohesion.App.Test'
+
+        { Assert-CohesionReleaseInventory -RepositoryDirectory $repository } |
+            Should -Throw -ExpectedMessage "*'resources/Test/Assimalign.Cohesion.App.Test.Runtime/src/Assimalign.Cohesion.App.Test.Runtime.csproj'*must be 'resources/Test/Assimalign.Cohesion.Test.Runtime/src/Assimalign.Cohesion.Test.Runtime.csproj'*"
+    }
+
+    It 'rejects a producer left in the retired frameworks folder' {
+        Set-CohesionTestReleaseFramework -Framework 'Assimalign.Cohesion.App.Test'
+        Add-CohesionTestFrameworkFamily -RepositoryDirectory $repository -Framework 'Assimalign.Cohesion.App.Test'
+        Add-CohesionTestFrameworkProducer `
+            -RepositoryDirectory $repository `
+            -RelativePath 'frameworks/Assimalign.Cohesion.App.Test.Refs/src/Assimalign.Cohesion.App.Test.Refs.csproj' `
+            -Framework 'Assimalign.Cohesion.App.Test' `
+            -Kind Ref `
+            -AssemblyName 'Assimalign.Cohesion.App.Test.Refs'
+
+        { Assert-CohesionReleaseInventory -RepositoryDirectory $repository } |
+            Should -Throw -ExpectedMessage "*'frameworks/Assimalign.Cohesion.App.Test.Refs/src/Assimalign.Cohesion.App.Test.Refs.csproj'*must be*"
+    }
+
+    It 'rejects a Refs producer whose assembly name follows the project instead of the framework' {
+        Set-CohesionTestReleaseFramework -Framework 'Assimalign.Cohesion.App.Test'
+        Add-CohesionTestFrameworkProducer `
+            -RepositoryDirectory $repository `
+            -RelativePath (Get-CohesionFrameworkProjectPath -Framework 'Assimalign.Cohesion.App.Test' -Kind Refs) `
+            -Framework 'Assimalign.Cohesion.App.Test' `
+            -Kind Ref
+        Add-CohesionTestFrameworkProducer `
+            -RepositoryDirectory $repository `
+            -RelativePath (Get-CohesionFrameworkProjectPath -Framework 'Assimalign.Cohesion.App.Test' -Kind Runtime) `
+            -Framework 'Assimalign.Cohesion.App.Test' `
+            -Kind Runtime `
+            -AssemblyName 'Assimalign.Cohesion.App.Test'
+
+        { Assert-CohesionReleaseInventory -RepositoryDirectory $repository } |
+            Should -Throw -ExpectedMessage '*must declare <AssemblyName>Assimalign.Cohesion.App.Test.Refs</AssemblyName>*'
+    }
+
+    It 'rejects a producer whose family the release does not ship' {
+        Add-CohesionTestFrameworkFamily -RepositoryDirectory $repository -Framework 'Assimalign.Cohesion.App.Test'
+
+        { Assert-CohesionReleaseInventory -RepositoryDirectory $repository } |
+            Should -Throw -ExpectedMessage "*belongs to family 'Assimalign.Cohesion.App.Test', which the release inventory does not ship*"
     }
 }

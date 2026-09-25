@@ -369,9 +369,10 @@ $script:CohesionReleaseSdk = @(
     'Assimalign.Cohesion.Sdk.VpnGateway'
 )
 
-# Shared-framework families. Each produces one targeting pack (<family>.Ref) from
-# frameworks/<family>.Refs and one runtime pack per RID (<family>.Runtime.<rid>) from
-# frameworks/<family>.Runtime. Keep aligned with the KnownFrameworkReferences in
+# Shared-framework families. Each produces one targeting pack (<family>.Ref) from its Refs
+# producer and one runtime pack per RID (<family>.Runtime.<rid>) from its Runtime producer;
+# Get-CohesionFrameworkProjectPath maps a family to those projects. Keep aligned with the
+# KnownFrameworkReferences in
 # sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props.
 $script:CohesionReleaseFramework = @(
     'Assimalign.Cohesion.App'
@@ -412,11 +413,11 @@ $script:CohesionReleaseRuntimeIdentifier = @(
 # implementation lands. Empty by default, and the default is the safe one.
 #
 # Six projects under libraries/ and resources/ currently compile to an empty assembly - Amqp,
-# the three Dns.Client transports, Web.Authorization, Web.Cors. They are real CI
-# citizens and they already reach consumers inside the shared-framework packs (they are listed in
-# frameworks/Assimalign.Cohesion.App.props), but a STANDALONE `Assimalign.Cohesion.Amqp` package
-# on nuget.org is a different artifact: a permanent, unlistable-only promise of functionality the
-# download does not contain.
+# the three Dns.Client transports, Web.Authorization, Web.Cors. They are real CI citizens, and the
+# two Web ones already reach consumers inside the App.Web packs (they are listed in
+# resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props), but a STANDALONE
+# `Assimalign.Cohesion.Amqp` package on nuget.org is a different artifact: a permanent,
+# unlistable-only promise of functionality the download does not contain.
 #
 # So the release omits them, and the omission is reversible; publishing is not. Adding a name here
 # is the deliberate opposite decision, and the guard then requires it to appear in
@@ -604,6 +605,55 @@ function Get-CohesionReleaseFramework {
     return , @($script:CohesionReleaseFramework)
 }
 
+function Get-CohesionFrameworkProjectPath {
+    <#
+    .SYNOPSIS
+        The repository-relative csproj path of a shared-framework producer.
+
+    .DESCRIPTION
+        The single encoding of the framework producer naming convention
+        (.claude/rules/build-system.md, "Framework producer projects"). A producer project is
+        named for the area that owns it; its assembly, package, and framework names keep the App
+        segment and never change with the project:
+
+            Assimalign.Cohesion.App         -> libraries/App/Assimalign.Cohesion.App.<Kind>/src/Assimalign.Cohesion.App.<Kind>.csproj
+            Assimalign.Cohesion.App.<Area>  -> resources/<Area>/Assimalign.Cohesion.<Area>.<Kind>/src/Assimalign.Cohesion.<Area>.<Kind>.csproj
+
+        Install-Local.ps1, the release pack plan, and Assert-CohesionReleaseInventory all resolve
+        producers through this function, so none of them can disagree about where one lives.
+
+    .PARAMETER Framework
+        The framework family name, for example Assimalign.Cohesion.App.Web.
+
+    .PARAMETER Kind
+        Refs for the targeting-pack producer, Runtime for the runtime-pack producer.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Framework,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('Refs', 'Runtime')]
+        [string] $Kind
+    )
+
+    $appFramework = 'Assimalign.Cohesion.App'
+    if ($Framework -ceq $appFramework) {
+        return "libraries/App/$appFramework.$Kind/src/$appFramework.$Kind.csproj"
+    }
+
+    $areaPrefix = "$appFramework."
+    $area = if ($Framework.StartsWith($areaPrefix, [System.StringComparison]::Ordinal)) {
+        $Framework.Substring($areaPrefix.Length)
+    }
+    if ([string]::IsNullOrEmpty($area) -or $area.Contains('.')) {
+        throw "'$Framework' is not a shared-framework family name. Expected '$appFramework' or '$appFramework.<Area>'."
+    }
+
+    return "resources/$area/Assimalign.Cohesion.$area.$Kind/src/Assimalign.Cohesion.$area.$Kind.csproj"
+}
+
 function Get-CohesionReleaseLibrary {
     <#
     .SYNOPSIS
@@ -684,7 +734,7 @@ function Get-CohesionReleaseProject {
         Get-CohesionReleaseLibrary -RepositoryDirectory $repositoryDirectory
 
         foreach ($framework in $script:CohesionReleaseFramework) {
-            $relativePath = "frameworks/$framework.Refs/src/$framework.Refs.csproj"
+            $relativePath = Get-CohesionFrameworkProjectPath -Framework $framework -Kind Refs
             [pscustomobject]@{
                 Kind              = 'FrameworkRef'
                 Project           = "$framework.Refs"
@@ -696,7 +746,7 @@ function Get-CohesionReleaseProject {
         }
 
         foreach ($framework in $script:CohesionReleaseFramework) {
-            $relativePath = "frameworks/$framework.Runtime/src/$framework.Runtime.csproj"
+            $relativePath = Get-CohesionFrameworkProjectPath -Framework $framework -Kind Runtime
             foreach ($rid in $RuntimeIdentifier) {
                 [pscustomobject]@{
                     Kind              = 'FrameworkRuntime'
@@ -1147,7 +1197,6 @@ function Get-CohesionPackableSourceProject {
             'libraries',
             'resources',
             'sdks',
-            'frameworks',
             'analyzers',
             'tooling',
             'extensions')) {
@@ -1298,8 +1347,9 @@ function Assert-CohesionReleaseInventory {
           2. No inventory entry is marked <IsPackable>false</IsPackable>.
           3. Every inventory entry is built by a per-area CI workflow.
           4. Every packable project a CI workflow builds is in the inventory.
-          5. Every SDK and framework family has its projects on disk, and no family folder on
-             disk is missing from the lists.
+          5. Every SDK and framework family has its projects on disk, and no SDK folder or
+             framework producer on disk is missing from the lists. A framework producer also has
+             to sit at its family's conventional path and keep its family's assembly name.
           6. The inventory is CLOSED under public package dependencies.
           7. No inventory entry ships without source unless it is a declared reservation.
           8. Every packable, source-bearing project in a repository-owned product or tooling root
@@ -1417,21 +1467,79 @@ function Assert-CohesionReleaseInventory {
         foreach ($kind in @('Refs', 'Runtime')) {
             $frameworkProject = Join-CohesionPath `
                 -Root $repositoryDirectory `
-                -Relative "frameworks/$framework.$kind/src/$framework.$kind.csproj"
+                -Relative (Get-CohesionFrameworkProjectPath -Framework $framework -Kind $kind)
             if (-not (Test-Path -LiteralPath $frameworkProject -PathType Leaf)) {
                 $failure.Add("Framework inventory entry has no project file: $frameworkProject")
             }
         }
     }
 
-    foreach ($frameworkFolder in @(Get-ChildItem -LiteralPath (Join-Path $repositoryDirectory 'frameworks') -Directory -Filter 'Assimalign.Cohesion.App*')) {
-        $family = $frameworkFolder.Name -replace '\.(Refs|Runtime)$', ''
-        if ($family -eq $frameworkFolder.Name) {
+    # A framework producer is any csproj that declares a CohesionFrameworkName. Wherever one turns
+    # up, it must sit at its family's conventional path, keep its family's assembly name, and belong
+    # to a family the release ships. Otherwise a producer created under the wrong name - or in
+    # frameworks/, the retired home of every producer - builds quietly outside the pack plan.
+    $readProjectValue = {
+        param(
+            [xml] $ProjectXml,
+            [string] $ElementName
+        )
+
+        $ProjectXml.SelectNodes("//*[local-name()='$ElementName']") |
+            ForEach-Object { $_.InnerText.Trim() } |
+            Where-Object { $_ }
+    }
+
+    foreach ($rootName in @('libraries', 'resources', 'sdks', 'analyzers', 'tooling', 'extensions', 'frameworks')) {
+        $rootDirectory = Join-Path $repositoryDirectory $rootName
+        if (-not (Test-Path -LiteralPath $rootDirectory -PathType Container)) {
             continue
         }
 
-        if ($script:CohesionReleaseFramework -notcontains $family) {
-            $failure.Add("frameworks/$($frameworkFolder.Name) belongs to family '$family', which the release inventory does not ship. Add it to `$script:CohesionReleaseFramework.")
+        foreach ($projectFile in @(
+                Get-ChildItem -LiteralPath $rootDirectory -Recurse -Filter '*.csproj' -File |
+                    Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' })) {
+            try {
+                $projectXml = [xml] (Get-Content -LiteralPath $projectFile.FullName -Raw)
+            }
+            catch {
+                # A malformed project fails its own build; it cannot pass for a producer.
+                continue
+            }
+
+            $family = @(& $readProjectValue $projectXml 'CohesionFrameworkName')
+            if ($family.Count -eq 0) {
+                continue
+            }
+
+            $relativePath = $projectFile.FullName.Substring($repositoryDirectory.Length + 1) -replace '\\', '/'
+            $declaredKind = @(& $readProjectValue $projectXml 'CohesionFrameworkKind')
+            if ($family.Count -ne 1 -or $declaredKind.Count -ne 1 -or $declaredKind[0] -cnotin @('Ref', 'Runtime')) {
+                $failure.Add("Framework producer '$relativePath' must declare exactly one CohesionFrameworkName and one CohesionFrameworkKind of Ref or Runtime.")
+                continue
+            }
+
+            $kind = if ($declaredKind[0] -ceq 'Ref') { 'Refs' } else { 'Runtime' }
+            try {
+                $expectedPath = Get-CohesionFrameworkProjectPath -Framework $family[0] -Kind $kind
+            }
+            catch {
+                $failure.Add("Framework producer '$relativePath': $($_.Exception.Message)")
+                continue
+            }
+
+            if ($relativePath -cne $expectedPath) {
+                $failure.Add("Framework producer '$relativePath' builds $($family[0]) ($($declaredKind[0])) and must be '$expectedPath'. Producer projects are named for their owning area; see .claude/rules/build-system.md, 'Framework producer projects'.")
+            }
+
+            $expectedAssembly = if ($kind -eq 'Runtime') { $family[0] } else { "$($family[0]).Refs" }
+            $assemblyName = @(& $readProjectValue $projectXml 'AssemblyName')
+            if ($assemblyName.Count -ne 1 -or $assemblyName[0] -cne $expectedAssembly) {
+                $failure.Add("Framework producer '$relativePath' must declare <AssemblyName>$expectedAssembly</AssemblyName>: the project name follows the owning area, the assembly name follows the framework.")
+            }
+
+            if ($script:CohesionReleaseFramework -cnotcontains $family[0]) {
+                $failure.Add("Framework producer '$relativePath' belongs to family '$($family[0])', which the release inventory does not ship. Add it to `$script:CohesionReleaseFramework.")
+            }
         }
     }
 
@@ -1495,7 +1603,8 @@ function Assert-CohesionReleaseInventory {
     #
     # This is intentionally repository-wide rather than another release-library comparison. The
     # three-way checks above cannot see a project omitted from both their inventory and their CI
-    # set, while this census also covers SDK, framework, analyzer, tooling, and extension roots.
+    # set, while this census also covers SDK, analyzer, tooling, and extension roots. Framework
+    # producers live under libraries/ and resources/ and have no source, so they are never candidates.
     $workflowMatrixProject = @(Get-CohesionWorkflowMatrixProject `
             -RepositoryDirectory $repositoryDirectory)
     $matrixProject = [System.Collections.Generic.HashSet[string]]::new(
@@ -1519,7 +1628,6 @@ function Assert-CohesionReleaseInventory {
             'libraries',
             'resources',
             'sdks',
-            'frameworks',
             'analyzers',
             'tooling',
             'extensions')) {
@@ -1689,9 +1797,9 @@ function Assert-CohesionPackageMetadata {
         cleanly with no icon and no warning.
 
         <license> and <readme> are reported rather than enforced. They are wired per-area
-        (libraries/ and resources/ Directory.Build.props) and the framework and SDK packs
-        legitimately carry neither, so a hard requirement would be wrong; a count in the log is
-        enough to see a regression.
+        (libraries/ and resources/ Directory.Build.props, which also cover the framework
+        producers) and the SDK packs legitimately carry neither, so a hard requirement would be
+        wrong; a count in the log is enough to see a regression.
     #>
     [CmdletBinding()]
     param(
@@ -1762,6 +1870,7 @@ Export-ModuleMember -Function @(
     'Get-CohesionReleaseRuntimeIdentifier'
     'Get-CohesionReleaseSdk'
     'Get-CohesionReleaseFramework'
+    'Get-CohesionFrameworkProjectPath'
     'Get-CohesionReleaseLibrary'
     'Get-CohesionReleaseProject'
     'Get-CohesionReleasePackageId'

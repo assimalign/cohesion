@@ -1,0 +1,8 @@
+<Project>
+    <!--
+        The Refs producer packs the framework its Runtime sibling defines: importing that
+        sibling's Directory.Build.props, which imports the parent chain, gives this project
+        the same Assimalign.Cohesion.App.MessageHub membership list.
+    -->
+    <Import Project="..\Assimalign.Cohesion.MessageHub.Runtime\Directory.Build.props" />
+</Project>

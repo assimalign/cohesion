@@ -59,4 +59,16 @@
 	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.MediaHub.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.MediaHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.MediaHub.ApplicationModel/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.Refs/">
+		<File Path="Assimalign.Cohesion.MediaHub.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.Refs/src/">
+		<Project Path="Assimalign.Cohesion.MediaHub.Refs/src/Assimalign.Cohesion.MediaHub.Refs.csproj" />
+	</Folder>
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.Runtime/">
+		<File Path="Assimalign.Cohesion.MediaHub.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.MediaHub.Runtime/src/Assimalign.Cohesion.MediaHub.Runtime.csproj" />
+	</Folder>
 </Solution>

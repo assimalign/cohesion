@@ -164,9 +164,10 @@ Write-Host ""
 # installer/scripts/modules/CohesionPackaging.psm1 - not two lists that drift.
 #
 # Each framework family has a Ref pack (one .nupkg) and a per-RID Runtime pack (one
-# .nupkg per RID). Each SDK entry maps to sdks/<name>/Tasks/src/<name>.Tasks.csproj. The
+# .nupkg per RID), produced by the Refs/Runtime projects Get-CohesionFrameworkProjectPath
+# resolves. Each SDK entry maps to sdks/<name>/Tasks/src/<name>.Tasks.csproj. The
 # base Sdk comes first because the others chain to it. The module keeps both lists
-# aligned with the folders under frameworks/ and sdks/ and with the
+# aligned with the framework producers and sdks/ folders on disk and with the
 # KnownFrameworkReferences in
 # sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props.
 Import-Module (Join-Path $PSScriptRoot 'modules/CohesionPackaging.psm1') -Force
@@ -270,7 +271,7 @@ if (-not $SkipSdks) {
     Write-Host "[2/5] Packing SDK projects..." -ForegroundColor Cyan
     # Each entry in $cohesionSdks maps to sdks/<SdkName>/Tasks/src/<SdkName>.Tasks.csproj.
     # Resource-domain SDKs are scaffolded by New-CohesionDomainScaffold.ps1; each
-    # corresponds to a folder under resources/ and a framework family in frameworks/.
+    # corresponds to a folder under resources/ and to the framework producers inside it.
     $sdkProjects = $cohesionSdks | ForEach-Object { Join-Path $repoRoot "sdks\$_\Tasks\src\$_.Tasks.csproj" }
     foreach ($proj in $sdkProjects) {
         if (-not (Test-Path -LiteralPath $proj)) {
@@ -291,7 +292,7 @@ else {
 if (-not $SkipFramework) {
     Write-Host "[3/5] Packing framework runtime pack(s)..." -ForegroundColor Cyan
     foreach ($framework in $cohesionFrameworks) {
-        $runtimeProj = Join-Path $repoRoot "frameworks\$framework.Runtime\src\$framework.Runtime.csproj"
+        $runtimeProj = Join-Path $repoRoot (Get-CohesionFrameworkProjectPath -Framework $framework -Kind Runtime)
         if (-not (Test-Path -LiteralPath $runtimeProj)) {
             Write-Host "  (skip, not found) $runtimeProj" -ForegroundColor DarkGray
             continue
@@ -312,7 +313,7 @@ else {
 if (-not $SkipFramework) {
     Write-Host "[4/5] Packing framework targeting pack(s)..." -ForegroundColor Cyan
     foreach ($framework in $cohesionFrameworks) {
-        $refsProj = Join-Path $repoRoot "frameworks\$framework.Refs\src\$framework.Refs.csproj"
+        $refsProj = Join-Path $repoRoot (Get-CohesionFrameworkProjectPath -Framework $framework -Kind Refs)
         if (-not (Test-Path -LiteralPath $refsProj)) {
             Write-Host "  (skip, not found) $refsProj" -ForegroundColor DarkGray
             continue

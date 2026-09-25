@@ -64,4 +64,16 @@
 	<Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel/docs/Assembly/Assimalign.Cohesion.NatGateway.ApplicationModel/">
 		<File Path="Assimalign.Cohesion.NatGateway.ApplicationModel/docs/Assembly/Assimalign.Cohesion.NatGateway.ApplicationModel/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway.Refs/">
+		<File Path="Assimalign.Cohesion.NatGateway.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway.Refs/src/">
+		<Project Path="Assimalign.Cohesion.NatGateway.Refs/src/Assimalign.Cohesion.NatGateway.Refs.csproj" />
+	</Folder>
+	<Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway.Runtime/">
+		<File Path="Assimalign.Cohesion.NatGateway.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/NatGateway/Assimalign.Cohesion.NatGateway.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.NatGateway.Runtime/src/Assimalign.Cohesion.NatGateway.Runtime.csproj" />
+	</Folder>
 </Solution>

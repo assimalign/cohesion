@@ -128,8 +128,13 @@ their root before any further work.
    `FileSystemStandardTests`, plus any provider-specific tests in a
    separate file.
 5. Add an entry to `.github/workflows/library-filesystem.yml`'s matrix.
-6. List the assembly in `frameworks/Assimalign.Cohesion.App.props` under
-   the active `<CohesionFrameworkAssembly>` block.
+6. Add the project to `$script:CohesionReleaseLibrary` in
+   `installer/scripts/modules/CohesionPackaging.psm1`; a provider ships as an
+   ordinary NuGet package. It needs no framework entry: `Assimalign.Cohesion.App`
+   derives its members from its kernel roots (`FileSystem.Physical` is one),
+   and an area framework carries a provider only through a
+   `CohesionFrameworkAssembly` line in that area's
+   `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props`.
 7. Update `libraries/FileSystem/README.md` and add per-package
    `README.md` + `docs/{OVERVIEW,DESIGN}.md`. Update
    `Assimalign.Cohesion.FileSystem/docs/COMPATIBILITY.md` with the

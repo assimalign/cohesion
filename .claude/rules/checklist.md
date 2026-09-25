@@ -23,7 +23,7 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] No hardcoded versions on `<Import Sdk>` elements
 - [ ] `<IsAotCompatible>true</IsAotCompatible>` not removed or weakened (`analyzers/` is the sanctioned exception)
 - [ ] No new reflection-based serialization, runtime code generation, or `Assembly.LoadFrom()`; runtime type inspection goes through source generators
-- [ ] If a new SDK or framework was added, the manifest in `frameworks/Assimalign.Cohesion.App.props` and the `KnownFrameworkReference` registration in the base SDK were both updated
+- [ ] If a new SDK or framework was added, its member list (the new Runtime producer's `Directory.Build.props`, imported by the Refs producer's) and the `KnownFrameworkReference` registration in the base SDK were both written
 - [ ] `FrameworkList.xml` / `RuntimeList.xml` were not hand-edited
 
 ## Code surface
