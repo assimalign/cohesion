@@ -4,13 +4,13 @@ namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal class ValidationProfileBuilderDefault : ValidationProfileBuilder
 {
-    private readonly Action<IValidationProfileBuilder> configure;
+    private readonly Action<IValidationProfileBuilder> _configure;
     public ValidationProfileBuilderDefault(Action<IValidationProfileBuilder> configure)
     {
-        this.configure = configure;
+        this._configure = configure;
     }
     protected override void OnBuild(IValidationProfileBuilder builder)
     {
-        configure.Invoke(builder);
+        _configure.Invoke(builder);
     }
 }

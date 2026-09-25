@@ -34,9 +34,23 @@ internal sealed record SqlSubqueryBinding(
 internal enum SqlSubqueryKind { Scalar, Exists, Set }
 
 /// <summary>A typed runtime constant produced by a relational operator.</summary>
-internal sealed class SqlConstantExpression(object? value, DatabaseType type, Collation? collation = null) : SqlExpression(null)
+internal sealed class SqlConstantExpression : SqlExpression
 {
-    internal object? Value { get; } = value;
-    internal DatabaseType Type { get; } = type;
-    internal Collation? Collation { get; } = collation;
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SqlConstantExpression"/> class.
+    /// </summary>
+    /// <param name="value">The runtime constant value.</param>
+    /// <param name="type">The database type the value carries.</param>
+    /// <param name="collation">The collation the value carries, or <see langword="null"/> when none applies.</param>
+    public SqlConstantExpression(object? value, DatabaseType type, Collation? collation = null)
+        : base(null)
+    {
+        Value = value;
+        Type = type;
+        Collation = collation;
+    }
+
+    internal object? Value { get; }
+    internal DatabaseType Type { get; }
+    internal Collation? Collation { get; }
 }

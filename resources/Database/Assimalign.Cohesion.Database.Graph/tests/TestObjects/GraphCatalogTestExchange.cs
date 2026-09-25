@@ -20,8 +20,19 @@ internal static class GraphCatalogTestExtensions
 internal sealed record GraphCatalogTestResult(
     IReadOnlyList<(string Name, DatabaseType Type)> Columns, IReadOnlyList<object?[]> Rows, long AffectedCount);
 
-internal sealed class GraphCatalogTestExchange(string statement) : IDatabaseProtocolExchange<GraphCatalogTestResult>
+internal sealed class GraphCatalogTestExchange : IDatabaseProtocolExchange<GraphCatalogTestResult>
 {
+    private readonly string _statement;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="GraphCatalogTestExchange"/> class.
+    /// </summary>
+    /// <param name="statement">The catalog statement sent in the Graph execute message.</param>
+    public GraphCatalogTestExchange(string statement)
+    {
+        _statement = statement;
+    }
+
     public ProtocolMessageFamily Family => GraphProtocol.Family;
 
     public bool IsResponseComplete { get; private set; }
@@ -31,7 +42,7 @@ internal sealed class GraphCatalogTestExchange(string statement) : IDatabaseProt
     {
         IsResponseComplete = false;
         await writer.WriteFrameAsync(new((ProtocolMessageType)GraphProtocolMessageType.Execute,
-            GraphProtocolExecuteMessage.Create(statement).Encode()), cancellationToken);
+            GraphProtocolExecuteMessage.Create(_statement).Encode()), cancellationToken);
         await writer.FlushAsync(cancellationToken);
         var columns = new List<(string Name, DatabaseType Type)>();
         var rows = new List<object?[]>();

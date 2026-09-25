@@ -11,6 +11,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Cli.Internal;
+
 namespace Assimalign.Cohesion.Cli.Tests;
 
 /// <summary>Exercises OIDC device authorization with deterministic HTTP and polling time.</summary>

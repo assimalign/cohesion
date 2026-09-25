@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 
 internal interface IInProcessProbeRunner
 {

@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.IdentityHub;
+using Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting;
 

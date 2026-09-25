@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Assimalign.Cohesion.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(AddConfigurationNamespaceCommandPayload))]

@@ -9,7 +9,7 @@ using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.IdentityModel.Token;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
-namespace Assimalign.Cohesion.Web.Authentication.Bearer;
+namespace Assimalign.Cohesion.Web.Authentication.Bearer.Internal;
 
 /// <summary>
 /// The JWT bearer authentication handler: parses the <c>Authorization: Bearer</c> credential,

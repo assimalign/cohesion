@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Hosting.Resources.Internal;
+
 namespace Assimalign.Cohesion.Hosting.Resources.Tests;
 
 [Collection(nameof(SerialCollection))]
@@ -18,7 +20,7 @@ namespace Assimalign.Cohesion.Hosting.Resources.Tests;
 public class ResourceRuntimeEntryInvocationTests
 {
     private const string DisplayPrefix = "Cohesion Test [Hosting] - Resource entry invocation: ";
-    private static readonly AsyncLocal<DirectEntryInvocationState?> DirectEntryInvocation = new();
+    private static readonly AsyncLocal<DirectEntryInvocationState?> _directEntryInvocation = new();
 
     [Fact(DisplayName = DisplayPrefix + "Registration: Reports a generated entry registration")]
     public void IsEntryRegistered_WhenGeneratedEntryIsRegistered_ReturnsTrue()
@@ -65,7 +67,7 @@ public class ResourceRuntimeEntryInvocationTests
             assembly,
             static () => ResourceControlPlane.Create());
         using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        DirectEntryInvocation.Value = state;
+        _directEntryInvocation.Value = state;
 
         try
         {
@@ -92,7 +94,7 @@ public class ResourceRuntimeEntryInvocationTests
         finally
         {
             state.Continue.TrySetResult(true);
-            DirectEntryInvocation.Value = null;
+            _directEntryInvocation.Value = null;
             if (state.Host is not null)
             {
                 await state.Host.DisposeAsync();
@@ -369,7 +371,7 @@ public class ResourceRuntimeEntryInvocationTests
 
     private static async Task DirectEntryPoint(string[] args)
     {
-        DirectEntryInvocationState state = DirectEntryInvocation.Value
+        DirectEntryInvocationState state = _directEntryInvocation.Value
             ?? throw new InvalidOperationException("The direct entry invocation state was not installed.");
         state.Entered.TrySetResult(true);
         await state.Continue.Task.ConfigureAwait(false);
@@ -392,10 +394,10 @@ public class ResourceRuntimeEntryInvocationTests
 
     private sealed class DirectEntryAssembly : Assembly
     {
-        private static readonly MethodInfo EntryMethod = typeof(ResourceRuntimeEntryInvocationTests)
+        private static readonly MethodInfo _entryMethod = typeof(ResourceRuntimeEntryInvocationTests)
             .GetMethod(nameof(DirectEntryPoint), BindingFlags.NonPublic | BindingFlags.Static)!;
 
-        public override MethodInfo? EntryPoint => EntryMethod;
+        public override MethodInfo? EntryPoint => _entryMethod;
 
         public override AssemblyName GetName() => new(nameof(DirectEntryAssembly));
 

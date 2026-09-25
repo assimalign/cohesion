@@ -4,6 +4,7 @@ using System.IO;
 using System.Reflection;
 
 using Assimalign.Cohesion.ConfigurationStore;
+using Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;

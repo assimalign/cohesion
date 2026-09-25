@@ -4,7 +4,7 @@ using System.Linq;
 
 using Assimalign.Cohesion.Scheduler;
 
-namespace Assimalign.Cohesion.Scheduler.Timer;
+namespace Assimalign.Cohesion.Scheduler.Timer.Internal;
 
 internal sealed class TimerScheduleProvider : IScheduleProvider
 {

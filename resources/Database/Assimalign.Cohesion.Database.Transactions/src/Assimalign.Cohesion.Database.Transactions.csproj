@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Transactions</RootNamespace>
+	</PropertyGroup>
 	<!--
 		A child root of the Database area: the area root (Assimalign.Cohesion.Database)
 		references THIS project, never the reverse, so the ACID substrate stays an

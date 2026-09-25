@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web;
 
-namespace Assimalign.Cohesion.LogSpace.Hosting;
+namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
 internal static class LogSpaceHttp
 {

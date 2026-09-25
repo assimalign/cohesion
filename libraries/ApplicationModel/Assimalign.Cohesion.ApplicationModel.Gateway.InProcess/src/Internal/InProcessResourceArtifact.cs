@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 
 internal sealed record InProcessResourceArtifact(
     ResourceId Resource,

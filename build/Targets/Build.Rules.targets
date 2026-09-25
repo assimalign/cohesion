@@ -50,7 +50,12 @@
 	          (RootNamespace is the checked proxy; the type names carry the area
 	          prefix instead). An apphost composes every area with one using.
 
-	    Scope: shipped projects under resources/<Area>/ only. Test, example, and
+	    Repo-wide (every project, not only resources/):
+
+	        * COHNS001 - A project declares <RootNamespace> in its own project file.
+	          dotnet new template content (tooling/templates/**/content/) is exempt.
+
+	    Scope of the resource rules above: shipped projects under resources/<Area>/ only. Test, example, and
 	    sample projects are exempt - the rule constrains shipped artifacts, not
 	    harnesses. The gate deliberately keys on those harness folders rather than
 	    on a 'src' folder name, so a project scaffolded with a nonstandard layout
@@ -211,6 +216,24 @@
 		       Code="COHAM002"
 		       File="$(MSBuildProjectFullPath)"
 		       Text="$(MSBuildProjectName) is a resource ApplicationModel package whose RootNamespace is '$(RootNamespace)'. Every ApplicationModel package declares the shared Assimalign.Cohesion.ApplicationModel namespace with area-prefixed type names (.claude/rules/resource-areas.md)." />
+	</Target>
+
+	<!-- COHNS001: every project pins <RootNamespace> in its own project file, so the namespace the
+	     code declares is written down rather than inherited from the file name
+	     (.claude/rules/general-rules.md). Read from the csproj itself: after evaluation
+	     $(RootNamespace) always has a value, defaulted from $(MSBuildProjectName) when the
+	     project is silent. dotnet new template content becomes customer projects and is exempt. -->
+	<Target Name="ValidateCohesionRootNamespacePinned"
+	        BeforeTargets="CoreCompile"
+	        Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(MSBuildProjectDirectory.Replace('\', '/'))', '(?i)/templates/.*/content(/|$)'))">
+		<XmlPeek XmlInputPath="$(MSBuildProjectFullPath)"
+		         Query="//*[local-name()='PropertyGroup']/*[local-name()='RootNamespace']/text()">
+			<Output TaskParameter="Result" ItemName="_CohesionPinnedRootNamespace" />
+		</XmlPeek>
+		<Error Condition="'@(_CohesionPinnedRootNamespace)' == ''"
+		       Code="COHNS001"
+		       File="$(MSBuildProjectFullPath)"
+		       Text="$(MSBuildProjectName) does not declare &lt;RootNamespace&gt; in its project file. Every project pins its root namespace explicitly (.claude/rules/general-rules.md)." />
 	</Target>
 
 	<Target Name="ValidateCohesionHostingIsolationRule"

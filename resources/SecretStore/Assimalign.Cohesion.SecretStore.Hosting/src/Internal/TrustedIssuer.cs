@@ -6,7 +6,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
 
-namespace Assimalign.Cohesion.SecretStore.Hosting;
+namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
 internal sealed class TrustedIssuer
 {

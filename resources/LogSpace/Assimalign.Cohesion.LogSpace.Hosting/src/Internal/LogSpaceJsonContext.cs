@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Assimalign.Cohesion.LogSpace.Hosting;
+namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
 internal sealed record StoredLog(string T, int Sev, string SevText, string Svc, string Cat,
     string Body, Dictionary<string, JsonElement> Attrs);

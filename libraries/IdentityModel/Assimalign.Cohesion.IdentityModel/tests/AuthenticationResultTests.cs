@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.IdentityModel.Tests;
 /// </summary>
 public sealed class AuthenticationResultTests
 {
-    private static readonly DateTimeOffset now = new(2026, 7, 3, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 7, 3, 12, 0, 0, TimeSpan.Zero);
 
     private static IIdentitySubject CreateSubject()
     {
@@ -29,14 +29,14 @@ public sealed class AuthenticationResultTests
     public void Success_WhenConstructed_ShouldCarrySubjectProvenanceAndContext()
     {
         // Arrange — what an OIDC RP persists after a code+PKCE sign-in.
-        var contextDescriptor = new AuthenticationContextDescriptor { AuthenticatedAt = now.AddSeconds(-5) };
+        var contextDescriptor = new AuthenticationContextDescriptor { AuthenticatedAt = _now.AddSeconds(-5) };
         contextDescriptor.ProviderSessionIds.Add("op-sid-1");
 
         var descriptor = new AuthenticationResultDescriptor
         {
             Subject = CreateSubject(),
             Protocol = AuthenticationProtocol.OpenIdConnect,
-            CompletedAt = now,
+            CompletedAt = _now,
             Issuer = "https://op.example",
             Audience = "client-app-1",
             EvidenceId = "jti-8842",
@@ -55,7 +55,7 @@ public sealed class AuthenticationResultTests
         result.Audience.ShouldBe("client-app-1");
         result.EvidenceId.ShouldBe("jti-8842");
         result.Context!.ProviderSessionIds.ShouldBe(["op-sid-1"]);
-        result.CompletedAt.ShouldBe(now);
+        result.CompletedAt.ShouldBe(_now);
 
         // The nullable-flow contract: inside a Succeeded branch, Subject dereferences
         // without suppression.
@@ -78,7 +78,7 @@ public sealed class AuthenticationResultTests
                 errorUri: "https://op.example/errors/invalid_grant"),
             AttemptedSubject = new SubjectIdentifier("alice", issuer: "https://op.example"),
             Protocol = AuthenticationProtocol.OAuth2,
-            CompletedAt = now,
+            CompletedAt = _now,
             CredentialId = "password-primary",
         };
 
@@ -98,12 +98,12 @@ public sealed class AuthenticationResultTests
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - Result: Exactly one of subject and failure is required")]
     public void Constructor_WhenSubjectAndFailureDisagree_ShouldThrow()
     {
-        var neither = new AuthenticationResultDescriptor { CompletedAt = now };
+        var neither = new AuthenticationResultDescriptor { CompletedAt = _now };
         var both = new AuthenticationResultDescriptor
         {
             Subject = CreateSubject(),
             Failure = new AuthenticationFailure(AuthenticationFailureCodes.Unknown, "?"),
-            CompletedAt = now,
+            CompletedAt = _now,
         };
         var missingCompletion = new AuthenticationResultDescriptor { Subject = CreateSubject() };
 
@@ -115,18 +115,18 @@ public sealed class AuthenticationResultTests
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - Result: Convenience factories should enforce their invariants")]
     public void Factories_WhenInvoked_ShouldEnforceInvariants()
     {
-        var success = AuthenticationResult.Success(CreateSubject(), AuthenticationProtocol.OpenIdConnect, now);
+        var success = AuthenticationResult.Success(CreateSubject(), AuthenticationProtocol.OpenIdConnect, _now);
         var failure = AuthenticationResult.Failed(
             new AuthenticationFailure(AuthenticationFailureCodes.SubjectNotFound, "No such subject."),
             AuthenticationProtocol.Saml2,
-            now);
+            _now);
 
         success.Succeeded.ShouldBeTrue();
         failure.Succeeded.ShouldBeFalse();
         failure.Protocol.ShouldBe(AuthenticationProtocol.Saml2);
 
-        Should.Throw<ArgumentNullException>(() => AuthenticationResult.Success(null!, AuthenticationProtocol.OpenIdConnect, now));
-        Should.Throw<ArgumentNullException>(() => AuthenticationResult.Failed(null!, AuthenticationProtocol.Saml2, now));
+        Should.Throw<ArgumentNullException>(() => AuthenticationResult.Success(null!, AuthenticationProtocol.OpenIdConnect, _now));
+        Should.Throw<ArgumentNullException>(() => AuthenticationResult.Failed(null!, AuthenticationProtocol.Saml2, _now));
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - Result: Failure guards should reject blank members")]

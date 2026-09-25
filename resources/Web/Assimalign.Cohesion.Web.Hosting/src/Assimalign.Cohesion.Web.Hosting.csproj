@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Hosting</RootNamespace>
+	</PropertyGroup>
 	<!-- Web-area dependency rule: the hosting/runtime module references only the root
 	     Assimalign.Cohesion.Web project, its own hosting family (O35), and non-Web-area libraries. Feature libraries
 	     (authentication, routing, results, ...) are NEVER referenced here - the App.Web

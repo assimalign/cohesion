@@ -8,11 +8,11 @@ using System.Text.Json;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
-namespace Assimalign.Cohesion.IdentityHub.Hosting;
+namespace Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 
 internal sealed class BootstrapTokenVerifier : IDisposable
 {
-    private static readonly TimeSpan MaximumLifetime = TimeSpan.FromHours(24);
+    private static readonly TimeSpan _maximumLifetime = TimeSpan.FromHours(24);
     private readonly string _application;
     private readonly string _gateway;
     private readonly ECDsa _key;
@@ -99,7 +99,7 @@ internal sealed class BootstrapTokenVerifier : IDisposable
             token.ExpiresAt is { } expiresAt &&
             issuedAt <= now + options.ClockSkew &&
             expiresAt > issuedAt && expiresAt > notBefore &&
-            expiresAt - issuedAt <= MaximumLifetime &&
+            expiresAt - issuedAt <= _maximumLifetime &&
             !string.IsNullOrWhiteSpace(token.Id);
         if (!valid)
         {

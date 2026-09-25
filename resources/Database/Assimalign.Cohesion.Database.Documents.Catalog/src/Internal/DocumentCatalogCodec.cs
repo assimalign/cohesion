@@ -3,16 +3,16 @@ using System.IO;
 using System.Text;
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Documents.Catalog;
+namespace Assimalign.Cohesion.Database.Documents.Catalog.Internal;
 
 internal static class DocumentCatalogCodec
 {
-    private static readonly UTF8Encoding Utf8 = new(false, true);
+    private static readonly UTF8Encoding _utf8 = new(false, true);
 
     internal static byte[] Encode(CatalogRecord record, TransactionSequence writer)
     {
         using var stream = new MemoryStream();
-        using var binary = new BinaryWriter(stream, Utf8, leaveOpen: true);
+        using var binary = new BinaryWriter(stream, _utf8, leaveOpen: true);
         binary.Write(writer.Value);
         binary.Write(0UL);
         binary.Write((byte)(record.Collection is not null ? 1 : record.Document is not null ? 2 : 4));
@@ -49,7 +49,7 @@ internal static class DocumentCatalogCodec
         try
         {
             using var stream = new MemoryStream(bytes.ToArray(), writable: false);
-            using var reader = new BinaryReader(stream, Utf8);
+            using var reader = new BinaryReader(stream, _utf8);
             reader.ReadUInt64();
             reader.ReadUInt64();
             byte kind = reader.ReadByte();
@@ -116,7 +116,7 @@ internal static class DocumentCatalogCodec
             writer.Write(-1);
             return;
         }
-        byte[] bytes = Utf8.GetBytes(value);
+        byte[] bytes = _utf8.GetBytes(value);
         writer.Write(bytes.Length);
         writer.Write(bytes);
     }
@@ -132,6 +132,6 @@ internal static class DocumentCatalogCodec
         {
             throw new DocumentCatalogException("Invalid catalog string length.");
         }
-        return Utf8.GetString(reader.ReadBytes(length));
+        return _utf8.GetString(reader.ReadBytes(length));
     }
 }

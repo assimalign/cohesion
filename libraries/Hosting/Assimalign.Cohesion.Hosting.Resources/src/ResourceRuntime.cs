@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Health;
+using Assimalign.Cohesion.Hosting.Resources.Internal;
 
 namespace Assimalign.Cohesion.Hosting.Resources;
 
@@ -19,11 +20,11 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 /// </summary>
 public static class ResourceRuntime
 {
-    private static readonly AsyncLocal<ResourceContextFrame?> AmbientContext = new();
-    private static readonly ConcurrentDictionary<Assembly, ControlPlaneRegistration> ControlPlanes = new();
-    private static readonly ConcurrentDictionary<Assembly, byte> Entries = new();
-    private static readonly ConcurrentDictionary<Assembly, IReadOnlyDictionary<string, string>> EndpointCertificates = new();
-    private static readonly ConditionalWeakTable<IHost, IResourceControlPlane> HostControlPlanes = new();
+    private static readonly AsyncLocal<ResourceContextFrame?> _ambientContext = new();
+    private static readonly ConcurrentDictionary<Assembly, ControlPlaneRegistration> _controlPlanes = new();
+    private static readonly ConcurrentDictionary<Assembly, byte> _entries = new();
+    private static readonly ConcurrentDictionary<Assembly, IReadOnlyDictionary<string, string>> _endpointCertificates = new();
+    private static readonly ConditionalWeakTable<IHost, IResourceControlPlane> _hostControlPlanes = new();
 
     /// <summary>
     /// Gets the current invocation context, lazily snapshotting the process environment in the
@@ -33,14 +34,14 @@ public static class ResourceRuntime
     {
         get
         {
-            ResourceContextFrame? frame = AmbientContext.Value;
+            ResourceContextFrame? frame = _ambientContext.Value;
             if (frame is not null)
             {
                 return frame.Context;
             }
 
             var context = ResourceContext.FromEnvironment();
-            AmbientContext.Value = new ResourceContextFrame(
+            _ambientContext.Value = new ResourceContextFrame(
                 context,
                 isExplicitInvocationScope: false);
             return context;
@@ -57,11 +58,11 @@ public static class ResourceRuntime
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        ResourceContextFrame? prior = AmbientContext.Value;
+        ResourceContextFrame? prior = _ambientContext.Value;
         var installed = new ResourceContextFrame(
             context,
             isExplicitInvocationScope: true);
-        AmbientContext.Value = installed;
+        _ambientContext.Value = installed;
         return new ResourceContextScope(prior, installed);
     }
 
@@ -97,7 +98,7 @@ public static class ResourceRuntime
                 $"Resource assembly '{assembly.GetName().Name}' does not have an executable entry point.");
         }
 
-        if (!Entries.TryAdd(assembly, 0))
+        if (!_entries.TryAdd(assembly, 0))
         {
             throw new InvalidOperationException(
                 $"Resource assembly '{assembly.GetName().Name}' already registered its entry point.");
@@ -117,7 +118,7 @@ public static class ResourceRuntime
     {
         ArgumentNullException.ThrowIfNull(assembly);
 
-        return Entries.ContainsKey(assembly);
+        return _entries.ContainsKey(assembly);
     }
 
     /// <summary>Registers immutable endpoint-to-certificate-mount metadata emitted for an enabled executable.</summary>
@@ -129,7 +130,7 @@ public static class ResourceRuntime
     {
         ArgumentNullException.ThrowIfNull(assembly);
         ArgumentNullException.ThrowIfNull(endpointCertificates);
-        if (!EndpointCertificates.TryAdd(assembly, new Dictionary<string, string>(endpointCertificates, StringComparer.OrdinalIgnoreCase)))
+        if (!_endpointCertificates.TryAdd(assembly, new Dictionary<string, string>(endpointCertificates, StringComparer.OrdinalIgnoreCase)))
         {
             throw new InvalidOperationException("The resource assembly already registered its endpoint certificate mounts.");
         }
@@ -160,7 +161,7 @@ public static class ResourceRuntime
         ArgumentNullException.ThrowIfNull(assembly);
         ArgumentNullException.ThrowIfNull(args);
 
-        if (!Entries.ContainsKey(assembly))
+        if (!_entries.ContainsKey(assembly))
         {
             throw new InvalidOperationException(
                 $"Resource assembly '{assembly.GetName().Name}' did not register an enabled resource entry point.");
@@ -210,7 +211,7 @@ public static class ResourceRuntime
 
     private static IResourceEntryInvocation InvokeEntryPointCore(Assembly assembly, string[] args)
     {
-        ResourceContextFrame? frame = AmbientContext.Value;
+        ResourceContextFrame? frame = _ambientContext.Value;
         if (frame is null || !frame.IsExplicitInvocationScope)
         {
             throw new InvalidOperationException(
@@ -255,7 +256,7 @@ public static class ResourceRuntime
                 $"The stop grace period must be at least {ResourceHostOptions.MinimumStopGraceSeconds} seconds.");
         }
 
-        if (!ControlPlanes.TryAdd(assembly, new ControlPlaneRegistration(factory, stopGraceSeconds)))
+        if (!_controlPlanes.TryAdd(assembly, new ControlPlaneRegistration(factory, stopGraceSeconds)))
         {
             throw new InvalidOperationException(
                 $"Resource assembly '{assembly.GetName().Name}' already registered a default control plane.");
@@ -281,14 +282,14 @@ public static class ResourceRuntime
         // An in-process member executes beneath the gateway's process entry assembly. The
         // invocation frame is the logical resource caller and must win over that process-wide
         // identity so concurrent members resolve only their own registered control plane.
-        Assembly registrationAssembly = AmbientContext.Value?.EntryAssembly ?? assembly;
+        Assembly registrationAssembly = _ambientContext.Value?.EntryAssembly ?? assembly;
 
-        if (EndpointCertificates.TryGetValue(registrationAssembly, out IReadOnlyDictionary<string, string>? certificates))
+        if (_endpointCertificates.TryGetValue(registrationAssembly, out IReadOnlyDictionary<string, string>? certificates))
         {
             Current.SetEndpointCertificates(certificates);
         }
 
-        if (!ControlPlanes.TryGetValue(
+        if (!_controlPlanes.TryGetValue(
             registrationAssembly,
             out ControlPlaneRegistration? registration))
         {
@@ -327,14 +328,14 @@ public static class ResourceRuntime
         }
 
         ResourceContext context = Current;
-        ResourceContextFrame? frame = AmbientContext.Value;
+        ResourceContextFrame? frame = _ambientContext.Value;
         bool isEntryInvocationHost = frame?.HostBuilt(host) is true;
         foreach ((string name, Uri endpoint) in context.Endpoints)
         {
             controlPlane.ObserveEndpoint(name, endpoint);
         }
         controlPlane.AttachHost(host);
-        HostControlPlanes.AddOrUpdate(host, controlPlane);
+        _hostControlPlanes.AddOrUpdate(host, controlPlane);
 
         int stopGraceSeconds = controlPlane is RegisteredResourceControlPlane registered
             ? registered.StopGraceSeconds
@@ -359,7 +360,7 @@ public static class ResourceRuntime
     public static bool TryGetControlPlane(IHost host, [NotNullWhen(true)] out IResourceControlPlane? controlPlane)
     {
         ArgumentNullException.ThrowIfNull(host);
-        return HostControlPlanes.TryGetValue(host, out controlPlane);
+        return _hostControlPlanes.TryGetValue(host, out controlPlane);
     }
 
     private sealed class ResourceContextScope : IDisposable
@@ -381,12 +382,12 @@ public static class ResourceRuntime
                 return;
             }
 
-            if (!ReferenceEquals(AmbientContext.Value, _installed))
+            if (!ReferenceEquals(_ambientContext.Value, _installed))
             {
                 throw new InvalidOperationException("Resource context scopes must be disposed in nesting order.");
             }
 
-            AmbientContext.Value = _prior;
+            _ambientContext.Value = _prior;
             _ = Interlocked.Exchange(ref _disposed, 1);
         }
     }

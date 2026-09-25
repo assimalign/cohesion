@@ -8,7 +8,7 @@ using Assimalign.Cohesion.Rezolvr.Client;
 using HostCommand = Assimalign.Cohesion.Hosting.Resources.ResourceCommand;
 using ResourceCommand = Assimalign.Cohesion.Rezolvr.Client.ResourceCommand;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal sealed class RezolvrGatewayCommandClient : IGatewayResourceCommandClient
 {

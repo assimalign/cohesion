@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 /// <summary>
 /// Marks an external resource as artifact-free while satisfying the common controller context.

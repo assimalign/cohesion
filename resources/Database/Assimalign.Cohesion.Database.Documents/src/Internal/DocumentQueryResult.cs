@@ -11,15 +11,29 @@ using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal sealed class DocumentQueryResult(IReadOnlyList<QueryColumn> columns, IReadOnlyList<object?[]> rows) : QueryResultSet
+internal sealed class DocumentQueryResult : QueryResultSet
 {
+    private readonly IReadOnlyList<QueryColumn> _columns;
+    private readonly IReadOnlyList<object?[]> _rows;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DocumentQueryResult"/> class.
+    /// </summary>
+    /// <param name="columns">The column descriptors of the result set.</param>
+    /// <param name="rows">The materialized row values, one array per row in column order.</param>
+    public DocumentQueryResult(IReadOnlyList<QueryColumn> columns, IReadOnlyList<object?[]> rows)
+    {
+        _columns = columns;
+        _rows = rows;
+    }
+
     public override QueryResultStatus Status => QueryResultStatus.Success;
     public override long AffectedCount => -1;
     public override IReadOnlyList<Diagnostic>? Diagnostics => null;
-    public override IReadOnlyList<QueryColumn> Columns => columns;
+    public override IReadOnlyList<QueryColumn> Columns => _columns;
     public override async IAsyncEnumerable<QueryRow> GetRowsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        foreach (var row in rows)
+        foreach (var row in _rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
             yield return new DocumentQueryRow(row);
@@ -28,18 +42,29 @@ internal sealed class DocumentQueryResult(IReadOnlyList<QueryColumn> columns, IR
     }
     public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private sealed class DocumentQueryRow(object?[] values) : QueryRow
+    private sealed class DocumentQueryRow : QueryRow
     {
-        public override int FieldCount => values.Length;
-        public override bool IsNull(int ordinal) => values[ordinal] is null;
-        public override object? GetValue(int ordinal) => values[ordinal];
-        public override string? GetString(int ordinal) => values[ordinal] switch
+        private readonly object?[] _values;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="DocumentQueryRow"/> class.
+        /// </summary>
+        /// <param name="values">The field values of the row in column order.</param>
+        public DocumentQueryRow(object?[] values)
+        {
+            _values = values;
+        }
+
+        public override int FieldCount => _values.Length;
+        public override bool IsNull(int ordinal) => _values[ordinal] is null;
+        public override object? GetValue(int ordinal) => _values[ordinal];
+        public override string? GetString(int ordinal) => _values[ordinal] switch
         {
             null => null,
             JsonElement json => json.GetRawText(),
             var value => Convert.ToString(value, CultureInfo.InvariantCulture),
         };
-        public override ReadOnlyMemory<byte> GetBytes(int ordinal) => values[ordinal] switch
+        public override ReadOnlyMemory<byte> GetBytes(int ordinal) => _values[ordinal] switch
         {
             null => ReadOnlyMemory<byte>.Empty,
             JsonElement json => Encoding.UTF8.GetBytes(json.GetRawText()),
@@ -50,6 +75,6 @@ internal sealed class DocumentQueryResult(IReadOnlyList<QueryColumn> columns, IR
         public override long GetInt64(int ordinal) => Convert.ToInt64(Required(ordinal), CultureInfo.InvariantCulture);
         public override double GetDouble(int ordinal) => Convert.ToDouble(Required(ordinal), CultureInfo.InvariantCulture);
         public override bool GetBoolean(int ordinal) => Convert.ToBoolean(Required(ordinal), CultureInfo.InvariantCulture);
-        private object Required(int ordinal) => values[ordinal] ?? throw new DatabaseException($"Field {ordinal} is null.");
+        private object Required(int ordinal) => _values[ordinal] ?? throw new DatabaseException($"Field {ordinal} is null.");
     }
 }

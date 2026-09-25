@@ -461,7 +461,7 @@ public sealed class OpenIdConnectIdToken
         {
             ArgumentNullException.ThrowIfNull(claim, nameof(descriptor));
 
-            if (TypedClaimNames.Contains(claim.Type))
+            if (_typedClaimNames.Contains(claim.Type))
             {
                 throw new IdentityModelException(
                     $"The extension claim '{claim.Type}' collides with a typed ID token member. " +
@@ -474,7 +474,7 @@ public sealed class OpenIdConnectIdToken
         return new IdentityClaimCollection(claims);
     }
 
-    private static readonly HashSet<string> TypedClaimNames = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> _typedClaimNames = new(StringComparer.Ordinal)
     {
         IdentityClaimTypes.Issuer,
         IdentityClaimTypes.Subject,

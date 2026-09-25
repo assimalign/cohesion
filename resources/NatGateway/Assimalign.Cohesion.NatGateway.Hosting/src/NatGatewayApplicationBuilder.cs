@@ -7,6 +7,7 @@ using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.NatGateway;
+using Assimalign.Cohesion.NatGateway.Hosting.Internal;
 
 namespace Assimalign.Cohesion.NatGateway.Hosting;
 

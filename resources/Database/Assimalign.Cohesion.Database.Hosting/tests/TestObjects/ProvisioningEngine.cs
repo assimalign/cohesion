@@ -98,14 +98,29 @@ internal sealed class ProvisioningEngine : IDatabaseEngine
     }
 }
 
-internal sealed class ProvisioningDatabase(
-    DatabaseName name,
-    IDatabaseEngine engine,
-    List<string> log) : IDatabase, IDatabaseSchemaProvisioner
+internal sealed class ProvisioningDatabase : IDatabase, IDatabaseSchemaProvisioner
 {
-    public DatabaseName Name { get; } = name;
+    private readonly List<string> _log;
 
-    public IDatabaseEngine Engine { get; } = engine;
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ProvisioningDatabase"/> class.
+    /// </summary>
+    /// <param name="name">The name of the database.</param>
+    /// <param name="engine">The engine that owns the database.</param>
+    /// <param name="log">The shared call log that records schema application.</param>
+    public ProvisioningDatabase(
+        DatabaseName name,
+        IDatabaseEngine engine,
+        List<string> log)
+    {
+        Name = name;
+        Engine = engine;
+        _log = log;
+    }
+
+    public DatabaseName Name { get; }
+
+    public IDatabaseEngine Engine { get; }
 
     public CompiledSchema? AppliedSchema { get; private set; }
 
@@ -114,7 +129,7 @@ internal sealed class ProvisioningDatabase(
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        log.Add("engine:apply");
+        _log.Add("engine:apply");
         AppliedSchema = schema;
         return ValueTask.FromResult(new SchemaMigrationResult(null, schema.Hash, 1, false));
     }

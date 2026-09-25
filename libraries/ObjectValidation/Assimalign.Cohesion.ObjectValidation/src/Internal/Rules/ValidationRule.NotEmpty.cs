@@ -3,7 +3,7 @@ using System.Collections;
 using System.Linq;
 using System.Linq.Expressions;
 
-namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 
 internal class NotEmptyValidationRule<TValue> : ValidationRuleBase<TValue> 

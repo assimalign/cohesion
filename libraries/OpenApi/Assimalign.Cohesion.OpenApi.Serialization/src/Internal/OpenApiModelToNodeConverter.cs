@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.OpenApi.Serialization;
+namespace Assimalign.Cohesion.OpenApi.Serialization.Internal;
 
 /// <summary>
 /// Maps the canonical <see cref="OpenApiDocument"/> graph to a format-agnostic <see cref="OpenApiNode"/>

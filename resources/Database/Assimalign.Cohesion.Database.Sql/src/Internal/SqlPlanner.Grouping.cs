@@ -174,10 +174,22 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>Structural equality is used for binding only, without expression hashing.</summary>
-    private sealed class GroupExpressionComparer(SqlPlanner planner, SqlExpressionEvaluator evaluator) : IEqualityComparer<SqlExpression>
+    private sealed class GroupExpressionComparer : IEqualityComparer<SqlExpression>
     {
+        private readonly SqlPlanner _planner;
+        private readonly SqlExpressionEvaluator _evaluator;
+
+        /// <summary>Initializes a new instance of the <see cref="GroupExpressionComparer"/> class.</summary>
+        /// <param name="planner">The planner whose structural comparison decides equality.</param>
+        /// <param name="evaluator">The evaluator that binds column references during comparison.</param>
+        public GroupExpressionComparer(SqlPlanner planner, SqlExpressionEvaluator evaluator)
+        {
+            _planner = planner;
+            _evaluator = evaluator;
+        }
+
         public bool Equals(SqlExpression? left, SqlExpression? right)
-            => left is not null && right is not null && planner.SameGroupExpression(left, right, evaluator);
+            => left is not null && right is not null && _planner.SameGroupExpression(left, right, _evaluator);
         public int GetHashCode(SqlExpression expression) => 0;
     }
 

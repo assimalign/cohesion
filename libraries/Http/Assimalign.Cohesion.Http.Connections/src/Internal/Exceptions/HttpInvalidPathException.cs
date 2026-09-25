@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.Http.Internal;
+﻿namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal class HttpInvalidPathException : HttpException
 {

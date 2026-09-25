@@ -57,30 +57,58 @@ public sealed class ProtocolChannel : IAsyncDisposable
         }
     }
 
-    private sealed class FamilyReader(IProtocolFrameReader reader, ProtocolMessageFamily family) : IProtocolFrameReader
+    private sealed class FamilyReader : IProtocolFrameReader
     {
+        private readonly IProtocolFrameReader _reader;
+        private readonly ProtocolMessageFamily _family;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="FamilyReader"/> class.
+        /// </summary>
+        /// <param name="reader">The framed reader whose frames are validated.</param>
+        /// <param name="family">The family every read identifier must belong to.</param>
+        public FamilyReader(IProtocolFrameReader reader, ProtocolMessageFamily family)
+        {
+            _reader = reader;
+            _family = family;
+        }
+
         public async ValueTask<ProtocolFrame?> ReadFrameAsync(CancellationToken cancellationToken = default)
         {
-            ProtocolFrame? frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
+            ProtocolFrame? frame = await _reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
             if (frame is { } value)
             {
-                Validate(family, value.Type);
+                Validate(_family, value.Type);
             }
             return frame;
         }
 
-        public ValueTask DisposeAsync() => reader.DisposeAsync();
+        public ValueTask DisposeAsync() => _reader.DisposeAsync();
     }
 
-    private sealed class FamilyWriter(IProtocolFrameWriter writer, ProtocolMessageFamily family) : IProtocolFrameWriter
+    private sealed class FamilyWriter : IProtocolFrameWriter
     {
-        public ValueTask WriteFrameAsync(ProtocolFrame frame, CancellationToken cancellationToken = default)
+        private readonly IProtocolFrameWriter _writer;
+        private readonly ProtocolMessageFamily _family;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="FamilyWriter"/> class.
+        /// </summary>
+        /// <param name="writer">The framed writer that receives validated frames.</param>
+        /// <param name="family">The family every written identifier must belong to.</param>
+        public FamilyWriter(IProtocolFrameWriter writer, ProtocolMessageFamily family)
         {
-            Validate(family, frame.Type);
-            return writer.WriteFrameAsync(frame, cancellationToken);
+            _writer = writer;
+            _family = family;
         }
 
-        public ValueTask FlushAsync(CancellationToken cancellationToken = default) => writer.FlushAsync(cancellationToken);
-        public ValueTask DisposeAsync() => writer.DisposeAsync();
+        public ValueTask WriteFrameAsync(ProtocolFrame frame, CancellationToken cancellationToken = default)
+        {
+            Validate(_family, frame.Type);
+            return _writer.WriteFrameAsync(frame, cancellationToken);
+        }
+
+        public ValueTask FlushAsync(CancellationToken cancellationToken = default) => _writer.FlushAsync(cancellationToken);
+        public ValueTask DisposeAsync() => _writer.DisposeAsync();
     }
 }

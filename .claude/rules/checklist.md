@@ -29,7 +29,11 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 ## Code surface
 
 - [ ] All new files use file-scoped namespaces
-- [ ] Namespace matches assembly name exactly
+- [ ] The csproj declares `<RootNamespace>` (COHNS001); namespaces match it — `{RootNamespace}.Internal` for internal types, never `.Abstractions`/`.Exceptions`/`.Extensions`/`.ValueObjects`
+- [ ] Types sit in the right folder (`general-rules.md`, "Library folder structure"): interfaces/abstract classes in `Abstractions/`, exceptions and `{Name}ErrorCode` enums in `Exceptions/`, extension containers in `Extensions/`, value objects in `ValueObjects/`, every internal type under `Internal/`; the first four stay flat
+- [ ] No primary constructors on classes or structs (positional records are fine)
+- [ ] Every private field — instance or static — is `_camelCase`
+- [ ] Assembly attributes, `InternalsVisibleTo` included, live in `Properties/AssemblyInfo.cs`, not the csproj
 - [ ] One public type per file (with grouped root-first naming for variant families, e.g., `Http2Frame.Header.cs`)
 - [ ] New public APIs are interfaces, with internal implementations (unless a documented deviation applies — see the exception protocol in `deviations.md`)
 - [ ] Public APIs have complete XML documentation (`<summary>`, `<param>`, `<returns>`, `<exception>`)

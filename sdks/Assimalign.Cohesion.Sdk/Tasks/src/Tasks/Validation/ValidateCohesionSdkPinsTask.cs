@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Sdk.Tasks;
 public sealed class ValidateCohesionSdkPinsTask : Task
 {
     private const string BaseSdkPackageId = "Assimalign.Cohesion.Sdk";
-    private static readonly HashSet<string> CohesionSdkPackageIds = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> _cohesionSdkPackageIds = new(StringComparer.OrdinalIgnoreCase)
     {
         BaseSdkPackageId,
 		"Assimalign.Cohesion.Sdk.ApplicationModel",
@@ -206,7 +206,7 @@ public sealed class ValidateCohesionSdkPinsTask : Task
 
     private static bool IsCohesionSdkPackageId(string packageId)
     {
-        return CohesionSdkPackageIds.Contains(packageId);
+        return _cohesionSdkPackageIds.Contains(packageId);
     }
 
     private static bool TryParseSdkVersion(string value, out Version? version)

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Scheduler;
 
-namespace Assimalign.Cohesion.Scheduler.Cron;
+namespace Assimalign.Cohesion.Scheduler.Cron.Internal;
 
 internal sealed class DefaultCronSchedule : CronSchedule<CronScheduleContext>
 {

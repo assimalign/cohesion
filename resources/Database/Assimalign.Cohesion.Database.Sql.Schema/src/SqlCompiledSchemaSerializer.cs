@@ -7,6 +7,8 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Sql.Schema.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql.Schema;
 
 /// <summary>Reads and writes the canonical compiled-schema document.</summary>
@@ -134,10 +136,3 @@ public static class SqlCompiledSchemaSerializer
     }
 
 }
-
-[JsonSourceGenerationOptions(
-    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    WriteIndented = false,
-    UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
-[JsonSerializable(typeof(SqlCompiledSchema))]
-internal sealed partial class SqlCompiledSchemaJsonContext : JsonSerializerContext;

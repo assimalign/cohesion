@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Security.DataProtection.Tests;
 
 public class DataProtectorTests
 {
-    private static readonly byte[] Sample = Encoding.UTF8.GetBytes("cohesion-data-protection-sample-payload");
+    private static readonly byte[] _sample = Encoding.UTF8.GetBytes("cohesion-data-protection-sample-payload");
 
     private static IDataProtectionProvider CreateProvider(string discriminator = "app")
     {
@@ -23,10 +23,10 @@ public class DataProtectorTests
     {
         IDataProtector protector = CreateProvider().CreateProtector("purpose");
 
-        byte[] protectedData = protector.Protect(Sample);
+        byte[] protectedData = protector.Protect(_sample);
         byte[] recovered = protector.Unprotect(protectedData);
 
-        recovered.ShouldBe(Sample);
+        recovered.ShouldBe(_sample);
     }
 
     [Fact(DisplayName = "Cohesion Test [Security.DataProtection] - Protect: Should round-trip an empty payload")]
@@ -44,13 +44,13 @@ public class DataProtectorTests
     {
         IDataProtector protector = CreateProvider().CreateProtector("purpose");
 
-        byte[] first = protector.Protect(Sample);
-        byte[] second = protector.Protect(Sample);
+        byte[] first = protector.Protect(_sample);
+        byte[] second = protector.Protect(_sample);
 
         // Random nonce per call ⇒ distinct payloads that both still decrypt.
         first.ShouldNotBe(second);
-        protector.Unprotect(first).ShouldBe(Sample);
-        protector.Unprotect(second).ShouldBe(Sample);
+        protector.Unprotect(first).ShouldBe(_sample);
+        protector.Unprotect(second).ShouldBe(_sample);
     }
 
     [Fact(DisplayName = "Cohesion Test [Security.DataProtection] - Protect: Should embed a versioned key-id header")]
@@ -58,7 +58,7 @@ public class DataProtectorTests
     {
         IDataProtector protector = CreateProvider().CreateProtector("purpose");
 
-        byte[] protectedData = protector.Protect(Sample);
+        byte[] protectedData = protector.Protect(_sample);
 
         // [version:1][keyId:16][nonce:12][ciphertext][tag:16]
         protectedData.Length.ShouldBeGreaterThan(45);
@@ -72,7 +72,7 @@ public class DataProtectorTests
     public void Unprotect_OnTamperedCiphertext_ShouldThrow()
     {
         IDataProtector protector = CreateProvider().CreateProtector("purpose");
-        byte[] protectedData = protector.Protect(Sample);
+        byte[] protectedData = protector.Protect(_sample);
         protectedData[^1] ^= 0xFF; // flip a tag byte
 
         Should.Throw<DataProtectionException>(() => protector.Unprotect(protectedData));
@@ -93,10 +93,10 @@ public class DataProtectorTests
         IDataProtector purposeA = provider.CreateProtector("purpose-a");
         IDataProtector purposeB = provider.CreateProtector("purpose-b");
 
-        byte[] protectedData = purposeA.Protect(Sample);
+        byte[] protectedData = purposeA.Protect(_sample);
 
         Should.Throw<DataProtectionException>(() => purposeB.Unprotect(protectedData));
-        purposeA.Unprotect(protectedData).ShouldBe(Sample);
+        purposeA.Unprotect(protectedData).ShouldBe(_sample);
     }
 
     [Fact(DisplayName = "Cohesion Test [Security.DataProtection] - Purpose: Should isolate different applications sharing a key ring")]
@@ -112,7 +112,7 @@ public class DataProtectorTests
             .Create(shared, o => o.ApplicationDiscriminator = "app-two")
             .CreateProtector("purpose");
 
-        byte[] protectedData = appOne.Protect(Sample);
+        byte[] protectedData = appOne.Protect(_sample);
 
         Should.Throw<DataProtectionException>(() => appTwo.Unprotect(protectedData));
     }
@@ -124,9 +124,9 @@ public class DataProtectorTests
         IDataProtector chained = provider.CreateProtector("outer").CreateProtector("inner");
         IDataProtector viaParams = provider.CreateProtector("outer", "inner");
 
-        byte[] protectedData = chained.Protect(Sample);
+        byte[] protectedData = chained.Protect(_sample);
 
-        viaParams.Unprotect(protectedData).ShouldBe(Sample);
+        viaParams.Unprotect(protectedData).ShouldBe(_sample);
     }
 
     [Fact(DisplayName = "Cohesion Test [Security.DataProtection] - Purpose: Sub-purpose should isolate from its parent")]
@@ -136,7 +136,7 @@ public class DataProtectorTests
         IDataProtector parent = provider.CreateProtector("outer");
         IDataProtector child = parent.CreateProtector("inner");
 
-        byte[] parentData = parent.Protect(Sample);
+        byte[] parentData = parent.Protect(_sample);
 
         Should.Throw<DataProtectionException>(() => child.Unprotect(parentData));
     }

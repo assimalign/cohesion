@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting;
 
-namespace Assimalign.Cohesion.ApiManager.Hosting;
+namespace Assimalign.Cohesion.ApiManager.Hosting.Internal;
 
 internal sealed class ApiManagerControlPlaneEndpointService : IHostService, IDisposable
 {

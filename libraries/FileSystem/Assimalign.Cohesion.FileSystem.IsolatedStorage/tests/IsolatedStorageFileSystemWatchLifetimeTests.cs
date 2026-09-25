@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.FileSystem.IsolatedStorage.Tests;
 /// </summary>
 public sealed class IsolatedStorageFileSystemWatchLifetimeTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(10);
 
     [Theory(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Dispose: Watch token stops its timer while its owner remains usable")]
     [InlineData(0)]
@@ -119,7 +119,7 @@ public sealed class IsolatedStorageFileSystemWatchLifetimeTests
 
         try
         {
-            await callbackStarted.Task.WaitAsync(TestTimeout);
+            await callbackStarted.Task.WaitAsync(_testTimeout);
             await Task.Run(() =>
             {
                 if (disposeOwner)
@@ -130,7 +130,7 @@ public sealed class IsolatedStorageFileSystemWatchLifetimeTests
                 {
                     ((IDisposable)token).Dispose();
                 }
-            }).WaitAsync(TestTimeout);
+            }).WaitAsync(_testTimeout);
             timer.IsDisposed.ShouldBeTrue();
             if (!disposeOwner)
             {
@@ -141,7 +141,7 @@ public sealed class IsolatedStorageFileSystemWatchLifetimeTests
         finally
         {
             releaseCallback.TrySetResult();
-            await firing.WaitAsync(TestTimeout);
+            await firing.WaitAsync(_testTimeout);
         }
 
         laterCallbacks.ShouldBe(0);
@@ -176,7 +176,7 @@ public sealed class IsolatedStorageFileSystemWatchLifetimeTests
         using var laterRegistration = token.OnCreate<object>(_ => laterCallbacks++, null);
         fileSystem.CreateFile("self-dispose.bin");
 
-        (await Task.Run(timer.Fire).WaitAsync(TestTimeout)).ShouldBeTrue();
+        (await Task.Run(timer.Fire).WaitAsync(_testTimeout)).ShouldBeTrue();
 
         callbacks.ShouldBe(1);
         laterCallbacks.ShouldBe(0);

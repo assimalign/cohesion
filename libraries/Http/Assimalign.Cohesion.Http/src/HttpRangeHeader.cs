@@ -25,12 +25,12 @@ public readonly struct HttpRangeHeader
     /// <summary>The <c>bytes</c> range unit — the only unit defined for HTTP range requests.</summary>
     public const string BytesUnit = "bytes";
 
-    private readonly HttpRange[]? ranges;
+    private readonly HttpRange[]? _ranges;
 
     private HttpRangeHeader(string unit, HttpRange[] ranges)
     {
         Unit = unit;
-        this.ranges = ranges;
+        this._ranges = ranges;
     }
 
     /// <summary>Gets the range unit; <see cref="BytesUnit"/> for any successfully parsed header.</summary>
@@ -38,13 +38,13 @@ public readonly struct HttpRangeHeader
 
     /// <summary>Gets the ordered set of range specs. Never empty for a parsed header.</summary>
     public IReadOnlyList<HttpRange> Ranges
-        => ranges ?? (IReadOnlyList<HttpRange>)Array.Empty<HttpRange>();
+        => _ranges ?? (IReadOnlyList<HttpRange>)Array.Empty<HttpRange>();
 
     /// <summary>Gets the number of range specs.</summary>
-    public int Count => ranges?.Length ?? 0;
+    public int Count => _ranges?.Length ?? 0;
 
     /// <summary>Gets a value indicating whether this instance was default-constructed (holds no ranges).</summary>
-    public bool IsEmpty => ranges is null;
+    public bool IsEmpty => _ranges is null;
 
     private string DebuggerDisplay => IsEmpty ? "<empty>" : ToString();
 
@@ -141,15 +141,15 @@ public readonly struct HttpRangeHeader
             return string.Empty;
         }
 
-        var builder = new StringBuilder(Unit.Length + 1 + ranges!.Length * 8);
+        var builder = new StringBuilder(Unit.Length + 1 + _ranges!.Length * 8);
         builder.Append(Unit).Append('=');
-        for (int i = 0; i < ranges.Length; i++)
+        for (int i = 0; i < _ranges.Length; i++)
         {
             if (i > 0)
             {
                 builder.Append(',');
             }
-            builder.Append(ranges[i].ToString());
+            builder.Append(_ranges[i].ToString());
         }
         return builder.ToString();
     }

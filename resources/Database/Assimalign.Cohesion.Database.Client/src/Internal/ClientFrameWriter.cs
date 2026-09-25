@@ -5,15 +5,26 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Client;
+namespace Assimalign.Cohesion.Database.Client.Internal;
 
-internal sealed class ClientFrameWriter(IProtocolFrameWriter writer) : IProtocolFrameWriter
+internal sealed class ClientFrameWriter : IProtocolFrameWriter
 {
+    private readonly IProtocolFrameWriter _writer;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ClientFrameWriter"/> class.
+    /// </summary>
+    /// <param name="writer">The underlying protocol frame writer whose completed-pipe failures are translated.</param>
+    public ClientFrameWriter(IProtocolFrameWriter writer)
+    {
+        _writer = writer;
+    }
+
     public async ValueTask WriteFrameAsync(ProtocolFrame frame, CancellationToken cancellationToken = default)
     {
         try
         {
-            await writer.WriteFrameAsync(frame, cancellationToken).ConfigureAwait(false);
+            await _writer.WriteFrameAsync(frame, cancellationToken).ConfigureAwait(false);
         }
         catch (InvalidOperationException exception)
         {
@@ -25,7 +36,7 @@ internal sealed class ClientFrameWriter(IProtocolFrameWriter writer) : IProtocol
     {
         try
         {
-            await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (InvalidOperationException exception)
         {
@@ -33,5 +44,5 @@ internal sealed class ClientFrameWriter(IProtocolFrameWriter writer) : IProtocol
         }
     }
 
-    public ValueTask DisposeAsync() => writer.DisposeAsync();
+    public ValueTask DisposeAsync() => _writer.DisposeAsync();
 }

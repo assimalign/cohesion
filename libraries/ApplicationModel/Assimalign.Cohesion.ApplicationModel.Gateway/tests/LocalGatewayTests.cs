@@ -13,6 +13,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 using Assimalign.Cohesion.Core;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
@@ -22,7 +23,7 @@ public class LocalGatewayTests
 {
     private const string ApplicationNameValue = "gateway-tests";
     private const string TestHostAssembly = "Assimalign.Cohesion.ApplicationModel.Gateway.TestHost";
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: name is local")]
     public void Name_DefaultGateway_IsLocal()
@@ -215,7 +216,7 @@ public class LocalGatewayTests
             var stopwatch = Stopwatch.StartNew();
 
             cancellation.Cancel();
-            await run.WaitAsync(TestTimeout);
+            await run.WaitAsync(_testTimeout);
 
             stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
             await WaitForTextAsync(observed, "observed");
@@ -295,7 +296,7 @@ public class LocalGatewayTests
 
             // Act
             cancellation.Cancel();
-            await run.WaitAsync(TestTimeout);
+            await run.WaitAsync(_testTimeout);
 
             // Assert
             await WaitForTextAsync(observed, "observed");
@@ -386,8 +387,8 @@ public class LocalGatewayTests
             var stopwatch = Stopwatch.StartNew();
 
             cancellation.Cancel();
-            await run.WaitAsync(TestTimeout);
-            string? detail = await forced.Task.WaitAsync(TestTimeout);
+            await run.WaitAsync(_testTimeout);
+            string? detail = await forced.Task.WaitAsync(_testTimeout);
 
             stopwatch.Elapsed.ShouldBeGreaterThanOrEqualTo(TimeSpan.FromSeconds(4.5));
             stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10));
@@ -443,7 +444,7 @@ public class LocalGatewayTests
             InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
                 async () => await secondApplication
                     .RunAsync(secondCancellation.Token)
-                    .WaitAsync(TestTimeout));
+                    .WaitAsync(_testTimeout));
 
             exception.Message.ShouldContain("already supervised", Case.Sensitive);
             ReadProcessId(pidPath).ShouldBe(originalProcessId);
@@ -580,7 +581,7 @@ public class LocalGatewayTests
 
             // Act
             cancellation.Cancel();
-            await run.WaitAsync(TestTimeout);
+            await run.WaitAsync(_testTimeout);
 
             // Assert
             File.ReadAllText(launchCount).Trim().ShouldBe("1");
@@ -661,7 +662,7 @@ public class LocalGatewayTests
                 && Interlocked.Exchange(ref blockStop, 1) == 0)
             {
                 stopEntered.Set();
-                if (!releaseStop.Wait(TestTimeout))
+                if (!releaseStop.Wait(_testTimeout))
                 {
                     throw new TimeoutException("The test did not release the blocked stop transition.");
                 }
@@ -677,18 +678,18 @@ public class LocalGatewayTests
             ResourceLifecycle running = await state.WaitForStateAsync(
                 descriptor.Resource.Id,
                 new HashSet<ResourceLifecycle> { ResourceLifecycle.Running },
-                TestTimeout);
+                _testTimeout);
             running.ShouldBe(ResourceLifecycle.Running);
             File.WriteAllText(exitGate, string.Empty);
             ResourceLifecycle stopped = await state.WaitForStateAsync(
                 descriptor.Resource.Id,
                 new HashSet<ResourceLifecycle> { ResourceLifecycle.Stopped },
-                TestTimeout);
+                _testTimeout);
             stopped.ShouldBe(ResourceLifecycle.Stopped);
             HasPortAllocation(root, manifest.Name).ShouldBeTrue();
 
             Task stop = Task.Run(() => controller.StopAsync(context, CancellationToken.None));
-            stopEntered.Wait(TestTimeout).ShouldBeTrue();
+            stopEntered.Wait(_testTimeout).ShouldBeTrue();
 
             // Act
             Task delete = controller.DeleteAsync(context, CancellationToken.None);
@@ -697,7 +698,7 @@ public class LocalGatewayTests
             delete.IsCompleted.ShouldBeFalse();
             HasPortAllocation(root, manifest.Name).ShouldBeTrue();
             releaseStop.Set();
-            await Task.WhenAll(stop, delete).WaitAsync(TestTimeout);
+            await Task.WhenAll(stop, delete).WaitAsync(_testTimeout);
             HasPortAllocation(root, manifest.Name).ShouldBeFalse();
         }
         finally
@@ -729,7 +730,7 @@ public class LocalGatewayTests
         IApplication application = builder.Build();
 
         InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
-            async () => await application.RunAsync().WaitAsync(TestTimeout));
+            async () => await application.RunAsync().WaitAsync(_testTimeout));
 
         exception.Message.ShouldContain("AddExecutable");
     }
@@ -853,8 +854,8 @@ public class LocalGatewayTests
         try
         {
             InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
-                async () => await application.RunAsync().WaitAsync(TestTimeout));
-            string? detail = await failed.Task.WaitAsync(TestTimeout);
+                async () => await application.RunAsync().WaitAsync(_testTimeout));
+            string? detail = await failed.Task.WaitAsync(_testTimeout);
 
             stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
             exception.Message.ShouldContain("did not reach Running");
@@ -985,7 +986,7 @@ public class LocalGatewayTests
             File.WriteAllText(liveStatus, "500", Encoding.UTF8);
             await WaitForTextAsync(launchCount, "2");
             File.WriteAllText(liveStatus, "200", Encoding.UTF8);
-            await restarted.Task.WaitAsync(TestTimeout);
+            await restarted.Task.WaitAsync(_testTimeout);
 
             StateObservation[] observed = transitions.ToArray();
             int degraded = IndexOf(observed, ResourceLifecycle.Degraded);
@@ -1795,8 +1796,8 @@ public class LocalGatewayTests
             ResourceLifecycle.Stopped,
         };
         ResourceLifecycle reached = await gateway.ResourceStates
-            .WaitForStateAsync(resource, terminals, TestTimeout)
-            .WaitAsync(TestTimeout);
+            .WaitForStateAsync(resource, terminals, _testTimeout)
+            .WaitAsync(_testTimeout);
         reached.ShouldBe(expected);
     }
 
@@ -1816,7 +1817,7 @@ public class LocalGatewayTests
     private static async Task WaitForConditionAsync(Func<bool> condition, string failure)
     {
         var stopwatch = Stopwatch.StartNew();
-        while (stopwatch.Elapsed < TestTimeout)
+        while (stopwatch.Elapsed < _testTimeout)
         {
             try
             {
@@ -1839,7 +1840,7 @@ public class LocalGatewayTests
     private static async Task StopApplicationAsync(CancellationTokenSource cancellation, Task run)
     {
         cancellation.Cancel();
-        await run.WaitAsync(TestTimeout);
+        await run.WaitAsync(_testTimeout);
     }
 
     private static IReadOnlyDictionary<string, string> ReadStringMap(string path)
@@ -1948,7 +1949,7 @@ public class LocalGatewayTests
             if (started && !process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
-                await process.WaitForExitAsync().WaitAsync(TestTimeout);
+                await process.WaitForExitAsync().WaitAsync(_testTimeout);
             }
 
             process.Dispose();
@@ -1963,7 +1964,7 @@ public class LocalGatewayTests
             if (!orphan.Process.HasExited)
             {
                 orphan.Process.Kill(entireProcessTree: true);
-                await orphan.Process.WaitForExitAsync().WaitAsync(TestTimeout);
+                await orphan.Process.WaitForExitAsync().WaitAsync(_testTimeout);
             }
         }
         finally

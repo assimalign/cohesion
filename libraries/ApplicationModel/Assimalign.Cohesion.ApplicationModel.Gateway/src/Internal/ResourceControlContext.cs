@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 /// <summary>
 /// The default <see cref="IResourceControlContext"/> passed to a controller for one resource.

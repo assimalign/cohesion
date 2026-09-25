@@ -8,6 +8,7 @@ using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 
 using Assimalign.Cohesion.Sdk.ApplicationModel.Tasks;
+using Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.Internal;
 
 namespace Assimalign.Cohesion.Sdk.Gateway.Tasks;
 

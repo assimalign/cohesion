@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 
 internal interface IInProcessMemberSupervisor
 {
@@ -920,19 +920,3 @@ internal readonly record struct InProcessMemberKey(
     ResourceId Resource);
 
 internal sealed record InProcessGeneration(ProcessHostLease Lease);
-
-internal sealed class InProcessMemberExitedException : Exception;
-
-internal sealed class InProcessReadinessTimeoutException : TimeoutException
-{
-    internal InProcessReadinessTimeoutException(
-        ResourceName resourceName,
-        TimeSpan readinessBudget,
-        Exception innerException)
-        : base(
-            $"Resource '{resourceName}' exceeded its in-process readiness budget of "
-            + $"'{readinessBudget}'.",
-            innerException)
-    {
-    }
-}

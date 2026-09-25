@@ -17,7 +17,7 @@ using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting;
 
-namespace Assimalign.Cohesion.LogSpace.Hosting;
+namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
 internal sealed class OtlpReceiverEndpointService : IHostService, IDisposable
 {

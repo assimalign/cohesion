@@ -238,9 +238,18 @@ internal static class GraphPlanExecutor
     }
 }
 
-internal sealed class GraphMutationResult(long count) : QueryResult
+internal sealed class GraphMutationResult : QueryResult
 {
+    private readonly long _count;
+
+    /// <summary>Initializes a new instance of the <see cref="GraphMutationResult"/> class.</summary>
+    /// <param name="count">The number of graph entities the mutation affected.</param>
+    public GraphMutationResult(long count)
+    {
+        _count = count;
+    }
+
     public override QueryResultStatus Status => QueryResultStatus.Success;
-    public override long AffectedCount => count;
+    public override long AffectedCount => _count;
     public override IReadOnlyList<Diagnostic>? Diagnostics => null;
 }

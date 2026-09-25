@@ -7,6 +7,8 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.Security.Internal;
+
 namespace Assimalign.Cohesion.Security.Tests;
 
 public class CertificateManagerTests

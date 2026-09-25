@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.ApiManager;
+using Assimalign.Cohesion.ApiManager.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.ApiManager.Hosting;

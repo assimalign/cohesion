@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.VpnGateway;
+using Assimalign.Cohesion.VpnGateway.Hosting.Internal;
 
 namespace Assimalign.Cohesion.VpnGateway.Hosting;
 

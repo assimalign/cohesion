@@ -12,6 +12,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
@@ -35,14 +36,14 @@ public sealed class GatewayTrustTests
         empty.AllowedCommandKinds.ShouldBeEmpty();
     }
 
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - LoadOrCreateAsync: Should persist a distinct P-256 trust key per application")]
     public async Task LoadOrCreateAsync_WhenReloaded_ShouldPersistApplicationTrustKey()
     {
         // Arrange
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         ApplicationName applicationA = ApplicationName.Parse("appa");
         ApplicationName applicationB = ApplicationName.Parse("appb");
         ResourceName gateway = "test-gateway";
@@ -82,7 +83,7 @@ public sealed class GatewayTrustTests
     {
         // Arrange
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         var options = new ApplicationGatewayOptions
         {
             ExportDirectory = root,
@@ -146,7 +147,7 @@ public sealed class GatewayTrustTests
     {
         // Arrange
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         var options = new ApplicationGatewayOptions
         {
             ExportDirectory = root,
@@ -192,7 +193,7 @@ public sealed class GatewayTrustTests
     {
         // Arrange
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         var repository = new RecordingTrustKeyRepository();
         var options = new ApplicationGatewayOptions
         {
@@ -239,7 +240,7 @@ public sealed class GatewayTrustTests
     {
         // Arrange
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         using var peerKey = new GatewayTrustKey(ECDsa.Create(ECCurve.NamedCurves.nistP256));
         byte[] document = TrustedIssuerDocument.Write(
             [new TrustedIssuer("peer", peerKey.PublicJwk)]);
@@ -293,7 +294,7 @@ public sealed class GatewayTrustTests
     {
         // Arrange
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         using var peerKey = new GatewayTrustKey(ECDsa.Create(ECCurve.NamedCurves.nistP256));
         byte[] document = TrustedIssuerDocument.Write(
             [new TrustedIssuer("peer", peerKey.PublicJwk)]);
@@ -349,7 +350,7 @@ public sealed class GatewayTrustTests
     {
         // Arrange
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         using var peerKey = new GatewayTrustKey(ECDsa.Create(ECCurve.NamedCurves.nistP256));
         var fallback = new TrustedIssuer("peer", peerKey.PublicJwk);
         await TrustedIssuerDocument.WriteFileAsync(
@@ -402,7 +403,7 @@ public sealed class GatewayTrustTests
     {
         // Arrange
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         var client = new TrustedIssuerStoreClient(Array.Empty<byte>());
         var options = new ApplicationGatewayOptions
         {
@@ -460,7 +461,7 @@ public sealed class GatewayTrustTests
     {
         // Arrange
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         var gateway = new TestGateway(
             new InMemoryResourceStateManager(),
             [new InputHistoryController()],
@@ -756,8 +757,19 @@ public sealed class GatewayTrustTests
             CancellationToken cancellationToken = default) => StopAsync(context, cancellationToken);
     }
 
-    private sealed class TrustedIssuerStoreClient(byte[] document) : IGatewayStoreClient
+    private sealed class TrustedIssuerStoreClient : IGatewayStoreClient
     {
+        private readonly byte[] _document;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="TrustedIssuerStoreClient"/> class.
+        /// </summary>
+        /// <param name="document">The trusted-issuer document returned for secret reads.</param>
+        public TrustedIssuerStoreClient(byte[] document)
+        {
+            _document = document;
+        }
+
         public bool ReturnNotFound { get; init; }
 
         public string? Credential { get; private set; }
@@ -789,7 +801,7 @@ public sealed class GatewayTrustTests
                         System.Net.HttpStatusCode.NotFound));
             }
 
-            return ValueTask.FromResult<ReadOnlyMemory<byte>>(document);
+            return ValueTask.FromResult<ReadOnlyMemory<byte>>(_document);
         }
 
         public ValueTask<string> ReadCertificateAsync(
@@ -822,8 +834,19 @@ public sealed class GatewayTrustTests
         }
     }
 
-    private sealed class TrustAwareExternalResolver(TestGateway gateway) : IExternalResourceResolver
+    private sealed class TrustAwareExternalResolver : IExternalResourceResolver
     {
+        private readonly TestGateway _gateway;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="TrustAwareExternalResolver"/> class.
+        /// </summary>
+        /// <param name="gateway">The gateway whose trusted issuers are inspected during resolution.</param>
+        public TrustAwareExternalResolver(TestGateway gateway)
+        {
+            _gateway = gateway;
+        }
+
         public bool PeerWasTrusted { get; private set; }
 
         public ValueTask<ExternalResourceResolution> ResolveAsync(
@@ -831,7 +854,7 @@ public sealed class GatewayTrustTests
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            IReadOnlyList<TrustedIssuer> issuers = gateway.GetTrustedIssuers("appa");
+            IReadOnlyList<TrustedIssuer> issuers = _gateway.GetTrustedIssuers("appa");
             for (int index = 0; index < issuers.Count; index++)
             {
                 if (string.Equals(issuers[index].Issuer, "peer", StringComparison.Ordinal))

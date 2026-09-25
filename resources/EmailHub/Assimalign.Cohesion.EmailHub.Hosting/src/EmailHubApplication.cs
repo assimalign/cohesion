@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.EmailHub;
+using Assimalign.Cohesion.EmailHub.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.EmailHub.Hosting;

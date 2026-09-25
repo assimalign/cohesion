@@ -5,12 +5,22 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
-internal sealed class IsolatedStorageFileSystemFileHandle(IsolatedStorageFileStream stream) : IFileSystemFileHandle
+internal sealed class IsolatedStorageFileSystemFileHandle : IFileSystemFileHandle
 {
+    private readonly IsolatedStorageFileStream _stream;
     // IsolatedStorageFileStream rejects SafeFileHandle access. Keep its private cursor behind
     // one gate so each offset-addressed operation is atomic with respect to all other callers.
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool _disposed;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IsolatedStorageFileSystemFileHandle"/> class.
+    /// </summary>
+    /// <param name="stream">The isolated-storage file stream this instance owns and disposes.</param>
+    public IsolatedStorageFileSystemFileHandle(IsolatedStorageFileStream stream)
+    {
+        _stream = stream;
+    }
 
     public long Length
     {
@@ -20,7 +30,7 @@ internal sealed class IsolatedStorageFileSystemFileHandle(IsolatedStorageFileStr
             try
             {
                 ThrowIfDisposed();
-                return stream.Length;
+                return _stream.Length;
             }
             finally
             {
@@ -46,8 +56,8 @@ internal sealed class IsolatedStorageFileSystemFileHandle(IsolatedStorageFileStr
         {
             ThrowIfDisposed();
             ArgumentOutOfRangeException.ThrowIfNegative(offset);
-            stream.Position = offset;
-            return stream.Read(buffer);
+            _stream.Position = offset;
+            return _stream.Read(buffer);
         }
         finally
         {
@@ -63,8 +73,8 @@ internal sealed class IsolatedStorageFileSystemFileHandle(IsolatedStorageFileStr
             ThrowIfDisposed();
             ArgumentOutOfRangeException.ThrowIfNegative(offset);
             cancellationToken.ThrowIfCancellationRequested();
-            stream.Position = offset;
-            return await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            _stream.Position = offset;
+            return await _stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -79,8 +89,8 @@ internal sealed class IsolatedStorageFileSystemFileHandle(IsolatedStorageFileStr
         {
             ThrowIfDisposed();
             ArgumentOutOfRangeException.ThrowIfNegative(offset);
-            stream.Position = offset;
-            stream.Write(buffer);
+            _stream.Position = offset;
+            _stream.Write(buffer);
         }
         finally
         {
@@ -96,8 +106,8 @@ internal sealed class IsolatedStorageFileSystemFileHandle(IsolatedStorageFileStr
             ThrowIfDisposed();
             ArgumentOutOfRangeException.ThrowIfNegative(offset);
             cancellationToken.ThrowIfCancellationRequested();
-            stream.Position = offset;
-            await stream.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+            _stream.Position = offset;
+            await _stream.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -111,7 +121,7 @@ internal sealed class IsolatedStorageFileSystemFileHandle(IsolatedStorageFileStr
         try
         {
             ThrowIfDisposed();
-            stream.SetLength(length);
+            _stream.SetLength(length);
         }
         finally
         {
@@ -125,7 +135,7 @@ internal sealed class IsolatedStorageFileSystemFileHandle(IsolatedStorageFileStr
         try
         {
             ThrowIfDisposed();
-            stream.Flush(durable);
+            _stream.Flush(durable);
         }
         finally
         {
@@ -143,11 +153,11 @@ internal sealed class IsolatedStorageFileSystemFileHandle(IsolatedStorageFileStr
             if (durable)
             {
                 // There is no async durable-flush overload; never substitute FlushAsync here.
-                stream.Flush(flushToDisk: true);
+                _stream.Flush(flushToDisk: true);
             }
             else
             {
-                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -167,7 +177,7 @@ internal sealed class IsolatedStorageFileSystemFileHandle(IsolatedStorageFileStr
             }
 
             Volatile.Write(ref _disposed, true);
-            stream.Dispose();
+            _stream.Dispose();
         }
         finally
         {
@@ -186,7 +196,7 @@ internal sealed class IsolatedStorageFileSystemFileHandle(IsolatedStorageFileStr
             }
 
             Volatile.Write(ref _disposed, true);
-            await stream.DisposeAsync().ConfigureAwait(false);
+            await _stream.DisposeAsync().ConfigureAwait(false);
         }
         finally
         {

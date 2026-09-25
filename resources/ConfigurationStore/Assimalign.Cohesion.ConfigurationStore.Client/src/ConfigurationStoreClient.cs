@@ -1,6 +1,8 @@
 using System;
 using System.Net.Http;
 
+using Assimalign.Cohesion.ConfigurationStore.Client.Internal;
+
 namespace Assimalign.Cohesion.ConfigurationStore.Client;
 
 /// <summary>

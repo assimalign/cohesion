@@ -26,7 +26,7 @@ internal sealed class ConsumerWorkspace : IDisposable
 #endif
     private const string TestFeedEnvironmentVariable = "COHESION_SDK_TEST_FEED";
     private const string TestPackageVersionEnvironmentVariable = "COHESION_SDK_TEST_PACKAGE_VERSION";
-    private static readonly string[] RequiredSdkPackageIds =
+    private static readonly string[] _requiredSdkPackageIds =
     [
         BaseSdkPackageId,
         "Assimalign.Cohesion.Sdk.ApplicationModel",
@@ -34,12 +34,12 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.Sdk.ConfigurationStore",
         "Assimalign.Cohesion.Sdk.Database"
     ];
-    private static readonly string RepositoryRoot = FindRepositoryRoot();
-    private static readonly string PackageVersion = ResolvePackageVersion();
+    private static readonly string _repositoryRoot = FindRepositoryRoot();
+    private static readonly string _packageVersion = ResolvePackageVersion();
     // The SDK family layout is sdks/<family>/Tasks/{src,tests,docs}; the fixtures sit beside
     // this test project's sources, so the path carries the Tasks/ segment.
-    private static readonly string TestProjectsRoot = Path.Combine(
-        RepositoryRoot,
+    private static readonly string _testProjectsRoot = Path.Combine(
+        _repositoryRoot,
         "sdks",
         TestSdkPackageId,
         "Tasks",
@@ -56,20 +56,20 @@ internal sealed class ConsumerWorkspace : IDisposable
 
     public string LocalPackageFeedDirectory { get; }
 
-    internal static string SdkPackageVersion => PackageVersion;
+    internal static string SdkPackageVersion => _packageVersion;
 
     public static string ResourceSchemaPath => Path.Combine(
-        RepositoryRoot,
+        _repositoryRoot,
         "assets",
         "schemas",
         "cohesion.resource.schema.json");
 
     public static ConsumerWorkspace Create(params string[] fixtureNames)
     {
-        string feedDirectory = Path.Combine(RepositoryRoot, "_out", "packages");
+        string feedDirectory = Path.Combine(_repositoryRoot, "_out", "packages");
         string sdkFeedDirectory = ResolveSdkFeedDirectory(feedDirectory);
-        string[] missingSdkPackages = RequiredSdkPackageIds
-            .Select(packageId => Path.Combine(sdkFeedDirectory, $"{packageId}.{PackageVersion}.nupkg"))
+        string[] missingSdkPackages = _requiredSdkPackageIds
+            .Select(packageId => Path.Combine(sdkFeedDirectory, $"{packageId}.{_packageVersion}.nupkg"))
             .Where(packagePath => !File.Exists(packagePath))
             .ToArray();
         if (missingSdkPackages.Length > 0)
@@ -81,9 +81,9 @@ internal sealed class ConsumerWorkspace : IDisposable
 
         string workspaceId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
         string rootDirectory = Path.Combine(
-            RepositoryRoot, "_out", "s15", workspaceId[..8]);
+            _repositoryRoot, "_out", "s15", workspaceId[..8]);
         string localPackageFeedDirectory = Path.Combine(
-            RepositoryRoot,
+            _repositoryRoot,
             "_out",
             "sdk-tests",
             workspaceId);
@@ -154,7 +154,7 @@ internal sealed class ConsumerWorkspace : IDisposable
                 property.Name.StartsWith($"{BaseSdkPackageId}.", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(
                 property => property.Name,
-                _ => PackageVersion,
+                _ => _packageVersion,
                 StringComparer.OrdinalIgnoreCase);
     }
 
@@ -190,7 +190,7 @@ internal sealed class ConsumerWorkspace : IDisposable
         string projectFile = ProjectFile(fixtureName);
         string project = File.ReadAllText(projectFile);
         const string unversionedSdk = "<Project Sdk=\"Assimalign.Cohesion.Sdk\">";
-        string versionedSdk = $"<Project Sdk=\"Assimalign.Cohesion.Sdk/{PackageVersion}\">";
+        string versionedSdk = $"<Project Sdk=\"Assimalign.Cohesion.Sdk/{_packageVersion}\">";
         if (!project.Contains(unversionedSdk, StringComparison.Ordinal))
         {
             throw new InvalidOperationException($"Fixture '{projectFile}' does not use the unversioned base SDK declaration.");
@@ -332,12 +332,12 @@ internal sealed class ConsumerWorkspace : IDisposable
         }
 
         XDocument frameworkDocument = XDocument.Load(Path.Combine(
-            RepositoryRoot,
+            _repositoryRoot,
             "build",
             "Targets",
             "Build.TargetFramework.props"));
         XDocument versionDocument = XDocument.Load(Path.Combine(
-            RepositoryRoot,
+            _repositoryRoot,
             "build",
             "Targets",
             "Build.Version.props"));
@@ -360,7 +360,7 @@ internal sealed class ConsumerWorkspace : IDisposable
 
     private void CopyFixture(string fixtureName)
     {
-        string sourceDirectory = Path.Combine(TestProjectsRoot, fixtureName);
+        string sourceDirectory = Path.Combine(_testProjectsRoot, fixtureName);
         if (!Directory.Exists(sourceDirectory))
         {
             throw new DirectoryNotFoundException($"SDK test fixture '{sourceDirectory}' does not exist.");
@@ -456,7 +456,7 @@ internal sealed class ConsumerWorkspace : IDisposable
     private static JsonDocument ReadRepositoryGlobalJson()
     {
         return JsonDocument.Parse(
-            File.ReadAllText(Path.Combine(RepositoryRoot, "global.json")),
+            File.ReadAllText(Path.Combine(_repositoryRoot, "global.json")),
             new JsonDocumentOptions
             {
                 AllowTrailingCommas = true,

@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Client;
 
-namespace Assimalign.Cohesion.Database.Sql.Client;
+namespace Assimalign.Cohesion.Database.Sql.Client.Internal;
 
 /// <summary>
 /// The default SQL client: a thin typed facade over the shared pooling client core.

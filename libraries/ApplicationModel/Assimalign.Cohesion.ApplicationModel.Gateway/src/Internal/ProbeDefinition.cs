@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal sealed class ProbeDefinition : IProbeSpec
 {

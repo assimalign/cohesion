@@ -1,5 +1,6 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
   <PropertyGroup>
+    <RootNamespace>CommandGateway</RootNamespace>
     <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
     <CohesionResourceName>command-gateway</CohesionResourceName>
     <CohesionGatewayAot>false</CohesionGatewayAot>

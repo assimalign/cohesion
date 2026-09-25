@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting;
 
-namespace Assimalign.Cohesion.LoadBalancer.Hosting;
+namespace Assimalign.Cohesion.LoadBalancer.Hosting.Internal;
 
 internal sealed class LoadBalancerControlPlaneEndpointService : IHostService, IDisposable
 {

@@ -349,11 +349,18 @@ public sealed class ResourceControlPlaneHostingTests
         application.Context.State.ShouldBe(HostState.Stopped);
     }
 
-    private sealed class HealthyHostService(string name) : IHostService, IHealthContributor
+    private sealed class HealthyHostService : IHostService, IHealthContributor
     {
+        /// <summary>Initializes a new instance of the <see cref="HealthyHostService"/> class.</summary>
+        /// <param name="name">The health contribution name the service reports under.</param>
+        public HealthyHostService(string name)
+        {
+            Name = name;
+        }
+
         public ServiceId Id { get; } = ServiceId.New();
 
-        public string Name { get; } = name;
+        public string Name { get; }
 
         public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
@@ -365,18 +372,29 @@ public sealed class ResourceControlPlaneHostingTests
         }
     }
 
-    private sealed class ControlledStartServer(
-        TaskCompletionSource<bool> bindStarted,
-        TaskCompletionSource<bool> accepting) : IDatabaseServer
+    private sealed class ControlledStartServer : IDatabaseServer
     {
         private readonly RecordingServer _inner = new([], "controlled");
+        private readonly TaskCompletionSource<bool> _bindStarted;
+        private readonly TaskCompletionSource<bool> _accepting;
+
+        /// <summary>Initializes a new instance of the <see cref="ControlledStartServer"/> class.</summary>
+        /// <param name="bindStarted">Completed when the host begins starting the server.</param>
+        /// <param name="accepting">Completes the server start once it is set, signalling the server is accepting.</param>
+        public ControlledStartServer(
+            TaskCompletionSource<bool> bindStarted,
+            TaskCompletionSource<bool> accepting)
+        {
+            _bindStarted = bindStarted;
+            _accepting = accepting;
+        }
 
         public IDatabaseServerContext Context => _inner.Context;
 
         public Task StartAsync(CancellationToken cancellationToken = default)
         {
-            bindStarted.TrySetResult(true);
-            return accepting.Task.WaitAsync(cancellationToken);
+            _bindStarted.TrySetResult(true);
+            return _accepting.Task.WaitAsync(cancellationToken);
         }
 
         public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

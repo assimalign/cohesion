@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 
+using Assimalign.Cohesion.Http.Internal;
+
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>

@@ -14,14 +14,14 @@ using Assimalign.Cohesion.DependencyInjection.Internal;
 /// </summary>
 public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDisposable
 {
-    private readonly CallSiteValidatorVisitor? callSiteValidator;
-    private readonly Func<Type, Func<ServiceProviderEngineScope, object?>> createServiceAccessor;
+    private readonly CallSiteValidatorVisitor? _callSiteValidator;
+    private readonly Func<Type, Func<ServiceProviderEngineScope, object?>> _createServiceAccessor;
 
     // Internal for testing
     internal ServiceProviderEngine engine;
 
     internal bool IsDisposed;
-    private ConcurrentDictionary<Type, Func<ServiceProviderEngineScope, object?>> realizedServices;
+    private ConcurrentDictionary<Type, Func<ServiceProviderEngineScope, object?>> _realizedServices;
 
     internal CallSiteFactory CallSiteFactory { get; }
     internal ServiceProviderEngineScope Root { get; }
@@ -34,8 +34,8 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
         // note that Root needs to be set before calling GetEngine(), because the engine may need to access Root
         Root = new ServiceProviderEngineScope(this, isRootScope: true);
         engine = GetEngine(options.EnableDynamicCode);
-        createServiceAccessor = CreateServiceAccessor;
-        realizedServices = new ConcurrentDictionary<Type, Func<ServiceProviderEngineScope, object?>>();
+        _createServiceAccessor = CreateServiceAccessor;
+        _realizedServices = new ConcurrentDictionary<Type, Func<ServiceProviderEngineScope, object?>>();
 
         CallSiteFactory = new CallSiteFactory(container);
         CallSiteFactory.Add(typeof(IServiceProvider), new ServiceProviderCallSite()); // The list of built in services that aren't part of the list of service descriptors. keep this in sync with CallSiteFactory.IsService
@@ -44,7 +44,7 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
 
         if (options.ValidateScopes)
         {
-            callSiteValidator = new CallSiteValidatorVisitor();
+            _callSiteValidator = new CallSiteValidatorVisitor();
         }
         if (options.ValidateOnBuild)
         {
@@ -99,11 +99,11 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
     }
     private void OnCreate(CallSiteService callSite)
     {
-        callSiteValidator?.ValidateCallSite(callSite);
+        _callSiteValidator?.ValidateCallSite(callSite);
     }
     private void OnResolve(Type serviceType, IServiceScope scope)
     {
-        callSiteValidator?.ValidateResolution(serviceType, scope, Root);
+        _callSiteValidator?.ValidateResolution(serviceType, scope, Root);
     }
     internal object GetService(Type serviceType, ServiceProviderEngineScope serviceProviderEngineScope)
     {
@@ -112,7 +112,7 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
             ThrowHelper.ThrowObjectDisposedException();
         }
 
-        var realizedService = realizedServices.GetOrAdd(serviceType, this.createServiceAccessor);
+        var realizedService = _realizedServices.GetOrAdd(serviceType, this._createServiceAccessor);
 
         OnResolve(serviceType, serviceProviderEngineScope);
 
@@ -166,7 +166,7 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
     }
     internal void ReplaceServiceAccessor(CallSiteService callSite, Func<ServiceProviderEngineScope, object> accessor)
     {
-        realizedServices[callSite.ServiceType] = accessor;
+        _realizedServices[callSite.ServiceType] = accessor;
     }
     internal IServiceScope CreateScope()
     {

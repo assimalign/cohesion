@@ -1,6 +1,7 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Web">
 
   <PropertyGroup>
+    <RootNamespace>DisabledResource</RootNamespace>
     <Nullable>disable</Nullable>
     <CohesionApplicationModel>disabled</CohesionApplicationModel>
   </PropertyGroup>

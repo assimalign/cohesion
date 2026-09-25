@@ -4,7 +4,7 @@ using System.Linq;
 
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Sql.Catalog;
+namespace Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 
 /// <summary>
 /// An immutable directory captured under the catalog's publication lock.

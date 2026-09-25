@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Scheduler</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<Compile Remove="Delegates\**" />
 		<Compile Remove="Internal\ScheduleTaskScheduler.cs" />
@@ -14,13 +17,13 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionValueType
-			Include="ValueTypes\JobId.cs"
+			Include="ValueObjects\JobId.cs"
 			ObjectRuntimeType="Ulid"
 			ObjectNamespace="Assimalign.Cohesion.Scheduler"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
 		<CohesionValueType
-			Include="ValueTypes\ScheduleId.cs"
+			Include="ValueObjects\ScheduleId.cs"
 			ObjectRuntimeType="Ulid"
 			ObjectNamespace="Assimalign.Cohesion.Scheduler"
 			ObjectAccessModifier="public"

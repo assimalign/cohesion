@@ -7,12 +7,22 @@ using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Graph.Client;
+namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 
-internal sealed class GraphExecuteExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
+internal sealed class GraphExecuteExchange
     : IDatabaseProtocolExchange<GraphResultSet>
 {
-    private readonly GraphProtocolExecuteMessage _request = GraphRequest.Create(statement, parameters);
+    private readonly GraphProtocolExecuteMessage _request;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="GraphExecuteExchange"/> class.
+    /// </summary>
+    /// <param name="statement">The graph statement to execute.</param>
+    /// <param name="parameters">The named statement parameters, or <see langword="null"/> when the statement has none.</param>
+    public GraphExecuteExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
+    {
+        _request = GraphRequest.Create(statement, parameters);
+    }
 
     public ProtocolMessageFamily Family => GraphProtocol.Family;
     public bool IsResponseComplete { get; private set; }

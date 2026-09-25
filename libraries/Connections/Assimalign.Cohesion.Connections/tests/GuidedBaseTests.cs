@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Connections.Tests;
 
 public class GuidedBaseTests
 {
-    private static readonly EndPoint TestEndPoint = new IPEndPoint(IPAddress.Loopback, 16000);
+    private static readonly EndPoint _testEndPoint = new IPEndPoint(IPAddress.Loopback, 16000);
 
     [Fact(DisplayName = "Cohesion Test [Connections] - BindAsync: Guided listener base should forward through interface calls")]
     public async Task BindAsync_OnConnectionListenerBase_ShouldForwardThroughInterfaceCall()
@@ -59,8 +59,8 @@ public class GuidedBaseTests
         factory.Enqueue(second);
 
         // Act
-        Connection typed = await factory.ConnectAsync(TestEndPoint);
-        IConnection viaInterface = await ((IConnectionFactory)factory).ConnectAsync(TestEndPoint);
+        Connection typed = await factory.ConnectAsync(_testEndPoint);
+        IConnection viaInterface = await ((IConnectionFactory)factory).ConnectAsync(_testEndPoint);
 
         // Assert
         typed.ShouldBeSameAs(first);

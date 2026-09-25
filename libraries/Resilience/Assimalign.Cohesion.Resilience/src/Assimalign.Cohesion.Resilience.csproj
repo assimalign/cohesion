@@ -1,10 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Resilience</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ObjectPool" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionValueType Include="ValueTypes\OperationKey.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Resilience" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="ValueObjects\OperationKey.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.Resilience" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
 	</ItemGroup>
 	<ItemGroup>
 		<Compile Update="Properties\ErrorMessages.Designer.cs">

@@ -8,7 +8,7 @@ using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Graph.Catalog;
+namespace Assimalign.Cohesion.Database.Graph.Catalog.Internal;
 
 internal sealed class DefaultGraphCatalog : IGraphCatalog
 {

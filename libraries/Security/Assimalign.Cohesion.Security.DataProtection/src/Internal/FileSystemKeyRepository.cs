@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-namespace Assimalign.Cohesion.Security.DataProtection;
+namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 
 /// <summary>
 /// The default file-system-backed <see cref="IKeyRepository"/>: one file per key

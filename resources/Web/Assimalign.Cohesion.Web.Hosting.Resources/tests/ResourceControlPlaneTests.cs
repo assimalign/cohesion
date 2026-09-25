@@ -215,10 +215,24 @@ public sealed class ResourceControlPlaneTests
             bootstrapCredential: Encoding.UTF8.GetBytes(token), applicationTrustKey: identity.PublicKey, ambientValues: null);
     }
 
-    private sealed class Contributor(string name, HealthContribution contribution) : IHealthContributor
+    private sealed class Contributor : IHealthContributor
     {
-        public string Name => name;
-        public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default) => ValueTask.FromResult(contribution);
+        private readonly string _name;
+        private readonly HealthContribution _contribution;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="Contributor"/> class.
+        /// </summary>
+        /// <param name="name">The contributor name reported in health output.</param>
+        /// <param name="contribution">The health contribution returned from every check.</param>
+        public Contributor(string name, HealthContribution contribution)
+        {
+            _name = name;
+            _contribution = contribution;
+        }
+
+        public string Name => _name;
+        public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default) => ValueTask.FromResult(_contribution);
     }
 
     private sealed class EchoHandler : IResourceCommandHandler

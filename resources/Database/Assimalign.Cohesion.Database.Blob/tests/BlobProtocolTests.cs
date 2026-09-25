@@ -195,8 +195,20 @@ public sealed class BlobProtocolTests
         return frame.Value;
     }
 
-    private sealed class GeneratedStream(long length, VerifyingStream destination) : Stream
+    private sealed class GeneratedStream : Stream
     {
+        private readonly long _length;
+        private readonly VerifyingStream _destination;
+        /// <summary>
+        /// Initializes a new instance of the <see cref="GeneratedStream"/> class.
+        /// </summary>
+        /// <param name="length">The total number of bytes the stream generates.</param>
+        /// <param name="destination">The stream whose written byte count bounds the unaccepted content.</param>
+        public GeneratedStream(long length, VerifyingStream destination)
+        {
+            _length = length;
+            _destination = destination;
+        }
         internal long BytesRead { get; private set; }
         internal long LargestUnacceptedContent { get; private set; }
         internal int LargestReadRequest { get; private set; }
@@ -211,13 +223,13 @@ public sealed class BlobProtocolTests
             cancellationToken.ThrowIfCancellationRequested();
             LargestReadRequest = Math.Max(LargestReadRequest, buffer.Length);
             // Deliberately exercise short reads; a chunk need not fill the negotiated maximum.
-            int count = (int)Math.Min(Math.Min(buffer.Length, 49_157), length - BytesRead);
+            int count = (int)Math.Min(Math.Min(buffer.Length, 49_157), _length - BytesRead);
             for (int index = 0; index < count; index++)
             {
                 buffer.Span[index] = ContentByte(BytesRead + index);
             }
             BytesRead += count;
-            LargestUnacceptedContent = Math.Max(LargestUnacceptedContent, BytesRead - destination.BytesWritten);
+            LargestUnacceptedContent = Math.Max(LargestUnacceptedContent, BytesRead - _destination.BytesWritten);
             return ValueTask.FromResult(count);
         }
 

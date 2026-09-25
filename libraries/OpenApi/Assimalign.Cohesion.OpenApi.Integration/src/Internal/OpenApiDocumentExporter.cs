@@ -3,7 +3,7 @@ using System;
 using Assimalign.Cohesion.OpenApi.Serialization;
 using Assimalign.Cohesion.OpenApi.Versioning;
 
-namespace Assimalign.Cohesion.OpenApi.Integration;
+namespace Assimalign.Cohesion.OpenApi.Integration.Internal;
 
 /// <summary>The default <see cref="IOpenApiDocumentExporter"/>, delegating to the writers and the transform pipeline.</summary>
 internal sealed class OpenApiDocumentExporter : IOpenApiDocumentExporter

@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Documents.Internal;
+
 namespace Assimalign.Cohesion.Database.Documents;
 
 /// <summary>One document result preserving its complete JSON shape and original UTF-8 bytes.</summary>

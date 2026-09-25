@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 
 using Assimalign.Cohesion.ApiManager;
+using Assimalign.Cohesion.ApiManager.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;

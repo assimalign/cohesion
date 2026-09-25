@@ -2,7 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Text;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal readonly struct HPackHeaderField
 {

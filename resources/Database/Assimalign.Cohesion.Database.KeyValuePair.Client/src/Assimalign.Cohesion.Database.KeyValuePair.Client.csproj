@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.KeyValuePair.Client</RootNamespace>
+	</PropertyGroup>
 	<!--
 		The typed key-value client: a thin point/range surface (get/put/delete/
 		exists/scan, etag-conditional writes, errors, telemetry) over the shared

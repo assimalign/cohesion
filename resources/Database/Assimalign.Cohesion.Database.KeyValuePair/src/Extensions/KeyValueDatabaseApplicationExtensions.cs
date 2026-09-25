@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Internal;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair;
 
 /// <summary>Registers deferred key-value composition through the dependency-free Database root contract.</summary>

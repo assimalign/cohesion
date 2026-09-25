@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.IdentityModel.AotSample</RootNamespace>
     <!--
         NativeAOT validation smoke for the IdentityModel family. Two complementary layers:
         (1) continuous — the family's Directory.Build.props promotes the trim/AOT analyzer

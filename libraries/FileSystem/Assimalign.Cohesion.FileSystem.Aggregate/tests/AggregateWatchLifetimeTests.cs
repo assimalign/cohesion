@@ -133,14 +133,25 @@ public class AggregateWatchLifetimeTests
         public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
     }
 
-    private sealed class TrackedToken(IFileSystemEventToken inner) : IFileSystemEventToken, IDisposable
+    private sealed class TrackedToken : IFileSystemEventToken, IDisposable
     {
+        private readonly IFileSystemEventToken _inner;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="TrackedToken"/> class.
+        /// </summary>
+        /// <param name="inner">The provider's watch token that callbacks and disposal are forwarded to.</param>
+        public TrackedToken(IFileSystemEventToken inner)
+        {
+            _inner = inner;
+        }
+
         public int DisposeCount { get; private set; }
-        public IDisposable OnChange(Action<object?> callback, object? state) => inner.OnChange(callback, state);
-        public IDisposable OnChange<T>(Action<FileSystemEvent<T?>> callback, T? state) => inner.OnChange(callback, state);
-        public IDisposable OnCreate<T>(Action<FileSystemEvent<T?>> callback, T? state) => inner.OnCreate(callback, state);
-        public IDisposable OnDelete<T>(Action<FileSystemEvent<T?>> callback, T? state) => inner.OnDelete(callback, state);
-        public IDisposable OnRename<T>(Action<FileSystemRenameEvent<T?>> callback, T? state) => inner.OnRename(callback, state);
-        public void Dispose() { DisposeCount++; ((IDisposable)inner).Dispose(); }
+        public IDisposable OnChange(Action<object?> callback, object? state) => _inner.OnChange(callback, state);
+        public IDisposable OnChange<T>(Action<FileSystemEvent<T?>> callback, T? state) => _inner.OnChange(callback, state);
+        public IDisposable OnCreate<T>(Action<FileSystemEvent<T?>> callback, T? state) => _inner.OnCreate(callback, state);
+        public IDisposable OnDelete<T>(Action<FileSystemEvent<T?>> callback, T? state) => _inner.OnDelete(callback, state);
+        public IDisposable OnRename<T>(Action<FileSystemRenameEvent<T?>> callback, T? state) => _inner.OnRename(callback, state);
+        public void Dispose() { DisposeCount++; ((IDisposable)_inner).Dispose(); }
     }
 }

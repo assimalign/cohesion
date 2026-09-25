@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// A single unit of inbound request-body data queued from the frame pump to the

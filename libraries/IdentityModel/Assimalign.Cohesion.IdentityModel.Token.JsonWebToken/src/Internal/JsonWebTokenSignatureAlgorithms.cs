@@ -1,7 +1,7 @@
 using System;
 using System.Security.Cryptography;
 
-namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
+namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
 
 /// <summary>
 /// Maps asymmetric JOSE algorithms to their BCL hash and key-family requirements.

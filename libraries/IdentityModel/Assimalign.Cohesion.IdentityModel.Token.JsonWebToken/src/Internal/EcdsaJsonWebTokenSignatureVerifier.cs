@@ -1,7 +1,7 @@
 using System;
 using System.Security.Cryptography;
 
-namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
+namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
 
 /// <summary>
 /// Verifies JOSE ECDSA signatures in their fixed-size IEEE P1363 <c>r||s</c> representation.

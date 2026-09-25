@@ -27,19 +27,19 @@ public sealed partial class ResourceContext
     private const string MountToken = "<M>";
     private const string ConfigurationToken = "<Section>";
 
-    private static readonly string EndpointPrefix = PatternPrefix(
+    private static readonly string _endpointPrefix = PatternPrefix(
         ResourceEnvironment.EndpointHostPattern,
         EndpointToken);
-    private static readonly string EndpointHostSuffix = PatternSuffix(
+    private static readonly string _endpointHostSuffix = PatternSuffix(
         ResourceEnvironment.EndpointHostPattern,
         EndpointToken);
-    private static readonly string MountPrefix = PatternPrefix(
+    private static readonly string _mountPrefix = PatternPrefix(
         ResourceEnvironment.MountPathPattern,
         MountToken);
-    private static readonly string MountSuffix = PatternSuffix(
+    private static readonly string _mountSuffix = PatternSuffix(
         ResourceEnvironment.MountPathPattern,
         MountToken);
-    private static readonly string ConfigurationPrefix = PatternPrefix(
+    private static readonly string _configurationPrefix = PatternPrefix(
         ResourceEnvironment.ConfigurationPattern,
         ConfigurationToken);
 
@@ -568,13 +568,13 @@ public sealed partial class ResourceContext
         var endpoints = new Dictionary<string, Uri>(StringComparer.OrdinalIgnoreCase);
         foreach (string variable in environment.Keys)
         {
-            if (!variable.StartsWith(EndpointPrefix, StringComparison.Ordinal)
-                || !variable.EndsWith(EndpointHostSuffix, StringComparison.Ordinal))
+            if (!variable.StartsWith(_endpointPrefix, StringComparison.Ordinal)
+                || !variable.EndsWith(_endpointHostSuffix, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            string name = variable[EndpointPrefix.Length..^EndpointHostSuffix.Length];
+            string name = variable[_endpointPrefix.Length..^_endpointHostSuffix.Length];
             if (ResourceEnvironment.TryGetEndpoint(environment, name, out Uri? endpoint))
             {
                 endpoints[name] = endpoint;
@@ -590,13 +590,13 @@ public sealed partial class ResourceContext
         foreach ((string variable, string? value) in environment)
         {
             if (string.IsNullOrWhiteSpace(value)
-                || !variable.StartsWith(MountPrefix, StringComparison.Ordinal)
-                || !variable.EndsWith(MountSuffix, StringComparison.Ordinal))
+                || !variable.StartsWith(_mountPrefix, StringComparison.Ordinal)
+                || !variable.EndsWith(_mountSuffix, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            string name = variable[MountPrefix.Length..^MountSuffix.Length];
+            string name = variable[_mountPrefix.Length..^_mountSuffix.Length];
             mounts[name] = new ResourceMount(value);
         }
 
@@ -608,12 +608,12 @@ public sealed partial class ResourceContext
         var settings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach ((string variable, string? value) in environment)
         {
-            if (value is null || !variable.StartsWith(ConfigurationPrefix, StringComparison.Ordinal))
+            if (value is null || !variable.StartsWith(_configurationPrefix, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            string key = variable[ConfigurationPrefix.Length..]
+            string key = variable[_configurationPrefix.Length..]
                 .Replace("__", ":", StringComparison.Ordinal);
             settings[key] = value;
         }

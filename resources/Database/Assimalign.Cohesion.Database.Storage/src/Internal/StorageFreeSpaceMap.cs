@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Storage;
+namespace Assimalign.Cohesion.Database.Storage.Internal;
 
 /// <summary>
 /// Tracks which pages in a storage file are allocated versus free using an in-memory

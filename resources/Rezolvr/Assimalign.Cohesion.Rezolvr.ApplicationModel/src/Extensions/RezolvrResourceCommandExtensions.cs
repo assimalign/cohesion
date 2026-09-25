@@ -2,6 +2,8 @@ using System;
 using System.Net;
 using System.Net.Sockets;
 
+using Assimalign.Cohesion.ApplicationModel.Internal;
+
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Declares records stored by the Rezolvr default control plane.</summary>

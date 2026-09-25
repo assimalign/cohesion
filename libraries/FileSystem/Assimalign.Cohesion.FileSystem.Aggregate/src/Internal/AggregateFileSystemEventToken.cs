@@ -26,7 +26,7 @@ internal sealed class AggregateFileSystemEventToken : IFileSystemEventToken, IDi
 
     // A "match everything" glob handed to each underlying mount so it surfaces every change.
     // We filter against the (aggregate-side) glob at dispatch time after remapping the path.
-    private static readonly Glob CatchAllGlob = Glob.Parse("/**");
+    private static readonly Glob _catchAllGlob = Glob.Parse("/**");
 
     public AggregateFileSystemEventToken(IReadOnlyList<AggregateMount> mounts, Glob? aggregateGlob, Action<AggregateFileSystemEventToken> onDispose)
     {
@@ -40,7 +40,7 @@ internal sealed class AggregateFileSystemEventToken : IFileSystemEventToken, IDi
             {
                 // Every token returned by these Watch calls is owned by this aggregate token.
                 // Provider ownership is independent: borrowed mounts still create owned tokens.
-                var mountToken = mount.FileSystem.Watch(CatchAllGlob);
+                var mountToken = mount.FileSystem.Watch(_catchAllGlob);
                 _mountSubscriptions.Add(new MountSubscription(mount, mountToken));
             }
         }

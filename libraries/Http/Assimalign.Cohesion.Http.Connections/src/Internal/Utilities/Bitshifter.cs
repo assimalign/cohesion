@@ -5,7 +5,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 
-namespace Assimalign.Cohesion.Http.Internal;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 // Mimics BinaryPrimitives with oddly sized units
 internal static class Bitshifter
 {

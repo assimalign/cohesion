@@ -10,15 +10,51 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
 
-namespace Assimalign.Cohesion.Cli;
+namespace Assimalign.Cohesion.Cli.Internal;
 
-internal sealed class CliApplication(
-    IProcessRunner processes, HttpClient http, TextReader input, TextWriter output, TextWriter error,
-    string workingDirectory, string homeDirectory,
-    Func<string, string?>? environment = null,
-    Func<TimeSpan, CancellationToken, Task>? delay = null,
-    TimeProvider? timeProvider = null)
+internal sealed class CliApplication
 {
+    private readonly IProcessRunner _processes;
+    private readonly HttpClient _http;
+    private readonly TextReader _input;
+    private readonly TextWriter _output;
+    private readonly TextWriter _error;
+    private readonly string _workingDirectory;
+    private readonly string _homeDirectory;
+    private readonly Func<string, string?>? _environment;
+    private readonly Func<TimeSpan, CancellationToken, Task>? _delay;
+    private readonly TimeProvider? _timeProvider;
+
+    /// <summary>Initializes a new instance of the <see cref="CliApplication"/> class.</summary>
+    /// <param name="processes">The runner that starts child processes such as dotnet.</param>
+    /// <param name="http">The HTTP client used for control-plane and IdentityHub requests.</param>
+    /// <param name="input">The reader for standard input.</param>
+    /// <param name="output">The writer for standard output.</param>
+    /// <param name="error">The writer for standard error.</param>
+    /// <param name="workingDirectory">The directory that relative paths and project discovery resolve against.</param>
+    /// <param name="homeDirectory">The user's home directory, where login credentials are stored.</param>
+    /// <param name="environment">The optional environment variable reader; defaults to the process environment.</param>
+    /// <param name="delay">The optional delay function used while polling; defaults to <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.</param>
+    /// <param name="timeProvider">The optional time source; defaults to <see cref="TimeProvider.System"/>.</param>
+    public CliApplication(
+        IProcessRunner processes, HttpClient http, TextReader input, TextWriter output, TextWriter error,
+        string workingDirectory, string homeDirectory,
+        Func<string, string?>? environment = null,
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        TimeProvider? timeProvider = null)
+    {
+        _processes = processes;
+        _http = http;
+        _input = input;
+        _output = output;
+        _error = error;
+        _workingDirectory = workingDirectory;
+        _homeDirectory = homeDirectory;
+        _environment = environment;
+        _delay = delay;
+        _timeProvider = timeProvider;
+    }
+
     // Fixed assembly metadata is preserved by NativeAOT; no runtime type discovery occurs.
     internal static string Version => StripBuildMetadata(
         typeof(CliApplication).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
@@ -33,21 +69,21 @@ internal sealed class CliApplication(
             cancellationToken.ThrowIfCancellationRequested();
             if (args.Length == 0 || args[0] is "--help" or "-h" or "help")
             {
-                output.WriteLine(Help.Text);
-                output.WriteLine("Templates: " + string.Join(", ", Templates.Names));
+                _output.WriteLine(Help.Text);
+                _output.WriteLine("Templates: " + string.Join(", ", Templates.Names));
                 return 0;
             }
             if (args[0] == "--version")
             {
-                output.WriteLine(Version);
+                _output.WriteLine(Version);
                 return 0;
             }
 
             var arguments = new Arguments(args[1..]);
             if (arguments.TakeFlag("--help") || arguments.TakeFlag("-h"))
             {
-                output.WriteLine(Help.Text);
-                output.WriteLine("Templates: " + string.Join(", ", Templates.Names));
+                _output.WriteLine(Help.Text);
+                _output.WriteLine("Templates: " + string.Join(", ", Templates.Names));
                 return 0;
             }
             switch (args[0])
@@ -65,15 +101,15 @@ internal sealed class CliApplication(
                     string? projectOption = arguments.TakeValue("--project");
                     string? stateOption = arguments.TakeValue("--state-root");
                     string? appOption = arguments.TakeValue("--app");
-                    string project = GatewayDiscovery.ResolveProject(workingDirectory, projectOption);
-                    string stateRoot = GatewayDiscovery.GetStateRoot(project, stateOption, workingDirectory);
+                    string project = GatewayDiscovery.ResolveProject(_workingDirectory, projectOption);
+                    string stateRoot = GatewayDiscovery.GetStateRoot(project, stateOption, _workingDirectory);
                     string app = GatewayDiscovery.ResolveApplication(project, stateRoot, appOption);
-                    var state = new LocalStateCommands(input, output, http, environment ?? Environment.GetEnvironmentVariable);
+                    var state = new LocalStateCommands(_input, _output, _http, _environment ?? Environment.GetEnvironmentVariable);
                     return args[0] == "parameter"
                         ? await state.ParameterAsync(arguments, stateRoot, app, cancellationToken).ConfigureAwait(false)
                         : await state.StatusAsync(arguments, stateRoot, app, cancellationToken).ConfigureAwait(false);
                 case "login":
-                    return await new DeviceLogin(http, output, error, homeDirectory, delay, timeProvider)
+                    return await new DeviceLogin(_http, _output, _error, _homeDirectory, _delay, _timeProvider)
                         .ExecuteAsync(arguments, cancellationToken).ConfigureAwait(false);
                 default:
                     throw new CliException("Unknown command. Use cohesion --help.");
@@ -81,29 +117,29 @@ internal sealed class CliApplication(
         }
         catch (CliException exception)
         {
-            error.WriteLine(exception.Message);
+            _error.WriteLine(exception.Message);
             return 2;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            error.WriteLine("Cancelled.");
+            _error.WriteLine("Cancelled.");
             return 130;
         }
         catch (HttpRequestException)
         {
-            error.WriteLine("HTTP request failed. Check that the endpoint is available and its certificate is trusted.");
+            _error.WriteLine("HTTP request failed. Check that the endpoint is available and its certificate is trusted.");
             return 1;
         }
         catch (OperationCanceledException)
         {
-            error.WriteLine("HTTP request timed out.");
+            _error.WriteLine("HTTP request timed out.");
             return 1;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
             CryptographicException or JsonException or XmlException or Win32Exception or ArgumentException or FormatException)
         {
             // Serialization and OS diagnostics can contain credential values or request URLs.
-            error.WriteLine("Unable to read or write the requested data, or start dotnet. Check the path, format, permissions and .NET installation.");
+            _error.WriteLine("Unable to read or write the requested data, or start dotnet. Check the path, format, permissions and .NET installation.");
             return 1;
         }
     }
@@ -119,7 +155,7 @@ internal sealed class CliApplication(
         int exitCode = await DotnetAsync(["new", template, .. args.Remaining], cancellationToken).ConfigureAwait(false);
         if (exitCode != 0)
         {
-            error.WriteLine($"Cohesion templates are not installed. Run: dotnet new install {Templates.PackageId}::{Version}");
+            _error.WriteLine($"Cohesion templates are not installed. Run: dotnet new install {Templates.PackageId}::{Version}");
         }
         return exitCode;
     }
@@ -134,8 +170,8 @@ internal sealed class CliApplication(
             throw new CliException("publish accepts one project, either positional or --project.");
         }
         string project = positional ?? (selected is null
-            ? GatewayDiscovery.ResolveProject(workingDirectory, null)
-            : Path.GetFullPath(selected, workingDirectory));
+            ? GatewayDiscovery.ResolveProject(_workingDirectory, null)
+            : Path.GetFullPath(selected, _workingDirectory));
         return DotnetAsync(inContainer
             ? ["publish", project, "-t:CohesionPublishImage", "-p:_CohesionImageInContainer=true", .. args.Remaining]
             : ["publish", project, .. args.Remaining], cancellationToken);
@@ -145,7 +181,7 @@ internal sealed class CliApplication(
     {
         string? projectOption = args.TakeValue("--project");
         string? gateway = args.TakeValue("--gateway");
-        Func<string, string?> readEnvironment = environment ?? Environment.GetEnvironmentVariable;
+        Func<string, string?> readEnvironment = _environment ?? Environment.GetEnvironmentVariable;
         bool hasEnvironmentVariable =
             !string.IsNullOrWhiteSpace(readEnvironment("COHESION_ENVIRONMENT"))
             || !string.IsNullOrWhiteSpace(readEnvironment("DOTNET_ENVIRONMENT"));
@@ -226,15 +262,15 @@ internal sealed class CliApplication(
                     throw new CliException("trust requires add or issue.");
             }
         }
-        string project = GatewayDiscovery.ResolveProject(workingDirectory, projectOption);
+        string project = GatewayDiscovery.ResolveProject(_workingDirectory, projectOption);
         // SDK 10.0.401 retains the caller's cwd in the verified dotnet-run probe.
         // Set it explicitly so gateway state and relative arguments are project-local.
         // dotnet launch profiles override inherited variables; preserve an explicit shell environment.
         string[] launchOptions = hasEnvironmentVariable ? ["--no-launch-profile"] : [];
-        return processes.RunAsync("dotnet", ["run", "--project", project, .. launchOptions, "--", .. mapped, .. args.Remaining],
+        return _processes.RunAsync("dotnet", ["run", "--project", project, .. launchOptions, "--", .. mapped, .. args.Remaining],
             Path.GetDirectoryName(project)!, cancellationToken);
     }
 
     private Task<int> DotnetAsync(string[] arguments, CancellationToken cancellationToken = default) =>
-        processes.RunAsync("dotnet", arguments, workingDirectory, cancellationToken);
+        _processes.RunAsync("dotnet", arguments, _workingDirectory, cancellationToken);
 }

@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting;
 
-namespace Assimalign.Cohesion.EventHub.Hosting;
+namespace Assimalign.Cohesion.EventHub.Hosting.Internal;
 
 internal sealed class EventHubControlPlaneEndpointService : IHostService, IDisposable
 {

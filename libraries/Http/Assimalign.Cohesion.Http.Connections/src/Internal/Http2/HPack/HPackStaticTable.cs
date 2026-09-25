@@ -1,7 +1,7 @@
 using System;
 using System.Text;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal static partial class HPackStaticTable
 {
@@ -60,9 +60,9 @@ internal static partial class HPackStaticTable
     public const int Via = 60;
     public const int WwwAuthenticate = 61;
 
-    public static int Count => s_staticDecoderTable.Length;
+    public static int Count => _staticDecoderTable.Length;
 
-    public static ref readonly HPackHeaderField Get(int index) => ref s_staticDecoderTable[index];
+    public static ref readonly HPackHeaderField Get(int index) => ref _staticDecoderTable[index];
 
     public static bool TryGetStatusIndex(int status, out int index)
     {
@@ -143,7 +143,7 @@ internal static partial class HPackStaticTable
         return index != -1;
     }
 
-    private static readonly HPackHeaderField[] s_staticDecoderTable =
+    private static readonly HPackHeaderField[] _staticDecoderTable =
     [
         CreateHeaderField(1, ":authority", ""),
         CreateHeaderField(2, ":method", "GET"),

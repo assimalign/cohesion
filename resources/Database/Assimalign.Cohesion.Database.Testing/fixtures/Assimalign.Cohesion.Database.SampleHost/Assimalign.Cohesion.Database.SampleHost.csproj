@@ -1,5 +1,6 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Database">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.SampleHost</RootNamespace>
 		<OutputType>Exe</OutputType>
 		<TargetFramework>net10.0</TargetFramework>
 		<IsPackable>false</IsPackable>

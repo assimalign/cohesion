@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Assimalign.Cohesion.Cli;
+namespace Assimalign.Cohesion.Cli.Internal;
 
 internal sealed class Arguments
 {

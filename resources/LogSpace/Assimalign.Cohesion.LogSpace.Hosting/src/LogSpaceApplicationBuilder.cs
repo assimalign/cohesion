@@ -6,6 +6,7 @@ using System.Reflection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
+using Assimalign.Cohesion.LogSpace.Hosting.Internal;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.LogSpace;
 

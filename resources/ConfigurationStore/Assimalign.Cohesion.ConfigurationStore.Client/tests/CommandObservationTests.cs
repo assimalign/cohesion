@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.ConfigurationStore.Client.Internal;
 using Assimalign.Cohesion.ConfigurationStore.Client.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Client.Tests;

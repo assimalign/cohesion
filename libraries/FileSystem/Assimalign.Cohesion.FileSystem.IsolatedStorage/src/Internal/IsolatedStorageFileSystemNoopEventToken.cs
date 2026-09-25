@@ -14,24 +14,24 @@ internal sealed class IsolatedStorageFileSystemNoopEventToken : IFileSystemEvent
     /// </summary>
     public static readonly IsolatedStorageFileSystemNoopEventToken Instance = new();
 
-    private static readonly IDisposable NoopDisposable = new NoopRegistration();
+    private static readonly IDisposable _noopDisposable = new NoopRegistration();
 
     private IsolatedStorageFileSystemNoopEventToken() { }
 
     /// <inheritdoc />
-    public IDisposable OnChange(Action<object?> callback, object? state) => NoopDisposable;
+    public IDisposable OnChange(Action<object?> callback, object? state) => _noopDisposable;
 
     /// <inheritdoc />
-    public IDisposable OnChange<T>(Action<FileSystemEvent<T?>> callback, T? state) => NoopDisposable;
+    public IDisposable OnChange<T>(Action<FileSystemEvent<T?>> callback, T? state) => _noopDisposable;
 
     /// <inheritdoc />
-    public IDisposable OnCreate<T>(Action<FileSystemEvent<T?>> callback, T? state) => NoopDisposable;
+    public IDisposable OnCreate<T>(Action<FileSystemEvent<T?>> callback, T? state) => _noopDisposable;
 
     /// <inheritdoc />
-    public IDisposable OnDelete<T>(Action<FileSystemEvent<T?>> callback, T? state) => NoopDisposable;
+    public IDisposable OnDelete<T>(Action<FileSystemEvent<T?>> callback, T? state) => _noopDisposable;
 
     /// <inheritdoc />
-    public IDisposable OnRename<T>(Action<FileSystemRenameEvent<T?>> callback, T? state) => NoopDisposable;
+    public IDisposable OnRename<T>(Action<FileSystemRenameEvent<T?>> callback, T? state) => _noopDisposable;
 
     private sealed class NoopRegistration : IDisposable
     {

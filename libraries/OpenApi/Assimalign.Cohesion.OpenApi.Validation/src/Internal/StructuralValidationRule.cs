@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.OpenApi.Validation;
+namespace Assimalign.Cohesion.OpenApi.Validation.Internal;
 
 /// <summary>
 /// Validates the structural shape of a document: presence of required fields, well-formed path templates,

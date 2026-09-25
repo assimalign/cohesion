@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Indexing;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog.Internal;
 
 /// <summary>
 /// One atomic capture of the catalog's format and index registrations.

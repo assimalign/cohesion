@@ -3,7 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 /// <summary>
 /// Writes application exports atomically so a concurrent reader never observes a partial

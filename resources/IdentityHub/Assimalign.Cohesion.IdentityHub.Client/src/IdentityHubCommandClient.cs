@@ -1,6 +1,8 @@
 using System;
 using System.Net.Http;
 
+using Assimalign.Cohesion.IdentityHub.Client.Internal;
+
 namespace Assimalign.Cohesion.IdentityHub.Client;
 
 /// <summary>Creates clients for the IdentityHub resource's HTTP admin command endpoint.</summary>

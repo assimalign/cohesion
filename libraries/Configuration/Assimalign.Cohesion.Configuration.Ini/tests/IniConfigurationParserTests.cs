@@ -230,7 +230,7 @@ public class IniConfigurationParserTests
     private static async Task IniConfigurationParser_ParseAsync(Stream stream, IDictionary<Path, string?> entries)
     {
         Assembly asm = typeof(ConfigurationIniProvider).Assembly;
-        Type parser = asm.GetType("Assimalign.Cohesion.Configuration.Ini.IniConfigurationParser")
+        Type parser = asm.GetType("Assimalign.Cohesion.Configuration.Ini.Internal.IniConfigurationParser")
             ?? throw new InvalidOperationException("IniConfigurationParser type not found in production assembly.");
         MethodInfo method = parser.GetMethod("ParseAsync", BindingFlags.Public | BindingFlags.Static)
             ?? throw new InvalidOperationException("IniConfigurationParser.ParseAsync(Stream, IDictionary, CancellationToken) not found.");

@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
 
-namespace Assimalign.Cohesion.LogSpace.Hosting;
+namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
 internal static class OtlpLogReader
 {

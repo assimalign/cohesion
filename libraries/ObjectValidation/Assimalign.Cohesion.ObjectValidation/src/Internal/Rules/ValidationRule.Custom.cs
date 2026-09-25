@@ -1,11 +1,11 @@
 ﻿using System;
 using System.Linq;
 
-namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class CustomValidationRule<TValue> : ValidationRuleBase<TValue>
 {
-    private readonly Action<TValue, IValidationContext> validation;
+    private readonly Action<TValue, IValidationContext> _validation;
 
     public CustomValidationRule(Action<TValue, IValidationContext> validation)
     {
@@ -14,7 +14,7 @@ internal sealed class CustomValidationRule<TValue> : ValidationRuleBase<TValue>
             throw new ArgumentNullException(nameof(validation));
         }
 
-        this.validation = validation;
+        this._validation = validation;
     }
 
     public override string Name { get; set; }
@@ -41,7 +41,7 @@ internal sealed class CustomValidationRule<TValue> : ValidationRuleBase<TValue>
         try
         {
             context = new ValidationContext<TValue>(value);
-            validation.Invoke(value, context);
+            _validation.Invoke(value, context);
             return true;
         }
         catch

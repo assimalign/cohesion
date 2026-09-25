@@ -7,18 +7,35 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal sealed class DocumentCollection(DocumentDatabaseInstance database, DocumentCollectionMetadata collection, DocumentDatabaseSession? boundSession) : IDocumentCollection
+internal sealed class DocumentCollection : IDocumentCollection
 {
-    public string Name => collection.Name;
+    private readonly DocumentDatabaseInstance _database;
+    private readonly DocumentCollectionMetadata _collection;
+    private readonly DocumentDatabaseSession? _boundSession;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DocumentCollection"/> class.
+    /// </summary>
+    /// <param name="database">The document database instance that owns the collection.</param>
+    /// <param name="collection">The catalog metadata of the collection.</param>
+    /// <param name="boundSession">The session the collection is bound to, or <see langword="null"/> when any session of the database may use it.</param>
+    public DocumentCollection(DocumentDatabaseInstance database, DocumentCollectionMetadata collection, DocumentDatabaseSession? boundSession)
+    {
+        _database = database;
+        _collection = collection;
+        _boundSession = boundSession;
+    }
+
+    public string Name => _collection.Name;
 
     public ValueTask<Document?> GetAsync(IDatabaseSession session, DocumentId id, CancellationToken cancellationToken = default)
     {
         ValidateId(id);
-        return database.RunAsync(ValidateSession(session), operation =>
+        return _database.RunAsync(ValidateSession(session), operation =>
         {
             EnsureCollection(operation.Context);
-            var entry = database.Catalog.FindDocument(collection.Id, id.Value, operation.Context.Snapshot);
-            return new ValueTask<Document?>(entry is null ? null : database.ReadDocument(entry.Value));
+            var entry = _database.Catalog.FindDocument(_collection.Id, id.Value, operation.Context.Snapshot);
+            return new ValueTask<Document?>(entry is null ? null : _database.ReadDocument(entry.Value));
         }, cancellationToken);
     }
 
@@ -27,21 +44,21 @@ internal sealed class DocumentCollection(DocumentDatabaseInstance database, Docu
         ValidateId(id);
         // Capture caller memory before any await; subsequent mutations cannot alter stored bytes.
         var bytes = content.ToArray();
-        return database.RunAsync(ValidateSession(session), async operation =>
+        return _database.RunAsync(ValidateSession(session), async operation =>
         {
-            await database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
+            await _database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
             EnsureCollection(operation.Context, writing: true);
-            var previous = database.Catalog.FindDocument(collection.Id, id.Value, operation.Context.Snapshot);
+            var previous = _database.Catalog.FindDocument(_collection.Id, id.Value, operation.Context.Snapshot);
             EnsureCurrent(operation.Context, id, previous, expectedVersion);
-            var reference = await database.DataStorage.WriteContentAsync(database.Coordinator, operation.Context, bytes, cancellationToken).ConfigureAwait(false);
+            var reference = await _database.DataStorage.WriteContentAsync(_database.Coordinator, operation.Context, bytes, cancellationToken).ConfigureAwait(false);
             if (previous is not null)
             {
-                await database.DataStorage.TombstoneContentAsync(database.Coordinator, operation.Context, DocumentDatabaseInstance.Content(previous.Value), cancellationToken).ConfigureAwait(false);
+                await _database.DataStorage.TombstoneContentAsync(_database.Coordinator, operation.Context, DocumentDatabaseInstance.Content(previous.Value), cancellationToken).ConfigureAwait(false);
             }
             // Use the durable kernel allocator: versions never repeat, even after delete/reinsert or restart.
-            ulong version = (ulong)database.DataStorage.ReserveTransactionSequence();
-            var entry = new DocumentCatalogEntry(collection.Id, id.Value, version, reference.Head, reference.Length, reference.Checksum);
-            await database.Catalog.SaveDocumentAsync(entry, operation.Context, cancellationToken).ConfigureAwait(false);
+            ulong version = (ulong)_database.DataStorage.ReserveTransactionSequence();
+            var entry = new DocumentCatalogEntry(_collection.Id, id.Value, version, reference.Head, reference.Length, reference.Checksum);
+            await _database.Catalog.SaveDocumentAsync(entry, operation.Context, cancellationToken).ConfigureAwait(false);
             return new Document(id, new DocumentVersion(version), bytes);
         }, cancellationToken);
     }
@@ -49,15 +66,15 @@ internal sealed class DocumentCollection(DocumentDatabaseInstance database, Docu
     public ValueTask<bool> DeleteAsync(IDatabaseSession session, DocumentId id, DocumentVersion? expectedVersion = null, CancellationToken cancellationToken = default)
     {
         ValidateId(id);
-        return database.RunAsync(ValidateSession(session), async operation =>
+        return _database.RunAsync(ValidateSession(session), async operation =>
         {
-            await database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
+            await _database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
             EnsureCollection(operation.Context, writing: true);
-            var previous = database.Catalog.FindDocument(collection.Id, id.Value, operation.Context.Snapshot);
+            var previous = _database.Catalog.FindDocument(_collection.Id, id.Value, operation.Context.Snapshot);
             EnsureCurrent(operation.Context, id, previous, expectedVersion);
             if (previous is null) { return false; }
-            await database.DataStorage.TombstoneContentAsync(database.Coordinator, operation.Context, DocumentDatabaseInstance.Content(previous.Value), cancellationToken).ConfigureAwait(false);
-            await database.Catalog.DeleteDocumentAsync(collection.Id, id.Value, operation.Context, cancellationToken).ConfigureAwait(false);
+            await _database.DataStorage.TombstoneContentAsync(_database.Coordinator, operation.Context, DocumentDatabaseInstance.Content(previous.Value), cancellationToken).ConfigureAwait(false);
+            await _database.Catalog.DeleteDocumentAsync(_collection.Id, id.Value, operation.Context, cancellationToken).ConfigureAwait(false);
             return true;
         }, cancellationToken);
     }
@@ -65,8 +82,8 @@ internal sealed class DocumentCollection(DocumentDatabaseInstance database, Docu
     private DocumentDatabaseSession ValidateSession(IDatabaseSession session)
     {
         ArgumentNullException.ThrowIfNull(session);
-        if (session is not DocumentDatabaseSession documentSession || !ReferenceEquals(documentSession.Instance, database) ||
-            (boundSession is not null && !ReferenceEquals(boundSession, documentSession)))
+        if (session is not DocumentDatabaseSession documentSession || !ReferenceEquals(documentSession.Instance, _database) ||
+            (_boundSession is not null && !ReferenceEquals(_boundSession, documentSession)))
         {
             throw new DatabaseException("The document collection and session must belong to the same bound database and session.");
         }
@@ -78,7 +95,7 @@ internal sealed class DocumentCollection(DocumentDatabaseInstance database, Docu
 
     private void EnsureCurrent(ITransactionContext context, DocumentId id, DocumentCatalogEntry? previous, DocumentVersion? expectedVersion)
     {
-        if (previous != database.Catalog.FindDocument(collection.Id, id.Value, database.LatestSnapshot(context))) { DocumentDatabaseInstance.ThrowConflict(); }
+        if (previous != _database.Catalog.FindDocument(_collection.Id, id.Value, _database.LatestSnapshot(context))) { DocumentDatabaseInstance.ThrowConflict(); }
         if (expectedVersion is not null && previous?.Version != expectedVersion.Value.Value)
         {
             throw new DatabaseException($"Document '{id}' does not match expected version '{expectedVersion}'.");
@@ -87,10 +104,10 @@ internal sealed class DocumentCollection(DocumentDatabaseInstance database, Docu
 
     private void EnsureCollection(ITransactionContext context, bool writing = false)
     {
-        var current = database.Catalog.FindCollection(Name, context.Snapshot);
-        if (current?.Id != collection.Id) { throw new DatabaseException($"Collection '{Name}' is no longer available in this transaction."); }
-        if (writing && (current != database.Catalog.FindCollection(Name, database.LatestSnapshot(context)) ||
-            !database.Catalog.GetIndexes(collection.Id, context.Snapshot).SequenceEqual(database.Catalog.GetIndexes(collection.Id, database.LatestSnapshot(context)))))
+        var current = _database.Catalog.FindCollection(Name, context.Snapshot);
+        if (current?.Id != _collection.Id) { throw new DatabaseException($"Collection '{Name}' is no longer available in this transaction."); }
+        if (writing && (current != _database.Catalog.FindCollection(Name, _database.LatestSnapshot(context)) ||
+            !_database.Catalog.GetIndexes(_collection.Id, context.Snapshot).SequenceEqual(_database.Catalog.GetIndexes(_collection.Id, _database.LatestSnapshot(context)))))
         {
             DocumentDatabaseInstance.ThrowConflict();
         }

@@ -6,11 +6,11 @@ namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class ValidationItem<T, TValue> : ValidationItemBase<T, TValue>
 {
-    private readonly Stopwatch stopwatch;
+    private readonly Stopwatch _stopwatch;
 
     public ValidationItem()
     {
-        this.stopwatch = SimpleObjectPool.Rent<Stopwatch>();
+        this._stopwatch = SimpleObjectPool.Rent<Stopwatch>();
     }
 
     public override void Evaluate(IValidationContext context)
@@ -37,7 +37,7 @@ internal sealed class ValidationItem<T, TValue> : ValidationItemBase<T, TValue>
                 ruleBase.ParentContext = context;
             }
 
-            stopwatch.Restart();
+            _stopwatch.Restart();
 
             if (rule.TryValidate(value, out var ruleContext))
             {
@@ -46,16 +46,16 @@ internal sealed class ValidationItem<T, TValue> : ValidationItemBase<T, TValue>
                     context.AddFailure(error);
                 }
 
-                stopwatch.Stop();
-                context.AddInvocation(new ValidationInvocation(rule.Name, true, stopwatch.ElapsedTicks));
+                _stopwatch.Stop();
+                context.AddInvocation(new ValidationInvocation(rule.Name, true, _stopwatch.ElapsedTicks));
             }
             else
             {
-                stopwatch.Stop();
-                context.AddInvocation(new ValidationInvocation(rule.Name, false, stopwatch.ElapsedTicks));
+                _stopwatch.Stop();
+                context.AddInvocation(new ValidationInvocation(rule.Name, false, _stopwatch.ElapsedTicks));
             }
         }
 
-        stopwatch.Reset();
+        _stopwatch.Reset();
     }
 }

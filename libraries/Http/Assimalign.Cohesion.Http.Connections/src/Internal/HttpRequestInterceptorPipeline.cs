@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The HTTP/1.1 parser (<see cref="Http1.Http1MessageReader"/>) invokes the same seam inline on
+/// The HTTP/1.1 parser (<see cref="Http1MessageReader"/>) invokes the same seam inline on
 /// its own read path; this helper reproduces its ordering, CONNECT-skip, empty-body, freeze, and
 /// failure-path disposal semantics for the transports that hand over a completed request object,
 /// keeping the seam contract uniform across protocols. Per-protocol timing (documented on

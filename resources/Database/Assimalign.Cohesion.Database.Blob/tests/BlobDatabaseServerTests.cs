@@ -273,65 +273,106 @@ public sealed class BlobDatabaseServerTests
         return result.ToArray();
     }
 
-    private sealed class FaultingAcceptListener(InMemoryConnectionListener inner) : IConnectionListener
+    private sealed class FaultingAcceptListener : IConnectionListener
     {
+        private readonly InMemoryConnectionListener _inner;
         private bool _accepted;
+        /// <summary>
+        /// Initializes a new instance of the <see cref="FaultingAcceptListener"/> class.
+        /// </summary>
+        /// <param name="inner">The listener that accepts the first connection before accepts start failing.</param>
+        public FaultingAcceptListener(InMemoryConnectionListener inner)
+        {
+            _inner = inner;
+        }
         internal bool WasDisposed { get; private set; }
-        public EndPoint EndPoint => inner.EndPoint;
-        public ConnectionCapabilities Capabilities => inner.Capabilities;
-        public ValueTask BindAsync(CancellationToken cancellationToken = default) => inner.BindAsync(cancellationToken);
+        public EndPoint EndPoint => _inner.EndPoint;
+        public ConnectionCapabilities Capabilities => _inner.Capabilities;
+        public ValueTask BindAsync(CancellationToken cancellationToken = default) => _inner.BindAsync(cancellationToken);
         public async ValueTask<IConnection> AcceptAsync(CancellationToken cancellationToken = default)
         {
             if (_accepted) { throw new IOException("Injected accept failure."); }
             _accepted = true;
-            return await inner.AcceptAsync(cancellationToken);
+            return await _inner.AcceptAsync(cancellationToken);
         }
-        public async ValueTask DisposeAsync() { WasDisposed = true; await inner.DisposeAsync(); }
+        public async ValueTask DisposeAsync() { WasDisposed = true; await _inner.DisposeAsync(); }
     }
 
-    private sealed class BlockingRejectionListener(InMemoryConnectionListener inner) : IConnectionListener
+    private sealed class BlockingRejectionListener : IConnectionListener
     {
+        private readonly InMemoryConnectionListener _inner;
         private int _accepted;
+        /// <summary>
+        /// Initializes a new instance of the <see cref="BlockingRejectionListener"/> class.
+        /// </summary>
+        /// <param name="inner">The listener whose accepted connections are passed through or wrapped as blocked rejections.</param>
+        public BlockingRejectionListener(InMemoryConnectionListener inner)
+        {
+            _inner = inner;
+        }
         internal TaskCompletionSource Blocked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal BlockedConnection? Rejected { get; private set; }
-        public EndPoint EndPoint => inner.EndPoint;
-        public ConnectionCapabilities Capabilities => inner.Capabilities;
-        public ValueTask BindAsync(CancellationToken cancellationToken = default) => inner.BindAsync(cancellationToken);
+        public EndPoint EndPoint => _inner.EndPoint;
+        public ConnectionCapabilities Capabilities => _inner.Capabilities;
+        public ValueTask BindAsync(CancellationToken cancellationToken = default) => _inner.BindAsync(cancellationToken);
         public async ValueTask<IConnection> AcceptAsync(CancellationToken cancellationToken = default)
         {
-            IConnection connection = await inner.AcceptAsync(cancellationToken);
+            IConnection connection = await _inner.AcceptAsync(cancellationToken);
             return ++_accepted == 1 ? connection : Rejected = new BlockedConnection(connection, Blocked);
         }
-        public ValueTask DisposeAsync() => inner.DisposeAsync();
+        public ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 
-    private sealed class BlockedConnection(IConnection inner, TaskCompletionSource blocked) : IConnection
+    private sealed class BlockedConnection : IConnection
     {
+        private readonly IConnection _inner;
+        /// <summary>
+        /// Initializes a new instance of the <see cref="BlockedConnection"/> class.
+        /// </summary>
+        /// <param name="inner">The connection being wrapped.</param>
+        /// <param name="blocked">The completion source signaled when a flush on the output blocks.</param>
+        public BlockedConnection(IConnection inner, TaskCompletionSource blocked)
+        {
+            _inner = inner;
+            Output = new BlockedWriter(inner.Output, blocked);
+        }
         internal bool WasAborted { get; private set; }
         internal bool WasDisposed { get; private set; }
-        public ConnectionId Id => inner.Id;
-        public EndPoint? LocalEndPoint => inner.LocalEndPoint;
-        public EndPoint? RemoteEndPoint => inner.RemoteEndPoint;
-        public ConnectionDirection Direction => inner.Direction;
-        public ConnectionCapabilities Capabilities => inner.Capabilities;
-        public ConnectionState State => inner.State;
-        public CancellationToken ConnectionClosed => inner.ConnectionClosed;
-        public PipeReader Input => inner.Input;
-        public PipeWriter Output { get; } = new BlockedWriter(inner.Output, blocked);
-        public void Abort(Exception? reason = null) { WasAborted = true; inner.Abort(reason); }
-        public async ValueTask DisposeAsync() { WasDisposed = true; await inner.DisposeAsync(); }
+        public ConnectionId Id => _inner.Id;
+        public EndPoint? LocalEndPoint => _inner.LocalEndPoint;
+        public EndPoint? RemoteEndPoint => _inner.RemoteEndPoint;
+        public ConnectionDirection Direction => _inner.Direction;
+        public ConnectionCapabilities Capabilities => _inner.Capabilities;
+        public ConnectionState State => _inner.State;
+        public CancellationToken ConnectionClosed => _inner.ConnectionClosed;
+        public PipeReader Input => _inner.Input;
+        public PipeWriter Output { get; }
+        public void Abort(Exception? reason = null) { WasAborted = true; _inner.Abort(reason); }
+        public async ValueTask DisposeAsync() { WasDisposed = true; await _inner.DisposeAsync(); }
     }
 
-    private sealed class BlockedWriter(PipeWriter inner, TaskCompletionSource blocked) : PipeWriter
+    private sealed class BlockedWriter : PipeWriter
     {
-        public override void Advance(int bytes) => inner.Advance(bytes);
-        public override void CancelPendingFlush() => inner.CancelPendingFlush();
-        public override void Complete(Exception? exception = null) => inner.Complete(exception);
-        public override Memory<byte> GetMemory(int sizeHint = 0) => inner.GetMemory(sizeHint);
-        public override Span<byte> GetSpan(int sizeHint = 0) => inner.GetSpan(sizeHint);
+        private readonly PipeWriter _inner;
+        private readonly TaskCompletionSource _blocked;
+        /// <summary>
+        /// Initializes a new instance of the <see cref="BlockedWriter"/> class.
+        /// </summary>
+        /// <param name="inner">The writer that receives every operation except flushes.</param>
+        /// <param name="blocked">The completion source signaled when a flush blocks.</param>
+        public BlockedWriter(PipeWriter inner, TaskCompletionSource blocked)
+        {
+            _inner = inner;
+            _blocked = blocked;
+        }
+        public override void Advance(int bytes) => _inner.Advance(bytes);
+        public override void CancelPendingFlush() => _inner.CancelPendingFlush();
+        public override void Complete(Exception? exception = null) => _inner.Complete(exception);
+        public override Memory<byte> GetMemory(int sizeHint = 0) => _inner.GetMemory(sizeHint);
+        public override Span<byte> GetSpan(int sizeHint = 0) => _inner.GetSpan(sizeHint);
         public override async ValueTask<FlushResult> FlushAsync(CancellationToken cancellationToken = default)
         {
-            blocked.TrySetResult();
+            _blocked.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return default;
         }

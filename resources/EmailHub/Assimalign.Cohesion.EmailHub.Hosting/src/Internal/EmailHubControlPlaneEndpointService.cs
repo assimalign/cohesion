@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting;
 
-namespace Assimalign.Cohesion.EmailHub.Hosting;
+namespace Assimalign.Cohesion.EmailHub.Hosting.Internal;
 
 internal sealed class EmailHubControlPlaneEndpointService : IHostService, IDisposable
 {

@@ -16,7 +16,7 @@ using SecretClientCredential = Assimalign.Cohesion.SecretStore.Client.ClientCred
 using SecretStoreProtocolClient = Assimalign.Cohesion.SecretStore.Client.SecretStoreClient;
 using SecretStoreResourceCommand = Assimalign.Cohesion.SecretStore.Client.ResourceCommand;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal sealed class GatewayStoreClient : IGatewayStoreClient
 {

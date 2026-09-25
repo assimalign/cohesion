@@ -15,11 +15,11 @@ namespace Assimalign.Cohesion.Web.Authentication.Cookie.Tests;
 
 public sealed class CookieAuthenticationHandlerTests : IDisposable
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
 
     private readonly string _keysDirectory;
     private readonly IDataProtector _protector;
-    private readonly MutableTimeProvider _time = new(Now);
+    private readonly MutableTimeProvider _time = new(_now);
 
     public CookieAuthenticationHandlerTests()
     {

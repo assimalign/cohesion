@@ -4,12 +4,12 @@ using System.Collections.Generic;
 using System.Text;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Internal;
 
 internal static class BlobProtocolPayload
 {
     private const int MaxStringByteLength = 65_535;
-    private static readonly UTF8Encoding Utf8 = new(false, true);
+    private static readonly UTF8Encoding _utf8 = new(false, true);
 
     internal static void WriteString(List<byte> buffer, string value, bool allowEmpty)
     {
@@ -19,7 +19,7 @@ internal static class BlobProtocolPayload
         }
         try
         {
-            int length = Utf8.GetByteCount(value);
+            int length = _utf8.GetByteCount(value);
             if (length > MaxStringByteLength)
             {
                 throw new ProtocolException("A Blob metadata string exceeds 65,535 UTF-8 bytes.");
@@ -27,7 +27,7 @@ internal static class BlobProtocolPayload
             Span<byte> prefix = stackalloc byte[sizeof(int)];
             BinaryPrimitives.WriteInt32BigEndian(prefix, length);
             buffer.AddRange(prefix.ToArray());
-            buffer.AddRange(Utf8.GetBytes(value));
+            buffer.AddRange(_utf8.GetBytes(value));
         }
         catch (EncoderFallbackException exception)
         {
@@ -49,7 +49,7 @@ internal static class BlobProtocolPayload
         }
         try
         {
-            string value = Utf8.GetString(payload.Slice(position, length));
+            string value = _utf8.GetString(payload.Slice(position, length));
             position += length;
             return value;
         }

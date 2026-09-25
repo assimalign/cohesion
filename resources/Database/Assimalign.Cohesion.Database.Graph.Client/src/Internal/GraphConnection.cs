@@ -8,14 +8,24 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Client;
 
-namespace Assimalign.Cohesion.Database.Graph.Client;
+namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 
-internal sealed class GraphConnection(IDatabaseConnection connection) : IGraphConnection
+internal sealed class GraphConnection : IGraphConnection
 {
+    private readonly IDatabaseConnection _connection;
     private int _disposed;
 
-    public string Database => connection.Database;
-    public bool IsOpen => Volatile.Read(ref _disposed) == 0 && connection.IsOpen;
+    /// <summary>
+    /// Initializes a new instance of the <see cref="GraphConnection"/> class.
+    /// </summary>
+    /// <param name="connection">The rented database connection that carries graph exchanges.</param>
+    public GraphConnection(IDatabaseConnection connection)
+    {
+        _connection = connection;
+    }
+
+    public string Database => _connection.Database;
+    public bool IsOpen => Volatile.Read(ref _disposed) == 0 && _connection.IsOpen;
 
     public async ValueTask<GraphResultSet> QueryAsync(string statement, IReadOnlyDictionary<string, object?>? parameters = null,
         CancellationToken cancellationToken = default)
@@ -24,7 +34,7 @@ internal sealed class GraphConnection(IDatabaseConnection connection) : IGraphCo
         var exchange = new GraphExecuteExchange(statement, parameters);
         try
         {
-            return await connection.ExecuteAsync(exchange, cancellationToken).ConfigureAwait(false);
+            return await _connection.ExecuteAsync(exchange, cancellationToken).ConfigureAwait(false);
         }
         catch (DatabaseClientException exception)
         {
@@ -44,7 +54,7 @@ internal sealed class GraphConnection(IDatabaseConnection connection) : IGraphCo
         Stream stream;
         try
         {
-            stream = await connection.ExecuteStreamingAsync(new GraphPathsExchange(statement, parameters),
+            stream = await _connection.ExecuteStreamingAsync(new GraphPathsExchange(statement, parameters),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (DatabaseClientException exception)
@@ -65,7 +75,7 @@ internal sealed class GraphConnection(IDatabaseConnection connection) : IGraphCo
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            await connection.AbortAsync().ConfigureAwait(false);
+            await _connection.AbortAsync().ConfigureAwait(false);
         }
     }
 
@@ -73,7 +83,7 @@ internal sealed class GraphConnection(IDatabaseConnection connection) : IGraphCo
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            await connection.DisposeAsync().ConfigureAwait(false);
+            await _connection.DisposeAsync().ConfigureAwait(false);
         }
     }
 

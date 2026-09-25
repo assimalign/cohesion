@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.Database.Documents.Catalog</RootNamespace>
+  </PropertyGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Database" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Storage" />

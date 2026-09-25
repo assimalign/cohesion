@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
 /// <summary>
 /// The default <see cref="IApplicationEnvironment"/>, resolved from the host process

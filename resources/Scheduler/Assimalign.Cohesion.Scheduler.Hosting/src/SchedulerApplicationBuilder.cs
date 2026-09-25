@@ -8,6 +8,7 @@ using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Scheduler;
+using Assimalign.Cohesion.Scheduler.Hosting.Internal;
 
 namespace Assimalign.Cohesion.Scheduler.Hosting;
 

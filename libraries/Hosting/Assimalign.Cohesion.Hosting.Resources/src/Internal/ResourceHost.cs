@@ -3,7 +3,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Hosting.Resources;
+namespace Assimalign.Cohesion.Hosting.Resources.Internal;
 
 internal static class ResourceHost
 {

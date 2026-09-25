@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Sdk.Scheduler.Tasks</RootNamespace>
 		<PackageId>Assimalign.Cohesion.Sdk.Scheduler</PackageId>
 		<OutDir>$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Tasks</OutDir>
 	</PropertyGroup>

@@ -297,7 +297,7 @@ public sealed class OpenIdConnectLogoutToken
         {
             ArgumentNullException.ThrowIfNull(claim, nameof(descriptor));
 
-            if (TypedClaimNames.Contains(claim.Type))
+            if (_typedClaimNames.Contains(claim.Type))
             {
                 throw new IdentityModelException(
                     $"The extension claim '{claim.Type}' collides with a typed logout token member. " +
@@ -312,7 +312,7 @@ public sealed class OpenIdConnectLogoutToken
 
     // Nonce is deliberately absent: it is not a typed member, and the §2.6 prohibited-
     // nonce negative fixture must stay constructible for Validate() to report it.
-    private static readonly HashSet<string> TypedClaimNames = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> _typedClaimNames = new(StringComparer.Ordinal)
     {
         IdentityClaimTypes.Issuer,
         IdentityClaimTypes.Subject,

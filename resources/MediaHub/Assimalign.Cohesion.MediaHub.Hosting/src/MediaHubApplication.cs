@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.MediaHub;
+using Assimalign.Cohesion.MediaHub.Hosting.Internal;
 
 namespace Assimalign.Cohesion.MediaHub.Hosting;
 

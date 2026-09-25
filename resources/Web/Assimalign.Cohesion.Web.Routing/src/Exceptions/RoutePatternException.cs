@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
-namespace Assimalign.Cohesion.Web.Routing.Exceptions;
+namespace Assimalign.Cohesion.Web.Routing;
 
 public sealed class RoutePatternException : Exception
 {

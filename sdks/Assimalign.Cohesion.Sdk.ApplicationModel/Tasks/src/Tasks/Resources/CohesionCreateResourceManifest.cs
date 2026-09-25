@@ -10,6 +10,8 @@ using System.Text.Json;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 
+using Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.Internal;
+
 namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tasks;
 
 /// <summary>
@@ -17,14 +19,14 @@ namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tasks;
 /// </summary>
 public sealed class CohesionCreateResourceManifest : Task
 {
-    private static readonly HashSet<string> BuiltInMetadata = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> _builtInMetadata = new(StringComparer.OrdinalIgnoreCase)
     {
         "AccessedTime", "CreatedTime", "DefiningProjectDirectory", "DefiningProjectExtension",
         "DefiningProjectFullPath", "DefiningProjectName", "Directory", "Extension", "Filename",
         "FullPath", "Identity", "ModifiedTime", "RecursiveDir", "RelativeDir", "RootDir"
     };
 
-    private static readonly HashSet<string> CSharpKeywords = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> _cSharpKeywords = new(StringComparer.Ordinal)
     {
         "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked",
         "class", "const", "continue", "decimal", "default", "delegate", "do", "double", "else",
@@ -889,7 +891,7 @@ public sealed class CohesionCreateResourceManifest : Task
         {
             foreach (string metadata in MetadataNames(item))
             {
-                if (!BuiltInMetadata.Contains(metadata) && !known.Contains(metadata))
+                if (!_builtInMetadata.Contains(metadata) && !known.Contains(metadata))
                 {
                     Log.LogError($"Unknown metadata '{metadata}' on {itemType} '{item.ItemSpec}'.");
                 }
@@ -1239,7 +1241,7 @@ public sealed class CohesionCreateResourceManifest : Task
     private static bool IsIdentifier(string value)
     {
         if (string.IsNullOrEmpty(value) ||
-            CSharpKeywords.Contains(value) ||
+            _cSharpKeywords.Contains(value) ||
             !(IsAsciiLetter(value[0]) || value[0] == '_'))
         {
             return false;

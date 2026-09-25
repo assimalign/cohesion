@@ -1,6 +1,8 @@
 using System;
 using System.Buffers;
 
+using Assimalign.Cohesion.Content.Text.Internal;
+
 namespace Assimalign.Cohesion.Content.Text;
 
 /// <summary>

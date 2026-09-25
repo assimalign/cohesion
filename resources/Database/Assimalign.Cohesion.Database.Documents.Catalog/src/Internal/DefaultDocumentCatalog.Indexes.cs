@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Documents.Catalog;
+namespace Assimalign.Cohesion.Database.Documents.Catalog.Internal;
 
 internal sealed partial class DefaultDocumentCatalog
 {
@@ -287,21 +287,46 @@ internal sealed partial class DefaultDocumentCatalog
 
     private readonly record struct IndexChange(DocumentIndexMetadata Metadata, IndexKey? OldKey, IndexKey? NewKey, ulong OldLocation);
 
-    private sealed class TransactionSource(TransactionCoordinator coordinator) : IStorageTransactionSource
+    private sealed class TransactionSource : IStorageTransactionSource
     {
+        private readonly TransactionCoordinator _coordinator;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="TransactionSource"/> class.
+        /// </summary>
+        /// <param name="coordinator">The coordinator that owns each transaction's shared statement bracket.</param>
+        public TransactionSource(TransactionCoordinator coordinator)
+        {
+            _coordinator = coordinator;
+        }
+
         public IStorageTransaction GetStorageTransaction(ITransactionContext context)
-            => coordinator.TryGetStorageTransaction(context, out var bracket)
+            => _coordinator.TryGetStorageTransaction(context, out var bracket)
                 ? bracket : throw new InvalidOperationException("Index mutation requires a shared statement bracket.");
     }
 
-    private sealed class IndexUndo(DefaultDocumentCatalog catalog, DocumentIndexMetadata metadata) : IRecordVersionIndex
+    private sealed class IndexUndo : IRecordVersionIndex
     {
+        private readonly DefaultDocumentCatalog _catalog;
+        private readonly DocumentIndexMetadata _metadata;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="IndexUndo"/> class.
+        /// </summary>
+        /// <param name="catalog">The catalog that resolves the index's physical tree when an undo runs.</param>
+        /// <param name="metadata">The metadata of the index whose entries are undone.</param>
+        public IndexUndo(DefaultDocumentCatalog catalog, DocumentIndexMetadata metadata)
+        {
+            _catalog = catalog;
+            _metadata = metadata;
+        }
+
         public ValueTask EraseAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken = default)
-            => catalog.ResolveIndex(metadata).EraseAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
+            => _catalog.ResolveIndex(_metadata).EraseAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
 
         public ValueTask ClearDeleterAsync(IStorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken = default)
-            => catalog.ResolveIndex(metadata).ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
+            => _catalog.ResolveIndex(_metadata).ClearDeleterAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);
     }
 }

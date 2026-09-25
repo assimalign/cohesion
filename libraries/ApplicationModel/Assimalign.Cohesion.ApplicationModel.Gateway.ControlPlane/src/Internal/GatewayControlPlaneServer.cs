@@ -19,7 +19,7 @@ using Assimalign.Cohesion.Web.Routing;
 using CohesionHttpMethod = Assimalign.Cohesion.Http.HttpMethod;
 using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
 internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlane
 {

@@ -15,18 +15,18 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Security.DataProtection;
 
-namespace Assimalign.Cohesion.SecretStore.Hosting;
+namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
 internal sealed class CertificateAuthorityManager : IDisposable
 {
     private const string CertificatePrefix = "certs/";
     private const string PublicCertificateName = "public";
-    private static readonly TimeSpan LeafRenewalWindow = TimeSpan.FromDays(7);
+    private static readonly TimeSpan _leafRenewalWindow = TimeSpan.FromDays(7);
 
     // macOS cannot load PKCS#12 private keys as ephemeral (X509CertificateLoader rejects EphemeralKeySet with
     // PlatformNotSupportedException); it stores them in a temporary keychain instead. Every other platform keeps
     // the keys out of the persistent store.
-    private static readonly X509KeyStorageFlags PrivateKeyStorageFlags = OperatingSystem.IsMacOS()
+    private static readonly X509KeyStorageFlags _privateKeyStorageFlags = OperatingSystem.IsMacOS()
         ? X509KeyStorageFlags.Exportable
         : X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable;
 
@@ -615,7 +615,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 X509Certificate2 issuer = X509CertificateLoader.LoadPkcs12(
                     pfx,
                     null,
-                    PrivateKeyStorageFlags);
+                    _privateKeyStorageFlags);
                 X509Certificate2[] chain = root.TryGetProperty("chain", out JsonElement chainProperty)
                     ? chainProperty.EnumerateArray()
                         .Select(static item => X509CertificateLoader.LoadCertificate(item.GetBytesFromBase64()))
@@ -724,7 +724,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
             return X509CertificateLoader.LoadPkcs12(
                 withKey.Export(X509ContentType.Pkcs12),
                 null,
-                PrivateKeyStorageFlags);
+                _privateKeyStorageFlags);
         }
         finally
         {
@@ -806,7 +806,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 return X509CertificateLoader.LoadPkcs12(
                     pfx,
                     null,
-                    PrivateKeyStorageFlags);
+                    _privateKeyStorageFlags);
             }
             finally
             {
@@ -830,7 +830,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 return X509CertificateLoader.LoadPkcs12(
                     pfx,
                     null,
-                    PrivateKeyStorageFlags);
+                    _privateKeyStorageFlags);
             }
             finally
             {
@@ -883,7 +883,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
             return X509CertificateLoader.LoadPkcs12(
                 pfx,
                 null,
-                PrivateKeyStorageFlags);
+                _privateKeyStorageFlags);
         }
         finally
         {
@@ -989,7 +989,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
     }
 
     private static bool RequiresRenewal(X509Certificate2 certificate, DateTimeOffset now)
-        => certificate.NotAfter.ToUniversalTime() <= now + LeafRenewalWindow;
+        => certificate.NotAfter.ToUniversalTime() <= now + _leafRenewalWindow;
 
     private static X500DistinguishedName CreateSubject(string commonName)
     {

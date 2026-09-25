@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.MediaHub.Hosting</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.MediaHub" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />

@@ -25,9 +25,9 @@ using Assimalign.Cohesion.Web.Health.Internal;
 /// </remarks>
 public static class WebApplicationExtensions
 {
-    private static readonly HttpPath DefaultHealthPath = new("/healthz");
-    private static readonly HttpPath DefaultReadinessPath = new("/readyz");
-    private static readonly HttpPath DefaultLivenessPath = new("/livez");
+    private static readonly HttpPath _defaultHealthPath = new("/healthz");
+    private static readonly HttpPath _defaultReadinessPath = new("/readyz");
+    private static readonly HttpPath _defaultLivenessPath = new("/livez");
 
     extension(IWebApplicationPipelineBuilder builder)
     {
@@ -87,7 +87,7 @@ public static class WebApplicationExtensions
         public IWebApplicationPipelineBuilder MapHealthChecks(
             IHealthCheckService service,
             Action<HealthEndpointOptions>? configure = null)
-            => builder.MapHealthChecks(DefaultHealthPath, service, configure);
+            => builder.MapHealthChecks(_defaultHealthPath, service, configure);
 
         /// <summary>
         /// Maps a readiness endpoint (default <c>/readyz</c>) that runs only checks tagged
@@ -101,7 +101,7 @@ public static class WebApplicationExtensions
             IHealthCheckService service,
             HttpPath? path = null,
             Action<HealthEndpointOptions>? configure = null)
-            => builder.MapHealthChecks(path ?? DefaultReadinessPath, service, options =>
+            => builder.MapHealthChecks(path ?? _defaultReadinessPath, service, options =>
             {
                 options.Predicate = HealthCheckPredicates.Ready;
                 configure?.Invoke(options);
@@ -120,7 +120,7 @@ public static class WebApplicationExtensions
             IHealthCheckService service,
             HttpPath? path = null,
             Action<HealthEndpointOptions>? configure = null)
-            => builder.MapHealthChecks(path ?? DefaultLivenessPath, service, options =>
+            => builder.MapHealthChecks(path ?? _defaultLivenessPath, service, options =>
             {
                 options.Predicate = HealthCheckPredicates.Live;
                 configure?.Invoke(options);

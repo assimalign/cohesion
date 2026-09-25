@@ -6,7 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Configuration.Json;
+namespace Assimalign.Cohesion.Configuration.Json.Internal;
 
 using Assimalign.Cohesion.Configuration;
 

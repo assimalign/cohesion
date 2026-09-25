@@ -9,7 +9,7 @@ using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog.Internal;
 
 /// <summary>
 /// Default key-value catalog: metadata records on a dedicated catalog storage

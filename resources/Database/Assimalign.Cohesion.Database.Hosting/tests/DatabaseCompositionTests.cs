@@ -388,9 +388,17 @@ public sealed class DatabaseCompositionTests
         public ValueTask DisposeAsync() { DisposeCount++; return ValueTask.CompletedTask; }
     }
 
-    private sealed class ServerService(IDatabaseEngine engine) : IDatabaseServer, IHostService
+    private sealed class ServerService : IDatabaseServer, IHostService
     {
-        private readonly RecordingServer _server = new([], engine: engine);
+        private readonly RecordingServer _server;
+
+        /// <summary>Initializes a new instance of the <see cref="ServerService"/> class.</summary>
+        /// <param name="engine">The engine the wrapped recording server fronts.</param>
+        public ServerService(IDatabaseEngine engine)
+        {
+            _server = new([], engine: engine);
+        }
+
         public ServiceId Id { get; } = ServiceId.New();
         public IDatabaseServerContext Context => _server.Context;
         public Task StartAsync(CancellationToken cancellationToken = default) => _server.StartAsync(cancellationToken);

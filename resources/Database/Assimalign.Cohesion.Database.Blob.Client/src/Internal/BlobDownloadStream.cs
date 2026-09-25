@@ -5,13 +5,24 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Client;
 
-namespace Assimalign.Cohesion.Database.Blob.Client;
+namespace Assimalign.Cohesion.Database.Blob.Client.Internal;
 
 // The shared stream owns buffering, cancellation and the exchange lifetime. This
 // facade preserves the Blob API's exception type after shared health processing.
-internal sealed class BlobDownloadStream(Stream stream) : Stream
+internal sealed class BlobDownloadStream : Stream
 {
-    public override bool CanRead => stream.CanRead;
+    private readonly Stream _stream;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="BlobDownloadStream"/> class.
+    /// </summary>
+    /// <param name="stream">The shared download stream whose client exceptions are translated to Blob exceptions.</param>
+    public BlobDownloadStream(Stream stream)
+    {
+        _stream = stream;
+    }
+
+    public override bool CanRead => _stream.CanRead;
     public override bool CanSeek => false;
     public override bool CanWrite => false;
     public override long Length => throw new NotSupportedException();
@@ -25,7 +36,7 @@ internal sealed class BlobDownloadStream(Stream stream) : Stream
     {
         try
         {
-            return stream.Read(buffer, offset, count);
+            return _stream.Read(buffer, offset, count);
         }
         catch (DatabaseClientException exception)
         {
@@ -40,7 +51,7 @@ internal sealed class BlobDownloadStream(Stream stream) : Stream
     {
         try
         {
-            return await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            return await _stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
         }
         catch (DatabaseClientException exception)
         {
@@ -52,14 +63,14 @@ internal sealed class BlobDownloadStream(Stream stream) : Stream
     {
         if (disposing)
         {
-            stream.Dispose();
+            _stream.Dispose();
         }
         base.Dispose(disposing);
     }
 
     public override async ValueTask DisposeAsync()
     {
-        await stream.DisposeAsync().ConfigureAwait(false);
+        await _stream.DisposeAsync().ConfigureAwait(false);
         GC.SuppressFinalize(this);
     }
 }

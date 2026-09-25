@@ -12,19 +12,30 @@ internal sealed record TestResourceCommand(string Id, string Kind, string Key,
     IApplicationResource Target, ApplicationName Owner, ReadOnlyMemory<byte> Payload, bool Optional) : IResourceCommand;
 
 // Deliberately matches older wrappers: no command or adapter interface, just delegated Resource identity.
-internal sealed class LegacyDescriptorWrapper(IApplicationResourceDescriptor inner) : IApplicationResourceDescriptor
+internal sealed class LegacyDescriptorWrapper : IApplicationResourceDescriptor
 {
-    public IApplicationResource Resource => inner.Resource;
-    public ResourcePlan? Plan => inner.Plan;
-    public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => inner.Dependencies;
+    private readonly IApplicationResourceDescriptor _inner;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LegacyDescriptorWrapper"/> class.
+    /// </summary>
+    /// <param name="inner">The descriptor whose resource identity and dependencies the wrapper delegates to.</param>
+    public LegacyDescriptorWrapper(IApplicationResourceDescriptor inner)
+    {
+        _inner = inner;
+    }
+
+    public IApplicationResource Resource => _inner.Resource;
+    public ResourcePlan? Plan => _inner.Plan;
+    public IReadOnlyList<IApplicationResourceDescriptor> Dependencies => _inner.Dependencies;
     public IApplicationResourceDescriptor DependsOn(IApplicationResourceDescriptor resource)
     {
-        inner.DependsOn(resource);
+        _inner.DependsOn(resource);
         return this;
     }
     public IApplicationResourceDescriptor DependsOn(params IApplicationResourceDescriptor[] resources)
     {
-        inner.DependsOn(resources);
+        _inner.DependsOn(resources);
         return this;
     }
 }

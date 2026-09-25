@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Routing;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
 internal sealed class ControlPlaneRouteHandler : IRouterRouteHandler
 {

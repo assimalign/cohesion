@@ -4,14 +4,25 @@ using Assimalign.Cohesion.Database.Storage;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal sealed class DocumentCheckpointWorker(DocumentDatabaseEngine engine) : DatabaseEngineWorker
+internal sealed class DocumentCheckpointWorker : DatabaseEngineWorker
 {
-    public override string Name => engine.Name + "/checkpoint";
+    private readonly DocumentDatabaseEngine _engine;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DocumentCheckpointWorker"/> class.
+    /// </summary>
+    /// <param name="engine">The document database engine whose open databases are checkpointed.</param>
+    public DocumentCheckpointWorker(DocumentDatabaseEngine engine)
+    {
+        _engine = engine;
+    }
+
+    public override string Name => _engine.Name + "/checkpoint";
     public override DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.Checkpoint;
-    public override TimeSpan Interval => engine.EngineOptions.CheckpointInterval;
+    public override TimeSpan Interval => _engine.EngineOptions.CheckpointInterval;
     public override void RunIteration(CancellationToken cancellationToken)
     {
-        foreach (var database in engine.GetInstanceSnapshot())
+        foreach (var database in _engine.GetInstanceSnapshot())
         {
             if (cancellationToken.IsCancellationRequested)
             {

@@ -11,12 +11,12 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 using HostingResourceMount = Assimalign.Cohesion.Hosting.Resources.ResourceMount;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 
 internal sealed class InProcessContextFactory
 {
     private const string ConfigurationSectionToken = "<Section>";
-    private static readonly string ConfigurationPrefix = GetConfigurationPrefix();
+    private static readonly string _configurationPrefix = GetConfigurationPrefix();
 
     private readonly string _stateDirectory;
     private readonly ILocalResourceState _localState;
@@ -224,12 +224,12 @@ internal sealed class InProcessContextFactory
         var settings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach ((string name, string value) in environment)
         {
-            if (!name.StartsWith(ConfigurationPrefix, StringComparison.Ordinal))
+            if (!name.StartsWith(_configurationPrefix, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            string key = name[ConfigurationPrefix.Length..]
+            string key = name[_configurationPrefix.Length..]
                 .Replace("__", ":", StringComparison.Ordinal);
             settings[key] = value;
         }

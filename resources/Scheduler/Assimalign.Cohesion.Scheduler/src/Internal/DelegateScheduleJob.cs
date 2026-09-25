@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Scheduler;
+namespace Assimalign.Cohesion.Scheduler.Internal;
 
 internal sealed class DelegateScheduleJob : IScheduleJob
 {

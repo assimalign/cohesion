@@ -8,6 +8,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
 namespace Assimalign.Cohesion.LogSpace.Hosting.Tests;
 

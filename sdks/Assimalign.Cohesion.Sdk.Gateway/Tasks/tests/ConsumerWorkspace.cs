@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Sdk.Gateway.Tests;
 
 internal sealed class ConsumerWorkspace : IDisposable
 {
-    private static readonly string[] RequiredSdkPackageIds =
+    private static readonly string[] _requiredSdkPackageIds =
     [
         "Assimalign.Cohesion.Sdk",
         "Assimalign.Cohesion.Sdk.Web",
@@ -28,9 +28,9 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.Sdk.LogSpace"
     ];
 
-    private static readonly string[] RequiredPackageIds =
+    private static readonly string[] _requiredPackageIds =
     [
-        .. RequiredSdkPackageIds,
+        .. _requiredSdkPackageIds,
         "Assimalign.Cohesion.Sdk.ApplicationModel",
         "Assimalign.Cohesion.Core",
         "Assimalign.Cohesion.ApplicationModel",
@@ -76,16 +76,16 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.ConfigurationStore.Client"
     ];
 
-    private static readonly string RepositoryRoot = FindRepositoryRoot();
+    private static readonly string _repositoryRoot = FindRepositoryRoot();
     public static string TargetFramework { get; } = ResolveTargetFramework();
     public static string HostRuntimeIdentifier { get; } = RuntimeInformation.RuntimeIdentifier;
-    private static readonly string PackageVersion =
+    private static readonly string _packageVersion =
         Environment.GetEnvironmentVariable("COHESION_GATEWAY_TEST_PACKAGE_VERSION")
         ?? ResolvePackageVersion();
     // The SDK family layout is sdks/<family>/Tasks/{src,tests,docs}; the fixtures sit beside
     // this test project's sources, so the path carries the Tasks/ segment.
-    private static readonly string TestProjectsRoot = Path.Combine(
-        RepositoryRoot,
+    private static readonly string _testProjectsRoot = Path.Combine(
+        _repositoryRoot,
         "sdks",
         "Assimalign.Cohesion.Sdk.Gateway",
         "Tasks",
@@ -107,10 +107,10 @@ internal sealed class ConsumerWorkspace : IDisposable
         string? configuredFeed = Environment.GetEnvironmentVariable(
             "COHESION_GATEWAY_TEST_PACKAGE_FEED");
         string feedDirectory = string.IsNullOrWhiteSpace(configuredFeed)
-            ? Path.Combine(RepositoryRoot, "_out", "packages")
+            ? Path.Combine(_repositoryRoot, "_out", "packages")
             : Path.GetFullPath(configuredFeed);
-        string[] missingPackages = RequiredPackageIds
-            .Select(packageId => Path.Combine(feedDirectory, $"{packageId}.{PackageVersion}.nupkg"))
+        string[] missingPackages = _requiredPackageIds
+            .Select(packageId => Path.Combine(feedDirectory, $"{packageId}.{_packageVersion}.nupkg"))
             .Where(packagePath => !File.Exists(packagePath))
             .ToArray();
         if (missingPackages.Length > 0)
@@ -123,7 +123,7 @@ internal sealed class ConsumerWorkspace : IDisposable
 
         string workspaceId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
         string rootDirectory = Path.Combine(
-            RepositoryRoot, "_out", "g15", workspaceId[..8]);
+            _repositoryRoot, "_out", "g15", workspaceId[..8]);
         string localPackageFeedDirectory = Path.Combine(rootDirectory, "packages");
         Directory.CreateDirectory(rootDirectory);
         Directory.CreateDirectory(localPackageFeedDirectory);
@@ -216,7 +216,7 @@ internal sealed class ConsumerWorkspace : IDisposable
             "--nologo",
             "--verbosity:minimal",
             "-p:IsPackable=true",
-            $"-p:PackageVersion={PackageVersion}"
+            $"-p:PackageVersion={_packageVersion}"
         };
         return RunDotNetAsync(RootDirectory, arguments, cancellationToken);
     }
@@ -444,7 +444,7 @@ internal sealed class ConsumerWorkspace : IDisposable
     private static string ResolvePackageVersion()
     {
         XDocument versionDocument = XDocument.Load(Path.Combine(
-            RepositoryRoot,
+            _repositoryRoot,
             "build",
             "Targets",
             "Build.Version.props"));
@@ -457,7 +457,7 @@ internal sealed class ConsumerWorkspace : IDisposable
     private static string ResolveTargetFramework()
     {
         XDocument frameworkDocument = XDocument.Load(Path.Combine(
-            RepositoryRoot,
+            _repositoryRoot,
             "build",
             "Targets",
             "Build.TargetFramework.props"));
@@ -475,7 +475,7 @@ internal sealed class ConsumerWorkspace : IDisposable
 
     private void CopyFixture(string fixtureName)
     {
-        string sourceDirectory = Path.Combine(TestProjectsRoot, fixtureName);
+        string sourceDirectory = Path.Combine(_testProjectsRoot, fixtureName);
         if (!Directory.Exists(sourceDirectory))
         {
             throw new DirectoryNotFoundException($"Gateway SDK test fixture '{sourceDirectory}' does not exist.");
@@ -503,7 +503,7 @@ internal sealed class ConsumerWorkspace : IDisposable
 
     private void WriteGlobalJson()
     {
-        string repositoryGlobalJson = Path.Combine(RepositoryRoot, "global.json");
+        string repositoryGlobalJson = Path.Combine(_repositoryRoot, "global.json");
         using JsonDocument repositorySettings = JsonDocument.Parse(
             File.ReadAllText(repositoryGlobalJson),
             new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip });
@@ -515,9 +515,9 @@ internal sealed class ConsumerWorkspace : IDisposable
             ["rollForward"] = sdkSettings.GetProperty("rollForward").GetString()
         };
         var sdkPackages = new JsonObject();
-        foreach (string packageId in RequiredSdkPackageIds)
+        foreach (string packageId in _requiredSdkPackageIds)
         {
-            sdkPackages[packageId] = PackageVersion;
+            sdkPackages[packageId] = _packageVersion;
         }
 
         var document = new JsonObject
@@ -533,7 +533,7 @@ internal sealed class ConsumerWorkspace : IDisposable
     private void WriteCentralPackageReferences()
     {
         File.Copy(
-            Path.Combine(RepositoryRoot, "build", "Targets", "Build.References.Packages.targets"),
+            Path.Combine(_repositoryRoot, "build", "Targets", "Build.References.Packages.targets"),
             Path.Combine(RootDirectory, "Directory.Build.targets"));
     }
 

@@ -82,8 +82,17 @@ public sealed class DatabaseExchangeHealthTests
         result.Rows.ShouldHaveSingleItem();
     }
 
-    private sealed class UnreadResponseExchange(ProtocolErrorCode code) : IDatabaseProtocolExchange<bool>
+    private sealed class UnreadResponseExchange : IDatabaseProtocolExchange<bool>
     {
+        private readonly ProtocolErrorCode _code;
+
+        /// <summary>Initializes a new instance of the <see cref="UnreadResponseExchange"/> class.</summary>
+        /// <param name="code">The error code the exchange reports after leaving its response unread.</param>
+        public UnreadResponseExchange(ProtocolErrorCode code)
+        {
+            _code = code;
+        }
+
         public ProtocolMessageFamily Family => SqlProtocol.Family;
 
         public async ValueTask<bool> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
@@ -91,7 +100,7 @@ public sealed class DatabaseExchangeHealthTests
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty), cancellationToken);
             await writer.FlushAsync(cancellationToken);
             // Pong remains unread. A familiar statement code is no proof of a clean session.
-            throw new DatabaseClientException(code, "Transfer stopped with its response unread.");
+            throw new DatabaseClientException(_code, "Transfer stopped with its response unread.");
         }
     }
 

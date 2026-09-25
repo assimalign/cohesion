@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// <remarks>The executable ISO/IEC 39075 subset includes documented Cohesion CREATE and SHOW extensions.</remarks>
 public static class GqlLanguageProfile
 {
-    private static readonly string[] Keywords =
+    private static readonly string[] _keywords =
     [
         // Pattern matching
         "MATCH", "OPTIONAL", "MANDATORY",
@@ -44,9 +44,9 @@ public static class GqlLanguageProfile
         "SHOW",
     ];
 
-    private static readonly string[] Functions = [];
+    private static readonly string[] _functions = [];
 
-    private static readonly string[] Clauses =
+    private static readonly string[] _clauses =
     [
         GqlClauses.Match,
         GqlClauses.Return,
@@ -60,7 +60,7 @@ public static class GqlLanguageProfile
     /// <summary>Gets the ISO GQL language profile used by graph-model query consumers.</summary>
     public static QueryLanguageProfile Instance { get; } = new(
         "GQL",
-        Keywords,
-        Functions,
-        Clauses);
+        _keywords,
+        _functions,
+        _clauses);
 }

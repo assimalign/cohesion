@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Core.Tests;
 public class RuntimeContractTests
 {
     private const string DisplayPrefix = "Cohesion Test [Core] - RuntimeContract: ";
-    private static readonly string[] ExpectedVariables =
+    private static readonly string[] _expectedVariables =
     [
         "COHESION_APPLICATION",
         "COHESION_RESOURCE",
@@ -59,8 +59,8 @@ public class RuntimeContractTests
         // Assert
         sourceVariables.Count.ShouldBeGreaterThan(0);
         documentedVariables.Count.ShouldBeGreaterThan(0);
-        sourceVariables.ShouldBe(ExpectedVariables);
-        documentedVariables.ShouldBe(ExpectedVariables);
+        sourceVariables.ShouldBe(_expectedVariables);
+        documentedVariables.ShouldBe(_expectedVariables);
     }
 
     [Fact(DisplayName = DisplayPrefix + "Cohesion variable literals have one source of truth")]

@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Scheduler;
+using Assimalign.Cohesion.Scheduler.Hosting.Internal;
 
 namespace Assimalign.Cohesion.Scheduler.Hosting;
 

@@ -3,17 +3,28 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace Assimalign.Cohesion.OpenApi.Validation;
+namespace Assimalign.Cohesion.OpenApi.Validation.Internal;
 
 /// <summary>
 /// A violation reported by <see cref="JsonSchemaEvaluator"/>: the JSON Pointer of the offending
 /// instance location and a human-readable message.
 /// </summary>
-internal readonly struct JsonSchemaViolation(string pointer, string message)
+internal readonly struct JsonSchemaViolation
 {
-    public string Pointer { get; } = pointer;
+    /// <summary>
+    /// Initializes a new instance of the <see cref="JsonSchemaViolation"/> structure.
+    /// </summary>
+    /// <param name="pointer">The JSON Pointer of the offending instance location.</param>
+    /// <param name="message">The human-readable description of the violation.</param>
+    public JsonSchemaViolation(string pointer, string message)
+    {
+        Pointer = pointer;
+        Message = message;
+    }
 
-    public string Message { get; } = message;
+    public string Pointer { get; }
+
+    public string Message { get; }
 }
 
 /// <summary>

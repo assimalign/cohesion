@@ -1,7 +1,7 @@
 using System;
 using System.Buffers.Binary;
 
-namespace Assimalign.Cohesion.Database.Indexing;
+namespace Assimalign.Cohesion.Database.Indexing.Internal;
 
 /// <summary>
 /// Overlay over the body of a <c>PageType.Index</c> page: a sorted-directory node

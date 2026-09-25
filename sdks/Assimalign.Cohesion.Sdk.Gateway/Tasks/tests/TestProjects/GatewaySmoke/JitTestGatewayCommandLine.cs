@@ -12,7 +12,7 @@ namespace GatewaySmoke;
 /// </summary>
 public static class JitTestGatewayCommandLine
 {
-    private static int applyCount;
+    private static int _applyCount;
 
     /// <summary>Applies the test provider's required command-line token.</summary>
     /// <param name="options">The selected provider's options.</param>
@@ -23,7 +23,7 @@ public static class JitTestGatewayCommandLine
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(args);
 
-        if (Interlocked.Increment(ref applyCount) is not 1)
+        if (Interlocked.Increment(ref _applyCount) is not 1)
         {
             throw new InvalidOperationException(
                 "The JitTest provider command-line hook ran more than once.");

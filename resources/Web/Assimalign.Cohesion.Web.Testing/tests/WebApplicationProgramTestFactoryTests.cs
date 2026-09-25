@@ -21,12 +21,12 @@ namespace Assimalign.Cohesion.Web.Testing.Tests;
 
 public sealed class WebApplicationProgramTestFactoryTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Testing] - FromProgram: drives the real resource Program end to end")]
     public async Task FromProgram_WithAmbientContext_ShouldDriveProgramEndToEnd()
     {
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         ResourceContext prior = ResourceRuntime.Current;
         ResourceContext context = CreateContext("first-host", "alpha", out Uri endpoint);
         await using IWebApplicationProgramTestFactory factory =
@@ -71,7 +71,7 @@ public sealed class WebApplicationProgramTestFactoryTests
     [Fact(DisplayName = "Cohesion Test [Web.Testing] - FromProgram: keeps two in-process resource scopes isolated")]
     public async Task FromProgram_WithConcurrentScopes_ShouldKeepHostsIsolated()
     {
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         ResourceContext firstContext = CreateContext("first-host", "alpha", out Uri firstEndpoint);
         ResourceContext secondContext = CreateContext("second-host", "beta", out Uri secondEndpoint);
         await using IWebApplicationProgramTestFactory first =
@@ -150,7 +150,7 @@ public sealed class WebApplicationProgramTestFactoryTests
     [Fact(DisplayName = "Cohesion Test [Web.Testing] - FromProgram: cancellation stops a starting resource Program")]
     public async Task FromProgram_WhenStartIsCancelled_ShouldStopProgram()
     {
-        using var timeout = new CancellationTokenSource(TestTimeout);
+        using var timeout = new CancellationTokenSource(_testTimeout);
         ResourceContext context = CreateContext("cancelled-host", "unhealthy", out _);
         await using IWebApplicationProgramTestFactory factory =
             WebApplicationTestFactory.FromProgram<Program>(new WebApplicationProgramTestFactoryOptions
@@ -173,7 +173,7 @@ public sealed class WebApplicationProgramTestFactoryTests
     [Fact(DisplayName = "Cohesion Test [Web.Testing] - FromProgram: cancellation remains primary when Program faults during cleanup")]
     public async Task FromProgram_WhenProgramFaultsDuringCancelledStart_ShouldPreserveCancellation()
     {
-        using var timeout = new CancellationTokenSource(TestTimeout);
+        using var timeout = new CancellationTokenSource(_testTimeout);
         ResourceContext context = CreateContext("faulted-host", "unhealthy-then-throw", out _);
         IWebApplicationProgramTestFactory factory =
             WebApplicationTestFactory.FromProgram<Program>(new WebApplicationProgramTestFactoryOptions

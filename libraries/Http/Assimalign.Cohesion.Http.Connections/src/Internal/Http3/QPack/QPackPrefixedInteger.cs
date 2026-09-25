@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Encodes and decodes QPACK prefixed integers (RFC 9204 §4.1.1, the same

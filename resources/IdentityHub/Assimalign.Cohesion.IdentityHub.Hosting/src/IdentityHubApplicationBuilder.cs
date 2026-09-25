@@ -7,6 +7,7 @@ using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.IdentityHub;
+using Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting;

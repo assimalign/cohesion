@@ -24,13 +24,13 @@ namespace Assimalign.Cohesion.Web.Serialization.Tests;
 /// </summary>
 public class SerializationPipelineTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Serialization] - Pipeline: Should round-trip typed request and response bodies end to end")]
     public async Task Pipeline_TypedBodyRoundTrip_ShouldSerializeEndToEnd()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -65,7 +65,7 @@ public class SerializationPipelineTests
     {
         // Arrange — the non-throwing registry surface is how middleware produces protocol
         // outcomes (415) instead of faults for unsupported request formats.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();

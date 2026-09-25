@@ -1,6 +1,8 @@
 using System;
 using System.Net.Http;
 
+using Assimalign.Cohesion.SecretStore.Client.Internal;
+
 namespace Assimalign.Cohesion.SecretStore.Client;
 
 /// <summary>

@@ -4,11 +4,18 @@ using System.Collections.Generic;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.OpenTelemetry;
 
-namespace Assimalign.Cohesion.Hosting.Telemetry;
+namespace Assimalign.Cohesion.Hosting.Telemetry.Internal;
 
-internal sealed class OtlpLoggerProvider(IOtlpLogExporter exporter) : LoggerProvider
+internal sealed class OtlpLoggerProvider : LoggerProvider
 {
-    internal IOtlpLogExporter Exporter { get; } = exporter;
+    /// <summary>Initializes a new instance of the <see cref="OtlpLoggerProvider"/> class.</summary>
+    /// <param name="exporter">The OTLP log exporter that receives the provider's log records.</param>
+    public OtlpLoggerProvider(IOtlpLogExporter exporter)
+    {
+        Exporter = exporter;
+    }
+
+    internal IOtlpLogExporter Exporter { get; }
     public override string Name => "OpenTelemetry";
     protected override Logger CreateCore(string category) => new OtlpLogger(category, this);
     protected override void DisposeCore() => Exporter.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -53,23 +60,46 @@ internal sealed class OtlpLoggerProvider(IOtlpLogExporter exporter) : LoggerProv
         _ => throw new ArgumentOutOfRangeException(nameof(level), "Unknown log severity.")
     };
 
-    private sealed class OtlpLogger(string category, OtlpLoggerProvider provider) : Logger(category)
+    private sealed class OtlpLogger : Logger
     {
-        protected override void WriteCore(ILoggerEntry entry) => provider.Write(entry);
+        private readonly OtlpLoggerProvider _provider;
+
+        /// <summary>Initializes a new instance of the <see cref="OtlpLogger"/> class.</summary>
+        /// <param name="category">The logger category.</param>
+        /// <param name="provider">The provider that exports the logger's entries.</param>
+        public OtlpLogger(string category, OtlpLoggerProvider provider)
+            : base(category)
+        {
+            _provider = provider;
+        }
+
+        protected override void WriteCore(ILoggerEntry entry) => _provider.Write(entry);
         protected override IScopedLogger BeginScopeCore(ILoggerEntry entry)
         {
-            provider.Write(entry);
-            return new OtlpScope(Category, provider, entry.Id);
+            _provider.Write(entry);
+            return new OtlpScope(Category, _provider, entry.Id);
         }
     }
 
-    private sealed class OtlpScope(string category, OtlpLoggerProvider provider, LogId parent) : ScopedLogger(category, parent)
+    private sealed class OtlpScope : ScopedLogger
     {
-        protected override void WriteCore(ILoggerEntry entry) => provider.Write(entry);
+        private readonly OtlpLoggerProvider _provider;
+
+        /// <summary>Initializes a new instance of the <see cref="OtlpScope"/> class.</summary>
+        /// <param name="category">The logger category.</param>
+        /// <param name="provider">The provider that exports the scope's entries.</param>
+        /// <param name="parent">The identifier of the entry that opened the scope.</param>
+        public OtlpScope(string category, OtlpLoggerProvider provider, LogId parent)
+            : base(category, parent)
+        {
+            _provider = provider;
+        }
+
+        protected override void WriteCore(ILoggerEntry entry) => _provider.Write(entry);
         protected override IScopedLogger BeginScopeCore(ILoggerEntry entry)
         {
-            provider.Write(entry);
-            return new OtlpScope(Category, provider, entry.Id);
+            _provider.Write(entry);
+            return new OtlpScope(Category, _provider, entry.Id);
         }
     }
 }

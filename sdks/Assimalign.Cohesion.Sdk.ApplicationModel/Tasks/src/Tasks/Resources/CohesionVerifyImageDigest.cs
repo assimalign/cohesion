@@ -5,6 +5,8 @@ using System.Text.Json;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 
+using Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.Internal;
+
 namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tasks;
 
 /// <summary>Verifies the single SDK-produced digest against its selected output sink.</summary>

@@ -2,6 +2,8 @@ using System;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 
+using Assimalign.Cohesion.ApplicationModel.Internal;
+
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>Creates immutable declarative commands using explicit JSON metadata.</summary>

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Documents;

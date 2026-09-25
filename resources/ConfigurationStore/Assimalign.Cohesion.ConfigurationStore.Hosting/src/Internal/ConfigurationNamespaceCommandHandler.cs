@@ -6,10 +6,19 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
+namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 
-internal sealed class ConfigurationNamespaceCommandHandler(ConfigurationStoreRepository repository) : IResourceCommandHandler
+internal sealed class ConfigurationNamespaceCommandHandler : IResourceCommandHandler
 {
+    private readonly ConfigurationStoreRepository _repository;
+
+    /// <summary>Initializes a new instance of the <see cref="ConfigurationNamespaceCommandHandler"/> class.</summary>
+    /// <param name="repository">The configuration store repository that creates and deletes namespaces.</param>
+    public ConfigurationNamespaceCommandHandler(ConfigurationStoreRepository repository)
+    {
+        _repository = repository;
+    }
+
     public string Kind => ConfigurationEndpointService.AddNamespaceCommand;
 
     public async ValueTask<ReadOnlyMemory<byte>> ExecuteAsync(ResourceCommand command, CancellationToken cancellationToken = default)
@@ -40,13 +49,13 @@ internal sealed class ConfigurationNamespaceCommandHandler(ConfigurationStoreRep
                 }
             }
         }
-        await repository.CreateNamespaceAsync(command.Key, command.Owner, seed, cancellationToken).ConfigureAwait(false);
+        await _repository.CreateNamespaceAsync(command.Key, command.Owner, seed, cancellationToken).ConfigureAwait(false);
         return ReadOnlyMemory<byte>.Empty;
     }
 
     public async ValueTask<ReadOnlyMemory<byte>> DeleteAsync(ResourceCommand command, CancellationToken cancellationToken = default)
     {
-        await repository.DeleteNamespaceAsync(command.Key, command.Owner, cancellationToken).ConfigureAwait(false);
+        await _repository.DeleteNamespaceAsync(command.Key, command.Owner, cancellationToken).ConfigureAwait(false);
         return ReadOnlyMemory<byte>.Empty;
     }
 }

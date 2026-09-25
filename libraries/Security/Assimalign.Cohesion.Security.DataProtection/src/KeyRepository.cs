@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Security.DataProtection.Internal;
+
 namespace Assimalign.Cohesion.Security.DataProtection;
 
 /// <summary>

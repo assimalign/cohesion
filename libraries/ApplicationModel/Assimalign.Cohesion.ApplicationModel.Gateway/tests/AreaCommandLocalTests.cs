@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.SecretStore.Client;

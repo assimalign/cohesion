@@ -1,3 +1,5 @@
+using Assimalign.Cohesion.Security.Internal;
+
 namespace Assimalign.Cohesion.Security;
 
 /// <summary>

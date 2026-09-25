@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// HTTP/3 unidirectional stream type identifiers (RFC 9114 §6.2 / §11.2.4),

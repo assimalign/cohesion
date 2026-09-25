@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
-namespace Assimalign.Cohesion.ConfigurationStore.Client;
+namespace Assimalign.Cohesion.ConfigurationStore.Client.Internal;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(List<string>), TypeInfoPropertyName = "NamespaceNames")]

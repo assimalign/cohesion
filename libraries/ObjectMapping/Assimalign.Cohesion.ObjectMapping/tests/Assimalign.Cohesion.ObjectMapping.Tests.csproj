@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.ObjectMapping.Tests</RootNamespace>
 		<IsPackable>false</IsPackable>
 		<RunSettingsFilePath>$(MSBuildProjectDirectory)\coverlet.runsettings</RunSettingsFilePath>
 		<!-- Allow the object-mapping generator's interceptors (inline AddProfile<T,S>(lambda)). -->

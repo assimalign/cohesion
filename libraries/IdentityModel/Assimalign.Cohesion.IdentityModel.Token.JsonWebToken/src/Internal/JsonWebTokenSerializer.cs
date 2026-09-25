@@ -6,7 +6,7 @@ using System.Text.Json;
 
 using Assimalign.Cohesion.IdentityModel;
 
-namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
+namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
 
 /// <summary>
 /// Serializes the typed token model directly with <see cref="Utf8JsonWriter" /> so the signing

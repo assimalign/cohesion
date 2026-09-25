@@ -3,7 +3,7 @@ using System.IO;
 
 using Assimalign.Cohesion.Database.Storage;
 
-namespace Assimalign.Cohesion.Database.Graph;
+namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal sealed class GraphDatabaseEngineBuilder : IGraphDatabaseEngineBuilder
 {

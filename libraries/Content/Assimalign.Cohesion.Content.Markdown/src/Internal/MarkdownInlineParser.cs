@@ -4,7 +4,7 @@ using System.Text;
 
 using Assimalign.Cohesion.Content.Text;
 
-namespace Assimalign.Cohesion.Content.Markdown;
+namespace Assimalign.Cohesion.Content.Markdown.Internal;
 
 /// <summary>
 /// The inline phase of the parser: tokenizes a leaf block's raw content with a
@@ -26,7 +26,7 @@ internal static class MarkdownInlineParser
     private const int backslashId = 8;
     private const int ampersandId = 9;
 
-    private static readonly TextTokenizerOptions TokenizerOptions = CreateTokenizerOptions();
+    private static readonly TextTokenizerOptions _tokenizerOptions = CreateTokenizerOptions();
 
     private static TextTokenizerOptions CreateTokenizerOptions()
     {
@@ -53,7 +53,7 @@ internal static class MarkdownInlineParser
         }
 
         var tokens = new List<TextToken>();
-        var tokenizer = new TextTokenizer(raw, TokenizerOptions);
+        var tokenizer = new TextTokenizer(raw, _tokenizerOptions);
         while (tokenizer.TryRead(out var token))
         {
             tokens.Add(token);
@@ -818,7 +818,7 @@ internal static class MarkdownInlineParser
             return true;
         }
 
-        foreach (var (name, replacement) in NamedEntities)
+        foreach (var (name, replacement) in _namedEntities)
         {
             if (text.Length > name.Length + 1
                 && text[1..(name.Length + 1)].SequenceEqual(name)
@@ -833,7 +833,7 @@ internal static class MarkdownInlineParser
         return false;
     }
 
-    private static readonly (string Name, string Replacement)[] NamedEntities =
+    private static readonly (string Name, string Replacement)[] _namedEntities =
     [
         ("amp", "&"),
         ("lt", "<"),
@@ -853,13 +853,23 @@ internal static class MarkdownInlineParser
         public static Atom ForDelimiter(Delimiter delimiter) => new() { Delimiter = delimiter };
     }
 
-    private sealed class Delimiter(char character, int count)
+    private sealed class Delimiter
     {
-        public char Character { get; } = character;
+        /// <summary>Initializes a new instance of the <see cref="Delimiter"/> class.</summary>
+        /// <param name="character">The delimiter character.</param>
+        /// <param name="count">The length of the delimiter run.</param>
+        public Delimiter(char character, int count)
+        {
+            Character = character;
+            Count = count;
+            OriginalCount = count;
+        }
 
-        public int Count { get; set; } = count;
+        public char Character { get; }
 
-        public int OriginalCount { get; } = count;
+        public int Count { get; set; }
+
+        public int OriginalCount { get; }
 
         public bool CanOpen { get; init; }
 

@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Health;
 /// </summary>
 public static class HealthChecksBuilderExtensions
 {
-    private static readonly string[] DefaultContributorTags =
+    private static readonly string[] _defaultContributorTags =
     [
         HealthTags.Ready,
         HealthTags.Live
@@ -59,7 +59,7 @@ public static class HealthChecksBuilderExtensions
                 contributor.Name,
                 (_, cancellationToken) => CheckContributorAsync(contributor, cancellationToken),
                 failureStatus,
-                tags ?? DefaultContributorTags,
+                tags ?? _defaultContributorTags,
                 timeout);
         }
     }

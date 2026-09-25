@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// </summary>
 public static class GenericPlanner
 {
-    private static readonly IReadOnlyList<string> EmptyCommand = Array.Empty<string>();
+    private static readonly IReadOnlyList<string> _emptyCommand = Array.Empty<string>();
 
     /// <summary>Creates a plan from generic resource-manifest traits.</summary>
     /// <param name="context">The manifest, typed options, environment, and references to plan.</param>
@@ -193,7 +193,7 @@ public static class GenericPlanner
         int shapeCount = 0;
         ProbeKind kind = default;
         string? value = null;
-        IReadOnlyList<string> command = EmptyCommand;
+        IReadOnlyList<string> command = _emptyCommand;
 
         if (probe.Http is not null)
         {

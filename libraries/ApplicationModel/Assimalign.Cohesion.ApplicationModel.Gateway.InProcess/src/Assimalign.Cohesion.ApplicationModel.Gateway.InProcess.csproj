@@ -1,12 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.ApplicationModel.Gateway.InProcess</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
-	</ItemGroup>
-	<ItemGroup>
-		<InternalsVisibleTo Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests" />
 	</ItemGroup>
 	<ItemGroup>
 		<None

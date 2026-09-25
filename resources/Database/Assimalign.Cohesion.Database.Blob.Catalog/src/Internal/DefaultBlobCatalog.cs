@@ -8,7 +8,7 @@ using Assimalign.Cohesion.Database.Blob.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Blob.Catalog;
+namespace Assimalign.Cohesion.Database.Blob.Catalog.Internal;
 
 internal sealed class DefaultBlobCatalog : IBlobCatalog
 {

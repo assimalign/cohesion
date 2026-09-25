@@ -7,11 +7,11 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 
 internal static class InProcessConsoleRouter
 {
-    private static readonly Lock Sync = new();
+    private static readonly Lock _sync = new();
     private static TextWriter? _originalOutput;
     private static TextWriter? _originalError;
     private static AmbientPrefixTextWriter? _routedOutput;
@@ -22,7 +22,7 @@ internal static class InProcessConsoleRouter
 
     internal static IDisposable Acquire()
     {
-        lock (Sync)
+        lock (_sync)
         {
             if (_leaseCount++ == 0)
             {
@@ -42,7 +42,7 @@ internal static class InProcessConsoleRouter
 
     private static void Release()
     {
-        lock (Sync)
+        lock (_sync)
         {
             if (_leaseCount == 0 || --_leaseCount != 0)
             {

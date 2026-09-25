@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Files.Bmff;
 /// </summary>
 public sealed class BmffStream : Stream
 {
-    private readonly Stream stream;
+    private readonly Stream _stream;
 
     /// <summary>
     /// 
@@ -19,7 +19,7 @@ public sealed class BmffStream : Stream
     /// <param name="limit"></param>
     public BmffStream(Stream stream, long offset, long limit)
     {
-        this.stream = stream;
+        this._stream = stream;
         this.Offset = offset;
         this.Limit = limit;
     }
@@ -40,13 +40,13 @@ public sealed class BmffStream : Stream
     public long Remaining =>  Limit - (Position - Offset);
 
     /// <inheritdoc />
-    public override bool CanRead => stream.CanRead;
-    public override bool CanSeek => stream.CanSeek;
-    public override bool CanWrite => stream.CanWrite;
-    public override long Length => stream.Length;
+    public override bool CanRead => _stream.CanRead;
+    public override bool CanSeek => _stream.CanSeek;
+    public override bool CanWrite => _stream.CanWrite;
+    public override long Length => _stream.Length;
     public override long Position
     {
-        get => stream.Position;
+        get => _stream.Position;
         set
         {
             if (value > Remaining)
@@ -54,13 +54,13 @@ public sealed class BmffStream : Stream
                 throw new ArgumentOutOfRangeException("");
             }
 
-            stream.Position = value;
+            _stream.Position = value;
         }
     }
 
     public override void Flush()
     {
-        stream.Flush();
+        _stream.Flush();
     }
 
     public override int Read(byte[] buffer, int offset, int count)
@@ -71,7 +71,7 @@ public sealed class BmffStream : Stream
             throw new ArgumentOutOfRangeException();
         }
 
-        return stream.Read(buffer, offset, count);
+        return _stream.Read(buffer, offset, count);
     }
 
     public override long Seek(long offset, SeekOrigin origin) => throw new NotImplementedException();
@@ -84,6 +84,6 @@ public sealed class BmffStream : Stream
             throw new ArgumentOutOfRangeException();
         }
 
-        stream.Write(buffer, offset, count);
+        _stream.Write(buffer, offset, count);
     }
 }

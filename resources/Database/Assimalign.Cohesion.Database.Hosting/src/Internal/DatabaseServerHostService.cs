@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 
-namespace Assimalign.Cohesion.Database.Hosting;
+namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 /// <summary>
 /// The endpoint host service: maps a <see cref="IDatabaseServer"/>'s bind and drain

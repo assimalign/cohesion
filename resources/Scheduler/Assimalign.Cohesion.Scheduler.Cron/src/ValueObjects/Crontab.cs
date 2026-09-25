@@ -272,9 +272,17 @@ public readonly struct Crontab : IEquatable<Crontab>, IEnumerable<DateTime>, IFo
         return first.AddMonths(1);
     }
 
-    private sealed class CrontabEnumerator(Crontab crontab) : IEnumerator<DateTime>
+    private sealed class CrontabEnumerator : IEnumerator<DateTime>
     {
+        private readonly Crontab _crontab;
         private DateTime? _current;
+
+        /// <summary>Initializes a new instance of the <see cref="CrontabEnumerator"/> class.</summary>
+        /// <param name="crontab">The cron expression whose occurrences are enumerated.</param>
+        public CrontabEnumerator(Crontab crontab)
+        {
+            _crontab = crontab;
+        }
 
         public DateTime Current => _current ?? throw new InvalidOperationException(
             "MoveNext must be called before reading the cron occurrence.");
@@ -283,7 +291,7 @@ public readonly struct Crontab : IEquatable<Crontab>, IEnumerable<DateTime>, IFo
 
         public bool MoveNext()
         {
-            _current = crontab.GetDateTime(_current ?? DateTime.Now);
+            _current = _crontab.GetDateTime(_current ?? DateTime.Now);
             return true;
         }
 

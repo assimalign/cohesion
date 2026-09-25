@@ -6,26 +6,47 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-namespace Assimalign.Cohesion.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
-internal sealed class DeclarativeResourceCommand(
-    string id,
-    string kind,
-    string key,
-    IApplicationResource target,
-    ApplicationName owner,
-    ReadOnlyMemory<byte> payload,
-    bool optional) : IResourceCommand
+internal sealed class DeclarativeResourceCommand : IResourceCommand
 {
-    private readonly byte[] _payload = payload.ToArray();
+    private readonly byte[] _payload;
 
-    public string Id { get; } = id;
-    public string Kind { get; } = kind;
-    public string Key { get; } = key;
-    public IApplicationResource Target { get; } = target;
-    public ApplicationName Owner { get; } = owner;
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DeclarativeResourceCommand"/> class.
+    /// </summary>
+    /// <param name="id">The deterministic SHA-256 identity of kind, target identity, and canonical payload.</param>
+    /// <param name="kind">The command kind accepted by the target's manifest.</param>
+    /// <param name="key">The nonblank, provider-scoped ownership conflict key.</param>
+    /// <param name="target">The target resource instance registered in the declaring application's graph.</param>
+    /// <param name="owner">The application that declares and owns this command.</param>
+    /// <param name="payload">The canonical UTF-8 JSON payload; copied on construction.</param>
+    /// <param name="optional">Whether rejection can be observed without blocking dependent resources.</param>
+    public DeclarativeResourceCommand(
+        string id,
+        string kind,
+        string key,
+        IApplicationResource target,
+        ApplicationName owner,
+        ReadOnlyMemory<byte> payload,
+        bool optional)
+    {
+        _payload = payload.ToArray();
+        Id = id;
+        Kind = kind;
+        Key = key;
+        Target = target;
+        Owner = owner;
+        Optional = optional;
+    }
+
+    public string Id { get; }
+    public string Kind { get; }
+    public string Key { get; }
+    public IApplicationResource Target { get; }
+    public ApplicationName Owner { get; }
     public ReadOnlyMemory<byte> Payload => _payload.AsSpan().ToArray();
-    public bool Optional { get; } = optional;
+    public bool Optional { get; }
 
     internal static byte[] Canonicalize(ReadOnlyMemory<byte> payload)
     {

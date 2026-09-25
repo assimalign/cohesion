@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Documents.Storage.Internal;
+
 namespace Assimalign.Cohesion.Database.Documents.Storage;
 
 using Assimalign.Cohesion.Database.Storage;

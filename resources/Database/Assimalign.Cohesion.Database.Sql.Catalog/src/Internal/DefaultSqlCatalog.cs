@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Sql.Catalog;
+namespace Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 
 /// <summary>
 /// Default catalog: metadata records on a dedicated catalog storage file set,
@@ -29,7 +29,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     private const int defaultCollationRecordKind = 7;
     private const int schemaStateChunkSize = 3 * 1024;
 
-    private static readonly Encoding StrictUtf8 = new UTF8Encoding(
+    private static readonly Encoding _strictUtf8 = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true);
 
@@ -537,7 +537,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
         ArgumentNullException.ThrowIfNull(state);
         cancellationToken.ThrowIfCancellationRequested();
 
-        byte[] document = StrictUtf8.GetBytes(state.CanonicalDocument);
+        byte[] document = _strictUtf8.GetBytes(state.CanonicalDocument);
         int chunkCount = document.Length == 0
             ? 1
             : ((document.Length - 1) / schemaStateChunkSize) + 1;
@@ -1312,7 +1312,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
 
         try
         {
-            return new SqlCatalogSchemaState(first.ContentHash, StrictUtf8.GetString(document));
+            return new SqlCatalogSchemaState(first.ContentHash, _strictUtf8.GetString(document));
         }
         catch (DecoderFallbackException)
         {

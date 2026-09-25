@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.LoadBalancer.Hosting</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.LoadBalancer" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />

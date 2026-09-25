@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting;
 
-namespace Assimalign.Cohesion.Rezolvr.Hosting;
+namespace Assimalign.Cohesion.Rezolvr.Hosting.Internal;
 
 internal sealed class RezolvrControlPlaneEndpointService : IHostService, IDisposable
 {

@@ -1,6 +1,8 @@
 using System;
 using System.Security.Cryptography;
 
+using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
+
 namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
 /// <summary>

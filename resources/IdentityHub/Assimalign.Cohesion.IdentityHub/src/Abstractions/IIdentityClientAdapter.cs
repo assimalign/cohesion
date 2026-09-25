@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Assimalign.Cohesion.Identity;
+namespace Assimalign.Cohesion.IdentityHub;
 
 /// <summary>
 /// 

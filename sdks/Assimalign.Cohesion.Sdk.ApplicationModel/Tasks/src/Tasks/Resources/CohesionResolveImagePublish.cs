@@ -7,6 +7,8 @@ using System.Runtime.InteropServices;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 
+using Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.Internal;
+
 namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tasks;
 
 /// <summary>Validates container inputs and selects the configuration and host-capability route.</summary>

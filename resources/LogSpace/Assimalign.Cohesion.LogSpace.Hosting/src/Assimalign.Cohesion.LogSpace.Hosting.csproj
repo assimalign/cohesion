@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup>
-    <InternalsVisibleTo Include="Assimalign.Cohesion.LogSpace.Hosting.Tests" />
-  </ItemGroup>
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.LogSpace.Hosting</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.LogSpace" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />

@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
 /// <summary>
 /// The default <see cref="IApplication"/>. It dispatches the model's run mode; ordinary Run

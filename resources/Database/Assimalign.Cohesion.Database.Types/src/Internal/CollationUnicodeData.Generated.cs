@@ -3,7 +3,7 @@
 // Reproduce with tools/Generate-CollationUnicodeData.ps1; persisted IDs must never change meaning.
 using System;
 
-namespace Assimalign.Cohesion.Database.Types;
+namespace Assimalign.Cohesion.Database.Types.Internal;
 
 internal static partial class CollationUnicodeData
 {

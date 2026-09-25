@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 
-namespace Assimalign.Cohesion.Security.DataProtection;
+namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 
 /// <summary>
 /// The in-memory view of the persisted keys, plus the rotation and grace-period rules that

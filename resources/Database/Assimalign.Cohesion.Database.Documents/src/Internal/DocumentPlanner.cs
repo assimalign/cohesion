@@ -8,8 +8,25 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal sealed class DocumentPlanner(IDocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters)
+internal sealed class DocumentPlanner
 {
+    private readonly IDocumentCatalog _catalog;
+    private readonly TransactionSnapshot _snapshot;
+    private readonly IReadOnlyDictionary<string, object?>? _parameters;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DocumentPlanner"/> class.
+    /// </summary>
+    /// <param name="catalog">The document catalog used to resolve collections and indexes.</param>
+    /// <param name="snapshot">The transaction snapshot at which catalog metadata is read.</param>
+    /// <param name="parameters">The OQL parameter values, or <see langword="null"/> when the statement supplies none.</param>
+    public DocumentPlanner(IDocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters)
+    {
+        _catalog = catalog;
+        _snapshot = snapshot;
+        _parameters = parameters;
+    }
+
     internal DocumentStatementPlan Plan(OqlExpression expression) => expression switch
     {
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
@@ -24,7 +41,7 @@ internal sealed class DocumentPlanner(IDocumentCatalog catalog, TransactionSnaps
     {
         var logical = CreateLogicalPlan(query);
         var collection = ResolveCollection(query.Collection);
-        return new DocumentPlan(logical, collection, ChooseAccess(query, catalog.GetIndexes(collection.Id, snapshot)));
+        return new DocumentPlan(logical, collection, ChooseAccess(query, _catalog.GetIndexes(collection.Id, _snapshot)));
     }
 
     private DocumentCreateIndexPlan PlanCreateIndex(OqlCreateIndexExpression create)
@@ -58,7 +75,7 @@ internal sealed class DocumentPlanner(IDocumentCatalog catalog, TransactionSnaps
             throw new DatabaseException("An OQL statement requires a collection name.");
         }
 
-        return catalog.FindCollection(name, snapshot)
+        return _catalog.FindCollection(name, _snapshot)
             ?? throw new DatabaseException($"Collection '{name}' does not exist.");
     }
 
@@ -167,7 +184,7 @@ internal sealed class DocumentPlanner(IDocumentCatalog catalog, TransactionSnaps
                 operation = operation switch { ">" => "<", ">=" => "<=", "<" => ">", "<=" => ">=", _ => operation };
             }
             if (path is null || !IsConstant(constant)) { return; }
-            var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters);
+            var evaluator = new DocumentExpressionEvaluator(query.Alias, _parameters);
             var value = evaluator.Evaluate(constant, default);
             string? pathName = IndexPath(path, query.Alias);
             if (pathName is not null && value is bool or decimal or string)

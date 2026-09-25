@@ -66,9 +66,18 @@ public sealed class TimerScheduleTests
         public ISchedulerApplication Build() => throw new NotSupportedException();
     }
 
-    private sealed class TestJob(
-        Func<IScheduleContext, CancellationToken, ValueTask> execute) : IScheduleJob
+    private sealed class TestJob : IScheduleJob
     {
+        private readonly Func<IScheduleContext, CancellationToken, ValueTask> _execute;
+
+        /// <summary>Initializes a new instance of the <see cref="TestJob"/> class.</summary>
+        /// <param name="execute">The delegate invoked when the job executes.</param>
+        public TestJob(
+            Func<IScheduleContext, CancellationToken, ValueTask> execute)
+        {
+            _execute = execute;
+        }
+
         public JobId Id { get; } = JobId.New();
 
         public string? Name => "test";
@@ -78,6 +87,6 @@ public sealed class TimerScheduleTests
         public ValueTask ExecuteAsync(
             IScheduleContext context,
             CancellationToken cancellationToken = default) =>
-            execute(context, cancellationToken);
+            _execute(context, cancellationToken);
     }
 }

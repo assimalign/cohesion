@@ -60,14 +60,23 @@ internal sealed class BlobClientTestHarness : IAsyncDisposable
     }
 }
 
-internal sealed class RecordingConnectionFactory(ConnectionFactory inner) : ConnectionFactory
+internal sealed class RecordingConnectionFactory : ConnectionFactory
 {
+    private readonly ConnectionFactory _inner;
+
+    /// <summary>Initializes a new instance of the <see cref="RecordingConnectionFactory"/> class.</summary>
+    /// <param name="inner">The connection factory whose connections are recorded.</param>
+    public RecordingConnectionFactory(ConnectionFactory inner)
+    {
+        _inner = inner;
+    }
+
     internal Connection? LastConnection { get; private set; }
-    public override ConnectionCapabilities Capabilities => inner.Capabilities;
+    public override ConnectionCapabilities Capabilities => _inner.Capabilities;
 
     public override async ValueTask<Connection> ConnectAsync(EndPoint endPoint, CancellationToken cancellationToken = default)
     {
-        LastConnection = await inner.ConnectAsync(endPoint, cancellationToken);
+        LastConnection = await _inner.ConnectAsync(endPoint, cancellationToken);
         return LastConnection;
     }
 }

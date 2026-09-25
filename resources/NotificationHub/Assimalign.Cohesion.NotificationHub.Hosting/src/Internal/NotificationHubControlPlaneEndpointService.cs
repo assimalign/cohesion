@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting;
 
-namespace Assimalign.Cohesion.NotificationHub.Hosting;
+namespace Assimalign.Cohesion.NotificationHub.Hosting.Internal;
 
 internal sealed class NotificationHubControlPlaneEndpointService : IHostService, IDisposable
 {

@@ -16,8 +16,8 @@ internal static partial class PipeOptionsFactory
     private const int DefaultMinimumRetainedBlocks = 32;
     private const int DefaultMaximumRetainedBlocks = 256;
     private const int MinimumSegmentSize = 4096;
-    private static readonly TimeSpan defaultWarmWindow = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan defaultTrimInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _defaultWarmWindow = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _defaultTrimInterval = TimeSpan.FromSeconds(30);
 
     public static AdaptiveMemoryPool CreateMemoryPool(long? maxReadBufferSize, long? maxWriteBufferSize)
     {
@@ -26,13 +26,13 @@ internal static partial class PipeOptionsFactory
         return new AdaptiveMemoryPool(new AdaptiveMemoryPoolOptions()
         {
             BlockSize = AdaptiveMemoryPool.DefaultBlockSize,
-            TrimInterval = defaultTrimInterval,
+            TrimInterval = _defaultTrimInterval,
             Policy = new AdaptiveMemoryPoolPressurePolicy()
             {
                 MinimumRetainedBlocks = Math.Min(DefaultMinimumRetainedBlocks, maximumRetainedBlocks),
                 MaximumRetainedBlocks = maximumRetainedBlocks,
                 PeakRetentionRatio = 0.25,
-                WarmWindow = defaultWarmWindow
+                WarmWindow = _defaultWarmWindow
             }
         });
     }

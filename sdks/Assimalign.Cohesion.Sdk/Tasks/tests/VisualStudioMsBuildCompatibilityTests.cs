@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Sdk.Tests;
 /// </summary>
 public sealed class VisualStudioMsBuildCompatibilityTests
 {
-    private static readonly Regex TwoArgumentGetFullPath = new(
+    private static readonly Regex _twoArgumentGetFullPath = new(
         @"GetFullPath\s*\(\s*'[^']*'\s*,\s*'[^']*'\s*\)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
@@ -29,7 +29,7 @@ public sealed class VisualStudioMsBuildCompatibilityTests
                 || path.EndsWith(".targets", System.StringComparison.OrdinalIgnoreCase))
             .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
                 && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
-            .Where(path => TwoArgumentGetFullPath.IsMatch(File.ReadAllText(path)))
+            .Where(path => _twoArgumentGetFullPath.IsMatch(File.ReadAllText(path)))
             .Select(path => Path.GetRelativePath(sdks, path))
             .Order()
             .ToArray();

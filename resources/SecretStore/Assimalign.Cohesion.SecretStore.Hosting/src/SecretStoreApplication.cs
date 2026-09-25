@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.SecretStore;
+using Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting;
 

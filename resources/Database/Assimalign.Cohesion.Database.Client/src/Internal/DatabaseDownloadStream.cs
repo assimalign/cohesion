@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Client;
+namespace Assimalign.Cohesion.Database.Client.Internal;
 
 // The worker owns all frame I/O. Only bounded copies of content cross into the caller's stream.
 internal sealed class DatabaseDownloadStream : Stream
@@ -272,10 +272,23 @@ internal sealed class DatabaseDownloadStream : Stream
         _cancellationToken.ThrowIfCancellationRequested();
     }
 
-    private sealed class StreamingExchange(DatabaseDownloadStream owner, IDatabaseStreamingExchange exchange)
-        : IDatabaseProtocolExchange<bool>
+    private sealed class StreamingExchange : IDatabaseProtocolExchange<bool>
     {
-        public ProtocolMessageFamily Family => exchange.Family;
+        private readonly DatabaseDownloadStream _owner;
+        private readonly IDatabaseStreamingExchange _exchange;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="StreamingExchange"/> class.
+        /// </summary>
+        /// <param name="owner">The download stream that receives the exchange's content.</param>
+        /// <param name="exchange">The streaming exchange to run on the leased connection.</param>
+        public StreamingExchange(DatabaseDownloadStream owner, IDatabaseStreamingExchange exchange)
+        {
+            _owner = owner;
+            _exchange = exchange;
+        }
+
+        public ProtocolMessageFamily Family => _exchange.Family;
         internal bool Entered { get; private set; }
 
         public async ValueTask<bool> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer,
@@ -283,21 +296,32 @@ internal sealed class DatabaseDownloadStream : Stream
         {
             Entered = true;
             using CancellationTokenRegistration registration = cancellationToken.UnsafeRegister(
-                static state => ((DatabaseDownloadStream)state!).Cancel(), owner);
+                static state => ((DatabaseDownloadStream)state!).Cancel(), _owner);
             var streamingReader = new ClientFrameReader(reader);
             var streamingWriter = new ClientFrameWriter(writer);
-            await exchange.OpenAsync(streamingReader, streamingWriter, cancellationToken).ConfigureAwait(false);
-            owner._started.TrySetResult();
+            await _exchange.OpenAsync(streamingReader, streamingWriter, cancellationToken).ConfigureAwait(false);
+            _owner._started.TrySetResult();
             // Model code may use synchronous destination writes. Let stream creation return before
             // such a write can block on the bounded queue waiting for its first consumer.
             await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
-            await exchange.CopyToAsync(streamingReader, streamingWriter, new DownloadDestination(owner), cancellationToken).ConfigureAwait(false);
+            await _exchange.CopyToAsync(streamingReader, streamingWriter, new DownloadDestination(_owner), cancellationToken).ConfigureAwait(false);
             return true;
         }
     }
 
-    private sealed class DownloadDestination(DatabaseDownloadStream owner) : Stream
+    private sealed class DownloadDestination : Stream
     {
+        private readonly DatabaseDownloadStream _owner;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="DownloadDestination"/> class.
+        /// </summary>
+        /// <param name="owner">The download stream whose bounded chunk queue receives the written content.</param>
+        public DownloadDestination(DatabaseDownloadStream owner)
+        {
+            _owner = owner;
+        }
+
         public override bool CanRead => false;
         public override bool CanSeek => false;
         public override bool CanWrite => true;
@@ -327,18 +351,18 @@ internal sealed class DatabaseDownloadStream : Stream
         public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
             using CancellationTokenRegistration registration = cancellationToken.UnsafeRegister(
-                static state => ((DatabaseDownloadStream)state!).Cancel(), owner);
-            CancellationToken operationToken = owner._cancellationToken;
+                static state => ((DatabaseDownloadStream)state!).Cancel(), _owner);
+            CancellationToken operationToken = _owner._cancellationToken;
             operationToken.ThrowIfCancellationRequested();
             while (!buffer.IsEmpty)
             {
                 // Wait before copying, so even a model's very large write cannot grow queued content.
-                if (!await owner._chunks.Writer.WaitToWriteAsync(operationToken).ConfigureAwait(false))
+                if (!await _owner._chunks.Writer.WaitToWriteAsync(operationToken).ConfigureAwait(false))
                 {
                     throw new InvalidOperationException("The download content destination is complete.");
                 }
                 int count = Math.Min(buffer.Length, chunkSize);
-                await owner._chunks.Writer.WriteAsync(buffer[..count].ToArray(), operationToken).ConfigureAwait(false);
+                await _owner._chunks.Writer.WriteAsync(buffer[..count].ToArray(), operationToken).ConfigureAwait(false);
                 buffer = buffer[count..];
             }
         }

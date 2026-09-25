@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 public class AmqpServerTransportTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     private static AmqpTransportOptions ManualNegotiationOptions => new()
     {
@@ -44,7 +44,7 @@ public class AmqpServerTransportTests
     public async Task OpenAsync_OnSingleStreamCarrier_ShouldWireContextToCarrierPipes()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         TestConnection carrier = new();
         TestConnectionListener listener = new();
         listener.Enqueue(carrier);
@@ -73,7 +73,7 @@ public class AmqpServerTransportTests
     public async Task OpenAsync_OnRepeatedCalls_ShouldReturnSameContext()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         TestConnection carrier = new();
         TestConnectionListener listener = new();
         listener.Enqueue(carrier);
@@ -94,7 +94,7 @@ public class AmqpServerTransportTests
     public async Task AcceptAsync_OnMultiplexedCarrier_ShouldAcceptCarrierStreamFromPeer()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         TestConnection stream = new();
         TestMultiplexedConnection carrier = new();
         carrier.Enqueue(stream);

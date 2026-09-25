@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 
 /// <summary>The materialized result of one KeyValuePair protocol exchange.</summary>
 internal sealed class KeyValueProtocolResult

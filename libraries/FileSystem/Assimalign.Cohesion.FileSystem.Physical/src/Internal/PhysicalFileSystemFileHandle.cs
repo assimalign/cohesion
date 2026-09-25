@@ -6,14 +6,25 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
-internal sealed class PhysicalFileSystemFileHandle(SafeFileHandle handle) : IFileSystemFileHandle
+internal sealed class PhysicalFileSystemFileHandle : IFileSystemFileHandle
 {
+    private readonly SafeFileHandle _handle;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PhysicalFileSystemFileHandle"/> class.
+    /// </summary>
+    /// <param name="handle">The operating-system file handle this instance owns and disposes.</param>
+    public PhysicalFileSystemFileHandle(SafeFileHandle handle)
+    {
+        _handle = handle;
+    }
+
     public long Length
     {
         get
         {
             ThrowIfDisposed();
-            return RandomAccess.GetLength(handle);
+            return RandomAccess.GetLength(_handle);
         }
     }
 
@@ -29,31 +40,31 @@ internal sealed class PhysicalFileSystemFileHandle(SafeFileHandle handle) : IFil
     public int Read(Span<byte> buffer, long offset)
     {
         ThrowIfDisposed();
-        return RandomAccess.Read(handle, buffer, offset);
+        return RandomAccess.Read(_handle, buffer, offset);
     }
 
     public ValueTask<int> ReadAsync(Memory<byte> buffer, long offset, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        return RandomAccess.ReadAsync(handle, buffer, offset, cancellationToken);
+        return RandomAccess.ReadAsync(_handle, buffer, offset, cancellationToken);
     }
 
     public void Write(ReadOnlySpan<byte> buffer, long offset)
     {
         ThrowIfDisposed();
-        RandomAccess.Write(handle, buffer, offset);
+        RandomAccess.Write(_handle, buffer, offset);
     }
 
     public ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, long offset, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        return RandomAccess.WriteAsync(handle, buffer, offset, cancellationToken);
+        return RandomAccess.WriteAsync(_handle, buffer, offset, cancellationToken);
     }
 
     public void SetLength(long length)
     {
         ThrowIfDisposed();
-        RandomAccess.SetLength(handle, length);
+        RandomAccess.SetLength(_handle, length);
     }
 
     public void Flush(bool durable)
@@ -62,7 +73,7 @@ internal sealed class PhysicalFileSystemFileHandle(SafeFileHandle handle) : IFil
         // RandomAccess has no managed write buffer; only a durable flush needs an OS call.
         if (durable)
         {
-            RandomAccess.FlushToDisk(handle);
+            RandomAccess.FlushToDisk(_handle);
         }
     }
 
@@ -75,7 +86,7 @@ internal sealed class PhysicalFileSystemFileHandle(SafeFileHandle handle) : IFil
         return ValueTask.CompletedTask;
     }
 
-    public void Dispose() => handle.Dispose();
+    public void Dispose() => _handle.Dispose();
 
     public ValueTask DisposeAsync()
     {
@@ -83,5 +94,5 @@ internal sealed class PhysicalFileSystemFileHandle(SafeFileHandle handle) : IFil
         return ValueTask.CompletedTask;
     }
 
-    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(handle.IsClosed, this);
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
 }

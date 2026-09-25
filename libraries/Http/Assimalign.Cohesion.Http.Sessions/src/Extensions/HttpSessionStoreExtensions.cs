@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Http.Internal;
+
 // Deviates from the repo namespace-matches-assembly rule per design decision:
 // session extensions retain the established HTTP family namespace.
 namespace Assimalign.Cohesion.Http;

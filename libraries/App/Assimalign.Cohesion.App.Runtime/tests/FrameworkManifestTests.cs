@@ -13,17 +13,17 @@ public sealed class FrameworkManifestTests
 {
     private const string AppFramework = "Assimalign.Cohesion.App";
     private const string CohesionAssemblyPrefix = "Assimalign.Cohesion.";
-    private static readonly string RepositoryRoot = FindRepositoryRoot();
-    private static readonly string ResourcesRoot = Path.Combine(RepositoryRoot, "resources");
+    private static readonly string _repositoryRoot = FindRepositoryRoot();
+    private static readonly string _resourcesRoot = Path.Combine(_repositoryRoot, "resources");
 
     // App's list: the one ItemGroup App.props conditions on $(CohesionFrameworkName).
     // Area lists live in resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props.
-    private static readonly string AppManifestPath = Path.Combine(
-        RepositoryRoot,
+    private static readonly string _appManifestPath = Path.Combine(
+        _repositoryRoot,
         "libraries",
         "App",
         "Assimalign.Cohesion.App.props");
-    private static readonly string[] ExpectedAreas =
+    private static readonly string[] _expectedAreas =
     [
         "ApiManager", "ConfigurationStore", "Database", "EmailHub", "EventHub",
         "IdentityHub", "IoTHub", "LoadBalancer", "LogSpace", "MediaHub", "MessageHub",
@@ -91,7 +91,7 @@ public sealed class FrameworkManifestTests
             .ToArray();
 
         // Act / Assert
-        actualAreas.ShouldBe(ExpectedAreas);
+        actualAreas.ShouldBe(_expectedAreas);
         foreach (string area in actualAreas)
         {
             string frameworkName = $"{AppFramework}.{area}";
@@ -140,7 +140,7 @@ public sealed class FrameworkManifestTests
     {
         // Arrange
         AreaFrameworkList[] lists = FindAreaFrameworkLists();
-        XElement[] appPropsFrameworkGroups = ReadElements(AppManifestPath, "ItemGroup")
+        XElement[] appPropsFrameworkGroups = ReadElements(_appManifestPath, "ItemGroup")
             .Where(group => ((string?)group.Attribute("Condition") ?? string.Empty)
                 .Contains("$(CohesionFrameworkName)", StringComparison.Ordinal))
             .ToArray();
@@ -153,12 +153,12 @@ public sealed class FrameworkManifestTests
 
         // Assert
         lists.Length.ShouldBe(18);
-        actualAreas.ShouldBe(ExpectedAreas);
+        actualAreas.ShouldBe(_expectedAreas);
         foreach (AreaFrameworkList list in lists)
         {
             string runtimeFolder = $"Assimalign.Cohesion.{list.Area}.Runtime";
             string refsListPath = Path.Combine(
-                ResourcesRoot,
+                _resourcesRoot,
                 list.Area,
                 $"Assimalign.Cohesion.{list.Area}.Refs",
                 "Directory.Build.props");
@@ -193,8 +193,8 @@ public sealed class FrameworkManifestTests
     {
         string[] projectPaths =
         [
-            .. Directory.EnumerateFiles(Path.Combine(RepositoryRoot, "libraries"), "*.csproj", SearchOption.AllDirectories),
-            .. Directory.EnumerateFiles(Path.Combine(RepositoryRoot, "resources"), "*.csproj", SearchOption.AllDirectories)
+            .. Directory.EnumerateFiles(Path.Combine(_repositoryRoot, "libraries"), "*.csproj", SearchOption.AllDirectories),
+            .. Directory.EnumerateFiles(Path.Combine(_repositoryRoot, "resources"), "*.csproj", SearchOption.AllDirectories)
         ];
         var assemblyByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var documentsByPath = new Dictionary<string, XDocument>(StringComparer.OrdinalIgnoreCase);
@@ -334,7 +334,7 @@ public sealed class FrameworkManifestTests
         // area's is the single unconditioned ItemGroup of its Runtime producer's
         // Directory.Build.props, keyed by the area folder. Add throws on a framework defined twice.
         var groups = new Dictionary<string, XElement>(StringComparer.OrdinalIgnoreCase);
-        foreach (XElement group in ReadElements(AppManifestPath, "ItemGroup"))
+        foreach (XElement group in ReadElements(_appManifestPath, "ItemGroup"))
         {
             string? framework = ReadFrameworkCondition((string?)group.Attribute("Condition"));
             if (framework is not null)
@@ -356,7 +356,7 @@ public sealed class FrameworkManifestTests
 
     private static AreaFrameworkList[] FindAreaFrameworkLists()
     {
-        return Directory.EnumerateDirectories(ResourcesRoot)
+        return Directory.EnumerateDirectories(_resourcesRoot)
             .SelectMany(areaDirectory => Directory
                 .EnumerateDirectories(areaDirectory, "Assimalign.Cohesion.*.Runtime")
                 .Select(runtimeDirectory => new AreaFrameworkList(Path.GetFileName(areaDirectory), runtimeDirectory)))

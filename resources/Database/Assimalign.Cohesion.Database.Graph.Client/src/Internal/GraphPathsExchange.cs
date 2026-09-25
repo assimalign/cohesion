@@ -8,13 +8,23 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Graph.Client;
+namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 
-internal sealed class GraphPathsExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
+internal sealed class GraphPathsExchange
     : IDatabaseStreamingExchange
 {
-    private readonly GraphProtocolExecuteMessage _request = GraphRequest.Create(statement, parameters);
+    private readonly GraphProtocolExecuteMessage _request;
     private ProtocolFrame _initial;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="GraphPathsExchange"/> class.
+    /// </summary>
+    /// <param name="statement">The graph statement whose matched paths are streamed.</param>
+    /// <param name="parameters">The named statement parameters, or <see langword="null"/> when the statement has none.</param>
+    public GraphPathsExchange(string statement, IReadOnlyDictionary<string, object?>? parameters)
+    {
+        _request = GraphRequest.Create(statement, parameters);
+    }
 
     public ProtocolMessageFamily Family => GraphProtocol.Family;
 

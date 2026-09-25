@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
 internal sealed class GatewayControlPlaneFactory : IApplicationGatewayControlPlaneFactory
 {

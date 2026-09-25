@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Graph.Client;
+namespace Assimalign.Cohesion.Database.Graph.Client.Internal;
 
 internal static class GraphRequest
 {

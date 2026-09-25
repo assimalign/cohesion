@@ -7,8 +7,22 @@ using Assimalign.Cohesion.Database.Documents.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-internal sealed class DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters)
+internal sealed class DocumentExpressionEvaluator
 {
+    private readonly string? _alias;
+    private readonly IReadOnlyDictionary<string, object?>? _parameters;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DocumentExpressionEvaluator"/> class.
+    /// </summary>
+    /// <param name="alias">The collection alias that may prefix document paths, or <see langword="null"/> when the query declares none.</param>
+    /// <param name="parameters">The OQL parameter values, or <see langword="null"/> when the statement supplies none.</param>
+    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters)
+    {
+        _alias = alias;
+        _parameters = parameters;
+    }
+
     internal object? Evaluate(OqlExpression expression, JsonElement document, IReadOnlyList<JsonElement>? group = null)
         => expression switch
         {
@@ -27,7 +41,7 @@ internal sealed class DocumentExpressionEvaluator(string? alias, IReadOnlyDictio
 
     internal object? Parameter(string name)
     {
-        if (parameters is null || !parameters.TryGetValue(name, out var value))
+        if (_parameters is null || !_parameters.TryGetValue(name, out var value))
         {
             throw new DatabaseException($"OQL parameter '{name}' has no value.");
         }
@@ -36,8 +50,8 @@ internal sealed class DocumentExpressionEvaluator(string? alias, IReadOnlyDictio
 
     private object? ReadPath(OqlPathExpression path, JsonElement document)
     {
-        int start = path.Segments.Count > 0 && alias is not null &&
-            string.Equals(path.Segments[0].Name, alias, StringComparison.Ordinal) ? 1 : 0;
+        int start = path.Segments.Count > 0 && _alias is not null &&
+            string.Equals(path.Segments[0].Name, _alias, StringComparison.Ordinal) ? 1 : 0;
         var current = document;
         for (int i = start; i < path.Segments.Count; i++)
         {

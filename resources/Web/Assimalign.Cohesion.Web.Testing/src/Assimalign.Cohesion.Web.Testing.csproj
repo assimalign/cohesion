@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Testing</RootNamespace>
 		<Description>Integration testing for Cohesion web applications. WebApplicationTestFactory supports socketless manual HTTP/1.1 and HTTP/2 composition plus FromProgram&lt;Program&gt; execution under an isolated ambient ResourceContext with graceful control-plane lifecycle.</Description>
 		<!-- Sanctioned exception to the resource hosting-isolation rule (COHRES001,
 		     .claude/rules/resource-areas.md): the test factory drives the concrete runtime

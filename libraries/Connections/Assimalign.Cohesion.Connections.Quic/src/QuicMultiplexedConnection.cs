@@ -6,6 +6,8 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections.Quic.Internal;
+
 namespace Assimalign.Cohesion.Connections.Quic;
 
 /// <summary>

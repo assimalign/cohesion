@@ -96,22 +96,34 @@ public class ApplicationLifecycleTests
         application.Context.State.ShouldBe(HostState.Stopped);
     }
 
-    private sealed class RecordingService(
-        string name,
-        ICollection<string> events) : IHostService
+    private sealed class RecordingService : IHostService
     {
+        private readonly string _name;
+        private readonly ICollection<string> _events;
+
+        /// <summary>Initializes a new instance of the <see cref="RecordingService"/> class.</summary>
+        /// <param name="name">The name recorded with each lifecycle event.</param>
+        /// <param name="events">The collection that receives the lifecycle events.</param>
+        public RecordingService(
+            string name,
+            ICollection<string> events)
+        {
+            _name = name;
+            _events = events;
+        }
+
         public ServiceId Id { get; } = ServiceId.New();
 
         public Task StartAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            events.Add($"{name}:start");
+            _events.Add($"{_name}:start");
             return Task.CompletedTask;
         }
 
         public Task StopAsync(CancellationToken cancellationToken = default)
         {
-            events.Add($"{name}:stop");
+            _events.Add($"{_name}:stop");
             return Task.CompletedTask;
         }
     }

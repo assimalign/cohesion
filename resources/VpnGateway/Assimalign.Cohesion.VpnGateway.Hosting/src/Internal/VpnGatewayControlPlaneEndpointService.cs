@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting;
 
-namespace Assimalign.Cohesion.VpnGateway.Hosting;
+namespace Assimalign.Cohesion.VpnGateway.Hosting.Internal;
 
 internal sealed class VpnGatewayControlPlaneEndpointService : IHostService, IDisposable
 {

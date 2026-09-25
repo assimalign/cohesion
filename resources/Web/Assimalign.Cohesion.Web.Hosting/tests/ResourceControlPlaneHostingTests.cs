@@ -501,9 +501,18 @@ public sealed class ResourceControlPlaneHostingTests
             references: null, bootstrapCredential: Encoding.UTF8.GetBytes(token),
             applicationTrustKey: identity.PublicKey, ambientValues: null);
 
-    private sealed class HealthyContributor(string name) : IHealthContributor
+    private sealed class HealthyContributor : IHealthContributor
     {
-        public string Name { get; } = name;
+        /// <summary>
+        /// Initializes a new instance of the <see cref="HealthyContributor"/> class.
+        /// </summary>
+        /// <param name="name">The name the contributor reports its health under.</param>
+        public HealthyContributor(string name)
+        {
+            Name = name;
+        }
+
+        public string Name { get; }
 
         public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
         {

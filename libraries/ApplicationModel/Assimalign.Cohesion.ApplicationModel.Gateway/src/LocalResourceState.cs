@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
+
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>Creates the file-backed state service used by local resource controllers.</summary>

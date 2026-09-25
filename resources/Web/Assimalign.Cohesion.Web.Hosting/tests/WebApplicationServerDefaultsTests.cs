@@ -172,10 +172,24 @@ public class WebApplicationServerDefaultsTests
         }
     }
 
-    private sealed class RootApplicationServer(
-        string name,
-        ICollection<string> events) : IWebApplicationServer
+    private sealed class RootApplicationServer : IWebApplicationServer
     {
+        private readonly string _name;
+        private readonly ICollection<string> _events;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RootApplicationServer"/> class.
+        /// </summary>
+        /// <param name="name">The name that prefixes each recorded lifecycle event.</param>
+        /// <param name="events">The collection that receives the recorded lifecycle events.</param>
+        public RootApplicationServer(
+            string name,
+            ICollection<string> events)
+        {
+            _name = name;
+            _events = events;
+        }
+
         public int StartCount { get; private set; }
 
         public int StopCount { get; private set; }
@@ -184,14 +198,14 @@ public class WebApplicationServerDefaultsTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             StartCount++;
-            events.Add($"{name}:start");
+            _events.Add($"{_name}:start");
             return Task.CompletedTask;
         }
 
         public Task StopAsync(CancellationToken cancellationToken = default)
         {
             StopCount++;
-            events.Add($"{name}:stop");
+            _events.Add($"{_name}:stop");
             return Task.CompletedTask;
         }
     }

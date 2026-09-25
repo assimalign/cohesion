@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Database.Testing.Tests;
 /// </summary>
 public sealed class DatabaseSampleHostEndToEndTests : IDisposable
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromMinutes(2);
     private readonly string _statePath = Path.Combine(
         Path.GetTempPath(),
         "cohesion-database-sample-e2e",
@@ -126,7 +126,7 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
     public async Task LocalGateway_WithGeneratedSampleManifest_ShouldServeAndRecoverAcrossRelaunch()
     {
         // Arrange
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         ResourceManifest generatedManifest = ResourceManifest.Load(
             GetSampleGeneratedPath("resource.json"));
         Directory.CreateDirectory(_statePath);

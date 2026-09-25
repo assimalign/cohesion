@@ -2,6 +2,8 @@ using System;
 using System.Buffers.Binary;
 using System.Text;
 
+using Assimalign.Cohesion.Database.Types.Internal;
+
 namespace Assimalign.Cohesion.Database.Types;
 
 /// <summary>

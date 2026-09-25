@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Security.Cryptography;
 
-namespace Assimalign.Cohesion.Cli;
+namespace Assimalign.Cohesion.Cli.Internal;
 
 internal static class ProtectedFile
 {

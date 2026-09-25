@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.IdentityHub.Hosting;
+namespace Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 
 internal sealed class IdentityCommandRegistry
 {

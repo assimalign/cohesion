@@ -165,20 +165,34 @@ internal sealed class BlobDatabaseSession : IDatabaseSession
     }
 }
 
-internal sealed class BlobSessionDatabase(BlobDatabaseInstance database, BlobDatabaseSession session) : IBlobDatabase
+internal sealed class BlobSessionDatabase : IBlobDatabase
 {
-    public DatabaseName Name => database.Name;
-    public IDatabaseEngine Engine => database.Engine;
+    private readonly BlobDatabaseInstance _database;
+    private readonly BlobDatabaseSession _session;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="BlobSessionDatabase"/> class.
+    /// </summary>
+    /// <param name="database">The blob database instance the session operates on.</param>
+    /// <param name="session">The session that scopes every operation issued through this view.</param>
+    public BlobSessionDatabase(BlobDatabaseInstance database, BlobDatabaseSession session)
+    {
+        _database = database;
+        _session = session;
+    }
+
+    public DatabaseName Name => _database.Name;
+    public IDatabaseEngine Engine => _database.Engine;
     public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
-    { session.ThrowIfNotOpen(); return database.CreateSessionAsync(cancellationToken); }
+    { _session.ThrowIfNotOpen(); return _database.CreateSessionAsync(cancellationToken); }
     public ValueTask<IBlobContainer> CreateContainerAsync(string name, CancellationToken cancellationToken = default)
-        => database.CreateContainerAsync(name, session, cancellationToken);
+        => _database.CreateContainerAsync(name, _session, cancellationToken);
     public ValueTask<IBlobContainer> GetContainerAsync(string name, CancellationToken cancellationToken = default)
-        => database.GetContainerAsync(name, session, cancellationToken);
+        => _database.GetContainerAsync(name, _session, cancellationToken);
     public ValueTask DropContainerAsync(string name, CancellationToken cancellationToken = default)
-        => database.DropContainerAsync(name, session, cancellationToken);
+        => _database.DropContainerAsync(name, _session, cancellationToken);
     public IAsyncEnumerable<IBlobContainer> GetContainersAsync(CancellationToken cancellationToken = default)
-        => database.GetContainersAsync(session, cancellationToken);
-    public void Dispose() => session.DisposeAsync().AsTask().GetAwaiter().GetResult();
-    public ValueTask DisposeAsync() => session.DisposeAsync();
+        => _database.GetContainersAsync(_session, cancellationToken);
+    public void Dispose() => _session.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    public ValueTask DisposeAsync() => _session.DisposeAsync();
 }

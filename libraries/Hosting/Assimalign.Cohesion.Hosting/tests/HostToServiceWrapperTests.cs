@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Hosting.Internal;
+
 namespace Assimalign.Cohesion.Hosting.Tests;
 
 [Collection(nameof(SerialCollection))]

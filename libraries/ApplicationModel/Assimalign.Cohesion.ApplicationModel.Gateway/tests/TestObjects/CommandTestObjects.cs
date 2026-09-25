@@ -14,8 +14,19 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 [JsonSerializable(typeof(JsonElement))]
 internal sealed partial class GatewayCommandJsonContext : JsonSerializerContext;
 
-internal sealed class RecordingCommandClient(List<string> events) : IGatewayResourceCommandClient
+internal sealed class RecordingCommandClient : IGatewayResourceCommandClient
 {
+    private readonly List<string> _events;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RecordingCommandClient"/> class.
+    /// </summary>
+    /// <param name="events">The shared list that records each command the client receives.</param>
+    public RecordingCommandClient(List<string> events)
+    {
+        _events = events;
+    }
+
     public RemoteCertificateValidationCallback? Validator { get; private set; }
 
     public string ResourceKind => "Database";
@@ -31,7 +42,7 @@ internal sealed class RecordingCommandClient(List<string> events) : IGatewayReso
     {
         cancellationToken.ThrowIfCancellationRequested();
         Validator = serverCertificateValidator;
-        events.Add("apply:" + command.Key);
+        _events.Add("apply:" + command.Key);
         ApplyCount++;
         Address = address;
         Token = bearerToken;
@@ -45,47 +56,72 @@ internal sealed class RecordingCommandClient(List<string> events) : IGatewayReso
     {
         cancellationToken.ThrowIfCancellationRequested();
         Validator = serverCertificateValidator;
-        events.Add("remove:" + command.Key);
+        _events.Add("remove:" + command.Key);
         return ValueTask.FromResult(new ResourceCommandResult(ResourceCommandStatus.Applied, "removed"));
     }
 }
 
-internal sealed class CommandController(List<string> events, string scheme = "http") : IApplicationResourceController
+internal sealed class CommandController : IApplicationResourceController
 {
+    private readonly List<string> _events;
+    private readonly string _scheme;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CommandController"/> class.
+    /// </summary>
+    /// <param name="events">The shared list that records each reconcile and delete call.</param>
+    /// <param name="scheme">The scheme reported on the observed admin endpoint.</param>
+    public CommandController(List<string> events, string scheme = "http")
+    {
+        _events = events;
+        _scheme = scheme;
+    }
+
     public bool CanRealize(ResourcePlan plan, out string? reason) { reason = null; return true; }
 
     public Task ReconcileAsync(IResourceControlContext context, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        events.Add("reconcile:" + context.Resource.Name);
+        _events.Add("reconcile:" + context.Resource.Name);
         context.State.SetState(context.Resource.Id, ResourceLifecycle.Running, observedEndpoints:
-            [new ResourceEndpoint("admin", scheme, 12345, Host: "127.0.0.1")]);
+            [new ResourceEndpoint("admin", _scheme, 12345, Host: "127.0.0.1")]);
         return Task.CompletedTask;
     }
 
     public Task DeleteAsync(IResourceControlContext context, CancellationToken cancellationToken = default)
     {
-        events.Add("delete:" + context.Resource.Name);
+        _events.Add("delete:" + context.Resource.Name);
         return Task.CompletedTask;
     }
 
     public Task StopAsync(IResourceControlContext context, CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 
-internal sealed class RecordingCommandHandler(List<string> events) : IResourceCommandHandler
+internal sealed class RecordingCommandHandler : IResourceCommandHandler
 {
+    private readonly List<string> _events;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RecordingCommandHandler"/> class.
+    /// </summary>
+    /// <param name="events">The shared list that records each command the handler executes.</param>
+    public RecordingCommandHandler(List<string> events)
+    {
+        _events = events;
+    }
+
     public string Kind => "database.add-database";
     public TimeSpan ApplyDelay { get; set; }
 
     public async ValueTask<ReadOnlyMemory<byte>> ExecuteAsync(HostCommand command, CancellationToken cancellationToken = default)
     {
         await Task.Delay(ApplyDelay, cancellationToken).ConfigureAwait(false);
-        events.Add("direct:" + command.Owner);
+        _events.Add("direct:" + command.Owner);
         return ReadOnlyMemory<byte>.Empty;
     }
     public ValueTask<ReadOnlyMemory<byte>> DeleteAsync(HostCommand command, CancellationToken cancellationToken = default)
     {
-        events.Add("direct-remove:" + command.Owner);
+        _events.Add("direct-remove:" + command.Owner);
         return ValueTask.FromResult(ReadOnlyMemory<byte>.Empty);
     }
 }

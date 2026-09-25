@@ -5,7 +5,7 @@ using System.IO;
 
 using Assimalign.Cohesion.Core;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal static class ObservedDependencyEnvironment
 {

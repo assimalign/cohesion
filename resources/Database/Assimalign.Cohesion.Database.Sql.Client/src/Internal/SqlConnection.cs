@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Client;
 
-namespace Assimalign.Cohesion.Database.Sql.Client;
+namespace Assimalign.Cohesion.Database.Sql.Client.Internal;
 
 /// <summary>
 /// The default typed SQL connection: wraps one pooled <see cref="IDatabaseConnection"/>,

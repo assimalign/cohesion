@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting;
 
-namespace Assimalign.Cohesion.NatGateway.Hosting;
+namespace Assimalign.Cohesion.NatGateway.Hosting.Internal;
 
 internal sealed class NatGatewayControlPlaneEndpointService : IHostService, IDisposable
 {

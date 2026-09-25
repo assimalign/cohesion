@@ -1,7 +1,7 @@
 using System;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Http;
+namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// Default <see cref="IHttpAntiforgery"/> implementation. A stateless,
@@ -13,9 +13,9 @@ namespace Assimalign.Cohesion.Http;
 /// </summary>
 internal sealed class HttpAntiforgeryService : IHttpAntiforgery
 {
-    private static readonly HttpHeaderKey CacheControlHeader = "Cache-Control";
-    private static readonly HttpHeaderKey PragmaHeader = "Pragma";
-    private static readonly HttpHeaderKey XFrameOptionsHeader = "X-Frame-Options";
+    private static readonly HttpHeaderKey _cacheControlHeader = "Cache-Control";
+    private static readonly HttpHeaderKey _pragmaHeader = "Pragma";
+    private static readonly HttpHeaderKey _xFrameOptionsHeader = "X-Frame-Options";
 
     private readonly HttpAntiforgeryOptions _options;
     private readonly HttpAntiforgeryTokenEngine _engine;
@@ -175,9 +175,9 @@ internal sealed class HttpAntiforgeryService : IHttpAntiforgery
 
         // A page carrying an antiforgery token must not be cached, or a shared
         // cache could serve one user's token to another.
-        headers[CacheControlHeader] = "no-cache, no-store";
-        headers[PragmaHeader] = "no-cache";
-        headers[XFrameOptionsHeader] = "SAMEORIGIN";
+        headers[_cacheControlHeader] = "no-cache, no-store";
+        headers[_pragmaHeader] = "no-cache";
+        headers[_xFrameOptionsHeader] = "SAMEORIGIN";
     }
 
     private static void RemoveByName(IHttpCookieCollection cookies, string name)

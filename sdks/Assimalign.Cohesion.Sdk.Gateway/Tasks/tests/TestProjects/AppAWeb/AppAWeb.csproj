@@ -1,6 +1,7 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Web">
 
   <PropertyGroup>
+    <RootNamespace>AppAWeb</RootNamespace>
     <CohesionApplicationModel>enabled</CohesionApplicationModel>
     <CohesionApplication>appa</CohesionApplication>
     <CohesionResourceName>appa-web</CohesionResourceName>

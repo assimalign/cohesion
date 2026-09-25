@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Storage;
+namespace Assimalign.Cohesion.Database.Storage.Internal;
 
 /// <summary>
 /// Internal storage transaction scope. Tracks the before image of every page the

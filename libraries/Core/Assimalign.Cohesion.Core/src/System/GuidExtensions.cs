@@ -6,7 +6,7 @@ namespace System;
 
 public static class GuidExtension
 {
-    private static readonly Guid DefaultNamespace = new("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+    private static readonly Guid _defaultNamespace = new("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
 
     extension(Guid guid)
     {
@@ -25,7 +25,7 @@ public static class GuidExtension
                 throw new ArgumentNullException(nameof(value));
             }
 
-            var ns = namespaceId ?? DefaultNamespace;
+            var ns = namespaceId ?? _defaultNamespace;
 
             var namespaceBytes = ns.ToByteArray();
             SwapByteOrder(namespaceBytes);

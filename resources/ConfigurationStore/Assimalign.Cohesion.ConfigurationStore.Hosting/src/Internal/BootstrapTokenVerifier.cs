@@ -8,11 +8,11 @@ using System.Text.Json;
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
-namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
+namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 
 internal sealed class BootstrapTokenVerifier
 {
-    private static readonly TimeSpan MaximumLifetime = TimeSpan.FromHours(24);
+    private static readonly TimeSpan _maximumLifetime = TimeSpan.FromHours(24);
     private readonly IReadOnlyList<ConfigurationTrustedIssuer> _trustedIssuers;
 
     internal BootstrapTokenVerifier(IReadOnlyList<ConfigurationTrustedIssuer> trustedIssuers)
@@ -66,7 +66,7 @@ internal sealed class BootstrapTokenVerifier
             issuedAt <= now + options.ClockSkew &&
             expiresAt > issuedAt &&
             expiresAt > notBefore &&
-            expiresAt - issuedAt <= MaximumLifetime;
+            expiresAt - issuedAt <= _maximumLifetime;
         if (!valid)
         {
             return BootstrapTokenValidation.Unauthorized;

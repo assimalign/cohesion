@@ -1,7 +1,7 @@
 using System;
 using System.Linq;
 
-namespace Assimalign.Cohesion.Cli;
+namespace Assimalign.Cohesion.Cli.Internal;
 
 internal static class Templates
 {
@@ -12,7 +12,7 @@ internal static class Templates
         "cohesion-web", "cohesion-spa", "cohesion-database", "cohesion-secretstore",
         "cohesion-configurationstore", "cohesion-identityhub", "cohesion-rezolvr"
     ];
-    private static readonly string[] deferred =
+    private static readonly string[] _deferred =
     [
         "apimanager", "emailhub", "eventhub", "iothub", "loadbalancer", "logspace",
         "mediahub", "messagehub", "natgateway", "notificationhub", "scheduler", "vpngateway"
@@ -23,7 +23,7 @@ internal static class Templates
         if (!Names.Contains(name, StringComparer.OrdinalIgnoreCase))
         {
             string area = name.StartsWith("cohesion-", StringComparison.OrdinalIgnoreCase) ? name[9..] : name;
-            string detail = deferred.Contains(area, StringComparer.OrdinalIgnoreCase)
+            string detail = _deferred.Contains(area, StringComparer.OrdinalIgnoreCase)
                 ? "No template ships for this area yet (item 39 follow-up). " : "Unknown Cohesion template. ";
             throw new CliException(detail + "Available templates: " + string.Join(", ", Names) + ".");
         }

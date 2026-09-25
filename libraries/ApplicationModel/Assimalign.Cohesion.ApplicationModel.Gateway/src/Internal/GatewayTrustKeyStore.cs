@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Security.DataProtection;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 /// <summary>
 /// Persists the gateway's ECDSA trust key beneath an application-scoped state directory.
@@ -23,8 +23,8 @@ internal sealed class GatewayTrustKeyStore : IGatewayTrustKeyRepository
     // Trust-key ciphertext is durable state. A century-long protecting-key window and an
     // equally long unprotect grace period prevent the transient-payload defaults from aging
     // it out; explicit trust-key rotation remains independent of this ring lifetime.
-    private static readonly TimeSpan DurableKeyLifetime = TimeSpan.FromDays(36500);
-    private static readonly TimeSpan DurableUnprotectGracePeriod = TimeSpan.FromDays(36500);
+    private static readonly TimeSpan _durableKeyLifetime = TimeSpan.FromDays(36500);
+    private static readonly TimeSpan _durableUnprotectGracePeriod = TimeSpan.FromDays(36500);
 
     private const UnixFileMode PrivateDirectoryMode =
         UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
@@ -236,8 +236,8 @@ internal sealed class GatewayTrustKeyStore : IGatewayTrustKeyRepository
         IDataProtectionProvider provider = DataProtectionProvider.Create(repository, options =>
         {
             options.ApplicationDiscriminator = string.Concat(ProtectorPurpose, "\0", applicationName);
-            options.KeyLifetime = DurableKeyLifetime;
-            options.UnprotectGracePeriod = DurableUnprotectGracePeriod;
+            options.KeyLifetime = _durableKeyLifetime;
+            options.UnprotectGracePeriod = _durableUnprotectGracePeriod;
         });
 
         return provider

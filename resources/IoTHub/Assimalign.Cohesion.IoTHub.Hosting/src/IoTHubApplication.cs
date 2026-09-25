@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.IoTHub;
+using Assimalign.Cohesion.IoTHub.Hosting.Internal;
 
 namespace Assimalign.Cohesion.IoTHub.Hosting;
 

@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 
 /// <summary>
 /// Owns the nested host services surrendered by in-process resource entry invocations.

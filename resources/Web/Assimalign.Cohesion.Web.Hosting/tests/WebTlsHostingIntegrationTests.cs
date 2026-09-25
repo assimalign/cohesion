@@ -34,13 +34,13 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 /// </summary>
 public class WebTlsHostingIntegrationTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttp1s: Should serve an HTTP/1.1 request over TLS with the https scheme")]
     public async Task UseHttp1s_OverTls_ShouldServeRequestWithHttpsScheme()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
         int port = GetAvailableLoopbackPort();
         using X509Certificate2 certificate = SelfSignedCertificateFactory.Create("localhost");
@@ -82,7 +82,7 @@ public class WebTlsHostingIntegrationTests
     public async Task UseHttp2s_OverTls_ShouldServeRequestWithHttpsSchemeAndNegotiateH2()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
         int port = GetAvailableLoopbackPort();
         using X509Certificate2 certificate = SelfSignedCertificateFactory.Create("localhost");
@@ -128,7 +128,7 @@ public class WebTlsHostingIntegrationTests
     {
         // Arrange — the full composition-root path: the secured listener is registered inside
         // builder.Server.UseServer(...), then the built server serves it.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
         int port = GetAvailableLoopbackPort();
         using X509Certificate2 certificate = SelfSignedCertificateFactory.Create("localhost");

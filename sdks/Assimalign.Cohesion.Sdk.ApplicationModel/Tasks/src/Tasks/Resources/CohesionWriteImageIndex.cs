@@ -7,6 +7,8 @@ using System.Text.Json;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 
+using Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.Internal;
+
 namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tasks;
 
 /// <summary>Writes the frozen cohesion/image/v1 producer document after digest verification.</summary>

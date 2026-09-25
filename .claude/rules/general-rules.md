@@ -28,9 +28,26 @@ public class DatabaseEngine { }
 ```
 Version goes in `build/Targets/Build.References.Packages.targets` first.
 
-### Namespace matches assembly name exactly
-- Assembly: `Assimalign.Cohesion.Database.Documents`
-- Namespace: `namespace Assimalign.Cohesion.Database.Documents;`
+### Every project pins its `RootNamespace`, and code declares it
+Every csproj — library, test, sample, fixture, tool — declares `<RootNamespace>` explicitly in its
+own project file, never inherited from `$(MSBuildProjectName)`. **COHNS001**
+(`build/Targets/Build.Rules.targets`) fails the build of any project that omits it; `dotnet new`
+template content under `tooling/templates/**/content/` is the only exemption, because those files
+become customer projects.
+
+```xml
+<PropertyGroup>
+	<RootNamespace>Assimalign.Cohesion.Database.Documents</RootNamespace>
+</PropertyGroup>
+```
+
+- The pin is normally the assembly name. A family that shares one namespace pins the family name
+  (`Assimalign.Cohesion.Http.Cookies` → `Assimalign.Cohesion.Http`); a project whose code already
+  declares a different namespace pins what the code declares rather than renaming public API.
+- `Abstractions/`, `Exceptions/`, `Extensions/`, and `ValueObjects/` types declare exactly the
+  `RootNamespace` — never `.Abstractions`, `.Exceptions`, `.Extensions`, or `.ValueObjects`.
+- Internal types declare `{RootNamespace}.Internal`, whichever `Internal/` subfolder holds them.
+- Everything else defaults to the `RootNamespace`.
 
 ### Target framework
 - Libraries target `net10.0` — but the target framework is centrally managed via `TargetFrameworkLatest` in `build/Targets/Build.TargetFramework.props`, so per-project overrides are normally not needed.
@@ -138,6 +155,27 @@ public static class DatabaseExtensions
 - No `CohesionException`, `NetworkException`, or similar cross-framework roots.
 - Unrelated libraries should not share exception ancestry just for convention.
 
+### Primary constructors on classes and structs
+```csharp
+// ❌ WRONG
+internal sealed class DocumentPlanner(DocumentCatalog catalog) { }
+
+// ✅ CORRECT
+internal sealed class DocumentPlanner
+{
+    private readonly DocumentCatalog _catalog;
+
+    public DocumentPlanner(DocumentCatalog catalog)
+    {
+        _catalog = catalog;
+    }
+}
+```
+Captured parameters become explicit `_camelCase` fields assigned in an explicit constructor.
+Positional **records** (`record Foo(int X)`, `record struct Foo(int X)`) are not primary
+constructors in this sense: their parameters generate properties, `Deconstruct`, and positional
+patterns, so they stay.
+
 ## Naming conventions
 
 ### Types
@@ -153,7 +191,7 @@ public static class DatabaseExtensions
 |---|---|---|
 | Method | PascalCase, verb-first | `ExecuteQuery`, `GetAsync` |
 | Property | PascalCase, noun | `ConnectionString`, `MaxRetries` |
-| Private field | `_camelCase` | `_connectionString`, `_retryCount` |
+| Private field (instance, `static`, or `readonly`; no exceptions) | `_camelCase` | `_connectionString`, `_retryCount`, `_defaultTimeout` |
 | Public const | PascalCase | `DefaultTimeout` |
 | Private const | camelCase | `maxRetries` |
 | Parameter | camelCase | `connectionString`, `timeout` |
@@ -165,12 +203,15 @@ public static class DatabaseExtensions
 ```
 libraries/{Category}/Assimalign.Cohesion.{Library}/
 ├── src/
-│   ├── Abstractions/      # Interfaces only
-│   ├── Extensions/        # Extension members
-│   ├── Internal/          # Internal implementation
-│   ├── Exceptions/        # Custom exceptions
-│   ├── ValueObjects/      # Value types
-│   └── [Feature folders]
+│   ├── Abstractions/      # Public interfaces and abstract classes — flat
+│   ├── Exceptions/        # Public exceptions and their {Name}ErrorCode enums — flat
+│   ├── Extensions/        # Public extension containers — flat
+│   ├── Internal/          # Every internal type; subfolders allowed
+│   │   ├── EventSource/   # EventSource-derived types
+│   │   └── Exceptions/    # Internal exceptions
+│   ├── ValueObjects/      # Value objects, generated and hand-written — flat
+│   ├── Properties/        # AssemblyInfo.cs (and resx designers)
+│   └── [Feature folders]  # Other public types
 ├── shared/                # Source compiled into sibling assemblies — see "Shared source"
 ├── docs/
 │   ├── OVERVIEW.md
@@ -180,6 +221,34 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/
     ├── TestObjects/
     └── Shared/
 ```
+
+These folder rules apply to every shipped `src/` project (`libraries/`, `resources/`, `sdks/*/Tasks/`,
+`analyzers/`, `tooling/`). Test, sample, fixture, and example projects keep the `tests/` layout in
+`testing.md`; the naming and constructor rules below still apply to them.
+
+| Folder | Holds | Nesting | Namespace |
+|---|---|---|---|
+| `Abstractions/` | Public interfaces and public `abstract` classes/records | Flat — no subfolders | `RootNamespace` |
+| `Exceptions/` | Public exception types; the `{Name}ErrorCode` enum that pairs with an exception root | Flat | `RootNamespace` |
+| `Extensions/` | Public `static` classes that declare `extension(...)` members | Flat | `RootNamespace` |
+| `ValueObjects/` | Public value objects: structs / record structs with value equality (`IEquatable<Self>`), including every `CohesionValueType` (its `Include` path is `ValueObjects\<Name>.cs`) | Flat | `RootNamespace` |
+| `Internal/` | Every `internal` type, whatever its kind | Subfolders allowed: `Internal/EventSource/` for `EventSource` types, `Internal/Exceptions/` for internal exceptions, plus feature folders | `{RootNamespace}.Internal` |
+| `Properties/` | `AssemblyInfo.cs`; assembly-level attributes live here, not in the csproj | — | — |
+| `System/` | BCL-namespace extensions (`namespace System.*`) | Mirrors the BCL namespace | `System.*` — **only** in `Assimalign.Cohesion.Core` |
+
+Precedence when a type matches more than one row: `internal` wins (an internal exception goes to
+`Internal/Exceptions/`), then exceptions, then abstractions. One file, one category: a secondary
+type with a category of its own gets its own file in its own folder; a related enum or delegate
+without one stays beside its primary type.
+
+**Error codes over exception sprawl.** Prefer one `abstract` exception root per library plus a
+`{Name}ErrorCode` enum in `Exceptions/` over a separate exception type per failure; consumers can
+still derive their own exception types from the root.
+
+Two narrow exceptions, each marked with a `// Deviates from ...` comment where it occurs:
+compiler polyfills such as `IsExternalInit` keep `System.Runtime.CompilerServices` because the
+compiler binds them by exact name, and `Properties/` resx designer classes keep the namespace their
+resource manifest name requires.
 
 ### File organization rules
 1. **One public type per file** (exceptions: nested types, related enums).
@@ -229,6 +298,10 @@ namespace Assimalign.Cohesion.Database;
 
 A shipped library grants `InternalsVisibleTo` only to its own **test** assembly. Do not add a
 grant between two shipped libraries.
+
+Declare grants as `[assembly: InternalsVisibleTo("...")]` in `Properties/AssemblyInfo.cs`, never as
+`<InternalsVisibleTo Include="..." />` items in the csproj — one place to look for every
+assembly-level attribute.
 
 Wanting one means a consumer needs a capability the producer does not expose. The grant does not
 supply that capability — it hides the question, and every later reader has to reconstruct which of
@@ -323,8 +396,10 @@ A shared-source link is a real coupling, so it is tracked in `docs/DEPENDENCIES.
 reference flavors — regenerate the graph when you add or remove one (`documentation.md`).
 
 Linked types keep their **owning** namespace so family callers resolve the same names; that is a
-narrowly scoped, per-file deviation from the namespace-matches-assembly rule and every shared file
-carries the `// Deviates from ...` comment saying so (`deviations.md`).
+narrowly scoped, per-file deviation from the `RootNamespace` rule (markers written before 2026-09
+call it the namespace-matches-assembly rule) and every shared file carries the `// Deviates from ...`
+comment saying so (`deviations.md`). The `shared/` folder sits outside `src/`, so the folder rules in
+"Library folder structure" do not move shared files.
 
 ## Interface-first with a guided abstract base
 

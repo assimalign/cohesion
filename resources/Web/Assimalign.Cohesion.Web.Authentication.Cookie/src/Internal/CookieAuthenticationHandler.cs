@@ -9,7 +9,7 @@ using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Security.DataProtection;
 using Assimalign.Cohesion.Web.Routing;
 
-namespace Assimalign.Cohesion.Web.Authentication.Cookie;
+namespace Assimalign.Cohesion.Web.Authentication.Cookie.Internal;
 
 /// <summary>
 /// The cookie authentication handler: issues and validates a data-protected ticket cookie,

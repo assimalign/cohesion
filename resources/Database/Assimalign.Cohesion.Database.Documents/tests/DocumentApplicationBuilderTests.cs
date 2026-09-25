@@ -200,13 +200,24 @@ public sealed class DocumentApplicationBuilderTests
         product.ShouldNotBeNull().State.ShouldBe(EngineState.Disposed);
     }
 
-    private sealed class RecordingBuilder(bool reject = false) : IDatabaseApplicationBuilder
+    private sealed class RecordingBuilder : IDatabaseApplicationBuilder
     {
+        private readonly bool _reject;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RecordingBuilder"/> class.
+        /// </summary>
+        /// <param name="reject">Whether engine registration is refused with an exception.</param>
+        public RecordingBuilder(bool reject = false)
+        {
+            _reject = reject;
+        }
+
         internal Func<IDatabaseApplicationContext, IDatabaseEngine>? Factory { get; private set; }
         public IDatabaseApplicationBuilder AddEngine(IDatabaseEngine engine) => throw new NotSupportedException("Registration must be deferred.");
         public IDatabaseApplicationBuilder AddEngine(Func<IDatabaseApplicationContext, IDatabaseEngine> configure)
         {
-            if (reject) { throw new InvalidOperationException("Registration refused."); }
+            if (_reject) { throw new InvalidOperationException("Registration refused."); }
             Factory = configure;
             return this;
         }
@@ -220,39 +231,84 @@ public sealed class DocumentApplicationBuilderTests
         public IDatabaseEngine GetEngine(string name) => throw new KeyNotFoundException(name);
     }
 
-    private sealed class RecordingWorker(IDatabaseEngine engine, ManualResetEventSlim started) : IDatabaseEngineWorker, IDisposable
+    private sealed class RecordingWorker : IDatabaseEngineWorker, IDisposable
     {
-        internal IDatabaseEngine Engine => engine;
+        private readonly IDatabaseEngine _engine;
+        private readonly ManualResetEventSlim _started;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RecordingWorker"/> class.
+        /// </summary>
+        /// <param name="engine">The engine the worker was created for.</param>
+        /// <param name="started">The event signaled when the worker starts running.</param>
+        public RecordingWorker(IDatabaseEngine engine, ManualResetEventSlim started)
+        {
+            _engine = engine;
+            _started = started;
+        }
+
+        internal IDatabaseEngine Engine => _engine;
         internal bool Disposed { get; private set; }
-        public string Name => engine.Name + "/custom";
+        public string Name => _engine.Name + "/custom";
         public DatabaseEngineWorkerKind Kind => DatabaseEngineWorkerKind.Checkpoint;
         public TimeSpan Interval => TimeSpan.FromSeconds(1);
         public void Run(CancellationToken cancellationToken = default)
         {
-            started.Set();
+            _started.Set();
             cancellationToken.WaitHandle.WaitOne();
         }
         public void Dispose() => Disposed = true;
     }
 
-    private sealed class RecordingServer(IDatabaseEngine engine) : IDatabaseServer
+    private sealed class RecordingServer : IDatabaseServer
     {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RecordingServer"/> class.
+        /// </summary>
+        /// <param name="engine">The engine the server's context reports as its owner.</param>
+        public RecordingServer(IDatabaseEngine engine)
+        {
+            Context = new RecordingServerContext(engine);
+        }
+
         internal int Starts { get; private set; }
         internal int Disposals { get; private set; }
-        public IDatabaseServerContext Context { get; } = new RecordingServerContext(engine);
+        public IDatabaseServerContext Context { get; }
         public Task StartAsync(CancellationToken cancellationToken = default) { Starts++; return Task.CompletedTask; }
         public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public ValueTask DisposeAsync() { Disposals++; return default; }
     }
 
-    private sealed class RecordingServerContext(IDatabaseEngine engine) : IDatabaseServerContext
+    private sealed class RecordingServerContext : IDatabaseServerContext
     {
-        public IDatabaseEngine Engine => engine;
+        private readonly IDatabaseEngine _engine;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RecordingServerContext"/> class.
+        /// </summary>
+        /// <param name="engine">The engine the context reports as its owner.</param>
+        public RecordingServerContext(IDatabaseEngine engine)
+        {
+            _engine = engine;
+        }
+
+        public IDatabaseEngine Engine => _engine;
         public IReadOnlyCollection<IDatabaseServerSession> Sessions => [];
     }
 
-    private sealed class RecordingStorageStrategy(string directory) : IDocumentStorageStrategy, IDisposable
+    private sealed class RecordingStorageStrategy : IDocumentStorageStrategy, IDisposable
     {
+        private readonly string _directory;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RecordingStorageStrategy"/> class.
+        /// </summary>
+        /// <param name="directory">The directory that holds each database's storage files.</param>
+        public RecordingStorageStrategy(string directory)
+        {
+            _directory = directory;
+        }
+
         internal StorageCommitDurability? LastDurability { get; private set; }
         internal int Opens { get; private set; }
         internal bool Disposed { get; private set; }
@@ -272,12 +328,12 @@ public sealed class DocumentApplicationBuilderTests
 
         public void DropStorage(DatabaseName databaseName)
         {
-            foreach (string suffix in new[] { "dat", "log", "bak" }) { File.Delete(Path.Combine(directory, databaseName + "." + suffix)); }
+            foreach (string suffix in new[] { "dat", "log", "bak" }) { File.Delete(Path.Combine(_directory, databaseName + "." + suffix)); }
         }
 
-        public bool StorageExists(DatabaseName databaseName) => File.Exists(Path.Combine(directory, databaseName + ".dat"));
-        public IEnumerable<DatabaseName> GetDatabaseNames() => Directory.EnumerateFiles(directory, "*.dat").Select(file => new DatabaseName(Path.GetFileNameWithoutExtension(file)));
+        public bool StorageExists(DatabaseName databaseName) => File.Exists(Path.Combine(_directory, databaseName + ".dat"));
+        public IEnumerable<DatabaseName> GetDatabaseNames() => Directory.EnumerateFiles(_directory, "*.dat").Select(file => new DatabaseName(Path.GetFileNameWithoutExtension(file)));
         public void Dispose() => Disposed = true;
-        private StorageStream Open(DatabaseName name, string suffix, FileMode mode) => StorageStream.FromFile(Path.Combine(directory, name + "." + suffix), mode, FileShare.Read);
+        private StorageStream Open(DatabaseName name, string suffix, FileMode mode) => StorageStream.FromFile(Path.Combine(_directory, name + "." + suffix), mode, FileShare.Read);
     }
 }

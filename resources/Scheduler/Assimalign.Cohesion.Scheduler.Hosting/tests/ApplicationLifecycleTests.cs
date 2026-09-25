@@ -330,22 +330,34 @@ public class ApplicationLifecycleTests
         }
     }
 
-    private sealed class RecordingService(
-        string name,
-        ICollection<string> events) : IHostService
+    private sealed class RecordingService : IHostService
     {
+        private readonly string _name;
+        private readonly ICollection<string> _events;
+
+        /// <summary>Initializes a new instance of the <see cref="RecordingService"/> class.</summary>
+        /// <param name="name">The name recorded with each lifecycle event.</param>
+        /// <param name="events">The collection that receives the recorded lifecycle events.</param>
+        public RecordingService(
+            string name,
+            ICollection<string> events)
+        {
+            _name = name;
+            _events = events;
+        }
+
         public ServiceId Id { get; } = ServiceId.New();
 
         public Task StartAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            events.Add($"{name}:start");
+            _events.Add($"{_name}:start");
             return Task.CompletedTask;
         }
 
         public Task StopAsync(CancellationToken cancellationToken = default)
         {
-            events.Add($"{name}:stop");
+            _events.Add($"{_name}:stop");
             return Task.CompletedTask;
         }
     }
@@ -364,12 +376,21 @@ public class ApplicationLifecycleTests
             ValueTask.CompletedTask;
     }
 
-    private sealed class TestScheduleProvider(params ISchedule[] schedules) : IScheduleProvider
+    private sealed class TestScheduleProvider : IScheduleProvider
     {
-        public ISchedule GetSchedule(ScheduleId id) =>
-            schedules.Single(schedule => schedule.Id == id);
+        private readonly ISchedule[] _schedules;
 
-        public IEnumerable<ISchedule> GetSchedules() => schedules;
+        /// <summary>Initializes a new instance of the <see cref="TestScheduleProvider"/> class.</summary>
+        /// <param name="schedules">The schedules the provider exposes.</param>
+        public TestScheduleProvider(params ISchedule[] schedules)
+        {
+            _schedules = schedules;
+        }
+
+        public ISchedule GetSchedule(ScheduleId id) =>
+            _schedules.Single(schedule => schedule.Id == id);
+
+        public IEnumerable<ISchedule> GetSchedules() => _schedules;
 
         public void DisableJob(ScheduleId scheduleId, JobId jobId) =>
             throw new NotSupportedException();
@@ -380,8 +401,17 @@ public class ApplicationLifecycleTests
         public bool IsJobEnabled(ScheduleId scheduleId, JobId jobId) => true;
     }
 
-    private sealed class TestSchedule(Func<CancellationToken, Task>? run = null) : ISchedule
+    private sealed class TestSchedule : ISchedule
     {
+        private readonly Func<CancellationToken, Task>? _run;
+
+        /// <summary>Initializes a new instance of the <see cref="TestSchedule"/> class.</summary>
+        /// <param name="run">The optional delegate invoked when the schedule runs; <see langword="null"/> completes immediately.</param>
+        public TestSchedule(Func<CancellationToken, Task>? run = null)
+        {
+            _run = run;
+        }
+
         public ScheduleId Id { get; } = ScheduleId.New();
 
         public string? Name => "test";
@@ -405,7 +435,7 @@ public class ApplicationLifecycleTests
         public IEnumerable<IScheduleJob> Jobs => [];
 
         public Task RunAsync(CancellationToken cancellationToken = default) =>
-            run?.Invoke(cancellationToken) ?? Task.CompletedTask;
+            _run?.Invoke(cancellationToken) ?? Task.CompletedTask;
     }
 
     private static SchedulerApplicationBuilder CreateResourceBuilder(Assembly resourceAssembly)

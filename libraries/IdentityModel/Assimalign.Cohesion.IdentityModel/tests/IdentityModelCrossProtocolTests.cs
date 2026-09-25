@@ -22,7 +22,7 @@ namespace Assimalign.Cohesion.IdentityModel.Tests;
 /// </summary>
 public sealed class IdentityModelCrossProtocolTests
 {
-    private static readonly DateTimeOffset now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
 
     private const string OidcIssuer = "https://op.example.com";
     private const string SamlIssuer = "https://idp.example.com/saml";
@@ -175,8 +175,8 @@ public sealed class IdentityModelCrossProtocolTests
         {
             Issuer = OidcIssuer,
             Subject = "user-42",
-            ExpiresAt = now.AddHours(1),
-            IssuedAt = now,
+            ExpiresAt = _now.AddHours(1),
+            IssuedAt = _now,
         };
         descriptor.Audiences.Add("client-1");
 
@@ -199,14 +199,14 @@ public sealed class IdentityModelCrossProtocolTests
         {
             Id = "_a1",
             Version = ProtocolSaml.SamlConstants.Version,
-            IssueInstant = now,
+            IssueInstant = _now,
             Issuer = new ProtocolSaml.SamlNameId(SamlIssuer, ProtocolSaml.SamlNameIdFormats.Entity),
             Subject = new ProtocolSaml.SamlSubject(new ProtocolSaml.SamlNameId("user-42")),
         };
 
         descriptor.AuthnStatements.Add(new ProtocolSaml.SamlAuthnStatement(
             new ProtocolSaml.SamlAuthnContext(ProtocolSaml.SamlAuthnContextClasses.PasswordProtectedTransport),
-            authnInstant: now.AddMinutes(-1)));
+            authnInstant: _now.AddMinutes(-1)));
 
         descriptor.AttributeStatements.Add(new ProtocolSaml.SamlAttributeStatement(new[]
         {

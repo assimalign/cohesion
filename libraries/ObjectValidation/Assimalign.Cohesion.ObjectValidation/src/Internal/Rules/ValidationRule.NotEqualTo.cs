@@ -1,12 +1,12 @@
-﻿namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+﻿namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class NotEqualToValidationRule<TValue> : ValidationRuleBase<TValue>
 {
-    private readonly TValue argument;
+    private readonly TValue _argument;
 
     public NotEqualToValidationRule(TValue argument)
     {
-        this.argument = argument;
+        this._argument = argument;
     }
 
     public override string Name { get; set; }
@@ -15,7 +15,7 @@ internal sealed class NotEqualToValidationRule<TValue> : ValidationRuleBase<TVal
     {
         context = null;
 
-        if (argument is null && value is not null)
+        if (_argument is null && value is not null)
         {
             context = new ValidationContext<TValue>(default(TValue));
             context.AddFailure(this.Error);
@@ -41,7 +41,7 @@ internal sealed class NotEqualToValidationRule<TValue> : ValidationRuleBase<TVal
         {
             context = new ValidationContext<TValue>(value);
 
-            if (this.argument.Equals(value))
+            if (this._argument.Equals(value))
             {
                 context.AddFailure(this.Error);
             }

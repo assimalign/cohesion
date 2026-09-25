@@ -1,5 +1,6 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
   <PropertyGroup>
+    <RootNamespace>LogSpaceGateway</RootNamespace>
     <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
     <CohesionResourceName>typed-logs-gateway</CohesionResourceName>
     <CohesionGatewayAot>false</CohesionGatewayAot>

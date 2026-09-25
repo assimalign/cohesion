@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Sdk.Database.Tasks</RootNamespace>
 		<PackageId>Assimalign.Cohesion.Sdk.Database</PackageId>
 		<OutDir>$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Tasks</OutDir>
 		<!-- The SQL schema package exposes its declaration contract as preview API. -->

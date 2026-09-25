@@ -7,6 +7,7 @@ using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.NotificationHub;
+using Assimalign.Cohesion.NotificationHub.Hosting.Internal;
 
 namespace Assimalign.Cohesion.NotificationHub.Hosting;
 

@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
+using Assimalign.Cohesion.ApplicationModel.Internal;
+
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>

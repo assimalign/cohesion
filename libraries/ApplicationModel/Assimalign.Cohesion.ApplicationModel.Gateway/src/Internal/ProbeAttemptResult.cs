@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal readonly record struct ProbeAttemptResult(bool Succeeded, bool FailFast, string Detail)
 {

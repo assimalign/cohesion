@@ -4,7 +4,7 @@ using System.IO;
 using System.Text;
 
 using Assimalign.Cohesion.Database.Sql.Schema;
-using Assimalign.Cohesion.Sdk.Database.Tasks.Compilation;
+using Assimalign.Cohesion.Sdk.Database.Tasks.Internal;
 
 using Microsoft.Build.Framework;
 

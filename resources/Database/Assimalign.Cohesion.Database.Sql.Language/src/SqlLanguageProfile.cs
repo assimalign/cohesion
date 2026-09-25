@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Database.Language;
 /// </summary>
 public static class SqlLanguageProfile
 {
-    private static readonly string[] Keywords =
+    private static readonly string[] _keywords =
     [
         // DML
         "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE",
@@ -43,7 +43,7 @@ public static class SqlLanguageProfile
         "PRECEDING", "FOLLOWING", "CURRENT", "ROW", "UNBOUNDED",
     ];
 
-    private static readonly string[] Functions =
+    private static readonly string[] _functions =
     [
         // Aggregate
         "COUNT", "SUM", "AVG", "MIN", "MAX",
@@ -63,7 +63,7 @@ public static class SqlLanguageProfile
         "LEAD", "LAG", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE", "NTILE",
     ];
 
-    private static readonly string[] Clauses =
+    private static readonly string[] _clauses =
     [
         SqlClauses.Select,
         SqlClauses.Insert,
@@ -106,9 +106,9 @@ public static class SqlLanguageProfile
     /// </summary>
     public static QueryLanguageProfile Instance { get; } = new(
         "SQL",
-        Keywords,
-        Functions,
-        Clauses);
+        _keywords,
+        _functions,
+        _clauses);
 
     /// <summary>
     /// Reports whether a join type executes in the SQL surface. Supported joins

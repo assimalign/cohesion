@@ -29,7 +29,7 @@ internal sealed class MinDataRateGate
     // A per-operation wait longer than this is treated as effectively unbounded: no realistic
     // transfer needs to block a single read/write for over an hour, and clamping keeps the delay
     // inside CancellationTokenSource's accepted range.
-    private static readonly TimeSpan MaxOperationTimeout = TimeSpan.FromHours(1);
+    private static readonly TimeSpan _maxOperationTimeout = TimeSpan.FromHours(1);
 
     private readonly double _bytesPerSecond;
     private readonly long _graceTicks;
@@ -84,8 +84,8 @@ internal sealed class MinDataRateGate
         }
 
         double seconds = remainingTicks / (double)_frequency;
-        timeout = seconds >= MaxOperationTimeout.TotalSeconds
-            ? MaxOperationTimeout
+        timeout = seconds >= _maxOperationTimeout.TotalSeconds
+            ? _maxOperationTimeout
             : TimeSpan.FromSeconds(seconds);
         return true;
     }

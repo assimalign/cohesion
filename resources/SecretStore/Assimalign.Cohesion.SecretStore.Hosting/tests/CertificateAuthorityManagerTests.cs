@@ -10,6 +10,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.SecretStore.Hosting.Internal;
 using Assimalign.Cohesion.Security.DataProtection;
 using Assimalign.Cohesion.SecretStore;
 

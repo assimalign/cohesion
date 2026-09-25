@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal sealed class LocalProbeRunner
 {

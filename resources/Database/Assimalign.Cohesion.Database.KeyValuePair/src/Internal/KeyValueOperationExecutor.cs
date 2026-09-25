@@ -64,25 +64,25 @@ internal sealed class KeyValueOperationExecutor
     /// </summary>
     internal const string PrimaryIndexName = "key";
 
-    private static readonly IReadOnlyList<QueryColumn> entryColumns =
+    private static readonly IReadOnlyList<QueryColumn> _entryColumns =
     [
         new QueryColumn { Name = "key", Ordinal = 0, Type = DatabaseType.Binary },
         new QueryColumn { Name = "value", Ordinal = 1, Type = DatabaseType.Binary },
         new QueryColumn { Name = "etag", Ordinal = 2, Type = DatabaseType.Int64 },
     ];
 
-    private static readonly IReadOnlyList<QueryColumn> putColumns =
+    private static readonly IReadOnlyList<QueryColumn> _putColumns =
     [
         new QueryColumn { Name = "applied", Ordinal = 0, Type = DatabaseType.Boolean },
         new QueryColumn { Name = "etag", Ordinal = 1, Type = DatabaseType.Int64, IsNullable = true },
     ];
 
-    private static readonly IReadOnlyList<QueryColumn> existsColumns =
+    private static readonly IReadOnlyList<QueryColumn> _existsColumns =
     [
         new QueryColumn { Name = "exists", Ordinal = 0, Type = DatabaseType.Boolean },
     ];
 
-    private static readonly IReadOnlyList<QueryColumn> keySpaceColumns =
+    private static readonly IReadOnlyList<QueryColumn> _keySpaceColumns =
     [
         new QueryColumn { Name = "database_name", Ordinal = 0, Type = DatabaseType.String },
         new QueryColumn { Name = "keyspace_id", Ordinal = 1, Type = DatabaseType.Int64 },
@@ -146,7 +146,7 @@ internal sealed class KeyValueOperationExecutor
             }
         }
 
-        return new KeyValueMaterializedResultSet(keySpaceColumns, rows);
+        return new KeyValueMaterializedResultSet(_keySpaceColumns, rows);
     }
 
     private async ValueTask<QueryResult> ExecuteGetAsync(KeyValueGetRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
@@ -159,14 +159,14 @@ internal sealed class KeyValueOperationExecutor
             rows.Add([current.Value.Key, current.Value.Value, (long)current.Value.Writer.Value]);
         }
 
-        return new KeyValueMaterializedResultSet(entryColumns, rows);
+        return new KeyValueMaterializedResultSet(_entryColumns, rows);
     }
 
     private async ValueTask<QueryResult> ExecuteExistsAsync(KeyValueExistsRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         var current = await ResolveCurrentAsync(request.Key, context, cancellationToken).ConfigureAwait(false);
 
-        return new KeyValueMaterializedResultSet(existsColumns, [[current is not null]]);
+        return new KeyValueMaterializedResultSet(_existsColumns, [[current is not null]]);
     }
 
     private async ValueTask<QueryResult> ExecuteScanAsync(KeyValueScanRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
@@ -197,7 +197,7 @@ internal sealed class KeyValueOperationExecutor
             }
         }
 
-        return new KeyValueMaterializedResultSet(entryColumns, rows);
+        return new KeyValueMaterializedResultSet(_entryColumns, rows);
     }
 
     // ── Writes ─────────────────────────────────────────────────────────
@@ -265,7 +265,7 @@ internal sealed class KeyValueOperationExecutor
                 exception);
         }
 
-        return new KeyValueMaterializedResultSet(putColumns, [[true, (long)context.Transaction.Sequence.Value]], affectedCount: 1);
+        return new KeyValueMaterializedResultSet(_putColumns, [[true, (long)context.Transaction.Sequence.Value]], affectedCount: 1);
     }
 
     private async ValueTask<QueryResult> ExecuteDeleteAsync(KeyValueDeleteRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
@@ -434,7 +434,7 @@ internal sealed class KeyValueOperationExecutor
     }
 
     private static KeyValueMaterializedResultSet NotApplied(long? currentETag)
-        => new(putColumns, [[false, currentETag]], affectedCount: 0);
+        => new(_putColumns, [[false, currentETag]], affectedCount: 0);
 
     /// <summary>
     /// Builds the index key range for a scan: an explicit [start, end) range, or

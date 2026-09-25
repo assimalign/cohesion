@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Client;
+namespace Assimalign.Cohesion.Database.Client.Internal;
 
 /// <summary>
 /// The default pooling client: a slot semaphore bounds total connections at the

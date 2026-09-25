@@ -8,13 +8,14 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 public class LocalProcessStateStoreTests
 {
     private const string TestHostAssembly = "Assimalign.Cohesion.ApplicationModel.Gateway.TestHost";
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local process state: stale cleanup preserves a newer registration")]
     public async Task DeleteIfMatchesAsync_NewerRegistrationReplacesExpected_PreservesNewRegistration()
@@ -122,7 +123,7 @@ public class LocalProcessStateStoreTests
             // Assert
             exception.Message.ShouldContain("already supervised", Case.Sensitive);
             File.WriteAllText(releasePath, string.Empty);
-            await process.WaitForExitAsync().WaitAsync(TestTimeout);
+            await process.WaitForExitAsync().WaitAsync(_testTimeout);
             process.ExitCode.ShouldBe(0);
             using LocalFileLease lease = await store.AcquireApplicationLeaseAsync(
                 application,
@@ -135,7 +136,7 @@ public class LocalProcessStateStoreTests
             if (started && !process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
-                await process.WaitForExitAsync().WaitAsync(TestTimeout);
+                await process.WaitForExitAsync().WaitAsync(_testTimeout);
             }
 
             DeleteTestDirectory(root);
@@ -148,7 +149,7 @@ public class LocalProcessStateStoreTests
 
     private static async Task WaitForFileAsync(string path)
     {
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         while (!File.Exists(path))
         {
             await Task.Delay(TimeSpan.FromMilliseconds(20), cancellation.Token);

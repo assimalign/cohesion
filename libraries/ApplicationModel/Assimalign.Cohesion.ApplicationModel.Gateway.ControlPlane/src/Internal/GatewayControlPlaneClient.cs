@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 using ResourceCommand = Assimalign.Cohesion.Hosting.Resources.ResourceCommand;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
 internal sealed class GatewayControlPlaneClient : IAuthenticatedControlPlaneClient
 {
@@ -45,7 +45,7 @@ internal sealed class GatewayControlPlaneClient : IAuthenticatedControlPlaneClie
                 }, ControlPlaneJsonContext.Default.ControlPlaneCommandRequest));
             request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         }
-        using HttpResponseMessage response = await Client.SendAsync(
+        using HttpResponseMessage response = await _client.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         await response.Content.LoadIntoBufferAsync(MaximumApplicationExportBytes, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
@@ -82,7 +82,7 @@ internal sealed class GatewayControlPlaneClient : IAuthenticatedControlPlaneClie
     private const string ApplicationPath = "/cohesion/v1/application";
     private const long MaximumApplicationExportBytes = 16 * 1024 * 1024;
 
-    private static readonly HttpClient Client = new(new SocketsHttpHandler
+    private static readonly HttpClient _client = new(new SocketsHttpHandler
     {
         AllowAutoRedirect = false,
         UseCookies = false,
@@ -137,7 +137,7 @@ internal sealed class GatewayControlPlaneClient : IAuthenticatedControlPlaneClie
             ApplicationPath).Uri;
         using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
-        using HttpResponseMessage response = await Client.SendAsync(
+        using HttpResponseMessage response = await _client.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken)

@@ -3,7 +3,7 @@ using System.IO;
 
 using Assimalign.Cohesion.Database.Storage;
 
-namespace Assimalign.Cohesion.Database.Blob;
+namespace Assimalign.Cohesion.Database.Blob.Internal;
 
 internal sealed class BlobDatabaseEngineBuilder : IBlobDatabaseEngineBuilder
 {

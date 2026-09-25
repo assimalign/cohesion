@@ -1,4 +1,5 @@
 using System;
+using Assimalign.Cohesion.Database.Graph.Storage.Internal;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Storage;

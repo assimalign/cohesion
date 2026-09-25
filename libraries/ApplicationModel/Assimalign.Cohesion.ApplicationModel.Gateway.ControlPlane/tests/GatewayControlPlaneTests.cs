@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
@@ -23,13 +24,13 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Tests;
 
 public sealed partial class GatewayControlPlaneTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway.ControlPlane] - GET: Should enforce trusted issuers and serve the shared export and observed resource")]
     public async Task Get_WithLoopbackListener_ShouldEnforceTrustAndServeDiscovery()
     {
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         var options = new ApplicationGatewayOptions
         {
             ExportDirectory = root,
@@ -188,7 +189,7 @@ public sealed partial class GatewayControlPlaneTests
     public async Task Commands_WithSupportedAndUnsupportedKinds_ShouldRecordOutcomes()
     {
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         var dispatcher = new RecordingCommandDispatcher();
         var options = new ApplicationGatewayOptions
         {

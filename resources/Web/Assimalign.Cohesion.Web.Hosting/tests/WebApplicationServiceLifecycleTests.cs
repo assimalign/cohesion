@@ -80,39 +80,64 @@ public class WebApplicationServiceLifecycleTests
         exception.Message.ShouldContain("service factory returned null", Case.Insensitive);
     }
 
-    private sealed class RecordingHostService(
-        string name,
-        ICollection<string> events) : IHostService
+    private sealed class RecordingHostService : IHostService
     {
+        private readonly string _name;
+        private readonly ICollection<string> _events;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RecordingHostService"/> class.
+        /// </summary>
+        /// <param name="name">The name that prefixes each recorded lifecycle event.</param>
+        /// <param name="events">The collection that receives the recorded lifecycle events.</param>
+        public RecordingHostService(
+            string name,
+            ICollection<string> events)
+        {
+            _name = name;
+            _events = events;
+        }
+
         public ServiceId Id { get; } = ServiceId.New();
 
         public Task StartAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            events.Add($"{name}:start");
+            _events.Add($"{_name}:start");
             return Task.CompletedTask;
         }
 
         public Task StopAsync(CancellationToken cancellationToken = default)
         {
-            events.Add($"{name}:stop");
+            _events.Add($"{_name}:stop");
             return Task.CompletedTask;
         }
     }
 
-    private sealed class RecordingApplicationServer(
-        ICollection<string> events) : IWebApplicationServer
+    private sealed class RecordingApplicationServer : IWebApplicationServer
     {
+        private readonly ICollection<string> _events;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RecordingApplicationServer"/> class.
+        /// </summary>
+        /// <param name="events">The collection that receives the recorded lifecycle events.</param>
+        public RecordingApplicationServer(
+            ICollection<string> events)
+        {
+            _events = events;
+        }
+
         public Task StartAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            events.Add("server:start");
+            _events.Add("server:start");
             return Task.CompletedTask;
         }
 
         public Task StopAsync(CancellationToken cancellationToken = default)
         {
-            events.Add("server:stop");
+            _events.Add("server:stop");
             return Task.CompletedTask;
         }
     }

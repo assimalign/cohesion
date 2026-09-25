@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.IdentityModel.Token.Saml.Tests;
 /// </summary>
 public sealed class SamlTokenTests
 {
-    private static readonly DateTimeOffset now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
 
     private const string Issuer = "https://idp.example.com/saml";
     private const string RelyingParty = "https://sp.example.com";
@@ -41,8 +41,8 @@ public sealed class SamlTokenTests
         token.Subject.Issuer.ShouldBe(Issuer);
         token.Subject.RelyingPartyQualifier.ShouldBe(RelyingParty);
         // Temporal comes from Conditions, not the bearer window.
-        token.NotBefore.ShouldBe(now.AddMinutes(-1));
-        token.ExpiresAt.ShouldBe(now.AddMinutes(5));
+        token.NotBefore.ShouldBe(_now.AddMinutes(-1));
+        token.ExpiresAt.ShouldBe(_now.AddMinutes(5));
         token.AuthenticationContext.ShouldNotBeNull();
         token.AuthenticationContext.ProviderSessionIds.ShouldContain("sess-1");
     }
@@ -99,8 +99,8 @@ public sealed class SamlTokenTests
     {
         var descriptor = ConformantDescriptor();
         descriptor.Conditions = new SamlConditions(
-            notBefore: now.AddMinutes(-10),
-            notOnOrAfter: now.AddMinutes(-5),
+            notBefore: _now.AddMinutes(-10),
+            notOnOrAfter: _now.AddMinutes(-5),
             audienceRestrictions: Audience(RelyingParty));
         var token = new SamlToken(descriptor);
 
@@ -116,8 +116,8 @@ public sealed class SamlTokenTests
         // Two restrictions: (sp) AND (other). A relying party only in the first must fail.
         var descriptor = ConformantDescriptor();
         descriptor.Conditions = new SamlConditions(
-            notBefore: now.AddMinutes(-1),
-            notOnOrAfter: now.AddMinutes(5),
+            notBefore: _now.AddMinutes(-1),
+            notOnOrAfter: _now.AddMinutes(5),
             audienceRestrictions: new[]
             {
                 (IReadOnlyList<string>)new[] { RelyingParty },
@@ -138,7 +138,7 @@ public sealed class SamlTokenTests
         descriptor.SubjectConfirmations.Clear();
         descriptor.SubjectConfirmations.Add(new SamlSubjectConfirmation(
             SamlConfirmationMethods.Bearer,
-            data: new SamlSubjectConfirmationData(recipient: AcsUrl, notOnOrAfter: now.AddMinutes(-10), inResponseTo: RequestId)));
+            data: new SamlSubjectConfirmationData(recipient: AcsUrl, notOnOrAfter: _now.AddMinutes(-10), inResponseTo: RequestId)));
         var token = new SamlToken(descriptor);
 
         var result = token.Validate(ConformantOptions());
@@ -156,8 +156,8 @@ public sealed class SamlTokenTests
             SamlConfirmationMethods.Bearer,
             data: new SamlSubjectConfirmationData(
                 recipient: AcsUrl,
-                notBefore: now.AddMinutes(-1), // the bearer profile forbids NotBefore
-                notOnOrAfter: now.AddMinutes(5),
+                notBefore: _now.AddMinutes(-1), // the bearer profile forbids NotBefore
+                notOnOrAfter: _now.AddMinutes(5),
                 inResponseTo: RequestId)));
         var token = new SamlToken(descriptor);
 
@@ -205,7 +205,7 @@ public sealed class SamlTokenTests
     {
         var contextDescriptor = new AuthenticationContextDescriptor
         {
-            AuthenticatedAt = now.AddMinutes(-5),
+            AuthenticatedAt = _now.AddMinutes(-5),
             ContextClass = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
         };
         contextDescriptor.ProviderSessionIds.Add("sess-1");
@@ -215,7 +215,7 @@ public sealed class SamlTokenTests
             AssertionId = "_a1",
             Version = "2.0",
             Issuer = Issuer,
-            IssuedAt = now,
+            IssuedAt = _now,
             AssertionXml = "<Assertion ID=\"_a1\" />",
             NameId = new SamlNameId(
                 "user@example.com",
@@ -223,15 +223,15 @@ public sealed class SamlTokenTests
                 nameQualifier: Issuer,
                 spNameQualifier: RelyingParty),
             Conditions = new SamlConditions(
-                notBefore: now.AddMinutes(-1),
-                notOnOrAfter: now.AddMinutes(5),
+                notBefore: _now.AddMinutes(-1),
+                notOnOrAfter: _now.AddMinutes(5),
                 audienceRestrictions: Audience(RelyingParty)),
             AuthenticationContext = new AuthenticationContext(contextDescriptor),
         };
 
         descriptor.SubjectConfirmations.Add(new SamlSubjectConfirmation(
             SamlConfirmationMethods.Bearer,
-            data: new SamlSubjectConfirmationData(recipient: AcsUrl, notOnOrAfter: now.AddMinutes(5), inResponseTo: RequestId)));
+            data: new SamlSubjectConfirmationData(recipient: AcsUrl, notOnOrAfter: _now.AddMinutes(5), inResponseTo: RequestId)));
 
         descriptor.Attributes.Add(new IdentityAttribute(
             "urn:oid:email",
@@ -247,7 +247,7 @@ public sealed class SamlTokenTests
     }
 
     private static SamlTokenValidationOptions ConformantOptions()
-        => new(now)
+        => new(_now)
         {
             ExpectedIssuer = Issuer,
             ExpectedAudience = RelyingParty,

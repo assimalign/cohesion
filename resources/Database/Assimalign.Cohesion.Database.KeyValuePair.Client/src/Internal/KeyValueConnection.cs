@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 
 /// <summary>
 /// The default typed key-value connection: wraps one pooled

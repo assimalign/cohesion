@@ -3,7 +3,7 @@ using System.Buffers.Text;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
+namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
 
 /// <summary>
 /// Computes the OpenID Connect access-token and code hash (<c>at_hash</c> / <c>c_hash</c>,

@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Connections.Tcp.Tests;
 
 public class TcpConnectionListenerTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - BindAsync: Should bind an ephemeral endpoint explicitly")]
     public async Task BindAsync_WithEphemeralEndPoint_ShouldReflectBoundPort()
@@ -107,7 +107,7 @@ public class TcpConnectionListenerTests
     public async Task AcceptAsync_WithEphemeralEndPoint_ShouldBindAndReflectBoundPort()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         await using TcpConnectionListener listener = TcpConnectionListener.Create(
             options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
@@ -158,7 +158,7 @@ public class TcpConnectionListenerTests
     public async Task AcceptAsync_WhenCanceled_ShouldThrowOperationCanceledException()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using CancellationTokenSource acceptCancellation = new();
 
         await using TcpConnectionListener listener = TcpConnectionListener.Create(
@@ -195,7 +195,7 @@ public class TcpConnectionListenerTests
     public async Task DisposeAsync_WithLiveAcceptedConnection_ShouldCloseTrackedConnection()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         TcpConnectionListener listener = TcpConnectionListener.Create(
             options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));

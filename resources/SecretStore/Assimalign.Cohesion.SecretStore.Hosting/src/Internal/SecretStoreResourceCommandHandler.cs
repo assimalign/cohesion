@@ -7,14 +7,30 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.SecretStore.Hosting;
+namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
-internal sealed class SecretStoreResourceCommandHandler(string kind, SecretStoreRepository repository,
-    CertificateAuthorityManager authority) : IResourceCommandHandler
+internal sealed class SecretStoreResourceCommandHandler : IResourceCommandHandler
 {
     internal const string AddSecret = "secretstore.add-secret";
     internal const string IssueCertificate = "secretstore.issue-certificate";
-    public string Kind { get; } = kind;
+    private readonly SecretStoreRepository _repository;
+    private readonly CertificateAuthorityManager _authority;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SecretStoreResourceCommandHandler"/> class.
+    /// </summary>
+    /// <param name="kind">The resource command kind this handler serves: <see cref="AddSecret"/> or <see cref="IssueCertificate"/>.</param>
+    /// <param name="repository">The secret repository that stores and deletes command-delivered secrets.</param>
+    /// <param name="authority">The certificate authority that issues and deletes command-requested certificates.</param>
+    public SecretStoreResourceCommandHandler(string kind, SecretStoreRepository repository,
+        CertificateAuthorityManager authority)
+    {
+        Kind = kind;
+        _repository = repository;
+        _authority = authority;
+    }
+
+    public string Kind { get; }
 
     public async ValueTask<ReadOnlyMemory<byte>> ExecuteAsync(ResourceCommand command, CancellationToken cancellationToken = default)
     {
@@ -39,7 +55,7 @@ internal sealed class SecretStoreResourceCommandHandler(string kind, SecretStore
             byte[] bytes = value.GetBytesFromBase64();
             try
             {
-                await repository.StoreCommandSecretAsync(command, source, bytes, cancellationToken).ConfigureAwait(false);
+                await _repository.StoreCommandSecretAsync(command, source, bytes, cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -65,7 +81,7 @@ internal sealed class SecretStoreResourceCommandHandler(string kind, SecretStore
                 : [];
             try
             {
-                await authority.GetCertificatePemAsync("certs/" + key, subject, alternatives, cancellationToken).ConfigureAwait(false);
+                await _authority.GetCertificatePemAsync("certs/" + key, subject, alternatives, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is CryptographicException or ArgumentException or NotSupportedException)
             {
@@ -79,11 +95,11 @@ internal sealed class SecretStoreResourceCommandHandler(string kind, SecretStore
     {
         if (Kind == AddSecret)
         {
-            await repository.DeleteCommandSecretAsync(command, cancellationToken).ConfigureAwait(false);
+            await _repository.DeleteCommandSecretAsync(command, cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            await authority.DeleteCertificateAsync(command.Key, cancellationToken).ConfigureAwait(false);
+            await _authority.DeleteCertificateAsync(command.Key, cancellationToken).ConfigureAwait(false);
         }
         return ReadOnlyMemory<byte>.Empty;
     }

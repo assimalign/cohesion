@@ -1,5 +1,6 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Database">
   <PropertyGroup>
+    <RootNamespace>SdkSmoke.Database</RootNamespace>
     <IsPackable>false</IsPackable>
     
   </PropertyGroup>

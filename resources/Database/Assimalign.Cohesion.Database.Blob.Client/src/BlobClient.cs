@@ -1,4 +1,5 @@
 using System;
+using Assimalign.Cohesion.Database.Blob.Client.Internal;
 using Assimalign.Cohesion.Database.Client;
 
 namespace Assimalign.Cohesion.Database.Blob.Client;

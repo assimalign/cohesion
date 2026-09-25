@@ -2,7 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Text;
 
-namespace Assimalign.Cohesion.Security.DataProtection;
+namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 
 /// <summary>
 /// Encodes a protector's purpose chain into the HKDF <c>info</c> parameter that binds a

@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
+        <RootNamespace>Assimalign.Cohesion.Connections.Tcp</RootNamespace>
         <Description>Reliable, ordered, single-stream TCP driver implementing the Cohesion connection contracts.</Description>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>

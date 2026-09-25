@@ -7,15 +7,22 @@ namespace Assimalign.Cohesion.Content.Yaml;
 /// <summary>
 /// A single key-value entry of a <see cref="YamlMapping"/>. YAML permits any node as a key.
 /// </summary>
-/// <param name="key">The entry key.</param>
-/// <param name="value">The entry value.</param>
-public readonly struct YamlMappingEntry(YamlNode key, YamlNode value)
+public readonly struct YamlMappingEntry
 {
+    /// <summary>Initializes a new instance of the <see cref="YamlMappingEntry"/> structure.</summary>
+    /// <param name="key">The entry key.</param>
+    /// <param name="value">The entry value.</param>
+    public YamlMappingEntry(YamlNode key, YamlNode value)
+    {
+        Key = key;
+        Value = value;
+    }
+
     /// <summary>Gets the entry key.</summary>
-    public YamlNode Key { get; } = key;
+    public YamlNode Key { get; }
 
     /// <summary>Gets the entry value.</summary>
-    public YamlNode Value { get; } = value;
+    public YamlNode Value { get; }
 }
 
 /// <summary>

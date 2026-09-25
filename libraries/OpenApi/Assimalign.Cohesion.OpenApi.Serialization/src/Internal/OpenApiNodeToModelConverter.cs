@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.OpenApi.Serialization;
+namespace Assimalign.Cohesion.OpenApi.Serialization.Internal;
 
 /// <summary>
 /// Maps a parsed <see cref="OpenApiNode"/> tree back into the canonical <see cref="OpenApiDocument"/>
@@ -188,7 +188,7 @@ internal static class OpenApiNodeToModelConverter
         item.Summary = GetString(node, "summary");
         item.Description = GetString(node, "description");
 
-        foreach (var (key, type) in OperationKeys)
+        foreach (var (key, type) in _operationKeys)
         {
             if (AsObject(Get(node, key)) is { } operationNode)
             {
@@ -1105,7 +1105,7 @@ internal static class OpenApiNodeToModelConverter
     private static double? GetDouble(OpenApiObjectNode node, string key) =>
         Get(node, key) is OpenApiValueNode { Kind: OpenApiValueKind.Integer or OpenApiValueKind.Double } value ? value.GetDouble() : null;
 
-    private static readonly (string Key, OperationType Type)[] OperationKeys =
+    private static readonly (string Key, OperationType Type)[] _operationKeys =
     [
         ("get", OperationType.Get),
         ("put", OperationType.Put),

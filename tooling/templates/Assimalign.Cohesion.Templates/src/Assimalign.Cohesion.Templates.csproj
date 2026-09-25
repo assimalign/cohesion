@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.Templates</RootNamespace>
     <PackageType>Template</PackageType>
     <PackageVersion>$(CohesionVersion)</PackageVersion>
     <Description>Executable Cohesion applications, landing zones, gateways, composites and resource templates for dotnet new.</Description>

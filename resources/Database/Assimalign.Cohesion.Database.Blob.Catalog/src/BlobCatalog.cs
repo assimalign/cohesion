@@ -1,5 +1,6 @@
 using System;
 
+using Assimalign.Cohesion.Database.Blob.Catalog.Internal;
 using Assimalign.Cohesion.Database.Blob.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 

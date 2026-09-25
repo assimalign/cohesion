@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.IdentityModel.Protocols</RootNamespace>
     <Description>Shared, transport-agnostic authentication protocol abstractions for Cohesion: protocol parties and roles, published-entity metadata, message envelopes, response status, logout semantics, binding descriptors, and validation results. The OpenID Connect and SAML contract branches build on these.</Description>
   </PropertyGroup>
   <ItemGroup>
@@ -12,8 +13,5 @@
          assembly boundary. -->
     <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" />
     <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel.Protocols" />
-  </ItemGroup>
-  <ItemGroup>
-    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.Tests" />
   </ItemGroup>
 </Project>

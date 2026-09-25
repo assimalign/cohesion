@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Assimalign.Cohesion.Database.Documents.Storage.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -149,15 +150,5 @@ public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Stora
 
     internal (PageId PageId, int SlotIndex) InsertChunk(IStorageTransaction transaction, TransactionSequence writer, ReadOnlySpan<byte> entry)
         => InsertRecord(transaction, writer.Value | (1UL << 63), entry);
-}
-
-internal sealed class DocumentTransactionRecordSpace(DocumentStorage storage) : ITransactionRecordSpace
-{
-    public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => storage.ReadEntry(pageId, slotIndex);
-    public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
-        => storage.UpdateEntry(transaction, pageId, slotIndex, record);
-    public void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex) => storage.DeleteEntry(transaction, pageId, slotIndex);
-    public ulong PackLocation(PageId pageId, int slotIndex) => DocumentStorage.PackLocation(pageId, slotIndex);
-    public (PageId PageId, int SlotIndex) UnpackLocation(ulong location) => DocumentStorage.UnpackLocation(location);
 }
 

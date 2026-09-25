@@ -1,5 +1,7 @@
 using System.IO;
 
+using Assimalign.Cohesion.OpenApi.Serialization.Internal;
+
 namespace Assimalign.Cohesion.OpenApi.Serialization;
 
 /// <summary>

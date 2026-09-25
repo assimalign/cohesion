@@ -1,6 +1,7 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
 
   <PropertyGroup>
+    <RootNamespace>InProcessTransitiveGateway</RootNamespace>
     <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
     <CohesionResourceName>inprocess-transitive-gateway</CohesionResourceName>
     <CohesionGateways>InProcess</CohesionGateways>

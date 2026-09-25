@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.NatGateway;
+using Assimalign.Cohesion.NatGateway.Hosting.Internal;
 
 namespace Assimalign.Cohesion.NatGateway.Hosting;
 

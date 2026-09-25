@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// The outcome of decoding a QPACK request field section: the decoded field

@@ -41,8 +41,8 @@ public sealed class GraphStoreTests
         await fixture.Store.CreateIndexAsync("Person", "name", writer);
         var a = await fixture.Store.CreateNodeAsync(["Person"], Properties("name", "Alice"), writer);
         var b = await fixture.Store.CreateNodeAsync(["Person"], Properties("name", "Bob"), writer);
-        var edge = await fixture.Store.CreateRelationshipAsync(a.Id, b.Id, "KNOWS", Empty, writer);
-        var self = await fixture.Store.CreateRelationshipAsync(a.Id, a.Id, "SELF", Empty, writer);
+        var edge = await fixture.Store.CreateRelationshipAsync(a.Id, b.Id, "KNOWS", _empty, writer);
+        var self = await fixture.Store.CreateRelationshipAsync(a.Id, a.Id, "SELF", _empty, writer);
         await fixture.Coordinator.CommitAsync(writer);
         var removing = await fixture.Begin();
         await Should.ThrowAsync<InvalidOperationException>(() => fixture.Store.DeleteNodeAsync(a.Id, false, removing).AsTask());
@@ -68,7 +68,7 @@ public sealed class GraphStoreTests
         await fixture.Store.CreateIndexAsync("N", "key", write);
         var a = await fixture.Store.CreateNodeAsync(["N"], Properties("key", 1), write);
         var b = await fixture.Store.CreateNodeAsync(["N"], Properties("key", 2), write);
-        var edge = await fixture.Store.CreateRelationshipAsync(a.Id, b.Id, "R", Empty, write);
+        var edge = await fixture.Store.CreateRelationshipAsync(a.Id, b.Id, "R", _empty, write);
         await fixture.Coordinator.CommitAsync(write);
         var old = await fixture.Begin();
         var remove = await fixture.Begin();
@@ -98,12 +98,12 @@ public sealed class GraphStoreTests
         await store.CreateIndexAsync("N", "key", write);
         var a = await store.CreateNodeAsync(["N"], Properties("key", 1), write);
         var b = await store.CreateNodeAsync(["N"], Properties("key", 2), write);
-        var edge = await store.CreateRelationshipAsync(a.Id, b.Id, "R", Empty, write);
+        var edge = await store.CreateRelationshipAsync(a.Id, b.Id, "R", _empty, write);
         await coordinator.CommitAsync(write);
         var partial = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         await store.DeleteNodeAsync(a.Id, true, partial);
         var uncommitted = await store.CreateNodeAsync(["N"], Properties("key", 3), partial);
-        await store.CreateRelationshipAsync(b.Id, uncommitted.Id, "PARTIAL", Empty, partial);
+        await store.CreateRelationshipAsync(b.Id, uncommitted.Id, "PARTIAL", _empty, partial);
         // Drain journal buffering into the in-memory recovery image; MemoryStream
         // has no durable-flush contract.
         storage.WriteAheadJournal.Flush(forceDurable: false);
@@ -121,7 +121,7 @@ public sealed class GraphStoreTests
         (await recoveredStore.GetIncidentAsync(b.Id, reader.Snapshot)).Single().Id.ShouldBe(edge.Id);
         (await recoveredStore.SearchIndexAsync("N", "key", 1m, reader.Snapshot)).Single().Id.ShouldBe(a.Id);
         (await recoveredStore.SearchIndexAsync("N", "key", 3m, reader.Snapshot)).ShouldBeEmpty();
-        var newNode = await recoveredStore.CreateNodeAsync(["N"], Empty, reader);
+        var newNode = await recoveredStore.CreateNodeAsync(["N"], _empty, reader);
         newNode.Id.ShouldBeGreaterThan(uncommitted.Id);
         await coordinator.RollbackAsync(partial);
     }
@@ -189,16 +189,16 @@ public sealed class GraphStoreTests
     {
         await using var fixture = new Fixture();
         var create = await fixture.Begin();
-        var node = await fixture.Store.CreateNodeAsync(["N"], Empty, create);
+        var node = await fixture.Store.CreateNodeAsync(["N"], _empty, create);
         await fixture.Coordinator.CommitAsync(create);
         var stale = await fixture.Begin();
         var deleting = await fixture.Begin();
         await fixture.Store.DeleteNodeAsync(node.Id, true, deleting);
         await fixture.Coordinator.CommitAsync(deleting);
-        await Should.ThrowAsync<TransactionAbortedException>(() => fixture.Store.CreateRelationshipAsync(node.Id, node.Id, "R", Empty, stale).AsTask());
+        await Should.ThrowAsync<TransactionAbortedException>(() => fixture.Store.CreateRelationshipAsync(node.Id, node.Id, "R", _empty, stale).AsTask());
         await fixture.Coordinator.RollbackAsync(stale);
         var missing = await fixture.Begin();
-        await Should.ThrowAsync<InvalidOperationException>(() => fixture.Store.CreateRelationshipAsync(node.Id, node.Id, "R", Empty, missing).AsTask());
+        await Should.ThrowAsync<InvalidOperationException>(() => fixture.Store.CreateRelationshipAsync(node.Id, node.Id, "R", _empty, missing).AsTask());
     }
 
     [Fact]
@@ -206,11 +206,11 @@ public sealed class GraphStoreTests
     {
         await using var fixture = new Fixture();
         var create = await fixture.Begin();
-        var node = await fixture.Store.CreateNodeAsync(["N"], Empty, create);
+        var node = await fixture.Store.CreateNodeAsync(["N"], _empty, create);
         await fixture.Coordinator.CommitAsync(create);
         var stale = await fixture.Begin();
         var linking = await fixture.Begin();
-        await fixture.Store.CreateRelationshipAsync(node.Id, node.Id, "R", Empty, linking);
+        await fixture.Store.CreateRelationshipAsync(node.Id, node.Id, "R", _empty, linking);
         await fixture.Coordinator.CommitAsync(linking);
         await Should.ThrowAsync<TransactionAbortedException>(() => fixture.Store.DeleteNodeAsync(node.Id, true, stale).AsTask());
     }
@@ -224,7 +224,7 @@ public sealed class GraphStoreTests
         await Should.ThrowAsync<ArgumentException>(() => fixture.Store.CreateNodeAsync(["N"], Properties("tooBig", new string('x', 100_000)), writer).AsTask());
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-        await Should.ThrowAsync<OperationCanceledException>(() => fixture.Store.CreateNodeAsync(["N"], Empty, writer, cancellation.Token).AsTask());
+        await Should.ThrowAsync<OperationCanceledException>(() => fixture.Store.CreateNodeAsync(["N"], _empty, writer, cancellation.Token).AsTask());
         fixture.Store.GetNodes(null, writer.Snapshot).ShouldBeEmpty();
     }
 
@@ -254,16 +254,16 @@ public sealed class GraphStoreTests
     {
         await using var fixture = new Fixture();
         var holder = await fixture.Begin();
-        await fixture.Store.CreateNodeAsync(["N"], Empty, holder);
+        await fixture.Store.CreateNodeAsync(["N"], _empty, holder);
         var waiter = await fixture.Begin();
-        var pending = fixture.Store.CreateNodeAsync(["N"], Empty, waiter).AsTask();
+        var pending = fixture.Store.CreateNodeAsync(["N"], _empty, waiter).AsTask();
         pending.IsCompleted.ShouldBeFalse();
         await fixture.Coordinator.RollbackAsync(waiter);
         await fixture.Coordinator.CommitAsync(holder);
         await Should.ThrowAsync<TransactionAbortedException>(() => pending);
         var next = await fixture.Begin();
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await fixture.Store.CreateNodeAsync(["N"], Empty, next, limit.Token);
+        await fixture.Store.CreateNodeAsync(["N"], _empty, next, limit.Token);
         fixture.Store.GetNodes(null, next.Snapshot).Count.ShouldBe(2);
     }
 
@@ -282,7 +282,7 @@ public sealed class GraphStoreTests
         for (int i = 0; i < 240; i++)
         {
             var node = await store.CreateNodeAsync(["N"], new Dictionary<string, object?> { ["key"] = i, ["group"] = "same" }, writer);
-            await store.CreateRelationshipAsync(center.Id, node.Id, "R", Empty, writer);
+            await store.CreateRelationshipAsync(center.Id, node.Id, "R", _empty, writer);
         }
         await coordinator.CommitAsync(writer);
         using var recovered = GraphStorage.Open(Clone(data), Clone(journal), new MemoryStream());
@@ -298,7 +298,7 @@ public sealed class GraphStoreTests
         (await next.SearchIndexAsync("N", "group", "same", read.Snapshot)).Count.ShouldBe(240);
     }
 
-    private static readonly IReadOnlyDictionary<string, object?> Empty = new Dictionary<string, object?>();
+    private static readonly IReadOnlyDictionary<string, object?> _empty = new Dictionary<string, object?>();
     private static IReadOnlyDictionary<string, object?> Properties(string key, object? value) => new Dictionary<string, object?> { [key] = value };
     private static MemoryStream Clone(MemoryStream source)
     {

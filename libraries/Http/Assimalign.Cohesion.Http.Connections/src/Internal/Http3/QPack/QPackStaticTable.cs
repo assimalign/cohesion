@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// The QPACK static table (RFC 9204 Appendix A) — 99 predefined
@@ -14,7 +14,7 @@ internal static class QPackStaticTable
     // RFC 9204 Appendix A. Entries are (name, value); an empty value is
     // the empty string. Casing, punctuation, and spacing are reproduced
     // exactly as specified — they are part of the byte-identical match.
-    private static readonly (string Name, string Value)[] Entries =
+    private static readonly (string Name, string Value)[] _entries =
     [
         (":authority", ""),
         (":path", "/"),
@@ -117,11 +117,11 @@ internal static class QPackStaticTable
         ("x-frame-options", "sameorigin"),
     ];
 
-    private static readonly Dictionary<string, int> NameToFirstIndex = BuildNameIndex();
-    private static readonly Dictionary<(string Name, string Value), int> FieldToIndex = BuildFieldIndex();
+    private static readonly Dictionary<string, int> _nameToFirstIndex = BuildNameIndex();
+    private static readonly Dictionary<(string Name, string Value), int> _fieldToIndex = BuildFieldIndex();
 
     /// <summary>The number of entries in the static table (99).</summary>
-    public static int Count => Entries.Length;
+    public static int Count => _entries.Length;
 
     /// <summary>
     /// Resolves a static-table index to its name and value.
@@ -135,9 +135,9 @@ internal static class QPackStaticTable
     /// </returns>
     public static bool TryGet(int index, out string name, out string value)
     {
-        if ((uint)index < (uint)Entries.Length)
+        if ((uint)index < (uint)_entries.Length)
         {
-            (name, value) = Entries[index];
+            (name, value) = _entries[index];
             return true;
         }
 
@@ -158,7 +158,7 @@ internal static class QPackStaticTable
     /// <see langword="false"/>.
     /// </returns>
     public static bool TryGetNameIndex(string name, out int index)
-        => NameToFirstIndex.TryGetValue(name, out index);
+        => _nameToFirstIndex.TryGetValue(name, out index);
 
     /// <summary>
     /// Finds the static-table index whose name and value both match
@@ -172,17 +172,17 @@ internal static class QPackStaticTable
     /// otherwise <see langword="false"/>.
     /// </returns>
     public static bool TryGetFieldIndex(string name, string value, out int index)
-        => FieldToIndex.TryGetValue((name, value), out index);
+        => _fieldToIndex.TryGetValue((name, value), out index);
 
     private static Dictionary<string, int> BuildNameIndex()
     {
         Dictionary<string, int> map = new(System.StringComparer.Ordinal);
 
-        for (int index = 0; index < Entries.Length; index++)
+        for (int index = 0; index < _entries.Length; index++)
         {
             // Keep the lowest index for a given name so references prefer
             // the canonical first entry.
-            map.TryAdd(Entries[index].Name, index);
+            map.TryAdd(_entries[index].Name, index);
         }
 
         return map;
@@ -192,9 +192,9 @@ internal static class QPackStaticTable
     {
         Dictionary<(string Name, string Value), int> map = new();
 
-        for (int index = 0; index < Entries.Length; index++)
+        for (int index = 0; index < _entries.Length; index++)
         {
-            map.TryAdd(Entries[index], index);
+            map.TryAdd(_entries[index], index);
         }
 
         return map;

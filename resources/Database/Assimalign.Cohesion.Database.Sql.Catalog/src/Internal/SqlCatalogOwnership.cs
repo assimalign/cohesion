@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Database.Sql.Catalog;
+namespace Assimalign.Cohesion.Database.Sql.Catalog.Internal;
 
 /// <summary>Validates the durable ownership metadata shared by catalog objects.</summary>
 internal static class SqlCatalogOwnership

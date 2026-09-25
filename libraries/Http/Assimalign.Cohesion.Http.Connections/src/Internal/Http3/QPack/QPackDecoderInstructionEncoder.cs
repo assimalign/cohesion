@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Encodes the QPACK decoder-stream instructions the decoder sends back to the

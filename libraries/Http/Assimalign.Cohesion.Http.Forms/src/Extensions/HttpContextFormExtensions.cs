@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 public static class HttpContextFormExtensions
 {
-    private static readonly HttpFormCollection EmptyCollection = new HttpFormCollection();
+    private static readonly HttpFormCollection _emptyCollection = new HttpFormCollection();
 
     extension(IHttpRequest request)
     {
@@ -64,7 +64,7 @@ public static class HttpContextFormExtensions
                 // If no feature was added then we return an empty collection.
                 if (feature is null || feature.Form is null)
                 {
-                    return EmptyCollection;
+                    return _emptyCollection;
                 }
                 return feature.Form;
             }

@@ -12,7 +12,7 @@ internal sealed record SqlSystemViewDefinition(string Schema, string Name, IRead
 /// <summary>Reserved virtual relations and their typed, ordered column contracts.</summary>
 internal static class SqlSystemViews
 {
-    private static readonly SqlSystemViewDefinition[] Views =
+    private static readonly SqlSystemViewDefinition[] _views =
     [
         Iso("TABLES", Text("TABLE_CATALOG"), Text("TABLE_SCHEMA"), Text("TABLE_NAME"), Text("TABLE_TYPE")),
         Iso("COLUMNS", Text("TABLE_CATALOG"), Text("TABLE_SCHEMA"), Text("TABLE_NAME"), Text("COLUMN_NAME"),
@@ -37,7 +37,7 @@ internal static class SqlSystemViews
 
     internal static SqlSystemViewDefinition? Find(SqlTableReference reference)
     {
-        foreach (var view in Views)
+        foreach (var view in _views)
         {
             if (string.Equals(view.Schema, reference.SchemaName, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(view.Name, reference.TableName, StringComparison.OrdinalIgnoreCase))

@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
 internal sealed class GenericPlannedResource<TOptions> : PlannedResource
     where TOptions : class, IResourceOptions

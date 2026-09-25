@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 /// <summary>
 /// Resolves an apphost or explicitly added executable without falling back to a managed DLL.

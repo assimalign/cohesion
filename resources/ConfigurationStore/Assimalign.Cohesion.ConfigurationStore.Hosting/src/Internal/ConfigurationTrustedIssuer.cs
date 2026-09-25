@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text.Json;
 
-namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
+namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 
 internal sealed class ConfigurationTrustedIssuer
 {

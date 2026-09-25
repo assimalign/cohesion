@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 
-namespace Assimalign.Cohesion.Database.Hosting;
+namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 /// <summary>
 /// Ensures a declared database is open before any registered server begins accepting.

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.Sql.Schema;
+namespace Assimalign.Cohesion.Database.Sql.Schema.Internal;
 
 /// <summary>
 /// Validates the portable compiled-schema contract at every trust boundary.

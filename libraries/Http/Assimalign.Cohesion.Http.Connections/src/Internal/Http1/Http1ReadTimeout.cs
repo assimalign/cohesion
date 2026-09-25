@@ -1,7 +1,7 @@
 using System;
 using System.Threading;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Drives the two-phase timeout that reclaims idle keep-alive and slow-header (Slowloris)

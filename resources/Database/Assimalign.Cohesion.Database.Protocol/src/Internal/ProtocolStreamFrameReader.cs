@@ -4,7 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Protocol;
+namespace Assimalign.Cohesion.Database.Protocol.Internal;
 
 /// <summary>
 /// Reads frames from a stream: 5-byte header first, then exactly the declared

@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.ConfigurationStore.Hosting</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
@@ -8,7 +11,4 @@
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 	</ItemGroup>
-  <ItemGroup>
-    <InternalsVisibleTo Include="Assimalign.Cohesion.ConfigurationStore.Hosting.Tests" />
-  </ItemGroup>
 </Project>

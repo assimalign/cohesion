@@ -20,7 +20,7 @@ using Assimalign.Cohesion.Web.Hosting;
 
 using CohesionHttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
-namespace Assimalign.Cohesion.Scheduler.Hosting;
+namespace Assimalign.Cohesion.Scheduler.Hosting.Internal;
 
 internal sealed class SchedulerControlPlaneEndpointService : IHostService, IDisposable
 {

@@ -112,12 +112,22 @@ internal sealed partial class SqlPlanExecutor
     /// All five aggregates skip NULL operands. COUNT(*) supplies a non-null
     /// sentinel for each row. SUM/AVG accumulate decimal; MIN/MAX retain values.
     /// </summary>
-    private sealed class AggregateState(string function, Collation collation)
+    private sealed class AggregateState
     {
-        private readonly string _function = function.ToUpperInvariant();
+        private readonly string _function;
+        private readonly Collation _collation;
         private long _count;
         private decimal _sum;
         private object? _extreme;
+
+        /// <summary>Initializes a new instance of the <see cref="AggregateState"/> class.</summary>
+        /// <param name="function">The aggregate function name, matched case-insensitively.</param>
+        /// <param name="collation">The collation MIN and MAX use to compare values.</param>
+        public AggregateState(string function, Collation collation)
+        {
+            _function = function.ToUpperInvariant();
+            _collation = collation;
+        }
 
         internal void Add(object? value)
         {
@@ -139,13 +149,13 @@ internal sealed partial class SqlPlanExecutor
                         _sum = checked(_sum + Convert.ToDecimal(value, CultureInfo.InvariantCulture));
                         break;
                     case "MIN":
-                        if (_extreme is null || SqlValueComparer.Compare(value, _extreme, collation) < 0)
+                        if (_extreme is null || SqlValueComparer.Compare(value, _extreme, _collation) < 0)
                         {
                             _extreme = value;
                         }
                         break;
                     case "MAX":
-                        if (_extreme is null || SqlValueComparer.Compare(value, _extreme, collation) > 0)
+                        if (_extreme is null || SqlValueComparer.Compare(value, _extreme, _collation) > 0)
                         {
                             _extreme = value;
                         }
@@ -170,8 +180,17 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>Uses SQL comparison equality, with NULL keys in one group and binary values by content.</summary>
-    private sealed class GroupKeyComparer(IReadOnlyList<Collation> collations) : IEqualityComparer<object?[]>
+    private sealed class GroupKeyComparer : IEqualityComparer<object?[]>
     {
+        private readonly IReadOnlyList<Collation> _collations;
+
+        /// <summary>Initializes a new instance of the <see cref="GroupKeyComparer"/> class.</summary>
+        /// <param name="collations">The collation for each group key position.</param>
+        public GroupKeyComparer(IReadOnlyList<Collation> collations)
+        {
+            _collations = collations;
+        }
+
         public bool Equals(object?[]? left, object?[]? right)
         {
             if (left is null || right is null || left.Length != right.Length)
@@ -181,7 +200,7 @@ internal sealed partial class SqlPlanExecutor
             for (int i = 0; i < left.Length; i++)
             {
                 if (left[i] is null ? right[i] is not null : right[i] is null
-                    || SqlValueComparer.Compare(left[i]!, right[i]!, collations[i]) != 0)
+                    || SqlValueComparer.Compare(left[i]!, right[i]!, _collations[i]) != 0)
                 {
                     return false;
                 }
@@ -194,7 +213,7 @@ internal sealed partial class SqlPlanExecutor
             var hash = new HashCode();
             for (int i = 0; i < values.Length; i++)
             {
-                hash.Add(SqlValueComparer.GetHashCode(values[i], collations[i]));
+                hash.Add(SqlValueComparer.GetHashCode(values[i], _collations[i]));
             }
             return hash.ToHashCode();
         }

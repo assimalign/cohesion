@@ -21,7 +21,7 @@ using Assimalign.Cohesion.Web.Hosting;
 
 using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
-namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
+namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 
 internal sealed class ConfigurationEndpointService : IHostService, IDisposable
 {

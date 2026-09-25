@@ -1,6 +1,7 @@
 using System;
 
 using Assimalign.Cohesion.Scheduler;
+using Assimalign.Cohesion.Scheduler.Cron.Internal;
 
 namespace Assimalign.Cohesion.Scheduler.Cron;
 

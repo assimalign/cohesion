@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Per-connection abuse detector for the frame-rate HTTP/2 attack classes: rapid stream reset

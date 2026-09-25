@@ -4,7 +4,7 @@ using System.Linq;
 
 using Assimalign.Cohesion.Scheduler;
 
-namespace Assimalign.Cohesion.Scheduler.Cron;
+namespace Assimalign.Cohesion.Scheduler.Cron.Internal;
 
 internal sealed class CronScheduleProvider : IScheduleProvider
 {

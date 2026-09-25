@@ -5,7 +5,7 @@ using System.Security.Cryptography;
 
 using Assimalign.Cohesion.Security.DataProtection;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 [SupportedOSPlatform("windows")]
 internal sealed class DpapiKeyRepository : IKeyRepository

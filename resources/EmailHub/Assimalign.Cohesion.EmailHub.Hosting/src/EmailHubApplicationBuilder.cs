@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 
 using Assimalign.Cohesion.EmailHub;
+using Assimalign.Cohesion.EmailHub.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;

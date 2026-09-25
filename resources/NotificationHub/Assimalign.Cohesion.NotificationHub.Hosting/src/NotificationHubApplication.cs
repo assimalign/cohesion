@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.NotificationHub;
+using Assimalign.Cohesion.NotificationHub.Hosting.Internal;
 
 namespace Assimalign.Cohesion.NotificationHub.Hosting;
 

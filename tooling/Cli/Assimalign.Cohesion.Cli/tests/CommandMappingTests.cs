@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Cli.Internal;
+
 namespace Assimalign.Cohesion.Cli.Tests;
 
 /// <summary>Tests thin wrapper arguments without spawning dotnet.</summary>

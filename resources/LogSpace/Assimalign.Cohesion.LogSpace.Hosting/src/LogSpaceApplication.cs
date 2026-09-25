@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.LogSpace;
+using Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
 namespace Assimalign.Cohesion.LogSpace.Hosting;
 

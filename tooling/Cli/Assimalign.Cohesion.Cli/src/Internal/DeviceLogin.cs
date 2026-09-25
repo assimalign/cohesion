@@ -8,13 +8,35 @@ using System.Text.Json.Serialization.Metadata;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Cli;
+namespace Assimalign.Cohesion.Cli.Internal;
 
-internal sealed class DeviceLogin(
-    HttpClient http, TextWriter output, TextWriter error, string homeDirectory,
-    Func<TimeSpan, CancellationToken, Task>? delay = null, TimeProvider? timeProvider = null)
+internal sealed class DeviceLogin
 {
-    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private readonly HttpClient _http;
+    private readonly TextWriter _output;
+    private readonly TextWriter _error;
+    private readonly string _homeDirectory;
+    private readonly Func<TimeSpan, CancellationToken, Task>? _delay;
+    private readonly TimeProvider _time;
+
+    /// <summary>Initializes a new instance of the <see cref="DeviceLogin"/> class.</summary>
+    /// <param name="http">The HTTP client used for OIDC discovery, device authorization, and token requests.</param>
+    /// <param name="output">The writer for standard output.</param>
+    /// <param name="error">The writer for standard error, where the verification prompt is written.</param>
+    /// <param name="homeDirectory">The user's home directory, where the credential is stored.</param>
+    /// <param name="delay">The optional delay function used between token polls; defaults to <see cref="Task.Delay(TimeSpan, CancellationToken)"/>.</param>
+    /// <param name="timeProvider">The optional time source; defaults to <see cref="TimeProvider.System"/>.</param>
+    public DeviceLogin(
+        HttpClient http, TextWriter output, TextWriter error, string homeDirectory,
+        Func<TimeSpan, CancellationToken, Task>? delay = null, TimeProvider? timeProvider = null)
+    {
+        _http = http;
+        _output = output;
+        _error = error;
+        _homeDirectory = homeDirectory;
+        _delay = delay;
+        _time = timeProvider ?? TimeProvider.System;
+    }
 
     internal async Task<int> ExecuteAsync(Arguments args, CancellationToken cancellationToken = default)
     {
@@ -27,7 +49,7 @@ internal sealed class DeviceLogin(
         args.RequireEmpty();
         Uri issuer = SecureEndpoint(issuerText);
         string issuerUrl = issuer.AbsoluteUri.TrimEnd('/');
-        using HttpResponseMessage discoveryResponse = await http.GetAsync(
+        using HttpResponseMessage discoveryResponse = await _http.GetAsync(
             issuerUrl + "/.well-known/openid-configuration", cancellationToken).ConfigureAwait(false);
         RequireSuccess(discoveryResponse, "OIDC discovery");
         DiscoveryDocument discovery = await ReadAsync(discoveryResponse,
@@ -52,7 +74,7 @@ internal sealed class DeviceLogin(
             authorizationForm["audience"] = audience;
         }
         using var authorizationContent = new FormUrlEncodedContent(authorizationForm);
-        using HttpResponseMessage authorizationResponse = await http.PostAsync(
+        using HttpResponseMessage authorizationResponse = await _http.PostAsync(
             authorizationEndpoint, authorizationContent, cancellationToken).ConfigureAwait(false);
         RequireSuccess(authorizationResponse, "Device authorization");
         DeviceAuthorizationDocument device = await ReadAsync(authorizationResponse,
@@ -65,7 +87,7 @@ internal sealed class DeviceLogin(
         {
             throw new CliException("IdentityHub returned an incomplete device authorization response.");
         }
-        error.WriteLine($"Open {verification} and approve user code {device.UserCode}.");
+        _error.WriteLine($"Open {verification} and approve user code {device.UserCode}.");
         DateTimeOffset deadline = _time.GetUtcNow().AddSeconds(device.ExpiresIn);
         TimeSpan interval = TimeSpan.FromSeconds(device.Interval);
         var tokenForm = new Dictionary<string, string>
@@ -83,13 +105,13 @@ internal sealed class DeviceLogin(
         {
             cancellationToken.ThrowIfCancellationRequested();
             TimeSpan remaining = deadline - _time.GetUtcNow();
-            await (delay ?? Task.Delay)(interval < remaining ? interval : remaining, cancellationToken).ConfigureAwait(false);
+            await (_delay ?? Task.Delay)(interval < remaining ? interval : remaining, cancellationToken).ConfigureAwait(false);
             if (_time.GetUtcNow() >= deadline)
             {
                 break;
             }
             using var tokenContent = new FormUrlEncodedContent(tokenForm);
-            using HttpResponseMessage tokenResponse = await http.PostAsync(tokenEndpoint,
+            using HttpResponseMessage tokenResponse = await _http.PostAsync(tokenEndpoint,
                 tokenContent, cancellationToken).ConfigureAwait(false);
             TokenDocument token = await ReadAsync(tokenResponse, LoginJsonContext.Default.TokenDocument,
                 cancellationToken).ConfigureAwait(false);
@@ -120,12 +142,12 @@ internal sealed class DeviceLogin(
             }
             if (print)
             {
-                output.WriteLine(token.AccessToken);
+                _output.WriteLine(token.AccessToken);
             }
             else
             {
                 // Proposed credential contract for item 27 (#972); the design specifies no login store.
-                string path = Path.Combine(homeDirectory, ".cohesion", "credentials", issuer.IdnHost.Replace(':', '_') + ".json");
+                string path = Path.Combine(_homeDirectory, ".cohesion", "credentials", issuer.IdnHost.Replace(':', '_') + ".json");
                 var credential = new CredentialDocument
                 {
                     AccessToken = token.AccessToken, TokenType = token.TokenType,
@@ -141,7 +163,7 @@ internal sealed class DeviceLogin(
                 {
                     CryptographicOperations.ZeroMemory(json);
                 }
-                output.WriteLine("IdentityHub credential saved for the later gateway token bridge.");
+                _output.WriteLine("IdentityHub credential saved for the later gateway token bridge.");
             }
             return 0;
         }

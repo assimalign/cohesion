@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Hosting.Resources;
+namespace Assimalign.Cohesion.Hosting.Resources.Internal;
 
 internal sealed class ResourceHostRunner : IHostRunner
 {

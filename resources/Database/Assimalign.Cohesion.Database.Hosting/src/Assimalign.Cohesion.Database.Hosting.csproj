@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Hosting</RootNamespace>
+	</PropertyGroup>
 	<!--
 		Composition-only, COHRES002-clean: the hosting module references only the
 		area root inside the area, plus non-area hosting infrastructure. The private

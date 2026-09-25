@@ -10,6 +10,5 @@
     </PropertyGroup>
     <ItemGroup>
         <CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
-        <InternalsVisibleTo Include="Assimalign.Cohesion.Cli.Tests" />
     </ItemGroup>
 </Project>

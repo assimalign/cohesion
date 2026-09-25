@@ -34,10 +34,10 @@ public readonly struct HttpCacheControl
 {
     private const long MaxDeltaSeconds = int.MaxValue;
 
-    private readonly HttpCacheControlFlags flags;
-    private readonly string[]? noCacheFields;
-    private readonly string[]? privateFields;
-    private readonly HttpCacheControlExtension[]? extensions;
+    private readonly HttpCacheControlFlags _flags;
+    private readonly string[]? _noCacheFields;
+    private readonly string[]? _privateFields;
+    private readonly HttpCacheControlExtension[]? _extensions;
 
     private HttpCacheControl(
         HttpCacheControlFlags flags,
@@ -51,54 +51,54 @@ public readonly struct HttpCacheControl
         string[]? privateFields,
         HttpCacheControlExtension[]? extensions)
     {
-        this.flags = flags;
+        this._flags = flags;
         MaxAge = maxAge;
         SharedMaxAge = sharedMaxAge;
         MinFresh = minFresh;
         MaxStale = maxStale;
         StaleWhileRevalidate = staleWhileRevalidate;
         StaleIfError = staleIfError;
-        this.noCacheFields = noCacheFields;
-        this.privateFields = privateFields;
-        this.extensions = extensions;
+        this._noCacheFields = noCacheFields;
+        this._privateFields = privateFields;
+        this._extensions = extensions;
     }
 
     /// <summary>Gets a value indicating whether the <c>no-store</c> directive is present.</summary>
-    public bool NoStore => (flags & HttpCacheControlFlags.NoStore) != 0;
+    public bool NoStore => (_flags & HttpCacheControlFlags.NoStore) != 0;
 
     /// <summary>Gets a value indicating whether the <c>no-cache</c> directive is present.</summary>
-    public bool NoCache => (flags & HttpCacheControlFlags.NoCache) != 0;
+    public bool NoCache => (_flags & HttpCacheControlFlags.NoCache) != 0;
 
     /// <summary>Gets a value indicating whether the <c>no-transform</c> directive is present.</summary>
-    public bool NoTransform => (flags & HttpCacheControlFlags.NoTransform) != 0;
+    public bool NoTransform => (_flags & HttpCacheControlFlags.NoTransform) != 0;
 
     /// <summary>Gets a value indicating whether the response <c>public</c> directive is present.</summary>
-    public bool Public => (flags & HttpCacheControlFlags.Public) != 0;
+    public bool Public => (_flags & HttpCacheControlFlags.Public) != 0;
 
     /// <summary>Gets a value indicating whether the response <c>private</c> directive is present.</summary>
-    public bool Private => (flags & HttpCacheControlFlags.Private) != 0;
+    public bool Private => (_flags & HttpCacheControlFlags.Private) != 0;
 
     /// <summary>Gets a value indicating whether the response <c>must-revalidate</c> directive is present.</summary>
-    public bool MustRevalidate => (flags & HttpCacheControlFlags.MustRevalidate) != 0;
+    public bool MustRevalidate => (_flags & HttpCacheControlFlags.MustRevalidate) != 0;
 
     /// <summary>Gets a value indicating whether the response <c>proxy-revalidate</c> directive is present.</summary>
-    public bool ProxyRevalidate => (flags & HttpCacheControlFlags.ProxyRevalidate) != 0;
+    public bool ProxyRevalidate => (_flags & HttpCacheControlFlags.ProxyRevalidate) != 0;
 
     /// <summary>Gets a value indicating whether the response <c>must-understand</c> directive is present.</summary>
-    public bool MustUnderstand => (flags & HttpCacheControlFlags.MustUnderstand) != 0;
+    public bool MustUnderstand => (_flags & HttpCacheControlFlags.MustUnderstand) != 0;
 
     /// <summary>Gets a value indicating whether the response <c>immutable</c> directive (RFC 8246) is present.</summary>
-    public bool Immutable => (flags & HttpCacheControlFlags.Immutable) != 0;
+    public bool Immutable => (_flags & HttpCacheControlFlags.Immutable) != 0;
 
     /// <summary>Gets a value indicating whether the request <c>only-if-cached</c> directive is present.</summary>
-    public bool OnlyIfCached => (flags & HttpCacheControlFlags.OnlyIfCached) != 0;
+    public bool OnlyIfCached => (_flags & HttpCacheControlFlags.OnlyIfCached) != 0;
 
     /// <summary>
     /// Gets a value indicating whether the request <c>max-stale</c> directive is present. When
     /// <see langword="true"/> and <see cref="MaxStale"/> is <see langword="null"/>, the client
     /// accepts a response of any staleness.
     /// </summary>
-    public bool HasMaxStale => (flags & HttpCacheControlFlags.MaxStale) != 0;
+    public bool HasMaxStale => (_flags & HttpCacheControlFlags.MaxStale) != 0;
 
     /// <summary>Gets the <c>max-age</c> directive value, or <see langword="null"/> when absent.</summary>
     public TimeSpan? MaxAge { get; }
@@ -126,28 +126,28 @@ public readonly struct HttpCacheControl
     /// Gets the field names carried by a response <c>no-cache="&#8230;"</c> argument. Empty when the
     /// directive is absent or carries no argument.
     /// </summary>
-    public IReadOnlyList<string> NoCacheFields => noCacheFields ?? (IReadOnlyList<string>)Array.Empty<string>();
+    public IReadOnlyList<string> NoCacheFields => _noCacheFields ?? (IReadOnlyList<string>)Array.Empty<string>();
 
     /// <summary>
     /// Gets the field names carried by a response <c>private="&#8230;"</c> argument. Empty when the
     /// directive is absent or carries no argument.
     /// </summary>
-    public IReadOnlyList<string> PrivateFields => privateFields ?? (IReadOnlyList<string>)Array.Empty<string>();
+    public IReadOnlyList<string> PrivateFields => _privateFields ?? (IReadOnlyList<string>)Array.Empty<string>();
 
     /// <summary>
     /// Gets the unrecognized extension directives (RFC 9111 &#167; 5.2.3) preserved from the field.
     /// </summary>
     public IReadOnlyList<HttpCacheControlExtension> Extensions
-        => extensions ?? (IReadOnlyList<HttpCacheControlExtension>)Array.Empty<HttpCacheControlExtension>();
+        => _extensions ?? (IReadOnlyList<HttpCacheControlExtension>)Array.Empty<HttpCacheControlExtension>();
 
     /// <summary>
     /// Gets a value indicating whether no directives at all are present (a default-constructed value).
     /// </summary>
     public bool IsEmpty
-        => flags == HttpCacheControlFlags.None
+        => _flags == HttpCacheControlFlags.None
         && MaxAge is null && SharedMaxAge is null && MinFresh is null && MaxStale is null
         && StaleWhileRevalidate is null && StaleIfError is null
-        && noCacheFields is null && privateFields is null && extensions is null;
+        && _noCacheFields is null && _privateFields is null && _extensions is null;
 
     private string DebuggerDisplay => IsEmpty ? "<empty>" : ToString();
 
@@ -441,9 +441,9 @@ public readonly struct HttpCacheControl
         AppendDelta(builder, "stale-while-revalidate", StaleWhileRevalidate);
         AppendDelta(builder, "stale-if-error", StaleIfError);
 
-        if (extensions is not null)
+        if (_extensions is not null)
         {
-            foreach (HttpCacheControlExtension extension in extensions)
+            foreach (HttpCacheControlExtension extension in _extensions)
             {
                 Separate(builder);
                 builder.Append(extension.Name);
@@ -474,7 +474,7 @@ public readonly struct HttpCacheControl
         }
         Separate(builder);
         builder.Append("no-cache");
-        AppendFieldList(builder, noCacheFields);
+        AppendFieldList(builder, _noCacheFields);
     }
 
     private void AppendPrivate(StringBuilder builder)
@@ -485,7 +485,7 @@ public readonly struct HttpCacheControl
         }
         Separate(builder);
         builder.Append("private");
-        AppendFieldList(builder, privateFields);
+        AppendFieldList(builder, _privateFields);
     }
 
     private static void AppendFieldList(StringBuilder builder, string[]? fields)

@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
@@ -10,9 +13,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
-	</ItemGroup>
-	<ItemGroup>
-		<InternalsVisibleTo Include="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Tests" />
 	</ItemGroup>
 	<ItemGroup>
 		<None

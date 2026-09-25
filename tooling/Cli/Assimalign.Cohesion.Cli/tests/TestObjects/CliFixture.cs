@@ -6,6 +6,8 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Cli.Internal;
+
 namespace Assimalign.Cohesion.Cli.Tests;
 
 internal sealed class CliFixture : IDisposable
@@ -99,11 +101,22 @@ internal sealed class RecordingProcessRunner : IProcessRunner
     }
 }
 
-internal sealed class TestHttpHandler(
-    Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler) : HttpMessageHandler
+internal sealed class TestHttpHandler : HttpMessageHandler
 {
+    private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handler;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TestHttpHandler"/> class.
+    /// </summary>
+    /// <param name="handler">The delegate that produces the response for each sent request.</param>
+    public TestHttpHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler)
+    {
+        _handler = handler;
+    }
+
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-        handler(request, cancellationToken);
+        _handler(request, cancellationToken);
 }
 
 internal sealed class TestClock : TimeProvider

@@ -4,6 +4,8 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Cli.Internal;
+
 namespace Assimalign.Cohesion.Cli;
 
 internal static class Program

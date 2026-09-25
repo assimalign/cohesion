@@ -2,7 +2,7 @@ using System;
 using System.Globalization;
 using System.Text;
 
-namespace Assimalign.Cohesion.Security.DataProtection;
+namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 
 /// <summary>
 /// Serializes a <see cref="ManagedKey"/> to and from the opaque bytes of a

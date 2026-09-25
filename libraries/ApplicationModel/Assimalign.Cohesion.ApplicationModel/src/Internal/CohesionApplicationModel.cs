@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
-namespace Assimalign.Cohesion.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
 /// <summary>
 /// The default <see cref="IApplicationModel"/>. <see cref="Descriptors"/> is authoritative;

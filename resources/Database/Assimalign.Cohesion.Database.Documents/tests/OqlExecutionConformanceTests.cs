@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 /// <summary>Measures every advertised OQL clause through a real document session.</summary>
 public sealed class OqlExecutionConformanceTests
 {
-    private static readonly IReadOnlyDictionary<string, ExecutionCase[]> Cases =
+    private static readonly IReadOnlyDictionary<string, ExecutionCase[]> _cases =
         new Dictionary<string, ExecutionCase[]>(StringComparer.OrdinalIgnoreCase)
         {
             [OqlClauses.Select] =
@@ -84,7 +84,7 @@ public sealed class OqlExecutionConformanceTests
 
         foreach (string clause in profile.Clauses)
         {
-            foreach (var execution in Cases[clause])
+            foreach (var execution in _cases[clause])
             {
                 string context = $"OQL clause '{clause}': {execution.Statement}";
                 var parsed = new OqlQueryParser().Parse(execution.Statement).ShouldBeOfType<OqlQueryStatement>();
@@ -157,10 +157,10 @@ public sealed class OqlExecutionConformanceTests
         profile.Clauses.ShouldNotBeEmpty();
         foreach (string clause in profile.Clauses)
         {
-            Cases.TryGetValue(clause, out var executions).ShouldBeTrue($"Advertised OQL clause '{clause}' has no execution case.");
+            _cases.TryGetValue(clause, out var executions).ShouldBeTrue($"Advertised OQL clause '{clause}' has no execution case.");
             executions.ShouldNotBeNull().ShouldNotBeEmpty($"Advertised OQL clause '{clause}' has no execution case.");
         }
-        Cases.Keys.Except(profile.Clauses, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty("Retired capabilities must not remain positive conformance cases.");
+        _cases.Keys.Except(profile.Clauses, StringComparer.OrdinalIgnoreCase).ShouldBeEmpty("Retired capabilities must not remain positive conformance cases.");
     }
 
     private static bool ContainsClause(OqlExpression expression, string clause) => clause switch

@@ -3,6 +3,8 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Client.Internal;
+
 namespace Assimalign.Cohesion.Database.Client;
 
 /// <summary>Executes streaming model responses using leases owned by the returned streams.</summary>

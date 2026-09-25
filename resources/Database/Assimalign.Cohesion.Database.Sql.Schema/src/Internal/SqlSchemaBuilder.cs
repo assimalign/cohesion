@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq.Expressions;
 
-namespace Assimalign.Cohesion.Database.Sql.Schema;
+namespace Assimalign.Cohesion.Database.Sql.Schema.Internal;
 
-internal sealed class SqlSchemaBuilder(string name) : ISqlSchemaBuilder
+internal sealed class SqlSchemaBuilder : ISqlSchemaBuilder
 {
     private readonly List<ISqlSchemaType> _types = [];
     private readonly List<ISqlSchemaTable> _tables = [];
@@ -13,6 +13,16 @@ internal sealed class SqlSchemaBuilder(string name) : ISqlSchemaBuilder
     private readonly List<ISqlSchemaTrigger> _triggers = [];
     private readonly List<ISqlSchemaPrincipal> _principals = [];
     private readonly List<ISqlSchemaExtension> _extensions = [];
+    private readonly string _name;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SqlSchemaBuilder"/> class.
+    /// </summary>
+    /// <param name="name">The name of the schema the builder produces.</param>
+    public SqlSchemaBuilder(string name)
+    {
+        _name = name;
+    }
 
     public bool AllowsDestructiveChanges { get; private set; }
 
@@ -77,7 +87,7 @@ internal sealed class SqlSchemaBuilder(string name) : ISqlSchemaBuilder
             Snapshot(_triggers),
             Snapshot(_principals),
             Snapshot(_extensions),
-            name);
+            _name);
 
     private void AddFunction(string name, LambdaExpression body)
     {
@@ -100,9 +110,18 @@ internal sealed record SqlSchemaModel(
     IReadOnlyList<ISqlSchemaExtension> Extensions,
     string Name) : ISqlSchema;
 
-internal sealed class SqlSchemaTypeBuilder(Type clrType) : ISqlTypeBuilder
+internal sealed class SqlSchemaTypeBuilder : ISqlTypeBuilder
 {
-    private readonly Type _clrType = clrType;
+    private readonly Type _clrType;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SqlSchemaTypeBuilder"/> class.
+    /// </summary>
+    /// <param name="clrType">The CLR type whose SQL type mapping the builder configures.</param>
+    public SqlSchemaTypeBuilder(Type clrType)
+    {
+        _clrType = clrType;
+    }
 
     public int? Precision { get; private set; }
 
@@ -131,12 +150,22 @@ internal sealed record SqlSchemaType(
     int? Precision,
     int? Scale) : ISqlSchemaType;
 
-internal sealed class SqlSchemaTableBuilder<TRow>(string name) : ISqlTableBuilder<TRow>
+internal sealed class SqlSchemaTableBuilder<TRow> : ISqlTableBuilder<TRow>
 {
     private readonly List<string> _columns = [];
     private readonly List<ISqlSchemaColumn> _columnDefinitions = [];
     private readonly List<string> _indexes = [];
     private readonly List<ISqlSchemaReference> _references = [];
+    private readonly string _name;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SqlSchemaTableBuilder{TRow}"/> class.
+    /// </summary>
+    /// <param name="name">The name of the table the builder produces.</param>
+    public SqlSchemaTableBuilder(string name)
+    {
+        _name = name;
+    }
 
     private string? PrimaryKey { get; set; }
 
@@ -157,7 +186,7 @@ internal sealed class SqlSchemaTableBuilder<TRow>(string name) : ISqlTableBuilde
 
     internal ISqlSchemaTable Build()
         => new SqlSchemaTable(
-            name,
+            _name,
             typeof(TRow),
             Array.AsReadOnly(_columns.ToArray()),
             Array.AsReadOnly(_columnDefinitions.ToArray()),
@@ -218,11 +247,20 @@ internal sealed record SqlSchemaTrigger(
     SqlTriggerEvent Event,
     LambdaExpression Body) : ISqlSchemaTrigger;
 
-internal sealed class SqlSchemaPrincipalBuilder(string name) : ISqlPrincipalBuilder
+internal sealed class SqlSchemaPrincipalBuilder : ISqlPrincipalBuilder
 {
     private readonly List<ISqlSchemaGrant> _grants = [];
 
-    private readonly string _name = name;
+    private readonly string _name;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SqlSchemaPrincipalBuilder"/> class.
+    /// </summary>
+    /// <param name="name">The name of the principal the builder produces.</param>
+    public SqlSchemaPrincipalBuilder(string name)
+    {
+        _name = name;
+    }
 
     public void Grant(SqlPermission permission, params string[] objects)
     {

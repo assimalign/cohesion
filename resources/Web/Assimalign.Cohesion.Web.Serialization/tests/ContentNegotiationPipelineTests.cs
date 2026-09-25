@@ -24,13 +24,13 @@ namespace Assimalign.Cohesion.Web.Serialization.Tests;
 /// </summary>
 public class ContentNegotiationPipelineTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Serialization] - Negotiated pipeline: Should serialize the accepted media type and stamp Vary: Accept")]
     public async Task Pipeline_AcceptableRequest_ShouldWriteNegotiatedBodyAndVary()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -63,7 +63,7 @@ public class ContentNegotiationPipelineTests
     public async Task Pipeline_UnacceptableRequest_ShouldComposeBodyless406()
     {
         // Arrange — only JSON is registered; a client that accepts XML only cannot be served.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -94,7 +94,7 @@ public class ContentNegotiationPipelineTests
     public async Task Pipeline_ExistingVary_ShouldAppendAcceptWithoutClobbering()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -124,7 +124,7 @@ public class ContentNegotiationPipelineTests
     public async Task Pipeline_TryNegotiateContentType_ShouldResolveFromTheExchange()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();

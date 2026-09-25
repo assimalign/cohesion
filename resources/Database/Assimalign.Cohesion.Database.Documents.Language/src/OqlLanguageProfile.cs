@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// </remarks>
 public static class OqlLanguageProfile
 {
-    private static readonly string[] Keywords =
+    private static readonly string[] _keywords =
     [
         // Query
         "SELECT", "FROM", "WHERE",
@@ -37,7 +37,7 @@ public static class OqlLanguageProfile
         "TYPEOF",
     ];
 
-    private static readonly string[] Functions =
+    private static readonly string[] _functions =
     [
         // Aggregate
         "COUNT", "SUM", "AVG", "MIN", "MAX",
@@ -48,7 +48,7 @@ public static class OqlLanguageProfile
         "LISTTOSET", "UNIQUE",
     ];
 
-    private static readonly string[] Clauses =
+    private static readonly string[] _clauses =
     [
         OqlClauses.CreateIndex,
         OqlClauses.DropIndex,
@@ -63,7 +63,7 @@ public static class OqlLanguageProfile
     /// <summary>Gets the OQL language profile used by document-model statement consumers.</summary>
     public static QueryLanguageProfile Instance { get; } = new(
         "OQL",
-        Keywords,
-        Functions,
-        Clauses);
+        _keywords,
+        _functions,
+        _clauses);
 }

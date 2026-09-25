@@ -228,41 +228,52 @@ public sealed class FileSystemDurabilityTests
         public void Insert(IStorageTransaction transaction, byte[] data) => InsertRecord(transaction, data);
     }
 
-    private sealed class RecordingHandle(IFileSystemFileHandle inner) : IFileSystemFileHandle
+    private sealed class RecordingHandle : IFileSystemFileHandle
     {
+        private readonly IFileSystemFileHandle _inner;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RecordingHandle"/> class.
+        /// </summary>
+        /// <param name="inner">The file handle every recorded operation is forwarded to.</param>
+        public RecordingHandle(IFileSystemFileHandle inner)
+        {
+            _inner = inner;
+        }
+
         public int DurableFlushRequests { get; private set; }
         public int CompletedDurableFlushes { get; private set; }
         public List<long> ReadOffsets { get; } = new();
         public List<long> WriteOffsets { get; } = new();
         public int MaximumReadSize { get; set; } = int.MaxValue;
-        public long Length => inner.Length;
-        public bool SupportsDurableFlush => inner.SupportsDurableFlush;
+        public long Length => _inner.Length;
+        public bool SupportsDurableFlush => _inner.SupportsDurableFlush;
 
         public int Read(Span<byte> buffer, long offset)
         {
             ReadOffsets.Add(offset);
-            return inner.Read(buffer[..Math.Min(buffer.Length, MaximumReadSize)], offset);
+            return _inner.Read(buffer[..Math.Min(buffer.Length, MaximumReadSize)], offset);
         }
 
         public ValueTask<int> ReadAsync(Memory<byte> buffer, long offset, CancellationToken cancellationToken = default)
         {
             ReadOffsets.Add(offset);
-            return inner.ReadAsync(buffer[..Math.Min(buffer.Length, MaximumReadSize)], offset, cancellationToken);
+            return _inner.ReadAsync(buffer[..Math.Min(buffer.Length, MaximumReadSize)], offset, cancellationToken);
         }
 
         public void Write(ReadOnlySpan<byte> buffer, long offset)
         {
             WriteOffsets.Add(offset);
-            inner.Write(buffer, offset);
+            _inner.Write(buffer, offset);
         }
 
         public ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, long offset, CancellationToken cancellationToken = default)
         {
             WriteOffsets.Add(offset);
-            return inner.WriteAsync(buffer, offset, cancellationToken);
+            return _inner.WriteAsync(buffer, offset, cancellationToken);
         }
 
-        public void SetLength(long length) => inner.SetLength(length);
+        public void SetLength(long length) => _inner.SetLength(length);
 
         public void Flush(bool durable)
         {
@@ -270,7 +281,7 @@ public sealed class FileSystemDurabilityTests
             {
                 DurableFlushRequests++;
             }
-            inner.Flush(durable);
+            _inner.Flush(durable);
             if (durable)
             {
                 CompletedDurableFlushes++;
@@ -283,65 +294,93 @@ public sealed class FileSystemDurabilityTests
             {
                 DurableFlushRequests++;
             }
-            await inner.FlushAsync(durable, cancellationToken);
+            await _inner.FlushAsync(durable, cancellationToken);
             if (durable)
             {
                 CompletedDurableFlushes++;
             }
         }
 
-        public void Dispose() => inner.Dispose();
-        public ValueTask DisposeAsync() => inner.DisposeAsync();
+        public void Dispose() => _inner.Dispose();
+        public ValueTask DisposeAsync() => _inner.DisposeAsync();
     }
 
-    private sealed class RecordingFileSystem(IFileSystem inner) : IFileSystem
+    private sealed class RecordingFileSystem : IFileSystem
     {
-        public List<(string Path, FileMode Mode, FileAccess Access, FileShare Share, RecordingHandle Handle)> Opened { get; } = new();
-        public Size Size => inner.Size;
-        public Size SpaceAvailable => inner.SpaceAvailable;
-        public Size SpaceUsed => inner.SpaceUsed;
-        public string Name => inner.Name;
-        public bool IsReadOnly => inner.IsReadOnly;
-        public IFileSystemDirectory RootDirectory => inner.RootDirectory;
-        public bool Exists(FileSystemPath path) => inner.Exists(path);
-        public IFileSystemEventToken Watch(Glob? pattern) => inner.Watch(pattern);
-        public IEnumerable<IFileSystemInfo> EnumerateFileSystem(FileSystemEnumerationOptions? options = default) => inner.EnumerateFileSystem(options);
-        public IFileSystemDirectory GetDirectory(FileSystemPath path) => inner.GetDirectory(path);
-        public IFileSystemFile GetFile(FileSystemPath path) => new RecordingFile(this, inner.GetFile(path), path);
-        public IFileSystemInfo GetInfo(FileSystemPath path) => inner.GetInfo(path);
-        public IFileSystemDirectory CreateDirectory(FileSystemPath path) => inner.CreateDirectory(path);
-        public IFileSystemFile CreateFile(FileSystemPath path) => new RecordingFile(this, inner.CreateFile(path), path);
-        public void DeleteDirectory(FileSystemPath path) => inner.DeleteDirectory(path);
-        public void DeleteFile(FileSystemPath path) => inner.DeleteFile(path);
-        public void CopyFile(FileSystemPath source, FileSystemPath destination) => inner.CopyFile(source, destination);
-        public void Move(FileSystemPath source, FileSystemPath destination) => inner.Move(source, destination);
-        public IEnumerator<IFileSystemInfo> GetEnumerator() => inner.GetEnumerator();
-        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-        public void Dispose() => inner.Dispose();
-        public ValueTask DisposeAsync() => inner.DisposeAsync();
+        private readonly IFileSystem _inner;
 
-        private sealed class RecordingFile(RecordingFileSystem owner, IFileSystemFile innerFile, FileSystemPath requestedPath) : IFileSystemFile
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RecordingFileSystem"/> class.
+        /// </summary>
+        /// <param name="inner">The file system every operation is forwarded to.</param>
+        public RecordingFileSystem(IFileSystem inner)
         {
-            public Size Size => innerFile.Size;
-            public FileName Name => innerFile.Name;
-            public IFileSystemDirectory Directory => innerFile.Directory;
-            public FileSystemPath Path => innerFile.Path;
-            public DateTime CreatedOn => innerFile.CreatedOn;
-            public DateTime UpdatedOn => innerFile.UpdatedOn;
-            public DateTime AccessedOn => innerFile.AccessedOn;
-            public FileAttributes Attributes => innerFile.Attributes;
-            public IFileSystem FileSystem => owner;
-            public void SetAttributes(FileAttributes attributes) => innerFile.SetAttributes(attributes);
-            public IFileSystemEventToken Watch() => innerFile.Watch();
-            public Stream Open() => innerFile.Open();
-            public Stream Open(FileMode fileMode) => innerFile.Open(fileMode);
-            public Stream Open(FileMode fileMode, FileAccess fileAccess) => innerFile.Open(fileMode, fileAccess);
-            public Stream Open(FileMode fileMode, FileAccess fileAccess, FileShare fileShare) => innerFile.Open(fileMode, fileAccess, fileShare);
+            _inner = inner;
+        }
+
+        public List<(string Path, FileMode Mode, FileAccess Access, FileShare Share, RecordingHandle Handle)> Opened { get; } = new();
+        public Size Size => _inner.Size;
+        public Size SpaceAvailable => _inner.SpaceAvailable;
+        public Size SpaceUsed => _inner.SpaceUsed;
+        public string Name => _inner.Name;
+        public bool IsReadOnly => _inner.IsReadOnly;
+        public IFileSystemDirectory RootDirectory => _inner.RootDirectory;
+        public bool Exists(FileSystemPath path) => _inner.Exists(path);
+        public IFileSystemEventToken Watch(Glob? pattern) => _inner.Watch(pattern);
+        public IEnumerable<IFileSystemInfo> EnumerateFileSystem(FileSystemEnumerationOptions? options = default) => _inner.EnumerateFileSystem(options);
+        public IFileSystemDirectory GetDirectory(FileSystemPath path) => _inner.GetDirectory(path);
+        public IFileSystemFile GetFile(FileSystemPath path) => new RecordingFile(this, _inner.GetFile(path), path);
+        public IFileSystemInfo GetInfo(FileSystemPath path) => _inner.GetInfo(path);
+        public IFileSystemDirectory CreateDirectory(FileSystemPath path) => _inner.CreateDirectory(path);
+        public IFileSystemFile CreateFile(FileSystemPath path) => new RecordingFile(this, _inner.CreateFile(path), path);
+        public void DeleteDirectory(FileSystemPath path) => _inner.DeleteDirectory(path);
+        public void DeleteFile(FileSystemPath path) => _inner.DeleteFile(path);
+        public void CopyFile(FileSystemPath source, FileSystemPath destination) => _inner.CopyFile(source, destination);
+        public void Move(FileSystemPath source, FileSystemPath destination) => _inner.Move(source, destination);
+        public IEnumerator<IFileSystemInfo> GetEnumerator() => _inner.GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+        public void Dispose() => _inner.Dispose();
+        public ValueTask DisposeAsync() => _inner.DisposeAsync();
+
+        private sealed class RecordingFile : IFileSystemFile
+        {
+            private readonly RecordingFileSystem _owner;
+            private readonly IFileSystemFile _innerFile;
+            private readonly FileSystemPath _requestedPath;
+
+            /// <summary>
+            /// Initializes a new instance of the <see cref="RecordingFile"/> class.
+            /// </summary>
+            /// <param name="owner">The recording file system that reports itself as this file's owner and records opened handles.</param>
+            /// <param name="innerFile">The file every operation is forwarded to.</param>
+            /// <param name="requestedPath">The path the caller requested, recorded with each opened handle.</param>
+            public RecordingFile(RecordingFileSystem owner, IFileSystemFile innerFile, FileSystemPath requestedPath)
+            {
+                _owner = owner;
+                _innerFile = innerFile;
+                _requestedPath = requestedPath;
+            }
+
+            public Size Size => _innerFile.Size;
+            public FileName Name => _innerFile.Name;
+            public IFileSystemDirectory Directory => _innerFile.Directory;
+            public FileSystemPath Path => _innerFile.Path;
+            public DateTime CreatedOn => _innerFile.CreatedOn;
+            public DateTime UpdatedOn => _innerFile.UpdatedOn;
+            public DateTime AccessedOn => _innerFile.AccessedOn;
+            public FileAttributes Attributes => _innerFile.Attributes;
+            public IFileSystem FileSystem => _owner;
+            public void SetAttributes(FileAttributes attributes) => _innerFile.SetAttributes(attributes);
+            public IFileSystemEventToken Watch() => _innerFile.Watch();
+            public Stream Open() => _innerFile.Open();
+            public Stream Open(FileMode fileMode) => _innerFile.Open(fileMode);
+            public Stream Open(FileMode fileMode, FileAccess fileAccess) => _innerFile.Open(fileMode, fileAccess);
+            public Stream Open(FileMode fileMode, FileAccess fileAccess, FileShare fileShare) => _innerFile.Open(fileMode, fileAccess, fileShare);
 
             public IFileSystemFileHandle OpenHandle(FileMode fileMode, FileAccess fileAccess, FileShare fileShare)
             {
-                var handle = new RecordingHandle(innerFile.OpenHandle(fileMode, fileAccess, fileShare));
-                owner.Opened.Add((requestedPath.ToString(), fileMode, fileAccess, fileShare, handle));
+                var handle = new RecordingHandle(_innerFile.OpenHandle(fileMode, fileAccess, fileShare));
+                _owner.Opened.Add((_requestedPath.ToString(), fileMode, fileAccess, fileShare, handle));
                 return handle;
             }
         }

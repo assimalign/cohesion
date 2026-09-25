@@ -8,19 +8,19 @@ using Assimalign.Cohesion.DependencyInjection.Properties;
 internal sealed class CallSiteValidatorVisitor : CallSiteVisitor<CallSiteValidatorVisitor.CallSiteValidatorState, Type?>
 {
     // Keys are services being resolved via GetService, values - first scoped service in their call site tree
-    private readonly ConcurrentDictionary<Type, Type> scopedServices = new();
+    private readonly ConcurrentDictionary<Type, Type> _scopedServices = new();
 
     public void ValidateCallSite(CallSiteService callSite)
     {
         var scoped = VisitCallSite(callSite, default);
         if (scoped != null)
         {
-            scopedServices[callSite.ServiceType] = scoped;
+            _scopedServices[callSite.ServiceType] = scoped;
         }
     }
     public void ValidateResolution(Type serviceType, IServiceScope scope, IServiceScope rootScope)
     {
-        if (ReferenceEquals(scope, rootScope) && scopedServices.TryGetValue(serviceType, out Type? scopedService))
+        if (ReferenceEquals(scope, rootScope) && _scopedServices.TryGetValue(serviceType, out Type? scopedService))
         {
             if (serviceType == scopedService)
             {

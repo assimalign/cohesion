@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Connections.Security.Tests;
 
 public class TlsConnectionExtensionsTests : IClassFixture<TestCertificateFixture>
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     private readonly TestCertificateFixture _fixture;
 
@@ -46,7 +46,7 @@ public class TlsConnectionExtensionsTests : IClassFixture<TestCertificateFixture
     public async Task UseTls_OnListener_ShouldSecureAcceptedConnections()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
         TestConnectionListener listener = new();
         listener.Enqueue(server);
@@ -91,7 +91,7 @@ public class TlsConnectionExtensionsTests : IClassFixture<TestCertificateFixture
     public async Task UseTls_OnFactory_ShouldSecureEstablishedConnections()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
         TestConnectionFactory factory = new();
         factory.Enqueue(client);

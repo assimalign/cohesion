@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Connections.Security.Tests;
 
 public class TlsConnectionLayerTests : IClassFixture<TestCertificateFixture>
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     private readonly TestCertificateFixture _fixture;
 
@@ -42,7 +42,7 @@ public class TlsConnectionLayerTests : IClassFixture<TestCertificateFixture>
     public async Task UpgradeAsync_WithServerOptions_ShouldCompleteServerSideHandshake()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
         TlsConnectionLayer layer = new(new TlsServerOptions
         {

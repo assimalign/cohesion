@@ -14,13 +14,13 @@ namespace Assimalign.Cohesion.Connections.NamedPipes.Tests;
 
 public class NamedPipeConnectionListenerTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     [Fact(DisplayName = "Cohesion Test [Connections.NamedPipes] - BindAsync: Should reserve the pipe before accepting")]
     public async Task BindAsync_BeforeAccept_ShouldReservePipeAndAcceptConnection()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         NamedPipeEndPoint endPoint = new(NamedPipeTestName.Create());
         await using NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(
             options => options.EndPoint = endPoint);
@@ -143,7 +143,7 @@ public class NamedPipeConnectionListenerTests
     public async Task DisposeAsync_WithPendingAccept_ShouldUnblockAccept()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(
             options => options.EndPoint = new NamedPipeEndPoint(NamedPipeTestName.Create()));
@@ -186,7 +186,7 @@ public class NamedPipeConnectionListenerTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         NamedPipeEndPoint endPoint = new(NamedPipeTestName.Create());
 
         PipeSecurity security = new();

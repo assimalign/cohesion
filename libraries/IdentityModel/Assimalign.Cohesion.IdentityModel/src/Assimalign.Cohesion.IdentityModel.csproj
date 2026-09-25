@@ -1,11 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.IdentityModel</RootNamespace>
+  </PropertyGroup>
   <ItemGroup>
     <!-- shared\ModelSnapshot.cs is this project's own shared source: a stateless static
          helper compiled into each protocol assembly that materializes models. It sits
          outside src\, so this project links it in the same way its siblings do. -->
     <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" />
-  </ItemGroup>
-  <ItemGroup>
-    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Tests" />
   </ItemGroup>
 </Project>

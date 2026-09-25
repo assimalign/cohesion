@@ -5,8 +5,19 @@ using Assimalign.Cohesion.ApplicationModel;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
-internal sealed class StoreEndpointResolver(ResourceEndpoint endpoint) : IExternalResourceResolver
+internal sealed class StoreEndpointResolver : IExternalResourceResolver
 {
+    private readonly ResourceEndpoint _endpoint;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="StoreEndpointResolver"/> class.
+    /// </summary>
+    /// <param name="endpoint">The endpoint every resolution returns.</param>
+    public StoreEndpointResolver(ResourceEndpoint endpoint)
+    {
+        _endpoint = endpoint;
+    }
+
     public int CallCount { get; private set; }
 
     public ValueTask<ExternalResourceResolution> ResolveAsync(
@@ -15,7 +26,7 @@ internal sealed class StoreEndpointResolver(ResourceEndpoint endpoint) : IExtern
     {
         cancellationToken.ThrowIfCancellationRequested();
         CallCount++;
-        return ValueTask.FromResult(new ExternalResourceResolution(true, [endpoint]));
+        return ValueTask.FromResult(new ExternalResourceResolution(true, [_endpoint]));
     }
 }
 

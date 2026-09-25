@@ -13,6 +13,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;

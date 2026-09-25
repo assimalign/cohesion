@@ -12,6 +12,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Cli.Internal;
+
 namespace Assimalign.Cohesion.Cli.Tests;
 
 /// <summary>Tests the gateway's local wire contracts and read-only status requests.</summary>

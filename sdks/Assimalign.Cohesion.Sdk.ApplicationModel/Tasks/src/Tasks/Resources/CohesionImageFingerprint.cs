@@ -8,6 +8,8 @@ using System.Text.Json;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 
+using Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.Internal;
+
 namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tasks;
 
 /// <summary>Hashes evaluated publish inputs and validates the cached image before an incremental skip.</summary>

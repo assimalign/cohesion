@@ -11,20 +11,20 @@ namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 
 internal class SocketPipeScheduler : PipeScheduler, IThreadPoolWorkItem
 {
-    private readonly ConcurrentQueue<Work> queue;
-    private int active;
+    private readonly ConcurrentQueue<Work> _queue;
+    private int _active;
 
     public SocketPipeScheduler()
     {
-        this.queue = new ConcurrentQueue<Work>();
+        this._queue = new ConcurrentQueue<Work>();
     }
 
     public override void Schedule(Action<object>? action, object? state)
     {
-        queue.Enqueue(new Work(action!, state!));
+        _queue.Enqueue(new Work(action!, state!));
 
         // Set working if it wasn't (via atomic Interlocked).
-        if (Interlocked.CompareExchange(ref active, 1, 0) == 0)
+        if (Interlocked.CompareExchange(ref _active, 1, 0) == 0)
         {
             // Wasn't working, schedule.
             System.Threading.ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
@@ -35,7 +35,7 @@ internal class SocketPipeScheduler : PipeScheduler, IThreadPoolWorkItem
     {
         while (true)
         {
-            while (queue.TryDequeue(out Work item))
+            while (_queue.TryDequeue(out Work item))
             {
                 item.Callback(item.State);
             }
@@ -44,21 +44,21 @@ internal class SocketPipeScheduler : PipeScheduler, IThreadPoolWorkItem
 
             // Set 'active' (0 == false) prior to checking IsEmpty to catch any missed work in interim.
             // This doesn't need to be volatile due to the following barrier (i.e. it is volatile).
-            active = 0;
+            _active = 0;
 
             // Ensure 'active' is written before IsEmpty is read.
             // As they are two different memory locations, we insert a barrier to guarantee ordering.
             Thread.MemoryBarrier();
 
             // Check if there is work to do
-            if (queue.IsEmpty)
+            if (_queue.IsEmpty)
             {
                 // Nothing to do, exit.
                 break;
             }
 
             // Is work, can we set it as active again (via atomic Interlocked), prior to scheduling?
-            if (Interlocked.Exchange(ref active, 1) == 1)
+            if (Interlocked.Exchange(ref _active, 1) == 1)
             {
                 // Execute has been rescheduled already, exit.
                 break;

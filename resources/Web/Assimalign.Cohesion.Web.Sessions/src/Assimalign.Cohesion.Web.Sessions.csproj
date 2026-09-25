@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Sessions</RootNamespace>
 		<Description>Per-request HTTP session support for the Cohesion Web pipeline. UseSessions establishes a hardened session-id cookie (HttpOnly, SameSite=Lax, Secure on HTTPS, session-scoped) via the Http.Cookies model, installs a store-backed session on the exchange lazily on first access, and commits it after the pipeline unwinds — over the async Http.Sessions store seam (IHttpSessionStore) with an in-memory default. Sliding idle expiration is renew-on-access; a cryptographically random session id plus a regeneration API defend against post-authentication fixation. Concrete distributed backends are deferred to store adapters.</Description>
 	</PropertyGroup>
 	<ItemGroup>

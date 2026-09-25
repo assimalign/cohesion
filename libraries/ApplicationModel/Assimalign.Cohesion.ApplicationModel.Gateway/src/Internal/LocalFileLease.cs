@@ -4,7 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 /// <summary>
 /// Holds a cooperative process-local and cross-process lease on a stable sidecar file.
@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// </summary>
 internal sealed class LocalFileLease : IDisposable
 {
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> ProcessGates =
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _processGates =
         new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
     private readonly FileStream _stream;
@@ -34,7 +34,7 @@ internal sealed class LocalFileLease : IDisposable
     {
         string fullPath = Path.GetFullPath(path);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-        SemaphoreSlim processGate = ProcessGates.GetOrAdd(
+        SemaphoreSlim processGate = _processGates.GetOrAdd(
             fullPath,
             static _ => new SemaphoreSlim(1, 1));
         bool processGateHeld;

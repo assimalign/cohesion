@@ -6,7 +6,7 @@ using System.Text;
 
 using Assimalign.Cohesion.IdentityHub;
 
-namespace Assimalign.Cohesion.IdentityHub.Hosting;
+namespace Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 
 internal sealed class IdentityHubClientRegistration
 {

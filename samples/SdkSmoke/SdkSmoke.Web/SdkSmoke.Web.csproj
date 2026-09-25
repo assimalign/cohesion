@@ -1,5 +1,6 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Web">
   <PropertyGroup>
+    <RootNamespace>SdkSmoke.Web</RootNamespace>
     <IsPackable>false</IsPackable>
     
   </PropertyGroup>

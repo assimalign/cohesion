@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Api.Tests</RootNamespace>
 		<IsPackable>false</IsPackable>
 		<!-- Allow the Web.Api endpoint-binding generator's interceptors (typed Map* call sites). -->
 		<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>

@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.OpenTelemetry;
+namespace Assimalign.Cohesion.OpenTelemetry.Internal;
 
 internal sealed class HttpJsonLogExporter : IOtlpLogExporter
 {

@@ -21,7 +21,7 @@ public sealed partial class GatewayControlPlaneTests
     {
         // Arrange
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         var areaClient = new RecordingGatewayCommandClient { ExpectedScheme = "https" };
         var options = new ApplicationGatewayOptions { ExportDirectory = root };
         options.CommandClients.Add(areaClient);
@@ -64,7 +64,7 @@ public sealed partial class GatewayControlPlaneTests
     public async Task StartAsync_RemoteCommands_ShouldObserveAndRemoveThroughPeer()
     {
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         var areaClient = new RecordingGatewayCommandClient();
         var providerOptions = new ApplicationGatewayOptions { ExportDirectory = root };
         providerOptions.CommandClients.Add(areaClient);
@@ -126,7 +126,7 @@ public sealed partial class GatewayControlPlaneTests
     {
         // Arrange
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         var areaClient = new RecordingGatewayCommandClient();
         var options = new ApplicationGatewayOptions { ExportDirectory = root };
         options.CommandClients.Add(areaClient);
@@ -243,7 +243,7 @@ public sealed partial class GatewayControlPlaneTests
     public async Task Commands_AllowedKinds_ShouldEnforceBothMutations()
     {
         string root = CreateTestDirectory();
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         var areaClient = new RecordingGatewayCommandClient();
         var options = new ApplicationGatewayOptions { ExportDirectory = root };
         options.CommandClients.Add(areaClient);

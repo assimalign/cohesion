@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Catalog.Internal;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;

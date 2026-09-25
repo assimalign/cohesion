@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Sdk.LoadBalancer.Tasks</RootNamespace>
 		<PackageId>Assimalign.Cohesion.Sdk.LoadBalancer</PackageId>
 		<OutDir>$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Tasks</OutDir>
 	</PropertyGroup>

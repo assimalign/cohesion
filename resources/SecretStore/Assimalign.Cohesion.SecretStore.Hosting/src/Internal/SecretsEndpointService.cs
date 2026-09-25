@@ -22,7 +22,7 @@ using Assimalign.Cohesion.Web.Hosting;
 
 using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
-namespace Assimalign.Cohesion.SecretStore.Hosting;
+namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
 internal sealed class SecretsEndpointService : IHostService, IDisposable
 {

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.ConfigurationStore.Client.Tests</RootNamespace>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 

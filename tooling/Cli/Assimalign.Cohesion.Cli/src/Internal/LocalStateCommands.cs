@@ -13,11 +13,29 @@ using System.Text.Json.Serialization.Metadata;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Cli;
+namespace Assimalign.Cohesion.Cli.Internal;
 
-internal sealed class LocalStateCommands(
-    TextReader input, TextWriter output, HttpClient http, Func<string, string?> environment)
+internal sealed class LocalStateCommands
 {
+    private readonly TextReader _input;
+    private readonly TextWriter _output;
+    private readonly HttpClient _http;
+    private readonly Func<string, string?> _environment;
+
+    /// <summary>Initializes a new instance of the <see cref="LocalStateCommands"/> class.</summary>
+    /// <param name="input">The reader for standard input, used by parameter set --stdin.</param>
+    /// <param name="output">The writer for standard output.</param>
+    /// <param name="http">The HTTP client used for live control-plane status requests.</param>
+    /// <param name="environment">The environment variable reader used to resolve COHESION_TOKEN.</param>
+    public LocalStateCommands(
+        TextReader input, TextWriter output, HttpClient http, Func<string, string?> environment)
+    {
+        _input = input;
+        _output = output;
+        _http = http;
+        _environment = environment;
+    }
+
     internal async Task<int> ParameterAsync(Arguments args, string stateRoot, string app,
         CancellationToken cancellationToken = default)
     {
@@ -65,14 +83,14 @@ internal sealed class LocalStateCommands(
         {
             foreach (string key in parameters.Keys.Order(StringComparer.Ordinal))
             {
-                output.WriteLine(key);
+                _output.WriteLine(key);
             }
             return 0;
         }
         if (verb == "set")
         {
             parameters[name!] = stdin
-                ? await input.ReadToEndAsync(cancellationToken).ConfigureAwait(false)
+                ? await _input.ReadToEndAsync(cancellationToken).ConfigureAwait(false)
                 : value!;
         }
         else
@@ -118,10 +136,10 @@ internal sealed class LocalStateCommands(
         PortDocument ports = File.Exists(portsPath)
             ? Read(portsPath, StateJsonContext.Default.PortDocument) : new PortDocument();
         string ownerPath = Path.Combine(directory, ".state", "owner");
-        output.WriteLine($"Application: {app} ({export.Environment}, {export.Version})");
-        output.WriteLine("File status: declared endpoints and allocated ports, not observed resource state.");
-        output.WriteLine("Owner: " + (File.Exists(ownerPath) ? File.ReadAllText(ownerPath).Trim() : "(unavailable)"));
-        output.WriteLine("Allocated control-plane port: " + (ports.ControlPlane?.ToString() ?? "(unavailable)"));
+        _output.WriteLine($"Application: {app} ({export.Environment}, {export.Version})");
+        _output.WriteLine("File status: declared endpoints and allocated ports, not observed resource state.");
+        _output.WriteLine("Owner: " + (File.Exists(ownerPath) ? File.ReadAllText(ownerPath).Trim() : "(unavailable)"));
+        _output.WriteLine("Allocated control-plane port: " + (ports.ControlPlane?.ToString() ?? "(unavailable)"));
 
         Uri? endpoint = null;
         string? token = null;
@@ -133,7 +151,7 @@ internal sealed class LocalStateCommands(
                 throw new CliException("No control-plane.json; start the gateway before using status --live.");
             }
             endpoint = HttpEndpoint.Parse(Read(metadataPath, StateJsonContext.Default.ControlPlaneDocument).Url);
-            token = suppliedToken ?? environment("COHESION_TOKEN");
+            token = suppliedToken ?? _environment("COHESION_TOKEN");
             if (string.IsNullOrWhiteSpace(token))
             {
                 throw new CliException("status --live requires --token or COHESION_TOKEN. Use a trust issue --developer token for this application (a missing bearer header receives HTTP 401).");
@@ -150,14 +168,14 @@ internal sealed class LocalStateCommands(
             string pidPath = Path.Combine(directory, ".state", name, "pid");
             string liveness = File.Exists(pidPath)
                 ? GetLiveness(Read(pidPath, StateJsonContext.Default.ProcessDocument)) : "unavailable";
-            output.WriteLine($"{name}: kind={resource.Kind}, manifestHash={resource.ManifestHash}, local process={liveness}");
+            _output.WriteLine($"{name}: kind={resource.Kind}, manifestHash={resource.ManifestHash}, local process={liveness}");
             foreach (ExportEndpoint declared in resource.Endpoints ?? [])
             {
                 if (declared is null)
                 {
                     throw new CliException("export.json contains an invalid endpoint.");
                 }
-                output.WriteLine($"  declared {declared.Name}: internal={declared.Internal ?? "(none)"}, public={declared.Public ?? "(none)"}");
+                _output.WriteLine($"  declared {declared.Name}: internal={declared.Internal ?? "(none)"}, public={declared.Public ?? "(none)"}");
             }
             if ((ports.Resources ?? throw new CliException("ports.json has no resource allocation map."))
                 .TryGetValue(name, out Dictionary<string, int>? allocated))
@@ -165,7 +183,7 @@ internal sealed class LocalStateCommands(
                 foreach ((string key, int port) in (allocated ?? throw new CliException("Invalid port allocation map."))
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal))
                 {
-                    output.WriteLine($"  allocated {key}: {port}");
+                    _output.WriteLine($"  allocated {key}: {port}");
                 }
             }
             if (endpoint is not null)
@@ -173,7 +191,7 @@ internal sealed class LocalStateCommands(
                 using var request = new HttpRequestMessage(HttpMethod.Get,
                     new Uri(endpoint.AbsoluteUri.TrimEnd('/') + "/cohesion/v1/resources/" + Uri.EscapeDataString(name)));
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                using HttpResponseMessage response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
                 if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
                 {
                     throw new CliException($"status --live received HTTP {(int)response.StatusCode}. Use a trust issue --developer token for this application; IdentityHub login tokens are not accepted.");
@@ -190,14 +208,14 @@ internal sealed class LocalStateCommands(
                 {
                     throw new CliException("Control-plane response has no observed state.");
                 }
-                output.WriteLine($"  observed state: {observed.State}");
+                _output.WriteLine($"  observed state: {observed.State}");
                 foreach (ObservedEndpoint address in observed.Endpoints ?? [])
                 {
                     if (address is null)
                     {
                         throw new CliException("Control-plane response contains an invalid endpoint.");
                     }
-                    output.WriteLine($"  observed {address.Name}: {address.Address} (public={address.IsPublic})");
+                    _output.WriteLine($"  observed {address.Name}: {address.Address} (public={address.IsPublic})");
                 }
             }
         }

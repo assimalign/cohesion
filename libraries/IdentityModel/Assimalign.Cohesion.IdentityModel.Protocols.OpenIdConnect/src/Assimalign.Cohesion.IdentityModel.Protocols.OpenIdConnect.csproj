@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect</RootNamespace>
     <Description>OpenID Connect contract branch for Cohesion IdentityModel: provider and client metadata, authorization/token/ID token/UserInfo/logout contracts, and specification-oriented validation. Builds on Assimalign.Cohesion.IdentityModel.Protocols.</Description>
   </PropertyGroup>
   <ItemGroup>
@@ -10,8 +11,5 @@
          endpoint validation), compiled in as stateless statics. -->
     <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" />
     <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel.Protocols" />
-  </ItemGroup>
-  <ItemGroup>
-    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect.Tests" />
   </ItemGroup>
 </Project>

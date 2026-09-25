@@ -5,7 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 
-namespace Assimalign.Cohesion.OpenTelemetry;
+namespace Assimalign.Cohesion.OpenTelemetry.Internal;
 
 internal static class OtlpJsonEncoder
 {

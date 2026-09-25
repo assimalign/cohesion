@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+﻿namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class NullValidationRule<TValue> : ValidationRuleBase<TValue>
 {

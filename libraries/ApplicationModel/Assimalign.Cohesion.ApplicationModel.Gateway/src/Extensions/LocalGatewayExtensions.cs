@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
+
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>

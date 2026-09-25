@@ -1,6 +1,8 @@
 using System;
 using System.Net.Http;
 
+using Assimalign.Cohesion.Rezolvr.Client.Internal;
+
 namespace Assimalign.Cohesion.Rezolvr.Client;
 
 /// <summary>Creates clients for the Rezolvr resource's HTTP admin command endpoint.</summary>

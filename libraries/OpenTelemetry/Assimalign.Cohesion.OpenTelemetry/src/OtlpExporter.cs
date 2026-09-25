@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.OpenTelemetry.Internal;
+
 namespace Assimalign.Cohesion.OpenTelemetry;
 
 /// <summary>Constructs transport-only OTLP exporters.</summary>

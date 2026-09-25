@@ -5,8 +5,17 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Blob.Client.Tests;
 
-internal class GeneratedContentStream(long length) : Stream
+internal class GeneratedContentStream : Stream
 {
+    private readonly long _length;
+
+    /// <summary>Initializes a new instance of the <see cref="GeneratedContentStream"/> class.</summary>
+    /// <param name="length">The total number of generated content bytes the stream yields.</param>
+    public GeneratedContentStream(long length)
+    {
+        _length = length;
+    }
+
     internal long BytesRead { get; private set; }
     internal int LargestReadRequest { get; private set; }
     internal bool WasDisposed { get; private set; }
@@ -20,7 +29,7 @@ internal class GeneratedContentStream(long length) : Stream
     {
         cancellationToken.ThrowIfCancellationRequested();
         LargestReadRequest = Math.Max(LargestReadRequest, buffer.Length);
-        int count = (int)Math.Min(buffer.Length, length - BytesRead);
+        int count = (int)Math.Min(buffer.Length, _length - BytesRead);
         for (int index = 0; index < count; index++)
         {
             buffer.Span[index] = ContentByte(BytesRead + index);

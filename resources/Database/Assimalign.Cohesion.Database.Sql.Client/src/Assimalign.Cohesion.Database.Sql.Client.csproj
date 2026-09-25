@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Sql.Client</RootNamespace>
+	</PropertyGroup>
 	<!--
 		The typed SQL client: a thin relational surface (commands, typed result
 		sets, errors, telemetry) over the shared Database.Client core. It sends

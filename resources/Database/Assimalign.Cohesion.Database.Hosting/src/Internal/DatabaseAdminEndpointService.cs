@@ -19,7 +19,7 @@ using Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Web.Hosting.Health;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 
-namespace Assimalign.Cohesion.Database.Hosting;
+namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostService, IDisposable
 {

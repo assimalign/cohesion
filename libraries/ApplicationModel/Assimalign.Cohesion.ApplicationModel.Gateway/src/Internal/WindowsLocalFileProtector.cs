@@ -2,7 +2,7 @@ using System;
 using System.Security.Cryptography;
 using System.Runtime.Versioning;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 [SupportedOSPlatform("windows")]
 internal sealed class WindowsLocalFileProtector : ILocalFileProtector

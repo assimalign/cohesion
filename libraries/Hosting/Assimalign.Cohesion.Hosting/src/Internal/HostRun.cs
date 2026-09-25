@@ -3,7 +3,7 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Hosting;
+namespace Assimalign.Cohesion.Hosting.Internal;
 
 internal sealed class HostRun<TContext> : IHostRun
     where TContext : HostContext

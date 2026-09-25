@@ -8,7 +8,7 @@ using Assimalign.Cohesion.ConfigurationStore.Client;
 using HostCommand = Assimalign.Cohesion.Hosting.Resources.ResourceCommand;
 using ResourceCommand = Assimalign.Cohesion.ConfigurationStore.Client.ResourceCommand;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal sealed class ConfigurationStoreGatewayCommandClient : IGatewayResourceCommandClient
 {

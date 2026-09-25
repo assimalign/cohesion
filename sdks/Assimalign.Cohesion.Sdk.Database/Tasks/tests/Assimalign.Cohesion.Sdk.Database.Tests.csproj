@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Sdk.Database.Tests</RootNamespace>
 		<EnablePreviewFeatures>true</EnablePreviewFeatures>
 		<GenerateDependencyFile>true</GenerateDependencyFile>
 		<IncludeBuildOutput>true</IncludeBuildOutput>

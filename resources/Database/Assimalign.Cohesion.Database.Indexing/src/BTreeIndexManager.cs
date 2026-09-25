@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Indexing.Internal;
+
 namespace Assimalign.Cohesion.Database.Indexing;
 
 /// <summary>

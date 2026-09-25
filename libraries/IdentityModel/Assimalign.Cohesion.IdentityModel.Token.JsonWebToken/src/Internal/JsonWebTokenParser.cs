@@ -5,7 +5,7 @@ using System.Text.Json;
 
 using Assimalign.Cohesion.IdentityModel;
 
-namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
+namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
 
 /// <summary>
 /// Parses a compact JWS-serialized JSON Web Token into a <see cref="JsonWebTokenDescriptor" />

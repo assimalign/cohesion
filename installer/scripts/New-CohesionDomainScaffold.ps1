@@ -92,6 +92,7 @@ if (-not $Name -or $Name.Count -eq 0) {
 $TasksCsprojTemplate = @'
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Sdk.{NAME}.Tasks</RootNamespace>
 		<PackageId>Assimalign.Cohesion.Sdk.{NAME}</PackageId>
 		<OutDir>$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Tasks</OutDir>
 	</PropertyGroup>
@@ -260,7 +261,7 @@ $RefsPropsTemplate = @'
 $ApplicationModelCsprojTemplate = @'
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.{NAME}.ApplicationModel</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>
 		<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>
 	</PropertyGroup>
 	<ItemGroup>

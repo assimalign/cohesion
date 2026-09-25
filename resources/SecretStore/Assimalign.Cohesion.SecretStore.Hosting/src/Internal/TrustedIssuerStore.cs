@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Security.DataProtection;
 
-namespace Assimalign.Cohesion.SecretStore.Hosting;
+namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
 internal sealed class TrustedIssuerStore
 {

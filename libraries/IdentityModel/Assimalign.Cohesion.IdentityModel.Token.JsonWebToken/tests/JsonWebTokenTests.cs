@@ -4,6 +4,7 @@ using System.Text;
 
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Token;
+using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
 
 using Shouldly;
 
@@ -18,7 +19,7 @@ namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Tests;
 /// </summary>
 public sealed class JsonWebTokenTests
 {
-    private static readonly DateTimeOffset now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
 
     // OpenID Connect Core §3.1.3.6 worked at_hash example: RS256 over this access token.
     private const string SpecAccessToken = "jHkWEdUXMU1BwAsC4vtUsZwnNvTIxEl0z9K3vx5KF0Y";
@@ -39,16 +40,16 @@ public sealed class JsonWebTokenTests
         token.Subject.Value.ShouldBe("user-42");
         token.Subject.Issuer.ShouldBe("https://issuer.example.com");
         token.Audiences.ShouldContain("client-1");
-        token.ExpiresAt.ShouldBe(now.AddHours(1));
-        token.IssuedAt.ShouldBe(now);
+        token.ExpiresAt.ShouldBe(_now.AddHours(1));
+        token.IssuedAt.ShouldBe(_now);
         token.Nonce.ShouldBe("n-abc");
         token.AuthorizedParty.ShouldBe("client-1");
         token.SessionId.ShouldBe("sess-1");
-        token.AuthTime.ShouldBe(now.AddMinutes(-5));
+        token.AuthTime.ShouldBe(_now.AddMinutes(-5));
         token.SigningInput.ShouldNotBeNull();
         // jti projects onto the neutral Id (feeds AuthenticationResult evidence linkage).
         token.Id.ShouldBe("id-123");
-        token.NotBefore.ShouldBe(now.AddMinutes(-5));
+        token.NotBefore.ShouldBe(_now.AddMinutes(-5));
         token.AuthenticationContextClassReference.ShouldBe("urn:mace:incommon:iap:silver");
         token.AuthenticationMethodReferences.ShouldBe(new[] { "pwd", "otp" });
     }
@@ -133,7 +134,7 @@ public sealed class JsonWebTokenTests
     {
         var token = JsonWebToken.Parse(ConformantCompact());
 
-        var result = token.Validate(new JsonWebTokenValidationOptions(now)
+        var result = token.Validate(new JsonWebTokenValidationOptions(_now)
         {
             ExpectedIssuer = "https://issuer.example.com",
             ExpectedAudience = "client-1",
@@ -147,7 +148,7 @@ public sealed class JsonWebTokenTests
     {
         var token = JsonWebToken.Parse(Compact("""{"alg":"none"}""", """{"iss":"i","sub":"s"}"""));
 
-        var result = token.Validate(new JsonWebTokenValidationOptions(now));
+        var result = token.Validate(new JsonWebTokenValidationOptions(_now));
 
         result.Succeeded.ShouldBeFalse();
         result.Errors.ShouldContain(e => e.Code == JsonWebTokenValidationCodes.AlgorithmNone);
@@ -158,7 +159,7 @@ public sealed class JsonWebTokenTests
     {
         var token = JsonWebToken.Parse(Compact("""{"alg":"none"}""", """{"iss":"i","sub":"s"}"""));
 
-        token.Validate(new JsonWebTokenValidationOptions(now) { AllowUnsecured = true }).Succeeded.ShouldBeTrue();
+        token.Validate(new JsonWebTokenValidationOptions(_now) { AllowUnsecured = true }).Succeeded.ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityModel.Token.JsonWebToken] - Validate: An algorithm outside the allowed set fails")]
@@ -166,7 +167,7 @@ public sealed class JsonWebTokenTests
     {
         var token = JsonWebToken.Parse(Compact("""{"alg":"HS256"}""", """{"iss":"i","sub":"s"}"""));
 
-        var options = new JsonWebTokenValidationOptions(now);
+        var options = new JsonWebTokenValidationOptions(_now);
         options.AllowedAlgorithms.Add(JoseAlgorithms.RS256);
 
         var result = token.Validate(options);
@@ -180,7 +181,7 @@ public sealed class JsonWebTokenTests
     {
         var token = JsonWebToken.Parse(Compact("""{"alg":"RS256"}""", """{"iss":"i"}"""));
 
-        var options = new JsonWebTokenValidationOptions(now);
+        var options = new JsonWebTokenValidationOptions(_now);
         options.RequiredClaims.Add(IdentityClaimTypes.Subject);
 
         var result = token.Validate(options);
@@ -194,7 +195,7 @@ public sealed class JsonWebTokenTests
     {
         var token = JsonWebToken.Parse(Compact("""{"alg":"RS256","b64":false}""", """{"iss":"i","sub":"s"}"""));
 
-        var result = token.Validate(new JsonWebTokenValidationOptions(now));
+        var result = token.Validate(new JsonWebTokenValidationOptions(_now));
 
         result.Errors.ShouldContain(e => e.Code == JsonWebTokenValidationCodes.UnsupportedBase64Payload);
     }
@@ -204,7 +205,7 @@ public sealed class JsonWebTokenTests
     {
         var token = JsonWebToken.Parse(Compact("""{"alg":"RS256","crit":["ext1"],"ext1":true}""", """{"iss":"i","sub":"s"}"""));
 
-        var result = token.Validate(new JsonWebTokenValidationOptions(now));
+        var result = token.Validate(new JsonWebTokenValidationOptions(_now));
 
         result.Errors.ShouldContain(e => e.Code == JsonWebTokenValidationCodes.UnrecognizedCriticalHeader);
     }
@@ -214,7 +215,7 @@ public sealed class JsonWebTokenTests
     {
         var token = JsonWebToken.Parse(ConformantCompact());
 
-        var result = token.Validate(new JsonWebTokenValidationOptions(now.AddHours(2)));
+        var result = token.Validate(new JsonWebTokenValidationOptions(_now.AddHours(2)));
 
         result.Errors.ShouldContain(e => e.Code == TokenValidationCodes.Expired);
     }
@@ -226,7 +227,7 @@ public sealed class JsonWebTokenTests
             """{"alg":"RS256"}""",
             $$"""{"iss":"i","sub":"s","at_hash":"{{SpecAccessTokenHash}}"}"""));
 
-        var result = token.Validate(new JsonWebTokenValidationOptions(now) { AccessToken = SpecAccessToken });
+        var result = token.Validate(new JsonWebTokenValidationOptions(_now) { AccessToken = SpecAccessToken });
 
         result.Succeeded.ShouldBeTrue();
     }
@@ -238,7 +239,7 @@ public sealed class JsonWebTokenTests
             """{"alg":"RS256"}""",
             $$"""{"iss":"i","sub":"s","at_hash":"{{SpecAccessTokenHash}}"}"""));
 
-        var result = token.Validate(new JsonWebTokenValidationOptions(now) { AccessToken = "a-different-access-token" });
+        var result = token.Validate(new JsonWebTokenValidationOptions(_now) { AccessToken = "a-different-access-token" });
 
         result.Succeeded.ShouldBeFalse();
         result.Errors.ShouldContain(e => e.Code == JsonWebTokenValidationCodes.AccessTokenHashMismatch);
@@ -250,11 +251,11 @@ public sealed class JsonWebTokenTests
         var token = JsonWebToken.Parse(Compact("""{"alg":"RS256"}""", """{"iss":"i","sub":"s"}"""));
 
         // Default: a missing hash claim is a warning (non-fatal) — pure code-flow tokens stay valid.
-        token.Validate(new JsonWebTokenValidationOptions(now) { AccessToken = SpecAccessToken })
+        token.Validate(new JsonWebTokenValidationOptions(_now) { AccessToken = SpecAccessToken })
             .Succeeded.ShouldBeTrue();
 
         // RequireTokenHash escalates it to an error.
-        var required = token.Validate(new JsonWebTokenValidationOptions(now)
+        var required = token.Validate(new JsonWebTokenValidationOptions(_now)
         {
             AccessToken = SpecAccessToken,
             RequireTokenHash = true,
@@ -272,10 +273,10 @@ public sealed class JsonWebTokenTests
             $$"""{"iss":"i","sub":"s","c_hash":"{{SpecAccessTokenHash}}"}"""));
 
         // A matching code validates; a different code is a mismatch.
-        token.Validate(new JsonWebTokenValidationOptions(now) { AuthorizationCode = SpecAccessToken })
+        token.Validate(new JsonWebTokenValidationOptions(_now) { AuthorizationCode = SpecAccessToken })
             .Succeeded.ShouldBeTrue();
 
-        var result = token.Validate(new JsonWebTokenValidationOptions(now) { AuthorizationCode = "a-different-code" });
+        var result = token.Validate(new JsonWebTokenValidationOptions(_now) { AuthorizationCode = "a-different-code" });
         result.Succeeded.ShouldBeFalse();
         result.Errors.ShouldContain(e => e.Code == JsonWebTokenValidationCodes.CodeHashMismatch);
     }
@@ -288,7 +289,7 @@ public sealed class JsonWebTokenTests
             """{"alg":"none"}""",
             $$"""{"iss":"i","sub":"s","at_hash":"{{SpecAccessTokenHash}}"}"""));
 
-        var result = token.Validate(new JsonWebTokenValidationOptions(now)
+        var result = token.Validate(new JsonWebTokenValidationOptions(_now)
         {
             AllowUnsecured = true, // isolate the hash path from the none-rejection rule.
             AccessToken = SpecAccessToken,
@@ -314,10 +315,10 @@ public sealed class JsonWebTokenTests
 
     private static string ConformantCompact()
     {
-        var exp = now.AddHours(1).ToUnixTimeSeconds();
-        var iat = now.ToUnixTimeSeconds();
-        var nbf = now.AddMinutes(-5).ToUnixTimeSeconds();
-        var authTime = now.AddMinutes(-5).ToUnixTimeSeconds();
+        var exp = _now.AddHours(1).ToUnixTimeSeconds();
+        var iat = _now.ToUnixTimeSeconds();
+        var nbf = _now.AddMinutes(-5).ToUnixTimeSeconds();
+        var authTime = _now.AddMinutes(-5).ToUnixTimeSeconds();
 
         var header = """{"alg":"RS256","typ":"JWT","kid":"key-1"}""";
         var payload =

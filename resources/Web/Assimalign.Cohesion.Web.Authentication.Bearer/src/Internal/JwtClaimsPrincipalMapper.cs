@@ -4,7 +4,7 @@ using System.Security.Claims;
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
-namespace Assimalign.Cohesion.Web.Authentication.Bearer;
+namespace Assimalign.Cohesion.Web.Authentication.Bearer.Internal;
 
 /// <summary>
 /// Projects a validated <see cref="JsonWebToken"/> onto a <see cref="ClaimsPrincipal"/>, bridging

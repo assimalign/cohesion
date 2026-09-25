@@ -25,13 +25,13 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 /// </summary>
 public class WebApplicationTerminalFallbackTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Terminal: An unhandled request should yield a bodyless 404")]
     public async Task Terminal_WhenNoMiddlewareHandles_ShouldReturnBodyless404()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -48,7 +48,7 @@ public class WebApplicationTerminalFallbackTests
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Terminal: A plain application should not expose Cohesion control-plane routes")]
     public async Task Terminal_WhenApplicationIsPlain_ShouldNotExposeControlPlaneRoutes()
     {
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -67,7 +67,7 @@ public class WebApplicationTerminalFallbackTests
     public async Task Terminal_WhenMiddlewareChoseStatus_ShouldNotOverwrite()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -90,7 +90,7 @@ public class WebApplicationTerminalFallbackTests
     public async Task Terminal_WhenMiddlewareWroteBody_ShouldNotOverwrite()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();

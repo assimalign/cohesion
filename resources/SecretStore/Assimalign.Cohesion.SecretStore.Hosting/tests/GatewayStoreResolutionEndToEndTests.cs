@@ -200,9 +200,18 @@ public sealed class GatewayStoreResolutionEndToEndTests
             ApplicationName application,
             CancellationToken cancellationToken) => Task.CompletedTask;
 
-        private sealed class TestArtifact(ResourceId resource) : IResourceArtifact
+        private sealed class TestArtifact : IResourceArtifact
         {
-            public ResourceId Resource { get; } = resource;
+            /// <summary>
+            /// Initializes a new instance of the <see cref="TestArtifact"/> class.
+            /// </summary>
+            /// <param name="resource">The identifier of the resource the artifact was gathered for.</param>
+            public TestArtifact(ResourceId resource)
+            {
+                Resource = resource;
+            }
+
+            public ResourceId Resource { get; }
         }
     }
 

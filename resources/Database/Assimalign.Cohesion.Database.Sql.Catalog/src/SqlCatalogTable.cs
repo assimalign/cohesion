@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using Assimalign.Cohesion.Database.Sql.Catalog.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 /// <summary>

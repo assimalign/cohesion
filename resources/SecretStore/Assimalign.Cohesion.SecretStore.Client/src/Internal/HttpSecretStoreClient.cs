@@ -6,7 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.SecretStore.Client;
+namespace Assimalign.Cohesion.SecretStore.Client.Internal;
 
 internal sealed class HttpSecretStoreClient : ISecretStoreClient
 {

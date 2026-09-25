@@ -48,23 +48,51 @@ internal sealed class ControlPlaneExchange : IHttpContext
         public ValueTask AbortAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class RequestData(IHttpContext context, string path, HttpMethod method) : IHttpRequest
+    private sealed class RequestData : IHttpRequest
     {
+        private readonly IHttpContext _context;
+        private readonly string _path;
+        private readonly HttpMethod _method;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RequestData"/> class.
+        /// </summary>
+        /// <param name="context">The exchange that owns the request.</param>
+        /// <param name="path">The request path.</param>
+        /// <param name="method">The request method.</param>
+        public RequestData(IHttpContext context, string path, HttpMethod method)
+        {
+            _context = context;
+            _path = path;
+            _method = method;
+        }
+
         public HttpHost Host => new("localhost");
-        public HttpPath Path => new(path);
-        public HttpMethod Method => method;
+        public HttpPath Path => new(_path);
+        public HttpMethod Method => _method;
         public HttpScheme Scheme => HttpScheme.Http;
         public IHttpQueryCollection Query { get; } = new HttpQueryCollection();
         public IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
-        public IHttpContext HttpContext => context;
+        public IHttpContext HttpContext => _context;
         public Stream Body { get; } = new MemoryStream();
     }
 
-    private sealed class ResponseData(IHttpContext context) : IHttpResponse
+    private sealed class ResponseData : IHttpResponse
     {
+        private readonly IHttpContext _context;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ResponseData"/> class.
+        /// </summary>
+        /// <param name="context">The exchange that owns the response.</param>
+        public ResponseData(IHttpContext context)
+        {
+            _context = context;
+        }
+
         public HttpStatusCode StatusCode { get; set; } = HttpStatusCode.Ok;
         public IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
-        public IHttpContext HttpContext => context;
+        public IHttpContext HttpContext => _context;
         public Stream Body { get; set; } = new MemoryStream();
     }
 }

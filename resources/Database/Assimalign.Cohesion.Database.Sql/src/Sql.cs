@@ -1,6 +1,8 @@
 using System;
 using System.Linq.Expressions;
 
+using Assimalign.Cohesion.Database.Sql.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>

@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.IdentityModel.Protocols.Saml</RootNamespace>
     <Description>SAML 2.0 contract branch for Cohesion IdentityModel: assertions, subject and NameID, statements and conditions, protocol messages (AuthnRequest/Response/logout), entity metadata, bindings, and specification-oriented validation. Builds on Assimalign.Cohesion.IdentityModel.Protocols.</Description>
   </PropertyGroup>
   <ItemGroup>
@@ -8,8 +9,5 @@
   <ItemGroup>
     <!-- ModelSnapshot (descriptor materialization), compiled in as a stateless static. -->
     <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" />
-  </ItemGroup>
-  <ItemGroup>
-    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Protocols.Saml.Tests" />
   </ItemGroup>
 </Project>

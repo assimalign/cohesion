@@ -7,6 +7,7 @@ using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.VpnGateway;
+using Assimalign.Cohesion.VpnGateway.Hosting.Internal;
 
 namespace Assimalign.Cohesion.VpnGateway.Hosting;
 

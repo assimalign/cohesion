@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 
 using IdentityModelSignatureVerifier = Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.JsonWebTokenSignatureVerifier;
 
+using Assimalign.Cohesion.Web.Authentication.Bearer.Internal;
+
 namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 
 /// <summary>

@@ -10,6 +10,8 @@ using System.Text.Json;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 
+using Assimalign.Cohesion.Sdk.Gateway.Tasks.Internal;
+
 namespace Assimalign.Cohesion.Sdk.Gateway.Tasks;
 
 /// <summary>

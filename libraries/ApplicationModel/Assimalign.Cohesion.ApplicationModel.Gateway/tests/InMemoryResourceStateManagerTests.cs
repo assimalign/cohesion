@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 public class InMemoryResourceStateManagerTests
 {
-    private static readonly IReadOnlySet<ResourceLifecycle> InitialReadinessTerminals =
+    private static readonly IReadOnlySet<ResourceLifecycle> _initialReadinessTerminals =
         new HashSet<ResourceLifecycle>
         {
             ResourceLifecycle.Running,
@@ -29,7 +29,7 @@ public class InMemoryResourceStateManagerTests
         ResourceId id = NewId();
         manager.SetState(id, ResourceLifecycle.Running);
 
-        ResourceLifecycle reached = await manager.WaitForStateAsync(id, InitialReadinessTerminals, TimeSpan.FromSeconds(1));
+        ResourceLifecycle reached = await manager.WaitForStateAsync(id, _initialReadinessTerminals, TimeSpan.FromSeconds(1));
 
         reached.ShouldBe(ResourceLifecycle.Running);
     }
@@ -40,7 +40,7 @@ public class InMemoryResourceStateManagerTests
         var manager = new InMemoryResourceStateManager();
         ResourceId id = NewId();
 
-        Task<ResourceLifecycle> wait = manager.WaitForStateAsync(id, InitialReadinessTerminals, TimeSpan.FromSeconds(2));
+        Task<ResourceLifecycle> wait = manager.WaitForStateAsync(id, _initialReadinessTerminals, TimeSpan.FromSeconds(2));
         manager.SetState(id, ResourceLifecycle.Running);
 
         (await wait).ShouldBe(ResourceLifecycle.Running);
@@ -52,7 +52,7 @@ public class InMemoryResourceStateManagerTests
         var manager = new InMemoryResourceStateManager();
         ResourceId id = NewId();
 
-        Task<ResourceLifecycle> wait = manager.WaitForStateAsync(id, InitialReadinessTerminals, TimeSpan.FromSeconds(2));
+        Task<ResourceLifecycle> wait = manager.WaitForStateAsync(id, _initialReadinessTerminals, TimeSpan.FromSeconds(2));
         manager.SetState(id, ResourceLifecycle.Failed);
 
         (await wait).ShouldBe(ResourceLifecycle.Failed);
@@ -66,7 +66,7 @@ public class InMemoryResourceStateManagerTests
         ResourceId id = NewId();
         Task<ResourceLifecycle> wait = manager.WaitForStateAsync(
             id,
-            InitialReadinessTerminals,
+            _initialReadinessTerminals,
             Timeout.InfiniteTimeSpan);
 
         // Act
@@ -84,7 +84,7 @@ public class InMemoryResourceStateManagerTests
         ResourceId id = NewId();
         Task<ResourceLifecycle> wait = manager.WaitForStateAsync(
             id,
-            InitialReadinessTerminals,
+            _initialReadinessTerminals,
             Timeout.InfiniteTimeSpan);
 
         // Act
@@ -167,7 +167,7 @@ public class InMemoryResourceStateManagerTests
         manager.SetState(id, ResourceLifecycle.Running);
         ResourceLifecycle reached = await manager.WaitForStateAsync(
             id,
-            InitialReadinessTerminals,
+            _initialReadinessTerminals,
             TimeSpan.FromSeconds(1));
         reached.ShouldBe(ResourceLifecycle.Running);
     }

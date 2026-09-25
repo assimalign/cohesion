@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Client.Internal;
+
 namespace Assimalign.Cohesion.Database.Client;
 
 /// <summary>

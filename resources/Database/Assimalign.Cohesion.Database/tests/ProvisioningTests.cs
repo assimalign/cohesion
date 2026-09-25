@@ -54,9 +54,20 @@ public class ProvisioningTests
         result.ShouldBe(new SchemaMigrationResult("before", "after", 2, false));
     }
 
-    private sealed class TestSchema(string name, EngineModel model, string document)
-        : CompiledSchema("tests/schema/v1", name, model, false)
+    private sealed class TestSchema : CompiledSchema
     {
-        public override string CanonicalDocument { get; } = document;
+        /// <summary>
+        /// Initializes a new instance of the <see cref="TestSchema"/> class.
+        /// </summary>
+        /// <param name="name">The database name the schema targets.</param>
+        /// <param name="model">The engine model the schema is written for.</param>
+        /// <param name="document">The canonical schema document.</param>
+        public TestSchema(string name, EngineModel model, string document)
+            : base("tests/schema/v1", name, model, false)
+        {
+            CanonicalDocument = document;
+        }
+
+        public override string CanonicalDocument { get; }
     }
 }

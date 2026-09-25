@@ -14,8 +14,8 @@ namespace Assimalign.Cohesion.Web.Authentication.Bearer.Tests;
 
 public class JwtBearerHandlerTests
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
-    private static readonly byte[] SecretKey = Encoding.UTF8.GetBytes("this-is-a-256-bit-hmac-test-key-value!!");
+    private static readonly DateTimeOffset _now = new(2026, 7, 8, 12, 0, 0, TimeSpan.Zero);
+    private static readonly byte[] _secretKey = Encoding.UTF8.GetBytes("this-is-a-256-bit-hmac-test-key-value!!");
 
     private const string Issuer = "https://issuer.example";
     private const string Audience = "api://default";
@@ -30,8 +30,8 @@ public class JwtBearerHandlerTests
 
     private static JwtBearerOptions HmacOptions()
     {
-        JwtBearerOptions options = new() { TimeProvider = new FixedTimeProvider(Now) };
-        options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(SecretKey));
+        JwtBearerOptions options = new() { TimeProvider = new FixedTimeProvider(_now) };
+        options.SigningKeys.Add(JwtSignatureVerifier.CreateHmac(_secretKey));
         options.ValidIssuers.Add(Issuer);
         options.ValidAudiences.Add(Audience);
         return options;
@@ -42,7 +42,7 @@ public class JwtBearerHandlerTests
     {
         // Arrange
         JwtBearerOptions options = HmacOptions();
-        string token = TestJwt.Hmac(SecretKey, TestJwt.Payload(Now, Issuer, Audience, name: "alice", roles: new[] { "admin", "user" }));
+        string token = TestJwt.Hmac(_secretKey, TestJwt.Payload(_now, Issuer, Audience, name: "alice", roles: new[] { "admin", "user" }));
         TestHttpContext context = TestHttpContext.Create();
         context.SetAuthorization("Bearer " + token);
         IAuthenticationHandler handler = await InitializeAsync(options, context);
@@ -109,7 +109,7 @@ public class JwtBearerHandlerTests
     {
         // Arrange
         byte[] attackerKey = Encoding.UTF8.GetBytes("a-completely-different-256-bit-key-value!");
-        string token = TestJwt.Hmac(attackerKey, TestJwt.Payload(Now, Issuer, Audience));
+        string token = TestJwt.Hmac(attackerKey, TestJwt.Payload(_now, Issuer, Audience));
         TestHttpContext context = TestHttpContext.Create();
         context.SetAuthorization("Bearer " + token);
         IAuthenticationHandler handler = await InitializeAsync(HmacOptions(), context);
@@ -126,7 +126,7 @@ public class JwtBearerHandlerTests
     public async Task Authenticate_ExpiredToken_Fails()
     {
         // Arrange — token issued and expired an hour before 'now'.
-        string token = TestJwt.Hmac(SecretKey, TestJwt.Payload(Now - TimeSpan.FromHours(2), Issuer, Audience, lifetime: TimeSpan.FromHours(1)));
+        string token = TestJwt.Hmac(_secretKey, TestJwt.Payload(_now - TimeSpan.FromHours(2), Issuer, Audience, lifetime: TimeSpan.FromHours(1)));
         TestHttpContext context = TestHttpContext.Create();
         context.SetAuthorization("Bearer " + token);
         IAuthenticationHandler handler = await InitializeAsync(HmacOptions(), context);
@@ -143,7 +143,7 @@ public class JwtBearerHandlerTests
     public async Task Authenticate_WrongIssuer_Fails()
     {
         // Arrange
-        string token = TestJwt.Hmac(SecretKey, TestJwt.Payload(Now, issuer: "https://evil.example", audience: Audience));
+        string token = TestJwt.Hmac(_secretKey, TestJwt.Payload(_now, issuer: "https://evil.example", audience: Audience));
         TestHttpContext context = TestHttpContext.Create();
         context.SetAuthorization("Bearer " + token);
         IAuthenticationHandler handler = await InitializeAsync(HmacOptions(), context);
@@ -159,7 +159,7 @@ public class JwtBearerHandlerTests
     public async Task Authenticate_WrongAudience_Fails()
     {
         // Arrange
-        string token = TestJwt.Hmac(SecretKey, TestJwt.Payload(Now, Issuer, audience: "api://other"));
+        string token = TestJwt.Hmac(_secretKey, TestJwt.Payload(_now, Issuer, audience: "api://other"));
         TestHttpContext context = TestHttpContext.Create();
         context.SetAuthorization("Bearer " + token);
         IAuthenticationHandler handler = await InitializeAsync(HmacOptions(), context);
@@ -175,7 +175,7 @@ public class JwtBearerHandlerTests
     public async Task Authenticate_NoneAlgorithm_Fails()
     {
         // Arrange
-        string token = TestJwt.Unsecured(TestJwt.Payload(Now, Issuer, Audience));
+        string token = TestJwt.Unsecured(TestJwt.Payload(_now, Issuer, Audience));
         TestHttpContext context = TestHttpContext.Create();
         context.SetAuthorization("Bearer " + token);
         IAuthenticationHandler handler = await InitializeAsync(HmacOptions(), context);
@@ -193,12 +193,12 @@ public class JwtBearerHandlerTests
     {
         // Arrange — the algorithm-confusion guard: no configured verifier accepts HS256.
         using RSA rsa = RSA.Create(2048);
-        JwtBearerOptions options = new() { TimeProvider = new FixedTimeProvider(Now) };
+        JwtBearerOptions options = new() { TimeProvider = new FixedTimeProvider(_now) };
         options.SigningKeys.Add(JwtSignatureVerifier.CreateRsa(rsa));
         options.ValidIssuers.Add(Issuer);
         options.ValidAudiences.Add(Audience);
 
-        string token = TestJwt.Hmac(SecretKey, TestJwt.Payload(Now, Issuer, Audience));
+        string token = TestJwt.Hmac(_secretKey, TestJwt.Payload(_now, Issuer, Audience));
         TestHttpContext context = TestHttpContext.Create();
         context.SetAuthorization("Bearer " + token);
         IAuthenticationHandler handler = await InitializeAsync(options, context);
@@ -215,12 +215,12 @@ public class JwtBearerHandlerTests
     {
         // Arrange
         using RSA rsa = RSA.Create(2048);
-        JwtBearerOptions options = new() { TimeProvider = new FixedTimeProvider(Now) };
+        JwtBearerOptions options = new() { TimeProvider = new FixedTimeProvider(_now) };
         options.SigningKeys.Add(JwtSignatureVerifier.CreateRsa(rsa));
         options.ValidIssuers.Add(Issuer);
         options.ValidAudiences.Add(Audience);
 
-        string token = TestJwt.Rsa(rsa, TestJwt.Payload(Now, Issuer, Audience, name: "bob"));
+        string token = TestJwt.Rsa(rsa, TestJwt.Payload(_now, Issuer, Audience, name: "bob"));
         TestHttpContext context = TestHttpContext.Create();
         context.SetAuthorization("Bearer " + token);
         IAuthenticationHandler handler = await InitializeAsync(options, context);
@@ -238,12 +238,12 @@ public class JwtBearerHandlerTests
     {
         // Arrange
         using ECDsa ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        JwtBearerOptions options = new() { TimeProvider = new FixedTimeProvider(Now) };
+        JwtBearerOptions options = new() { TimeProvider = new FixedTimeProvider(_now) };
         options.SigningKeys.Add(JwtSignatureVerifier.CreateEcdsa(ecdsa));
         options.ValidIssuers.Add(Issuer);
         options.ValidAudiences.Add(Audience);
 
-        string token = TestJwt.Ecdsa(ecdsa, TestJwt.Payload(Now, Issuer, Audience, name: "carol"));
+        string token = TestJwt.Ecdsa(ecdsa, TestJwt.Payload(_now, Issuer, Audience, name: "carol"));
         TestHttpContext context = TestHttpContext.Create();
         context.SetAuthorization("Bearer " + token);
         IAuthenticationHandler handler = await InitializeAsync(options, context);

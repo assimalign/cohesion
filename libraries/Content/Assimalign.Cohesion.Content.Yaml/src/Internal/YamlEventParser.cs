@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Assimalign.Cohesion.Content.Yaml;
+namespace Assimalign.Cohesion.Content.Yaml.Internal;
 
 /// <summary>
 /// Parses YAML 1.2 text into the event stream by recursive descent over a normalized character

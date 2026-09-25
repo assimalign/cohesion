@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Blob</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
@@ -8,6 +11,5 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Transactions" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Catalog" />
-		<InternalsVisibleTo Include="Assimalign.Cohesion.Database.Blob.Tests" />
 	</ItemGroup>
 </Project>

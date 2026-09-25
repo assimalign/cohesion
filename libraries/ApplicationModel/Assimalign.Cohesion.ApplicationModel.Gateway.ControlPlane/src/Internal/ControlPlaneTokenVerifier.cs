@@ -8,14 +8,14 @@ using System.Text.Json;
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
 internal static class ControlPlaneTokenVerifier
 {
     private const string Audience = "cohesion-export";
     private const string TokenUseClaim = "cohesion_token_use";
     private const string GatewayTokenUse = "gateway";
-    private static readonly TimeSpan MaximumLifetime = TimeSpan.FromHours(8);
+    private static readonly TimeSpan _maximumLifetime = TimeSpan.FromHours(8);
 
     public static bool TryVerify(
         string compactToken,
@@ -64,7 +64,7 @@ internal static class ControlPlaneTokenVerifier
             issuedAt <= now + options.ClockSkew &&
             expiresAt > issuedAt &&
             expiresAt > notBefore &&
-            expiresAt - issuedAt <= MaximumLifetime;
+            expiresAt - issuedAt <= _maximumLifetime;
         if (!valid)
         {
             return false;

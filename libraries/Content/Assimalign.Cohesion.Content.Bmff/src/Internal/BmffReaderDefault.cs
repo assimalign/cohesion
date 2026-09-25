@@ -1,14 +1,15 @@
 ﻿using System;
 using static System.Buffers.Binary.BinaryPrimitives;
 
+using Assimalign.Cohesion.Content.Media;
 using Assimalign.IO;
 
 namespace Assimalign.Cohesion.Files.Bmff.Internal;
 
 internal sealed partial class BmffReaderDefault : BmffReader
 {
-    private BmffBox current;
-    private readonly BmffStream stream;
+    private BmffBox _current;
+    private readonly BmffStream _stream;
 
     public BmffReaderDefault(BmffStream stream)
     {
@@ -16,24 +17,24 @@ internal sealed partial class BmffReaderDefault : BmffReader
         {
             throw new ArgumentNullException(nameof(stream));
         }
-        this.stream = stream;
+        this._stream = stream;
     }
 
     
 
-    public override BmffBox Current => this.current;
+    public override BmffBox Current => this._current;
 
     public override bool Read()
     {
-        if ((stream.Position - stream.Offset) >= stream.Limit)
+        if ((_stream.Position - _stream.Offset) >= _stream.Limit)
         {
             return false;
         }
 
         // Represents the Offset of the context starting from the beginning of the stream.
-        var offset  = stream.Position;
-        var limit   = ReadInt32BigEndian(stream.ReadBytes(4));
-        var type    = ReadInt32BigEndian(stream.ReadBytes(4));
+        var offset  = _stream.Position;
+        var limit   = ReadInt32BigEndian(_stream.ReadBytes(4));
+        var type    = ReadInt32BigEndian(_stream.ReadBytes(4));
 
         if (type < 0 || !Enum.IsDefined(typeof(BmffBoxType), (uint)type))
         {
@@ -45,23 +46,23 @@ internal sealed partial class BmffReaderDefault : BmffReader
 
         }
   
-        var box = boxes[(BmffBoxType)type].Invoke(offset, limit);
+        var box = _boxes[(BmffBoxType)type].Invoke(offset, limit);
 
         // The + and - 8 are to account for the 8 bytes just read above
-        box.Read(new BmffStream(stream, offset + 8, limit - 8)
+        box.Read(new BmffStream(_stream, offset + 8, limit - 8)
         {
             BoxType = (BmffBoxType)type
         });
 
-        current = box;
-        stream.Position = 0;
-        stream.Position = (offset + limit);
+        _current = box;
+        _stream.Position = 0;
+        _stream.Position = (offset + limit);
         
         return true;
     }
 
     public override void Dispose()
     {
-        stream.Close();
+        _stream.Close();
     }
 }

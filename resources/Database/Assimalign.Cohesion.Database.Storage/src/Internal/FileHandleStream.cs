@@ -8,15 +8,25 @@ namespace Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.FileSystem;
 
 /// <summary>A sequential cursor over an owned positional handle.</summary>
-internal sealed class FileHandleStream(IFileSystemFileHandle handle) : Stream
+internal sealed class FileHandleStream : Stream
 {
+    private readonly IFileSystemFileHandle _handle;
     private long _position;
     private bool _disposed;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FileHandleStream"/> class.
+    /// </summary>
+    /// <param name="handle">The positional handle the stream owns and disposes.</param>
+    public FileHandleStream(IFileSystemFileHandle handle)
+    {
+        _handle = handle;
+    }
 
     public override bool CanRead => !_disposed;
     public override bool CanWrite => !_disposed;
     public override bool CanSeek => !_disposed;
-    public override long Length => handle.Length;
+    public override long Length => _handle.Length;
 
     public override long Position
     {
@@ -29,15 +39,15 @@ internal sealed class FileHandleStream(IFileSystemFileHandle handle) : Stream
         }
     }
 
-    public override void Flush() => handle.Flush(durable: false);
+    public override void Flush() => _handle.Flush(durable: false);
     public override Task FlushAsync(CancellationToken cancellationToken)
-        => handle.FlushAsync(false, cancellationToken).AsTask();
+        => _handle.FlushAsync(false, cancellationToken).AsTask();
 
     public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
 
     public override int Read(Span<byte> buffer)
     {
-        int read = handle.Read(buffer, Position);
+        int read = _handle.Read(buffer, Position);
         _position += read;
         return read;
     }
@@ -47,7 +57,7 @@ internal sealed class FileHandleStream(IFileSystemFileHandle handle) : Stream
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        int read = await handle.ReadAsync(buffer, Position, cancellationToken).ConfigureAwait(false);
+        int read = await _handle.ReadAsync(buffer, Position, cancellationToken).ConfigureAwait(false);
         _position += read;
         return read;
     }
@@ -56,7 +66,7 @@ internal sealed class FileHandleStream(IFileSystemFileHandle handle) : Stream
 
     public override void Write(ReadOnlySpan<byte> buffer)
     {
-        handle.Write(buffer, Position);
+        _handle.Write(buffer, Position);
         _position += buffer.Length;
     }
 
@@ -65,7 +75,7 @@ internal sealed class FileHandleStream(IFileSystemFileHandle handle) : Stream
 
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        await handle.WriteAsync(buffer, Position, cancellationToken).ConfigureAwait(false);
+        await _handle.WriteAsync(buffer, Position, cancellationToken).ConfigureAwait(false);
         _position += buffer.Length;
     }
 
@@ -86,14 +96,14 @@ internal sealed class FileHandleStream(IFileSystemFileHandle handle) : Stream
         return position;
     }
 
-    public override void SetLength(long value) => handle.SetLength(value);
+    public override void SetLength(long value) => _handle.SetLength(value);
 
     protected override void Dispose(bool disposing)
     {
         if (disposing && !_disposed)
         {
             _disposed = true;
-            handle.Dispose();
+            _handle.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -103,7 +113,7 @@ internal sealed class FileHandleStream(IFileSystemFileHandle handle) : Stream
         if (!_disposed)
         {
             _disposed = true;
-            await handle.DisposeAsync().ConfigureAwait(false);
+            await _handle.DisposeAsync().ConfigureAwait(false);
         }
         GC.SuppressFinalize(this);
     }

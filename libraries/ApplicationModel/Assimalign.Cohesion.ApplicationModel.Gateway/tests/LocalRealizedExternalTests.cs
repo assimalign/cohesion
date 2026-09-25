@@ -19,7 +19,7 @@ public class LocalRealizedExternalTests
     private const string ConsumerApplication = "consumer-app";
     private const string RetainedApplication = "peer-app";
     private const string Resource = "external-api";
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local --realize: Should retain the external manifest application lifecycle")]
     public async Task StartAsync_RealizedExternal_ShouldRetainManifestApplicationAndStopCleanly()
@@ -76,7 +76,7 @@ public class LocalRealizedExternalTests
             options => options.Endpoint("http", "http://peer.invalid:8080"));
         IApplicationModel model = builder.Build().Model;
         IApplicationGateway control = gateway;
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         int processId = 0;
         bool stopped = false;
 

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
+
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>

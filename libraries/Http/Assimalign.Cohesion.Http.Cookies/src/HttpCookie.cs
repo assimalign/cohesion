@@ -2,6 +2,8 @@ using System;
 using System.Diagnostics;
 using System.Text;
 
+using Assimalign.Cohesion.Http.Internal;
+
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>

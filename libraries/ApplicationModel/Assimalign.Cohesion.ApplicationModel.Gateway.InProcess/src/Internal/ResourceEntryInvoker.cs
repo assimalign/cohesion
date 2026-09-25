@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 
 internal interface IResourceEntryInvoker
 {

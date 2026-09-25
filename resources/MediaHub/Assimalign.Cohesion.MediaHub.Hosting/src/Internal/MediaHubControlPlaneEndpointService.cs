@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting;
 
-namespace Assimalign.Cohesion.MediaHub.Hosting;
+namespace Assimalign.Cohesion.MediaHub.Hosting.Internal;
 
 internal sealed class MediaHubControlPlaneEndpointService : IHostService, IDisposable
 {

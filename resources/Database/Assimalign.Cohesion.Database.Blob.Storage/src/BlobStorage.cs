@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Assimalign.Cohesion.Database.Blob.Storage.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -188,14 +189,4 @@ public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
 
     internal (PageId PageId, int SlotIndex) InsertChunk(IStorageTransaction transaction, TransactionSequence writer, ReadOnlySpan<byte> entry)
         => InsertRecord(transaction, writer.Value | (1UL << 63), entry);
-}
-
-internal sealed class BlobTransactionRecordSpace(BlobStorage storage) : ITransactionRecordSpace
-{
-    public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => storage.ReadEntry(pageId, slotIndex);
-    public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
-        => storage.UpdateEntry(transaction, pageId, slotIndex, record);
-    public void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex) => storage.DeleteEntry(transaction, pageId, slotIndex);
-    public ulong PackLocation(PageId pageId, int slotIndex) => BlobStorage.PackLocation(pageId, slotIndex);
-    public (PageId PageId, int SlotIndex) UnpackLocation(ulong location) => BlobStorage.UnpackLocation(location);
 }

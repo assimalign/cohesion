@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.OpenApi.Integration.Internal;
+
 namespace Assimalign.Cohesion.OpenApi.Integration;
 
 /// <summary>

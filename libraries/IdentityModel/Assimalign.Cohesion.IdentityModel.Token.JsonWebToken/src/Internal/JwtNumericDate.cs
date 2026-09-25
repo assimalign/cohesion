@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.IdentityModel;
 
-namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
+namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
 
 /// <summary>
 /// Converts RFC 7519 NumericDate claim values into <see cref="DateTimeOffset" /> without ever
@@ -13,8 +13,8 @@ namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 /// </summary>
 internal static class JwtNumericDate
 {
-    private static readonly long MinUnixSeconds = DateTimeOffset.MinValue.ToUnixTimeSeconds();
-    private static readonly long MaxUnixSeconds = DateTimeOffset.MaxValue.ToUnixTimeSeconds();
+    private static readonly long _minUnixSeconds = DateTimeOffset.MinValue.ToUnixTimeSeconds();
+    private static readonly long _maxUnixSeconds = DateTimeOffset.MaxValue.ToUnixTimeSeconds();
 
     /// <summary>
     /// Converts a whole-second Unix timestamp, or <see langword="null" /> when it is outside the
@@ -22,7 +22,7 @@ internal static class JwtNumericDate
     /// </summary>
     public static DateTimeOffset? ToDateTimeOffset(long unixSeconds)
     {
-        if (unixSeconds < MinUnixSeconds || unixSeconds > MaxUnixSeconds)
+        if (unixSeconds < _minUnixSeconds || unixSeconds > _maxUnixSeconds)
         {
             return null;
         }
@@ -46,7 +46,7 @@ internal static class JwtNumericDate
         if (value.TryGetDouble(out var fractional))
         {
             if (double.IsNaN(fractional) || double.IsInfinity(fractional) ||
-                fractional < MinUnixSeconds || fractional > MaxUnixSeconds)
+                fractional < _minUnixSeconds || fractional > _maxUnixSeconds)
             {
                 return null;
             }

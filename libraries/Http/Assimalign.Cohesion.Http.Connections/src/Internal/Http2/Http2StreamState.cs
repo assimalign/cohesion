@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Lifecycle state of an HTTP/2 stream, as defined by RFC 9113 §5.1.

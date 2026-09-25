@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
-using Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
+using Assimalign.Cohesion.Http.Connections.Internal;
+
 
 namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 
@@ -306,7 +307,7 @@ internal static class HttpProtocolPayloadFactory
 
         foreach (char c in value)
         {
-            (uint code, byte length) = Internal.Http2.HPack.HPackHuffmanCodes.Table[(byte)c];
+            (uint code, byte length) = Internal.HPackHuffmanCodes.Table[(byte)c];
             bits = (bits << length) | code;
             count += length;
 
@@ -664,7 +665,7 @@ internal static class HttpProtocolPayloadFactory
         index += length;
 
         return huffman
-            ? Encoding.Latin1.GetString(Internal.Http2.HPack.HPackHuffmanDecoder.Decode(octets))
+            ? Encoding.Latin1.GetString(Internal.HPackHuffmanDecoder.Decode(octets))
             : Encoding.ASCII.GetString(octets);
     }
 

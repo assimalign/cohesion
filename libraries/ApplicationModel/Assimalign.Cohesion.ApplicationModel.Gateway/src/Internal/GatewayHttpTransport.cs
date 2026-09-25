@@ -1,7 +1,7 @@
 using System.Net.Http;
 using System.Net.Security;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal static class GatewayHttpTransport
 {

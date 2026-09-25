@@ -22,7 +22,7 @@ namespace Assimalign.Cohesion.Connections.Quic.Tests;
 [SupportedOSPlatform("macos")]
 public class QuicConnectionListenerTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(10);
 
     [Fact(DisplayName = "Cohesion Test [Connections.Quic] - BindAsync: Construction should remain unbound until explicit bind")]
     public async Task BindAsync_OnUnboundListener_ShouldBindConcreteEndPoint()
@@ -33,7 +33,7 @@ public class QuicConnectionListenerTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
         QuicConnectionListenerOptions options = CreateOptions(certificate, new IPEndPoint(IPAddress.Loopback, 0));
         await using QuicConnectionListener listener = new(options);
@@ -59,7 +59,7 @@ public class QuicConnectionListenerTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
         QuicConnectionListener first = new(CreateOptions(certificate, new IPEndPoint(IPAddress.Loopback, 0)));
         await first.BindAsync(cancellation.Token);
@@ -102,7 +102,7 @@ public class QuicConnectionListenerTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         // Act
@@ -190,7 +190,7 @@ public class QuicConnectionListenerTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using QuicConnectionListener listener = await QuicConnectionListener.CreateAsync(options =>

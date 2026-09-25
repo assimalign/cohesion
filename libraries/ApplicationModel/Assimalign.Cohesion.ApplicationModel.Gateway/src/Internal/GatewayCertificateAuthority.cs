@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 using HostingMount = Assimalign.Cohesion.Hosting.Resources.ResourceMount;
 
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal sealed class GatewayCertificateAuthority
 {

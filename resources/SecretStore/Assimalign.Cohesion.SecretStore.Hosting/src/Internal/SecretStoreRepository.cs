@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Security.DataProtection;
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.SecretStore.Hosting;
+namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
 internal sealed class SecretStoreRepository
 {

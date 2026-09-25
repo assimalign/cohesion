@@ -1,7 +1,7 @@
 using System;
 using System.Text;
 
-namespace Assimalign.Cohesion.Database.Types;
+namespace Assimalign.Cohesion.Database.Types.Internal;
 
 /// <summary>Applies the pinned Unicode mappings without runtime globalization services.</summary>
 internal static partial class CollationUnicodeData

@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting;
 
-namespace Assimalign.Cohesion.MessageHub.Hosting;
+namespace Assimalign.Cohesion.MessageHub.Hosting.Internal;
 
 internal sealed class MessageHubControlPlaneEndpointService : IHostService, IDisposable
 {

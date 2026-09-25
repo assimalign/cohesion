@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Scheduler.Hosting.Tests</RootNamespace>
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>

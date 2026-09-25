@@ -9,9 +9,9 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Channels;
 
-namespace Assimalign.Cohesion.LogSpace.Hosting;
+namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
-internal sealed class LogSegmentStore(string directory)
+internal sealed class LogSegmentStore
 {
     private const long maxSegmentBytes = 16 * 1024 * 1024;
     private readonly Channel<QueuedLog> _pending = Channel.CreateBounded<QueuedLog>(new BoundedChannelOptions(8192)
@@ -27,7 +27,16 @@ internal sealed class LogSegmentStore(string directory)
     private SegmentIndex? _index;
     private long _queuedBytes;
 
-    internal string DirectoryPath { get; } = Path.GetFullPath(directory);
+    /// <summary>
+    /// Initializes a new instance of the <see cref="LogSegmentStore"/> class.
+    /// </summary>
+    /// <param name="directory">The directory that holds the log segment files; it is resolved to a full path.</param>
+    public LogSegmentStore(string directory)
+    {
+        DirectoryPath = Path.GetFullPath(directory);
+    }
+
+    internal string DirectoryPath { get; }
     internal bool IsAvailable => !_failed && !_stopped;
     internal bool TryEnqueue(StoredLog record)
     {

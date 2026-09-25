@@ -171,9 +171,18 @@ public sealed class SqlEngineCompositionTests
         public void Dispose() { Disposed = true; Started.Dispose(); }
     }
 
-    private sealed class ProbeServer(IDatabaseEngine engine) : IDatabaseServer
+    private sealed class ProbeServer : IDatabaseServer
     {
-        public IDatabaseServerContext Context { get; } = new ProbeContext(engine);
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ProbeServer"/> class.
+        /// </summary>
+        /// <param name="engine">The engine the server's context reports as its owner.</param>
+        public ProbeServer(IDatabaseEngine engine)
+        {
+            Context = new ProbeContext(engine);
+        }
+
+        public IDatabaseServerContext Context { get; }
         public bool FailDisposal { get; init; }
         public bool YieldBeforeDisposal { get; init; }
         public int Disposals { get; private set; }
@@ -193,9 +202,20 @@ public sealed class SqlEngineCompositionTests
         }
     }
 
-    private sealed class ProbeContext(IDatabaseEngine engine) : IDatabaseServerContext
+    private sealed class ProbeContext : IDatabaseServerContext
     {
-        public IDatabaseEngine Engine => engine;
+        private readonly IDatabaseEngine _engine;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ProbeContext"/> class.
+        /// </summary>
+        /// <param name="engine">The engine the context reports as its owner.</param>
+        public ProbeContext(IDatabaseEngine engine)
+        {
+            _engine = engine;
+        }
+
+        public IDatabaseEngine Engine => _engine;
         public IReadOnlyCollection<IDatabaseServerSession> Sessions => [];
     }
 

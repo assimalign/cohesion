@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal enum Http3ErrorCode : long
 {

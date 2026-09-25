@@ -85,11 +85,18 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <param name="location">Packed location.</param><returns>The page and slot.</returns>
     public static (PageId PageId, int SlotIndex) UnpackLocation(ulong location) => ((PageId)(long)(location >> 16), (int)(location & 0xffff));
     internal (PageId PageId, int SlotIndex) InsertOwned(IStorageTransaction transaction, ulong owner, ReadOnlySpan<byte> bytes) => InsertRecord(transaction, owner, bytes);
-    private sealed class RecordSpace(GraphStorage storage) : ITransactionRecordSpace
+    private sealed class RecordSpace : ITransactionRecordSpace
     {
-        public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => storage.ReadEntry(pageId, slotIndex);
-        public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record) => storage.UpdateEntry(transaction, pageId, slotIndex, record);
-        public void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex) => storage.DeleteEntry(transaction, pageId, slotIndex);
+        private readonly GraphStorage _storage;
+        /// <summary>Initializes a new instance of the <see cref="RecordSpace"/> class.</summary>
+        /// <param name="storage">The graph storage whose records the adapter exposes.</param>
+        public RecordSpace(GraphStorage storage)
+        {
+            _storage = storage;
+        }
+        public ReadOnlyMemory<byte> Read(PageId pageId, int slotIndex) => _storage.ReadEntry(pageId, slotIndex);
+        public void Update(IStorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record) => _storage.UpdateEntry(transaction, pageId, slotIndex, record);
+        public void Delete(IStorageTransaction transaction, PageId pageId, int slotIndex) => _storage.DeleteEntry(transaction, pageId, slotIndex);
         public ulong PackLocation(PageId pageId, int slotIndex) => GraphStorage.PackLocation(pageId, slotIndex);
         public (PageId PageId, int SlotIndex) UnpackLocation(ulong location) => GraphStorage.UnpackLocation(location);
     }

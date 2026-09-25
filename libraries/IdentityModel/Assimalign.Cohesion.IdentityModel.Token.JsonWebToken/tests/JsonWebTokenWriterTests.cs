@@ -21,7 +21,7 @@ public sealed class JsonWebTokenWriterTests
     private const string issuer = "cohesion-gateway";
     private const string audience = "secret-store";
     private const string keyId = "gateway-key-1";
-    private static readonly DateTimeOffset now = new(2026, 9, 6, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 9, 6, 12, 0, 0, TimeSpan.Zero);
 
     [Fact(DisplayName = "Cohesion Test [IdentityModel.Token.JsonWebToken] - Write: ES256 token round-trips through parse and verification")]
     public void Write_WhenEs256DescriptorProvided_ShouldRoundTripAndVerify()
@@ -30,7 +30,7 @@ public sealed class JsonWebTokenWriterTests
         using ECDsa privateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using ECDsa publicKey = CreatePublicKey(privateKey);
         IJsonWebTokenWriter writer = JsonWebTokenWriter.CreateEs256(privateKey, keyId);
-        JsonWebTokenDescriptor descriptor = CreateDescriptor(now.AddHours(1));
+        JsonWebTokenDescriptor descriptor = CreateDescriptor(_now.AddHours(1));
         descriptor.Claims.Add(new IdentityClaim("scope", "bootstrap"));
 
         // Act
@@ -44,7 +44,7 @@ public sealed class JsonWebTokenWriterTests
         token.Header.Type.ShouldBe("JWT");
         token.Issuer.ShouldBe(issuer);
         token.Audiences.ShouldBe(new[] { audience });
-        token.ExpiresAt.ShouldBe(now.AddHours(1));
+        token.ExpiresAt.ShouldBe(_now.AddHours(1));
         token.Id.ShouldBe("bootstrap-1");
         token.Claims.TryGet("scope", out IIdentityClaim? scope).ShouldBeTrue();
         scope!.Value.AsString().ShouldBe("bootstrap");
@@ -61,7 +61,7 @@ public sealed class JsonWebTokenWriterTests
         using ECDsa privateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using ECDsa publicKey = CreatePublicKey(privateKey);
         string compact = JsonWebTokenWriter.CreateEs256(privateKey, keyId)
-            .Write(CreateDescriptor(now.AddHours(1)));
+            .Write(CreateDescriptor(_now.AddHours(1)));
         JsonWebTokenParts original = JsonWebToken.Parse(compact).Parts!;
         string tamperedPayload = Base64Url.EncodeToString(Encoding.UTF8.GetBytes(
             "{\"iss\":\"cohesion-gateway\",\"aud\":\"attacker\",\"exp\":1788699600}"));
@@ -83,7 +83,7 @@ public sealed class JsonWebTokenWriterTests
         using ECDsa privateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using ECDsa wrongKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         JsonWebToken token = JsonWebToken.Parse(
-            JsonWebTokenWriter.CreateEs256(privateKey, keyId).Write(CreateDescriptor(now.AddHours(1))));
+            JsonWebTokenWriter.CreateEs256(privateKey, keyId).Write(CreateDescriptor(_now.AddHours(1))));
         IJsonWebTokenSignatureVerifier verifier = JsonWebTokenSignatureVerifier.CreateEcdsa(wrongKey, keyId);
 
         // Act
@@ -99,8 +99,8 @@ public sealed class JsonWebTokenWriterTests
         // Arrange
         using ECDsa privateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         JsonWebToken token = JsonWebToken.Parse(
-            JsonWebTokenWriter.CreateEs256(privateKey, keyId).Write(CreateDescriptor(now.AddHours(1))));
-        JsonWebTokenValidationOptions options = new(now.AddHours(2))
+            JsonWebTokenWriter.CreateEs256(privateKey, keyId).Write(CreateDescriptor(_now.AddHours(1))));
+        JsonWebTokenValidationOptions options = new(_now.AddHours(2))
         {
             ClockSkew = TimeSpan.Zero,
             ExpectedAudience = "configuration-store",
@@ -123,7 +123,7 @@ public sealed class JsonWebTokenWriterTests
         // Arrange
         using ECDsa privateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         IJsonWebTokenWriter writer = JsonWebTokenWriter.CreateEs256(privateKey, keyId);
-        JsonWebTokenDescriptor descriptor = CreateDescriptor(now.AddHours(1));
+        JsonWebTokenDescriptor descriptor = CreateDescriptor(_now.AddHours(1));
         descriptor.Claims.Add(new IdentityClaim(IdentityClaimTypes.Issuer, issuer));
 
         // Act
@@ -178,7 +178,7 @@ public sealed class JsonWebTokenWriterTests
             Issuer = issuer,
             Subject = new SubjectIdentifier("gateway"),
             TokenType = "JWT",
-            IssuedAt = now,
+            IssuedAt = _now,
             ExpiresAt = expiresAt,
         };
         descriptor.Audiences.Add(audience);

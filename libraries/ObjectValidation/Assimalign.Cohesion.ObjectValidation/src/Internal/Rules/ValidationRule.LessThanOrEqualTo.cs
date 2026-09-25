@@ -1,17 +1,17 @@
 ﻿using System;
 
-namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class LessThanOrEqualToValidationRule<TValue> : ValidationRuleBase<TValue>
     where TValue : struct, IComparable, IComparable<TValue>
 {
-    private readonly TValue argument;
-    private readonly Func<TValue, TValue, bool> isLessThanOrEqualTo;
+    private readonly TValue _argument;
+    private readonly Func<TValue, TValue, bool> _isLessThanOrEqualTo;
 
     public LessThanOrEqualToValidationRule(TValue argument)
     {
-        this.argument = argument;
-        this.isLessThanOrEqualTo = (arg, val) => arg.CompareTo(val) >= 0;
+        this._argument = argument;
+        this._isLessThanOrEqualTo = (arg, val) => arg.CompareTo(val) >= 0;
     }
 
     public override string Name { get; set; }
@@ -42,7 +42,7 @@ internal sealed class LessThanOrEqualToValidationRule<TValue> : ValidationRuleBa
         {
             context = new ValidationContext<TValue>(value);
 
-            if (!isLessThanOrEqualTo(this.argument, value))
+            if (!_isLessThanOrEqualTo(this._argument, value))
             {
                 context.AddFailure(this.Error);
             }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.OpenApi.Serialization;
 using Assimalign.Cohesion.OpenApi.Validation;
+using Assimalign.Cohesion.OpenApi.Versioning.Internal;
 
 namespace Assimalign.Cohesion.OpenApi.Versioning;
 

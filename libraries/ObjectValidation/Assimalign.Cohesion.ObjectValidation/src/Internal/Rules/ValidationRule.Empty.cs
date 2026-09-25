@@ -2,7 +2,7 @@
 using System.Collections;
 using System.Linq;
 
-namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class EmptyValidationRule<TValue> : ValidationRuleBase<TValue>
     where TValue : IEnumerable

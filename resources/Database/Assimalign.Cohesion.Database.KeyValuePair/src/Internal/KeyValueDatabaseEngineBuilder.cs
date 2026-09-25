@@ -3,7 +3,7 @@ using System.IO;
 
 using Assimalign.Cohesion.Database.Storage;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 internal sealed class KeyValueDatabaseEngineBuilder : IKeyValueDatabaseEngineBuilder
 {

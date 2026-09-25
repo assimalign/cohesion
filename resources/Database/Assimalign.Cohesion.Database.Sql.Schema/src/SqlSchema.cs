@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Sql.Schema.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql.Schema;
 
 /// <summary>

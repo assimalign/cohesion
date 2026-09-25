@@ -8,7 +8,7 @@ using Assimalign.Cohesion.Database.Documents.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Documents.Catalog;
+namespace Assimalign.Cohesion.Database.Documents.Catalog.Internal;
 
 internal sealed partial class DefaultDocumentCatalog : IDocumentCatalog
 {

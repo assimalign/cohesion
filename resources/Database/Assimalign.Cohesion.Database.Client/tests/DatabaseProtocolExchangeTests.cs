@@ -55,9 +55,18 @@ public class DatabaseProtocolExchangeTests
         (await replacement.ExecuteAsync(new PingExchange(SqlProtocol.Family), ClientTestHarness.Timeout())).ShouldBe(ProtocolMessageType.Pong);
     }
 
-    private sealed class PingExchange(ProtocolMessageFamily family) : IDatabaseProtocolExchange<ProtocolMessageType>
+    private sealed class PingExchange : IDatabaseProtocolExchange<ProtocolMessageType>
     {
-        public ProtocolMessageFamily Family => family;
+        private readonly ProtocolMessageFamily _family;
+
+        /// <summary>Initializes a new instance of the <see cref="PingExchange"/> class.</summary>
+        /// <param name="family">The protocol message family the exchange declares.</param>
+        public PingExchange(ProtocolMessageFamily family)
+        {
+            _family = family;
+        }
+
+        public ProtocolMessageFamily Family => _family;
         internal bool Started { get; private set; }
 
         public async ValueTask<ProtocolMessageType> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
@@ -70,15 +79,24 @@ public class DatabaseProtocolExchangeTests
         }
     }
 
-    private sealed class InterruptedExchange(CancellationTokenSource cancellation) : IDatabaseProtocolExchange<bool>
+    private sealed class InterruptedExchange : IDatabaseProtocolExchange<bool>
     {
+        private readonly CancellationTokenSource _cancellation;
+
+        /// <summary>Initializes a new instance of the <see cref="InterruptedExchange"/> class.</summary>
+        /// <param name="cancellation">The cancellation source the exchange cancels after sending its request.</param>
+        public InterruptedExchange(CancellationTokenSource cancellation)
+        {
+            _cancellation = cancellation;
+        }
+
         public ProtocolMessageFamily Family => SqlProtocol.Family;
 
         public async ValueTask<bool> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer, CancellationToken cancellationToken = default)
         {
             await writer.WriteFrameAsync(new ProtocolFrame(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty), cancellationToken);
             await writer.FlushAsync(cancellationToken);
-            cancellation.Cancel();
+            _cancellation.Cancel();
             cancellationToken.ThrowIfCancellationRequested();
             return true;
         }

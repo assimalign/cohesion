@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
-namespace Assimalign.Cohesion.IdentityHub.Hosting;
+namespace Assimalign.Cohesion.IdentityHub.Hosting.Internal;
 
 internal sealed class IdentitySigningKey : IDisposable
 {

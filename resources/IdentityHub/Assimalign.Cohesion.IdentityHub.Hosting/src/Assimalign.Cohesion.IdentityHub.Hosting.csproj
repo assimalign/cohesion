@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.IdentityHub.Hosting</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityHub" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
@@ -17,8 +20,4 @@
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 	</ItemGroup>
-  <ItemGroup>
-    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityHub.Hosting.Tests" />
-    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityHub.Client.Tests" />
-  </ItemGroup>
 </Project>

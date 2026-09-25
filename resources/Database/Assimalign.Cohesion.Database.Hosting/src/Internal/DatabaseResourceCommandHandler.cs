@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.Database.Hosting;
+namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 internal sealed class DatabaseResourceCommandHandler : IResourceCommandHandler
 {

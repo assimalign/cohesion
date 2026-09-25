@@ -12,6 +12,7 @@ using Xunit;
 
 using Assimalign.Cohesion.ConfigurationStore;
 using Assimalign.Cohesion.ConfigurationStore.Client;
+using Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 

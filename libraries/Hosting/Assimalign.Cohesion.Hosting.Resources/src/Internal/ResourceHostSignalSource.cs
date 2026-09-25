@@ -5,7 +5,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 
-namespace Assimalign.Cohesion.Hosting.Resources;
+namespace Assimalign.Cohesion.Hosting.Resources.Internal;
 
 internal interface IResourceHostSignalSource
 {
@@ -139,20 +139,20 @@ internal sealed class ResourceHostSignalSource : IResourceHostSignalSource
 
     private static class ProcessSignalRouter
     {
-        private static readonly Lock gate = new();
-        private static readonly List<Func<ResourceHostStopSignal, bool>> subscribers = new();
+        private static readonly Lock _gate = new();
+        private static readonly List<Func<ResourceHostStopSignal, bool>> _subscribers = new();
 
         // Retaining these process-lifetime registrations makes one BCL handler fan out to
         // every active resource host instead of installing N handlers for N nested hosts.
-        private static readonly PosixSignalRegistration[] registrations = CreateRegistrations();
+        private static readonly PosixSignalRegistration[] _registrations = CreateRegistrations();
 
         internal static IDisposable Subscribe(Func<ResourceHostStopSignal, bool> callback)
         {
-            _ = registrations;
+            _ = _registrations;
 
-            lock (gate)
+            lock (_gate)
             {
-                subscribers.Add(callback);
+                _subscribers.Add(callback);
             }
 
             return new ProcessSignalSubscription(callback);
@@ -209,9 +209,9 @@ internal sealed class ResourceHostSignalSource : IResourceHostSignalSource
                 : ResourceHostStopSignal.Terminate;
             Func<ResourceHostStopSignal, bool>[] callbacks;
 
-            lock (gate)
+            lock (_gate)
             {
-                callbacks = subscribers.ToArray();
+                callbacks = _subscribers.ToArray();
             }
 
             bool accepted = false;
@@ -240,9 +240,9 @@ internal sealed class ResourceHostSignalSource : IResourceHostSignalSource
                     return;
                 }
 
-                lock (gate)
+                lock (_gate)
                 {
-                    subscribers.Remove(callback);
+                    _subscribers.Remove(callback);
                 }
             }
         }

@@ -181,10 +181,27 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
         return frame;
     }
 
-    private sealed class DocumentExchange(bool? synchronousUntokenedWrite = null,
-        TaskCompletionSource? writeStarted = null, TaskCompletionSource? writeCompleted = null) : IDatabaseStreamingExchange
+    private sealed class DocumentExchange : IDatabaseStreamingExchange
     {
+        private readonly bool? _synchronousUntokenedWrite;
+        private readonly TaskCompletionSource? _writeStarted;
+        private readonly TaskCompletionSource? _writeCompleted;
         private int _length;
+
+        /// <summary>Initializes a new instance of the <see cref="DocumentExchange"/> class.</summary>
+        /// <param name="synchronousUntokenedWrite">
+        /// <see langword="true"/> to copy each content chunk with a synchronous write, <see langword="false"/> to copy it
+        /// with an asynchronous write that omits the cancellation token, or <see langword="null"/> to pass the token through.
+        /// </param>
+        /// <param name="writeStarted">Signaled when a content chunk write starts, or <see langword="null"/>.</param>
+        /// <param name="writeCompleted">Signaled when a content chunk write completes, or <see langword="null"/>.</param>
+        public DocumentExchange(bool? synchronousUntokenedWrite = null,
+            TaskCompletionSource? writeStarted = null, TaskCompletionSource? writeCompleted = null)
+        {
+            _synchronousUntokenedWrite = synchronousUntokenedWrite;
+            _writeStarted = writeStarted;
+            _writeCompleted = writeCompleted;
+        }
 
         public ProtocolMessageFamily Family => StreamingClientTestHarness.Family;
 
@@ -208,12 +225,12 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
                 if (frame.Type == content)
                 {
                     received += frame.Payload.Length;
-                    writeStarted?.TrySetResult();
-                    if (synchronousUntokenedWrite == true)
+                    _writeStarted?.TrySetResult();
+                    if (_synchronousUntokenedWrite == true)
                     {
                         destination.Write(frame.Payload.Span);
                     }
-                    else if (synchronousUntokenedWrite == false)
+                    else if (_synchronousUntokenedWrite == false)
                     {
                         await destination.WriteAsync(frame.Payload);
                     }
@@ -221,7 +238,7 @@ internal sealed class StreamingClientTestHarness : IAsyncDisposable
                     {
                         await destination.WriteAsync(frame.Payload, cancellationToken);
                     }
-                    writeCompleted?.TrySetResult();
+                    _writeCompleted?.TrySetResult();
                     continue;
                 }
                 if (frame.Type != complete || frame.Payload.Length != sizeof(int) ||

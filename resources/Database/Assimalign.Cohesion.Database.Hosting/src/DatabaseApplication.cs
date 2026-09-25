@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.Database.Hosting;

@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.SourceGeneration.Web;
+namespace Assimalign.Cohesion.SourceGeneration.Web.Internal;
 
 /// <summary>Where a handler parameter is bound from.</summary>
 internal enum BindingSource

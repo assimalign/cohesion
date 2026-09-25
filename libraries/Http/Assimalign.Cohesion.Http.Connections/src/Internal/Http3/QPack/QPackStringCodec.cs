@@ -2,9 +2,8 @@ using System;
 using System.IO;
 using System.Text;
 
-using Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Decodes and encodes QPACK string literals (RFC 9204 §4.1.2). A string

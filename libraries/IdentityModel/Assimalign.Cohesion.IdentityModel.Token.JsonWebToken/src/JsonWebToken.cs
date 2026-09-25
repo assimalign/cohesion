@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Token;
+using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
 
 namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 

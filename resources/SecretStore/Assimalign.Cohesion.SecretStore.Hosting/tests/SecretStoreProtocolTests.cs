@@ -16,6 +16,7 @@ using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.SecretStore;
 using Assimalign.Cohesion.SecretStore.Client;
+using Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Tests;
 

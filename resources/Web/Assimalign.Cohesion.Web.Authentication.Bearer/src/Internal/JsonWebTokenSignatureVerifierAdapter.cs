@@ -2,7 +2,7 @@ using System;
 
 using IdentityModelSignatureVerifier = Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.IJsonWebTokenSignatureVerifier;
 
-namespace Assimalign.Cohesion.Web.Authentication.Bearer;
+namespace Assimalign.Cohesion.Web.Authentication.Bearer.Internal;
 
 /// <summary>
 /// Adapts the reusable IdentityModel asymmetric verifier to Bearer's existing public seam.

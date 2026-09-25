@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Sql.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql;
 
 using Assimalign.Cohesion.Database.Sql.Storage;

@@ -20,10 +20,10 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts.Tests;
 /// </summary>
 public class RequestTimeoutMiddlewareTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan ArmedTimeout = TimeSpan.FromMilliseconds(100);
-    private static readonly TimeSpan NeverInTestBudget = TimeSpan.FromSeconds(300);
-    private static readonly TimeSpan PastArmedTimeout = TimeSpan.FromMilliseconds(450);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _armedTimeout = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan _neverInTestBudget = TimeSpan.FromSeconds(300);
+    private static readonly TimeSpan _pastArmedTimeout = TimeSpan.FromMilliseconds(450);
 
     [Fact(DisplayName = "Cohesion Test [Web.RequestTimeouts] - UseRequestTimeouts: Should throw on a null pipeline builder")]
     public void UseRequestTimeouts_NullBuilder_ShouldThrow()
@@ -40,14 +40,14 @@ public class RequestTimeoutMiddlewareTests
     public async Task InvokeAsync_GlobalPolicyExpires_ShouldWrite504AndCancelDownstreamWork()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using TimeoutTestContext context = new();
         CancellationToken observedToken = default;
 
         IWebApplicationPipeline pipeline = BuildPipeline(
-            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = ArmedTimeout },
+            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _armedTimeout },
             async ctx =>
             {
                 observedToken = ctx.RequestCancelled;
@@ -68,7 +68,7 @@ public class RequestTimeoutMiddlewareTests
     public async Task InvokeAsync_InjectedTimeProvider_ShouldExpireOnlyWhenClockAdvances()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         ManualTimeProvider timeProvider = new();
@@ -78,7 +78,7 @@ public class RequestTimeoutMiddlewareTests
             options =>
             {
                 options.TimeProvider = timeProvider;
-                options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = NeverInTestBudget };
+                options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _neverInTestBudget };
             },
             ctx => Task.Delay(Timeout.InfiniteTimeSpan, ctx.RequestCancelled));
 
@@ -88,7 +88,7 @@ public class RequestTimeoutMiddlewareTests
         await Task.Delay(100, cancellationToken);
         execution.IsCompleted.ShouldBeFalse();
 
-        timeProvider.Advance(NeverInTestBudget);
+        timeProvider.Advance(_neverInTestBudget);
         await execution.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
 
         // Assert
@@ -99,18 +99,18 @@ public class RequestTimeoutMiddlewareTests
     public async Task InvokeAsync_EndpointPolicyShorterThanGlobal_ShouldTimeoutOnEndpointPolicy()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using TimeoutTestContext context = new();
 
         IWebApplicationPipeline pipeline = BuildPipeline(
-            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = NeverInTestBudget },
+            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _neverInTestBudget },
             async ctx =>
             {
                 // What UseRouting does between matching and dispatching: publish the match (with
                 // its endpoint metadata) on the context's feature collection, then run the handler.
-                ctx.Features.Set<Routing.IRouteMatchFeature>(new FakeRouteMatchFeature(new RequestTimeoutMetadata(ArmedTimeout)));
+                ctx.Features.Set<Routing.IRouteMatchFeature>(new FakeRouteMatchFeature(new RequestTimeoutMetadata(_armedTimeout)));
                 await Task.Delay(Timeout.InfiniteTimeSpan, ctx.RequestCancelled);
             });
 
@@ -125,17 +125,17 @@ public class RequestTimeoutMiddlewareTests
     public async Task InvokeAsync_EndpointPolicyDisabled_ShouldRunPastGlobalTimeout()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using TimeoutTestContext context = new();
 
         IWebApplicationPipeline pipeline = BuildPipeline(
-            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = ArmedTimeout },
+            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _armedTimeout },
             async ctx =>
             {
                 ctx.Features.Set<Routing.IRouteMatchFeature>(new FakeRouteMatchFeature(RequestTimeoutMetadata.Disabled));
-                await Task.Delay(PastArmedTimeout, ctx.RequestCancelled);
+                await Task.Delay(_pastArmedTimeout, ctx.RequestCancelled);
                 ctx.Response.StatusCode = HttpStatusCode.Ok;
             });
 
@@ -150,17 +150,17 @@ public class RequestTimeoutMiddlewareTests
     public async Task InvokeAsync_EndpointPolicyLongerThanGlobal_ShouldReplaceGlobalTimer()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using TimeoutTestContext context = new();
 
         IWebApplicationPipeline pipeline = BuildPipeline(
-            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = ArmedTimeout },
+            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _armedTimeout },
             async ctx =>
             {
-                ctx.Features.Set<Routing.IRouteMatchFeature>(new FakeRouteMatchFeature(new RequestTimeoutMetadata(NeverInTestBudget)));
-                await Task.Delay(PastArmedTimeout, ctx.RequestCancelled);
+                ctx.Features.Set<Routing.IRouteMatchFeature>(new FakeRouteMatchFeature(new RequestTimeoutMetadata(_neverInTestBudget)));
+                await Task.Delay(_pastArmedTimeout, ctx.RequestCancelled);
                 ctx.Response.StatusCode = HttpStatusCode.Ok;
             });
 
@@ -175,19 +175,19 @@ public class RequestTimeoutMiddlewareTests
     public async Task InvokeAsync_FeatureDisable_ShouldDisarmForTheExchange()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using TimeoutTestContext context = new();
 
         IWebApplicationPipeline pipeline = BuildPipeline(
-            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = ArmedTimeout },
+            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _armedTimeout },
             async ctx =>
             {
                 IRequestTimeoutFeature feature = ctx.Features.Get<IRequestTimeoutFeature>()!;
                 feature.Disable();
 
-                await Task.Delay(PastArmedTimeout, ctx.RequestCancelled);
+                await Task.Delay(_pastArmedTimeout, ctx.RequestCancelled);
                 ctx.Response.StatusCode = HttpStatusCode.Ok;
             });
 
@@ -202,7 +202,7 @@ public class RequestTimeoutMiddlewareTests
     public async Task InvokeAsync_FeatureSetTimeout_WithoutConfiguredPolicy_ShouldArmAndAnswer504()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using TimeoutTestContext context = new();
@@ -212,7 +212,7 @@ public class RequestTimeoutMiddlewareTests
             async ctx =>
             {
                 IRequestTimeoutFeature feature = ctx.Features.Get<IRequestTimeoutFeature>()!;
-                feature.SetTimeout(ArmedTimeout);
+                feature.SetTimeout(_armedTimeout);
 
                 await Task.Delay(Timeout.InfiniteTimeSpan, ctx.RequestCancelled);
             });
@@ -228,13 +228,13 @@ public class RequestTimeoutMiddlewareTests
     public async Task InvokeAsync_ClientAbort_ShouldPropagateCancellationWithout504()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using TimeoutTestContext context = new();
 
         IWebApplicationPipeline pipeline = BuildPipeline(
-            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = NeverInTestBudget },
+            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _neverInTestBudget },
             async ctx =>
             {
                 context.AbortClient();
@@ -253,14 +253,14 @@ public class RequestTimeoutMiddlewareTests
     public async Task InvokeAsync_ResponseAlreadyStarted_ShouldAbortExchangeInsteadOfWriting504()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using TimeoutTestContext context = new();
         context.Features.Set<IHttpResponseStreamingFeature>(new FakeResponseStreamingFeature(hasStarted: true));
 
         IWebApplicationPipeline pipeline = BuildPipeline(
-            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = ArmedTimeout },
+            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _armedTimeout },
             ctx => Task.Delay(Timeout.InfiniteTimeSpan, ctx.RequestCancelled));
 
         // Act
@@ -277,7 +277,7 @@ public class RequestTimeoutMiddlewareTests
     public async Task InvokeAsync_ProblemDetailsPolicy_ShouldWriteProblemPayloadAndResetStagedResponse()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using TimeoutTestContext context = new();
@@ -285,7 +285,7 @@ public class RequestTimeoutMiddlewareTests
         IWebApplicationPipeline pipeline = BuildPipeline(
             options => options.DefaultPolicy = new RequestTimeoutPolicy
             {
-                Timeout = ArmedTimeout,
+                Timeout = _armedTimeout,
                 WriteProblemDetails = true,
             },
             async ctx =>
@@ -313,7 +313,7 @@ public class RequestTimeoutMiddlewareTests
     public async Task InvokeAsync_CustomWriteResponse_ShouldOwnTheTimeoutResponse()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using TimeoutTestContext context = new();
@@ -321,7 +321,7 @@ public class RequestTimeoutMiddlewareTests
         IWebApplicationPipeline pipeline = BuildPipeline(
             options => options.DefaultPolicy = new RequestTimeoutPolicy
             {
-                Timeout = ArmedTimeout,
+                Timeout = _armedTimeout,
                 WriteResponse = async ctx =>
                 {
                     ctx.Response.StatusCode = HttpStatusCode.ServiceUnavailable;
@@ -342,13 +342,13 @@ public class RequestTimeoutMiddlewareTests
     public async Task InvokeAsync_HandlerCompletesDespiteTimeout_ShouldKeepHandlerResponse()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using TimeoutTestContext context = new();
 
         IWebApplicationPipeline pipeline = BuildPipeline(
-            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = ArmedTimeout },
+            options => options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _armedTimeout },
             async ctx =>
             {
                 try
@@ -376,7 +376,7 @@ public class RequestTimeoutMiddlewareTests
     public async Task InvokeAsync_NoPolicies_ShouldPassThroughAndCleanUpFeature()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using TimeoutTestContext context = new();

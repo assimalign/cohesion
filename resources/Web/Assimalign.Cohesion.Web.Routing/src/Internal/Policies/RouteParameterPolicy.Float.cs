@@ -1,7 +1,7 @@
 using System;
 using System.Globalization;
 
-namespace Assimalign.Cohesion.Web.Routing.Policies;
+namespace Assimalign.Cohesion.Web.Routing.Internal;
 
 /// <summary>
 /// Validates that a route value is a single-precision floating-point number and converts it to a

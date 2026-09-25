@@ -20,13 +20,13 @@ namespace Assimalign.Cohesion.Database.Testing.Tests;
 /// </summary>
 public class DatabaseApplicationTestFactoryTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Database.Testing] - FromProgram: drives the real entry point under an isolated resource context")]
     public async Task FromProgram_WithDefaultContext_ShouldDriveEntryPointAndControlPlane()
     {
         // Arrange
-        using var cancellation = new CancellationTokenSource(TestTimeout);
+        using var cancellation = new CancellationTokenSource(_testTimeout);
         await using DatabaseApplicationTestFactory factory =
             DatabaseApplicationTestFactory.FromProgram<Program>();
 

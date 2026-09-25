@@ -4,7 +4,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 
-namespace Assimalign.Cohesion.OpenApi.Serialization;
+namespace Assimalign.Cohesion.OpenApi.Serialization.Internal;
 
 /// <summary>
 /// The JSON implementation of <see cref="IOpenApiWriter"/>. Composes the version-aware model-to-node

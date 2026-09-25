@@ -201,18 +201,29 @@ public class DatabaseApplicationTests
         await ((IHost)application).StopAsync(DatabaseHostTestHarness.Timeout());
     }
 
-    private sealed class ControlledStartServer(
-        TaskCompletionSource<bool> bindStarted,
-        TaskCompletionSource<bool> accepting) : IDatabaseServer
+    private sealed class ControlledStartServer : IDatabaseServer
     {
         private readonly RecordingServer _inner = new([], "controlled");
+        private readonly TaskCompletionSource<bool> _bindStarted;
+        private readonly TaskCompletionSource<bool> _accepting;
+
+        /// <summary>Initializes a new instance of the <see cref="ControlledStartServer"/> class.</summary>
+        /// <param name="bindStarted">Completed when the host begins starting the server.</param>
+        /// <param name="accepting">Completes the server start once it is set, signalling the server is accepting.</param>
+        public ControlledStartServer(
+            TaskCompletionSource<bool> bindStarted,
+            TaskCompletionSource<bool> accepting)
+        {
+            _bindStarted = bindStarted;
+            _accepting = accepting;
+        }
 
         public IDatabaseServerContext Context => _inner.Context;
 
         public Task StartAsync(CancellationToken cancellationToken = default)
         {
-            bindStarted.TrySetResult(true);
-            return accepting.Task.WaitAsync(cancellationToken);
+            _bindStarted.TrySetResult(true);
+            return _accepting.Task.WaitAsync(cancellationToken);
         }
 
         public Task StopAsync(CancellationToken cancellationToken = default)
@@ -220,19 +231,31 @@ public class DatabaseApplicationTests
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-        internal void Accept() => accepting.TrySetResult(true);
+        internal void Accept() => _accepting.TrySetResult(true);
     }
 
-    private sealed class ControlledStartService(
-        TaskCompletionSource<bool> started,
-        TaskCompletionSource<bool> release) : IHostService
+    private sealed class ControlledStartService : IHostService
     {
+        private readonly TaskCompletionSource<bool> _started;
+        private readonly TaskCompletionSource<bool> _release;
+
+        /// <summary>Initializes a new instance of the <see cref="ControlledStartService"/> class.</summary>
+        /// <param name="started">Completed when the host begins starting the service.</param>
+        /// <param name="release">Completes the service start once it is set.</param>
+        public ControlledStartService(
+            TaskCompletionSource<bool> started,
+            TaskCompletionSource<bool> release)
+        {
+            _started = started;
+            _release = release;
+        }
+
         public ServiceId Id { get; } = ServiceId.New();
 
         public async Task StartAsync(CancellationToken cancellationToken = default)
         {
-            started.TrySetResult(true);
-            await release.Task.WaitAsync(cancellationToken);
+            _started.TrySetResult(true);
+            await _release.Task.WaitAsync(cancellationToken);
         }
 
         public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

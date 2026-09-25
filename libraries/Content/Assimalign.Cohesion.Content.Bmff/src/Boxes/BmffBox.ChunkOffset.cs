@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using static System.Buffers.Binary.BinaryPrimitives;
 
+using Assimalign.Cohesion.Content.Media;
 using Assimalign.IO;
 
 namespace Assimalign.Cohesion.Files.Bmff;
@@ -13,7 +14,7 @@ namespace Assimalign.Cohesion.Files.Bmff;
 [DebuggerDisplay("Bmff Box: Chunk Offset (stco)")]
 public sealed class ChunkOffsetBox : BmffBox
 {
-    private uint[] entries;
+    private uint[] _entries;
 
     public ChunkOffsetBox(long offset, long limit)
     {
@@ -21,7 +22,7 @@ public sealed class ChunkOffsetBox : BmffBox
         this.Limit = limit;
     }
 
-    public uint[] Entries => entries;
+    public uint[] Entries => _entries;
     public override bool IsLeaf => true;
     public override bool IsComposite => false;
     public override long Limit { get; }
@@ -32,11 +33,11 @@ public sealed class ChunkOffsetBox : BmffBox
     {
         var count = ReadUInt32BigEndian(stream.ReadBytes(4));
 
-        entries = new uint[count];
+        _entries = new uint[count];
 
         for (uint i = 0; i < count; i++)
         {
-            entries[i] = ReadUInt32BigEndian(stream.ReadBytes(4));
+            _entries[i] = ReadUInt32BigEndian(stream.ReadBytes(4));
         }
     }
 

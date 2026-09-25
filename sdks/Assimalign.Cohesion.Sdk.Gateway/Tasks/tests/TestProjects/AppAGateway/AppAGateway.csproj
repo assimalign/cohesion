@@ -1,6 +1,7 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
 
   <PropertyGroup>
+    <RootNamespace>AppAGateway</RootNamespace>
     <CohesionApplicationName>appa</CohesionApplicationName>
     <CohesionResourceName>appa-gateway</CohesionResourceName>
     <CohesionGateways>Local</CohesionGateways>

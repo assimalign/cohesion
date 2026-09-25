@@ -24,7 +24,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 /// </summary>
 public class WebApplicationServerIntegrationTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Server: A parked connection should not starve other connections (per-connection dispatch)")]
     public async Task Server_ParkedConnection_ShouldNotStarveOtherConnections()
@@ -33,7 +33,7 @@ public class WebApplicationServerIntegrationTests
         // served from a second connection while the first is parked. Pre-#762 this deadlocked:
         // the accept loop served connections inline, so the parked connection blocked all
         // others.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         TaskCompletionSource slowEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -82,7 +82,7 @@ public class WebApplicationServerIntegrationTests
     {
         // Arrange — an exchange parked in the pipeline on a test-owned gate that deliberately
         // ignores cancellation, so the only way StopAsync can complete is by draining it.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -132,7 +132,7 @@ public class WebApplicationServerIntegrationTests
     {
         // Arrange — a completed request leaves its pooled connection parked in the server's
         // receive loop; the drain must unblock it rather than hang on the idle client.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -155,7 +155,7 @@ public class WebApplicationServerIntegrationTests
     public async Task StopAsync_AfterStop_ShouldRefuseNewConnections()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();

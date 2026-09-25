@@ -1,11 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.IdentityModel.Token.JsonWebToken</RootNamespace>
     <Description>Concrete JSON Web Token (JOSE/JWT) layer for Cohesion IdentityModel: reflection-free compact parsing and ES256 writing, typed JOSE headers and claims, document validation, and reusable BCL-backed RSA/ECDSA signature verification. Builds on Assimalign.Cohesion.IdentityModel.Token.</Description>
   </PropertyGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token" />
-  </ItemGroup>
-  <ItemGroup>
-    <InternalsVisibleTo Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Tests" />
   </ItemGroup>
 </Project>

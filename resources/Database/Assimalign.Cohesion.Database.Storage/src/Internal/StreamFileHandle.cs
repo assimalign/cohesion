@@ -11,11 +11,21 @@ using Assimalign.Cohesion.FileSystem;
 /// Serializes offset I/O over a legacy stream. A Stream has no durable-flush
 /// contract, so this adapter must reject durable requests regardless of its type.
 /// </summary>
-internal sealed class StreamFileHandle(Stream stream) : IFileSystemFileHandle
+internal sealed class StreamFileHandle : IFileSystemFileHandle
 {
+    private readonly Stream _stream;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public long Length => stream.Length;
+    /// <summary>
+    /// Initializes a new instance of the <see cref="StreamFileHandle"/> class.
+    /// </summary>
+    /// <param name="stream">The seekable legacy stream the handle serializes offset I/O over and owns.</param>
+    public StreamFileHandle(Stream stream)
+    {
+        _stream = stream;
+    }
+
+    public long Length => _stream.Length;
     public bool SupportsDurableFlush => false;
 
     public int Read(Span<byte> buffer, long offset)
@@ -23,8 +33,8 @@ internal sealed class StreamFileHandle(Stream stream) : IFileSystemFileHandle
         _gate.Wait();
         try
         {
-            stream.Position = offset;
-            return stream.Read(buffer);
+            _stream.Position = offset;
+            return _stream.Read(buffer);
         }
         finally { _gate.Release(); }
     }
@@ -34,8 +44,8 @@ internal sealed class StreamFileHandle(Stream stream) : IFileSystemFileHandle
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            stream.Position = offset;
-            return await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            _stream.Position = offset;
+            return await _stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
@@ -45,8 +55,8 @@ internal sealed class StreamFileHandle(Stream stream) : IFileSystemFileHandle
         _gate.Wait();
         try
         {
-            stream.Position = offset;
-            stream.Write(buffer);
+            _stream.Position = offset;
+            _stream.Write(buffer);
         }
         finally { _gate.Release(); }
     }
@@ -56,13 +66,13 @@ internal sealed class StreamFileHandle(Stream stream) : IFileSystemFileHandle
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            stream.Position = offset;
-            await stream.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+            _stream.Position = offset;
+            await _stream.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
 
-    public void SetLength(long length) => stream.SetLength(length);
+    public void SetLength(long length) => _stream.SetLength(length);
 
     public void Flush(bool durable)
     {
@@ -70,7 +80,7 @@ internal sealed class StreamFileHandle(Stream stream) : IFileSystemFileHandle
         {
             throw new NotSupportedException("A Stream does not carry a durable-flush contract. Open an IFileSystemFileHandle instead.");
         }
-        stream.Flush();
+        _stream.Flush();
     }
 
     public ValueTask FlushAsync(bool durable, CancellationToken cancellationToken = default)
@@ -79,9 +89,9 @@ internal sealed class StreamFileHandle(Stream stream) : IFileSystemFileHandle
         {
             throw new NotSupportedException("A Stream does not carry a durable-flush contract. Open an IFileSystemFileHandle instead.");
         }
-        return new ValueTask(stream.FlushAsync(cancellationToken));
+        return new ValueTask(_stream.FlushAsync(cancellationToken));
     }
 
-    public void Dispose() => stream.Dispose();
-    public ValueTask DisposeAsync() => stream.DisposeAsync();
+    public void Dispose() => _stream.Dispose();
+    public ValueTask DisposeAsync() => _stream.DisposeAsync();
 }

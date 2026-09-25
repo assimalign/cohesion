@@ -21,19 +21,19 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
-    private static readonly string[] Seed =
+    private static readonly string[] _seed =
     [
         "CREATE TABLE t (id INT PRIMARY KEY, name TEXT, age INT);",
         "INSERT INTO t VALUES (1, 'Ada', 36), (2, 'Grace', 45), (3, 'Alan', 41);",
     ];
 
-    private static readonly string[] OrderingSeed =
+    private static readonly string[] _orderingSeed =
     [
         "CREATE TABLE ordering_rows (id INT PRIMARY KEY, age INT);",
         "INSERT INTO ordering_rows VALUES (40, 20), (10, 10), (50, 20), (20, 30), (30, 10);",
     ];
 
-    private static readonly object?[][] OrderingInsertionRows = [[40, 20], [10, 10], [50, 20], [20, 30], [30, 10]];
+    private static readonly object?[][] _orderingInsertionRows = [[40, 20], [10, 10], [50, 20], [20, 30], [30, 10]];
 
     /// <summary>Requires every advertised clause to have a case with correct live-engine results.</summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Profile: every advertised clause has a verified live execution case")]
@@ -88,8 +88,8 @@ public sealed class SqlLanguageConformanceTests
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-cast" });
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        await ExecuteAsync(session, Seed[0]);
-        await ExecuteAsync(session, Seed[1]);
+        await ExecuteAsync(session, _seed[0]);
+        await ExecuteAsync(session, _seed[1]);
         await using var result = (await ExecuteAsync(session, sql)).ShouldBeAssignableTo<QueryResultSet>();
         result.Columns[0].Type.ShouldBe(type);
         (await ReadRowsAsync(result)).ShouldHaveSingleItem()[0].ShouldBe(expected);
@@ -110,7 +110,7 @@ public sealed class SqlLanguageConformanceTests
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-aggregate" });
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        foreach (string setup in Seed) { await ExecuteAsync(session, setup); }
+        foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
         (await RowsAsync(session, "SELECT COUNT(*) FROM t WHERE age > 40;")).ShouldHaveSingleItem()[0].ShouldBe(2L);
         string sql = $"SELECT {projection} FROM t;";
         new SqlQueryParser().Parse(sql).Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
@@ -144,7 +144,7 @@ public sealed class SqlLanguageConformanceTests
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-partial" });
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        foreach (string setup in Seed) { await ExecuteAsync(session, setup); }
+        foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
         // #1023: the parsed expression must fail before publishing a column or changing old rows.
         string alter = "ALTER TABLE t ADD COLUMN extra INT DEFAULT (1 + 2);";
         new SqlQueryParser().Parse(alter).Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
@@ -178,10 +178,10 @@ public sealed class SqlLanguageConformanceTests
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-projection" });
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        foreach (string setup in OrderingSeed) { await ExecuteAsync(session, setup); }
+        foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }
 
         object?[][] expected = [[30, 10], [10, 10], [50, 20], [40, 20], [20, 30]];
-        RequireReordering(await RowsAsync(session, $"SELECT {projection} FROM ordering_rows;"), OrderingInsertionRows, expected);
+        RequireReordering(await RowsAsync(session, $"SELECT {projection} FROM ordering_rows;"), _orderingInsertionRows, expected);
         await ExpectRowsAsync(session, $"SELECT {projection} FROM ordering_rows ORDER BY 2 ASC, 1 DESC;", expected);
     }
 
@@ -192,7 +192,7 @@ public sealed class SqlLanguageConformanceTests
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-self" });
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        foreach (string setup in OrderingSeed) { await ExecuteAsync(session, setup); }
+        foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }
 
         object?[][] expected = [[20, 70L], [50, 80L], [40, 80L], [30, 90L], [10, 90L]];
         object?[][] inserted = [[40, 80L], [10, 90L], [50, 80L], [20, 70L], [30, 90L]];
@@ -207,7 +207,7 @@ public sealed class SqlLanguageConformanceTests
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-group" });
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        foreach (string setup in OrderingSeed) { await ExecuteAsync(session, setup); }
+        foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }
 
         const string query = "SELECT ordering_rows.age AS source_age, SUM(id) AS age FROM ordering_rows GROUP BY ordering_rows.age";
         object?[][] expected = [[30, 20m], [10, 40m], [20, 90m]];
@@ -230,7 +230,7 @@ public sealed class SqlLanguageConformanceTests
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-profile-order-invalid" });
         var database = await engine.CreateDatabaseAsync("audit");
         await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
-        foreach (string setup in OrderingSeed) { await ExecuteAsync(session, setup); }
+        foreach (string setup in _orderingSeed) { await ExecuteAsync(session, setup); }
 
         (await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, query))).Message.ShouldBe(message);
     }
@@ -245,7 +245,7 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression select && select.Columns.Any(column => column.Expression is SqlSubqueryExpression),
             [[2, 45], [3, 45]]),
         [SqlClauses.Join] = new("SELECT t.name, p.email FROM t INNER JOIN profiles p ON t.id = p.user_id ORDER BY t.id;",
-            [.. Seed, "CREATE TABLE profiles (user_id INT REFERENCES t(id), email TEXT);",
+            [.. _seed, "CREATE TABLE profiles (user_id INT REFERENCES t(id), email TEXT);",
                 "INSERT INTO profiles VALUES (1, 'ada@example.test'), (3, 'alan@example.test');"],
             expression => expression is SqlSelectExpression { Joins.Count: 1 } select && select.Joins[0].JoinType == SqlJoinType.Inner,
             async (_, result) => CheckRows(await ReadRowsAsync(result), [["Ada", "ada@example.test"], ["Alan", "alan@example.test"]])),
@@ -257,12 +257,12 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression { GroupBy.Count: 1 }, [[false, 1L, 36m], [true, 2L, 86m]]),
         [SqlClauses.Having] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t WHERE age > 35 GROUP BY age > 40 HAVING SUM(age) > 50;",
             expression => expression is SqlSelectExpression { Having: not null }, [[true, 2L, 86m]]),
-        [SqlClauses.OrderBy] = new("SELECT id, age AS years FROM ordering_rows ORDER BY years + 1 ASC, 1 DESC;", OrderingSeed,
+        [SqlClauses.OrderBy] = new("SELECT id, age AS years FROM ordering_rows ORDER BY years + 1 ASC, 1 DESC;", _orderingSeed,
             expression => expression is SqlSelectExpression { OrderBy.Count: 2 },
             async (session, result) =>
             {
                 object?[][] expected = [[30, 10], [10, 10], [50, 20], [40, 20], [20, 30]];
-                RequireReordering(await RowsAsync(session, "SELECT id, age FROM ordering_rows;"), OrderingInsertionRows, expected);
+                RequireReordering(await RowsAsync(session, "SELECT id, age FROM ordering_rows;"), _orderingInsertionRows, expected);
                 CheckRows(await ReadRowsAsync(result), expected);
                 // Retain the previous verified source-expression subset beside the restored forms.
                 await ExpectRowsAsync(session, "SELECT id, age FROM ordering_rows ORDER BY age + 1 ASC, id DESC;", expected);
@@ -274,7 +274,7 @@ public sealed class SqlLanguageConformanceTests
         [SqlClauses.Case] = Query("SELECT CASE WHEN age > 40 THEN 'senior' ELSE 'junior' END, CASE id WHEN 1 THEN 'first' ELSE 'later' END FROM t ORDER BY id;",
             expression => expression is SqlSelectExpression select && select.Columns.All(column => column.Expression is SqlCaseExpression),
             [["junior", "first"], ["senior", "later"], ["senior", "later"]]),
-        [SqlClauses.Cast] = new("SELECT CAST('42' AS INT), CAST(age AS TEXT) FROM t ORDER BY id;", Seed,
+        [SqlClauses.Cast] = new("SELECT CAST('42' AS INT), CAST(age AS TEXT) FROM t ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression select && select.Columns.All(column => column.Expression is SqlCastExpression),
             async (_, result) =>
             {
@@ -283,28 +283,28 @@ public sealed class SqlLanguageConformanceTests
                 resultSet.Columns[1].Type.ShouldBe(DatabaseType.String);
                 CheckRows(await ReadRowsAsync(resultSet), [[42, "36"], [42, "45"], [42, "41"]]);
             }),
-        [SqlClauses.Insert] = new("INSERT INTO t (id, name, age) VALUES (4, 'Barbara', 33);", Seed,
+        [SqlClauses.Insert] = new("INSERT INTO t (id, name, age) VALUES (4, 'Barbara', 33);", _seed,
             expression => expression is SqlInsertExpression,
             async (session, result) =>
             {
                 result.AffectedCount.ShouldBe(1);
                 await ExpectRowsAsync(session, "SELECT name, age FROM t WHERE id = 4;", [["Barbara", 33]]);
             }),
-        [SqlClauses.Values] = new("INSERT INTO t VALUES (4, 'Barbara', 33), (5, 'Edsger', 42);", Seed,
+        [SqlClauses.Values] = new("INSERT INTO t VALUES (4, 'Barbara', 33), (5, 'Edsger', 42);", _seed,
             expression => expression is SqlInsertExpression { Values.Count: 2 },
             async (session, result) =>
             {
                 result.AffectedCount.ShouldBe(2);
                 await ExpectRowsAsync(session, "SELECT name FROM t WHERE id > 3 ORDER BY id;", [["Barbara"], ["Edsger"]]);
             }),
-        [SqlClauses.Update] = new("UPDATE t SET age = age + 10 WHERE id = 1;", Seed,
+        [SqlClauses.Update] = new("UPDATE t SET age = age + 10 WHERE id = 1;", _seed,
             expression => expression is SqlUpdateExpression,
             async (session, result) =>
             {
                 result.AffectedCount.ShouldBe(1);
                 await ExpectRowsAsync(session, "SELECT age FROM t ORDER BY id;", [[46], [45], [41]]);
             }),
-        [SqlClauses.Delete] = new("DELETE FROM t WHERE id = 2;", Seed,
+        [SqlClauses.Delete] = new("DELETE FROM t WHERE id = 2;", _seed,
             expression => expression is SqlDeleteExpression,
             async (session, result) =>
             {
@@ -318,9 +318,9 @@ public sealed class SqlLanguageConformanceTests
                 await ExecuteAsync(session, "INSERT INTO created (id) VALUES (7);");
                 await ExpectRowsAsync(session, "SELECT id, label FROM created;", [[7, "new"]]);
             }),
-        [SqlClauses.AlterTable] = new("ALTER TABLE t ADD COLUMN extra INT NOT NULL DEFAULT 7;", Seed,
+        [SqlClauses.AlterTable] = new("ALTER TABLE t ADD COLUMN extra INT NOT NULL DEFAULT 7;", _seed,
             expression => expression is SqlAlterTableExpression { Action: SqlAlterAddColumnAction }, VerifyAlterAsync),
-        [SqlClauses.DropTable] = new("DROP TABLE t;", Seed,
+        [SqlClauses.DropTable] = new("DROP TABLE t;", _seed,
             expression => expression is SqlDropTableExpression,
             async (session, _) =>
             {
@@ -330,7 +330,7 @@ public sealed class SqlLanguageConformanceTests
                     .Message.ShouldContain("does not exist", Case.Sensitive);
                 (await ExecuteAsync(session, "DROP TABLE IF EXISTS t;")).Status.ShouldBe(QueryResultStatus.Success);
             }),
-        [SqlClauses.CreateIndex] = new("CREATE UNIQUE INDEX ix_name ON t(name);", Seed,
+        [SqlClauses.CreateIndex] = new("CREATE UNIQUE INDEX ix_name ON t(name);", _seed,
             expression => expression is SqlCreateIndexExpression { IsUnique: true },
             async (session, _) =>
             {
@@ -340,7 +340,7 @@ public sealed class SqlLanguageConformanceTests
                 await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO t VALUES (4, 'Ada', 1);"));
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE name = 'Ada';", [[1]]);
             }),
-        [SqlClauses.DropIndex] = new("DROP INDEX ix_age ON t;", [.. Seed, "CREATE INDEX ix_age ON t(age);"],
+        [SqlClauses.DropIndex] = new("DROP INDEX ix_age ON t;", [.. _seed, "CREATE INDEX ix_age ON t(age);"],
             expression => expression is SqlDropIndexExpression,
             async (session, _) =>
             {
@@ -383,9 +383,9 @@ public sealed class SqlLanguageConformanceTests
                 await ExpectRowsAsync(session, "SELECT pid FROM c WHERE pid = 1;", [[1]]);
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE id = 1;", [[1]]);
             }),
-        [SqlClauses.Begin] = new("BEGIN;", Seed,
+        [SqlClauses.Begin] = new("BEGIN;", _seed,
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Begin }, VerifyBeginAsync),
-        [SqlClauses.Commit] = new("COMMIT;", [.. Seed, "BEGIN;", "INSERT INTO t VALUES (4, 'new', 1);"],
+        [SqlClauses.Commit] = new("COMMIT;", [.. _seed, "BEGIN;", "INSERT INTO t VALUES (4, 'new', 1);"],
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Commit },
             async (session, _) =>
             {
@@ -393,7 +393,7 @@ public sealed class SqlLanguageConformanceTests
                 await using var observer = await session.Database.CreateSessionAsync();
                 await ExpectRowsAsync(observer, "SELECT id FROM t WHERE id = 4;", [[4]]);
             }),
-        [SqlClauses.Rollback] = new("ROLLBACK;", [.. Seed, "BEGIN;", "INSERT INTO t VALUES (4, 'new', 1);", "DELETE FROM t WHERE id = 2;"],
+        [SqlClauses.Rollback] = new("ROLLBACK;", [.. _seed, "BEGIN;", "INSERT INTO t VALUES (4, 'new', 1);", "DELETE FROM t WHERE id = 2;"],
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Rollback },
             async (session, _) =>
             {
@@ -401,7 +401,7 @@ public sealed class SqlLanguageConformanceTests
                 await using var observer = await session.Database.CreateSessionAsync();
                 await ExpectRowsAsync(observer, "SELECT id FROM t ORDER BY id;", [[1], [2], [3]]);
             }),
-        [SqlClauses.Transaction] = new("BEGIN TRANSACTION;", Seed,
+        [SqlClauses.Transaction] = new("BEGIN TRANSACTION;", _seed,
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Begin } && expression.Text!.Contains("TRANSACTION", StringComparison.Ordinal),
             async (session, _) =>
             {
@@ -417,10 +417,10 @@ public sealed class SqlLanguageConformanceTests
     };
 
     private static ExecutionCase Query(string statement, Func<SqlQueryExpression, bool> containsClause, object?[][] expected)
-        => new(statement, Seed, containsClause, async (_, result) => CheckRows(await ReadRowsAsync(result), expected));
+        => new(statement, _seed, containsClause, async (_, result) => CheckRows(await ReadRowsAsync(result), expected));
 
     private static ExecutionCase ForeignKeyCase(string statement, SqlReferentialAction action, Func<IDatabaseSession, QueryResult, Task> verify)
-        => new(statement, Seed, expression => expression is SqlCreateTableExpression create &&
+        => new(statement, _seed, expression => expression is SqlCreateTableExpression create &&
             create.Constraints.Any(constraint => constraint.Kind == SqlConstraintKind.ForeignKey && constraint.ReferencedTable is not null && constraint.OnDelete == action), verify);
 
     private static bool HasConstraint(SqlQueryExpression expression, SqlConstraintKind kind)

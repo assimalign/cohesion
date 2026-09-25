@@ -121,11 +121,25 @@ internal sealed class DocumentOperation
 // One read-committed statement gets one visibility decision, including every
 // metadata lookup and all document content. Lifecycle operations use the original
 // context; physical brackets and record stamps use this identical writer sequence.
-internal sealed class DocumentStatementContext(ITransactionContext context, TransactionSnapshot snapshot) : ITransactionContext
+internal sealed class DocumentStatementContext : ITransactionContext
 {
-    public TransactionId Id => context.Id;
-    public TransactionSequence Sequence => context.Sequence;
-    public IsolationLevel IsolationLevel => context.IsolationLevel;
-    public TransactionState State => context.State;
-    public TransactionSnapshot Snapshot => snapshot;
+    private readonly ITransactionContext _context;
+    private readonly TransactionSnapshot _snapshot;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DocumentStatementContext"/> class.
+    /// </summary>
+    /// <param name="context">The original transaction context that supplies identity, sequence, isolation, and state.</param>
+    /// <param name="snapshot">The snapshot captured for the statement's single visibility decision.</param>
+    public DocumentStatementContext(ITransactionContext context, TransactionSnapshot snapshot)
+    {
+        _context = context;
+        _snapshot = snapshot;
+    }
+
+    public TransactionId Id => _context.Id;
+    public TransactionSequence Sequence => _context.Sequence;
+    public IsolationLevel IsolationLevel => _context.IsolationLevel;
+    public TransactionState State => _context.State;
+    public TransactionSnapshot Snapshot => _snapshot;
 }

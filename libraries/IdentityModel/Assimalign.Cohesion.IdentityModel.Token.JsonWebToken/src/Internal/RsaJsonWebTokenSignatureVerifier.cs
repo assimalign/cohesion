@@ -1,7 +1,7 @@
 using System;
 using System.Security.Cryptography;
 
-namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
+namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
 
 /// <summary>
 /// Verifies JOSE RSA PKCS#1 and RSA-PSS signatures.

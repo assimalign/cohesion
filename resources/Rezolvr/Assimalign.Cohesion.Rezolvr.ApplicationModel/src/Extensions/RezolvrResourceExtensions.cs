@@ -1,6 +1,7 @@
 using System;
 
 using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel.Internal;
 
 namespace Assimalign.Cohesion.ApplicationModel;
 

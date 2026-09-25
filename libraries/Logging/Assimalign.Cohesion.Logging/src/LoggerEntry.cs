@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Logging;
 /// </summary>
 public sealed class LoggerEntry : ILoggerEntry
 {
-    private static readonly IReadOnlyDictionary<string, object?> EmptyAttributes = new Dictionary<string, object?>(capacity: 0);
+    private static readonly IReadOnlyDictionary<string, object?> _emptyAttributes = new Dictionary<string, object?>(capacity: 0);
 
     /// <summary>
     /// Initializes a new entry.
@@ -41,7 +41,7 @@ public sealed class LoggerEntry : ILoggerEntry
         Message = message ?? string.Empty;
         Exception = exception;
         Timestamp = timestamp ?? DateTimeOffset.UtcNow;
-        Attributes = attributes ?? EmptyAttributes;
+        Attributes = attributes ?? _emptyAttributes;
     }
 
     /// <inheritdoc />

@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Files.Bmff;
 [DebuggerDisplay("Bmff Box: Item Protection (ipro)")]
 public sealed class ItemProtectionBox : BmffBoxComposite
 {
-    private IEnumerable<BmffBox> children;
+    private IEnumerable<BmffBox> _children;
     public ItemProtectionBox(long offset, long limit)
     {
         this.Offset = offset;
@@ -40,7 +40,7 @@ public sealed class ItemProtectionBox : BmffBoxComposite
             boxes.Add(reader.Current);
         }
 
-        children = boxes;
+        _children = boxes;
     }
 
     public override void Write(BmffStream stream)

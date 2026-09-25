@@ -1,5 +1,6 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
   <PropertyGroup>
+    <RootNamespace>IdentityHubGateway</RootNamespace>
     <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
     <CohesionResourceName>typed-identity-gateway</CohesionResourceName>
     <CohesionGatewayAot>false</CohesionGatewayAot>

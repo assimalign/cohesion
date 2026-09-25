@@ -15,11 +15,11 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 /// <summary>Measures each advertised GQL clause against a running graph engine.</summary>
 public sealed class GqlProfileExecutionTests
 {
-    private static readonly Guid PersonLabelId = new("13333333-3333-3333-3333-333333333333");
+    private static readonly Guid _personLabelId = new("13333333-3333-3333-3333-333333333333");
     private const string seed = "INSERT (a:Person {name: 'Alice', age: 42, active: TRUE})-[r:KNOWS {weight: 2}]->(b:Person {name: 'Bob', age: 17, active: FALSE}), (:Person {name: 'Isolated', age: 30})";
 
     // The profile drives execution. A profile addition without data here fails before any query runs.
-    private static readonly IReadOnlyDictionary<string, ExecutionCase[]> Cases =
+    private static readonly IReadOnlyDictionary<string, ExecutionCase[]> _cases =
         new Dictionary<string, ExecutionCase[]>(StringComparer.OrdinalIgnoreCase)
         {
             [GqlClauses.Match] =
@@ -69,7 +69,7 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Show] =
             [
-                new("SHOW LABELS", [["audit", PersonLabelId, "Person"]]),
+                new("SHOW LABELS", [["audit", _personLabelId, "Person"]]),
             ],
         };
 
@@ -82,7 +82,7 @@ public sealed class GqlProfileExecutionTests
         var token = cancellation.Token;
         foreach (string clause in GqlLanguageProfile.Instance.Clauses)
         {
-            foreach (var executionCase in Cases[clause])
+            foreach (var executionCase in _cases[clause])
             {
                 var statement = new GqlQueryParser().Parse(executionCase.Statement).ShouldBeOfType<GqlQueryStatement>();
                 statement.Diagnostics.ShouldBeEmpty($"{clause}: {executionCase.Statement}");
@@ -90,7 +90,7 @@ public sealed class GqlProfileExecutionTests
                 await using var engine = GraphDatabaseEngine.Create(new());
                 var database = (IGraphDatabase)await engine.CreateDatabaseAsync("audit", token);
                 await using var session = await database.CreateSessionAsync(token);
-                await GraphSchema.Open(database, session).SaveLabelAsync(new(PersonLabelId, "Person"), token);
+                await GraphSchema.Open(database, session).SaveLabelAsync(new(_personLabelId, "Person"), token);
                 await session.ExecuteAsync(seed, cancellationToken: token);
 
                 await ExecuteAndVerifyAsync(session, executionCase, clause, token);
@@ -132,8 +132,8 @@ public sealed class GqlProfileExecutionTests
     {
         foreach (string clause in clauses)
         {
-            Cases.ContainsKey(clause).ShouldBeTrue($"Advertised GQL clause '{clause}' has no execution case.");
-            Cases[clause].ShouldNotBeEmpty($"Advertised GQL clause '{clause}' has no execution case.");
+            _cases.ContainsKey(clause).ShouldBeTrue($"Advertised GQL clause '{clause}' has no execution case.");
+            _cases[clause].ShouldNotBeEmpty($"Advertised GQL clause '{clause}' has no execution case.");
         }
     }
 

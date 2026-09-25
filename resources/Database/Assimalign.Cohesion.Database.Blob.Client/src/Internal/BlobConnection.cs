@@ -8,15 +8,25 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Blob.Client;
+namespace Assimalign.Cohesion.Database.Blob.Client.Internal;
 
-internal sealed class BlobConnection(IDatabaseConnection connection) : IBlobConnection
+internal sealed class BlobConnection : IBlobConnection
 {
+    private readonly IDatabaseConnection _connection;
     private int _disposed;
     private int _returned;
 
-    public string Database => connection.Database;
-    public bool IsOpen => Volatile.Read(ref _disposed) == 0 && Volatile.Read(ref _returned) == 0 && connection.IsOpen;
+    /// <summary>
+    /// Initializes a new instance of the <see cref="BlobConnection"/> class.
+    /// </summary>
+    /// <param name="connection">The rented shared database connection that carries the Blob exchanges.</param>
+    public BlobConnection(IDatabaseConnection connection)
+    {
+        _connection = connection;
+    }
+
+    public string Database => _connection.Database;
+    public bool IsOpen => Volatile.Read(ref _disposed) == 0 && Volatile.Read(ref _returned) == 0 && _connection.IsOpen;
 
     public ValueTask<long> UploadAsync(string container, string name, Stream source,
         string contentType = "application/octet-stream", long length = -1, bool overwrite = true,
@@ -48,7 +58,7 @@ internal sealed class BlobConnection(IDatabaseConnection connection) : IBlobConn
         EnsureOpen();
         try
         {
-            Stream stream = await connection.ExecuteStreamingAsync(
+            Stream stream = await _connection.ExecuteStreamingAsync(
                 new BlobDownloadExchange(container, name), cancellationToken).ConfigureAwait(false);
             return new BlobDownloadStream(stream);
         }
@@ -189,11 +199,11 @@ internal sealed class BlobConnection(IDatabaseConnection connection) : IBlobConn
     {
         try
         {
-            return await connection.ExecuteAsync(new BlobExchange<TResult>(action), cancellationToken).ConfigureAwait(false);
+            return await _connection.ExecuteAsync(new BlobExchange<TResult>(action), cancellationToken).ConfigureAwait(false);
         }
         catch (DatabaseClientException exception)
         {
-            if (!connection.IsOpen)
+            if (!_connection.IsOpen)
             {
                 await ReturnAsync().ConfigureAwait(false);
             }
@@ -203,7 +213,7 @@ internal sealed class BlobConnection(IDatabaseConnection connection) : IBlobConn
         {
             // The shared client invalidates the incomplete exchange before returning here.
             // Return it immediately so cancellation also disconnects the server and aborts its write.
-            if (!connection.IsOpen)
+            if (!_connection.IsOpen)
             {
                 await ReturnAsync().ConfigureAwait(false);
             }
@@ -213,13 +223,13 @@ internal sealed class BlobConnection(IDatabaseConnection connection) : IBlobConn
 
     private void EnsureOpen()
         => ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0 ||
-            Volatile.Read(ref _returned) != 0 || !connection.IsOpen, this);
+            Volatile.Read(ref _returned) != 0 || !_connection.IsOpen, this);
 
     private async ValueTask ReturnAsync()
     {
         if (Interlocked.Exchange(ref _returned, 1) == 0)
         {
-            await connection.DisposeAsync().ConfigureAwait(false);
+            await _connection.DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -244,25 +254,46 @@ internal sealed class BlobConnection(IDatabaseConnection connection) : IBlobConn
         await writer.FlushAsync(token).ConfigureAwait(false);
     }
 
-    private sealed class BlobExchange<TResult>(
-        Func<IProtocolFrameReader, IProtocolFrameWriter, CancellationToken, ValueTask<TResult>> action)
-        : IDatabaseProtocolExchange<TResult>
+    private sealed class BlobExchange<TResult> : IDatabaseProtocolExchange<TResult>
     {
+        private readonly Func<IProtocolFrameReader, IProtocolFrameWriter, CancellationToken, ValueTask<TResult>> _action;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="BlobExchange{TResult}"/> class.
+        /// </summary>
+        /// <param name="action">The Blob exchange body to run over the error-normalizing reader and writer.</param>
+        public BlobExchange(
+            Func<IProtocolFrameReader, IProtocolFrameWriter, CancellationToken, ValueTask<TResult>> action)
+        {
+            _action = action;
+        }
+
         public ProtocolMessageFamily Family => BlobProtocol.Family;
 
         public ValueTask<TResult> ExecuteAsync(IProtocolFrameReader reader, IProtocolFrameWriter writer,
             CancellationToken cancellationToken = default)
-            => action(new BlobErrorReader(reader), new BlobFrameWriter(writer), cancellationToken);
+            => _action(new BlobErrorReader(reader), new BlobFrameWriter(writer), cancellationToken);
     }
 
-    private sealed class BlobErrorReader(IProtocolFrameReader reader) : IProtocolFrameReader
+    private sealed class BlobErrorReader : IProtocolFrameReader
     {
+        private readonly IProtocolFrameReader _reader;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="BlobErrorReader"/> class.
+        /// </summary>
+        /// <param name="reader">The shared frame reader whose error frames and transport failures are normalized.</param>
+        public BlobErrorReader(IProtocolFrameReader reader)
+        {
+            _reader = reader;
+        }
+
         public async ValueTask<ProtocolFrame?> ReadFrameAsync(CancellationToken cancellationToken = default)
         {
             ProtocolFrame? frame;
             try
             {
-                frame = await reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
+                frame = await _reader.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (InvalidOperationException exception)
             {
@@ -284,13 +315,24 @@ internal sealed class BlobConnection(IDatabaseConnection connection) : IBlobConn
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class BlobFrameWriter(IProtocolFrameWriter writer) : IProtocolFrameWriter
+    private sealed class BlobFrameWriter : IProtocolFrameWriter
     {
+        private readonly IProtocolFrameWriter _writer;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="BlobFrameWriter"/> class.
+        /// </summary>
+        /// <param name="writer">The shared frame writer whose transport failures are normalized.</param>
+        public BlobFrameWriter(IProtocolFrameWriter writer)
+        {
+            _writer = writer;
+        }
+
         public async ValueTask WriteFrameAsync(ProtocolFrame frame, CancellationToken cancellationToken = default)
         {
             try
             {
-                await writer.WriteFrameAsync(frame, cancellationToken).ConfigureAwait(false);
+                await _writer.WriteFrameAsync(frame, cancellationToken).ConfigureAwait(false);
             }
             catch (InvalidOperationException exception)
             {
@@ -303,7 +345,7 @@ internal sealed class BlobConnection(IDatabaseConnection connection) : IBlobConn
         {
             try
             {
-                await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+                await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (InvalidOperationException exception)
             {
@@ -315,9 +357,22 @@ internal sealed class BlobConnection(IDatabaseConnection connection) : IBlobConn
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class BlobDownloadExchange(string container, string name) : IDatabaseStreamingExchange
+    private sealed class BlobDownloadExchange : IDatabaseStreamingExchange
     {
+        private readonly string _container;
+        private readonly string _name;
         private BlobTransferStartMessage? _metadata;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="BlobDownloadExchange"/> class.
+        /// </summary>
+        /// <param name="container">The container that holds the Blob to download.</param>
+        /// <param name="name">The name of the Blob to download.</param>
+        public BlobDownloadExchange(string container, string name)
+        {
+            _container = container;
+            _name = name;
+        }
 
         public ProtocolMessageFamily Family => BlobProtocol.Family;
 
@@ -325,7 +380,7 @@ internal sealed class BlobConnection(IDatabaseConnection connection) : IBlobConn
             CancellationToken cancellationToken = default)
         {
             await WriteAsync(writer, BlobProtocolMessageType.Read,
-                new BlobReadMessage(container, name).Encode(), cancellationToken).ConfigureAwait(false);
+                new BlobReadMessage(_container, _name).Encode(), cancellationToken).ConfigureAwait(false);
             ProtocolFrame start = await ExpectAsync(new BlobErrorReader(reader), cancellationToken).ConfigureAwait(false);
             if (start.Type != (ProtocolMessageType)BlobProtocolMessageType.TransferStart)
             {

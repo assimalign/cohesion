@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;

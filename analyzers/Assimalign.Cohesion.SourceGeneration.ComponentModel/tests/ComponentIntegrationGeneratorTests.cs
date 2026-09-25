@@ -45,7 +45,7 @@ public class ComponentIntegrationGeneratorTests
         }
         """;
 
-    private static readonly IReadOnlyList<MetadataReference> PlatformReferences =
+    private static readonly IReadOnlyList<MetadataReference> _platformReferences =
         ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)
             .Where(path => path.Length > 0)
@@ -931,7 +931,7 @@ public class ComponentIntegrationGeneratorTests
         string source,
         bool includeCore = true)
     {
-        var references = PlatformReferences.ToList();
+        var references = _platformReferences.ToList();
         if (includeCore)
         {
             references.Add(CoreReference());
@@ -959,7 +959,7 @@ public class ComponentIntegrationGeneratorTests
         bool includeCore = true,
         LanguageVersion languageVersion = LanguageVersion.Preview)
     {
-        var references = PlatformReferences.ToList();
+        var references = _platformReferences.ToList();
         if (includeCore)
         {
             references.Add(CoreReference());

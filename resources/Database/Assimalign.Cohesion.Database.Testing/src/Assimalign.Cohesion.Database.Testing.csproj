@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Testing</RootNamespace>
 		<Description>Integration testing for Cohesion database resource programs. DatabaseApplicationTestFactory invokes the resource's real Program entry point under an isolated ResourceContext, waits for the generated Database control plane to become ready, and stops it through the same graceful control-plane path used by gateways. NativeAOT-safe with no assembly loading or runtime code generation.</Description>
 		<!-- Sanctioned exception to the resource hosting-isolation rule (COHRES001,
 		     .claude/rules/resource-areas.md): the test factory drives the concrete

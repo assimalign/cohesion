@@ -1,6 +1,8 @@
 using System;
 using System.Net.Http;
 
+using Assimalign.Cohesion.Database.Client.Internal;
+
 namespace Assimalign.Cohesion.Database.Client;
 
 /// <summary>Creates clients for the Database resource's HTTP admin command endpoint.</summary>

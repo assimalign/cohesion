@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 
 internal sealed class KeyValueExecuteExchange : IDatabaseProtocolExchange<KeyValueProtocolResult>
 {

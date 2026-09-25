@@ -11,13 +11,22 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting.Resources;
 
-namespace Assimalign.Cohesion.Rezolvr.Hosting;
+namespace Assimalign.Cohesion.Rezolvr.Hosting.Internal;
 
-internal sealed class RezolvrRecordRepository(string dataPath)
+internal sealed class RezolvrRecordRepository
 {
-    private readonly string _path = Path.Combine(Path.GetFullPath(dataPath), "records.json");
+    private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Dictionary<string, StoredRezolvrRecord>? _records;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RezolvrRecordRepository"/> class.
+    /// </summary>
+    /// <param name="dataPath">The directory that holds the persisted <c>records.json</c> document.</param>
+    public RezolvrRecordRepository(string dataPath)
+    {
+        _path = Path.Combine(Path.GetFullPath(dataPath), "records.json");
+    }
 
     internal async Task<IReadOnlyList<ResourceCommand>> ReadCommandsAsync(CancellationToken cancellationToken = default)
     {

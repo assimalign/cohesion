@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.Hosting.Resources.Internal;
+
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>

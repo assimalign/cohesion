@@ -4,6 +4,8 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Reflection;
 
+using Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
+
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 
 /// <summary>Associates generated, composable resource manifests with in-process bindings.</summary>

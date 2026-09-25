@@ -3,6 +3,8 @@ using System.Buffers;
 using System.Globalization;
 using System.Text;
 
+using Assimalign.Cohesion.Database.Types.Internal;
+
 namespace Assimalign.Cohesion.Database.Types;
 
 /// <summary>

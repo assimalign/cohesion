@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Hosting.Resources;
 using Assimalign.Cohesion.Web.Hosting;
 
-namespace Assimalign.Cohesion.IoTHub.Hosting;
+namespace Assimalign.Cohesion.IoTHub.Hosting.Internal;
 
 internal sealed class IoTHubControlPlaneEndpointService : IHostService, IDisposable
 {

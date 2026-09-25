@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Cli;
+namespace Assimalign.Cohesion.Cli.Internal;
 
 internal static class HttpEndpoint
 {

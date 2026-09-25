@@ -25,8 +25,9 @@ Scope of this library:
   `Assimalign.Cohesion.Web.Routing.Metadata` namespace, mirroring the `Patterns`/`Policies` areas.
   The read contract `IRouterRouteMetadataCollection` stays in `Abstractions/` at the root namespace
   with the other routing interfaces.
-- **Host-constrained matching** (`RouteHostConstraint` + `RouteHostMetadata`, in `Metadata/`),
-  evaluated during candidate selection off the metadata bag (#788).
+- **Host-constrained matching** (`RouteHostMetadata` in `Metadata/`, carrying the
+  `RouteHostConstraint` value object from `ValueObjects/` at the root namespace), evaluated during
+  candidate selection off the metadata bag (#788).
 - **Route groups** (`IRouterGroupBuilder`, via `MapGroup`) — builder-time composition of a path
   prefix, shared parameter policies, and shared endpoint metadata onto child routes (#786).
 - **Named routes and outbound URL generation** (`RouteNameMetadata` in `Metadata/`,

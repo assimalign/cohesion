@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Sql.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>Registers deferred SQL composition through the dependency-free Database root contract.</summary>

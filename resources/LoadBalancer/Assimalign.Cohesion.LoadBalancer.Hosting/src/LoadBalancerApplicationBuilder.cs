@@ -6,6 +6,7 @@ using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.LoadBalancer;
+using Assimalign.Cohesion.LoadBalancer.Hosting.Internal;
 using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.LoadBalancer.Hosting;

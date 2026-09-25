@@ -4,16 +4,16 @@ using System.Text;
 
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Blob.Catalog;
+namespace Assimalign.Cohesion.Database.Blob.Catalog.Internal;
 
 internal static class BlobCatalogCodec
 {
-    private static readonly UTF8Encoding Utf8 = new(false, true);
+    private static readonly UTF8Encoding _utf8 = new(false, true);
 
     internal static byte[] Encode(CatalogRecord record, TransactionSequence writer)
     {
         using var stream = new MemoryStream();
-        using var binary = new BinaryWriter(stream, Utf8, leaveOpen: true);
+        using var binary = new BinaryWriter(stream, _utf8, leaveOpen: true);
         binary.Write(writer.Value);
         binary.Write(0UL);
         binary.Write((byte)(record.Container is not null ? 1 : 2));
@@ -46,7 +46,7 @@ internal static class BlobCatalogCodec
         try
         {
             using var stream = new MemoryStream(bytes.ToArray(), writable: false);
-            using var reader = new BinaryReader(stream, Utf8);
+            using var reader = new BinaryReader(stream, _utf8);
             reader.ReadUInt64();
             reader.ReadUInt64();
             byte kind = reader.ReadByte();
@@ -112,7 +112,7 @@ internal static class BlobCatalogCodec
             writer.Write(-1);
             return;
         }
-        byte[] bytes = Utf8.GetBytes(value);
+        byte[] bytes = _utf8.GetBytes(value);
         writer.Write(bytes.Length);
         writer.Write(bytes);
     }
@@ -128,7 +128,7 @@ internal static class BlobCatalogCodec
         {
             throw new BlobCatalogException("Invalid catalog string length.");
         }
-        return Utf8.GetString(reader.ReadBytes(length));
+        return _utf8.GetString(reader.ReadBytes(length));
     }
 
     private static void WriteTime(BinaryWriter writer, DateTimeOffset time)

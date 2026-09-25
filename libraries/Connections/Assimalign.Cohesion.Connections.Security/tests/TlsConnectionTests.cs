@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Connections.Security.Tests;
 
 public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     private readonly TestCertificateFixture _fixture;
 
@@ -27,7 +27,7 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
     public async Task UpgradeToTlsAsync_WithClientAndServerPair_ShouldExchangeBytesInBothDirections()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         // Act
@@ -50,7 +50,7 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
     public async Task UpgradeToTlsAsync_OnSecuredConnection_ShouldReportTlsSecurityAndPreserveOtherCapabilities()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         // Act
@@ -65,7 +65,7 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
     public async Task UpgradeToTlsAsync_OnSecuredConnection_ShouldDelegateIdentityToInnerConnection()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         // Act
@@ -82,7 +82,7 @@ public class TlsConnectionTests : IClassFixture<TestCertificateFixture>
     public async Task DisposeAsync_OnSecuredConnection_ShouldDisposeInnerConnection()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
         (IConnection securedClient, IConnection _) = await UpgradePairAsync(client, server, timeout.Token);
 

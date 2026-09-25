@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 
-namespace Assimalign.Cohesion.Content.Yaml;
+namespace Assimalign.Cohesion.Content.Yaml.Internal;
 
 /// <summary>
 /// Emits the document model as deterministic YAML text: block styles by default, flow where a

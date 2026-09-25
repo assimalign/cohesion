@@ -402,12 +402,23 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// Keeps the area's pairing error at the engine boundary while the shared
     /// coordinator owns the current statement bracket.
     /// </summary>
-    private sealed class StatementTransactionSource(TransactionCoordinator coordinator) : IStorageTransactionSource
+    private sealed class StatementTransactionSource : IStorageTransactionSource
     {
+        private readonly TransactionCoordinator _coordinator;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="StatementTransactionSource"/> class.
+        /// </summary>
+        /// <param name="coordinator">The transaction coordinator that owns the current statement bracket.</param>
+        public StatementTransactionSource(TransactionCoordinator coordinator)
+        {
+            _coordinator = coordinator;
+        }
+
         /// <inheritdoc />
         public IStorageTransaction GetStorageTransaction(ITransactionContext context)
         {
-            if (coordinator.TryGetStorageTransaction(context, out var transaction))
+            if (_coordinator.TryGetStorageTransaction(context, out var transaction))
             {
                 return transaction;
             }

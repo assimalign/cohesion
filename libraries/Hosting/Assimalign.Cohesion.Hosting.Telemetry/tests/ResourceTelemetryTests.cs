@@ -15,6 +15,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Hosting.Telemetry.Internal;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.OpenTelemetry;
 

@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Rezolvr;
+using Assimalign.Cohesion.Rezolvr.Hosting.Internal;
 
 namespace Assimalign.Cohesion.Rezolvr.Hosting;
 

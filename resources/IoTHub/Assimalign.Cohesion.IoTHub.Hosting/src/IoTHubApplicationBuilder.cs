@@ -6,6 +6,7 @@ using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.IoTHub;
+using Assimalign.Cohesion.IoTHub.Hosting.Internal;
 using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.IoTHub.Hosting;

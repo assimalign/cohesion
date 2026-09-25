@@ -2,18 +2,18 @@
 using System.Collections;
 using System.Linq;
 
-namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class LengthBetweenValidationRule<TValue> : ValidationRuleBase<TValue>
     where TValue : IEnumerable
 {
-    private readonly int lowerBound;
-    private readonly int upperBound;
+    private readonly int _lowerBound;
+    private readonly int _upperBound;
 
     public LengthBetweenValidationRule(int lowerBound, int upperBound)
     {
-        this.upperBound = upperBound;
-        this.lowerBound = lowerBound;
+        this._upperBound = upperBound;
+        this._lowerBound = lowerBound;
     }
 
     public override string Name { get; set; }
@@ -63,10 +63,10 @@ internal sealed class LengthBetweenValidationRule<TValue> : ValidationRuleBase<T
         return member switch
         {
             null => true,
-            string stringValue      when stringValue is not null && stringValue.Length >= this.lowerBound && stringValue.Length <= this.upperBound => true,
-            ICollection collection  when collection.Count >= this.lowerBound && collection.Count <= this.upperBound => true,
-            Array array             when array.Length >= this.lowerBound && array.Length <= this.upperBound => true,
-            IEnumerable enumerable  when enumerable.Cast<object>().Count() >= this.lowerBound  && enumerable.Cast<object>().Count() <= this.upperBound => true,
+            string stringValue      when stringValue is not null && stringValue.Length >= this._lowerBound && stringValue.Length <= this._upperBound => true,
+            ICollection collection  when collection.Count >= this._lowerBound && collection.Count <= this._upperBound => true,
+            Array array             when array.Length >= this._lowerBound && array.Length <= this._upperBound => true,
+            IEnumerable enumerable  when enumerable.Cast<object>().Count() >= this._lowerBound  && enumerable.Cast<object>().Count() <= this._upperBound => true,
             _ => false
         };
     }

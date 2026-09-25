@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 
+using Assimalign.Cohesion.Web.Routing.Internal;
+
 namespace Assimalign.Cohesion.Web.Routing.Patterns;
 
 using Policies;
@@ -12,10 +14,10 @@ using Policies;
 /// </summary>
 public static class RoutePatternFactory
 {
-    private static readonly IReadOnlyDictionary<string, object?> EmptyDictionary =
+    private static readonly IReadOnlyDictionary<string, object?> _emptyDictionary =
         new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase));
 
-    private static readonly IReadOnlyDictionary<string, IReadOnlyList<RoutePatternParameterPolicyReference>> EmptyPoliciesDictionary =
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<RoutePatternParameterPolicyReference>> _emptyPoliciesDictionary =
         new ReadOnlyDictionary<string, IReadOnlyList<RoutePatternParameterPolicyReference>>(
             new Dictionary<string, IReadOnlyList<RoutePatternParameterPolicyReference>>(StringComparer.OrdinalIgnoreCase));
 
@@ -100,7 +102,7 @@ public static class RoutePatternFactory
 
         IReadOnlyDictionary<string, object?> normalizedDefaults = updatedDefaults is { Count: > 0 }
             ? new ReadOnlyDictionary<string, object?>(updatedDefaults)
-            : EmptyDictionary;
+            : _emptyDictionary;
 
         IReadOnlyDictionary<string, IReadOnlyList<RoutePatternParameterPolicyReference>> normalizedPolicies = updatedParameterPolicies is { Count: > 0 }
             ? new ReadOnlyDictionary<string, IReadOnlyList<RoutePatternParameterPolicyReference>>(
@@ -108,12 +110,12 @@ public static class RoutePatternFactory
                     keySelector: pair => pair.Key,
                     elementSelector: pair => (IReadOnlyList<RoutePatternParameterPolicyReference>)pair.Value.ToArray(),
                     comparer: StringComparer.OrdinalIgnoreCase))
-            : EmptyPoliciesDictionary;
+            : _emptyPoliciesDictionary;
 
         IReadOnlyDictionary<string, object?> normalizedRequiredValues = requiredValues is { Count: > 0 }
             ? new ReadOnlyDictionary<string, object?>(
                 new Dictionary<string, object?>(requiredValues, StringComparer.OrdinalIgnoreCase))
-            : EmptyDictionary;
+            : _emptyDictionary;
 
         return new RoutePattern(
             rawText,

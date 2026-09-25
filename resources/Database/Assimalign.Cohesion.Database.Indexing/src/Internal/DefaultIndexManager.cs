@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Indexing;
+namespace Assimalign.Cohesion.Database.Indexing.Internal;
 
 /// <summary>
 /// Default index manager: an in-memory directory of live B+Tree indexes over one

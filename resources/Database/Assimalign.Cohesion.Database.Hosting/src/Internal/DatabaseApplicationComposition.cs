@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Database.Hosting;
+namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 internal sealed record DatabaseApplicationComposition(
     DatabaseApplicationOptions Options,

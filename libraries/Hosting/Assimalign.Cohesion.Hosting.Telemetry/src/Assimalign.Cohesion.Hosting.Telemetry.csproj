@@ -10,7 +10,4 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Logging.Console" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.OpenTelemetry" />
 	</ItemGroup>
-	<ItemGroup>
-		<InternalsVisibleTo Include="Assimalign.Cohesion.Hosting.Telemetry.Tests" />
-	</ItemGroup>
 </Project>

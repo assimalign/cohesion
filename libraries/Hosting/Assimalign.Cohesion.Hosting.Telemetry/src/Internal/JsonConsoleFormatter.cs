@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 
 using Assimalign.Cohesion.Logging;
 
-namespace Assimalign.Cohesion.Hosting.Telemetry;
+namespace Assimalign.Cohesion.Hosting.Telemetry.Internal;
 
 internal static class JsonConsoleFormatter
 {

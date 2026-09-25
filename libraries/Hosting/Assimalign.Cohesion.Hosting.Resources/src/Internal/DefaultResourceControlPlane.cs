@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Hosting.Health;
 
-namespace Assimalign.Cohesion.Hosting.Resources;
+namespace Assimalign.Cohesion.Hosting.Resources.Internal;
 
 internal sealed class DefaultResourceControlPlane : IResourceControlPlane
 {

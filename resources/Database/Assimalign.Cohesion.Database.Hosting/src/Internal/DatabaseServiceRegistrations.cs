@@ -5,11 +5,21 @@ using System.Collections.Generic;
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.DependencyInjection;
 
-namespace Assimalign.Cohesion.Database.Hosting;
+namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
-internal sealed class DatabaseServiceRegistrations(Action ensureMutable) : IServiceProviderBuilder, IServiceContainer
+internal sealed class DatabaseServiceRegistrations : IServiceProviderBuilder, IServiceContainer
 {
     private readonly List<ServiceDescriptor> _descriptors = [];
+    private readonly Action _ensureMutable;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DatabaseServiceRegistrations"/> class.
+    /// </summary>
+    /// <param name="ensureMutable">The callback that throws when the owning builder no longer accepts registrations.</param>
+    public DatabaseServiceRegistrations(Action ensureMutable)
+    {
+        _ensureMutable = ensureMutable;
+    }
 
     public IServiceContainer Container => this;
     public int Count => _descriptors.Count;
@@ -24,13 +34,13 @@ internal sealed class DatabaseServiceRegistrations(Action ensureMutable) : IServ
     public void Register(ServiceDescriptor descriptor)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
-        ensureMutable();
+        _ensureMutable();
         _descriptors.Add(descriptor);
     }
 
-    public bool Unregister(ServiceDescriptor descriptor) { ensureMutable(); return _descriptors.Remove(descriptor); }
-    public void UnregisterAt(int index) { ensureMutable(); _descriptors.RemoveAt(index); }
-    public void Clear() { ensureMutable(); _descriptors.Clear(); }
+    public bool Unregister(ServiceDescriptor descriptor) { _ensureMutable(); return _descriptors.Remove(descriptor); }
+    public void UnregisterAt(int index) { _ensureMutable(); _descriptors.RemoveAt(index); }
+    public void Clear() { _ensureMutable(); _descriptors.Clear(); }
     public IEnumerator<ServiceDescriptor> GetEnumerator() => _descriptors.GetEnumerator();
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     public IServiceProvider Build() => throw new InvalidOperationException("Only DatabaseApplicationBuilder.Build creates the provider.");

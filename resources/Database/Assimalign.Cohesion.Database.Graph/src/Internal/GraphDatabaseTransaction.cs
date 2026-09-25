@@ -4,13 +4,25 @@ using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
-internal sealed class GraphDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context) : IDatabaseTransaction
+internal sealed class GraphDatabaseTransaction : IDatabaseTransaction
 {
-    internal ITransactionContext Context => context;
+    private readonly TransactionCoordinator _coordinator;
+    private readonly ITransactionContext _context;
+
+    /// <summary>Initializes a new instance of the <see cref="GraphDatabaseTransaction"/> class.</summary>
+    /// <param name="coordinator">The transaction coordinator that commits or rolls back the transaction.</param>
+    /// <param name="context">The transaction context the transaction wraps.</param>
+    public GraphDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context)
+    {
+        _coordinator = coordinator;
+        _context = context;
+    }
+
+    internal ITransactionContext Context => _context;
     internal int Operations { get; set; }
-    public TransactionId Id => context.Id;
-    public TransactionState State => context.State;
-    public IsolationLevel IsolationLevel => context.IsolationLevel;
+    public TransactionId Id => _context.Id;
+    public TransactionState State => _context.State;
+    public IsolationLevel IsolationLevel => _context.IsolationLevel;
     public ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
         EnsureActive();
@@ -19,11 +31,11 @@ internal sealed class GraphDatabaseTransaction(TransactionCoordinator coordinato
             throw new DatabaseException("Dispose every graph operation before committing its transaction.");
         }
 
-        return coordinator.CommitAsync(context, cancellationToken);
+        return _coordinator.CommitAsync(_context, cancellationToken);
     }
     public ValueTask RollbackAsync(CancellationToken cancellationToken = default)
-    { EnsureActive(); return coordinator.RollbackAsync(context, cancellationToken); }
-    public ValueTask DisposeAsync() => State == TransactionState.Active ? coordinator.RollbackAsync(context) : default;
+    { EnsureActive(); return _coordinator.RollbackAsync(_context, cancellationToken); }
+    public ValueTask DisposeAsync() => State == TransactionState.Active ? _coordinator.RollbackAsync(_context) : default;
     private void EnsureActive()
     { if (State != TransactionState.Active)
         {

@@ -10,6 +10,7 @@ using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Configuration.CommandLine;
 using Assimalign.Cohesion.Configuration.Json;
 using Assimalign.Cohesion.Connections.Tcp;
+using Assimalign.Cohesion.Database.Hosting.Internal;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Hosting;

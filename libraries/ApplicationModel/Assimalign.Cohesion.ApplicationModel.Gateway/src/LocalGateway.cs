@@ -4,6 +4,8 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
+
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>

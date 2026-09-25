@@ -171,20 +171,34 @@ internal sealed class DocumentDatabaseSession : IDatabaseSession
     }
 }
 
-internal sealed class DocumentSessionDatabase(DocumentDatabaseInstance database, DocumentDatabaseSession session) : IDocumentDatabase
+internal sealed class DocumentSessionDatabase : IDocumentDatabase
 {
-    public DatabaseName Name => database.Name;
-    public IDatabaseEngine Engine => database.Engine;
+    private readonly DocumentDatabaseInstance _database;
+    private readonly DocumentDatabaseSession _session;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DocumentSessionDatabase"/> class.
+    /// </summary>
+    /// <param name="database">The document database instance the session belongs to.</param>
+    /// <param name="session">The session this database view is bound to.</param>
+    public DocumentSessionDatabase(DocumentDatabaseInstance database, DocumentDatabaseSession session)
+    {
+        _database = database;
+        _session = session;
+    }
+
+    public DatabaseName Name => _database.Name;
+    public IDatabaseEngine Engine => _database.Engine;
     public ValueTask<IDatabaseSession> CreateSessionAsync(CancellationToken cancellationToken = default)
-    { session.ThrowIfNotOpen(); return database.CreateSessionAsync(cancellationToken); }
+    { _session.ThrowIfNotOpen(); return _database.CreateSessionAsync(cancellationToken); }
     public ValueTask<IDocumentCollection> CreateCollectionAsync(string name, CancellationToken cancellationToken = default)
-        => database.CreateCollectionAsync(name, session, cancellationToken);
+        => _database.CreateCollectionAsync(name, _session, cancellationToken);
     public ValueTask<IDocumentCollection> GetCollectionAsync(string name, CancellationToken cancellationToken = default)
-        => database.GetCollectionAsync(name, session, cancellationToken);
+        => _database.GetCollectionAsync(name, _session, cancellationToken);
     public ValueTask DropCollectionAsync(string name, CancellationToken cancellationToken = default)
-        => database.DropCollectionAsync(name, session, cancellationToken);
+        => _database.DropCollectionAsync(name, _session, cancellationToken);
     public IAsyncEnumerable<IDocumentCollection> GetCollectionsAsync(CancellationToken cancellationToken = default)
-        => database.GetCollectionsAsync(session, cancellationToken);
-    public void Dispose() => session.DisposeAsync().AsTask().GetAwaiter().GetResult();
-    public ValueTask DisposeAsync() => session.DisposeAsync();
+        => _database.GetCollectionsAsync(_session, cancellationToken);
+    public void Dispose() => _session.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    public ValueTask DisposeAsync() => _session.DisposeAsync();
 }

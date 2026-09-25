@@ -4,6 +4,7 @@ using System.Text;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Storage.Tests;

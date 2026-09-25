@@ -10,8 +10,20 @@ internal sealed record GraphAnchor(int NodeIndex, string? Label, string? Propert
 internal sealed record GraphPathPlan(GqlPathPattern Pattern, GraphAnchor Anchor);
 internal sealed record GraphPlan(GqlQueryExpression Query, IReadOnlyList<GraphPathPlan> Matches);
 
-internal sealed class GraphPlanner(GraphDatabaseInstance database, TransactionSnapshot snapshot)
+internal sealed class GraphPlanner
 {
+    private readonly GraphDatabaseInstance _database;
+    private readonly TransactionSnapshot _snapshot;
+
+    /// <summary>Initializes a new instance of the <see cref="GraphPlanner"/> class.</summary>
+    /// <param name="database">The graph database whose catalog and store resolve labels, relationship types, and indexes.</param>
+    /// <param name="snapshot">The transaction snapshot that catalog and index lookups observe.</param>
+    public GraphPlanner(GraphDatabaseInstance database, TransactionSnapshot snapshot)
+    {
+        _database = database;
+        _snapshot = snapshot;
+    }
+
     internal GraphPlan Plan(GqlQueryExpression query)
     {
         var variables = new Dictionary<string, BindingKind>(StringComparer.Ordinal);
@@ -42,7 +54,7 @@ internal sealed class GraphPlanner(GraphDatabaseInstance database, TransactionSn
                 Bind(node.Variable, BindingKind.Node);
                 foreach (string label in node.Labels)
                 {
-                    if (!creating && database.Catalog.FindLabel(label, snapshot) is null)
+                    if (!creating && _database.Catalog.FindLabel(label, _snapshot) is null)
                     { throw new DatabaseException($"COHDBG002: Unknown label '{label}'."); }
                 }
             }
@@ -51,7 +63,7 @@ internal sealed class GraphPlanner(GraphDatabaseInstance database, TransactionSn
                 Bind(relationship.Variable, BindingKind.Relationship);
                 if (!Enum.IsDefined(relationship.Direction) || creating && (relationship.Type is null || relationship.Direction == GqlPatternDirection.Undirected))
                 { throw new DatabaseException("COHDBG001: Inserted relationships require a type and a directed pattern."); }
-                if (!creating && relationship.Type is { } type && database.Catalog.FindRelationshipType(type, snapshot) is null)
+                if (!creating && relationship.Type is { } type && _database.Catalog.FindRelationshipType(type, _snapshot) is null)
                 { throw new DatabaseException($"COHDBG002: Unknown relationship type '{type}'."); }
             }
             if (path.Variable is { } variable)
@@ -99,7 +111,7 @@ internal sealed class GraphPlanner(GraphDatabaseInstance database, TransactionSn
                 var values = node.Properties.Concat(Equalities(predicate, node.Variable));
                 foreach (var value in values)
                 {
-                    if (value.Value is not null && database.Store.HasIndex(label, value.Key, snapshot))
+                    if (value.Value is not null && _database.Store.HasIndex(label, value.Key, _snapshot))
                     { return new GraphAnchor(i, label, value.Key, value.Value); }
                 }
             }

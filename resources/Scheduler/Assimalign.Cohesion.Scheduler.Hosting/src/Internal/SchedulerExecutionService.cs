@@ -6,14 +6,23 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Scheduler;
 
-namespace Assimalign.Cohesion.Scheduler.Hosting;
+namespace Assimalign.Cohesion.Scheduler.Hosting.Internal;
 
-internal sealed class SchedulerExecutionService(
-    IReadOnlyList<ISchedule> schedules) : BackgroundService
+internal sealed class SchedulerExecutionService : BackgroundService
 {
+    private readonly IReadOnlyList<ISchedule> _schedules;
+
+    /// <summary>Initializes a new instance of the <see cref="SchedulerExecutionService"/> class.</summary>
+    /// <param name="schedules">The schedules to run concurrently until shutdown is requested.</param>
+    public SchedulerExecutionService(
+        IReadOnlyList<ISchedule> schedules)
+    {
+        _schedules = schedules;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken cancellationToken)
     {
-        if (schedules.Count == 0)
+        if (_schedules.Count == 0)
         {
             try
             {
@@ -27,15 +36,15 @@ internal sealed class SchedulerExecutionService(
         }
 
         using var siblingCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var tasks = new Task[schedules.Count];
+        var tasks = new Task[_schedules.Count];
         var initializedTaskCount = 0;
         try
         {
-            for (int index = 0; index < schedules.Count; index++)
+            for (int index = 0; index < _schedules.Count; index++)
             {
-                tasks[index] = schedules[index].RunAsync(siblingCancellation.Token)
+                tasks[index] = _schedules[index].RunAsync(siblingCancellation.Token)
                     ?? throw new InvalidOperationException(
-                        $"Schedule '{schedules[index].Name ?? schedules[index].Id.ToString()}' returned a null task.");
+                        $"Schedule '{_schedules[index].Name ?? _schedules[index].Id.ToString()}' returned a null task.");
                 initializedTaskCount++;
             }
         }
@@ -59,7 +68,7 @@ internal sealed class SchedulerExecutionService(
             siblingCancellation.Cancel();
             _ = ObserveTasksAsync(tasks, tasks.Length);
             int scheduleIndex = Array.IndexOf(tasks, firstCompleted);
-            ISchedule completedSchedule = schedules[scheduleIndex];
+            ISchedule completedSchedule = _schedules[scheduleIndex];
             throw new InvalidOperationException(
                 $"Schedule '{completedSchedule.Name ?? completedSchedule.Id.ToString()}' " +
                 "completed before scheduler shutdown was requested.");

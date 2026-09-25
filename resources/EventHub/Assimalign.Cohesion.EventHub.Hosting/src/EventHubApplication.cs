@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.EventHub;
+using Assimalign.Cohesion.EventHub.Hosting.Internal;
 using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.EventHub.Hosting;

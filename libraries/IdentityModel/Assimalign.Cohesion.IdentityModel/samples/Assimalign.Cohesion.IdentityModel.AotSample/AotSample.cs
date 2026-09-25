@@ -26,7 +26,7 @@ namespace Assimalign.Cohesion.IdentityModel.AotSample;
 /// </summary>
 internal static class AotSample
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
 
     // OpenID Connect Core §3.1.3.6 worked at_hash example (RS256).
     private const string SpecAccessToken = "jHkWEdUXMU1BwAsC4vtUsZwnNvTIxEl0z9K3vx5KF0Y";
@@ -63,7 +63,7 @@ internal static class AotSample
             IdentityClaimValue.FromInteger(42),
             IdentityClaimValue.FromDouble(4.2),
             IdentityClaimValue.FromDecimal(4.2m),
-            IdentityClaimValue.FromDateTime(Now),
+            IdentityClaimValue.FromDateTime(_now),
             IdentityClaimValue.FromBinary(new byte[] { 1, 2, 3 }),
             IdentityClaimValue.FromArray(new[] { IdentityClaimValue.FromString("a") }),
             IdentityClaimValue.FromObject(new[]
@@ -86,7 +86,7 @@ internal static class AotSample
     {
         // The family's only wire-format parse path: base64url + Utf8 JSON readers, then the
         // keyless at_hash comparison (SHA-256 under ILC) via the spec vector.
-        var exp = Now.AddHours(1).ToUnixTimeSeconds();
+        var exp = _now.AddHours(1).ToUnixTimeSeconds();
         var header = """{"alg":"RS256","typ":"JWT"}""";
         var payload =
             $$"""{"iss":"https://op.example.com","sub":"user-42","aud":"client-1","jti":"id-1","exp":{{exp}},"at_hash":"{{SpecAccessTokenHash}}"}""";
@@ -97,7 +97,7 @@ internal static class AotSample
         Require(token.Subject?.Value == "user-42", "JWT subject parses");
         Require(token.Id == "id-1", "JWT jti projects onto Id");
 
-        var result = token.Validate(new TokenJwt.JsonWebTokenValidationOptions(Now)
+        var result = token.Validate(new TokenJwt.JsonWebTokenValidationOptions(_now)
         {
             ExpectedIssuer = "https://op.example.com",
             ExpectedAudience = "client-1",
@@ -114,8 +114,8 @@ internal static class AotSample
         {
             Id = "bootstrap-1",
             Issuer = "https://gateway.example.com",
-            IssuedAt = Now,
-            ExpiresAt = Now.AddHours(1),
+            IssuedAt = _now,
+            ExpiresAt = _now.AddHours(1),
         };
         descriptor.Audiences.Add("secret-store");
 
@@ -155,18 +155,18 @@ internal static class AotSample
             Issuer = "https://idp.example.com/saml",
             NameId = new TokenSaml.SamlNameId("user-42", format: SubjectIdentifierFormats.Persistent),
             Conditions = new TokenSaml.SamlConditions(
-                notBefore: Now.AddMinutes(-1),
-                notOnOrAfter: Now.AddMinutes(5),
+                notBefore: _now.AddMinutes(-1),
+                notOnOrAfter: _now.AddMinutes(5),
                 audienceRestrictions: new[] { (IReadOnlyList<string>)new[] { "https://sp.example.com" } }),
         };
         descriptor.SubjectConfirmations.Add(new TokenSaml.SamlSubjectConfirmation(
             TokenSaml.SamlConfirmationMethods.Bearer,
             data: new TokenSaml.SamlSubjectConfirmationData(
                 recipient: "https://sp.example.com/acs",
-                notOnOrAfter: Now.AddMinutes(5))));
+                notOnOrAfter: _now.AddMinutes(5))));
 
         var token = new TokenSaml.SamlToken(descriptor);
-        var result = token.Validate(new TokenSaml.SamlTokenValidationOptions(Now)
+        var result = token.Validate(new TokenSaml.SamlTokenValidationOptions(_now)
         {
             ExpectedIssuer = "https://idp.example.com/saml",
             ExpectedAudience = "https://sp.example.com",
@@ -183,8 +183,8 @@ internal static class AotSample
         {
             Issuer = "https://op.example.com",
             Subject = "user-42",
-            ExpiresAt = Now.AddHours(1),
-            IssuedAt = Now,
+            ExpiresAt = _now.AddHours(1),
+            IssuedAt = _now,
         };
         idTokenDescriptor.Audiences.Add("client-1");
         idTokenDescriptor.AdditionalClaims.Add(new IdentityClaim(
