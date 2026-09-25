@@ -8,15 +8,15 @@ namespace Assimalign.Cohesion.ObjectValidation;
 
 public class ValidationItemQueue : IValidationItemQueue
 {
-	private int size;
-	private int version;
-	private IValidationItem[] array;
+	private int _size;
+	private int _version;
+	private IValidationItem[] _array;
 
 
 
 	public ValidationItemQueue()
 	{
-		array = Array.Empty<IValidationItem>();
+		_array = Array.Empty<IValidationItem>();
 	}
 
 	public ValidationItemQueue(int capacity)
@@ -25,7 +25,7 @@ public class ValidationItemQueue : IValidationItemQueue
 		{
 			throw new ArgumentOutOfRangeException("capacity", capacity, "Capacity must be greater than 0.");
 		}
-		this.array = new IValidationItem[capacity];
+		this._array = new IValidationItem[capacity];
 	}
 
 	public ValidationItemQueue(IEnumerable<IValidationItem> collection)
@@ -34,29 +34,29 @@ public class ValidationItemQueue : IValidationItemQueue
 		{
 			throw new ArgumentNullException("collection");
 		}
-		this.array = ToArray(collection, out size);
+		this._array = ToArray(collection, out _size);
 	}
 
 
-	public int Count => size;
+	public int Count => _size;
 
-    public IValidationItem this[int index] => array[index];
+    public IValidationItem this[int index] => _array[index];
 
     public void Clear()
 	{
 		if (RuntimeHelpers.IsReferenceOrContainsReferences<IValidationItem>())
 		{
-			Array.Clear(array, 0, size);
+			Array.Clear(_array, 0, _size);
 		}
-		size = 0;
-		version++;
+		_size = 0;
+		_version++;
 	}
 
 	public bool Contains(IValidationItem item)
 	{
-		if (size != 0)
+		if (_size != 0)
 		{
-			return Array.LastIndexOf(array, item, size - 1) != -1;
+			return Array.LastIndexOf(_array, item, _size - 1) != -1;
 		}
 		return false;
 	}
@@ -71,15 +71,15 @@ public class ValidationItemQueue : IValidationItemQueue
 		{
 			throw new ArgumentOutOfRangeException("arrayIndex", arrayIndex, "The index is either less than 0 or greater than the array.");
 		}
-		if (array.Length - arrayIndex < size)
+		if (array.Length - arrayIndex < _size)
 		{
 			throw new ArgumentException("The size of the array is less than the current size.");
 		}
 		int num = 0;
-		int num2 = arrayIndex + size;
-		while (num < size)
+		int num2 = arrayIndex + _size;
+		while (num < _size)
 		{
-			array[--num2] = this.array[num++];
+			array[--num2] = this._array[num++];
 		}
 	}
 
@@ -119,18 +119,18 @@ public class ValidationItemQueue : IValidationItemQueue
 
 	public void TrimExcess()
 	{
-		int num = (int)((double)array.Length * 0.9);
-		if (size < num)
+		int num = (int)((double)_array.Length * 0.9);
+		if (_size < num)
 		{
-			Array.Resize(ref array, size);
-			version++;
+			Array.Resize(ref _array, _size);
+			_version++;
 		}
 	}
 
 	IValidationItem IValidationItemQueue.Peek()
 	{
-		int num = size - 1;
-		IValidationItem[] array = this.array;
+		int num = _size - 1;
+		IValidationItem[] array = this._array;
 		if ((uint)num >= (uint)array.Length)
 		{
 			ThrowForEmptyStack();
@@ -140,8 +140,8 @@ public class ValidationItemQueue : IValidationItemQueue
 
 	bool IValidationItemQueue.TryPeek([MaybeNullWhen(false)] out IValidationItem result)
 	{
-		int num = size - 1;
-		IValidationItem[] array = this.array;
+		int num = _size - 1;
+		IValidationItem[] array = this._array;
 		if ((uint)num >= (uint)array.Length)
 		{
 			result = default(IValidationItem);
@@ -154,14 +154,14 @@ public class ValidationItemQueue : IValidationItemQueue
 
 	IValidationItem IValidationItemQueue.Pop()
 	{
-		int num = size - 1;
-		IValidationItem[] array = this.array;
+		int num = _size - 1;
+		IValidationItem[] array = this._array;
 		if ((uint)num >= (uint)array.Length)
 		{
 			ThrowForEmptyStack();
 		}
-		version++;
-		size = num;
+		_version++;
+		_size = num;
 		IValidationItem result = array[num];
 		if (RuntimeHelpers.IsReferenceOrContainsReferences<IValidationItem>())
 		{
@@ -172,15 +172,15 @@ public class ValidationItemQueue : IValidationItemQueue
 
 	bool IValidationItemQueue.TryPop([MaybeNullWhen(false)] out IValidationItem result)
 	{
-		int num = size - 1;
-		IValidationItem[] array = this.array;
+		int num = _size - 1;
+		IValidationItem[] array = this._array;
 		if ((uint)num >= (uint)array.Length)
 		{
 			result = default;
 			return false;
 		}
-		version++;
-		size = num;
+		_version++;
+		_size = num;
 		result = array[num];
 		if (RuntimeHelpers.IsReferenceOrContainsReferences<IValidationItem>())
 		{
@@ -191,13 +191,13 @@ public class ValidationItemQueue : IValidationItemQueue
 
 	void IValidationItemQueue.Push(IValidationItem item)
 	{
-		int size = this.size;
-		IValidationItem[] array = this.array;
+		int size = this._size;
+		IValidationItem[] array = this._array;
 		if ((uint)size < (uint)array.Length)
 		{
 			array[size] = item;
-			version++;
-			this.size = size + 1;
+			_version++;
+			this._size = size + 1;
 		}
 		else
 		{
@@ -208,10 +208,10 @@ public class ValidationItemQueue : IValidationItemQueue
 	[MethodImpl(MethodImplOptions.NoInlining)]
 	private void PushWithResize(IValidationItem item)
 	{
-		Grow(size + 1);
-		array[size] = item;
-		version++;
-		size++;
+		Grow(_size + 1);
+		_array[_size] = item;
+		_version++;
+		_size++;
 	}
 
 	public int EnsureCapacity(int capacity)
@@ -220,17 +220,17 @@ public class ValidationItemQueue : IValidationItemQueue
 		{
 			throw new ArgumentOutOfRangeException("capacity", capacity, "Capacity must be greater than 0.");
 		}
-		if (array.Length < capacity)
+		if (_array.Length < capacity)
 		{
 			Grow(capacity);
-			version++;
+			_version++;
 		}
-		return array.Length;
+		return _array.Length;
 	}
 
 	private void Grow(int capacity)
 	{
-		int num = ((array.Length == 0) ? 4 : (2 * array.Length));
+		int num = ((_array.Length == 0) ? 4 : (2 * _array.Length));
 		if ((uint)num > 2147483591)
 		{
 			num = 2147483591;
@@ -239,19 +239,19 @@ public class ValidationItemQueue : IValidationItemQueue
 		{
 			num = capacity;
 		}
-		Array.Resize(ref array, num);
+		Array.Resize(ref _array, num);
 	}
 
 	public IValidationItem[] ToArray()
 	{
-		if (size == 0)
+		if (_size == 0)
 		{
 			return Array.Empty<IValidationItem>();
 		}
-		IValidationItem[] array = new IValidationItem[size];
-		for (int i = 0; i < size; i++)
+		IValidationItem[] array = new IValidationItem[_size];
+		for (int i = 0; i < _size; i++)
 		{
-			array[i] = this.array[size - i - 1];
+			array[i] = this._array[_size - i - 1];
 		}
 		return array;
 	}
@@ -322,21 +322,21 @@ public class ValidationItemQueue : IValidationItemQueue
 
 	internal struct Enumerator : IEnumerator<IValidationItem>, IDisposable, IEnumerator
 	{
-		private readonly int version;
-		private readonly ValidationItemQueue stack;
+		private readonly int _version;
+		private readonly ValidationItemQueue _stack;
 
-		private int index;
-		private IValidationItem current;
+		private int _index;
+		private IValidationItem _current;
 
 		public IValidationItem Current
 		{
 			get
 			{
-				if (index < 0)
+				if (_index < 0)
 				{
 					ThrowEnumerationNotStartedOrEnded();
 				}
-				return this.current;
+				return this._current;
 			}
 		}
 
@@ -344,46 +344,46 @@ public class ValidationItemQueue : IValidationItemQueue
 
 		internal Enumerator(ValidationItemQueue stack)
 		{
-			this.stack = stack;
-			this.version = stack.version;
-			this.index = -2;
-			this.current = default;
+			this._stack = stack;
+			this._version = stack._version;
+			this._index = -2;
+			this._current = default;
 		}
 
 		public void Dispose()
 		{
-			this.index = -1;
+			this._index = -1;
 		}
 
 		public bool MoveNext()
 		{
-			if (this.version != stack.version)
+			if (this._version != _stack._version)
 			{
 				throw new InvalidOperationException("");// System.SR.InvalidOperation_EnumFailedVersion);
 			}
 			bool flag;
-			if (this.index == -2)
+			if (this._index == -2)
 			{
-				this.index = stack.size - 1;
-				flag = index >= 0;
+				this._index = _stack._size - 1;
+				flag = _index >= 0;
 				if (flag)
 				{
-					this.current = stack.array[index];
+					this._current = _stack._array[_index];
 				}
 				return flag;
 			}
-			if (index == -1)
+			if (_index == -1)
 			{
 				return false;
 			}
-			flag = --index >= 0;
+			flag = --_index >= 0;
 			if (flag)
 			{
-				this.current = stack.array[index];
+				this._current = _stack._array[_index];
 			}
 			else
 			{
-				this.current = default;
+				this._current = default;
 			}
 			return flag;
 		}
@@ -395,12 +395,12 @@ public class ValidationItemQueue : IValidationItemQueue
 
 		void IEnumerator.Reset()
 		{
-			if (version != stack.version)
+			if (_version != _stack._version)
 			{
 				throw new InvalidOperationException("");// System.SR.InvalidOperation_EnumFailedVersion);
 			}
-			index = -2;
-			current = default;
+			_index = -2;
+			_current = default;
 		}
 	}
 }

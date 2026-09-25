@@ -1,0 +1,28 @@
+<Project>
+	<!--
+		Import before Microsoft.NET.Sdk's Sdk.props because Microsoft.NET.Sdk.props already
+		defaults OutputType to Library. Resource-area SDKs set $(_CohesionResourceSdk) before
+		importing the base props, which lets them select the executable default here while a
+		direct base-SDK consumer keeps Microsoft.NET.Sdk's Library default. The conditions
+		honor -p: global properties; the consumer's Directory.Build.props and csproj body are
+		imported later and override these defaults by last assignment wins.
+
+		TargetFrameworks in a consumer is invisible here, so both TargetFramework and
+		TargetFrameworks would be set and IsCrossTargetingBuild would remain false;
+		resource executables never multi-target (R3).
+		Microsoft.NET.Sdk.Common.targets forces LangVersion=Preview when EnablePreviewFeatures
+		is true on the latest TFM, making our LangVersion default effectively redundant;
+		override LangVersion together with EnablePreviewFeatures.
+	-->
+	<PropertyGroup>
+		<OutputType Condition="'$(OutputType)' == '' and '$(_CohesionResourceSdk)' == 'true'">Exe</OutputType>
+		<!-- build/Targets/Build.TargetFramework.props is the repository-side TFM source;
+		     this shipped literal and the KnownFrameworkReference TFMs must move with it. -->
+		<TargetFramework Condition="'$(TargetFramework)' == ''">net10.0</TargetFramework>
+		<LangVersion Condition="'$(LangVersion)' == ''">Preview</LangVersion>
+		<EnablePreviewFeatures Condition="'$(EnablePreviewFeatures)' == ''">true</EnablePreviewFeatures>
+		<ImplicitUsings Condition="'$(ImplicitUsings)' == ''">disable</ImplicitUsings>
+		<Nullable Condition="'$(Nullable)' == ''">enable</Nullable>
+		<IsAotCompatible Condition="'$(IsAotCompatible)' == ''">true</IsAotCompatible>
+	</PropertyGroup>
+</Project>

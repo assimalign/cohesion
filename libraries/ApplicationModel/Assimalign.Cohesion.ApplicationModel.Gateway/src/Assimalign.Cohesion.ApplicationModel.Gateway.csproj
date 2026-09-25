@@ -1,8 +1,24 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.ApplicationModel.Gateway</RootNamespace>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityHub.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Rezolvr.Client" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.SecretStore.Client" />
+        <CohesionProjectReference Include="Assimalign.Cohesion.Security.DataProtection" />
+		<CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
 	</ItemGroup>
 	<ItemGroup>
-		<InternalsVisibleTo Include="Assimalign.Cohesion.ApplicationModel.Gateway.Tests" />
+		<None
+			Include="..\buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.props"
+			Pack="true"
+			PackagePath="buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.props" />
 	</ItemGroup>
 </Project>

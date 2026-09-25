@@ -1,6 +1,7 @@
 using System;
 
 using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.Sql.Client.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Client;
 
@@ -36,6 +37,7 @@ public static class SqlClient
         {
             Settings = options.Settings,
             ConnectionFactory = options.ConnectionFactory,
+            Family = SqlProtocol.Family,
         });
 
         return new DefaultSqlClient(client, options.Settings, options.Observer);

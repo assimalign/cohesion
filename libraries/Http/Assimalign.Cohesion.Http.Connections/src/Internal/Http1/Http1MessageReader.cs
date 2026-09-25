@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http.Connections.Internal;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal static class Http1MessageReader
 {

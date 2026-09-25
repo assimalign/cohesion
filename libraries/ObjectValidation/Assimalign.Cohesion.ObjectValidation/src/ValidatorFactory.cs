@@ -9,12 +9,12 @@ namespace Assimalign.Cohesion.ObjectValidation;
 /// </summary>
 public sealed class ValidatorFactory : IValidatorFactory
 {
-    private readonly IDictionary<string, IValidator> validators;
+    private readonly IDictionary<string, IValidator> _validators;
 
     private ValidatorFactory() { }
     internal ValidatorFactory(IDictionary<string, IValidator> validators)
     {
-        this.validators = validators;
+        this._validators = validators;
     }
 
     /// <inheritdoc cref="IValidatorFactory.CreateValidator(string)"/>
@@ -27,7 +27,7 @@ public sealed class ValidatorFactory : IValidatorFactory
             throw new ArgumentNullException(nameof(validatorName), $"The parameter 'validatorName' cannot be null or empty.");
         }
         
-        return validators.TryGetValue(validatorName, out var validator) ? 
+        return _validators.TryGetValue(validatorName, out var validator) ? 
             validator:
             throw new ArgumentException($"The requested validator: '{validatorName}' does not exist.");   
     }

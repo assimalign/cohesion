@@ -8,7 +8,7 @@
         <TargetFrameworkForSdks>$(TargetFrameworkLatest)</TargetFrameworkForSdks>
         <TargetFrameworkForTooling>$(TargetFrameworkLatest)</TargetFrameworkForTooling>
         <!--
-            Alias consumed by framework Ref/Runtime targets (frameworks\Assimalign.Cohesion.App.targets)
+            Alias consumed by framework Ref/Runtime targets (libraries\App\Assimalign.Cohesion.App.targets)
             in path construction. Kept derived from TargetFramework so bumping the TFM here continues to
             drive everything from one place.
         -->

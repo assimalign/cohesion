@@ -7,6 +7,42 @@ serialization) standards-driven format machinery without service or storage coup
 
 Tracked by area epic [L01.01.05] Foundation - Content (#14).
 
+## Project map
+
+An arrow means "references": `Content.Text --> Content` reads "`Assimalign.Cohesion.Content.Text`
+references `Assimalign.Cohesion.Content`". The family layers rather than fans out — a format
+package sits on the *kind* of content it is (binary, text, media), not on the root directly.
+
+```mermaid
+flowchart LR
+    Root["Content — area root"]
+    Binary["Content.Binary"]
+    Text["Content.Text"]
+    Media["Content.Media"]
+    Bmff["Content.Bmff"]
+    Mkv["Content.Mkv"]
+    Exe["Content.Exe"]
+    Markdown["Content.Markdown"]
+    Yaml["Content.Yaml"]
+    Standalone["Content.Ebml · Content.Mpeg · Content.Pdf"]
+    Binary --> Root
+    Text --> Root
+    Media --> Binary
+    Bmff --> Media
+    Mkv --> Bmff
+    Exe --> Binary
+    Markdown --> Root
+    Markdown --> Text
+    Yaml --> Root
+    Yaml --> Text
+```
+
+The three packages in the collapsed node currently reference nothing — `Content.Ebml`,
+`Content.Mpeg`, and `Content.Pdf` are self-contained today and are expected to take the root
+contract as they fill in. Every package in the family depends only on packages *below* it: the
+root never references a format, and a format never references a sibling at its own level. The full
+reference graph for every Cohesion assembly is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
+
 ## Layering
 
 - **L1 (this area):** content contracts and format packages — pure description and parsing machinery,

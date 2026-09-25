@@ -5,7 +5,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 
-namespace Assimalign.Cohesion.FileSystem;
+namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.FileSystem.Internal;
 

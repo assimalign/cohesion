@@ -11,13 +11,13 @@ namespace Assimalign.Cohesion.Files.Bmff;
 [DebuggerDisplay("Bmff Box: Partition Entry (paen)")]
 public sealed class PartitionEntryBox : BmffBoxComposite
 {
-    private IEnumerable<BmffBox> children;
+    private IEnumerable<BmffBox> _children;
     public PartitionEntryBox(long offset, long limit)
     {
         this.Offset = offset;
         this.Limit = limit;
     }
-    public override IEnumerable<BmffBox> Children => children;
+    public override IEnumerable<BmffBox> Children => _children;
 
     public override long Limit { get; }
 
@@ -35,7 +35,7 @@ public sealed class PartitionEntryBox : BmffBoxComposite
             boxes.Add(reader.Current);
         }
 
-        children = boxes;
+        _children = boxes;
     }
 
     public override void Write(BmffStream stream)

@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties
 {
     internal partial class Resources
     {
-        private static readonly bool IsUsingResourceKeys = AppContext.TryGetSwitch("System.Resources.UseSystemResourceKeys", out bool isEnabled) ? isEnabled : false;
+        private static readonly bool _isUsingResourceKeys = AppContext.TryGetSwitch("System.Resources.UseSystemResourceKeys", out bool isEnabled) ? isEnabled : false;
 
         // This method is used to decide if we need to append the exception message parameters to the message when calling SR.Format.
         // by default it returns the value of System.Resources.UseSystemResourceKeys AppContext switch or false if not specified.
@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties
 
         internal static string GetResourceString(string resourceKey)
         {
-            if (IsUsingResourceKeys)
+            if (_isUsingResourceKeys)
             {
                 return resourceKey;
             }
@@ -52,13 +52,13 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties
             }
             if (args.Length <= 3)
             {
-                return IsUsingResourceKeys ?
+                return _isUsingResourceKeys ?
                     string.Join(", ", resourceFormat, args) :
                     string.Format(resourceFormat, args);
             }
             else
             {
-                return IsUsingResourceKeys ?
+                return _isUsingResourceKeys ?
                     resourceFormat + ", " + string.Join(", ", args) :
                     string.Format(resourceFormat, args);
             }

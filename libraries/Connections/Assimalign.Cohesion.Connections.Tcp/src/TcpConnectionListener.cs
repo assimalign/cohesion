@@ -6,7 +6,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
-using Assimalign.Cohesion.Connections.Internal;
 using Assimalign.Cohesion.Connections.Tcp.Internal;
 
 namespace Assimalign.Cohesion.Connections.Tcp;
@@ -15,7 +14,8 @@ namespace Assimalign.Cohesion.Connections.Tcp;
 /// Listens for inbound, reliable, ordered single-stream TCP connections on a local endpoint.
 /// </summary>
 /// <remarks>
-/// The listening socket is bound lazily on the first call to <see cref="AcceptAsync(CancellationToken)"/>.
+/// <see cref="BindAsync(CancellationToken)"/> acquires the listening socket explicitly. For backward
+/// compatibility, <see cref="AcceptAsync(CancellationToken)"/> binds the listener when necessary.
 /// Each accepted connection is returned as a live <see cref="Connection"/> whose IO loops are
 /// already running.
 /// </remarks>
@@ -25,6 +25,7 @@ public sealed class TcpConnectionListener : ConnectionListener
     private readonly TcpConnectionSettings[] _settings;
     private readonly ListenerId _listenerId = ListenerId.New();
     private readonly ConcurrentDictionary<ConnectionId, TcpConnection> _connections = new();
+    private readonly Lock _gate = new();
 
     private EndPoint _endPoint;
     private Socket? _socket;
@@ -88,26 +89,76 @@ public sealed class TcpConnectionListener : ConnectionListener
     public override ConnectionCapabilities Capabilities { get; }
 
     /// <inheritdoc />
+    /// <exception cref="ObjectDisposedException">Thrown when the listener has been disposed.</exception>
+    public override ValueTask BindAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_isDisposed, this);
+
+            if (_socket is not null)
+            {
+                return ValueTask.CompletedTask;
+            }
+
+            (Socket socket, string? socketFilePath) = _endPoint is FileHandleEndPoint fileHandle
+                ? (AdoptInheritedSocket(fileHandle), null)
+                : BindNewSocket();
+
+            _protocol = SocketConnectionProtocol.FromAddressFamily(socket.AddressFamily);
+            _endPoint = socket.LocalEndPoint ?? _endPoint;
+            _socketFilePath = socketFilePath;
+            _socket = socket;
+
+            ConnectionDiagnostics.ListenerInitialized(_protocol, _listenerId);
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
     {
-        EnsureBound();
+        await BindAsync(cancellationToken).ConfigureAwait(false);
 
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                Socket socket = await _socket!.AcceptAsync(cancellationToken);
+                Socket listenerSocket;
 
-                TcpConnectionSettings settings = _settings[Interlocked.Increment(ref _index) % _settings.Length];
-
-                if (socket.LocalEndPoint is IPEndPoint)
+                lock (_gate)
                 {
-                    socket.NoDelay = _options.NoDelay;
+                    ObjectDisposedException.ThrowIf(_isDisposed, this);
+                    listenerSocket = _socket!;
                 }
 
-                var connection = new TcpConnection(socket, settings, _listenerId);
+                Socket socket = await listenerSocket.AcceptAsync(cancellationToken);
+                TcpConnection? connection = null;
 
-                _connections.TryAdd(connection.Id, connection);
+                lock (_gate)
+                {
+                    if (!_isDisposed)
+                    {
+                        TcpConnectionSettings settings = _settings[Interlocked.Increment(ref _index) % _settings.Length];
+
+                        if (socket.LocalEndPoint is IPEndPoint)
+                        {
+                            socket.NoDelay = _options.NoDelay;
+                        }
+
+                        connection = new TcpConnection(socket, settings, _listenerId);
+                        _connections.TryAdd(connection.Id, connection);
+                    }
+                }
+
+                if (connection is null)
+                {
+                    socket.Dispose();
+                    throw new ObjectDisposedException(nameof(TcpConnectionListener));
+                }
 
                 connection.ConnectionClosed.Register(static state =>
                 {
@@ -121,13 +172,17 @@ public sealed class TcpConnectionListener : ConnectionListener
             }
             catch (ObjectDisposedException)
             {
-                // The listening socket was closed; loop so cancellation can be observed.
-                continue;
+                lock (_gate)
+                {
+                    ObjectDisposedException.ThrowIf(_isDisposed, this);
+                }
             }
             catch (SocketException exception) when (exception.SocketErrorCode == SocketError.OperationAborted)
             {
-                // A call was made to DisposeAsync; loop so cancellation can be observed.
-                continue;
+                lock (_gate)
+                {
+                    ObjectDisposedException.ThrowIf(_isDisposed, this);
+                }
             }
         }
 
@@ -137,23 +192,32 @@ public sealed class TcpConnectionListener : ConnectionListener
     /// <inheritdoc />
     public override async ValueTask DisposeAsync()
     {
-        if (_isDisposed)
+        Socket? socket;
+        string? socketFilePath;
+
+        lock (_gate)
         {
-            return;
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            _isDisposed = true;
+            socket = _socket;
+            _socket = null;
+            socketFilePath = _socketFilePath;
+            _socketFilePath = null;
         }
 
-        _isDisposed = true;
-
-        _socket?.Close();
-        _socket?.Dispose();
+        socket?.Close();
+        socket?.Dispose();
 
         // Unlink the Unix domain socket file this listener bound so the path is free for the next bind.
         // Only a filesystem-backed path that this listener created is removed (never an inherited
         // file-handle socket or an abstract-namespace socket, which have no filesystem entry).
-        if (_socketFilePath is not null)
+        if (socketFilePath is not null)
         {
-            UnixDomainSocketFile.Unlink(_socketFilePath);
-            _socketFilePath = null;
+            UnixDomainSocketFile.Unlink(socketFilePath);
         }
 
         // ConcurrentDictionary.Values returns a snapshot, so connections removing themselves
@@ -187,24 +251,6 @@ public sealed class TcpConnectionListener : ConnectionListener
         return new TcpConnectionListener(options);
     }
 
-    private void EnsureBound()
-    {
-        if (_socket is not null)
-        {
-            return;
-        }
-
-        Socket socket = _endPoint is FileHandleEndPoint fileHandle
-            ? AdoptInheritedSocket(fileHandle)
-            : BindNewSocket();
-
-        _protocol = SocketConnectionProtocol.FromAddressFamily(socket.AddressFamily);
-        _endPoint = socket.LocalEndPoint ?? _endPoint;
-        _socket = socket;
-
-        ConnectionEventSource.Log.ListenerInitialized(_protocol, _listenerId);
-    }
-
     /// <summary>
     /// Adopts a listening socket handed off by a parent process (systemd <c>.socket</c> activation,
     /// launchd, or a supervising process). The descriptor is already bound and listening, so it is
@@ -223,37 +269,62 @@ public sealed class TcpConnectionListener : ConnectionListener
         return new Socket(new SafeSocketHandle((IntPtr)fileHandle.FileHandle, ownsHandle: true));
     }
 
-    private Socket BindNewSocket()
+    private (Socket Socket, string? SocketFilePath) BindNewSocket()
     {
         if (_endPoint is UnixDomainSocketEndPoint)
         {
             // A Unix domain socket bound to a filesystem path leaves a socket file behind. Remove any
             // stale file left by a prior unclean shutdown so the bind does not fail with
             // AddressAlreadyInUse (rebind-after-crash), and remember the path so disposal can unlink it.
-            _socketFilePath = UnixDomainSocketFile.ResolvePath(_endPoint);
+            string? socketFilePath = UnixDomainSocketFile.ResolvePath(_endPoint);
 
-            if (_socketFilePath is not null)
+            if (socketFilePath is not null)
             {
-                UnixDomainSocketFile.DeleteStale(_socketFilePath);
+                UnixDomainSocketFile.DeleteStale(socketFilePath);
             }
 
             Socket unixSocket = new(_endPoint.AddressFamily, SocketType.Stream, ProtocolType.Unspecified);
-            unixSocket.Bind(_endPoint);
-            unixSocket.Listen(_options.Backlog);
+            bool isBound = false;
 
-            return unixSocket;
+            try
+            {
+                unixSocket.Bind(_endPoint);
+                isBound = true;
+                unixSocket.Listen(_options.Backlog);
+
+                return (unixSocket, socketFilePath);
+            }
+            catch
+            {
+                unixSocket.Dispose();
+
+                if (isBound && socketFilePath is not null)
+                {
+                    UnixDomainSocketFile.Unlink(socketFilePath);
+                }
+
+                throw;
+            }
         }
 
         Socket socket = new(_endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
 
-        if (_endPoint is IPEndPoint ip && ip.Address == IPAddress.IPv6Any)
+        try
         {
-            socket.DualMode = true;
+            if (_endPoint is IPEndPoint ip && ip.Address == IPAddress.IPv6Any)
+            {
+                socket.DualMode = true;
+            }
+
+            socket.Bind(_endPoint);
+            socket.Listen(_options.Backlog);
+
+            return (socket, null);
         }
-
-        socket.Bind(_endPoint);
-        socket.Listen(_options.Backlog);
-
-        return socket;
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 }

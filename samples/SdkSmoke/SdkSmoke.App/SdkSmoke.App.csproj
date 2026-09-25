@@ -1,0 +1,11 @@
+<Project Sdk="Assimalign.Cohesion.Sdk">
+  <PropertyGroup>
+    <RootNamespace>SdkSmoke.App</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Assimalign.Cohesion.App" />
+  </ItemGroup>
+</Project>

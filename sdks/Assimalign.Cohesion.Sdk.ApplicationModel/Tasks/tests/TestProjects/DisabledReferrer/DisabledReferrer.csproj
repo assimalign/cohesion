@@ -1,0 +1,14 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>DisabledReferrer</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>inventory</CohesionApplication>
+    <CohesionResourceName>inventory-referrer</CohesionResourceName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionResourceReference Include="..\DisabledReferenced\DisabledReferenced.csproj" />
+  </ItemGroup>
+
+</Project>

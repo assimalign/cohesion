@@ -1,0 +1,13 @@
+<Project Sdk="Assimalign.Cohesion.Sdk">
+  <PropertyGroup>
+    <RootNamespace>SdkSmoke.Analyzer</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles><NoWarn>$(NoWarn);CA2252</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Assimalign.Cohesion.App" />
+    <CohesionPackageReference Include="Assimalign.Cohesion.ObjectMapping" Version="$(CohesionVersion)" />
+  </ItemGroup>
+</Project>

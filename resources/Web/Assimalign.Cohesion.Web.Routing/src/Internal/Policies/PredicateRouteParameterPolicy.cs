@@ -1,6 +1,8 @@
 using System;
 
-namespace Assimalign.Cohesion.Web.Routing.Policies;
+using Assimalign.Cohesion.Web.Routing.Policies;
+
+namespace Assimalign.Cohesion.Web.Routing.Internal;
 
 /// <summary>
 /// Evaluates a route parameter using a custom predicate.

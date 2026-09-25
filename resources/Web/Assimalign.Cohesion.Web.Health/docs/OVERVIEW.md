@@ -2,46 +2,65 @@
 
 ## Purpose
 
-Cohesion health checks, delivered over HTTP. One package owns both the health model and the
-`/healthz` · `/livez` · `/readyz` endpoint. Health lives in the Web area because it is
-delivered over HTTP (Kubernetes probes are HTTP endpoints), and resources consume it as a
-private implementation detail — the application developer opts in via resource options and
-never sees these types.
+`Assimalign.Cohesion.Web.Health` is the public health-check feature for Cohesion Web
+applications. It owns both the health model and its HTTP delivery through `/healthz`, `/readyz`,
+and `/livez` pipeline endpoints.
 
 ## Scope
 
 - **Model:** `IHealthCheck`, `HealthStatus`, `HealthCheckResult`, `HealthReport`,
-  `HealthReportEntry`, `HealthCheckRegistration`, `IHealthChecksBuilder`,
-  `IHealthCheckService`, `HealthChecks.CreateBuilder()`, `HealthTags`, `HealthCheckPredicates`.
-- **Endpoint:** `MapHealthChecks` / `MapReadinessCheck` / `MapLivenessCheck`,
-  `HealthEndpointOptions`, `IHealthResponseWriter` + the default AOT-safe JSON writer,
-  `IHttpHealthFeature`.
+  `HealthReportEntry`, and `HealthCheckRegistration`.
+- **Composition:** `HealthChecks.CreateBuilder()`, `IHealthChecksBuilder`, inline and typed checks.
+  The optional `Web.Hosting.Health` package adds `AddContributor` for host contributors.
+- **Filtering:** `HealthTags` and `HealthCheckPredicates` for aggregate, readiness, and liveness
+  views.
+- **HTTP delivery:** `MapHealthChecks`, `MapReadinessCheck`, `MapLivenessCheck`,
+  `HealthEndpointOptions`, `IHealthResponseWriter`, and `IHttpHealthFeature`.
 
 ## Dependencies
 
-`Assimalign.Cohesion.Web` (which brings the HTTP stack). No DI container reference.
+The package references `Assimalign.Cohesion.Web` for pipeline and HTTP contracts. It references
+no hosting library or dependency-injection container. `Web.Hosting.Health` references this
+package and `Hosting.Health` to supply the optional contributor bridge.
 
-## Layering
+## Framework delivery
 
-L3 Web feature project. Resources reference it **privately**
-(`CohesionPrivateProjectReference` + `CohesionFrameworkPrivateAssembly`) so the HTTP stack is
-pulled into the resource at runtime but hidden from the resource's consumers.
+- `App.Web` lists `Assimalign.Cohesion.Web.Health` as a public framework assembly. Web application
+  authors see and use its types directly.
+- `App.Database` lists the same assembly as a private framework assembly because the Database
+  runtime uses a private Web implementation closure. Database application authors do not gain a
+  public Web health surface from that inclusion.
+
+The package can also be referenced directly outside those framework profiles.
 
 ## Usage
 
-An application developer never touches these types — they opt in through a resource's options:
+Compose an immutable service, then explicitly map the endpoints that the application exposes:
 
 ```csharp
-builder.AddDatabase(o => { o.EnableHealthCheck = true; o.HealthCheckPath = "/healthz"; });
-```
+using Assimalign.Cohesion.Web.Health;
+using Assimalign.Cohesion.Web.Hosting.Health;
 
-A resource wires it internally when that option is set:
-
-```csharp
 IHealthCheckService health = HealthChecks.CreateBuilder()
-    .AddCheck("database", new DatabaseConnectivityCheck(...), tags: new[] { HealthTags.Ready })
+    .AddCheck(
+        "self",
+        () => HealthCheckResult.Healthy("accepting traffic"),
+        tags: new[] { HealthTags.Ready, HealthTags.Live })
+    .AddContributor(resourceContext)
     .Build();
-pipeline.MapHealthChecks(o.HealthCheckPath ?? "/healthz", health);
+
+pipeline.MapHealthChecks(health);       // /healthz, all checks
+pipeline.MapReadinessCheck(health);     // /readyz, ready-tagged checks
+pipeline.MapLivenessCheck(health);      // /livez, live-tagged checks
 ```
 
-See `docs/DESIGN.md` for the private-packaging model and the AOT-safe writer.
+`AddContributor` uses `IHealthContributor.Name` as the registration name and preserves the
+contribution's status, description, and diagnostic data. It forwards request cancellation and
+supports the same failure status, tags, and timeout policy as `AddCheck`. When tags are omitted,
+both `ready` and `live` are applied; pass an empty collection for aggregate-only participation.
+
+The middleware receives `IHealthCheckService` explicitly. It does not locate services during a
+request and does not mutate registrations after the service is built.
+
+Hosting contributor integration is supplied by `Assimalign.Cohesion.Web.Hosting.Health`.
+`Web.Health` owns the health model and endpoints and references no hosting library (O34).

@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Encodes the server's HTTP/3 SETTINGS frame payload — the identifier/value

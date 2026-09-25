@@ -1,10 +1,10 @@
 # Assimalign.Cohesion.Database — Design
 
-The area root (architecture: [resources/Database/DESIGN.md](../../DESIGN.md)).
+The area root (architecture: [resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md)).
 Everything here must be true for *all five* data models — anything model-specific
 belongs in a model package. The root's job is to make engines substitutable at the
 seams the platform builds on: the server serves any engine, the hosting layer
-starts any engine, a client result looks the same regardless of the engine that
+composes any engine, a client result looks the same regardless of the engine that
 produced it.
 
 The root is also the area's **rollup**: it references every child root — the
@@ -14,6 +14,24 @@ independently consumable base components a database is made of (`Database.Types`
 `Database.Governance`) — so one reference to the root delivers the whole base
 surface. Child roots never reference the root.
 
+
+## Phase 29 composition contract (current)
+
+The approved [hosting composition](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md) supersedes the historical builder/worker descriptions below. `IDatabaseApplicationBuilder` exposes exactly borrowed `AddEngine(instance)`, owned `AddEngine(Func<IDatabaseApplicationContext, IDatabaseEngine>)`, and one-shot `Build()`. There is no builder engine enumeration, application-level AddServer, or Use stage. `IDatabaseApplication` inherits `IAsyncDisposable`; its context observes every engine, nested servers, and ordinal `GetEngine(name)` lookup. All four named engine operations use the existing `DatabaseName` value object; its implicit string conversions preserve straightforward callers while implementations use the typed contract.
+
+`IDatabaseEngineBuilder` earns a shared seam because AddWorker is model-agnostic: the same factory can attach a worker to any model. Shared construction/rollback source is owned in this project's `shared/` and compiled by each model through `CohesionSharedSource`. Every model-specific interface extends the base and carries that model's options. No separate generic application composition algorithm consumes arbitrary model options. Strongly typed worker/server factory overloads are deliberately omitted: the common engine factory contract already works, and explicit casts for SQL/KeyValue servers avoid overload ambiguity and a second factory vocabulary.
+
+Workers remain scheduled and quiesced by their engine. `IDatabaseEngineWorker.Run(CancellationToken)` exposes the existing executable pump so workers returned by the approved deferred factories can run without requiring a particular base implementation. `IDatabaseEngine.Servers` enables hosting to discover nested servers. Engines own factory-produced workers and servers; hosting snapshots servers for lifecycle only. Application-created engines are disposed by the application; instance-registered engines remain caller-owned.
+
+```mermaid
+classDiagram
+    IDatabaseApplicationBuilder --> IDatabaseApplication : Build
+    IDatabaseApplication --> IDatabaseApplicationContext : Context
+    IDatabaseApplicationContext --> IDatabaseEngine : Engines
+    IDatabaseEngineBuilder --> IDatabaseEngine : Build
+    IDatabaseEngine --> IDatabaseServer : Servers
+    IDatabaseEngine --> IDatabaseEngineWorker : Workers
+```
 ## Why-this-not-that decisions
 
 - **Child roots roll up under the root; they never reference it** (owner
@@ -70,8 +88,9 @@ surface. Child roots never reference the root.
   lifecycle enum to three observational conditions: `Running` (from creation),
   `Faulted` (a background-worker fault was recorded; the engine keeps serving —
   grouped commits self-help, checkpoints just stop truncating — but the owner
-  should learn it runs degraded), `Disposed`. The health seam (#168) reads this
-  surface; nothing drives transitions from outside.
+  should learn it runs degraded), `Disposed`. The default control-plane health
+  aggregate delivered by #973 reads this surface; nothing drives transitions
+  from outside.
 - **The application exposes its composition through `IDatabaseApplicationContext`,
   and the context is plural** (owner direction, 2026-07-13 — the Database
   instance of the Web area's `IWebApplicationContext` pattern, converged with
@@ -164,19 +183,23 @@ surface. Child roots never reference the root.
   cost accepted; wire parity held by the protocol contract and per-model E2Es —
   the preserved prediction-vs-evidence table lives in the area DESIGN §3.10).
   The contracts stay here for the same COHRES001 reason as before: feature
-  libraries (quotas #167, health #168, a future `Database.Testing`) must be
+  libraries (quotas #167, health, `Database.Testing`) must be
   able to name the server without referencing any runtime. The context shape
   (`Context` = engine + sessions) mirrors the application context pattern —
   observational composition on a context, lifecycle on the owning object.
 - **The application builder is a root seam; the implementation is not** (owner
   direction, 2026-07-13). `IDatabaseApplicationBuilder`/`IDatabaseApplication`
   live here so **model packages register their engines and servers without
-  knowing the hosting layer**: `Database.Sql` ships `AddSqlDatabase(...)` and
+  knowing the hosting implementation**: `Database.Sql` ships `AddSqlDatabase(...)` and
   `AddSqlServer(...)` as `extension(IDatabaseApplicationBuilder)` members and
   never references `Database.Hosting` (COHRES001 intact); the hosting module
   ships the implementation (`DatabaseApplicationBuilder`) and the creation
-  entry point (`DatabaseApplication.CreateBuilder()`). Multiple `AddServer`
-  registrations are allowed — servers are per-model. This mirrors the Web area exactly
+  entry point (`DatabaseApplication.CreateBuilder()`). The concrete
+  `DatabaseApplicationBuilder.AddService` in `Database.Hosting` accepts plain Hosting
+  service instances and context factories; those services start before servers and
+  stop after them in reverse order. The root references no hosting library and
+  exposes no service-registration verb (O34). Multiple `AddServer` registrations are
+  allowed — servers are per-model. This mirrors the Web area exactly
   (`IWebApplicationBuilder` in the `Web` root, `WebApplication.CreateBuilder()`
   in `Web.Hosting`, `AddAuthentication` in `Web.Authentication`) — and the
   pattern is the **cross-area expectation**: every area root provides
@@ -185,6 +208,27 @@ surface. Child roots never reference the root.
   alternative — a builder type in the hosting module — would force every model
   package that wants a registration verb to reference the composition surface,
   which is precisely what the hosting-isolation rule forbids.
+- **Model-specific schemas belong to their model family** (MVP features A1–A4,
+  2026-09-17). `CompiledSchema` is an abstract model-agnostic identity carrying
+  `Format`, `Name`, `Model`, `AllowsDestructiveChanges`, and the model's canonical
+  document. The root computes SHA-256 over that document without inspecting its
+  shape. `IDatabaseSchemaProvisioner` remains the common apply seam, returning
+  the readonly `SchemaMigrationResult` value (`FromHash`, `ToHash`,
+  `OperationCount`, `WasAlreadyApplied`). Relational declarations, builders,
+  validation, serialization, and migration planning moved to the thin
+  `Database.Sql.Schema` package, which build tooling can consume without the SQL
+  engine or network stack. The former root schema's collection shape was removed;
+  the document model will define its own vocabulary in its own model family.
+  If another model needs a different shape, it does not belong in this root.
+- **Object ownership separates code-first provisioning from ad-hoc statements.**
+  `DatabaseObjectOwner.Adhoc` objects remain fully mutable through session
+  statements. `DatabaseObjectOwner.Schema` objects can change only through schema
+  apply; a session attempting to alter or drop one receives
+  `DatabaseObjectLockedException` identifying the object, its compiled
+  `OwningSchema`, and the operation. `OwningSchema` is provisioning identity,
+  distinct from any model-specific namespace such as a SQL table's `Schema`.
+  Model catalogs persist ownership and model engines enforce it. Neither the
+  ownership contract nor the exception requires a relational object shape.
 - **`ProtocolVersion` lives in `Database.Protocol`, and the root consumes it.**
   The struct is wire vocabulary, so it lives with the wire implementation —
   `ProtocolVersion.Current` ("the version this assembly implements") is a plain
@@ -202,9 +246,12 @@ the root for **the contract root and everything built *above* it**: the model
 engines and their satellites (`SqlCatalogException`, engine-thrown
 `DatabaseException`s), the client core (`DatabaseClientException`,
 `SqlClientException`), the server, and `Database.Embedded`.
-The root defines three semantic subtypes, each because the distinction is part
-of the session contract: `DatabaseParseException` (fix-the-text vs.
-fix-the-data — the wire's `ParseFailure`), and the retryable-abort pair
+The root defines semantic subtypes, each because the distinction is part
+of a public contract: `DatabaseNotFoundException` is the exact absence signal
+from `IDatabaseEngine.OpenDatabaseAsync` (so provisioning and server binding do
+not confuse an operational failure with a missing database),
+`DatabaseParseException` distinguishes fix-the-text from fix-the-data failures
+(the wire's `ParseFailure`), and the retryable-abort pair
 `DatabaseTransactionAbortedException` / `DatabaseTransactionDeadlockException`
 (the model-boundary surface of the transaction kernel's aborts: a write-write
 conflict or deadlock victim is retryable by construction, and in-process
@@ -249,13 +296,16 @@ as `DatabaseException`, so the inversion changed no live wire mapping.
 
 ## AOT posture
 
-Contracts, enums, and value objects only — no reflection, no serialization.
+Contracts, enums, value objects, and canonical-document hashing only. The root does not inspect
+model schemas or discover types dynamically. SQL declaration compilation and source-generated
+JSON serialization live in `Database.Sql.Schema`.
 
 ## Non-goals
 
 - No connection/network concepts (that is the per-model server machinery in
   the model packages — `SqlDatabaseServer` in `Database.Sql` — and
   `Database.Client`).
-- No DI or configuration surface (that is `Database.Hosting`'s seam alone).
+- No DI, configuration, or `Assimalign.Cohesion.Hosting*` reference. Background-work
+  registration and hosting implementation remain in `Database.Hosting` (O34).
 - No model-specific request or result types — models subclass the
   `Database.Execution` family in their own packages.

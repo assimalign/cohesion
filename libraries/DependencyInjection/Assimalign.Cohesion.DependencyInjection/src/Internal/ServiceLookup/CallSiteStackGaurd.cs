@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Internal;
 internal sealed class CallSiteStackGuard
 {
     private const int MaxExecutionStackCount = 1024;
-    private int executionStackCount;
+    private int _executionStackCount;
 
     public bool TryEnterOnCurrentStack()
     {
@@ -16,7 +16,7 @@ internal sealed class CallSiteStackGuard
         {
             return true;
         }
-        if (executionStackCount < MaxExecutionStackCount)
+        if (_executionStackCount < MaxExecutionStackCount)
         {
             return false;
         }
@@ -35,7 +35,7 @@ internal sealed class CallSiteStackGuard
     }
     private R RunOnEmptyStackCore<R>(Func<object, R> action, object state)
     {
-        executionStackCount++;
+        _executionStackCount++;
 
         try
         {
@@ -54,7 +54,7 @@ internal sealed class CallSiteStackGuard
         }
         finally
         {
-            executionStackCount--;
+            _executionStackCount--;
         }
     }
 }

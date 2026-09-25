@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.OpenApi.Fluent;
+namespace Assimalign.Cohesion.OpenApi.Fluent.Internal;
 
 /// <summary>
 /// Guards version-gated fluent operations, failing fast at authoring time when a builder targeting one

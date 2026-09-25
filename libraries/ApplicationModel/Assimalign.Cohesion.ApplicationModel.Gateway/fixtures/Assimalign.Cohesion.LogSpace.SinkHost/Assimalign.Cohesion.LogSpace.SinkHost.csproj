@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.LogSpace.SinkHost</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.LogSpace.Hosting" />
+  </ItemGroup>
+</Project>

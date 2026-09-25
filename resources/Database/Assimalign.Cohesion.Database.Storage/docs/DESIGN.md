@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Database.Storage — Design
 
 The physical layer of the Data Platform kernel (area architecture:
-[resources/Database/DESIGN.md](../../DESIGN.md) §3.2). This document records the design
+[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2). This document records the design
 decisions that shape the storage model; the program-level requirements it satisfies are
 R1 (ACID), R3 (shared kernel), and R6 (NativeAOT) in the area design.
 
@@ -47,6 +47,59 @@ LSN) sits in the **body** of page 0 — after the standard 96-byte page header �
 file offset 0. An earlier draft overlaid the file header on the page header, which made
 page 0 un-checksummable and un-typed. Making page 0 a normal `PageType.FileHeader` page
 means one integrity rule covers every page in the file, including the header.
+
+## File handles, positional I/O, and durability
+
+Storage file opening accepts an `IFileSystem`; omitting it selects the physical
+file system. Data, backup, and journal files are opened with `OpenHandle`, which
+returns the explicit `IFileSystemFileHandle` contract. The buffer pool and recovery
+pass page offsets to its positional reads and writes through `StorageStream`.
+Their I/O does not depend on a shared stream cursor; the pool's existing locking,
+page layout, and write-ahead ordering remain unchanged.
+
+Durability follows the handle through composition: the storage journal retains
+the `StorageStream` durability contract and forwards a durable request to
+`IFileSystemFileHandle.Flush(durable: true)`. Capability comes from
+`SupportsDurableFlush`, never a runtime stream type. This fixes **#1018**: wrapping
+a physical handle cannot silently turn the journal's durable flush into an
+ordinary buffered flush. The physical handle implements that request with
+`RandomAccess.FlushToDisk`.
+
+The dependency direction keeps the physical implementation as the default behind
+the file-system contract:
+
+```mermaid
+flowchart LR
+    Storage["Database.Storage"] --> Contract["FileSystem — IFileSystemFileHandle"]
+    Storage --> Physical["FileSystem.Physical — default"]
+    Physical --> Contract
+```
+
+**Durability follows the storage.** `Storage.SupportsDurableFlush` requires both
+data and journal handles to support durable flushing: checkpointing cannot safely
+discard a durable journal before its data pages are durable. Backups are separate
+from the commit/checkpoint path. `ConfigureCommitDurability` derives an unset choice
+as `Synchronous` for capable storage and `None` otherwise. An explicit `Synchronous`
+or `Grouped` choice on unsupported storage fails at engine open, naming the storage
+and the setting. Model factories resolve the default before initialization and
+recovery; engines validate their explicit options before serving the database.
+
+Low-level durable journal operations still throw `NotSupportedException` on
+unsupported handles, rather than silently downgrading the request. Reading existing
+journal bytes does not advance `DurableLsn`: only a completed explicit durable flush
+does. Reopening live memory or an operating-system cache is not durability evidence.
+
+Constructors accepting an ordinary `Stream` explicitly provide **no durability**,
+even if that stream happens to wrap a physical file. Such callers must use the
+handle overload to carry the contract. `StorageStream.FromInMemory()` is likewise
+non-durable. Tests of recovery ordering use explicit simulated durable handles;
+that fixture contract models persistence across their simulated crash rather
+than claiming that production memory is durable.
+
+The regression gate observes the durable flag on a recording handle around the
+real physical handle used by the composed storage journal. A reopen or simulated
+crash assertion alone cannot prove this request: operating-system buffering can
+preserve bytes even when no durable flush was issued.
 
 ## The buffer pool
 
@@ -235,8 +288,7 @@ next pass".
 
 ### Commit durability modes (group commit)
 
-`Storage.CommitDurability` selects who performs the commit's durable flush — never
-whether it happens:
+`Storage.CommitDurability` controls how journal records reach stable storage:
 
 - **`Synchronous` (default):** commit calls `EnsureDurable(commitLsn)` inline — one
   fsync per commit, simplest latency profile.
@@ -248,6 +300,19 @@ whether it happens:
   flushes inline itself; a missing, stalled, or misconfigured worker costs bounded
   latency, never durability. A commit is acknowledged only after its records are
   durable in either mode.
+- **`None`:** commits do not flush to durable storage because the backing store
+  cannot provide it. The same before images, after images, and commit records are
+  appended. Page write-back keeps ordinary journal-before-page flush ordering;
+  recovery, checkpoints, explicit flushes, and shutdown perform ordinary flushes
+  without advancing the durable LSN or publishing durable group-commit progress.
+
+`Synchronous = 0` and `Grouped = 1` retain their shipped enum values; `None = 2` is
+additive. The low-level `Storage` property retains its synchronous default for
+callers explicitly managing composition. Engine defaults are derived from the
+backing handles, and the resolved value is visible through `CommitDurability`.
+The policy is applied after the commit record exists; `EnsureCommitDurable` also
+lets an outer logical transaction apply the same policy to its later commit
+record. MVCC visibility, joins, and constraint enforcement do not read this setting.
 
 The gate lives in storage (not the engine) because commit blocks inside
 `CommitTransaction`; the engine contributes only the worker loop and the wake signal.
@@ -268,6 +333,29 @@ Page 0 (the file header) carries only recomputable bookkeeping and is rebuilt or
 revalidated on open; it is flushed but never journaled. Page allocation is likewise
 not undone on rollback — a page allocated by an aborted transaction is restored to
 its empty initialized image and leaks safely until reused.
+
+## Empty pages and streaming journal recovery
+
+Deleting the last live record in a data page retypes it as `Free` inside the
+physical bracket and registers a pending free, exactly as an owner-chain release
+does. The allocator and owner directory change only after commit. Rollback restores
+the original page image and keeps its owner membership. Inserts check page type
+and owner before reusing a current-write-page hint, including a hint to a page
+pending release in the same bracket. Iterators release a pin before skipping a
+page that was freed during a scan.
+
+`StorageJournal.ReadSequential` holds the synchronous append lock for the lifetime
+of an enumeration and yields one validated frame at a time. Callers consume it on
+one thread without awaiting or mutating the journal; early disposal restores the
+underlying stream position and releases the lock. `ReadAll` preserves its existing
+materialized API. Journal initialization also uses streaming enumeration.
+
+Physical recovery uses three streaming passes: classify committed sequences,
+retain the winning relevant LSN per page, then replay only those images. The winner
+remains the last committed after-image or uncommitted before-image in WAL order,
+preserving existing undo/redo semantics and torn-tail handling. The replay memory
+cost is transaction/page identities plus one page image, not the journal payload
+size. This permits Blob journals larger than available memory to reopen.
 
 ## Error model
 

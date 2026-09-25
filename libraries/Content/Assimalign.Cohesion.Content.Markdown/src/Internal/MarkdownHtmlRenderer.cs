@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Assimalign.Cohesion.Content.Markdown;
+namespace Assimalign.Cohesion.Content.Markdown.Internal;
 
 /// <summary>
 /// Renders a document as HTML in the shapes the CommonMark specification's examples use, so the

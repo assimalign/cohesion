@@ -1,0 +1,22 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.ConfigurationStore">
+  <!-- Versioned configuration namespaces with promotion and watch: an ordinary executable whose Program.cs composes the
+       store, the shared namespaces and the promotion policy in C#. Consumers reach it through the gateway's mount resolution
+       (`platform-configurationstore:<key>`) or the ConfigurationStore.Client at run time. Zone namespaces are not declared
+       here: each zone claims its own with a `config.AddNamespace(...)` command from its gateway.
+       Default control plane commands: configurationstore.namespace, configurationstore.value.
+       Sdk.ConfigurationStore defaults: endpoint `api` (https 8443, private), mount `data` (Volume, 10Gi), StatefulSet, replicas 1. -->
+  <PropertyGroup>
+    <CohesionResourceName>platform-configurationstore</CohesionResourceName>
+    <!-- Opt-in to orchestration. Enabled: Sdk.ConfigurationStore generates resource.json (the manifest), Resource.g.cs (typed accessors:
+         Resource.Endpoints/Mounts/Settings/References over the ambient ResourceContext) and ResourceControlPlane.g.cs (the
+         ConfigurationStore default control plane — readiness, health, observed endpoints, stop, ConfigurationStore commands — owned by
+         ConfigurationStore.ApplicationModel). Disabled (the default): a plain executable that no gateway can reference. -->
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionEndpoint Update="api" Public="true" Certificate="tls" />
+    <CohesionMount Update="tls" Source="platform-secretstore:certs/platform-configurationstore" />
+    <CohesionResourceReference Include="..\Example.Platform.SecretStore\Example.Platform.SecretStore.csproj" />
+    <Content Include="Configuration\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Snapshot of an HTTP/2 endpoint's negotiated SETTINGS parameters

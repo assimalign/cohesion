@@ -1,0 +1,21 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>ManifestConsumer</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>inventory</CohesionApplication>
+    <CohesionResourceName>manifest-consumer</CohesionResourceName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionResourceReference Include="EnabledWeb.Manifest" Version="1.0.0" Endpoints="http" />
+  </ItemGroup>
+
+  <Target Name="CaptureCohesionResourceManifestItems" AfterTargets="Build">
+    <WriteLinesToFile
+      File="$(BaseIntermediateOutputPath)cohesion-resource-manifests.txt"
+      Lines="@(CohesionResourceManifest->'%(FullPath)|%(ManifestPath)|%(PackageId)|%(ReferenceIdentity)|%(IsSelf)')"
+      Overwrite="true" />
+  </Target>
+
+</Project>

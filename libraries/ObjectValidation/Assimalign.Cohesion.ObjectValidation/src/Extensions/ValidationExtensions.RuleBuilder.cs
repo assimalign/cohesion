@@ -7,7 +7,6 @@ namespace Assimalign.Cohesion.ObjectValidation;
 
 using Assimalign.Cohesion.ObjectValidation.Properties;
 using Assimalign.Cohesion.ObjectValidation.Internal;
-using Assimalign.Cohesion.ObjectValidation.Internal.Rules;
 
 
 /// <summary>

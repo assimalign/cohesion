@@ -1,7 +1,8 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.EmailHub</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
-		<Analyzer Include="C:\Source\repos\assimalign\tooling\libraries\Analyzers\Assimalign.CodeAnalysis.Internal\src\bin\Debug\netstandard2.0\Assimalign.CodeAnalysis.Internal.dll" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
-
 </Project>

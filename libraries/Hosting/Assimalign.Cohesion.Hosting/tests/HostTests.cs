@@ -13,6 +13,175 @@ public class HostTests
 {
     public const string DisplayPrefix = $"Cohesion Test [Hosting] - Host: ";
 
+    [Theory(DisplayName = DisplayPrefix + "Rejected startup hooks never enter the service lifecycle")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StartAsync_WhenStartingHookRejects_ShouldLeaveServiceLifecycleUntouched(bool afterCompletedCycle)
+    {
+        var events = new List<TestLifecycleService.Lifecycle>();
+        var options = new TestHostOptions();
+        options.HostedServices.Add(new TestLifecycleService(events.Add));
+        bool reject = !afterCompletedCycle;
+        var expectedFailure = new InvalidOperationException("startup rejected");
+        await using IHost host = new HookRecordingHost(options, phase =>
+        {
+            if (phase == "OnStarting" && reject)
+            {
+                throw expectedFailure;
+            }
+        });
+
+        if (afterCompletedCycle)
+        {
+            await host.StartAsync();
+            await host.StopAsync();
+            reject = true;
+        }
+        var previousEvents = events.ToArray();
+
+        var failure = await Should.ThrowAsync<InvalidOperationException>(
+            () => host.StartAsync().WaitAsync(TimeSpan.FromSeconds(5)));
+        failure.ShouldBeSameAs(expectedFailure);
+        host.Context.State.ShouldBe(HostState.Failed);
+        events.ShouldBe(previousEvents);
+        await host.StopAsync();
+        events.ShouldBe(previousEvents);
+
+        // The generic host still permits a fresh attempt when its hook permits it.
+        reject = false;
+        await host.StartAsync();
+        await host.StopAsync();
+        events.Count.ShouldBe(previousEvents.Length + 6);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Pre-cancelled run starts and stops each service once")]
+    public async Task RunAsync_WithPreCancelledToken_ShouldStartAndStopEachServiceOnce()
+    {
+        // Arrange
+        var events = new List<string>();
+        var options = new TestHostOptions();
+        foreach (string name in new[] { "first", "second" })
+        {
+            options.HostedServices.Add(new DelegateHostService(
+                token => { token.IsCancellationRequested.ShouldBeFalse(); events.Add(name + ":start"); return Task.CompletedTask; },
+                token => { token.IsCancellationRequested.ShouldBeFalse(); events.Add(name + ":stop"); return Task.CompletedTask; }));
+        }
+        await using IHost host = new TestHost(options);
+
+        // Act
+        await host.RunAsync(new CancellationToken(canceled: true)).WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert
+        events.ShouldBe(new[] { "first:start", "second:start", "second:stop", "first:stop" });
+        host.Context.State.ShouldBe(HostState.Stopped);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A normal run follows a pre-cancelled run on the same host")]
+    public async Task RunAsync_AfterPreCancelledRun_ShouldRunNormally()
+    {
+        // Arrange
+        int starts = 0;
+        int stops = 0;
+        var options = new TestHostOptions();
+        options.HostedServices.Add(new DelegateHostService(
+            _ => { starts++; return Task.CompletedTask; },
+            _ => { stops++; return Task.CompletedTask; }));
+        var host = new TestHost(options);
+        await using IHost lifetime = host;
+        await host.RunAsync(new CancellationToken(canceled: true));
+
+        // Act
+        Task run = host.RunAsync(CancellationToken.None);
+        host.Context.State.ShouldBe(HostState.Started);
+        run.IsCompleted.ShouldBeFalse();
+        host.Context.Shutdown();
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert
+        starts.ShouldBe(2);
+        stops.ShouldBe(2);
+        host.Context.State.ShouldBe(HostState.Stopped);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Pre-cancelled run notifies the normal observer sequence")]
+    public async Task RunAsync_WithPreCancelledToken_ShouldNotifyObserver()
+    {
+        // Arrange
+        var runner = new RecordingRunObserver();
+        var host = new TestHost(new TestHostOptions());
+        await using IHost lifetime = host;
+        host.Context.Runner = runner;
+
+        // Act
+        await host.RunAsync(new CancellationToken(canceled: true)).WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert
+        runner.Events.ShouldBe(new[] { "Started", "Stopping", "Stopped" });
+        host.Context.State.ShouldBe(HostState.Stopped);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Pre-cancelled extension run uses fresh lifecycle tokens")]
+    public async Task RunAsync_OnPlainHostWithPreCancelledToken_ShouldStartAndStop()
+    {
+        // Arrange
+        var host = new PlainRunHost();
+        await using IHost lifetime = host;
+
+        // Act
+        await lifetime.RunAsync(new CancellationToken(canceled: true)).WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert
+        host.Events.ShouldBe(new[] { "Start", "Stop" });
+        host.Context.State.ShouldBe(HostState.Stopped);
+    }
+
+    [Theory(DisplayName = DisplayPrefix + "A run never joins a stop that could not begin")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunAsync_WhenStopCannotBegin_ShouldComplete(bool preCancelled)
+    {
+        // Arrange: simulate a derived startup hook making the state terminal without a stop.
+        HookRecordingHost? host = null;
+        host = new HookRecordingHost(new TestHostOptions(), phase =>
+        {
+            if (phase == "OnStarted")
+            {
+                host!.Context.SetState(HostState.Failed);
+                host.Context.Shutdown();
+            }
+        });
+        await using IHost lifetime = host;
+
+        // Act
+        await host.RunAsync(new CancellationToken(preCancelled)).WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert
+        host.Context.State.ShouldBe(HostState.Failed);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Pre-cancelled run still propagates startup failure")]
+    public async Task RunAsync_WithPreCancelledTokenAndFailedStart_ShouldRollbackAndThrow()
+    {
+        // Arrange
+        var expected = new InvalidOperationException("start failed");
+        int stops = 0;
+        var options = new TestHostOptions();
+        options.HostedServices.Add(new DelegateHostService(
+            _ => Task.FromException(expected),
+            _ => { stops++; return Task.CompletedTask; }));
+        var host = new TestHost(options);
+        await using IHost lifetime = host;
+
+        // Act
+        InvalidOperationException error = await Should.ThrowAsync<InvalidOperationException>(
+            () => host.RunAsync(new CancellationToken(canceled: true)));
+
+        // Assert
+        error.ShouldBeSameAs(expected);
+        stops.ShouldBe(1);
+        host.Context.State.ShouldBe(HostState.Failed);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "Ensure Lifecycle Service Start & Stop Order")]
     public async Task TestLifecycleServiceOrder()
     {

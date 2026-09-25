@@ -1,0 +1,29 @@
+<Project Sdk="Assimalign.Cohesion.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>EnabledGeneric</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>inventory</CohesionApplication>
+    <CohesionResourceName>inventory-worker</CohesionResourceName>
+    <CohesionResourceKind>Worker</CohesionResourceKind>
+    <CohesionControlPlaneEndpoint>http</CohesionControlPlaneEndpoint>
+    <CohesionControlPlanePath>/cohesion/v1</CohesionControlPlanePath>
+    <CohesionWorkloadKind>Deployment</CohesionWorkloadKind>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Assimalign.Cohesion.App" />
+    <CohesionEndpoint Include="http" Scheme="http" ContainerPort="8082" DevPort="18082" />
+  </ItemGroup>
+
+  <Target Name="CaptureSdkDefaults" AfterTargets="Build">
+    <WriteLinesToFile
+      File="$(BaseIntermediateOutputPath)sdk-defaults.txt"
+      Lines="$(OutputType)|$(TargetFramework)|$(LangVersion)|$(EnablePreviewFeatures)|$(ImplicitUsings)|$(Nullable)|$(IsAotCompatible)"
+      Overwrite="true" />
+  </Target>
+
+  <Import Project="Sdk.targets" Sdk="Assimalign.Cohesion.Sdk.ApplicationModel" Version="$(CohesionVersion)" />
+
+</Project>

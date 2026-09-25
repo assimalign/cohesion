@@ -1,0 +1,466 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Xml.Linq;
+
+#if COHESION_APPLICATION_MODEL_TESTS
+namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tests;
+#else
+namespace Assimalign.Cohesion.Sdk.Tests;
+#endif
+
+internal sealed class ConsumerWorkspace : IDisposable
+{
+    private const string BaseSdkPackageId = "Assimalign.Cohesion.Sdk";
+#if COHESION_APPLICATION_MODEL_TESTS
+    private const string TestSdkPackageId = "Assimalign.Cohesion.Sdk.ApplicationModel";
+#else
+    private const string TestSdkPackageId = BaseSdkPackageId;
+#endif
+    private const string TestFeedEnvironmentVariable = "COHESION_SDK_TEST_FEED";
+    private const string TestPackageVersionEnvironmentVariable = "COHESION_SDK_TEST_PACKAGE_VERSION";
+    private static readonly string[] _requiredSdkPackageIds =
+    [
+        BaseSdkPackageId,
+        "Assimalign.Cohesion.Sdk.ApplicationModel",
+        "Assimalign.Cohesion.Sdk.Web",
+        "Assimalign.Cohesion.Sdk.ConfigurationStore",
+        "Assimalign.Cohesion.Sdk.Database"
+    ];
+    private static readonly string _repositoryRoot = FindRepositoryRoot();
+    private static readonly string _packageVersion = ResolvePackageVersion();
+    // The SDK family layout is sdks/<family>/Tasks/{src,tests,docs}; the fixtures sit beside
+    // this test project's sources, so the path carries the Tasks/ segment.
+    private static readonly string _testProjectsRoot = Path.Combine(
+        _repositoryRoot,
+        "sdks",
+        TestSdkPackageId,
+        "Tasks",
+        "tests",
+        "TestProjects");
+
+    private ConsumerWorkspace(string rootDirectory, string localPackageFeedDirectory)
+    {
+        RootDirectory = rootDirectory;
+        LocalPackageFeedDirectory = localPackageFeedDirectory;
+    }
+
+    public string RootDirectory { get; }
+
+    public string LocalPackageFeedDirectory { get; }
+
+    internal static string SdkPackageVersion => _packageVersion;
+
+    public static string ResourceSchemaPath => Path.Combine(
+        _repositoryRoot,
+        "assets",
+        "schemas",
+        "cohesion.resource.schema.json");
+
+    public static ConsumerWorkspace Create(params string[] fixtureNames)
+    {
+        string feedDirectory = Path.Combine(_repositoryRoot, "_out", "packages");
+        string sdkFeedDirectory = ResolveSdkFeedDirectory(feedDirectory);
+        string[] missingSdkPackages = _requiredSdkPackageIds
+            .Select(packageId => Path.Combine(sdkFeedDirectory, $"{packageId}.{_packageVersion}.nupkg"))
+            .Where(packagePath => !File.Exists(packagePath))
+            .ToArray();
+        if (missingSdkPackages.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"The package-boundary SDK tests require '{string.Join("', '", missingSdkPackages)}'. " +
+                "Prepare the SDK package feed before running this test project.");
+        }
+
+        string workspaceId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
+        string rootDirectory = Path.Combine(
+            _repositoryRoot, "_out", "s15", workspaceId[..8]);
+        string localPackageFeedDirectory = Path.Combine(
+            _repositoryRoot,
+            "_out",
+            "sdk-tests",
+            workspaceId);
+        Directory.CreateDirectory(rootDirectory);
+        File.WriteAllText(Path.Combine(rootDirectory, "Directory.Build.props"), "<Project />");
+        File.WriteAllText(Path.Combine(rootDirectory, "Directory.Build.targets"), "<Project />");
+        Directory.CreateDirectory(localPackageFeedDirectory);
+
+        var workspace = new ConsumerWorkspace(rootDirectory, localPackageFeedDirectory);
+        try
+        {
+            foreach (string fixtureName in fixtureNames)
+            {
+                workspace.CopyFixture(fixtureName);
+            }
+
+            workspace.WriteNuGetConfig(feedDirectory, sdkFeedDirectory);
+            workspace.WriteGlobalJson();
+            return workspace;
+        }
+        catch
+        {
+            workspace.Dispose();
+            throw;
+        }
+    }
+
+    public string ProjectDirectory(string fixtureName)
+    {
+        return Path.Combine(RootDirectory, fixtureName);
+    }
+
+    public string ProjectFile(string fixtureName)
+    {
+        return Path.Combine(ProjectDirectory(fixtureName), $"{fixtureName}.csproj");
+    }
+
+    public Task<DotNetBuildResult> BuildAsync(
+        string fixtureName,
+        CancellationToken cancellationToken = default)
+    {
+        return RunDotNetAsync("build", fixtureName, [], cancellationToken);
+    }
+
+    public Task<DotNetBuildResult> RestoreAsync(
+        string fixtureName,
+        CancellationToken cancellationToken = default)
+    {
+        return RunDotNetAsync("restore", fixtureName, [], cancellationToken);
+    }
+
+    public Task<DotNetBuildResult> BuildAsync(
+        string fixtureName,
+        IEnumerable<string> properties,
+        CancellationToken cancellationToken = default)
+    {
+        return RunDotNetAsync("build", fixtureName, properties, cancellationToken);
+    }
+
+    internal static Dictionary<string, string> CreateMatchingSdkPins()
+    {
+        using JsonDocument repositorySettings = ReadRepositoryGlobalJson();
+        return repositorySettings.RootElement
+            .GetProperty("msbuild-sdks")
+            .EnumerateObject()
+            .Where(property =>
+                string.Equals(property.Name, BaseSdkPackageId, StringComparison.OrdinalIgnoreCase) ||
+                property.Name.StartsWith($"{BaseSdkPackageId}.", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(
+                property => property.Name,
+                _ => _packageVersion,
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+    internal void WriteGlobalJson(
+        string dotNetSdkVersion,
+        IReadOnlyDictionary<string, string> sdkPins,
+        string rollForward = "latestFeature")
+    {
+        var sdk = new JsonObject
+        {
+            ["version"] = dotNetSdkVersion,
+            ["rollForward"] = rollForward
+        };
+        var sdkPackages = new JsonObject();
+        foreach (KeyValuePair<string, string> sdkPin in sdkPins)
+        {
+            sdkPackages[sdkPin.Key] = sdkPin.Value;
+        }
+
+        var document = new JsonObject
+        {
+            ["sdk"] = sdk,
+            ["msbuild-sdks"] = sdkPackages
+        };
+
+        File.WriteAllText(
+            Path.Combine(RootDirectory, "global.json"),
+            document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    internal void UseInlineBaseSdkVersion(string fixtureName)
+    {
+        string projectFile = ProjectFile(fixtureName);
+        string project = File.ReadAllText(projectFile);
+        const string unversionedSdk = "<Project Sdk=\"Assimalign.Cohesion.Sdk\">";
+        string versionedSdk = $"<Project Sdk=\"Assimalign.Cohesion.Sdk/{_packageVersion}\">";
+        if (!project.Contains(unversionedSdk, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Fixture '{projectFile}' does not use the unversioned base SDK declaration.");
+        }
+
+        File.WriteAllText(projectFile, project.Replace(unversionedSdk, versionedSdk, StringComparison.Ordinal));
+    }
+
+    internal void RemoveGlobalJsonAndUseInlineBaseSdkVersion(string fixtureName)
+    {
+        UseInlineBaseSdkVersion(fixtureName);
+        File.Delete(Path.Combine(RootDirectory, "global.json"));
+    }
+
+    public Task<DotNetBuildResult> PackAsync(
+        string fixtureName,
+        IEnumerable<string>? properties = null,
+        CancellationToken cancellationToken = default)
+    {
+        return RunDotNetAsync("pack", fixtureName, properties ?? [], cancellationToken);
+    }
+
+    public Task<DotNetBuildResult> PublishAsync(
+        string fixtureName,
+        IEnumerable<string>? properties = null,
+        string configuration = "Debug",
+        string target = "CohesionPublishImage",
+        CancellationToken cancellationToken = default)
+    {
+        return RunDotNetAsync("msbuild", fixtureName, (properties ?? []).Append("Configuration=" + configuration), cancellationToken, configuration, target);
+    }
+
+    private async Task<DotNetBuildResult> RunDotNetAsync(
+        string command,
+        string fixtureName,
+        IEnumerable<string> properties,
+        CancellationToken cancellationToken,
+        string configuration = "Debug",
+        string? target = null)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            WorkingDirectory = RootDirectory,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(command);
+        startInfo.ArgumentList.Add(ProjectFile(fixtureName));
+        if (!string.Equals(command, "restore", StringComparison.Ordinal) && command != "msbuild")
+        {
+            startInfo.ArgumentList.Add("--configuration");
+            startInfo.ArgumentList.Add(configuration);
+        }
+        if (string.Equals(command, "pack", StringComparison.Ordinal))
+        {
+            startInfo.ArgumentList.Add("--output");
+            startInfo.ArgumentList.Add(LocalPackageFeedDirectory);
+        }
+        startInfo.ArgumentList.Add("--nologo");
+        startInfo.ArgumentList.Add("--verbosity:minimal");
+        if (target is not null)
+        {
+            startInfo.ArgumentList.Add("-t:" + target);
+        }
+        foreach (string property in properties)
+        {
+            startInfo.ArgumentList.Add($"-p:{property}");
+        }
+        startInfo.Environment["DOTNET_CLI_HOME"] = Path.Combine(RootDirectory, ".dotnet");
+        startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
+        startInfo.Environment["DOTNET_NOLOGO"] = "1";
+        startInfo.Environment["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1";
+        startInfo.Environment["DOTNET_GENERATE_ASPNET_CERTIFICATE"] = "false";
+        startInfo.Environment["NUGET_PACKAGES"] = Path.Combine(RootDirectory, ".nuget", "packages");
+
+        using Process process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start the dotnet build process.");
+        Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+        Task<string> standardError = process.StandardError.ReadToEndAsync();
+
+        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        return new DotNetBuildResult(
+            process.ExitCode,
+            await standardOutput.ConfigureAwait(false),
+            await standardError.ConfigureAwait(false));
+    }
+
+    public void Dispose()
+    {
+        DeleteDirectory(RootDirectory);
+        DeleteDirectory(LocalPackageFeedDirectory);
+    }
+
+    private static void DeleteDirectory(string directory)
+    {
+        try
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+        catch (IOException)
+        {
+            // A failed cleanup must not hide the build assertion that owns this workspace.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // A failed cleanup must not hide the build assertion that owns this workspace.
+        }
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo? current = new(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            string versionProps = Path.Combine(current.FullName, "build", "Targets", "Build.Version.props");
+            if (File.Exists(versionProps))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException(
+            $"Could not locate the Cohesion repository above '{AppContext.BaseDirectory}'.");
+    }
+
+    private static string ResolvePackageVersion()
+    {
+        string? testPackageVersion = Environment.GetEnvironmentVariable(TestPackageVersionEnvironmentVariable);
+        if (!string.IsNullOrWhiteSpace(testPackageVersion))
+        {
+            return testPackageVersion;
+        }
+
+        XDocument frameworkDocument = XDocument.Load(Path.Combine(
+            _repositoryRoot,
+            "build",
+            "Targets",
+            "Build.TargetFramework.props"));
+        XDocument versionDocument = XDocument.Load(Path.Combine(
+            _repositoryRoot,
+            "build",
+            "Targets",
+            "Build.Version.props"));
+
+        string targetFramework = RequiredElementValue(frameworkDocument, "TargetFrameworkLatest");
+        string minorVersion = RequiredElementValue(versionDocument, "CohesionMinorVersion");
+        string patchVersion = RequiredElementValue(versionDocument, "CohesionPatchVersion");
+        Version frameworkVersion = Version.Parse(targetFramework[3..]);
+        return $"{frameworkVersion.Major}.{minorVersion}.{patchVersion}";
+    }
+
+    private static string RequiredElementValue(XDocument document, string localName)
+    {
+        return document
+            .Descendants()
+            .First(element => string.Equals(element.Name.LocalName, localName, StringComparison.Ordinal))
+            .Value
+            .Trim();
+    }
+
+    private void CopyFixture(string fixtureName)
+    {
+        string sourceDirectory = Path.Combine(_testProjectsRoot, fixtureName);
+        if (!Directory.Exists(sourceDirectory))
+        {
+            throw new DirectoryNotFoundException($"SDK test fixture '{sourceDirectory}' does not exist.");
+        }
+
+        string destinationDirectory = ProjectDirectory(fixtureName);
+        foreach (string sourceFile in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            string relativePath = Path.GetRelativePath(sourceDirectory, sourceFile);
+            string destinationFile = Path.Combine(destinationDirectory, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationFile)!);
+            File.Copy(sourceFile, destinationFile);
+        }
+    }
+
+    private void WriteGlobalJson()
+    {
+        using JsonDocument repositorySettings = ReadRepositoryGlobalJson();
+        JsonElement sdkSettings = repositorySettings.RootElement.GetProperty("sdk");
+        WriteGlobalJson(
+            sdkSettings.GetProperty("version").GetString()!,
+            CreateMatchingSdkPins(),
+            sdkSettings.GetProperty("rollForward").GetString()!);
+    }
+
+    private void WriteNuGetConfig(string feedDirectory, string sdkFeedDirectory)
+    {
+        var packageSources = new XElement(
+            "packageSources",
+            new XElement("clear"),
+            new XElement(
+                "add",
+                new XAttribute("key", "cohesion-sdk-test"),
+                new XAttribute("value", LocalPackageFeedDirectory)));
+        var sourceMappings = new XElement(
+            "packageSourceMapping",
+            new XElement(
+                "packageSource",
+                new XAttribute("key", "cohesion-sdk-test"),
+                new XElement("package", new XAttribute("pattern", "EnabledWeb.Manifest"))));
+
+        if (!string.Equals(feedDirectory, sdkFeedDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            packageSources.Add(
+                new XElement(
+                    "add",
+                    new XAttribute("key", "cohesion-sdk-under-test"),
+                    new XAttribute("value", sdkFeedDirectory)));
+            sourceMappings.Add(
+                new XElement(
+                    "packageSource",
+                    new XAttribute("key", "cohesion-sdk-under-test"),
+                    new XElement("package", new XAttribute("pattern", "Assimalign.Cohesion.Sdk*"))));
+        }
+
+        packageSources.Add(
+            new XElement(
+                "add",
+                new XAttribute("key", "cohesion-local"),
+                new XAttribute("value", feedDirectory)),
+            new XElement(
+                "add",
+                new XAttribute("key", "nuget.org"),
+                new XAttribute("value", "https://api.nuget.org/v3/index.json"),
+                new XAttribute("protocolVersion", "3")));
+        sourceMappings.Add(
+            new XElement(
+                "packageSource",
+                new XAttribute("key", "cohesion-local"),
+                new XElement("package", new XAttribute("pattern", "Assimalign.Cohesion.*"))),
+            new XElement(
+                "packageSource",
+                new XAttribute("key", "nuget.org"),
+                new XElement("package", new XAttribute("pattern", "*"))));
+
+        var document = new XDocument(
+            new XElement(
+                "configuration",
+                packageSources,
+                sourceMappings));
+
+        document.Save(Path.Combine(RootDirectory, "nuget.config"));
+    }
+
+    private static string ResolveSdkFeedDirectory(string defaultFeedDirectory)
+    {
+        string? testFeed = Environment.GetEnvironmentVariable(TestFeedEnvironmentVariable);
+        return string.IsNullOrWhiteSpace(testFeed)
+            ? defaultFeedDirectory
+            : Path.GetFullPath(testFeed);
+    }
+
+    private static JsonDocument ReadRepositoryGlobalJson()
+    {
+        return JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(_repositoryRoot, "global.json")),
+            new JsonDocumentOptions
+            {
+                AllowTrailingCommas = true,
+                CommentHandling = JsonCommentHandling.Skip
+            });
+    }
+}

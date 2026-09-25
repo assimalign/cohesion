@@ -1,6 +1,7 @@
 using System;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Routing.Internal;
 using Assimalign.Cohesion.Web.Routing.Patterns;
 using Assimalign.Cohesion.Web.Routing.Policies;
 using Assimalign.Cohesion.Web.Routing.Tests.TestObjects;

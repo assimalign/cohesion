@@ -1,2 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Types</RootNamespace>
+	</PropertyGroup>
 </Project>

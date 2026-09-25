@@ -45,7 +45,7 @@ public class ComponentIntegrationGeneratorTests
         }
         """;
 
-    private static readonly IReadOnlyList<MetadataReference> PlatformReferences =
+    private static readonly IReadOnlyList<MetadataReference> _platformReferences =
         ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)
             .Where(path => path.Length > 0)
@@ -815,8 +815,11 @@ public class ComponentIntegrationGeneratorTests
             new[] { seam });
         string generated = NormalizeLineEndings(GeneratedText(result));
 
+        // The expected block is normalized BEFORE indenting: on a CRLF checkout (the Windows runners)
+        // the literal's blank lines are "\r", which Indent would otherwise treat as text and indent,
+        // and the whole block would be compared against the LF-normalized generator output.
         generated.ShouldContain(
-            Indent(
+            Indent(NormalizeLineEndings(
                 """
                     public global::Test.Seams.ISeam AddEndToEnd(global::System.Action<global::Test.EndToEndBuilderContributor.ThingBuilder> @configure)
                     {
@@ -836,7 +839,7 @@ public class ComponentIntegrationGeneratorTests
                         builder.AddThing<global::Test.EndToEndBuilderContributor.IThing>(_ => cohesionComponent);
                         return builder;
                     }
-                """,
+                """),
                 spaces: 8),
             Case.Sensitive);
         AssertNoErrors(result.Compilation);
@@ -928,7 +931,7 @@ public class ComponentIntegrationGeneratorTests
         string source,
         bool includeCore = true)
     {
-        var references = PlatformReferences.ToList();
+        var references = _platformReferences.ToList();
         if (includeCore)
         {
             references.Add(CoreReference());
@@ -956,7 +959,7 @@ public class ComponentIntegrationGeneratorTests
         bool includeCore = true,
         LanguageVersion languageVersion = LanguageVersion.Preview)
     {
-        var references = PlatformReferences.ToList();
+        var references = _platformReferences.ToList();
         if (includeCore)
         {
             references.Add(CoreReference());

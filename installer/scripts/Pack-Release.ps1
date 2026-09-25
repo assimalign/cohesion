@@ -4,10 +4,10 @@
     Produces the complete, version-consistent Cohesion NuGet release set.
 
 .DESCRIPTION
-    Strictly packs every shipping library and resource, every SDK pack, and every shared-framework
-    targeting and runtime pack into _out/release/packages, at exactly one version, and validates
-    the result against the authoritative inventory in
-    installer/scripts/modules/CohesionPackaging.psm1.
+    Strictly packs every selected release package into _out/release/packages at exactly one
+    version and validates the result against the authoritative inventory in
+    installer/scripts/modules/CohesionPackaging.psm1. The default selection is every shipping
+    library and resource, every SDK pack, and every shared-framework targeting and runtime pack.
 
     Three things separate this from the local dogfooding packer
     (installer/scripts/Install-Local.ps1):
@@ -20,17 +20,18 @@
         build/Targets/Build.Version.props currently says. Here the caller passes the version the
         release tag asserted, and every layer of the version props is pinned to it by global
         MSBuild property - the layering means a stray SDK default otherwise lands a package at
-        1.0.0 (see frameworks/Directory.Build.props for that exact bug).
+        1.0.0 (see the framework producer defaults in libraries/App/Assimalign.Cohesion.App.props
+        for that exact bug).
 
       * It emits a publication manifest. package-order.txt and checksums.sha256 are what the
         publish jobs in .github/workflows/release.yml consume; they never check out the
         repository, so the producer has to hand them the file list and the hashes.
 
-    Roughly 300 packages are produced (131 libraries and resources, 19 SDK packs, 19 targeting
-    packs, and 19 x 7 runtime packs). Expect a long run.
+    The exact package count is inventory-derived and recorded in package-order.txt. Expect a long
+    run.
 
 .PARAMETER Version
-    The SemVer package version to produce, for example 10.0.1 or 10.0.1-preview.2. Must match the
+    The SemVer package version to produce, for example 10.0.1 or 10.0.0-preview.1. Must match the
     canonical CohesionVersion; .github/workflows/release.yml enforces that against the release tag
     before calling this script.
 
@@ -42,11 +43,20 @@
     packaging module. Every value must also appear on the SDK's KnownFrameworkReference
     RuntimePackRuntimeIdentifiers, or consumers cannot resolve the pack.
 
+.PARAMETER SkipLibraries
+    Omits standalone library and resource packages while retaining strict inventory, package-set,
+    and metadata validation for every SDK and framework pack. The publish-less SDK smoke workflow
+    uses this mode with the host RID; official releases never use it.
+
 .PARAMETER PackageDirectory
     Overrides the output directory. Defaults to _out/release/packages under the repository root.
 
+.PARAMETER RepositoryCommit
+    Commit SHA embedded in package repository metadata. Release automation passes the commit pinned
+    by its prepare job; local callers default to GITHUB_SHA and then the checked-out HEAD.
+
 .EXAMPLE
-    ./installer/scripts/Pack-Release.ps1 -Version 10.0.1-preview.2
+    ./installer/scripts/Pack-Release.ps1 -Version 10.0.0-preview.1
 #>
 [CmdletBinding()]
 param(
@@ -58,7 +68,11 @@ param(
 
     [string[]] $RuntimeIdentifier,
 
-    [string] $PackageDirectory
+    [switch] $SkipLibraries,
+
+    [string] $PackageDirectory,
+
+    [string] $RepositoryCommit
 )
 
 $ErrorActionPreference = 'Stop'
@@ -76,13 +90,18 @@ if (-not $versionMatch.Success) {
     throw "Version '$Version' must be SemVer in the supported form MAJOR.MINOR.PATCH[-PRERELEASE]."
 }
 if ($versionMatch.Groups['suffix'].Success) {
-    foreach ($identifier in $versionMatch.Groups['suffix'].Value.Split('.')) {
+    $versionIdentifier = $versionMatch.Groups['suffix'].Value.Split('.')
+    foreach ($identifier in $versionIdentifier) {
         if ([string]::IsNullOrWhiteSpace($identifier)) {
             throw "Version '$Version' contains an empty prerelease identifier."
         }
         if ($identifier -match '^[0-9]+$' -and $identifier -notmatch '^(0|[1-9][0-9]*)$') {
             throw "Version '$Version' contains a numeric prerelease identifier with a leading zero."
         }
+    }
+
+    if ($versionIdentifier -contains 'local') {
+        throw "Version '$Version' contains the reserved local identifier and cannot be release-packed."
     }
 }
 
@@ -93,7 +112,7 @@ $versionSuffix = $versionMatch.Groups['suffix'].Value
 $versionPrefix = "$majorVersion.$minorVersion.$patchCoreVersion"
 
 # build/Targets/Build.Version.props treats CohesionPatchVersion as the patch number PLUS any
-# prerelease tag ("1-preview.2"), splitting the numeric core back out for AssemblyVersion. Feed it
+# prerelease tag ("0-preview.1"), splitting the numeric core back out for AssemblyVersion. Feed it
 # the same shape so the props file's own derivation stays self-consistent.
 $patchVersion = $patchCoreVersion
 if (-not [string]::IsNullOrWhiteSpace($versionSuffix)) {
@@ -109,8 +128,40 @@ $repositoryDirectory = [System.IO.Path]::GetFullPath((Split-Path $PSScriptRoot -
 Import-Module (Join-Path $PSScriptRoot 'modules/CohesionPackaging.psm1') -Force
 Assert-CohesionReleaseInventory -RepositoryDirectory $repositoryDirectory
 
+# Validate the immutable source identity before clearing any prior release artifacts. Manual
+# promotion runs start on main but explicitly check out the published release commit, so GITHUB_SHA
+# alone is not authoritative for that path.
+$resolvedRepositoryCommit = $RepositoryCommit
+if ([string]::IsNullOrWhiteSpace($resolvedRepositoryCommit)) {
+    $resolvedRepositoryCommit = $env:GITHUB_SHA
+}
+if ([string]::IsNullOrWhiteSpace($resolvedRepositoryCommit)) {
+    $resolvedRepositoryCommit = (& git -C $repositoryDirectory rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Resolving the repository commit failed.'
+    }
+}
+if ($resolvedRepositoryCommit -notmatch '^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$') {
+    throw "Repository commit '$resolvedRepositoryCommit' is not a full Git object id."
+}
+
+$checkedOutCommit = (& git -C $repositoryDirectory rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0) {
+    throw 'Resolving the checked-out repository commit failed.'
+}
+if (-not $resolvedRepositoryCommit.Equals($checkedOutCommit, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Repository commit $resolvedRepositoryCommit does not match checked-out HEAD $checkedOutCommit."
+}
+
 if (-not $RuntimeIdentifier -or $RuntimeIdentifier.Count -eq 0) {
     $RuntimeIdentifier = Get-CohesionReleaseRuntimeIdentifier
+}
+$supportedRuntimeIdentifier = Get-CohesionReleaseRuntimeIdentifier
+$unsupportedRuntimeIdentifier = @(
+    $RuntimeIdentifier | Where-Object { $supportedRuntimeIdentifier -notcontains $_ }
+)
+if ($unsupportedRuntimeIdentifier.Count -gt 0) {
+    throw "Unsupported release runtime identifier(s): $($unsupportedRuntimeIdentifier -join ', ')."
 }
 
 $releaseOutputDirectory = [System.IO.Path]::GetFullPath(
@@ -148,22 +199,15 @@ Get-ChildItem -LiteralPath $packageDirectory -File |
     } |
     ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
 
-$repositoryCommit = $env:GITHUB_SHA
-if ([string]::IsNullOrWhiteSpace($repositoryCommit)) {
-    $repositoryCommit = (& git -C $repositoryDirectory rev-parse HEAD).Trim()
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Resolving the repository commit failed.'
-    }
-}
-
 # ---------------------------------------------------------------------------------------------
 # Build properties
 # ---------------------------------------------------------------------------------------------
 
 # Passed on the command line, which makes them GLOBAL properties: a <PropertyGroup> in any
 # Directory.Build.props cannot override them. That is the point - the version reaches every one of
-# the layered props files (build/Targets/Build.Version.props, libraries/, frameworks/, sdks/)
-# identically, instead of each re-deriving it and one of them getting it wrong.
+# the layered props files (build/Targets/Build.Version.props, libraries/, resources/, sdks/, and
+# the framework producer defaults in libraries/App/Assimalign.Cohesion.App.props) identically,
+# instead of each re-deriving it and one of them getting it wrong.
 $buildProperties = @(
     "-p:CohesionMajorVersion=$majorVersion"
     "-p:CohesionMinorVersion=$minorVersion"
@@ -175,7 +219,7 @@ $buildProperties = @(
     "-p:VersionSuffix=$versionSuffix"
     "-p:PackageVersion=$Version"
     '-p:ContinuousIntegrationBuild=true'
-    "-p:RepositoryCommit=$repositoryCommit"
+    "-p:RepositoryCommit=$resolvedRepositoryCommit"
     "-p:PackageOutputPath=$packageDirectory"
 )
 
@@ -186,6 +230,7 @@ $buildProperties = @(
 Write-Host "Packing Cohesion $Version from $repositoryCommit" -ForegroundColor Cyan
 Write-Host "  Configuration : $Configuration"
 Write-Host "  RIDs          : $($RuntimeIdentifier -join ', ')"
+Write-Host "  Libraries     : $(if ($SkipLibraries) { 'skipped' } else { 'included' })"
 Write-Host "  Output        : $packageDirectory"
 Write-Host ""
 
@@ -225,7 +270,12 @@ function Invoke-PackageBuild {
     }
 }
 
-$plan = @(Get-CohesionReleaseProject -RepositoryDirectory $repositoryDirectory -RuntimeIdentifier $RuntimeIdentifier)
+$plan = @(
+    Get-CohesionReleaseProject `
+        -RepositoryDirectory $repositoryDirectory `
+        -RuntimeIdentifier $RuntimeIdentifier |
+        Where-Object { -not $SkipLibraries -or $_.Kind -ne 'Library' }
+)
 $planIndex = 0
 
 foreach ($item in $plan) {

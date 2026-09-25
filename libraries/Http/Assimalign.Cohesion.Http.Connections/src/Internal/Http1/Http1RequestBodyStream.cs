@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http.Connections.Internal;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// The lazy, forward-only HTTP/1.1 request-body stream. Reads the body incrementally from the

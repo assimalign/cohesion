@@ -8,15 +8,15 @@ namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
 internal class ExpressionsServiceProviderEngine : ServiceProviderEngine
 {
-    private readonly CallSiteExpressionResolverBuilderVisitor visitor;
+    private readonly CallSiteExpressionResolverBuilderVisitor _visitor;
 
     public ExpressionsServiceProviderEngine(ServiceProvider serviceProvider)
     {
-        visitor = new CallSiteExpressionResolverBuilderVisitor(serviceProvider);
+        _visitor = new CallSiteExpressionResolverBuilderVisitor(serviceProvider);
     }
 
     public override Func<ServiceProviderEngineScope, object> RealizeService(CallSiteService callSite)
     {
-        return visitor.Build(callSite);
+        return _visitor.Build(callSite);
     }
 }

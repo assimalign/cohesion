@@ -13,10 +13,10 @@ namespace Assimalign.Cohesion.DependencyInjection;
 /// </remarks>
 public sealed class ServiceProviderFactory
 {
-    private static string defaultKey = Guid.NewGuid().ToString("N");
+    private static string _defaultKey = Guid.NewGuid().ToString("N");
 
-    private static Factory factory = new();
-    private static ConcurrentDictionary<string, Func<IServiceProvider>> providers = new(StringComparer.CurrentCultureIgnoreCase);
+    private static Factory _factory = new();
+    private static ConcurrentDictionary<string, Func<IServiceProvider>> _providers = new(StringComparer.CurrentCultureIgnoreCase);
 
     public ServiceProviderFactory Register(Action<ServiceProviderBuilder> configure)
     {
@@ -26,22 +26,22 @@ public sealed class ServiceProviderFactory
 
         var descriptor = ServiceDescriptor.Singleton<IServiceProviderFactory>(serviceProvider =>
         {
-            return factory;
+            return _factory;
         });
 
         builder.Add(descriptor);
 
-        providers[defaultKey] = () => ((IServiceProviderBuilder)builder).Build();
+        _providers[_defaultKey] = () => ((IServiceProviderBuilder)builder).Build();
 
         return this;
     }
     public ServiceProviderFactory Register(string serviceProviderName, ServiceContainer services)
     {
-        var descriptor = ServiceDescriptor.Singleton<IServiceProviderFactory>(factory);
+        var descriptor = ServiceDescriptor.Singleton<IServiceProviderFactory>(_factory);
 
         services.Register(descriptor);
 
-        providers.TryAdd(serviceProviderName, () =>
+        _providers.TryAdd(serviceProviderName, () =>
         {
             return new ServiceProvider(services, ServiceProviderOptions.Default);
         });
@@ -56,12 +56,12 @@ public sealed class ServiceProviderFactory
 
         var descriptor = ServiceDescriptor.Singleton<IServiceProviderFactory>(serviceProvider =>
         {
-            return factory;
+            return _factory;
         });
 
         builder.Add(descriptor);
 
-        providers[serviceProviderName] = () => ((IServiceProviderBuilder)builder).Build();
+        _providers[serviceProviderName] = () => ((IServiceProviderBuilder)builder).Build();
 
         return this;
     }
@@ -73,27 +73,27 @@ public sealed class ServiceProviderFactory
 
         var descriptor = ServiceDescriptor.Singleton<IServiceProviderFactory>(serviceProvider =>
         {
-            return factory;
+            return _factory;
         });
 
         builder.Add(descriptor);
 
-        providers[serviceProviderName] = () => builder.Build();
+        _providers[serviceProviderName] = () => builder.Build();
 
         return this;
     }
 
-    public IServiceProviderFactory Build() => factory;
+    public IServiceProviderFactory Build() => _factory;
 
     private partial class Factory : IServiceProviderFactory
     {
         IServiceProvider IServiceProviderFactory.Create()
         {
-            if (!providers.Any())
+            if (!_providers.Any())
             {
                 throw new InvalidOperationException("No IServiceProvider's have been registered.");
             }
-            if (providers.TryGetValue(defaultKey, out var provider))
+            if (_providers.TryGetValue(_defaultKey, out var provider))
             {
                 return provider.Invoke();
             }
@@ -103,7 +103,7 @@ public sealed class ServiceProviderFactory
 
         IServiceProvider IServiceProviderFactory.Create(string serviceProviderName)
         {
-            if (!providers.Any())
+            if (!_providers.Any())
             {
                 throw new InvalidOperationException("No IServiceProvider's have been registered.");
             }
@@ -111,7 +111,7 @@ public sealed class ServiceProviderFactory
             {
                 throw new ArgumentNullException(nameof(serviceProviderName));
             }
-            if (providers.TryGetValue(serviceProviderName, out var provider))
+            if (_providers.TryGetValue(serviceProviderName, out var provider))
             {
                 return provider.Invoke();
             }

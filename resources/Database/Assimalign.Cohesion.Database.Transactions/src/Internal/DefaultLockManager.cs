@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Transactions;
+namespace Assimalign.Cohesion.Database.Transactions.Internal;
 
 /// <summary>
 /// Default lock manager: a lock table keyed by <see cref="LockResource"/> with a
@@ -14,7 +14,7 @@ internal sealed class DefaultLockManager : ILockManager
 {
     // Compatibility matrix indexed [held, requested]:
     // Shared, Update, Exclusive, IntentShared, IntentExclusive.
-    private static readonly bool[,] Compatible =
+    private static readonly bool[,] _compatible =
     {
         //               S      U      X      IS     IX
         /* S  */ { true,  true,  false, true,  false },
@@ -168,7 +168,7 @@ internal sealed class DefaultLockManager : ILockManager
                 continue;
             }
 
-            if (!Compatible[(int)heldMode, (int)mode])
+            if (!_compatible[(int)heldMode, (int)mode])
             {
                 return false;
             }
@@ -206,7 +206,7 @@ internal sealed class DefaultLockManager : ILockManager
 
         foreach (var (holder, heldMode) in entry.Granted)
         {
-            if (holder != owner && !Compatible[(int)heldMode, (int)mode])
+            if (holder != owner && !_compatible[(int)heldMode, (int)mode])
             {
                 blockers.Add(holder);
             }

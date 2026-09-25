@@ -29,20 +29,20 @@ namespace Assimalign.Cohesion.Web.Caching.Tests;
 /// </summary>
 public class OutputCacheEndToEndTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan LongDuration = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _longDuration = TimeSpan.FromMinutes(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Caching] - E2E: A second request is served from cache without running the endpoint")]
     public async Task UseOutputCache_SecondRequest_ShouldServeFromCache()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
         int invocations = 0;
 
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = LongDuration));
+        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = _longDuration));
         factory.Application.Use(async (context, next) =>
         {
             int n = Interlocked.Increment(ref invocations);
@@ -66,11 +66,11 @@ public class OutputCacheEndToEndTests
     public async Task UseOutputCache_Hit_ShouldCarryAgeHeader()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = LongDuration));
+        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = _longDuration));
         factory.Application.Use(async (context, next) =>
         {
             context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -91,13 +91,13 @@ public class OutputCacheEndToEndTests
     public async Task UseOutputCache_DifferentQuery_ShouldMiss()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
         int invocations = 0;
 
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = LongDuration));
+        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = _longDuration));
         factory.Application.Use(async (context, next) =>
         {
             int n = Interlocked.Increment(ref invocations);
@@ -125,13 +125,13 @@ public class OutputCacheEndToEndTests
         // Arrange — the endpoint varies its body by X-Client and advertises Vary: X-Client. A client that
         // did not request a stored variant must never receive it (the compression/negotiation cross-client
         // safety property proven over a generic Vary header).
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
         int invocations = 0;
 
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = LongDuration));
+        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = _longDuration));
         factory.Application.Use(async (context, next) =>
         {
             Interlocked.Increment(ref invocations);
@@ -162,13 +162,13 @@ public class OutputCacheEndToEndTests
     public async Task UseOutputCache_AuthenticatedRequest_ShouldBypass()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
         int invocations = 0;
 
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = LongDuration));
+        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = _longDuration));
         factory.Application.Use(async (context, next) =>
         {
             Interlocked.Increment(ref invocations);
@@ -195,7 +195,7 @@ public class OutputCacheEndToEndTests
     public async Task UseOutputCache_EvictByTag_ShouldReFetch()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -204,7 +204,7 @@ public class OutputCacheEndToEndTests
 
         factory.Application.UseOutputCache(store, options => options.AddBasePolicy(policy =>
         {
-            policy.Duration = LongDuration;
+            policy.Duration = _longDuration;
             policy.Tag("catalog");
         }));
         factory.Application.Use(async (context, next) =>
@@ -234,7 +234,7 @@ public class OutputCacheEndToEndTests
     {
         // Arrange — opt-in mode (no base policy): only the endpoint carrying OutputCacheMetadata.Enabled
         // is cached; the plain endpoint runs every time.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();

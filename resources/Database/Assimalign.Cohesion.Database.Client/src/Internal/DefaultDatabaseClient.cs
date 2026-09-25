@@ -4,8 +4,9 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.Client;
+namespace Assimalign.Cohesion.Database.Client.Internal;
 
 /// <summary>
 /// The default pooling client: a slot semaphore bounds total connections at the
@@ -16,14 +17,16 @@ namespace Assimalign.Cohesion.Database.Client;
 internal sealed class DefaultDatabaseClient : IDatabaseClient
 {
     private readonly IConnectionFactory _connectionFactory;
+    private readonly ProtocolMessageFamily _family;
     private readonly ConcurrentStack<PooledDatabaseConnection> _idle = new();
     private readonly SemaphoreSlim _slots;
     private bool _isDisposed;
 
-    internal DefaultDatabaseClient(DatabaseConnectionSettings settings, IConnectionFactory connectionFactory)
+    internal DefaultDatabaseClient(DatabaseConnectionSettings settings, IConnectionFactory connectionFactory, ProtocolMessageFamily family)
     {
         Settings = settings;
         _connectionFactory = connectionFactory;
+        _family = family;
         _slots = new SemaphoreSlim(settings.MaxPoolSize, settings.MaxPoolSize);
     }
 
@@ -52,7 +55,7 @@ internal sealed class DefaultDatabaseClient : IDatabaseClient
                 await idle.CloseAsync().ConfigureAwait(false);
             }
 
-            var connection = new PooledDatabaseConnection(this, _connectionFactory, Settings);
+            var connection = new PooledDatabaseConnection(this, _connectionFactory, Settings, _family);
 
             try
             {
@@ -80,23 +83,28 @@ internal sealed class DefaultDatabaseClient : IDatabaseClient
     /// </summary>
     internal async ValueTask ReturnAsync(PooledDatabaseConnection connection)
     {
-        if (!_isDisposed && connection.IsOpen)
-        {
-            _idle.Push(connection);
-        }
-        else
-        {
-            await connection.CloseAsync().ConfigureAwait(false);
-        }
-
         try
         {
-            _slots.Release();
+            if (!_isDisposed && connection.IsOpen)
+            {
+                _idle.Push(connection);
+            }
+            else
+            {
+                await connection.CloseAsync().ConfigureAwait(false);
+            }
         }
-        catch (ObjectDisposedException)
+        finally
         {
-            // The client was disposed while this connection was rented; nothing
-            // waits on the slot anymore.
+            try
+            {
+                _slots.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The client was disposed while this connection was rented; nothing
+                // waits on the slot anymore.
+            }
         }
     }
 

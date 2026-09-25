@@ -4,18 +4,18 @@ namespace Assimalign.IO;
 
 public readonly struct FPoint
 {
-    private readonly uint value;
+    private readonly uint _value;
 
     public FPoint(uint value)
     {
-        this.value = value;
+        this._value = value;
     }
 
-    public uint Value => value;
+    public uint Value => _value;
 
     public double ToDouble()
     {
-        return (double)value / 65536;
+        return (double)_value / 65536;
     }
 
 

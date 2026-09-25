@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Http;
+namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// Parse-time marker recording that the request head matched an HTTP/1.1 transition signal

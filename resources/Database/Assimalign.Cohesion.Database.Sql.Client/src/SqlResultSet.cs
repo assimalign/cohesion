@@ -2,16 +2,14 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Database.Client;
-
 namespace Assimalign.Cohesion.Database.Sql.Client;
 
 /// <summary>
 /// The materialized result of a row-returning SQL command: its typed columns and rows.
 /// </summary>
 /// <remarks>
-/// The typed set is built while draining the wire exchange, mirroring the shared
-/// client core's materialization. Column names resolve to ordinals once and every
+/// This SQL client materializes the complete wire exchange. Column names resolve
+/// to ordinals once and every
 /// row shares that lookup, so name-based access across a large set stays cheap.
 /// </remarks>
 public sealed class SqlResultSet : IReadOnlyList<SqlRow>
@@ -47,9 +45,9 @@ public sealed class SqlResultSet : IReadOnlyList<SqlRow>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     /// <summary>
-    /// Projects the shared client core's materialized result into a typed result set.
+    /// Projects the SQL protocol's materialized result into a typed result set.
     /// </summary>
-    /// <param name="result">The materialized core result.</param>
+    /// <param name="result">The materialized SQL protocol result.</param>
     /// <returns>The typed result set.</returns>
     internal static SqlResultSet FromClientResult(DatabaseClientResult result)
     {

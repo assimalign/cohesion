@@ -1,16 +1,16 @@
 ﻿using System;
 
-namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class MustNotStartWithValidationRule : ValidationRuleBase<string>
 {
-    private readonly string value;
-    private readonly StringComparison comparison;
+    private readonly string _value;
+    private readonly StringComparison _comparison;
 
     public MustNotStartWithValidationRule(string value, StringComparison comparison = StringComparison.InvariantCulture)
     {
-        this.value = value;
-        this.comparison = comparison;
+        this._value = value;
+        this._comparison = comparison;
     }
 
     public override string Name { get; set; }
@@ -40,7 +40,7 @@ internal sealed class MustNotStartWithValidationRule : ValidationRuleBase<string
         {
             context = new ValidationContext<string>(value);
 
-            if (value.StartsWith(this.value, comparison))
+            if (value.StartsWith(this._value, _comparison))
             {
                 context.AddFailure(this.Error);
             }

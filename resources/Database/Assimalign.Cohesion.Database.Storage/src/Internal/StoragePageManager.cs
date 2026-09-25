@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Storage;
+namespace Assimalign.Cohesion.Database.Storage.Internal;
 
 using Assimalign.Cohesion.Database.Storage.Units;
 

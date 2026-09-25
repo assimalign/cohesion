@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Transactions;
+namespace Assimalign.Cohesion.Database.Transactions.Internal;
 
 /// <summary>
 /// In-memory transaction log for embedded working state and tests: appends are

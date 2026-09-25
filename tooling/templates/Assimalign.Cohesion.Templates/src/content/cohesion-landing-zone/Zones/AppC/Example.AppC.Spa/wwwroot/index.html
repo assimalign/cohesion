@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AppC — inventory</title>
+</head>
+<body>
+  <h1>AppC inventory</h1>
+  <ul id="list"></ul>
+  <script>
+    fetch('/cohesion.config.json')
+      .then(r => r.json())
+      .then(cfg => fetch(cfg.references.appcApi.http + '/bindings'))
+      .then(r => r.json())
+      .then(items => { for (const i of items) { const li = document.createElement('li'); li.textContent = JSON.stringify(i); list.appendChild(li); } });
+  </script>
+</body>
+</html>

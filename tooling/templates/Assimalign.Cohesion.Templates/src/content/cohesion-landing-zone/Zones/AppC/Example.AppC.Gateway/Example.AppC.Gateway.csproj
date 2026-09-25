@@ -1,0 +1,22 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <!--
+    One Sdk.Gateway project = one application = one deployment unit = one namespace (appc). A gateway always has
+    CohesionApplicationModel enabled (it is itself a resource with a manifest and a control plane). Sdk.Gateway injects the
+    orchestration packages, walks the referenced manifests transitively (stopping at application boundaries), and generates
+    Resources.g.cs: Gateway.CreateBuilder(args), AddAppCApi/Spa/Database/SecretStore, AddAllResources, and
+    Externals.IdentityHub / Externals.PlatformConfigurationStore for the crossings the Api declares.
+  -->
+  <PropertyGroup>
+    <CohesionApplicationName>appc</CohesionApplicationName>
+    <CohesionGateways>InProcess;Local</CohesionGateways>
+    <CohesionGatewayInProcess>true</CohesionGatewayInProcess>                <!-- sanctioned composition root: the in-process gateway runs every resource's entry in this process under its own ResourceContext -->
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionResourceReference Include="..\Example.AppC.Api\Example.AppC.Api.csproj" />
+    <CohesionResourceReference Include="..\Example.AppC.Spa\Example.AppC.Spa.csproj" />
+    <!-- InProcess needs a compile-time entry anchor for each composable member, including transitive members. -->
+    <CohesionResourceReference Include="..\Example.AppC.Database\Example.AppC.Database.csproj" />
+    <CohesionResourceReference Include="..\Example.AppC.SecretStore\Example.AppC.SecretStore.csproj" />
+    <Content Include="Configuration\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

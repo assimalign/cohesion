@@ -1,0 +1,8 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Database">
+  <!-- An ordinary executable: Program.cs defines the schema in C#. Sdk.Database defaults: endpoint `db`, endpoint `admin`
+       (the Database default control plane: probes + commands), mount `data`, StatefulSet, replicas 1. -->
+  <PropertyGroup>
+    <CohesionResourceName>acme-database</CohesionResourceName>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>   <!-- referenced by Acme.Api and Acme.Gateway -->
+  </PropertyGroup>
+</Project>

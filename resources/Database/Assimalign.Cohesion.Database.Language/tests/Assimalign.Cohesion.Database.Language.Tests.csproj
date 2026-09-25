@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Language.Tests</RootNamespace>
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
@@ -8,6 +9,7 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="NUlid" />
+		<CohesionPackageReference Include="Shouldly" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Language" />
 	</ItemGroup>
 </Project>

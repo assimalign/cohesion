@@ -606,4 +606,42 @@
 		<Project Path="../../libraries/FileSystem/Assimalign.Cohesion.FileSystem.Physical/src/Assimalign.Cohesion.FileSystem.Physical.csproj" />
 		<Project Path="../../libraries/FileSystem/Assimalign.Cohesion.FileSystem.InMemory/src/Assimalign.Cohesion.FileSystem.InMemory.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Health/">
+		<File Path="Assimalign.Cohesion.Web.Hosting.Health/README.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Health/docs/">
+		<File Path="Assimalign.Cohesion.Web.Hosting.Health/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.Hosting.Health/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Health/src/">
+		<Project Path="Assimalign.Cohesion.Web.Hosting.Health/src/Assimalign.Cohesion.Web.Hosting.Health.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Health/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Hosting.Health/tests/Assimalign.Cohesion.Web.Hosting.Health.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Resources/">
+		<File Path="Assimalign.Cohesion.Web.Hosting.Resources/README.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/">
+		<File Path="Assimalign.Cohesion.Web.Hosting.Resources/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.Hosting.Resources/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Resources/src/">
+		<Project Path="Assimalign.Cohesion.Web.Hosting.Resources/src/Assimalign.Cohesion.Web.Hosting.Resources.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Hosting.Resources/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Hosting.Resources/tests/Assimalign.Cohesion.Web.Hosting.Resources.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Refs/">
+		<File Path="Assimalign.Cohesion.Web.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Refs/src/">
+		<Project Path="Assimalign.Cohesion.Web.Refs/src/Assimalign.Cohesion.Web.Refs.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Runtime/">
+		<File Path="Assimalign.Cohesion.Web.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.Web.Runtime/src/Assimalign.Cohesion.Web.Runtime.csproj" />
+	</Folder>
 </Solution>

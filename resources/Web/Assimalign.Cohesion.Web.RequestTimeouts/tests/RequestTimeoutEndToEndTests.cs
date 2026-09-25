@@ -25,24 +25,24 @@ namespace Assimalign.Cohesion.Web.RequestTimeouts.Tests;
 /// </summary>
 public class RequestTimeoutEndToEndTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan GlobalTimeout = TimeSpan.FromMilliseconds(200);
-    private static readonly TimeSpan NeverInTestBudget = TimeSpan.FromSeconds(300);
-    private static readonly TimeSpan PastGlobalTimeout = TimeSpan.FromMilliseconds(600);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _globalTimeout = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan _neverInTestBudget = TimeSpan.FromSeconds(300);
+    private static readonly TimeSpan _pastGlobalTimeout = TimeSpan.FromMilliseconds(600);
 
     [Fact(DisplayName = "Cohesion Test [Web.RequestTimeouts] - E2E: A slow handler should be answered with 504 on the wire")]
     public async Task UseRequestTimeouts_SlowHandler_ShouldAnswer504()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
 
-        factory.Application.UseRequestTimeouts(GlobalTimeout);
+        factory.Application.UseRequestTimeouts(_globalTimeout);
         factory.Application.Use(async (context, next) =>
         {
-            await Task.Delay(NeverInTestBudget, context.RequestCancelled);
+            await Task.Delay(_neverInTestBudget, context.RequestCancelled);
         });
 
         using HttpClient client = factory.CreateClient();
@@ -58,19 +58,19 @@ public class RequestTimeoutEndToEndTests
     public async Task UseRequestTimeouts_ProblemDetailsPolicy_ShouldAnswerProblemJson()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
 
         factory.Application.UseRequestTimeouts(options => options.DefaultPolicy = new RequestTimeoutPolicy
         {
-            Timeout = GlobalTimeout,
+            Timeout = _globalTimeout,
             WriteProblemDetails = true,
         });
         factory.Application.Use(async (context, next) =>
         {
-            await Task.Delay(NeverInTestBudget, context.RequestCancelled);
+            await Task.Delay(_neverInTestBudget, context.RequestCancelled);
         });
 
         using HttpClient client = factory.CreateClient();
@@ -91,13 +91,13 @@ public class RequestTimeoutEndToEndTests
     public async Task UseRequestTimeouts_EndpointShorterThanGlobal_ShouldWinPrecedence()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
         factory.Builder.AddRouting();
 
-        factory.Application.UseRequestTimeouts(NeverInTestBudget);
+        factory.Application.UseRequestTimeouts(_neverInTestBudget);
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(
@@ -105,9 +105,9 @@ public class RequestTimeoutEndToEndTests
             "/slow",
             new RouterRouteHandler(async context =>
             {
-                await Task.Delay(NeverInTestBudget, context.RequestCancelled);
+                await Task.Delay(_neverInTestBudget, context.RequestCancelled);
             }),
-            new RouterRouteMetadataCollection(new RequestTimeoutMetadata(GlobalTimeout))));
+            new RouterRouteMetadataCollection(new RequestTimeoutMetadata(_globalTimeout))));
 
         using HttpClient client = factory.CreateClient();
 
@@ -122,13 +122,13 @@ public class RequestTimeoutEndToEndTests
     public async Task UseRequestTimeouts_EndpointLongerThanGlobal_ShouldExtendPastGlobal()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
         factory.Builder.AddRouting();
 
-        factory.Application.UseRequestTimeouts(GlobalTimeout);
+        factory.Application.UseRequestTimeouts(_globalTimeout);
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(
@@ -136,11 +136,11 @@ public class RequestTimeoutEndToEndTests
             "/steady",
             new RouterRouteHandler(async context =>
             {
-                await Task.Delay(PastGlobalTimeout, context.RequestCancelled);
+                await Task.Delay(_pastGlobalTimeout, context.RequestCancelled);
                 context.Response.StatusCode = CohesionHttpStatusCode.Ok;
                 await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes("finished"), context.RequestCancelled);
             }),
-            new RouterRouteMetadataCollection(new RequestTimeoutMetadata(NeverInTestBudget))));
+            new RouterRouteMetadataCollection(new RequestTimeoutMetadata(_neverInTestBudget))));
 
         using HttpClient client = factory.CreateClient();
 
@@ -156,13 +156,13 @@ public class RequestTimeoutEndToEndTests
     public async Task UseRequestTimeouts_EndpointDisabled_ShouldServePastGlobalTimeout()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
         factory.Builder.AddRouting();
 
-        factory.Application.UseRequestTimeouts(GlobalTimeout);
+        factory.Application.UseRequestTimeouts(_globalTimeout);
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(
@@ -170,7 +170,7 @@ public class RequestTimeoutEndToEndTests
             "/unhurried",
             new RouterRouteHandler(async context =>
             {
-                await Task.Delay(PastGlobalTimeout, context.RequestCancelled);
+                await Task.Delay(_pastGlobalTimeout, context.RequestCancelled);
                 context.Response.StatusCode = CohesionHttpStatusCode.Ok;
                 await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes("unhurried"), context.RequestCancelled);
             }),
@@ -190,7 +190,7 @@ public class RequestTimeoutEndToEndTests
     public async Task UseRequestTimeouts_ClientCancelsRequest_ShouldSurfaceAsCancellation()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -198,7 +198,7 @@ public class RequestTimeoutEndToEndTests
         factory.Application.UseRequestTimeouts(TimeSpan.FromSeconds(2));
         factory.Application.Use(async (context, next) =>
         {
-            await Task.Delay(NeverInTestBudget, context.RequestCancelled);
+            await Task.Delay(_neverInTestBudget, context.RequestCancelled);
         });
 
         using HttpClient client = factory.CreateClient();

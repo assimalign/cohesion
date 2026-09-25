@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Assimalign.Cohesion.OpenApi.Versioning;
+namespace Assimalign.Cohesion.OpenApi.Versioning.Internal;
 
 /// <summary>
 /// Builds JSON Pointers (RFC 6901) for diagnostic locations, escaping <c>~</c> and <c>/</c> in tokens.

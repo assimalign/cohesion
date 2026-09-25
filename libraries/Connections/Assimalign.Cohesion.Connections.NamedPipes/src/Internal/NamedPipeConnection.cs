@@ -30,7 +30,7 @@ namespace Assimalign.Cohesion.Connections.NamedPipes.Internal;
 /// </remarks>
 internal sealed class NamedPipeConnection : Connection
 {
-    private static readonly ConnectionCapabilities NamedPipeCapabilities = new(
+    private static readonly ConnectionCapabilities _namedPipeCapabilities = new(
         ConnectionProtocol.NamedPipe,
         ConnectionDelivery.Stream,
         IsReliable: true,
@@ -78,7 +78,7 @@ internal sealed class NamedPipeConnection : Connection
     public override PipeWriter Output => _output;
 
     /// <inheritdoc />
-    public override ConnectionCapabilities Capabilities => NamedPipeCapabilities;
+    public override ConnectionCapabilities Capabilities => _namedPipeCapabilities;
 
     /// <inheritdoc />
     public override ConnectionState State

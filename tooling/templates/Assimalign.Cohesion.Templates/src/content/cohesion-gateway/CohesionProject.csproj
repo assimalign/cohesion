@@ -1,0 +1,12 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <PropertyGroup>
+    <CohesionApplicationName>__APPLICATION_NAME__</CohesionApplicationName>
+    <CohesionGateways>InProcess;Local</CohesionGateways>
+    <CohesionGatewayInProcess>true</CohesionGatewayInProcess>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Add enabled members here; a composite can itself be referenced by an outer gateway.
+    <CohesionResourceReference Include="../Example.Api/Example.Api.csproj" />
+    -->
+  </ItemGroup>
+</Project>

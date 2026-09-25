@@ -61,6 +61,119 @@ public class SqlCatalogTests
 
     // NonClosingStream lives in TestObjects/ (shared with the index metadata suite).
 
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Ownership: metadata survives table alteration and reopen")]
+    public async Task SchemaOwnership_AfterColumnChanges_ShouldPersistForTableAndIndex()
+    {
+        var (catalog, harness) = OpenFresh();
+        var table = await SqlCatalog.CreateSchemaTableAsync(catalog, "dbo", "customers",
+            [Column("id", DatabaseType.Int64), Column("legacy", DatabaseType.String)],
+            null, "AppSchema", default);
+        await catalog.CreateIndexAsync(new SqlCatalogIndex(table.ObjectId, "ix_customers_id", ["id"], false,
+            DatabaseObjectOwner.Schema, "AppSchema"), []);
+        await catalog.AddColumnAsync("dbo", "customers", Column("note", DatabaseType.String));
+        await catalog.DropColumnAsync("dbo", "customers", "legacy");
+        await catalog.CreateTableAsync("dbo", "scratch", [Column("id", DatabaseType.Int64)]);
+
+        ISqlCatalog reopened = Reopen(harness);
+
+        reopened.TryGetTable("dbo", "customers", out var persisted).ShouldBeTrue();
+        persisted.Owner.ShouldBe(DatabaseObjectOwner.Schema);
+        persisted.OwningSchema.ShouldBe("AppSchema");
+        persisted.FindColumn("note").ShouldNotBeNull();
+        persisted.FindColumn("legacy").ShouldBeNull();
+        reopened.TryGetIndex(table.ObjectId, "ix_customers_id", out var index).ShouldBeTrue();
+        index.Owner.ShouldBe(DatabaseObjectOwner.Schema);
+        index.OwningSchema.ShouldBe("AppSchema");
+        reopened.TryGetTable("dbo", "scratch", out var scratch).ShouldBeTrue();
+        scratch.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
+        scratch.OwningSchema.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Ownership: legacy records remain ad-hoc")]
+    public void LegacyRecords_WithoutOwnershipSuffix_ShouldRemainAdhoc()
+    {
+        using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "legacy-catalog");
+        var table = new DatabaseKeyWriter();
+        table.AppendInt32(1).AppendInt64(1).AppendString("dbo", Collation.Binary)
+            .AppendString("legacy", Collation.Binary).AppendInt32(1)
+            .AppendString("id", Collation.Binary).AppendInt8((sbyte)DatabaseType.Int64)
+            .AppendInt32(-1).AppendInt32(-1).AppendInt32(-1).AppendBoolean(true)
+            .AppendNull().AppendInt32(0);
+        var index = new DatabaseKeyWriter();
+        index.AppendInt32(5).AppendInt64(1).AppendString("ix_legacy_id", Collation.Binary)
+            .AppendBoolean(false).AppendInt32(1).AppendString("id", Collation.Binary);
+        using (var transaction = storage.BeginTransaction())
+        {
+            storage.InsertRow(transaction, table.ToArray());
+            storage.InsertRow(transaction, index.ToArray());
+            transaction.Commit();
+        }
+
+        ISqlCatalog catalog = SqlCatalog.Open(storage);
+
+        catalog.TryGetTable("dbo", "legacy", out var loadedTable).ShouldBeTrue();
+        loadedTable.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
+        loadedTable.OwningSchema.ShouldBeNull();
+        catalog.TryGetIndex(1, "ix_legacy_id", out var loadedIndex).ShouldBeTrue();
+        loadedIndex.Owner.ShouldBe(DatabaseObjectOwner.Adhoc);
+        loadedIndex.OwningSchema.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Ownership: inconsistent metadata is rejected")]
+    [InlineData(DatabaseObjectOwner.Schema, null)]
+    [InlineData(DatabaseObjectOwner.Schema, " ")]
+    [InlineData(DatabaseObjectOwner.Adhoc, "AppSchema")]
+    [InlineData((DatabaseObjectOwner)2, null)]
+    public void Ownership_WithInvalidMetadata_ShouldReject(DatabaseObjectOwner owner, string? owningSchema)
+    {
+        Should.Throw<ArgumentException>(() => new SqlCatalogTable(1, "dbo", "customers",
+            [Column("id", DatabaseType.Int64)], owner: owner, owningSchema: owningSchema));
+        Should.Throw<ArgumentException>(() => new SqlCatalogIndex(1, "ix_customers_id", ["id"], false,
+            owner, owningSchema));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Schema state: a fresh catalog has no applied schema")]
+    public void Open_EmptyCatalog_ShouldHaveNoSchemaState()
+    {
+        // Arrange / Act
+        var (catalog, _) = OpenFresh();
+
+        // Assert
+        catalog.SchemaState.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Schema state: large documents and replacements survive reopen")]
+    public async Task SaveSchemaState_AcrossReopen_ShouldReplaceCompleteDocument()
+    {
+        // Arrange
+        var (catalog, harness) = OpenFresh();
+        string largeDocument = "{\"schema\":\"" + new string('x', 20_000) + "\"}";
+        var first = new SqlCatalogSchemaState("sha256:first", largeDocument);
+
+        // Act / Assert: the canonical document spans catalog records and reassembles on open.
+        await catalog.SaveSchemaStateAsync(first);
+        var firstReopen = Reopen(harness);
+        firstReopen.SchemaState.ShouldNotBeNull();
+        firstReopen.SchemaState.ContentHash.ShouldBe("sha256:first");
+        firstReopen.SchemaState.CanonicalDocument.ShouldBe(largeDocument);
+
+        // Act / Assert: replacement removes every old chunk and persists hash + document together.
+        const string replacementDocument = "{\"schema\":\"replacement\"}";
+        await catalog.SaveSchemaStateAsync(new SqlCatalogSchemaState("sha256:replacement", replacementDocument));
+        var replacementReopen = Reopen(harness);
+        replacementReopen.SchemaState.ShouldNotBeNull();
+        replacementReopen.SchemaState.ContentHash.ShouldBe("sha256:replacement");
+        replacementReopen.SchemaState.CanonicalDocument.ShouldBe(replacementDocument);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Schema state: invalid values are rejected")]
+    public void CreateSchemaState_InvalidValues_ShouldThrow()
+    {
+        // Act / Assert
+        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("", "{}"));
+        Should.Throw<ArgumentException>(() => new SqlCatalogSchemaState("sha256:value", ""));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - CreateTable: assigns object ids and exposes the table")]
     public async Task CreateTable_NewTable_ShouldAssignIdentityAndExpose()
     {

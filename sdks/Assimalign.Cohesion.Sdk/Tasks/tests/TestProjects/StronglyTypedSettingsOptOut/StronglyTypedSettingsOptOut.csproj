@@ -1,0 +1,14 @@
+<Project Sdk="Assimalign.Cohesion.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>StronglyTypedSettingsOptOut</RootNamespace>
+  </PropertyGroup>
+
+  <Target Name="CaptureCompileItems" AfterTargets="CoreCompile">
+    <WriteLinesToFile
+      File="$(BaseIntermediateOutputPath)compile-items.txt"
+      Lines="@(Compile)"
+      Overwrite="true" />
+  </Target>
+
+</Project>

@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Configuration.Xml.Internal;
+
 namespace Assimalign.Cohesion.Configuration.Xml;
 
 using Assimalign.Cohesion.Configuration;

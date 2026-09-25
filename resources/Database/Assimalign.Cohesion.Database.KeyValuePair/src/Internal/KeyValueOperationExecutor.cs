@@ -7,6 +7,7 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Internal;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.KeyValuePair.Catalog;
 using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
@@ -63,31 +64,47 @@ internal sealed class KeyValueOperationExecutor
     /// </summary>
     internal const string PrimaryIndexName = "key";
 
-    private static readonly IReadOnlyList<QueryColumn> entryColumns =
+    private static readonly IReadOnlyList<QueryColumn> _entryColumns =
     [
         new QueryColumn { Name = "key", Ordinal = 0, Type = DatabaseType.Binary },
         new QueryColumn { Name = "value", Ordinal = 1, Type = DatabaseType.Binary },
         new QueryColumn { Name = "etag", Ordinal = 2, Type = DatabaseType.Int64 },
     ];
 
-    private static readonly IReadOnlyList<QueryColumn> putColumns =
+    private static readonly IReadOnlyList<QueryColumn> _putColumns =
     [
         new QueryColumn { Name = "applied", Ordinal = 0, Type = DatabaseType.Boolean },
         new QueryColumn { Name = "etag", Ordinal = 1, Type = DatabaseType.Int64, IsNullable = true },
     ];
 
-    private static readonly IReadOnlyList<QueryColumn> existsColumns =
+    private static readonly IReadOnlyList<QueryColumn> _existsColumns =
     [
         new QueryColumn { Name = "exists", Ordinal = 0, Type = DatabaseType.Boolean },
     ];
 
+    private static readonly IReadOnlyList<QueryColumn> _keySpaceColumns =
+    [
+        new QueryColumn { Name = "database_name", Ordinal = 0, Type = DatabaseType.String },
+        new QueryColumn { Name = "keyspace_id", Ordinal = 1, Type = DatabaseType.Int64 },
+        new QueryColumn { Name = "entry_space_format_version", Ordinal = 2, Type = DatabaseType.Int32 },
+        new QueryColumn { Name = "primary_index_name", Ordinal = 3, Type = DatabaseType.String },
+        new QueryColumn { Name = "index_kind", Ordinal = 4, Type = DatabaseType.String },
+        new QueryColumn { Name = "is_unique", Ordinal = 5, Type = DatabaseType.Boolean },
+    ];
+
+    private readonly DatabaseName _databaseName;
+    private readonly IKeyValueCatalog _catalog;
     private readonly KeyValueStorage _storage;
     private readonly IIndex _primaryIndex;
+    private readonly RecordVersionIndex _primaryIndexVersions;
 
-    internal KeyValueOperationExecutor(KeyValueStorage storage, IIndex primaryIndex)
+    internal KeyValueOperationExecutor(DatabaseName databaseName, IKeyValueCatalog catalog, KeyValueStorage storage, IIndex primaryIndex)
     {
+        _databaseName = databaseName;
+        _catalog = catalog;
         _storage = storage;
         _primaryIndex = primaryIndex;
+        _primaryIndexVersions = new RecordVersionIndex(primaryIndex);
     }
 
     /// <summary>
@@ -97,6 +114,7 @@ internal sealed class KeyValueOperationExecutor
     {
         return request switch
         {
+            KeyValueKeySpacesRequest => ExecuteKeySpaces(cancellationToken),
             KeyValueGetRequest get => await ExecuteGetAsync(get, context, cancellationToken).ConfigureAwait(false),
             KeyValueExistsRequest exists => await ExecuteExistsAsync(exists, context, cancellationToken).ConfigureAwait(false),
             KeyValueScanRequest scan => await ExecuteScanAsync(scan, context, cancellationToken).ConfigureAwait(false),
@@ -108,6 +126,29 @@ internal sealed class KeyValueOperationExecutor
 
     // ── Reads ──────────────────────────────────────────────────────────
 
+    private QueryResult ExecuteKeySpaces(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var catalog = KeyValueCatalog.CaptureSnapshot(_catalog);
+        var rows = new List<object?[]>();
+
+        // Only the implicit key space is supported. Catalog registrations are
+        // its source of identity and index metadata; physical pages stay private.
+        foreach (var registration in catalog.IndexRegistrations)
+        {
+            if (registration.ObjectId == KeySpaceObjectId &&
+                string.Equals(registration.Definition.Name, PrimaryIndexName, StringComparison.Ordinal))
+            {
+                rows.Add([
+                    _databaseName.ToString(), (long)registration.ObjectId, catalog.EntrySpaceFormatVersion,
+                    registration.Definition.Name, registration.Definition.Kind.ToString(), registration.Definition.IsUnique,
+                ]);
+            }
+        }
+
+        return new KeyValueMaterializedResultSet(_keySpaceColumns, rows);
+    }
+
     private async ValueTask<QueryResult> ExecuteGetAsync(KeyValueGetRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         var rows = new List<object?[]>(1);
@@ -118,14 +159,14 @@ internal sealed class KeyValueOperationExecutor
             rows.Add([current.Value.Key, current.Value.Value, (long)current.Value.Writer.Value]);
         }
 
-        return new KeyValueMaterializedResultSet(entryColumns, rows);
+        return new KeyValueMaterializedResultSet(_entryColumns, rows);
     }
 
     private async ValueTask<QueryResult> ExecuteExistsAsync(KeyValueExistsRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
     {
         var current = await ResolveCurrentAsync(request.Key, context, cancellationToken).ConfigureAwait(false);
 
-        return new KeyValueMaterializedResultSet(existsColumns, [[current is not null]]);
+        return new KeyValueMaterializedResultSet(_existsColumns, [[current is not null]]);
     }
 
     private async ValueTask<QueryResult> ExecuteScanAsync(KeyValueScanRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
@@ -156,7 +197,7 @@ internal sealed class KeyValueOperationExecutor
             }
         }
 
-        return new KeyValueMaterializedResultSet(entryColumns, rows);
+        return new KeyValueMaterializedResultSet(_entryColumns, rows);
     }
 
     // ── Writes ─────────────────────────────────────────────────────────
@@ -209,7 +250,7 @@ internal sealed class KeyValueOperationExecutor
 
                 ulong reference = KeyValueRecordLocation.Pack(pageId, slotIndex);
                 await _primaryIndex.InsertAsync(context.Transaction, indexKey, reference, cancellationToken).ConfigureAwait(false);
-                context.Coordinator.VersionStore.RecordIndexEntryCreated(context.Transaction.Sequence, _primaryIndex, indexKey, reference);
+                context.Coordinator.VersionStore.RecordIndexEntryCreated(context.Transaction.Sequence, _primaryIndexVersions, indexKey.Encoded, reference);
 
                 return true;
             }, durable: false, cancellationToken).ConfigureAwait(false);
@@ -224,7 +265,7 @@ internal sealed class KeyValueOperationExecutor
                 exception);
         }
 
-        return new KeyValueMaterializedResultSet(putColumns, [[true, (long)context.Transaction.Sequence.Value]], affectedCount: 1);
+        return new KeyValueMaterializedResultSet(_putColumns, [[true, (long)context.Transaction.Sequence.Value]], affectedCount: 1);
     }
 
     private async ValueTask<QueryResult> ExecuteDeleteAsync(KeyValueDeleteRequest request, KeyValueStatementContext context, CancellationToken cancellationToken)
@@ -389,11 +430,11 @@ internal sealed class KeyValueOperationExecutor
     private async ValueTask TombstoneIndexEntryAsync(KeyValueStatementContext context, IndexKey indexKey, ulong entryReference, CancellationToken cancellationToken)
     {
         await _primaryIndex.DeleteAsync(context.Transaction, indexKey, entryReference, cancellationToken).ConfigureAwait(false);
-        context.Coordinator.VersionStore.RecordIndexEntryTombstoned(context.Transaction.Sequence, _primaryIndex, indexKey, entryReference);
+        context.Coordinator.VersionStore.RecordIndexEntryTombstoned(context.Transaction.Sequence, _primaryIndexVersions, indexKey.Encoded, entryReference);
     }
 
     private static KeyValueMaterializedResultSet NotApplied(long? currentETag)
-        => new(putColumns, [[false, currentETag]], affectedCount: 0);
+        => new(_putColumns, [[false, currentETag]], affectedCount: 0);
 
     /// <summary>
     /// Builds the index key range for a scan: an explicit [start, end) range, or

@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
+using Assimalign.Cohesion.Web.Routing.Internal;
 
 namespace Assimalign.Cohesion.Web.Routing;
 

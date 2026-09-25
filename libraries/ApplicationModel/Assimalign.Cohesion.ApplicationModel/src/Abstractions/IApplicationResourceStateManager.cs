@@ -12,12 +12,30 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// </summary>
 /// <remarks>
 /// The readiness wait completes on any state in a supplied terminal set (for example
-/// <c>{ Running, Failed }</c>) so that a failed dependency can never deadlock a dependent.
+/// <c>{ Running, Failed, Stopped }</c>) so that a failed or cleanly stopped dependency can
+/// never deadlock a dependent. <see cref="ResourceLifecycle.Degraded"/> is observational;
+/// gateways do not include it in their initial-readiness terminal set.
 /// Implementations must be race-free: a waiter registers under the same lock that guards
 /// the current-state read, so a <see cref="SetState"/> racing a wait cannot be lost.
 /// </remarks>
 public interface IApplicationResourceStateManager
 {
+    /// <summary>Returns payload-free command observations for a resource.</summary>
+    /// <param name="id">The target resource identifier.</param>
+    /// <returns>The latest observation for each owner and command id.</returns>
+    IReadOnlyList<ResourceCommandObservation> GetCommandObservations(ResourceId id);
+
+    /// <summary>Records the provider's outcome for a declared command.</summary>
+    /// <param name="id">The target resource identifier.</param>
+    /// <param name="observation">The immutable provider observation.</param>
+    void SetCommandObservation(ResourceId id, ResourceCommandObservation observation);
+
+    /// <summary>Removes an observation after the provider confirms teardown.</summary>
+    /// <param name="id">The target resource identifier.</param>
+    /// <param name="owner">The declaring application.</param>
+    /// <param name="commandId">The command identifier.</param>
+    void RemoveCommandObservation(ResourceId id, string owner, string commandId);
+
     /// <summary>
     /// Returns the current observed state of a resource, or <see cref="ResourceLifecycle.Unknown"/>
     /// if nothing has been observed yet.
@@ -50,15 +68,21 @@ public interface IApplicationResourceStateManager
     IReadOnlyList<ResourceEndpoint> GetObservedEndpoints(ResourceId id);
 
     /// <summary>
-    /// Completes when the resource reaches any state in <paramref name="terminals"/>, or when
-    /// <paramref name="budget"/> elapses, or when <paramref name="cancellationToken"/> is
-    /// signalled; returns the reached state (or the last observed state on timeout).
+    /// Completes when the resource reaches any state in <paramref name="terminals"/> or when
+    /// <paramref name="budget"/> elapses. Cancellation abandons the wait by throwing an
+    /// <see cref="OperationCanceledException"/>.
     /// </summary>
     /// <param name="id">The resource identifier.</param>
     /// <param name="terminals">The set of states any of which completes the wait.</param>
     /// <param name="budget">The maximum time to wait before giving up.</param>
     /// <param name="cancellationToken">Signals that the wait should be abandoned.</param>
     /// <returns>The state that was reached, or the last observed state if the budget elapsed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="terminals"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="budget"/> is outside the supported timer range and is not
+    /// <see cref="Timeout.InfiniteTimeSpan"/>.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> is cancelled.</exception>
     Task<ResourceLifecycle> WaitForStateAsync(
         ResourceId id,
         IReadOnlySet<ResourceLifecycle> terminals,

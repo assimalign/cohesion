@@ -25,8 +25,8 @@ using HttpStatusCode = System.Net.HttpStatusCode;
 /// </summary>
 public class RedirectHandlingTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
-    private static readonly HttpMethod QueryMethod = new("QUERY");
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
+    private static readonly HttpMethod _queryMethod = new("QUERY");
 
     private static HttpClient CreateClient(
         ScriptedRedirectHandler handler,
@@ -44,7 +44,7 @@ public class RedirectHandlingTests
     }
 
     private static HttpRequestMessage CreateQuery(string uri, string content = "{\"q\":\"cohesion\"}")
-        => new(QueryMethod, uri)
+        => new(_queryMethod, uri)
         {
             Content = new StringContent(content, System.Text.Encoding.UTF8, "application/json"),
         };
@@ -57,7 +57,7 @@ public class RedirectHandlingTests
     public async Task SendAsync_QueryRedirected_ShouldReissueQueryWithContent(HttpStatusCode statusCode)
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         var handler = new ScriptedRedirectHandler()
             .EnqueueRedirect(statusCode, "https://origin.example/search-v2")
             .EnqueueOk();
@@ -80,7 +80,7 @@ public class RedirectHandlingTests
     public async Task SendAsync_QueryRedirectedWith303_ShouldFollowWithGetWithoutContent()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         var handler = new ScriptedRedirectHandler()
             .EnqueueRedirect(HttpStatusCode.SeeOther, "https://origin.example/results/42")
             .EnqueueOk();
@@ -104,7 +104,7 @@ public class RedirectHandlingTests
     public async Task SendAsync_PostRedirected_ShouldRewriteToGet(HttpStatusCode statusCode)
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         var handler = new ScriptedRedirectHandler()
             .EnqueueRedirect(statusCode, "https://origin.example/moved")
             .EnqueueOk();
@@ -127,7 +127,7 @@ public class RedirectHandlingTests
     public async Task SendAsync_PostRedirectedWith307_ShouldPreservePost()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         var handler = new ScriptedRedirectHandler()
             .EnqueueRedirect(HttpStatusCode.RedirectKeepVerb, "https://origin.example/retry")
             .EnqueueOk();
@@ -150,7 +150,7 @@ public class RedirectHandlingTests
     public async Task SendAsync_RelativeLocation_ShouldResolveAgainstRequestUri()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         var handler = new ScriptedRedirectHandler()
             .EnqueueRedirect(HttpStatusCode.RedirectKeepVerb, "/search-v2?page=1")
             .EnqueueOk();
@@ -170,7 +170,7 @@ public class RedirectHandlingTests
     public async Task SendAsync_HttpsToHttpRedirect_ShouldNotFollow()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         var handler = new ScriptedRedirectHandler()
             .EnqueueRedirect(HttpStatusCode.RedirectKeepVerb, "http://origin.example/insecure");
         using HttpClient client = CreateClient(handler);
@@ -188,7 +188,7 @@ public class RedirectHandlingTests
     public async Task SendAsync_RedirectWithAuthorization_ShouldDropCredential()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         var handler = new ScriptedRedirectHandler()
             .EnqueueRedirect(HttpStatusCode.RedirectKeepVerb, "https://elsewhere.example/search")
             .EnqueueOk();
@@ -209,7 +209,7 @@ public class RedirectHandlingTests
     public async Task SendAsync_RedirectChainPastCap_ShouldReturnLastRedirect()
     {
         // Arrange — three redirects with a cap of two: the third 3xx surfaces to the caller.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         var handler = new ScriptedRedirectHandler()
             .EnqueueRedirect(HttpStatusCode.Moved, "https://origin.example/1")
             .EnqueueRedirect(HttpStatusCode.Moved, "https://origin.example/2")
@@ -229,7 +229,7 @@ public class RedirectHandlingTests
     public async Task SendAsync_AutoRedirectDisabled_ShouldReturnRawRedirect()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         var handler = new ScriptedRedirectHandler()
             .EnqueueRedirect(HttpStatusCode.PermanentRedirect, "https://origin.example/search-v2");
         using HttpClient client = CreateClient(handler, options => options.AllowAutoRedirect = false);
@@ -248,7 +248,7 @@ public class RedirectHandlingTests
     public async Task SendAsync_RedirectWithoutLocation_ShouldNotFollow()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         var handler = new ScriptedRedirectHandler()
             .EnqueueRedirect(HttpStatusCode.Found, location: null);
         using HttpClient client = CreateClient(handler);

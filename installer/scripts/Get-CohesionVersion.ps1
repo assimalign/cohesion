@@ -8,8 +8,8 @@
 
         CohesionMajorVersion = [System.Version]::Parse(TargetFramework.TrimStart('net')).Major
         CohesionMinorVersion = literal integer from Build.Version.props
-        CohesionPatchVersion = literal integer from Build.Version.props
-        CohesionVersion      = Major.Minor.Patch
+        CohesionPatchVersion = literal patch plus optional prerelease from Build.Version.props
+        CohesionVersion      = Major.Minor.Patch[-Prerelease]
 
     Bumping <TargetFramework> in build/Targets/Build.TargetFramework.props is the
     single-place edit for stepping across .NET releases — it drives the package
@@ -31,7 +31,7 @@
     (which puts installer/scripts/ two levels under the root).
 
 .OUTPUTS
-    System.String. The version (e.g. "10.0.0") emitted to stdout.
+    System.String. The version (e.g. "10.0.0-preview.1") emitted to stdout.
 
 .EXAMPLE
     $version = & ./installer/scripts/Get-CohesionVersion.ps1
@@ -65,7 +65,7 @@ $targetFramework = Get-XmlPropertyValue -Path $tfmPropsPath     -Property 'Targe
 $cohesionMinor   = Get-XmlPropertyValue -Path $versionPropsPath -Property 'CohesionMinorVersion'
 $cohesionPatch   = Get-XmlPropertyValue -Path $versionPropsPath -Property 'CohesionPatchVersion'
 
-# Minor/Patch must be literal integers; if either ever becomes an MSBuild
+# Minor and the patch core must be literal integers; if either ever becomes an MSBuild
 # expression we'd silently produce a junk version, so fail loud instead.
 foreach ($p in @(
     @{ Name = 'CohesionMinorVersion'; Value = $cohesionMinor }

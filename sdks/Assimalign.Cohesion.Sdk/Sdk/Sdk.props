@@ -1,6 +1,7 @@
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<Import Project="..\Targets\Assimalign.Cohesion.Sdk.Defaults.props" />
 	<Import Sdk="Microsoft.NET.Sdk" Project="Sdk.props" />
-	<!-- Define $(CohesionVersion) FIRST so every subsequent import can use it.
+	<!-- Define $(CohesionVersion) before the version-dependent Cohesion imports.
 	     Without this, FrameworkReference.props evaluates KnownFrameworkReference
 	     with TargetingPackVersion="" and NuGet's restore fails with
 	     "'[]' is not a valid version string" before any pack is extracted. -->

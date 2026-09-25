@@ -6,7 +6,7 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Connections.Internal;
+using Assimalign.Cohesion.Connections.Quic.Internal;
 
 namespace Assimalign.Cohesion.Connections.Quic;
 
@@ -59,7 +59,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         RemoteEndPoint = connection.RemoteEndPoint;
         _state = ConnectionState.Open;
 
-        ConnectionEventSource.Log.ConnectionStart(ConnectionProtocol.Quic, listenerId, Id);
+        ConnectionDiagnostics.ConnectionStart(ConnectionProtocol.Quic, listenerId, Id);
     }
 
     /// <inheritdoc />
@@ -189,7 +189,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
 
         CancelConnectionClosedToken();
 
-        ConnectionEventSource.Log.ConnectionStop(ConnectionProtocol.Quic, _listenerId, Id);
+        ConnectionDiagnostics.ConnectionStop(ConnectionProtocol.Quic, _listenerId, Id);
 
         // The stream options own the connection's shared memory pool; dispose them last, after
         // every stream and the connection itself have released their buffers.

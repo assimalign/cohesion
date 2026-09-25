@@ -27,14 +27,14 @@ namespace Assimalign.Cohesion.Web.Testing.Tests;
 /// </summary>
 public class WebApplicationTestFactoryIsolationTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Testing] - Isolation: Two factories in one process keep isolated router state (#789 regression)")]
     public async Task TwoFactories_InOneProcess_ShouldKeepIsolatedRouterState()
     {
         // Arrange — factory A knows only /alpha; factory B knows only /beta. Each terminates
         // unmatched requests with 404 (the pre-#881 application-authored terminal).
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factoryA = CreateRoutedFactory("/alpha", "alpha payload");
@@ -72,7 +72,7 @@ public class WebApplicationTestFactoryIsolationTests
     public async Task TwoFactories_ConcurrentRequests_ShouldNotCrossTalk()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factoryA = CreateRoutedFactory("/alpha", "alpha payload");

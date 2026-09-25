@@ -25,8 +25,9 @@ Scope of this library:
   `Assimalign.Cohesion.Web.Routing.Metadata` namespace, mirroring the `Patterns`/`Policies` areas.
   The read contract `IRouterRouteMetadataCollection` stays in `Abstractions/` at the root namespace
   with the other routing interfaces.
-- **Host-constrained matching** (`RouteHostConstraint` + `RouteHostMetadata`, in `Metadata/`),
-  evaluated during candidate selection off the metadata bag (#788).
+- **Host-constrained matching** (`RouteHostMetadata` in `Metadata/`, carrying the
+  `RouteHostConstraint` value object from `ValueObjects/` at the root namespace), evaluated during
+  candidate selection off the metadata bag (#788).
 - **Route groups** (`IRouterGroupBuilder`, via `MapGroup`) — builder-time composition of a path
   prefix, shared parameter policies, and shared endpoint metadata onto child routes (#786).
 - **Named routes and outbound URL generation** (`RouteNameMetadata` in `Metadata/`,
@@ -166,7 +167,7 @@ Each pattern is `host[:port]`, where `host` takes one of four forms:
   a malformed pattern throws `RoutePatternException` at the producer, never at match time. The
   parser and matcher are span-based `IndexOf`/`EndsWith` scans — no regex, no reflection, AOT-safe.
 - The `host[:port]` **structural split and port parse are shared** with the `Http` layer, not
-  reimplemented here: `RouteHostConstraint` delegates both to `HttpHost.TrySplitHostPort` /
+  reimplemented here: `RouteHostConstraint` delegates both to the public `HttpHost.TrySplitHostPort` /
   `HttpHost.TryParsePort` (#890). This is the same primitive `HttpHostMatcher` (#781) validates
   against, so host **selection** here and host **allowlist validation** there cannot drift on what
   a given wire value means — the bracket rules, single-colon rule, and 1–65535 port range are one

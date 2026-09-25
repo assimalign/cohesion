@@ -1,5 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <ItemGroup>
-    <Folder Include="Abstractions\" />
-  </ItemGroup>
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.ApiManager</RootNamespace>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+	</ItemGroup>
 </Project>

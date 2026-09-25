@@ -1,0 +1,31 @@
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<!--
+		The import occurs after the consumer project body, so CohesionApplicationModel is final.
+		These properties must still precede Microsoft.NET.Sdk's Sdk.targets import in the base
+		SDK because that import consumes the self-contained, RID, and executable-reference
+		values. ItemDefinitionGroup defaults remain valid here: MSBuild evaluates all item
+		definitions before evaluating project items.
+	-->
+	<PropertyGroup>
+		<_CohesionApplicationModelSdkImported>true</_CohesionApplicationModelSdkImported>
+		<_CohesionImageSelfContainedInput>$(SelfContained)</_CohesionImageSelfContainedInput>
+		<_CohesionImagePublishSelfContainedInput>$(PublishSelfContained)</_CohesionImagePublishSelfContainedInput>
+		<CohesionImageRuntimeIdentifier Condition="'$(CohesionImageRuntimeIdentifier)' == ''">$(RuntimeIdentifier)</CohesionImageRuntimeIdentifier>
+		<CohesionImageRuntimeIdentifier Condition="'$(CohesionImageRuntimeIdentifier)' == ''">linux-x64</CohesionImageRuntimeIdentifier>
+		<SelfContained Condition="'$(SelfContained)' == ''">true</SelfContained>
+		<RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>
+		<ValidateExecutableReferencesMatchSelfContained Condition="'$(ValidateExecutableReferencesMatchSelfContained)' == ''">false</ValidateExecutableReferencesMatchSelfContained>
+	</PropertyGroup>
+
+	<Import Project="..\Targets\Sdk.Resource.props" />
+	<!-- Resource reference items must exist before the base name-only reference converter. -->
+	<Import Project="..\Targets\Sdk.Resource.targets" />
+	<!--
+		The base import brings in Microsoft.NET.Sdk.targets after the early resource-host
+		properties above are set. The late ApplicationModel build import follows it so
+		paths such as IntermediateOutputPath have their final .NET SDK values before
+		being captured.
+	-->
+	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.targets" />
+	<Import Project="..\Targets\Assimalign.Cohesion.Sdk.ApplicationModel.Build.targets" />
+</Project>

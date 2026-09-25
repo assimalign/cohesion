@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Database.Transactions;
+namespace Assimalign.Cohesion.Database.Transactions.Internal;
 
 /// <summary>
 /// Internal transaction context. Under <see cref="IsolationLevel.ReadCommitted"/>

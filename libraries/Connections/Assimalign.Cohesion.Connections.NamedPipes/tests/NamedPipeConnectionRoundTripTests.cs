@@ -11,13 +11,13 @@ namespace Assimalign.Cohesion.Connections.NamedPipes.Tests;
 
 public class NamedPipeConnectionRoundTripTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     [Fact(DisplayName = "Cohesion Test [Connections.NamedPipes] - RoundTrip: Should carry bytes in both directions across multiple exchanges")]
     public async Task ClientAndServer_ShouldExchangeBytesBidirectionally()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         NamedPipeEndPoint endPoint = new(NamedPipeTestName.Create());
 
         await using NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(
@@ -53,7 +53,7 @@ public class NamedPipeConnectionRoundTripTests
     public async Task Listener_ShouldAcceptSuccessiveClientsOnSamePipeName()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         NamedPipeEndPoint endPoint = new(NamedPipeTestName.Create());
 
         await using NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(
@@ -86,7 +86,7 @@ public class NamedPipeConnectionRoundTripTests
     public async Task Input_WhenPeerDisposes_ShouldObserveCompletion()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         NamedPipeEndPoint endPoint = new(NamedPipeTestName.Create());
 
         await using NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(

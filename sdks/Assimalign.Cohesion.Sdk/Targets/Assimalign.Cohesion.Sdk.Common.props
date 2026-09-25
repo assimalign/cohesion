@@ -1,10 +1,7 @@
 <Project>
     <PropertyGroup>
-        <IntermediateOutputPath Condition=" '$(PlatformName)' == 'AnyCPU' ">$(BaseIntermediateOutputPath)$(Configuration)\</IntermediateOutputPath>
-        <IntermediateOutputPath Condition=" '$(PlatformName)' != 'AnyCPU' ">$(BaseIntermediateOutputPath)$(PlatformName)\$(Configuration)\</IntermediateOutputPath>
-    </PropertyGroup>
-    <PropertyGroup>
         <_CohesionSdk>true</_CohesionSdk>
         <_CohesionIntermediateOutputPath>$(IntermediateOutputPath)\Cohesion</_CohesionIntermediateOutputPath>
+		<CohesionApplicationModel Condition="'$(CohesionApplicationModel)' == ''">disabled</CohesionApplicationModel>
     </PropertyGroup>
 </Project>

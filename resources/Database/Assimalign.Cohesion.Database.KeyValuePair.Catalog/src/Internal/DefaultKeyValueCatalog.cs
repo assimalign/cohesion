@@ -9,7 +9,7 @@ using Assimalign.Cohesion.Database.KeyValuePair.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Types;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Catalog.Internal;
 
 /// <summary>
 /// Default key-value catalog: metadata records on a dedicated catalog storage
@@ -40,6 +40,16 @@ internal sealed class DefaultKeyValueCatalog : IKeyValueCatalog
         var catalog = new DefaultKeyValueCatalog(storage);
         catalog.Load();
         return catalog;
+    }
+
+    // Exposed through KeyValueCatalog.CaptureSnapshot(IKeyValueCatalog) without adding a
+    // capability to the public catalog contract.
+    internal IKeyValueCatalogSnapshot CaptureSnapshot()
+    {
+        lock (_sync)
+        {
+            return new KeyValueCatalogSnapshot(_entrySpaceFormatVersion, Array.AsReadOnly(_registrations.ToArray()));
+        }
     }
 
     /// <inheritdoc />

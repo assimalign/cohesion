@@ -6,6 +6,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Storage;
@@ -28,6 +29,8 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
         _catalog = catalog;
         _indexManager = indexManager;
     }
+
+    internal ISqlCatalogSnapshot CaptureCatalogSnapshot() => SqlCatalog.CaptureSnapshot(_catalog);
 
     /// <summary>
     /// Public interface method — requires a transaction context from the session.
@@ -55,7 +58,16 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
         }
 
         var planner = new SqlPlanner(_catalog, sqlRequest.Parameters);
-        var plan = planner.Plan(sqlRequest.Statement.SqlExpression);
+        SqlPlan plan;
+        try
+        {
+            plan = planner.Plan(sqlRequest.Statement.SqlExpression);
+        }
+        catch (SqlUnsupportedQueryException exception)
+        {
+            return Task.FromResult<QueryResult>(new SqlQueryResult(QueryResultStatus.Error, affectedCount: 0,
+                [new Diagnostic { Code = "COHDBL001", Message = exception.Message, Severity = DiagnosticSeverity.Error }]));
+        }
 
         var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, sqlRequest.Parameters);
         return executor.ExecuteAsync(plan, statement, cancellationToken);

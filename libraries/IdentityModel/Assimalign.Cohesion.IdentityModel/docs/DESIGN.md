@@ -41,7 +41,7 @@ Three tenets shape everything in the family:
 | `Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect` | OpenID Connect contract branch | `…IdentityModel.Protocols` |
 | `Assimalign.Cohesion.IdentityModel.Protocols.Saml` | SAML 2.0 contract branch | `…IdentityModel.Protocols` |
 | `Assimalign.Cohesion.IdentityModel.Token` | Protocol-neutral token/assertion normalization layer | `…IdentityModel` |
-| `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken` | Concrete JOSE / JWT document behavior | `…IdentityModel.Token` |
+| `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken` | Concrete JOSE / JWT document behavior, ES256 writing, RSA/ECDSA verification | `…IdentityModel.Token` |
 | `Assimalign.Cohesion.IdentityModel.Token.Saml` | Concrete SAML assertion token behavior | `…IdentityModel.Token` |
 
 Two independent branches hang off the root anchor:
@@ -73,8 +73,8 @@ other protocols, and so each protocol is built and tested in isolation.
   (subjects, application identities, actors, credentials, claims and
   attributes, sessions, authentication context, authentication results); the
   `IdentityModelException` error root; and the shared internal
-  descriptor-materialization helper (`ModelSnapshot`), exposed to the family
-  via `InternalsVisibleTo`.
+  descriptor-materialization algorithm (`ModelSnapshot`), compiled from linked
+  shared source into each family assembly that needs it.
 - **`…IdentityModel.Protocols`** owns: the shared, transport-agnostic protocol
   abstractions — party roles, published-entity metadata, message envelopes,
   response status, validation results, logout semantics, binding and endpoint
@@ -96,7 +96,8 @@ other protocols, and so each protocol is built and tested in isolation.
   format-specific; see the Token normalization decisions).
 - **`…Token.JsonWebToken`** owns: concrete JWT document fidelity — JOSE
   header shape, compact serialization, registered and OIDC ID-token claims,
-  JWT-specific validation descriptors and negative-case behavior.
+  JWT-specific validation descriptors and negative-case behavior — plus the format-specific
+  ES256 writer and RSA/ECDSA compact-JWS verifier. Callers own keys and trust policy.
 - **`…Token.Saml`** owns: concrete SAML assertion token fidelity — typed
   NameID, conditions, subject confirmation, and encrypted-element markers,
   normalized onto the root canonical model (subject via the re-minted recipe,
@@ -119,21 +120,55 @@ A new identity protocol (say, WS-Federation or a future protocol) is a new
 
 1. Create `libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.<Name>/`
    with `src/` and `tests/`, referencing `Assimalign.Cohesion.IdentityModel.Protocols`.
-2. Add `<InternalsVisibleTo Include="…Protocols.<Name>" />` to the root project
-   (for the shared `ModelSnapshot`) and to `…Protocols` (for shared endpoint
-   validation) — the two shared-internal seams the branches use.
-3. Register the assembly in `frameworks/Assimalign.Cohesion.App.props`, add it
+2. If the branch needs descriptor snapshots or endpoint-location validation, add
+   the owning project's name as a `CohesionSharedSource` item **in the branch's own
+   csproj** — `Assimalign.Cohesion.IdentityModel` for `ModelSnapshot`,
+   `Assimalign.Cohesion.IdentityModel.Protocols` for `EndpointLocation`. The sources
+   live in each owner's `shared/` folder beside `src/`; never grant another shipped
+   assembly internal visibility or copy a helper body into the branch.
+3. Add the project to `$script:CohesionReleaseLibrary` in
+   `installer/scripts/modules/CohesionPackaging.psm1`; protocol packages ship as
+   ordinary NuGet packages. Only when an area framework should carry it, add a
+   `CohesionFrameworkAssembly` line to that area's
+   `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props` (the
+   `App.Web` list keeps today's protocol packages as commented candidates). Add it
    to both `.slnx` files, and add a branch entry to
    `IdentityModelFamilyBoundaryTests` / `IdentityModelNamespaceAlignmentTests`.
 4. Add `docs/OVERVIEW.md` + `docs/DESIGN.md`; the deep family-level rationale
    stays in this keystone document, which each project's `DESIGN.md` links to.
 
-Implementation packages that *execute* — protocol readers/writers, metadata
-retrievers, validators that run cryptography — are separate descendant projects
-again (for example `…Protocols.OpenIdConnect.Metadata` retrieving discovery
-documents over HTTP, or `…Protocols.Saml.Serialization` reading assertion XML).
-The contract branch stays pure data; the executable layer depends on it and on
-the Security/transport areas.
+Execution stays with the narrowest concrete owner. Format-specific, transport-free execution can
+live in a concrete token package: `…Token.JsonWebToken` writes compact ES256 JWS values and
+verifies their RSA/ECDSA signatures. Execution that needs transport or key management remains in
+separate descendant projects (for example `…Protocols.OpenIdConnect.Metadata` retrieving
+discovery documents over HTTP, or `…Protocols.Saml.Serialization` reading assertion XML), which
+depend on the appropriate Security/transport areas.
+
+### Shared implementation source
+
+`ModelSnapshot` remains an internal static helper. One source file —
+`Assimalign.Cohesion.IdentityModel/shared/ModelSnapshot.cs` — is linked into the root,
+Protocols, OpenIdConnect, and Saml assemblies. Its inputs and results are BCL collection contracts and the public
+`IdentityClaimValue` type. No helper instance exists or crosses an assembly
+boundary, and no caller depends on the identity of its empty collection field.
+Independent internal CLR types therefore preserve the snapshot behavior without
+turning descriptor materialization into a public API commitment.
+
+The static endpoint-location algorithm is likewise linked into Protocols and
+OpenIdConnect as `Assimalign.Cohesion.IdentityModel.Protocols/shared/EndpointLocation.cs`.
+`ProtocolEndpoint` itself is a public model
+whose instances do cross assembly boundaries; it stays defined only in Protocols.
+Only the stateless string-to-boolean validation logic is shared as source.
+
+The two linked helpers deliberately retain their owning namespaces so their
+family callers resolve the same internal names. This narrowly scoped deviation
+from the namespace-matches-assembly rule is documented in both shared files; it
+does not affect any public type. Each consuming assembly declares its own
+`CohesionSharedSource` item — the repo-wide `shared/` convention in
+`.claude/rules/general-rules.md` — so the csproj a reader opens is the csproj that
+says which source it compiles. There is no area `Directory.Build.targets`: an
+allowlist hidden a directory above the project was exactly the thing that made the
+linkage hard to see. All family friend grants target test assemblies only.
 
 ## Namespace map
 
@@ -432,8 +467,8 @@ against the JWT-package and cross-protocol features that build on it.
   required option), and no cryptography. The Core §3.1.3.7 split with the
   JWT package: this branch owns the data checks (issuer/audience/azp with
   the MUST-vs-SHOULD severity map, temporal windows, nonce, `auth_time`
-  age); the JWT package owns signature and `at_hash`/`c_hash`
-  presence-plus-value as one crypto concern. Additional audiences are
+  age); the JWT package owns the separately invoked signature primitive and
+  `at_hash`/`c_hash` presence-plus-value checks. Additional audiences are
   untrusted by default (the spec's posture) with an explicit
   `AllowAdditionalAudiences` opt-out, on both the ID token and the logout
   token; an absent RFC 9207 `iss` from an advertising provider is an Error
@@ -704,21 +739,23 @@ assertion shapes and against the JWT/SAML token packages that build on it.
 ## JSON Web Token package decisions
 
 Feature `[L01.01.12.07]` brought `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`
-to OIDC grade. The decisions below were stress-tested against RFC 7515/7517/
-7518/7519/8725 and OpenID Connect Core before implementation.
+to OIDC grade; design item 25b `[L01.01.12.16]` (#970) added compact ES256 writing and reusable
+RSA/ECDSA verification. The decisions below were stress-tested against RFC 7515/7517/7518/7519/
+8725 and OpenID Connect Core before implementation.
 
-- **The crypto line is key material, not the word "crypto".** The JWT package
-  *executes* the keyless, deterministic checks a JWT document owns —
+- **The crypto line is format execution versus key/trust management.** The JWT package
+  *executes* deterministic checks a JWT document owns —
   `alg=none` rejection (RFC 8725) and the `at_hash`/`c_hash` half-SHA-2
   base64url comparison (OIDC Core §3.1.3.6/§3.3.2.11), with the digest size
   read from the JWS `alg` name and `none`/EdDSA/unknown yielding a diagnostic
-  rather than a silent pass. It *exposes but does not execute* signature
-  verification: `SigningInput` (the raw ASCII `header.payload`) and the
-  signature bytes are the seam a Security-layer verifier consumes. A
+  rather than a silent pass. Item 25b adds the format-specific BCL execution needed to write
+  ES256 and verify RSA/ECDSA JWS signatures over `SigningInput` (the exact ASCII
+  `header.payload`) and decoded signature bytes. The interfaces borrow caller-owned keys; key
+  generation, storage, rotation, trust resolution, revocation, and JWKS retrieval stay outside
+  the package. This signed-off placement supersedes the earlier blanket assignment in #830 that
+  put all keyed JWT cryptography in Security. A
   successful `Validate` means "data + hash rules passed", never "signature
-  verified" — the same validated≠trusted caveat the other branches carry. This
-  resolves the earlier keystone tension (see the narrowed Non-goal): keyless
-  hashing is document fidelity; keyed verification is the deferred seam.
+  verified" — callers invoke verification separately before trusting claims.
 - **The JWT/OIDC validation split has one owner per rule.** The JWT package
   owns JOSE `alg`/`b64`/`crit`, required-claim presence, and `at_hash`/`c_hash`
   value; the OpenID Connect branch owns the protocol rules (`nonce` match,
@@ -752,8 +789,11 @@ to OIDC grade. The decisions below were stress-tested against RFC 7515/7517/
   members, bounds NumericDate so an extreme `exp` degrades to a null projection
   (the raw claim staying wire-shaped in `Claims`) instead of throwing, folds
   string-or-array `aud` into both surfaces consistently, and bounds claim-graph
-  depth. Signature verification, JWE, and the unencoded-payload (`b64:false`)
-  variant are out of scope; the compatibility matrix in the package
+  depth. Writing uses the same reflection-free JSON primitives, then `ECDsa.SignData` with NIST
+  P-256 and IEEE P1363 output. RSA/ECDSA verification uses BCL `VerifyData`, binds every `ES*`
+  algorithm to its named NIST curve and fixed P1363 length, and preserves the exact received
+  signing input. JWE and the unencoded-payload (`b64:false`) variant remain out of scope; the
+  compatibility matrix in the package
   `docs/DESIGN.md` records implemented-vs-deferred.
 
 ## SAML token package decisions
@@ -915,8 +955,8 @@ The family's NativeAOT evidence has two complementary layers, both delivered by
   references all seven assemblies and exercises their representative surfaces
   under the same promoted set; the IdentityModel CI workflow builds it (and all
   seven projects) on every push.
-- **Point-in-time (publish and run).** Recorded 2026-07-05, SDK `10.0.301`
-  (global.json pin `10.0.300`), Visual Studio 2026 (v18) MSVC toolchain,
+- **Point-in-time (publish and run).** Refreshed 2026-09-06, SDK `10.0.400`
+  (`global.json` pin `10.0.300` with `latestFeature` roll-forward), Visual Studio 2026 (v18) MSVC toolchain,
   ARM64 host:
 
   ```
@@ -926,16 +966,16 @@ The family's NativeAOT evidence has two complementary layers, both delivered by
   Result: 0 IL warnings (the promoted diagnostic set —
   `IL2026/IL2070/IL2072/IL2075/IL2087/IL3050/IL3051` — fails the build; other
   IL diagnostics surface as log warnings and the recorded run emitted none),
-  a 1.87 MB native binary that runs to completion (exit 0) printing
+  a 2,693,120-byte native binary that runs to completion (exit 0) printing
   the deterministic check output (claim-value kinds, JWT parse + at_hash spec
-  vector validation, SAML token materialization + validation, cross-protocol
-  canonicalization). Pick the RID matching the publishing host; on
+  vector validation, ES256 writing plus ECDSA/RSA signature verification, SAML token
+  materialization + validation, and cross-protocol canonicalization). Pick the RID matching the publishing host; on
   `LongPathsEnabled=0` machines run from a short path (the main checkout or a
   subst-mapped drive) because ILC intermediate paths are long.
 
-  Scope honesty: the JWT compact parse (`System.Text.Json` readers +
-  `Base64Url` + one-shot SHA-2) is the family's only wire-format parse path and
-  the only real trim-risk surface; everything else is POCO construction. SAML
+  Scope honesty: JWT compact parsing/writing (`System.Text.Json` readers/writers +
+  `Base64Url`) and the one-shot SHA-2/ECDSA/RSA operations are the family's executable
+  trim-sensitive surfaces; the remaining checks are POCO construction. SAML
   XML parsing is out of scope because no XML parser exists in the family yet —
   when one lands, the smoke carries the obligation to exercise it.
 
@@ -976,16 +1016,11 @@ work item):
 - **Protocol flow orchestration and transport execution.** No HTTP clients,
   redirect handling, or endpoint hosting. Binding descriptors describe
   transports; they never execute them.
-- **Keyed cryptographic execution.** The deferred seam is *keyed*
-  cryptography — signature/MAC creation and verification, key management, and
-  encryption/decryption — all of which require key material and
-  algorithm-suite dispatch and belong to the Security-area implementation
-  packages (descriptors and validation parameters are the seam). *Keyless,
-  deterministic hashing* that a token document must perform to check its own
-  self-consistency — the JOSE/OIDC `at_hash`/`c_hash` half-SHA-2 comparison and
-  `alg=none` rejection — is document fidelity, not a key operation, and is
-  owned and executed by the JWT package (see the JSON Web Token package
-  decisions). The line is key material, not the word "crypto".
+- **Key management and non-JWT cryptographic suites.** The JWT package owns its compact ES256
+  writer and reusable RSA/ECDSA verification primitives, but it does not generate, store, rotate,
+  resolve, revoke, or publish trust keys. HMAC writing, JWE, SAML XML-DSig/XML encryption, and
+  broader algorithm-suite/key-management execution remain deferred to their concrete Security or
+  format implementation packages.
 - **Wire-format serialization for SAML.** The family preserves raw assertion
   XML as opaque context; XML readers/writers are a future implementation
   package.
@@ -1019,3 +1054,4 @@ a decision recorded here:
 | `[L01.01.12.07]` #608 | JWT package to OIDC grade. |
 | `[L01.01.12.08]` #612 | SAML token package to assertion grade. |
 | `[L01.01.12.09]` #616 | Cross-protocol claim mapping, migration fixtures, compliance matrices, NativeAOT evidence, and the family's `docs/Assembly/` API reference pages (deferred from earlier features so the reference is written once against the settled surface). |
+| `[L01.01.12.16]` #970 | Design item 25b: compact ES256 `JsonWebTokenWriter` and reusable RSA/ECDSA verifier moved below Web into the JWT package. |

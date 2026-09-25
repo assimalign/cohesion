@@ -1,0 +1,8 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.LogSpace">
+  <PropertyGroup>
+    <RootNamespace>TypedLogSpace</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>gateway-smoke</CohesionApplication>
+    <CohesionResourceName>typed-logs</CohesionResourceName>
+  </PropertyGroup>
+</Project>

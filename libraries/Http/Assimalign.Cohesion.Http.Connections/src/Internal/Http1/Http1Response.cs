@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal sealed class Http1Response : TransportHttpResponse
 {

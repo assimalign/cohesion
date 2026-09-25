@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Sdk.Tasks</RootNamespace>
+		<PackageId>Assimalign.Cohesion.Sdk</PackageId>
+		<OutDir>$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Tasks</OutDir>
+		<IsAotCompatible>true</IsAotCompatible>
+
+		<!--
+			SDK tasks intentionally stay on net10.0 and load through the
+			.NET MSBuild host selected by Runtime="NET" in the SDK props.
+		-->
+
+		<EnablePreviewFeatures>false</EnablePreviewFeatures>
+	</PropertyGroup>
+
+	<!--
+		Microsoft.Build.* stay compile-time-only because this DLL loads inside
+		MSBuild's process. Bundling another copy of those assemblies causes a
+		type-identity conflict with the assemblies the host already loaded.
+	-->
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.Build" ExcludeAssets="runtime"/>
+		<CohesionPackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" />
+		<CohesionPackageReference Include="Microsoft.Build.Utilities.Core" ExcludeAssets="runtime" />
+	</ItemGroup>
+</Project>

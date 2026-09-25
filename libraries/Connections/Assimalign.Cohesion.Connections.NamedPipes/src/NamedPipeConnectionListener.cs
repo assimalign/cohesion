@@ -8,7 +8,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
-using Assimalign.Cohesion.Connections.Internal;
 using Assimalign.Cohesion.Connections.NamedPipes.Internal;
 
 namespace Assimalign.Cohesion.Connections.NamedPipes;
@@ -18,10 +17,10 @@ namespace Assimalign.Cohesion.Connections.NamedPipes;
 /// (the Windows-native local IPC equivalent of a Unix domain socket listener).
 /// </summary>
 /// <remarks>
-/// The first call to <see cref="AcceptAsync(CancellationToken)"/> creates the initial server instance,
-/// reserving the pipe name; each subsequent accept creates a fresh <see cref="NamedPipeServerStream"/>
-/// instance that shares the name, so the listener keeps serving new clients as prior connections stay
-/// live. Access control is applied at creation time via <see cref="NamedPipeConnectionListenerOptions.PipeSecurity"/>
+/// <see cref="BindAsync(CancellationToken)"/> creates the initial server instance and reserves the pipe
+/// name. Each accept consumes a <see cref="NamedPipeServerStream"/> instance, and the next accept creates
+/// a fresh instance that shares the name, so the listener keeps serving new clients as prior connections
+/// stay live. Access control is applied at creation time via <see cref="NamedPipeConnectionListenerOptions.PipeSecurity"/>
 /// (Windows) or <see cref="NamedPipeConnectionListenerOptions.CurrentUserOnly"/>.
 /// </remarks>
 public sealed class NamedPipeConnectionListener : ConnectionListener
@@ -33,6 +32,7 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
     private readonly Lock _gate = new();
 
     private NamedPipeServerStream? _pendingStream;
+    private bool _acceptPending;
     private bool _isBound;
     private bool _isDisposed;
 
@@ -78,8 +78,33 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
         ConnectionSecurity.None);
 
     /// <inheritdoc />
+    /// <exception cref="ObjectDisposedException">Thrown when the listener has been disposed.</exception>
+    public override ValueTask BindAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_isDisposed, this);
+
+            if (_isBound)
+            {
+                return ValueTask.CompletedTask;
+            }
+
+            _pendingStream = CreateServerStream();
+            _isBound = true;
+            ConnectionDiagnostics.ListenerInitialized(ConnectionProtocol.NamedPipe, _listenerId);
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public override async ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
     {
+        await BindAsync(cancellationToken).ConfigureAwait(false);
+
         while (!cancellationToken.IsCancellationRequested)
         {
             NamedPipeServerStream server;
@@ -91,14 +116,14 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
                     break;
                 }
 
-                server = CreateServerStream();
-                _pendingStream = server;
-
-                if (!_isBound)
+                if (_acceptPending)
                 {
-                    _isBound = true;
-                    ConnectionEventSource.Log.ListenerInitialized(ConnectionProtocol.NamedPipe, _listenerId);
+                    throw new InvalidOperationException("Only one named-pipe accept operation may be pending at a time.");
                 }
+
+                server = _pendingStream ?? CreateServerStream();
+                _pendingStream = server;
+                _acceptPending = true;
             }
 
             try
@@ -107,18 +132,21 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
             }
             catch (OperationCanceledException)
             {
+                ClearPendingAccept(server);
                 await server.DisposeAsync().ConfigureAwait(false);
                 throw;
             }
             catch (IOException)
             {
                 // The client aborted before the handshake completed; retry with a fresh instance.
+                ClearPendingAccept(server);
                 await server.DisposeAsync().ConfigureAwait(false);
                 continue;
             }
             catch (ObjectDisposedException)
             {
                 // The listener was disposed while this accept was waiting.
+                ClearPendingAccept(server);
                 continue;
             }
 
@@ -126,7 +154,12 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
 
             lock (_gate)
             {
-                _pendingStream = null;
+                if (ReferenceEquals(_pendingStream, server))
+                {
+                    _pendingStream = null;
+                }
+
+                _acceptPending = false;
 
                 if (_isDisposed)
                 {
@@ -147,7 +180,7 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
 
             }, (this, connection));
 
-            ConnectionEventSource.Log.ConnectionStart(ConnectionProtocol.NamedPipe, _listenerId, connection.Id);
+            ConnectionDiagnostics.ConnectionStart(ConnectionProtocol.NamedPipe, _listenerId, connection.Id);
 
             return connection;
         }
@@ -170,6 +203,8 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
             }
 
             _isDisposed = true;
+            _isBound = false;
+            _acceptPending = false;
             pending = _pendingStream;
             _pendingStream = null;
         }
@@ -198,6 +233,19 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
     public static NamedPipeConnectionListener Create(Action<NamedPipeConnectionListenerOptions> configure)
         => new(NamedPipeConnectionListenerOptions.Create(configure));
+
+    private void ClearPendingAccept(NamedPipeServerStream server)
+    {
+        lock (_gate)
+        {
+            if (ReferenceEquals(_pendingStream, server))
+            {
+                _pendingStream = null;
+            }
+
+            _acceptPending = false;
+        }
+    }
 
     private NamedPipeServerStream CreateServerStream()
     {

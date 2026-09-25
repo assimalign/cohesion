@@ -10,10 +10,8 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
-using Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
-using Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal sealed class Http3ConnectionContext : HttpConnectionContext
 {

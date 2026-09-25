@@ -3,7 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 
-namespace Assimalign.Cohesion.OpenApi.SourceGeneration;
+namespace Assimalign.Cohesion.OpenApi.SourceGeneration.Internal;
 
 /// <summary>
 /// A value-equatable wrapper over <see cref="ImmutableArray{T}"/> so generator pipeline models compare

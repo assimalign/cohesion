@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// HTTP/2 raw response body sink. Commits the HEADERS block on first write/flush and emits the body

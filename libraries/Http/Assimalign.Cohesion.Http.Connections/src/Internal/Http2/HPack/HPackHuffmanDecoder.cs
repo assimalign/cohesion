@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Decodes an HPACK Huffman-encoded string per RFC 7541 §5.2 + Appendix B.

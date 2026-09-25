@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Client;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 
 /// <summary>
 /// The default key-value client: a thin typed facade over the shared pooling

@@ -102,8 +102,9 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
         CancellationTokenRegistration abortRegistration = hardAbort.Register(static state => ((SqlDatabaseServerSession)state!).Abort(), this);
 
         Stream stream = _connection.AsStream();
-        _reader = ProtocolFraming.CreateReader(stream, leaveOpen: true);
-        _writer = ProtocolFraming.CreateWriter(stream, leaveOpen: true);
+        await using var channel = new ProtocolChannel(stream, SqlProtocol.Family, leaveOpen: true);
+        _reader = channel.Reader;
+        _writer = channel.Writer;
 
         try
         {
@@ -176,13 +177,13 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
 
         ProtocolStartupMessage startup = ProtocolStartupMessage.Decode(frame.Value.Payload.Span);
 
-        if (startup.Version.Major != ProtocolVersion.Current.Major)
+        if (!ProtocolVersion.TryNegotiate(startup.Version, out var negotiatedVersion))
         {
             await TryWriteErrorAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.").ConfigureAwait(false);
             return false;
         }
 
-        ProtocolVersion = ProtocolVersion.Current;
+        ProtocolVersion = negotiatedVersion;
 
         IDatabase? database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
 
@@ -269,7 +270,7 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
 
             switch (frame.Value.Type)
             {
-                case ProtocolMessageType.Execute:
+                case (ProtocolMessageType)SqlProtocolMessageType.Execute:
                     // Executions run on the session lifetime token, not the soft-stop
                     // token: a drain lets in-flight statements finish.
                     await ExecuteAsync(frame.Value, rowWriter, _lifetimeSource.Token).ConfigureAwait(false);
@@ -342,7 +343,7 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
                     columns.Add((column.Name, (byte)column.Type));
                 }
 
-                await WriteFrameAsync(ProtocolMessageType.ResultHeader, new ProtocolResultHeaderMessage(columns).Encode(), cancellationToken).ConfigureAwait(false);
+                await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultHeader, new ProtocolResultHeaderMessage(columns).Encode(), cancellationToken).ConfigureAwait(false);
 
                 await foreach (QueryRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
@@ -353,14 +354,14 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
                         DatabaseValueCodec.Append(rowWriter, row.GetValue(ordinal));
                     }
 
-                    await WriteFrameAsync(ProtocolMessageType.ResultRow, rowWriter.ToArray(), cancellationToken).ConfigureAwait(false);
+                    await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultRow, rowWriter.ToArray(), cancellationToken).ConfigureAwait(false);
                 }
 
                 // Evidence-driven fix kept from the (since-reversed) shared-core
                 // extraction: ResultComplete carries the set's real AffectedCount
                 // (SQL's materialized sets report -1, so SQL wire behavior is
                 // unchanged; outcome sets elsewhere carry real counts).
-                await WriteFrameAsync(ProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(resultSet.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
+                await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(resultSet.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
             }
 
             return;
@@ -369,14 +370,14 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
         if (result.Status != QueryResultStatus.Success)
         {
             string detail = result.Diagnostics is { Count: > 0 } diagnostics && diagnostics[0].Message is { } diagnosticMessage
-                ? diagnosticMessage
+                ? $"{diagnostics[0].Code}: {diagnosticMessage}"
                 : $"The statement completed with status {result.Status}.";
 
             await WriteErrorAsync(ProtocolErrorCode.ExecutionFailure, detail, cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        await WriteFrameAsync(ProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
+        await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -399,7 +400,7 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
         {
             return await _engine.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
         }
-        catch (DatabaseException)
+        catch (DatabaseNotFoundException)
         {
             // The engine has no database by that name.
         }

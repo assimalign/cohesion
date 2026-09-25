@@ -2,7 +2,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Content.Markdown;
+namespace Assimalign.Cohesion.Content.Markdown.Internal;
 
 /// <summary>
 /// The content-family reader seam over <see cref="MarkdownText.Parse(Stream)"/>.

@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
-namespace Assimalign.Cohesion.Database.Indexing;
+namespace Assimalign.Cohesion.Database.Indexing.Internal;
 
 /// <summary>
 /// The B+Tree index: sorted-directory nodes on <see cref="PageType.Index"/> pages,

@@ -8,11 +8,11 @@ namespace Assimalign.Cohesion;
 public static class Memoise<TIn, TOut>
     where TIn : notnull
 {
-    private static IDictionary<TIn, TOut> cache;
+    private static IDictionary<TIn, TOut> _cache;
 
     static Memoise()
     {
-        cache ??= new ConcurrentDictionary<TIn, TOut>();
+        _cache ??= new ConcurrentDictionary<TIn, TOut>();
     }
 
     /// <summary>
@@ -23,8 +23,8 @@ public static class Memoise<TIn, TOut>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Func<TIn, TOut> Invoke(Func<TIn, TOut> method)
     {
-        return input => cache.TryGetValue(input, out var results) ?
+        return input => _cache.TryGetValue(input, out var results) ?
             results :
-            cache[input] = method.Invoke(input);
+            _cache[input] = method.Invoke(input);
     }
 }

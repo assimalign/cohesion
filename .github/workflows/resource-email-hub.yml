@@ -1,0 +1,31 @@
+name: Email Hub
+on:
+  push:
+    paths:
+      - 'resources/EmailHub/**'
+      - '.github/workflows/resource-email-hub.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: [
+            'Assimalign.Cohesion.EmailHub',
+            'Assimalign.Cohesion.EmailHub.ApplicationModel',
+            'Assimalign.Cohesion.EmailHub.Hosting'
+        ]
+    steps:
+      - uses: actions/checkout@v4
+        name: "Checkout: ${{ matrix.projects }}"
+
+      - uses: ./.github/actions/build
+        name: "Running Build & Tests: ${{ matrix.projects }}"
+        with:
+          area: 'resources'
+          category: 'EmailHub'
+          project: ${{ matrix.projects }}

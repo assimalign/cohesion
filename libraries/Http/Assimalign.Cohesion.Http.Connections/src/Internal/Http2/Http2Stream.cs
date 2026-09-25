@@ -4,9 +4,8 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Server-side HTTP/2 stream — tracks the RFC 9113 §5.1 lifecycle state

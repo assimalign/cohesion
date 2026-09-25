@@ -1,0 +1,75 @@
+<Project>
+	<UsingTask
+		TaskName="Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.CohesionCreateResourceManifest"
+		AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.dll"
+		Runtime="NET" />
+	<UsingTask
+		TaskName="Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.CohesionPrepareResourceManifestPackage"
+		AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.dll"
+		Runtime="NET" />
+	<UsingTask
+		TaskName="Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.CohesionValidateImageManifest"
+		AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.ApplicationModel.Tasks.dll"
+		Runtime="NET" />
+
+	<PropertyGroup>
+		<CohesionApplication Condition="'$(CohesionApplication)' == '' and '$(CohesionApplicationName)' != ''">$(CohesionApplicationName)</CohesionApplication>
+		<CohesionApplicationName Condition="'$(CohesionApplicationName)' == '' and '$(CohesionApplication)' != ''">$(CohesionApplication)</CohesionApplicationName>
+		<CohesionResourceComposable Condition="'$(CohesionResourceComposable)' == ''">true</CohesionResourceComposable>
+		<CohesionReplicas Condition="'$(CohesionReplicas)' == ''">1</CohesionReplicas>
+		<CohesionStopGraceSeconds Condition="'$(CohesionStopGraceSeconds)' == ''">30</CohesionStopGraceSeconds>
+		<CohesionRestartPolicy Condition="'$(CohesionRestartPolicy)' == ''">OnFailure</CohesionRestartPolicy>
+		<CohesionPackRuntime Condition="'$(CohesionPackRuntime)' == ''">false</CohesionPackRuntime>
+		<CohesionImageRequired Condition="'$(CohesionImageRequired)' == ''">false</CohesionImageRequired>
+		<CohesionPackImageArchive Condition="'$(CohesionPackImageArchive)' == ''">false</CohesionPackImageArchive>
+	</PropertyGroup>
+
+	<ItemDefinitionGroup>
+		<!--
+			Restore-visible ApplicationModel packages may contribute typed gateway mappings
+			through build/buildTransitive props. The item identity is the resource kind;
+			ApplicationModel, OptionsType, and AddMethod are required, while DescriptorType
+			defaults in the Gateway task to IApplicationResourceDescriptor.
+		-->
+		<CohesionGatewayResourceKind>
+			<ApplicationModel></ApplicationModel>
+			<OptionsType></OptionsType>
+			<DescriptorType></DescriptorType>
+			<AddMethod></AddMethod>
+		</CohesionGatewayResourceKind>
+		<CohesionEndpoint>
+			<Scheme></Scheme>
+			<ContainerPort></ContainerPort>
+			<DevPort></DevPort>
+			<Public>false</Public>
+			<Certificate></Certificate>
+			<Protocol>tcp</Protocol>
+		</CohesionEndpoint>
+		<CohesionProbe>
+			<Endpoint></Endpoint>
+			<Http></Http>
+			<Tcp></Tcp>
+			<Exec></Exec>
+			<Grpc></Grpc>
+			<None></None>
+		</CohesionProbe>
+		<CohesionMount>
+			<Kind></Kind>
+			<ContainerPath></ContainerPath>
+			<Source></Source>
+			<Size></Size>
+		</CohesionMount>
+		<CohesionSetting>
+			<Default></Default>
+			<Type>string</Type>
+		</CohesionSetting>
+		<CohesionResourceReference>
+			<Version></Version>
+			<Optional>false</Optional>
+			<Endpoints></Endpoints>
+		</CohesionResourceReference>
+		<CohesionResourceProperty>
+			<Value></Value>
+		</CohesionResourceProperty>
+	</ItemDefinitionGroup>
+</Project>

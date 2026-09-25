@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 
 using Assimalign.Cohesion.Content.Text;
+using Assimalign.Cohesion.Content.Yaml.Internal;
 
 namespace Assimalign.Cohesion.Content.Yaml;
 

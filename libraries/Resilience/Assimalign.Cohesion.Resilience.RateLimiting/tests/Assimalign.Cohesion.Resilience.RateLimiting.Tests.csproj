@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Resilience.RateLimiting.Tests</RootNamespace>
 		<OutputType>Exe</OutputType>
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>

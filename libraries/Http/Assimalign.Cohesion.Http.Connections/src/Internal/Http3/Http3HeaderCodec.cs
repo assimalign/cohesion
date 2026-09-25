@@ -2,9 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-using Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Bridges QPACK field sections (RFC 9204) to the HTTP message model and

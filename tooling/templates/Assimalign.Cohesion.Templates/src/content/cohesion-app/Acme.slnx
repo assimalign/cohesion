@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Acme.Api\Acme.Api.csproj" />
+  <Project Path="Acme.Database\Acme.Database.csproj" />
+  <Project Path="Acme.Gateway\Acme.Gateway.csproj" />
+</Solution>

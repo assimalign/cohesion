@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Testing.Tests</RootNamespace>
+		<OutputType>Exe</OutputType>
+		<IsPackable>false</IsPackable>
+		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+	</PropertyGroup>
+	<ItemGroup>
+		<Compile Include="TestObjects\Assimalign.Cohesion.Database.Testing.TestHost\Program.cs" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+	</ItemGroup>
+</Project>

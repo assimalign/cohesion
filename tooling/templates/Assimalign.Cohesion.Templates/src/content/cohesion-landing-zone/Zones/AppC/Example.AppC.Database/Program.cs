@@ -1,0 +1,46 @@
+using System;
+
+using Assimalign.Cohesion.Database.Hosting;
+using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.Database.Storage;
+using Example.AppC.Database;
+
+DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
+
+builder.AddSql((_, options) =>
+{
+    options.EngineName = "appc-sql";
+    options.RootPath = Resource.Mounts.Data.Path
+        ?? throw new InvalidOperationException("The database data mount must have a materialized path.");
+    options.Durability = Resource.Settings.DatabaseDurability.Get<StorageCommitDurability>();
+    options.AddServer(engine => SqlDatabaseServer.Create(
+        (SqlDatabaseEngine)engine, new SqlDatabaseServerOptions().Listen(Resource.Endpoints.Db)));
+});
+
+SqlCompiledSchema schema = SqlSchema.Compile("inventory", database =>
+{
+    database.Table<Item>("Items", table =>
+    {
+        table.Key(item => item.Sku);
+        table.Index(item => item.Name);
+    });
+    database.Table<Movement>("Movements", table =>
+    {
+        table.Key(movement => movement.Id);
+        table.References<Item>(movement => movement.Sku);
+    });
+    database.Principal(
+        "appc-api",
+        principal => principal.Grant(SqlPermission.ReadWrite, "Items", "Movements"));
+});
+
+builder.AddDatabase("appc-sql", "inventory", schema);
+
+await using DatabaseApplication application = builder.Build();
+await application.RunAsync();
+
+internal sealed record Item(string Sku, string Name, int OnHand, int Reserved, DateTime UpdatedAt);
+
+internal sealed record Movement(long Id, string Sku, int Delta, string Reason, DateTime MovedAt);

@@ -1,0 +1,33 @@
+name: Identity Hub
+on:
+  push:
+    paths:
+      - 'resources/IdentityHub/**'
+      - '.github/workflows/resource-identity-hub.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: [
+            'Assimalign.Cohesion.IdentityHub',
+            'Assimalign.Cohesion.IdentityHub.ApplicationModel',
+            'Assimalign.Cohesion.IdentityHub.Client',
+            'Assimalign.Cohesion.IdentityHub.Hosting',
+            'Assimalign.Cohesion.IdentityHub.Models'
+        ]
+    steps:
+      - uses: actions/checkout@v4
+        name: "Checkout: ${{ matrix.projects }}"
+
+      - uses: ./.github/actions/build
+        name: "Running Build & Tests: ${{ matrix.projects }}"
+        with:
+          area: 'resources'
+          category: 'IdentityHub'
+          project: ${{ matrix.projects }}

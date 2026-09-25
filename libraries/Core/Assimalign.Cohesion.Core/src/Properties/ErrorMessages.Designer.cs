@@ -24,9 +24,9 @@ namespace Assimalign.Cohesion.Properties {
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
     internal class ErrorMessages {
         
-        private static global::System.Resources.ResourceManager resourceMan;
+        private static global::System.Resources.ResourceManager _resourceMan;
         
-        private static global::System.Globalization.CultureInfo resourceCulture;
+        private static global::System.Globalization.CultureInfo _resourceCulture;
         
         [global::System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1811:AvoidUncalledPrivateCode")]
         internal ErrorMessages() {
@@ -38,11 +38,11 @@ namespace Assimalign.Cohesion.Properties {
         [global::System.ComponentModel.EditorBrowsableAttribute(global::System.ComponentModel.EditorBrowsableState.Advanced)]
         internal static global::System.Resources.ResourceManager ResourceManager {
             get {
-                if (object.ReferenceEquals(resourceMan, null)) {
+                if (object.ReferenceEquals(_resourceMan, null)) {
                     global::System.Resources.ResourceManager temp = new global::System.Resources.ResourceManager("Assimalign.Cohesion.Properties.ErrorMessages", typeof(ErrorMessages).Assembly);
-                    resourceMan = temp;
+                    _resourceMan = temp;
                 }
-                return resourceMan;
+                return _resourceMan;
             }
         }
         
@@ -53,10 +53,10 @@ namespace Assimalign.Cohesion.Properties {
         [global::System.ComponentModel.EditorBrowsableAttribute(global::System.ComponentModel.EditorBrowsableState.Advanced)]
         internal static global::System.Globalization.CultureInfo Culture {
             get {
-                return resourceCulture;
+                return _resourceCulture;
             }
             set {
-                resourceCulture = value;
+                _resourceCulture = value;
             }
         }
         
@@ -65,7 +65,7 @@ namespace Assimalign.Cohesion.Properties {
         /// </summary>
         internal static string ArgumentExceptionOnEmptySpan {
             get {
-                return ResourceManager.GetString("ArgumentExceptionOnEmptySpan", resourceCulture);
+                return ResourceManager.GetString("ArgumentExceptionOnEmptySpan", _resourceCulture);
             }
         }
         
@@ -74,7 +74,7 @@ namespace Assimalign.Cohesion.Properties {
         /// </summary>
         internal static string ArgumentExceptionOnEnumNotDefined {
             get {
-                return ResourceManager.GetString("ArgumentExceptionOnEnumNotDefined", resourceCulture);
+                return ResourceManager.GetString("ArgumentExceptionOnEnumNotDefined", _resourceCulture);
             }
         }
         
@@ -83,7 +83,7 @@ namespace Assimalign.Cohesion.Properties {
         /// </summary>
         internal static string ArgumentExceptionOnNotOfType {
             get {
-                return ResourceManager.GetString("ArgumentExceptionOnNotOfType", resourceCulture);
+                return ResourceManager.GetString("ArgumentExceptionOnNotOfType", _resourceCulture);
             }
         }
         
@@ -92,7 +92,7 @@ namespace Assimalign.Cohesion.Properties {
         /// </summary>
         internal static string FileSystePathError {
             get {
-                return ResourceManager.GetString("FileSystePathError", resourceCulture);
+                return ResourceManager.GetString("FileSystePathError", _resourceCulture);
             }
         }
     }

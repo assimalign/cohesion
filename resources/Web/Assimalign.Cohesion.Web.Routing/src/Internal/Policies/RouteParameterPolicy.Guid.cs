@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Web.Routing.Policies;
+namespace Assimalign.Cohesion.Web.Routing.Internal;
 
 /// <summary>
 /// Validates that a route value is a <see cref="Guid"/> and converts it to one.

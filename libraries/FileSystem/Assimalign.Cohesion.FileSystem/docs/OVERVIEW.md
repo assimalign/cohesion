@@ -18,6 +18,7 @@ contract suite shared into every concrete provider via `<Compile Include …>`.
 |------|------|
 | `IFileSystem` | Contract for a directory-and-file tree. Inherits `IDisposable` + `IAsyncDisposable`. |
 | `IFileSystemFile`, `IFileSystemDirectory`, `IFileSystemInfo` | Entry contracts returned from the file system. |
+| [`IFileSystemFileHandle`](Assembly/Assimalign.Cohesion.FileSystem/IFileSystemFileHandle/OVERVIEW.md) | Caller-owned positional I/O, length control, and durability-aware flush, opened through `IFileSystemFile.OpenHandle`. |
 | `IFileSystemEventToken` | Change-notification token. Inherits `IChangeToken`. |
 | `IFileSystemFactory` | Resolves a named `IFileSystem` from a builder-registered table. |
 | `FileSystemFactoryBuilder` | Single-use builder with case-insensitive name registration, duplicate rejection, lazy instantiation. |

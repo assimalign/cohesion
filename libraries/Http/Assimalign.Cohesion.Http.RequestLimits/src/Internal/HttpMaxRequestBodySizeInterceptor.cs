@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Http;
+namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// Attaches a per-request <see cref="IHttpMaxRequestBodySizeFeature"/> — a write-through view

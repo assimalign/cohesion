@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Protocol;
 
-namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
+namespace Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 
 /// <summary>
 /// The default typed key-value connection: wraps one pooled
@@ -36,7 +36,7 @@ internal sealed class KeyValueConnection : IKeyValueConnection
     /// <inheritdoc />
     public async ValueTask<KeyValueClientEntry?> GetAsync(ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
-        DatabaseClientResult result = await ExecuteCoreAsync(
+        KeyValueProtocolResult result = await ExecuteCoreAsync(
             "GET @k",
             new Dictionary<string, object?> { ["k"] = key.ToArray() },
             cancellationToken).ConfigureAwait(false);
@@ -54,7 +54,7 @@ internal sealed class KeyValueConnection : IKeyValueConnection
     {
         const string command = "PUT @k @v";
 
-        DatabaseClientResult result = await ExecuteCoreAsync(
+        KeyValueProtocolResult result = await ExecuteCoreAsync(
             command,
             new Dictionary<string, object?> { ["k"] = key.ToArray(), ["v"] = value.ToArray() },
             cancellationToken).ConfigureAwait(false);
@@ -82,14 +82,14 @@ internal sealed class KeyValueConnection : IKeyValueConnection
             parameters["etag"] = condition.ExpectedETag;
         }
 
-        DatabaseClientResult result = await ExecuteCoreAsync(command, parameters, cancellationToken).ConfigureAwait(false);
+        KeyValueProtocolResult result = await ExecuteCoreAsync(command, parameters, cancellationToken).ConfigureAwait(false);
         return DecodeWriteOutcome(command, result);
     }
 
     /// <inheritdoc />
     public async ValueTask<bool> TryDeleteAsync(ReadOnlyMemory<byte> key, CancellationToken cancellationToken = default)
     {
-        DatabaseClientResult result = await ExecuteCoreAsync(
+        KeyValueProtocolResult result = await ExecuteCoreAsync(
             "DELETE @k",
             new Dictionary<string, object?> { ["k"] = key.ToArray() },
             cancellationToken).ConfigureAwait(false);
@@ -100,7 +100,7 @@ internal sealed class KeyValueConnection : IKeyValueConnection
     /// <inheritdoc />
     public async ValueTask<bool> TryDeleteAsync(ReadOnlyMemory<byte> key, long expectedETag, CancellationToken cancellationToken = default)
     {
-        DatabaseClientResult result = await ExecuteCoreAsync(
+        KeyValueProtocolResult result = await ExecuteCoreAsync(
             "DELETE @k IF @etag",
             new Dictionary<string, object?> { ["k"] = key.ToArray(), ["etag"] = expectedETag },
             cancellationToken).ConfigureAwait(false);
@@ -113,7 +113,7 @@ internal sealed class KeyValueConnection : IKeyValueConnection
     {
         const string command = "EXISTS @k";
 
-        DatabaseClientResult result = await ExecuteCoreAsync(
+        KeyValueProtocolResult result = await ExecuteCoreAsync(
             command,
             new Dictionary<string, object?> { ["k"] = key.ToArray() },
             cancellationToken).ConfigureAwait(false);
@@ -164,7 +164,7 @@ internal sealed class KeyValueConnection : IKeyValueConnection
             }
         }
 
-        DatabaseClientResult result = await ExecuteCoreAsync(
+        KeyValueProtocolResult result = await ExecuteCoreAsync(
             command,
             parameters.Count == 0 ? null : parameters,
             cancellationToken).ConfigureAwait(false);
@@ -199,7 +199,7 @@ internal sealed class KeyValueConnection : IKeyValueConnection
     /// Decodes the model's write outcome shape: one row of
     /// <c>[applied (bool), etag (long or null)]</c>.
     /// </summary>
-    private static KeyValueWriteResult DecodeWriteOutcome(string command, DatabaseClientResult result)
+    private static KeyValueWriteResult DecodeWriteOutcome(string command, KeyValueProtocolResult result)
     {
         if (result.Rows.Count != 1 || result.Rows[0] is not [bool applied, var etag] || etag is not (null or long))
         {
@@ -219,7 +219,7 @@ internal sealed class KeyValueConnection : IKeyValueConnection
     /// Runs one command on the shared connection, wrapping it in telemetry and
     /// mapping core failures onto the key-value error surface.
     /// </summary>
-    private async ValueTask<DatabaseClientResult> ExecuteCoreAsync(string commandText, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    private async ValueTask<KeyValueProtocolResult> ExecuteCoreAsync(string commandText, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         NotifyExecuting(commandText, parameters?.Count ?? 0);
 
@@ -227,7 +227,7 @@ internal sealed class KeyValueConnection : IKeyValueConnection
 
         try
         {
-            DatabaseClientResult result = await _connection.ExecuteAsync(commandText, parameters, cancellationToken).ConfigureAwait(false);
+            KeyValueProtocolResult result = await _connection.ExecuteAsync(new KeyValueExecuteExchange(commandText, parameters), cancellationToken).ConfigureAwait(false);
 
             NotifyExecuted(commandText, result.Rows.Count, result.AffectedCount, Stopwatch.GetElapsedTime(startTimestamp));
             return result;

@@ -29,7 +29,7 @@ internal sealed class InMemoryConnection : Connection
     // Non-pausing pipes: the in-memory transport favors deterministic, non-blocking byte movement
     // over back-pressure realism, so a synchronous prime write or a write-then-read on the same task
     // never blocks waiting for the peer. HTTP/2 and HTTP/3 exercise their own flow control above this.
-    private static readonly PipeOptions PipeOptionsInstance = new(
+    private static readonly PipeOptions _pipeOptionsInstance = new(
         pauseWriterThreshold: 0,
         resumeWriterThreshold: 0,
         useSynchronizationContext: false);
@@ -183,8 +183,8 @@ internal sealed class InMemoryConnection : Connection
         ConnectionDirection directionA = ConnectionDirection.Bidirectional)
     {
         // aToB carries A.Output -> B.Input; bToA carries B.Output -> A.Input.
-        Pipe aToB = new(PipeOptionsInstance);
-        Pipe bToA = new(PipeOptionsInstance);
+        Pipe aToB = new(_pipeOptionsInstance);
+        Pipe bToA = new(_pipeOptionsInstance);
 
         ConnectionDirection directionB = directionA switch
         {

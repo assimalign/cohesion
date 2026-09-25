@@ -321,25 +321,29 @@ public class SqlExecutionPipelineTests : IDisposable
 
     // ── Unsupported-feature diagnostics ────────────────────────────────
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Planner: unsupported features fail with precise messages")]
-    public async Task Planner_UnsupportedFeatures_ShouldFailPrecisely()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Parser and planner: unsupported features fail with precise messages")]
+    public async Task ParserAndPlanner_UnsupportedFeatures_ShouldFailPrecisely()
     {
         await using var engine = await CreateEngine();
         var db = await engine.CreateDatabaseAsync("test-db");
         var session = await OpenSeededSessionAsync(db);
         await using var _ = session;
 
-        (await Should.ThrowAsync<DatabaseException>(async () =>
-            await Sql(session, "SELECT * FROM users u INNER JOIN users v ON u.id = v.id;")))
-            .Message.ShouldContain("JOIN", Case.Sensitive);
+        // The former unsupported JOIN case now executes through the distinct join plan (#1019).
+        var joined = await Rows(session, "SELECT * FROM users u INNER JOIN users v ON u.id = v.id ORDER BY u.id;");
+        joined.Count.ShouldBe(3);
+        joined[0].ShouldBe(new object?[] { 1L, "Ada", 36, 1L, "Ada", 36 });
+        joined[1].ShouldBe(new object?[] { 2L, "Grace", 45, 2L, "Grace", 45 });
+        joined[2].ShouldBe(new object?[] { 3L, "Alan", 41, 3L, "Alan", 41 });
 
-        (await Should.ThrowAsync<DatabaseException>(async () =>
-            await Sql(session, "SELECT age FROM users GROUP BY age;")))
-            .Message.ShouldContain("GROUP BY", Case.Sensitive);
-
-        (await Should.ThrowAsync<DatabaseException>(async () =>
-            await Sql(session, "SELECT SUM(age) FROM users;")))
-            .Message.ShouldContain("Aggregate", Case.Sensitive);
+        // The former unsupported GROUP BY and SUM cases now execute (#1020).
+        var grouped = await Rows(session, "SELECT age FROM users GROUP BY age ORDER BY age;");
+        grouped.Count.ShouldBe(3);
+        grouped[0].ShouldBe(new object?[] { 36 });
+        grouped[1].ShouldBe(new object?[] { 41 });
+        grouped[2].ShouldBe(new object?[] { 45 });
+        (await Rows(session, "SELECT SUM(age) FROM users;"))
+            .ShouldHaveSingleItem().ShouldBe(new object?[] { 122m });
 
         (await Should.ThrowAsync<DatabaseException>(async () =>
             await Sql(session, "SELECT * FROM missing_table;")))

@@ -1,6 +1,6 @@
 using Assimalign.Cohesion.Connections;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Produces <see cref="Http1Connection"/> instances, capturing the shared

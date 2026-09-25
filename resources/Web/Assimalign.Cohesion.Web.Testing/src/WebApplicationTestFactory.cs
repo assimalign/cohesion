@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -37,9 +38,10 @@ namespace Assimalign.Cohesion.Web.Testing;
 /// in-memory transport.
 /// </para>
 /// <para>
-/// The factory is AOT/trim-safe: composition is plain delegate wiring over the builder
-/// seams, and the client side rides BCL types (<see cref="SocketsHttpHandler"/> over a
-/// duplex-pipe stream). No reflection anywhere.
+/// The manual factory path is reflection-free: composition is plain delegate wiring over the
+/// builder seams, and the client side rides BCL types (<see cref="SocketsHttpHandler"/> over a
+/// duplex-pipe stream). <see cref="FromProgram{TProgram}()"/> uses the one compiler-rooted,
+/// trimming-annotated entry-point invocation supplied by <c>ResourceRuntime</c>.
 /// </para>
 /// </remarks>
 public sealed class WebApplicationTestFactory : IWebApplicationTestFactory
@@ -53,6 +55,61 @@ public sealed class WebApplicationTestFactory : IWebApplicationTestFactory
     private IWebApplicationServer? _server;
     private bool _isStarted;
     private bool _isDisposed;
+
+    /// <summary>
+    /// Creates a factory that invokes the resource program declared by
+    /// <typeparamref name="TProgram"/> under an isolated default ambient context.
+    /// </summary>
+    /// <typeparam name="TProgram">
+    /// The resource executable's top-level <c>Program</c> marker. Declare it public and partial
+    /// so the test project can name it.
+    /// </typeparam>
+    /// <returns>An unstarted factory for the resource program.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <typeparamref name="TProgram"/> is not the executable assembly's entry-point type, or
+    /// the assembly has no executable entry point.
+    /// </exception>
+    public static IWebApplicationProgramTestFactory FromProgram<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes.PublicMethods |
+            DynamicallyAccessedMemberTypes.NonPublicMethods)] TProgram>()
+    {
+        return FromProgram<TProgram>(new WebApplicationProgramTestFactoryOptions());
+    }
+
+    /// <summary>
+    /// Creates a factory that invokes the resource program declared by
+    /// <typeparamref name="TProgram"/> with explicit invocation options.
+    /// </summary>
+    /// <typeparam name="TProgram">
+    /// The resource executable's top-level <c>Program</c> marker. Declare it public and partial
+    /// so the test project can name it.
+    /// </typeparam>
+    /// <param name="options">The context, arguments, and lifecycle budgets.</param>
+    /// <returns>An unstarted factory for the resource program.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="options"/> or its argument collection is null.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// A startup, shutdown, or probe-interval budget is not greater than zero.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// The supplied resource context has no <c>http</c> endpoint, or that endpoint does not use
+    /// the <c>http</c> scheme.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// <typeparamref name="TProgram"/> is not the executable assembly's entry-point type, or
+    /// the assembly has no executable entry point.
+    /// </exception>
+    public static IWebApplicationProgramTestFactory FromProgram<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes.PublicMethods |
+            DynamicallyAccessedMemberTypes.NonPublicMethods)] TProgram>(
+        WebApplicationProgramTestFactoryOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return new ProgramWebApplicationTestFactory(typeof(TProgram), options);
+    }
 
     /// <summary>
     /// Initializes a new factory serving HTTP/1.1 over the in-memory transport.

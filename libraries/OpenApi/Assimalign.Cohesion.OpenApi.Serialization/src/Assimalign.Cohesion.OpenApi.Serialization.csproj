@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.OpenApi.Serialization</RootNamespace>
 		<Description>JSON and YAML serialization for the Cohesion OpenApi document model. Maps the canonical OpenApiDocument graph to and from a format-agnostic OpenApiNode tree (version-aware, gated by the model's capability matrix) and renders that tree through two thin formatters: JSON via System.Text.Json's Utf8JsonReader/Utf8JsonWriter and YAML via the Cohesion Content.Yaml engine. No reflection; NativeAOT- and trimming-safe.</Description>
 	</PropertyGroup>
 	<ItemGroup>

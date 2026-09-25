@@ -35,6 +35,8 @@ public sealed class AggregateFileSystem : IFileSystem
     private readonly bool _isReadOnly;
     private readonly List<AggregateMount> _mountsSorted;
     private readonly IFileSystemDirectory _rootDirectory;
+    private readonly object _watchGate = new();
+    private readonly HashSet<AggregateFileSystemEventToken> _watchTokens = new();
     private bool _isDisposed;
 
     /// <summary>
@@ -328,8 +330,21 @@ public sealed class AggregateFileSystem : IFileSystem
     /// <inheritdoc />
     public IFileSystemEventToken Watch(Glob? pattern)
     {
-        CheckIfDisposed();
-        return new AggregateFileSystemEventToken(_mountsSorted, pattern);
+        lock (_watchGate)
+        {
+            CheckIfDisposed();
+            var token = new AggregateFileSystemEventToken(_mountsSorted, pattern, RemoveWatchToken);
+            _watchTokens.Add(token);
+            return token;
+        }
+    }
+
+    private void RemoveWatchToken(AggregateFileSystemEventToken token)
+    {
+        lock (_watchGate)
+        {
+            _watchTokens.Remove(token);
+        }
     }
 
     /// <inheritdoc />
@@ -348,8 +363,8 @@ public sealed class AggregateFileSystem : IFileSystem
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_isDisposed) { return; }
-        _isDisposed = true;
+        if (!TryBeginDispose(out var tokens)) { return; }
+        foreach (var token in tokens) { token.Dispose(); }
 
         foreach (var mount in _mountsSorted)
         {
@@ -363,8 +378,8 @@ public sealed class AggregateFileSystem : IFileSystem
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        if (_isDisposed) { return; }
-        _isDisposed = true;
+        if (!TryBeginDispose(out var tokens)) { return; }
+        foreach (var token in tokens) { token.Dispose(); }
 
         foreach (var mount in _mountsSorted)
         {
@@ -373,6 +388,22 @@ public sealed class AggregateFileSystem : IFileSystem
                 try { await mount.FileSystem.DisposeAsync().ConfigureAwait(false); }
                 catch { /* best-effort */ }
             }
+        }
+    }
+
+    private bool TryBeginDispose(out AggregateFileSystemEventToken[] tokens)
+    {
+        lock (_watchGate)
+        {
+            if (_isDisposed)
+            {
+                tokens = Array.Empty<AggregateFileSystemEventToken>();
+                return false;
+            }
+            _isDisposed = true;
+            tokens = _watchTokens.ToArray();
+            _watchTokens.Clear();
+            return true;
         }
     }
 

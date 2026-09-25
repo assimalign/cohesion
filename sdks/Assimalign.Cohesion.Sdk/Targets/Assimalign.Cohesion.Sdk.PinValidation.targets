@@ -1,0 +1,14 @@
+<Project>
+    <UsingTask
+        TaskName="Assimalign.Cohesion.Sdk.Tasks.ValidateCohesionSdkPinsTask"
+        AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.Tasks.dll"
+        Runtime="NET" />
+
+    <Target Name="_CohesionValidateSdkPins"
+            BeforeTargets="CollectPackageReferences;PrepareForBuild"
+            Condition="'$(CohesionSkipSdkPinCheck)' != 'true'">
+        <ValidateCohesionSdkPinsTask
+            ProjectDirectory="$(MSBuildProjectDirectory)"
+            MinimumDotNetSdkVersion="10.0.300" />
+    </Target>
+</Project>

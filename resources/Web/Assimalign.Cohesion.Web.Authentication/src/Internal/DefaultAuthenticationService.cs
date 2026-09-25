@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
 
-namespace Assimalign.Cohesion.Web.Authentication;
+namespace Assimalign.Cohesion.Web.Authentication.Internal;
 
 /// <summary>
 /// Default <see cref="IAuthenticationService"/> implementation. Reads the live

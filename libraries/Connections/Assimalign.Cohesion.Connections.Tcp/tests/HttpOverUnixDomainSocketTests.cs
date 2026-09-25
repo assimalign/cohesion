@@ -22,13 +22,13 @@ namespace Assimalign.Cohesion.Connections.Tcp.Tests;
 /// </summary>
 public class HttpOverUnixDomainSocketTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(15);
 
     [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - Http1: Should serve an HTTP/1.1 request over a Unix domain socket")]
     public async Task Http1_OverUnixDomainSocket_ShouldServeRequestAndResponse()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         string path = UnixSocketPath.Create();

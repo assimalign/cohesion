@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal readonly struct Http2PeerSetting
 {

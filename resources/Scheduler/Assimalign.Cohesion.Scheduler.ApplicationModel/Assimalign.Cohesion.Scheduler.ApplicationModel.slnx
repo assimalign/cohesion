@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/docs/">
+    <File Path="README.md" />
+    <File Path="docs/DESIGN.md" />
+    <File Path="docs/OVERVIEW.md" />
+  </Folder>
+  <Folder Name="/docs/Assembly/">
+    <File Path="docs/Assembly/Assimalign.Cohesion.Scheduler.ApplicationModel/OVERVIEW.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Assimalign.Cohesion.Scheduler.ApplicationModel.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Assimalign.Cohesion.Scheduler.ApplicationModel.Tests.csproj" />
+  </Folder>
+</Solution>

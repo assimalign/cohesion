@@ -29,7 +29,6 @@ application protocols knowing about it. Application protocols observe security o
 - [Assimalign.Cohesion.Security/docs/OVERVIEW.md](Assimalign.Cohesion.Security/docs/OVERVIEW.md)
 - [Assimalign.Cohesion.Security/docs/DESIGN.md](Assimalign.Cohesion.Security/docs/DESIGN.md) —
   why TLS is an upgrade returning a new connection rather than middleware observing an existing one.
-- [Assimalign.Cohesion.Security.Cryptography/docs/OVERVIEW.md](Assimalign.Cohesion.Security.Cryptography/docs/OVERVIEW.md)
 - [Assimalign.Cohesion.Security.DataProtection/docs/OVERVIEW.md](Assimalign.Cohesion.Security.DataProtection/docs/OVERVIEW.md)
 - [Assimalign.Cohesion.Security.DataProtection/docs/DESIGN.md](Assimalign.Cohesion.Security.DataProtection/docs/DESIGN.md) —
   the AES-GCM + HKDF construction, the rotating key ring with grace-period unprotect, and why

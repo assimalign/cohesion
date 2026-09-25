@@ -2,12 +2,13 @@
 
 ## Summary
 
-Provides the foundational primitives, exceptions, environment helpers, glob support, and low-level extensions shared across the rest of the Core libraries.
+Provides the foundational primitives, frozen resource environment contract, typed `System.Uri`
+endpoints, environment helpers, glob support, and low-level extensions shared across Cohesion.
 
 ## Current Evaluation
 
 - Status: Partial
-- Production source files: 57; key type candidates discovered: 8; test files discovered: 10.
+- Production source files: 59; key type candidates discovered: 10; test files discovered: 13.
 - Project references: None
 - Package references: None
 - NotImplementedException markers: 8
@@ -26,6 +27,8 @@ Provides the foundational primitives, exceptions, environment helpers, glob supp
 - AdaptiveMemoryPoolSnapshot
 - AIMetadataAttribute
 - AppEnvironment
+- ResourceEnvironment
+- UriExtensions
 - AsyncExtensions
 - CertificateManager
 

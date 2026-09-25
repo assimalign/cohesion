@@ -1,5 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Graph</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Language" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Storage" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Catalog" />
 	</ItemGroup>
 </Project>

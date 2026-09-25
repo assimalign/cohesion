@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.FileSystem.Aggregate.Tests</RootNamespace>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<IsPackable>false</IsPackable>
@@ -10,10 +11,12 @@
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="Shouldly" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Aggregate" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.InMemory" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Physical" />
 	</ItemGroup>
 	<ItemGroup>
 		<Using Include="Xunit" />

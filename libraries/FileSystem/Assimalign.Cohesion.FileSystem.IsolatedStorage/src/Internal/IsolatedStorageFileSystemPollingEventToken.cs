@@ -25,8 +25,8 @@ namespace Assimalign.Cohesion.FileSystem.Internal;
 /// <para>
 /// The token uses a <see cref="Timer"/> and an <see cref="Interlocked.CompareExchange(ref int, int, int)"/>
 /// guard to ensure polls do not re-enter even if a single tick takes longer than the configured
-/// interval. After <see cref="Dispose"/> the timer is stopped and subsequent registrations and
-/// callbacks are no-ops.
+/// interval. Disposal drains snapshot I/O and stops future polls and registrations. Subscriber
+/// callbacks already dispatched may finish; callbacks can safely dispose the token or its owner.
 /// </para>
 /// </remarks>
 internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEventToken, IDisposable
@@ -37,24 +37,28 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
     private readonly Glob? _glob;
     private readonly object _gate = new();
     private readonly List<Subscriber> _subscribers = new();
-    private readonly Timer _timer;
+    private readonly ITimer _timer;
+    private readonly Action<IsolatedStorageFileSystemPollingEventToken> _onDisposed;
     private Dictionary<string, EntrySnapshot> _snapshot;
     private int _polling;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     private IsolatedStorageFileSystemPollingEventToken(
         IsolatedStorageFile storage,
         FileSystemPath anchor,
         bool anchorIsFile,
         Glob? glob,
-        TimeSpan interval)
+        TimeSpan interval,
+        TimeProvider timeProvider,
+        Action<IsolatedStorageFileSystemPollingEventToken> onDisposed)
     {
         _storage = storage;
         _anchor = anchor;
         _anchorIsFile = anchorIsFile;
         _glob = glob;
+        _onDisposed = onDisposed;
         _snapshot = TakeSnapshot();
-        _timer = new Timer(_ => Poll(), state: null, dueTime: interval, period: interval);
+        _timer = timeProvider.CreateTimer(_ => Poll(), state: null, dueTime: interval, period: interval);
     }
 
     /// <summary>
@@ -65,8 +69,10 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
         IsolatedStorageFile storage,
         FileSystemPath directoryAnchor,
         Glob? glob,
-        TimeSpan interval)
-        => new(storage, directoryAnchor, anchorIsFile: false, glob, interval);
+        TimeSpan interval,
+        TimeProvider timeProvider,
+        Action<IsolatedStorageFileSystemPollingEventToken> onDisposed)
+        => new(storage, directoryAnchor, anchorIsFile: false, glob, interval, timeProvider, onDisposed);
 
     /// <summary>
     /// Watches a single file at <paramref name="fileAnchor"/>. Events fire only when the file
@@ -75,12 +81,17 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
     public static IsolatedStorageFileSystemPollingEventToken ForFile(
         IsolatedStorageFile storage,
         FileSystemPath fileAnchor,
-        TimeSpan interval)
-        => new(storage, fileAnchor, anchorIsFile: true, glob: null, interval);
+        TimeSpan interval,
+        TimeProvider timeProvider,
+        Action<IsolatedStorageFileSystemPollingEventToken> onDisposed)
+        => new(storage, fileAnchor, anchorIsFile: true, glob: null, interval, timeProvider, onDisposed);
 
     /// <inheritdoc />
     public IDisposable OnChange(Action<object?> callback, object? state)
-        => Register(ChangeType.Changed, state, args => callback(args.State), isRename: false);
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        return Register<object>(ChangeType.Changed, state, args => callback(args.State));
+    }
 
     /// <inheritdoc />
     public IDisposable OnChange<T>(Action<FileSystemEvent<T?>> callback, T? state)
@@ -111,28 +122,26 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        _timer.Dispose();
-
         lock (_gate)
         {
+            if (_disposed)
+            {
+                return;
+            }
+
+            // Snapshot I/O holds this gate too. Once disposal returns, no poll can still
+            // access the store, including callbacks queued before the timer was stopped.
+            _disposed = true;
+            _timer.Dispose();
             _subscribers.Clear();
         }
+
+        _onDisposed(this);
     }
 
     private IDisposable Register<T>(ChangeType changeType, T? state, Action<FileSystemEvent<T?>> callback)
     {
         ArgumentNullException.ThrowIfNull(callback);
-
-        if (_disposed)
-        {
-            return new NoopRegistration();
-        }
 
         var subscriber = new TypedSubscriber<T>(
             changeType,
@@ -148,26 +157,14 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
 
         lock (_gate)
         {
+            if (_disposed)
+            {
+                return new NoopRegistration();
+            }
             _subscribers.Add(subscriber);
         }
 
         return subscriber;
-    }
-
-    private IDisposable Register(
-        ChangeType changeType,
-        object? state,
-        Action<FileSystemEvent<object?>> callback,
-        bool isRename)
-    {
-        ArgumentNullException.ThrowIfNull(callback);
-
-        if (_disposed)
-        {
-            return new NoopRegistration();
-        }
-
-        return Register<object>(changeType, state, callback);
     }
 
     private void Poll()
@@ -177,8 +174,8 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
             return;
         }
 
-        // Skip the tick if a previous poll is still running. Using a CAS guard avoids the
-        // overhead of a Monitor when polls are nominally non-overlapping.
+        // Skip overlapping ticks, including while the previous tick dispatches callbacks
+        // outside the snapshot gate.
         if (Interlocked.CompareExchange(ref _polling, 1, 0) != 0)
         {
             return;
@@ -186,8 +183,21 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
 
         try
         {
-            Dictionary<string, EntrySnapshot> previous = _snapshot;
-            Dictionary<string, EntrySnapshot> current = TakeSnapshot();
+            Dictionary<string, EntrySnapshot> previous;
+            Dictionary<string, EntrySnapshot> current;
+            lock (_gate)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+                previous = _snapshot;
+                current = TakeSnapshot();
+                _snapshot = current;
+            }
+
+            // Never invoke user code under the I/O gate: a callback may dispose this token
+            // or its owner. All store access is already finished before dispatch starts.
 
             foreach (var (path, snap) in current)
             {
@@ -208,8 +218,6 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
                     Dispatch(ChangeType.Deleted, IsolatedStoragePathHelper.FromStorePath(path));
                 }
             }
-
-            _snapshot = current;
         }
         catch
         {
@@ -232,7 +240,7 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
         Subscriber[] copy;
         lock (_gate)
         {
-            if (_subscribers.Count == 0)
+            if (_disposed || _subscribers.Count == 0)
             {
                 return;
             }
@@ -241,6 +249,17 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
 
         foreach (var subscriber in copy)
         {
+            lock (_gate)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+                if (!_subscribers.Contains(subscriber))
+                {
+                    continue;
+                }
+            }
             if (subscriber.ChangeType == changeType)
             {
                 try
@@ -305,7 +324,7 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
 
         try
         {
-            using var stream = _storage.OpenFile(storePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite);
+            using var stream = OpenSnapshotStream(_storage, storePath);
             length = stream.Length;
         }
         catch
@@ -325,6 +344,12 @@ internal sealed class IsolatedStorageFileSystemPollingEventToken : IFileSystemEv
 
         return new EntrySnapshot(length, lastWriteUtc);
     }
+
+    // Keep the snapshot open compatible with concurrent replacement and deletion. The
+    // caller can remove a file while its length is being sampled on Windows as well.
+    internal static IsolatedStorageFileStream OpenSnapshotStream(IsolatedStorageFile storage, string storePath)
+        => storage.OpenFile(storePath, System.IO.FileMode.Open, System.IO.FileAccess.Read,
+            System.IO.FileShare.ReadWrite | System.IO.FileShare.Delete);
 
     private readonly record struct EntrySnapshot(long Length, DateTime LastWriteUtc);
 

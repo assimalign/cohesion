@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.ApplicationModel.Gateway.Tests</RootNamespace>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
@@ -15,6 +16,15 @@
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
     <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.TestHost" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.HttpsHost" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.LogSpace.SinkHost" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="TestHost/**/*.cs" />
   </ItemGroup>
 
 </Project>

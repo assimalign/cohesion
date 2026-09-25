@@ -1,9 +1,8 @@
 using System;
 using System.IO;
 
-using Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Decodes the QPACK Field Section Prefix (RFC 9204 §4.5.1): the encoded

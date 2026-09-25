@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 <PropertyGroup>
+	<RootNamespace>Assimalign.Cohesion.Database.Sql.Storage.Tests</RootNamespace>
 		<OutputType>Exe</OutputType>
 		<IsPackable>false</IsPackable>
 

@@ -25,9 +25,9 @@ namespace Assimalign.Cohesion.Web.Query.Tests;
 /// </summary>
 public class WebQueryConditionalTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
-    private static readonly NetHttpMethod QueryMethod = new("QUERY");
-    private static readonly DateTimeOffset LastModified = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
+    private static readonly NetHttpMethod _queryMethod = new("QUERY");
+    private static readonly DateTimeOffset _lastModified = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
 
     // ============================================================================
     // Helper surface (unit level — header parsing + outcome shaping)
@@ -70,7 +70,7 @@ public class WebQueryConditionalTests
         var validators = new WebQueryResourceValidators
         {
             ETag = HttpEntityTag.Strong("v2"),
-            LastModified = LastModified,
+            LastModified = _lastModified,
         };
 
         // Act
@@ -80,7 +80,7 @@ public class WebQueryConditionalTests
         handled.ShouldBeTrue();
         context.Response.StatusCode.ShouldBe(HttpStatusCode.NotModified);
         context.Response.Headers.GetValue(HttpHeaderKey.ETag).ShouldBe("\"v2\"");
-        context.Response.Headers.GetValue(HttpHeaderKey.LastModified).ShouldBe(HttpDate.Format(LastModified));
+        context.Response.Headers.GetValue(HttpHeaderKey.LastModified).ShouldBe(HttpDate.Format(_lastModified));
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Query] - Conditional: TryHandleQueryPreconditions writes 412 on a failed If-Match")]
@@ -145,14 +145,14 @@ public class WebQueryConditionalTests
     public async Task UseQueryConditionals_IfNoneMatchMatches_ShouldAnswer304WithoutExecuting()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client, var executed) = await CreateConditionalAppAsync(
-            new WebQueryResourceValidators { ETag = HttpEntityTag.Strong("v2"), LastModified = LastModified },
+            new WebQueryResourceValidators { ETag = HttpEntityTag.Strong("v2"), LastModified = _lastModified },
             cancellation.Token);
         await using WebApplicationTestFactory ownedFactory = factory;
         using HttpClient ownedClient = client;
 
-        using var request = new HttpRequestMessage(QueryMethod, "/search")
+        using var request = new HttpRequestMessage(_queryMethod, "/search")
         {
             Content = new StringContent("{\"q\":1}", Encoding.UTF8, "application/json"),
         };
@@ -172,18 +172,18 @@ public class WebQueryConditionalTests
     public async Task UseQueryConditionals_IfModifiedSinceNotModified_ShouldAnswer304()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client, var executed) = await CreateConditionalAppAsync(
-            new WebQueryResourceValidators { LastModified = LastModified },
+            new WebQueryResourceValidators { LastModified = _lastModified },
             cancellation.Token);
         await using WebApplicationTestFactory ownedFactory = factory;
         using HttpClient ownedClient = client;
 
-        using var request = new HttpRequestMessage(QueryMethod, "/search")
+        using var request = new HttpRequestMessage(_queryMethod, "/search")
         {
             Content = new StringContent("{\"q\":1}", Encoding.UTF8, "application/json"),
         };
-        request.Headers.TryAddWithoutValidation("If-Modified-Since", HttpDate.Format(LastModified)).ShouldBeTrue();
+        request.Headers.TryAddWithoutValidation("If-Modified-Since", HttpDate.Format(_lastModified)).ShouldBeTrue();
 
         // Act
         using HttpResponseMessage response = await client.SendAsync(request, cancellation.Token);
@@ -197,14 +197,14 @@ public class WebQueryConditionalTests
     public async Task UseQueryConditionals_FailedIfMatch_ShouldAnswer412WithoutExecuting()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client, var executed) = await CreateConditionalAppAsync(
             new WebQueryResourceValidators { ETag = HttpEntityTag.Strong("v2") },
             cancellation.Token);
         await using WebApplicationTestFactory ownedFactory = factory;
         using HttpClient ownedClient = client;
 
-        using var request = new HttpRequestMessage(QueryMethod, "/search")
+        using var request = new HttpRequestMessage(_queryMethod, "/search")
         {
             Content = new StringContent("{\"q\":1}", Encoding.UTF8, "application/json"),
         };
@@ -222,14 +222,14 @@ public class WebQueryConditionalTests
     public async Task UseQueryConditionals_UnconditionalQuery_ShouldExecuteAndStampValidators()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client, var executed) = await CreateConditionalAppAsync(
-            new WebQueryResourceValidators { ETag = HttpEntityTag.Strong("v2"), LastModified = LastModified },
+            new WebQueryResourceValidators { ETag = HttpEntityTag.Strong("v2"), LastModified = _lastModified },
             cancellation.Token);
         await using WebApplicationTestFactory ownedFactory = factory;
         using HttpClient ownedClient = client;
 
-        using var request = new HttpRequestMessage(QueryMethod, "/search")
+        using var request = new HttpRequestMessage(_queryMethod, "/search")
         {
             Content = new StringContent("{\"q\":1}", Encoding.UTF8, "application/json"),
         };
@@ -249,14 +249,14 @@ public class WebQueryConditionalTests
     public async Task UseQueryConditionals_ProviderReturnsNull_ShouldPassThrough()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client, var executed) = await CreateConditionalAppAsync(
             validators: null,
             cancellation.Token);
         await using WebApplicationTestFactory ownedFactory = factory;
         using HttpClient ownedClient = client;
 
-        using var request = new HttpRequestMessage(QueryMethod, "/search")
+        using var request = new HttpRequestMessage(_queryMethod, "/search")
         {
             Content = new StringContent("{\"q\":1}", Encoding.UTF8, "application/json"),
         };
@@ -274,7 +274,7 @@ public class WebQueryConditionalTests
     public async Task UseQueryConditionals_NonQueryMethod_ShouldPassThrough()
     {
         // Arrange — a GET with a matching If-None-Match is not this middleware's decision.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client, var executed) = await CreateConditionalAppAsync(
             new WebQueryResourceValidators { ETag = HttpEntityTag.Strong("v2") },
             cancellation.Token);

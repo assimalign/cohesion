@@ -35,7 +35,7 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 [SupportedOSPlatform("macos")]
 public class Http3RoundTripTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - Http3: Should complete a full request/response round-trip with status and body over real QUIC")]
     public async Task Http3_OnRequest_ShouldCompleteFullRoundTripWithStatusAndBody()
@@ -46,7 +46,7 @@ public class Http3RoundTripTests
         }
 
         // Arrange — a loopback h3 server that answers 200 with a small text body.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using Http3LoopbackServer server = await Http3LoopbackServer.StartAsync(exchange =>
@@ -78,7 +78,7 @@ public class Http3RoundTripTests
 
         // Arrange — a 200 with no body (Content-Length: 0, no DATA frame). Before the fix the client's
         // content-length-0 drain never completed because the request stream was never ended.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using Http3LoopbackServer server = await Http3LoopbackServer.StartAsync(exchange =>
@@ -110,7 +110,7 @@ public class Http3RoundTripTests
         // positioned at its end. The send path must emit the whole buffer (Content-Length AND DATA
         // consistent), independent of the stream position — the body-position observation on #928.
         const string payload = "written-to-end-position";
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using Http3LoopbackServer server = await Http3LoopbackServer.StartAsync(async exchange =>
@@ -143,7 +143,7 @@ public class Http3RoundTripTests
         // HTTP/3 client reuses one QUIC connection across sequential requests; each request completing
         // proves the server's control and QPACK streams stayed open for the connection lifetime (a
         // closed critical stream is exactly the 0x104 error, which would fail the second request).
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using Http3LoopbackServer server = await Http3LoopbackServer.StartAsync(exchange =>

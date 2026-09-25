@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Http;
+namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// Write-through <see cref="IHttpMaxRequestBodySizeFeature"/> implementation: a typed view over

@@ -1,112 +1,115 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Hosting.Internal;
+using Assimalign.Cohesion.Hosting;
+
 namespace Assimalign.Cohesion.Database.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Database.Hosting.Internal;
-
-/// <summary>
-/// The standalone hosting application for the database resource. Composition-only:
-/// it wraps the composed wire-protocol servers as host services on the
-/// <c>Assimalign.Cohesion.Hosting</c> execution menu and integrates them — plus any
-/// additional services — with the host lifecycle.
-/// </summary>
-/// <remarks>
-/// Registration order is the composition root's additional services first
-/// (<see cref="DatabaseApplicationOptions.Services"/>), then one endpoint host
-/// service per registered server (<see cref="DatabaseApplicationOptions.Servers"/>).
-/// Because a host starts services in registration order and stops them in reverse,
-/// the servers start last and drain first. Engines take no part in the lifecycle:
-/// they are data machines — operational from creation, durably flushed and closed
-/// by whichever composition root created and disposes them. Compose an application
-/// through <see cref="CreateBuilder()"/> (the builder-first surface — model
-/// packages register engines and servers on the root's
-/// <see cref="IDatabaseApplicationBuilder"/> seam) or construct it directly from
-/// fully populated <see cref="DatabaseApplicationOptions"/>.
-/// </remarks>
+/// <summary>A complete database composition with ordered hosting and explicit product ownership.</summary>
+/// <remarks>Services start before servers. Disposal stops the host, disposes owned services and engines, then infrastructure.</remarks>
 public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDatabaseApplication
 {
     private readonly DatabaseApplicationContext _context;
+    private readonly DatabaseApplicationOwnership _ownership;
+    private readonly object _disposeGate = new();
+    private Task? _disposeTask;
+    private bool _startAttempted;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="DatabaseApplication"/> class.
-    /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    /// <summary>Builds an application from copied legacy borrowed inputs and local default infrastructure.</summary>
+    /// <param name="options">The host settings and caller-owned inputs.</param>
     public DatabaseApplication(DatabaseApplicationOptions options)
-        : this(options, options is null ? null! : new DatabaseApplicationContext(options))
+        : this(new DatabaseApplicationBuilder(options).BuildComposition()) { }
+
+    internal DatabaseApplication(DatabaseApplicationComposition composition) : base(composition.Options)
     {
-    }
-
-    internal DatabaseApplication(DatabaseApplicationOptions options, DatabaseApplicationContext context) : base(options)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(context);
-
-        var services = new List<IHostService>();
-
-        // The composition root's additional services start first and stop last
-        // (after the servers have drained).
-        foreach (IHostService service in options.Services)
-        {
-            services.Add(service);
-        }
-
-        // The wire-protocol servers register last: a host starts services in
-        // registration order and stops them in reverse, so every server starts
-        // last and drains first.
-        foreach (IDatabaseServer server in options.Servers)
+        _context = composition.Context;
+        _ownership = composition.Ownership;
+        var services = new List<IHostService>(composition.Options.Services);
+        foreach (IDatabaseServer server in composition.Context.Servers)
         {
             services.Add(new DatabaseServerHostService(server));
         }
 
-        context.SetHostedServices(services);
-        _context = context;
+        _context.SetHostedServices(services.AsReadOnly());
     }
 
-    /// <summary>
-    /// Gets the application context.
-    /// </summary>
+    /// <summary>Gets final infrastructure and the fixed runtime engine/server registry.</summary>
     public override DatabaseApplicationContext Context => _context;
 
-    /// <summary>
-    /// Creates a builder for composing a database application — the entry point of
-    /// the area's builder pattern (mirrors <c>WebApplication.CreateBuilder()</c>).
-    /// Model packages register their engines and servers on the returned builder
-    /// through the root's <see cref="IDatabaseApplicationBuilder"/> seam.
-    /// </summary>
-    /// <returns>A new application builder over default options.</returns>
-    public static DatabaseApplicationBuilder CreateBuilder()
+    /// <summary>Creates a builder with default settings and no command-line arguments.</summary>
+    /// <returns>A new builder.</returns>
+    public static DatabaseApplicationBuilder CreateBuilder() => new(new DatabaseApplicationOptions());
+
+    /// <summary>Captures application arguments for configuration loaded at Build.</summary>
+    /// <param name="args">The arguments, copied before returning.</param>
+    /// <returns>A new builder honoring the existing enabled-resource host integration when present.</returns>
+    public static DatabaseApplicationBuilder CreateBuilder(string[] args)
     {
-        return CreateBuilder(new DatabaseApplicationOptions());
+        ArgumentNullException.ThrowIfNull(args);
+        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(DatabaseApplication).Assembly;
+        return new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), resourceAssembly, args);
     }
 
-    /// <summary>
-    /// Creates a builder for composing a database application over the specified
-    /// options.
-    /// </summary>
-    /// <param name="options">The application options the builder composes into.</param>
-    /// <returns>A new application builder over <paramref name="options"/>.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
-    public static DatabaseApplicationBuilder CreateBuilder(DatabaseApplicationOptions options)
-    {
-        ArgumentNullException.ThrowIfNull(options);
+    /// <summary>Creates a builder from host settings and borrowed legacy inputs.</summary>
+    /// <param name="options">The options copied at Build.</param>
+    /// <returns>A new builder.</returns>
+    public static DatabaseApplicationBuilder CreateBuilder(DatabaseApplicationOptions options) => new(options);
 
-        return new DatabaseApplicationBuilder(options);
+    /// <inheritdoc />
+    protected override Task OnStartingAsync(CancellationToken cancellationToken = default)
+    {
+        if (_disposeTask is not null)
+        {
+            throw new ObjectDisposedException(nameof(DatabaseApplication));
+        }
+
+        if (_startAttempted)
+        {
+            throw new InvalidOperationException("A database application supports only one start lifecycle.");
+        }
+
+        _startAttempted = true;
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    protected override ValueTask DisposeAsync(bool disposing)
+    {
+        if (!disposing)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        lock (_disposeGate)
+        {
+            _disposeTask ??= DisposeCoreAsync();
+            return new ValueTask(_disposeTask);
+        }
+    }
+
+    private async Task DisposeCoreAsync()
+    {
+        var failures = new List<Exception>();
+        try
+        {
+            await base.DisposeAsync(true).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            failures.Add(exception);
+        }
+        await _ownership.DisposeAsync(failures).ConfigureAwait(false);
+        if (failures.Count > 0)
+        {
+            throw new AggregateException("Database application disposal failed.", failures);
+        }
     }
 
     IDatabaseApplicationContext IDatabaseApplication.Context => _context;
-
-    Task IDatabaseApplication.StartAsync(CancellationToken cancellationToken)
-    {
-        return ((IHost)this).StartAsync(cancellationToken);
-    }
-
-    Task IDatabaseApplication.StopAsync(CancellationToken cancellationToken)
-    {
-        return ((IHost)this).StopAsync(cancellationToken);
-    }
+    Task IDatabaseApplication.StartAsync(CancellationToken cancellationToken) => ((IHost)this).StartAsync(cancellationToken);
+    Task IDatabaseApplication.StopAsync(CancellationToken cancellationToken) => ((IHost)this).StopAsync(cancellationToken);
 }

@@ -3,7 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Content;
+namespace Assimalign.Cohesion.Content.Internal;
 
 /// <summary>
 /// In-memory content. Always reopenable; writable unless created read-only. Writes are committed when
@@ -73,16 +73,33 @@ internal sealed class MemoryContent : IWritableContent
     }
 
     /// <summary>A caller-owned read view over the current bytes; disposing it does not affect the content.</summary>
-    private sealed class ReadOnlyMemoryStream(ReadOnlyMemory<byte> data) : MemoryStream(data.ToArray(), writable: false);
+    private sealed class ReadOnlyMemoryStream : MemoryStream
+    {
+        /// <summary>Initializes a new instance of the <see cref="ReadOnlyMemoryStream"/> class.</summary>
+        /// <param name="data">The bytes copied into the non-writable view.</param>
+        public ReadOnlyMemoryStream(ReadOnlyMemory<byte> data)
+            : base(data.ToArray(), writable: false)
+        {
+        }
+    }
 
     /// <summary>Buffers writes and commits them to the owning content when disposed.</summary>
-    private sealed class CommitOnDisposeStream(MemoryContent owner) : MemoryStream
+    private sealed class CommitOnDisposeStream : MemoryStream
     {
+        private readonly MemoryContent _owner;
+
+        /// <summary>Initializes a new instance of the <see cref="CommitOnDisposeStream"/> class.</summary>
+        /// <param name="owner">The content that receives the buffered bytes when the stream is disposed.</param>
+        public CommitOnDisposeStream(MemoryContent owner)
+        {
+            _owner = owner;
+        }
+
         protected override void Dispose(bool disposing)
         {
-            if (disposing && !owner._disposed)
+            if (disposing && !_owner._disposed)
             {
-                owner._data = ToArray();
+                _owner._data = ToArray();
             }
 
             base.Dispose(disposing);

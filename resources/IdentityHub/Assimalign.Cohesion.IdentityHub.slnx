@@ -12,25 +12,112 @@
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/" />
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/">
 		<File Path="Assimalign.Cohesion.IdentityHub/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityHub/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/Assembly/Assimalign.Cohesion.IdentityHub/IIdentityHubApplication/">
+		<File Path="Assimalign.Cohesion.IdentityHub/docs/Assembly/Assimalign.Cohesion.IdentityHub/IIdentityHubApplication/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/Assembly/Assimalign.Cohesion.IdentityHub/IIdentityHubApplicationBuilder/">
+		<File Path="Assimalign.Cohesion.IdentityHub/docs/Assembly/Assimalign.Cohesion.IdentityHub/IIdentityHubApplicationBuilder/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/docs/Assembly/Assimalign.Cohesion.IdentityHub/IdentityHubClientOptions/">
+		<File Path="Assimalign.Cohesion.IdentityHub/docs/Assembly/Assimalign.Cohesion.IdentityHub/IdentityHubClientOptions/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/src/">
 		<Project Path="Assimalign.Cohesion.IdentityHub/src/Assimalign.Cohesion.IdentityHub.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/">
+		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/">
+		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/">
+		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/src/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/src/Assimalign.Cohesion.IdentityHub.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/tests/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/tests/Assimalign.Cohesion.IdentityHub.ApplicationModel.Tests.csproj" />
 	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/" />
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/docs/">
 		<File Path="Assimalign.Cohesion.IdentityHub.Hosting/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.IdentityHub.Hosting/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/docs/Assembly/Assimalign.Cohesion.IdentityHub.Hosting/IdentityHubApplication/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Hosting/docs/Assembly/Assimalign.Cohesion.IdentityHub.Hosting/IdentityHubApplication/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.IdentityHub.Hosting/src/Assimalign.Cohesion.IdentityHub.Hosting.csproj" />
 	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/tests/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Hosting/tests/Assimalign.Cohesion.IdentityHub.Hosting.Tests.csproj" />
+	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/" />
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/docs/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Models/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityHub.Models/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/src/">
 		<Project Path="Assimalign.Cohesion.IdentityHub.Models/src/Assimalign.Cohesion.IdentityHub.Models.csproj" />
 	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/tests/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Models/tests/Assimalign.Cohesion.IdentityHub.Models.Tests.csproj" />
+	</Folder>
 	<Folder Name="/IdentityHub/refs/" >
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Assimalign.Cohesion.ApplicationModel.csproj" />
 		<Project Path="../../libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
+		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting.Resources/src/Assimalign.Cohesion.Hosting.Resources.csproj" />
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/README.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/src/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Client/src/Assimalign.Cohesion.IdentityHub.Client.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/tests/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Client/tests/Assimalign.Cohesion.IdentityHub.Client.Tests.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/IdentityHubCommandClient/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/IdentityHubCommandClient/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/IIdentityHubCommandClient/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/IIdentityHubCommandClient/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/ResourceCommand/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/ResourceCommand/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/ResourceCommandObservation/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Client/docs/Assembly/Assimalign.Cohesion.IdentityHub.Client/ResourceCommandObservation/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IdentityHubResourceCommandExtensions/">
+		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IdentityHubResourceCommandExtensions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IIdentityHubResourceDescriptor/">
+		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/Assembly/Assimalign.Cohesion.IdentityHub.ApplicationModel/IIdentityHubResourceDescriptor/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Refs/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Refs/src/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Refs/src/Assimalign.Cohesion.IdentityHub.Refs.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Runtime/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Runtime/src/Assimalign.Cohesion.IdentityHub.Runtime.csproj" />
 	</Folder>
 </Solution>

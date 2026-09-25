@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Sql.Tests</RootNamespace>
 		<OutputType>Exe</OutputType>
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
@@ -14,12 +15,17 @@
 	</ItemGroup>
 	<ItemGroup>
 		<Content Include="xunit.runner.json" />
+		<Compile Include="..\..\Assimalign.Cohesion.Database.Storage\tests\TestObjects\SimulatedDurableFileHandle.cs" Link="TestObjects\SimulatedDurableFileHandle.cs" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Tcp" />
 		<!-- The SqlDatabaseServer suite and the AddSqlServer verb test run over the
 		     in-memory Connections driver. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+		<!-- Lifecycle symmetry is proven against a real fixed TCP endpoint. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 	</ItemGroup>
 
 </Project>

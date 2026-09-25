@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Database.Types — Design
 
 The shared scalar type system (area architecture:
-[resources/Database/DESIGN.md](../../DESIGN.md) §3.2). One rule drives everything
+[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2). One rule drives everything
 here: **all type intelligence is spent at encoding time so that comparison time is a
 raw unsigned byte compare.** That is the design center `Database.Indexing` documents
 for `IndexKey` (the memcmp-key approach of InnoDB and FoundationDB tuples) — this
@@ -23,17 +23,39 @@ references makes cross-model ordering a compile-time fact rather than a conventi
   decodability without a schema in hand (debugging, generic tooling, replication),
   and loud failures on type mismatch. Schema-directed tagless encoding is a
   measured-need optimization that can arrive later behind the same writer surface.
-- **Sealed `Collation` set (binary + invariant) instead of pluggable collations.**
+- **Sealed `Collation` set instead of pluggable collations.**
   A collation is a *persistence contract* — its id is inside every encoded key on
   disk. Runtime-registered collations would make file portability depend on process
   configuration. Adding one is deliberately a kernel change here. `Binary` compares
   by Unicode code point (equals UTF-8 byte order), *not* `string.CompareOrdinal` —
   UTF-16 code-unit order disagrees with code-point order for supplementary-plane
   characters, and the byte encoding is the ground truth.
-- **Linguistic string keys carry sort key + original bytes.** Culture sort keys are
-  not reversible, and the acceptance bar requires round-trips. Layout: escaped sort
-  key (defines order), then length-prefixed original UTF-8 (restores the value,
-  breaks collation-equal ties deterministically).
+- **Three deterministic index-backed collations (#1025).** `Binary` (id 0) keeps
+  UTF-8 unchanged; `CaseInsensitive` (id 2) applies Unicode default simple case
+  folding; `CaseAccentInsensitive` (id 3) applies canonical decomposition, removes
+  all `Mn`/`Mc`/`Me` marks, then applies the same fold. Canonical decomposition
+  includes Hangul and excludes compatibility decomposition. Simple folding uses
+  the `C` and `S` mappings, excludes Turkic tailoring, and does not expand sharp S
+  into `ss`. Combining marks remain significant under `CaseInsensitive`.
+- **Unicode 17.0 data is pinned in source.** Neither the three byte transforms nor
+  their comparisons and hashes use runtime normalization, casing, or `CompareInfo`.
+  They work identically under invariant globalization and across ICU upgrades.
+  [The generator](../tools/Generate-CollationUnicodeData.ps1) verifies SHA-256 hashes
+  of the official [CaseFolding.txt](https://www.unicode.org/Public/17.0.0/ucd/CaseFolding.txt)
+  and [UnicodeData.txt](https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt) inputs;
+  [Unicode License v3](UNICODE_LICENSE.txt) covers the generated tables. Updating
+  Unicode behavior requires a new persisted collation identity, never replacing
+  the mappings of an existing id.
+- **Folded keys contain only canonical bytes.** Layout is the existing type tag,
+  stable collation id, and escaped/terminated transformed UTF-8. There is no original
+  spelling tie-breaker: equal strings must have identical keys and unique-lock
+  hashes. The reader returns the canonical comparison value for folding collations;
+  row/value storage retains original spelling. Binary keys keep their prior bytes.
+- **Legacy `Invariant` (id 1) is not index-backed.** It retains linguistic scan
+  comparison and matching hashing for compatibility. New key encoding rejects it;
+  historical encoded keys remain readable. Only this legacy collation consults
+  `CompareInfo`, and linguistic operations reject invariant globalization explicitly
+  instead of silently becoming ordinal. SQL predicates using it must scan.
 - **Decimal as normalized scientific notation** (sign byte, biased base-10 exponent,
   significant digits `+1`, terminator; negatives stored complemented) rather than
   scaled-integer bit tricks. `System.Decimal`'s 96-bit mantissa + scale
@@ -58,7 +80,7 @@ references makes cross-model ordering a compile-time fact rather than a conventi
   wire protocol (#852) moves *untyped* values in both directions: a client encodes
   boxed parameter values, the server decodes them, and result rows make the same
   trip in reverse. Both ends need the identical runtime-type→component mapping;
-  duplicating the switch in the server runtime and `Database.Client` would let the
+  duplicating the switch in model servers and their `.Client` materializers would let the
   two drift (a wire-corruption class of bug). The codec dispatches on runtime type
   (`Append`), reads self-describing components back boxed (`Read`), and offers
   single-component helpers (`EncodeComponent`/`DecodeComponent`) as the parameter
@@ -69,20 +91,21 @@ references makes cross-model ordering a compile-time fact rather than a conventi
 ## Error model
 
 `DatabaseTypeException` is the project root: unknown collation ids, malformed or
-truncated key bytes, and component-type mismatches. Encoding never throws for valid
-values; decoding is strict.
+truncated key bytes, component-type mismatches, invalid Unicode scalar sequences,
+and attempts to encode a non-index-backed collation. Decoding is strict.
 
 ## AOT posture
 
-No reflection, no culture lookups beyond the pinned invariant `CompareInfo`,
-span-based codecs, `string`/digit work confined to the decimal codec and linguistic
-sort keys. `DatabaseKeyReader` is a `ref struct`; `DatabaseKeyWriter` is reusable via
-`Reset()` so steady-state key building does not allocate.
+No reflection; the index-backed collations use immutable span-based Unicode tables
+with no globalization dependency. Only legacy `Invariant` scan operations use the
+runtime invariant `CompareInfo`. `DatabaseKeyReader` is a `ref struct`;
+`DatabaseKeyWriter` is reusable via `Reset()`. String transforms allocate their
+canonical text and UTF-8 payload.
 
 ## Non-goals
 
 - No boxed value union (`DatabaseValue`) yet — planners and catalogs (#173, #175)
   will motivate its exact shape; encoding does not need it.
-- No case-insensitive or per-language collations in the MVP (the id space and this
-  file are the extension point).
+- No per-language, user-defined, or full linguistic index-backed collations; those
+  require a persisted versioning design (#1026).
 - No compression or tagless schema-directed encoding (see decision above).

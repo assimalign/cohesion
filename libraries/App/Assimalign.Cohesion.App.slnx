@@ -1,0 +1,27 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/App/">
+		<File Path="Assimalign.Cohesion.App.props" />
+		<File Path="Assimalign.Cohesion.App.targets" />
+		<File Path="Directory.Build.props" />
+		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
+	</Folder>
+	<Folder Name="/App/Assimalign.Cohesion.App.Refs/" />
+	<Folder Name="/App/Assimalign.Cohesion.App.Refs/src/">
+		<Project Path="Assimalign.Cohesion.App.Refs/src/Assimalign.Cohesion.App.Refs.csproj" />
+	</Folder>
+	<Folder Name="/App/Assimalign.Cohesion.App.Runtime/">
+		<File Path="Assimalign.Cohesion.App.Runtime/README.md" />
+	</Folder>
+	<Folder Name="/App/Assimalign.Cohesion.App.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.App.Runtime/src/Assimalign.Cohesion.App.Runtime.csproj" />
+	</Folder>
+	<Folder Name="/App/Assimalign.Cohesion.App.Runtime/tests/">
+		<Project Path="Assimalign.Cohesion.App.Runtime/tests/Assimalign.Cohesion.App.Runtime.Tests.csproj" />
+	</Folder>
+</Solution>

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.Rezolvr.Client.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+    <CohesionPackageReference Include="coverlet.collector" />
+    <CohesionPackageReference Include="xunit" />
+    <CohesionPackageReference Include="xunit.runner.visualstudio" />
+    <CohesionPackageReference Include="Shouldly" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Rezolvr.Client" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Rezolvr.ApplicationModel" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Rezolvr.Hosting" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+  </ItemGroup>
+</Project>

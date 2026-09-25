@@ -15,7 +15,8 @@ transformations (such as TLS) compose over it.
 
 - `IConnection` / `Connection` — a live byte channel; **is** an `IDuplexPipe` (`Input`/`Output`
   anchored to the holder), with `Direction`, `Capabilities`, `State`, and lifetime members.
-- `IConnectionListener` / `ConnectionListener` — accepts inbound connections (server side).
+- `IConnectionListener` / `ConnectionListener` — explicitly binds and accepts inbound connections
+  (server side).
 - `IConnectionFactory` / `ConnectionFactory` — establishes outbound connections (client side).
 - `IMultiplexedConnection` / `MultiplexedConnection` — carries multiple `IConnection` streams;
   `OpenStreamAsync(ConnectionDirection, ...)` for bidirectional or unidirectional streams.

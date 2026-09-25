@@ -23,7 +23,7 @@ public static class HttpContentTypes
     public const string Fallback = "application/octet-stream";
 
     // Extension (with leading dot, lower-case) → content type. Common web assets only.
-    private static readonly KeyValuePair<string, string>[] DefaultMappings =
+    private static readonly KeyValuePair<string, string>[] _defaultMappings =
     {
         // Documents / markup.
         new(".html", "text/html"),
@@ -113,7 +113,7 @@ public static class HttpContentTypes
     /// Gets the default extension-to-content-type table (case-insensitive keys, leading-dot form).
     /// </summary>
     public static FrozenDictionary<string, string> Default { get; }
-        = FrozenDictionary.ToFrozenDictionary(DefaultMappings, StringComparer.OrdinalIgnoreCase);
+        = FrozenDictionary.ToFrozenDictionary(_defaultMappings, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Attempts to resolve a content type from a file name or extension using the default table.
@@ -175,7 +175,7 @@ public static class HttpContentTypes
         IEnumerable<KeyValuePair<string, string>>? additionalMappings)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (KeyValuePair<string, string> mapping in DefaultMappings)
+        foreach (KeyValuePair<string, string> mapping in _defaultMappings)
         {
             map[mapping.Key] = mapping.Value;
         }

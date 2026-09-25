@@ -12,11 +12,15 @@ this project so ordering is consistent across every database model.
   decimal, string, binary, date/time family, GUID, JSON) and `DatabaseTypeInfo`
   constraints (length/precision/scale).
 - **Collation** — explicit, named, persisted-by-id string ordering rules:
-  `Collation.Binary` (code-point order) and `Collation.Invariant` (culture-invariant
-  linguistic order). No comparison in the platform ever depends on ambient culture.
+  `Collation.Binary` (code-point order), `CaseInsensitive` (Unicode simple case fold),
+  and `CaseAccentInsensitive` (canonical decomposition, mark removal, case fold).
+  Their Unicode 17.0 transforms are pinned and independent of runtime globalization.
+  Legacy `Collation.Invariant` retains linguistic scan comparison but is explicitly
+  **not index-backed** and rejects invariant-globalization operation.
 - **Key encodings** — `DatabaseKeyWriter` builds self-describing composite keys whose
   unsigned byte-wise comparison equals component-by-component value comparison;
-  `DatabaseKeyReader` decodes them back (round-trip). `Database.Indexing`'s `IndexKey`
+  `DatabaseKeyReader` decodes them back (folding collations return canonical text;
+  original spelling stays in value storage). `Database.Indexing`'s `IndexKey`
   and every model's key convention consume these.
 - **Boxed-value bridge** — `DatabaseValueCodec` maps boxed runtime values onto the
   same component encoding (dispatch by runtime type, read back boxed). The wire

@@ -3,7 +3,7 @@ using System.Runtime.Versioning;
 
 using Assimalign.Cohesion.Connections;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Produces <see cref="Http3Connection"/> instances, capturing the limits and QPACK options

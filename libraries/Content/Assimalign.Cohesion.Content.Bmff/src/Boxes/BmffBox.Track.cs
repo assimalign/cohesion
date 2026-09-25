@@ -14,14 +14,14 @@ namespace Assimalign.Cohesion.Files.Bmff;
 [DebuggerDisplay("Bmff Box: Track (trak)")]
 public sealed class TrackBox : BmffBoxComposite
 {
-    private IList<BmffBox> children = new List<BmffBox>();
+    private IList<BmffBox> _children = new List<BmffBox>();
 
     protected uint _flags;
 
-    private ulong trackCreationTime;
-    private ulong trackModificationTime;
-    private int trackRate;
-    private short trackVolume;
+    private ulong _trackCreationTime;
+    private ulong _trackModificationTime;
+    private int _trackRate;
+    private short _trackVolume;
 
     public TrackBox(long size, long offset)
     {
@@ -51,14 +51,14 @@ public sealed class TrackBox : BmffBoxComposite
 
     public double Rate
     {
-        get => (double)trackRate / ((int)ushort.MaxValue + 1);
-        set => trackRate = checked((int)Math.Round(value * ((int)short.MaxValue + 1)));
+        get => (double)_trackRate / ((int)ushort.MaxValue + 1);
+        set => _trackRate = checked((int)Math.Round(value * ((int)short.MaxValue + 1)));
     }
 
     public double Volume
     {
-        get => (double)trackVolume / ((int)byte.MaxValue + 1);
-        set => trackVolume = checked((short)Math.Round(value * ((int)byte.MaxValue + 1)));
+        get => (double)_trackVolume / ((int)byte.MaxValue + 1);
+        set => _trackVolume = checked((short)Math.Round(value * ((int)byte.MaxValue + 1)));
     }
 
     public byte[] Reserved { get; private set; }
@@ -75,7 +75,7 @@ public sealed class TrackBox : BmffBoxComposite
 
     public override BmffBoxType BoxType => BmffBoxType.Track;
 
-    public override IEnumerable<BmffBox> Children => this.children;
+    public override IEnumerable<BmffBox> Children => this._children;
 
     public override void Read(BmffStream stream)
     {
@@ -87,7 +87,7 @@ public sealed class TrackBox : BmffBoxComposite
             boxes.Add(reader.Current);
         }
 
-        children = boxes;
+        _children = boxes;
     }
 
     public override void Write(BmffStream stream)

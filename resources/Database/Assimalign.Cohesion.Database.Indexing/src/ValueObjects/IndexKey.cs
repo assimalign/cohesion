@@ -1,0 +1,132 @@
+using System;
+using System.Buffers.Binary;
+
+using Assimalign.Cohesion.Database.Types;
+
+namespace Assimalign.Cohesion.Database.Indexing;
+
+/// <summary>
+/// An order-preserving, byte-comparable index key.
+/// </summary>
+/// <remarks>
+/// Keys compare by unsigned lexicographic byte order, so any component encoding
+/// that preserves its type's natural order under that comparison can participate
+/// in a key (integers are encoded big-endian with the sign bit flipped; string
+/// collation encoding is provided by the shared type system). Composite keys
+/// concatenate component encodings.
+/// </remarks>
+public readonly struct IndexKey : IEquatable<IndexKey>, IComparable<IndexKey>
+{
+    private readonly ReadOnlyMemory<byte> _encoded;
+
+    /// <summary>
+    /// Initializes a new <see cref="IndexKey"/> over an already order-preserving encoding.
+    /// </summary>
+    /// <param name="encoded">The encoded key bytes.</param>
+    public IndexKey(ReadOnlyMemory<byte> encoded)
+    {
+        _encoded = encoded;
+    }
+
+    /// <summary>
+    /// Gets the encoded key bytes.
+    /// </summary>
+    public ReadOnlyMemory<byte> Encoded => _encoded;
+
+    /// <summary>
+    /// Gets the length of the encoded key in bytes.
+    /// </summary>
+    public int Length => _encoded.Length;
+
+    /// <summary>
+    /// Encodes a signed 64-bit integer as an order-preserving key component.
+    /// </summary>
+    /// <param name="value">The value to encode.</param>
+    /// <returns>A key whose byte order matches the numeric order of the input.</returns>
+    public static IndexKey FromInt64(long value)
+    {
+        var buffer = new byte[sizeof(ulong)];
+        // Flipping the sign bit maps the signed range onto the unsigned range
+        // order-preservingly; big-endian makes byte order match numeric order.
+        BinaryPrimitives.WriteUInt64BigEndian(buffer, (ulong)value ^ 0x8000_0000_0000_0000UL);
+        return new IndexKey(buffer);
+    }
+
+    /// <summary>
+    /// Encodes an unsigned 64-bit integer as an order-preserving key component.
+    /// </summary>
+    /// <param name="value">The value to encode.</param>
+    /// <returns>A key whose byte order matches the numeric order of the input.</returns>
+    public static IndexKey FromUInt64(ulong value)
+    {
+        var buffer = new byte[sizeof(ulong)];
+        BinaryPrimitives.WriteUInt64BigEndian(buffer, value);
+        return new IndexKey(buffer);
+    }
+
+    /// <summary>
+    /// Encodes a string through its collation's deterministic byte transform.
+    /// Collation-equal strings have identical keys and hashes, including unique locks.
+    /// </summary>
+    /// <param name="value">The string to encode.</param>
+    /// <param name="collation">The index-backed collation defining order and equality.</param>
+    /// <returns>The encoded string key.</returns>
+    /// <exception cref="DatabaseTypeException">The collation is not index-backed.</exception>
+    public static IndexKey FromString(string value, Collation collation)
+        => From(new DatabaseKeyWriter().AppendString(value, collation));
+
+    /// <summary>
+    /// Creates a key from the shared type system's composite key writer — the path
+    /// for typed and composite keys (strings under an explicit collation, decimals,
+    /// temporal types, multi-column keys).
+    /// </summary>
+    /// <param name="writer">The writer holding the encoded components.</param>
+    /// <returns>A key over the writer's order-preserving encoding.</returns>
+    public static IndexKey From(DatabaseKeyWriter writer)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        return new IndexKey(writer.ToArray());
+    }
+
+    /// <summary>
+    /// Computes the key's stable content hash (FNV-1a over the encoded bytes) —
+    /// the identity unique-key locks are taken under. Exposed so writers can
+    /// pre-acquire a key's lock (through the shared lock manager, as
+    /// <c>LockResource.Entry(objectId, key.Hash())</c>) before entering a scope
+    /// that must never wait, relying on the lock manager's same-owner re-grant
+    /// when the index acquires it again internally. A hash collision only
+    /// over-locks (two keys sharing one lock), which is safe.
+    /// </summary>
+    /// <returns>The 64-bit FNV-1a hash of the encoded key bytes.</returns>
+    public ulong Hash()
+    {
+        ulong hash = 14695981039346656037UL;
+
+        foreach (byte value in _encoded.Span)
+        {
+            hash = (hash ^ value) * 1099511628211UL;
+        }
+
+        return hash;
+    }
+
+    /// <inheritdoc />
+    public int CompareTo(IndexKey other) => _encoded.Span.SequenceCompareTo(other._encoded.Span);
+
+    /// <inheritdoc />
+    public bool Equals(IndexKey other) => _encoded.Span.SequenceEqual(other._encoded.Span);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is IndexKey other && Equals(other);
+
+    /// <inheritdoc />
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.AddBytes(_encoded.Span);
+        return hash.ToHashCode();
+    }
+
+    /// <inheritdoc />
+    public override string ToString() => Convert.ToHexString(_encoded.Span);
+}

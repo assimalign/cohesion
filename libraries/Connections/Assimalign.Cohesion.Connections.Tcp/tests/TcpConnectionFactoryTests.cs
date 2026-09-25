@@ -8,17 +8,19 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.Connections.Tcp.Internal;
+
 namespace Assimalign.Cohesion.Connections.Tcp.Tests;
 
 public class TcpConnectionFactoryTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     [Fact]
     public async Task ConnectAsync_ToNonListeningEndPoint_ShouldThrowSocketException()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         IPEndPoint deadEndPoint = GetClosedLoopbackEndPoint();
 
@@ -32,7 +34,7 @@ public class TcpConnectionFactoryTests
     public async Task ConnectAsync_TypedAndInterface_ShouldReturnTcpConnection()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using Socket listenerSocket = CreateLoopbackListenerSocket(out IPEndPoint endPoint);
 
         TcpConnectionFactory factory = new();
@@ -46,6 +48,22 @@ public class TcpConnectionFactoryTests
         // so both calls produce the same concrete driver connection type.
         typed.ShouldBeOfType<TcpConnection>();
         viaInterface.ShouldBeOfType<TcpConnection>();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - ConnectAsync: DnsEndPoint selects a connectable socket family")]
+    public async Task ConnectAsync_DnsEndPoint_ShouldReturnTcpConnection()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using Socket listenerSocket = CreateLoopbackListenerSocket(out IPEndPoint endPoint);
+        var dnsEndPoint = new DnsEndPoint(IPAddress.Loopback.ToString(), endPoint.Port);
+        TcpConnectionFactory factory = new();
+
+        // Act
+        await using Connection connection = await factory.ConnectAsync(dnsEndPoint, cancellation.Token);
+
+        // Assert
+        connection.ShouldBeOfType<TcpConnection>();
     }
 
     [Fact]

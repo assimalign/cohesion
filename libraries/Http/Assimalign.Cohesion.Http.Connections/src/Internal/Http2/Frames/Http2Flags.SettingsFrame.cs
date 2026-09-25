@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 [Flags]
 internal enum Http2SettingsFrameFlags : byte

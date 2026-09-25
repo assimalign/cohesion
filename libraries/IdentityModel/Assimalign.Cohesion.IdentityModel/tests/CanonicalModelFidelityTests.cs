@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.IdentityModel.Tests;
 /// </summary>
 public sealed class CanonicalModelFidelityTests
 {
-    private static readonly DateTimeOffset now = new(2026, 7, 3, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 7, 3, 12, 0, 0, TimeSpan.Zero);
 
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - Fidelity: An OIDC-authenticated principal should map without loss")]
     public void CanonicalModel_WhenSourcedFromOidc_ShouldPreserveProvenance()
@@ -40,7 +40,7 @@ public sealed class CanonicalModelFidelityTests
 
         var contextDescriptor = new AuthenticationContextDescriptor
         {
-            AuthenticatedAt = now.AddSeconds(-30),
+            AuthenticatedAt = _now.AddSeconds(-30),
             ContextClass = "urn:mace:incommon:iap:silver",
         };
         contextDescriptor.Methods.Add("pwd");
@@ -52,7 +52,7 @@ public sealed class CanonicalModelFidelityTests
         {
             Subject = new IdentitySubject(descriptor),
             Protocol = AuthenticationProtocol.OpenIdConnect,
-            CompletedAt = now,
+            CompletedAt = _now,
             Issuer = "https://op.example",
             Audience = "s6BhdRkqt3",
             EvidenceId = "jti-a41c",
@@ -93,9 +93,9 @@ public sealed class CanonicalModelFidelityTests
 
         var contextDescriptor = new AuthenticationContextDescriptor
         {
-            AuthenticatedAt = now.AddSeconds(-30),
+            AuthenticatedAt = _now.AddSeconds(-30),
             ContextClass = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
-            SessionExpiresAt = now.AddHours(8),
+            SessionExpiresAt = _now.AddHours(8),
         };
         contextDescriptor.ProviderSessionIds.Add("session-index-3");
         contextDescriptor.AuthenticatingAuthorities.Add("https://upstream-idp.example");
@@ -105,7 +105,7 @@ public sealed class CanonicalModelFidelityTests
         {
             Subject = new IdentitySubject(descriptor),
             Protocol = AuthenticationProtocol.Saml2,
-            CompletedAt = now,
+            CompletedAt = _now,
             Issuer = "https://idp.example",
             Audience = "https://sp.example",
             EvidenceId = "_assertion-8fe1",
@@ -118,7 +118,7 @@ public sealed class CanonicalModelFidelityTests
         email.Provenance!.OriginalType.ShouldBe("urn:oid:0.9.2342.19200300.100.1.3");
         email.Provenance.OriginalFriendlyName.ShouldBe("mail");
         email.Provenance.OriginalNameFormat.ShouldBe("urn:oasis:names:tc:SAML:2.0:attrname-format:uri");
-        result.Context!.SessionExpiresAt.ShouldBe(now.AddHours(8));
+        result.Context!.SessionExpiresAt.ShouldBe(_now.AddHours(8));
         result.Context.AuthenticatingAuthorities.ShouldBe(["https://upstream-idp.example"]);
 
         var session = new AuthenticationSession(new AuthenticationSessionDescriptor
@@ -133,7 +133,7 @@ public sealed class CanonicalModelFidelityTests
             State = AuthenticationSessionState.Active,
         });
         session.Issuer.ShouldBe("https://idp.example");
-        session.IsActive(now).ShouldBeTrue();
+        session.IsActive(_now).ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - Fidelity: The two protocols should produce the same consumer surface")]

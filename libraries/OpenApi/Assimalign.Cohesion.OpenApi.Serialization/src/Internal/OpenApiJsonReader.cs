@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text.Json;
 
-namespace Assimalign.Cohesion.OpenApi.Serialization;
+namespace Assimalign.Cohesion.OpenApi.Serialization.Internal;
 
 /// <summary>
 /// The JSON implementation of <see cref="IOpenApiReader"/>. Parses JSON into the format-agnostic node

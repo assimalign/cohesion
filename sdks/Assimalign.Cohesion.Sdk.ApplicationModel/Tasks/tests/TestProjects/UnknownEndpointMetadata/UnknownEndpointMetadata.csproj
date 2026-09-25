@@ -1,0 +1,14 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>UnknownEndpointMetadata</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>inventory</CohesionApplication>
+    <CohesionResourceName>inventory-web</CohesionResourceName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionEndpoint Update="http" HealthPath="/health" />
+  </ItemGroup>
+
+</Project>

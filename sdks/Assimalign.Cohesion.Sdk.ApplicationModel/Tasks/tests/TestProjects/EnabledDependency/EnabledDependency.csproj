@@ -1,0 +1,14 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Database">
+
+  <PropertyGroup>
+    <RootNamespace>EnabledDependency</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>inventory</CohesionApplication>
+    <CohesionResourceName>platform-configuration-store</CohesionResourceName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionEndpoint Update="db" DevPort="15741" />
+  </ItemGroup>
+
+</Project>

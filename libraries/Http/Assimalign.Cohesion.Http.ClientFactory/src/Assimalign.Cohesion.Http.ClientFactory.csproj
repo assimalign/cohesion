@@ -8,7 +8,4 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 	</ItemGroup>
-	<ItemGroup>
-		<InternalsVisibleTo Include="Assimalign.Cohesion.Http.ClientFactory.Tests" />
-	</ItemGroup>
 </Project>

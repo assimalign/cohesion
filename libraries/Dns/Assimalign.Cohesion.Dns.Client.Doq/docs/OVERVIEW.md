@@ -51,8 +51,9 @@ The implementing PR will:
    `.github/workflows/library-dns.yml`. Runs only on
    ubuntu-latest + windows-latest until macOS gets a working QUIC
    stack.
-5. Add the assembly to `frameworks/Assimalign.Cohesion.App.props`
-   under the active block.
+5. Add the project to `$script:CohesionReleaseLibrary` in
+   `installer/scripts/modules/CohesionPackaging.psm1`; it ships as an
+   ordinary NuGet package (no shared framework lists the Dns family).
 6. Replace this OVERVIEW with the post-implementation version
    (status, public surface, etc.) and either freeze
    `REQUIREMENTS.md` or fold it into the DESIGN doc.

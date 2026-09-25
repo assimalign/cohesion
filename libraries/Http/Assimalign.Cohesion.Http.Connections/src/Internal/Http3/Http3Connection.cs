@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal sealed class Http3Connection : HttpConnection
 {

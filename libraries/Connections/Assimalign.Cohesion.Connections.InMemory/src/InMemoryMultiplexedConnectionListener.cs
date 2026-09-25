@@ -48,6 +48,21 @@ public sealed class InMemoryMultiplexedConnectionListener : MultiplexedConnectio
     public override ConnectionCapabilities Capabilities => _capabilities;
 
     /// <inheritdoc />
+    /// <remarks>The in-memory listener is logically bound when constructed.</remarks>
+    /// <exception cref="ObjectDisposedException">Thrown when the listener has been disposed.</exception>
+    public override ValueTask BindAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_isDisposed, this);
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public override async ValueTask<MultiplexedConnection> AcceptAsync(CancellationToken cancellationToken = default)
     {
         try

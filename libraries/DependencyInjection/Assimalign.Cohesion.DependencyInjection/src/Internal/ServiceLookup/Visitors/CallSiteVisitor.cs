@@ -5,14 +5,14 @@ namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
 internal abstract class CallSiteVisitor<TArgument, TResult>
 {
-    private readonly CallSiteStackGuard stackGuard;
-    protected CallSiteVisitor() => stackGuard = new CallSiteStackGuard();
+    private readonly CallSiteStackGuard _stackGuard;
+    protected CallSiteVisitor() => _stackGuard = new CallSiteStackGuard();
 
     protected virtual TResult VisitCallSite(CallSiteService callSite, TArgument argument)
     {
-        if (!stackGuard.TryEnterOnCurrentStack())
+        if (!_stackGuard.TryEnterOnCurrentStack())
         {
-            return stackGuard.RunOnEmptyStack((c, a) => VisitCallSite(c, a), callSite, argument);
+            return _stackGuard.RunOnEmptyStack((c, a) => VisitCallSite(c, a), callSite, argument);
         }
         return callSite.Cache.Location switch
         {

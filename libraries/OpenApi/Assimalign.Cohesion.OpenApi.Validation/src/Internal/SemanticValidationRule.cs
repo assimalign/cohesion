@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.OpenApi.Validation;
+namespace Assimalign.Cohesion.OpenApi.Validation.Internal;
 
 /// <summary>
 /// Validates cross-field semantics that structural and schema checks do not capture: operation identifier

@@ -1,0 +1,12 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <PropertyGroup>
+    <CohesionApplicationName>acme</CohesionApplicationName>
+    <CohesionGateways>InProcess;Local</CohesionGateways>
+    <CohesionGatewayInProcess>true</CohesionGatewayInProcess>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionResourceReference Include="..\Acme.Api\Acme.Api.csproj" />
+    <!-- InProcess needs a compile-time entry anchor for each composable member, including transitive members. -->
+    <CohesionResourceReference Include="..\Acme.Database\Acme.Database.csproj" />
+  </ItemGroup>
+</Project>

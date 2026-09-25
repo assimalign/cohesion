@@ -18,7 +18,7 @@ using Assimalign.Cohesion.Logging;
 /// </summary>
 internal sealed class W3CAccessLogWriter : IDisposable
 {
-    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+    private static readonly UTF8Encoding _utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     private readonly Lock _lock = new();
     private readonly StringBuilder _buffer = new(capacity: 512);
@@ -173,7 +173,7 @@ internal sealed class W3CAccessLogWriter : IDisposable
             }
 
             var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
-            _writer = new StreamWriter(stream, Utf8NoBom, bufferSize: 64 * 1024) { AutoFlush = false };
+            _writer = new StreamWriter(stream, _utf8NoBom, bufferSize: 64 * 1024) { AutoFlush = false };
             _currentPath = path;
             _approximateSize = existingLength;
 

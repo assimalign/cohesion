@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Net.Security;
 using System.Runtime.Versioning;
 using System.Security.Authentication;
-using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Connections;
@@ -44,20 +43,16 @@ namespace Assimalign.Cohesion.Web.Hosting;
 /// members do for TCP.
 /// </para>
 /// <para>
-/// The h1/h2 callbacks compose a <em>synchronous</em> listener factory, but binding a QUIC listener is
-/// asynchronous (<c>QuicConnectionListener.CreateAsync</c>). Rather than force an async shape onto the
-/// registration surface, the h3 members register a deferred factory that materializes the QUIC listener
-/// when the <see cref="HttpConnectionListener"/> is constructed — at server start, never at
-/// configuration time — blocking once on the async bind at that single point (the same sync-over-async
-/// bridge the connection primitives use). This is the resolution of the historical omission the earlier
-/// revision of these remarks recorded.
+/// The h1/h2/h3 callbacks all compose synchronous factories for unbound listeners. The default server
+/// awaits the aggregate <see cref="IHttpConnectionListener.BindAsync(System.Threading.CancellationToken)"/>
+/// operation from its own start lifecycle, so QUIC's asynchronous bind requires no sync-over-async bridge.
 /// </para>
 /// <para>
 /// <c>System.Net.Quic</c> is available only on Windows, Linux, and macOS, and only when the platform
 /// ships a usable QUIC implementation (for example libmsquic). The h3 members are therefore annotated
 /// <see cref="SupportedOSPlatformAttribute"/> for those operating systems, and when the running platform
-/// lacks QUIC support (<c>QuicListener.IsSupported</c> is <see langword="false"/>) materialization throws
-/// <see cref="PlatformNotSupportedException"/> at start, matching <c>QuicConnectionListener.CreateAsync</c>.
+/// lacks QUIC support (<c>QuicListener.IsSupported</c> is <see langword="false"/>) awaited binding throws
+/// <see cref="PlatformNotSupportedException"/> at start, matching <c>QuicConnectionListener.BindAsync</c>.
 /// </para>
 /// </remarks>
 public static class WebHostingExtensions
@@ -82,7 +77,7 @@ public static class WebHostingExtensions
         {
             ArgumentNullException.ThrowIfNull(configuration);
 
-            return builder.UseServer((_, options) => HttpServerConfiguration.Bind(configuration, sectionKey, options));
+            return builder.UseServer((_, options) => HttpServerConfiguration.Bind(configuration, sectionKey, options, builder.OwnEndpointCertificate));
         }
     }
 
@@ -137,13 +132,21 @@ public static class WebHostingExtensions
         /// <c>isSecure</c> flag.
         /// </remarks>
         public HttpConnectionListenerOptions UseHttp1s(Action<TcpConnectionListenerOptions> configure, TlsServerOptions tlsOptions)
+            => options.UseHttp1s(configure, tlsOptions, null);
+
+        /// <summary>Serves HTTP/1 over TLS with explicit per-listener protocol options.</summary>
+        /// <param name="configure">The TCP listener configuration.</param>
+        /// <param name="tlsOptions">The server TLS options.</param>
+        /// <param name="configureHttp">Optional protocol settings, including request limits.</param>
+        /// <returns>The current listener options.</returns>
+        public HttpConnectionListenerOptions UseHttp1s(Action<TcpConnectionListenerOptions> configure, TlsServerOptions tlsOptions, Action<Http1ConnectionListenerOptions>? configureHttp)
         {
             ArgumentNullException.ThrowIfNull(configure);
             ArgumentNullException.ThrowIfNull(tlsOptions);
 
             EnsureApplicationProtocols(tlsOptions, SslApplicationProtocol.Http11);
 
-            return options.UseHttp1(() => TcpConnectionListener.Create(configure).UseTls(tlsOptions));
+            return options.UseHttp1(() => TcpConnectionListener.Create(configure).UseTls(tlsOptions), configureHttp ?? (static _ => { }));
         }
 
         /// <summary>
@@ -170,13 +173,21 @@ public static class WebHostingExtensions
         /// the defaulted <c>h2</c> protocol id is what makes the secured listener reachable as HTTP/2.
         /// </remarks>
         public HttpConnectionListenerOptions UseHttp2s(Action<TcpConnectionListenerOptions> configure, TlsServerOptions tlsOptions)
+            => options.UseHttp2s(configure, tlsOptions, null);
+
+        /// <summary>Serves HTTP/2 over TLS with explicit per-listener protocol options.</summary>
+        /// <param name="configure">The TCP listener configuration.</param>
+        /// <param name="tlsOptions">The server TLS options.</param>
+        /// <param name="configureHttp">Optional protocol settings, including request limits.</param>
+        /// <returns>The current listener options.</returns>
+        public HttpConnectionListenerOptions UseHttp2s(Action<TcpConnectionListenerOptions> configure, TlsServerOptions tlsOptions, Action<Http2ConnectionListenerOptions>? configureHttp)
         {
             ArgumentNullException.ThrowIfNull(configure);
             ArgumentNullException.ThrowIfNull(tlsOptions);
 
             EnsureApplicationProtocols(tlsOptions, SslApplicationProtocol.Http2);
 
-            return options.UseHttp2(() => TcpConnectionListener.Create(configure).UseTls(tlsOptions));
+            return options.UseHttp2(() => TcpConnectionListener.Create(configure).UseTls(tlsOptions), configureHttp ?? (static _ => { }));
         }
 
         /// <summary>
@@ -199,15 +210,15 @@ public static class WebHostingExtensions
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
         /// <remarks>
         /// <para>
-        /// The callback runs at materialization, not at registration: the QUIC listener is bound when
-        /// the <see cref="HttpConnectionListener"/> is constructed (server start), never at
-        /// configuration time. QUIC's transport security is always-on, so the materialized listener
+        /// The callback runs at materialization, not at registration. It creates an unbound QUIC
+        /// listener; binding is awaited by the server's start lifecycle, never at configuration time.
+        /// QUIC's transport security is always-on, so the materialized listener
         /// reports <see cref="ConnectionCapabilities.Security"/> equal to
         /// <see cref="ConnectionSecurity.Tls"/> and every served request carries the <c>https</c> scheme.
         /// </para>
         /// <para>
         /// When the running platform lacks QUIC support (<c>QuicListener.IsSupported</c> is
-        /// <see langword="false"/>) materialization throws <see cref="PlatformNotSupportedException"/> at
+        /// <see langword="false"/>) binding throws <see cref="PlatformNotSupportedException"/> at
         /// start. Registered alongside an HTTP/1.1 or HTTP/2 listener plus
         /// <see cref="HttpConnectionListenerOptions.AdvertiseAltService(Action{HttpAltServiceAdvertisementOptions})"/>,
         /// this listener's bound endpoint is what the server advertises in the RFC 7838 <c>Alt-Svc</c>
@@ -228,14 +239,14 @@ public static class WebHostingExtensions
                 EnsureApplicationProtocols(quicOptions.ServerAuthenticationOptions, SslApplicationProtocol.Http3);
                 EnsureTls13(quicOptions.ServerAuthenticationOptions);
 
-                return MaterializeQuicListener(quicOptions);
+                return new QuicConnectionListener(quicOptions);
             });
         }
 
         /// <summary>
         /// Serves HTTP/3 over a QUIC multiplexed connection listener whose TLS is supplied through the
         /// same <see cref="TlsServerOptions"/> surface the TCP <c>UseHttp1s</c>/<c>UseHttp2s</c> members
-        /// use, registering a deferred factory that binds the QUIC listener when the server starts.
+        /// use, registering a deferred factory whose unbound QUIC listener is bound when the server starts.
         /// </summary>
         /// <param name="configure">
         /// The QUIC listener configuration callback (endpoint, per-connection stream limits, and error
@@ -258,8 +269,8 @@ public static class WebHostingExtensions
         /// This overload mirrors the ergonomics of <see cref="UseHttp2s(Action{TcpConnectionListenerOptions}, TlsServerOptions)"/>:
         /// the endpoint is configured through the callback while the certificate flows through
         /// <paramref name="tlsOptions"/>. The ALPN/TLS defaults are applied to <paramref name="tlsOptions"/>
-        /// eagerly (a mutation, so a subsequent read observes them); the QUIC listener itself is bound at
-        /// materialization (server start), never at configuration time. Materialization throws
+        /// eagerly (a mutation, so a subsequent read observes them); the QUIC listener itself is bound by
+        /// the awaited server start, never at configuration time. Binding throws
         /// <see cref="PlatformNotSupportedException"/> at start when the platform lacks QUIC support.
         /// </remarks>
         [SupportedOSPlatform("windows")]
@@ -279,7 +290,7 @@ public static class WebHostingExtensions
                 configure(quicOptions);
                 quicOptions.ServerAuthenticationOptions = tlsOptions.AuthenticationOptions;
 
-                return MaterializeQuicListener(quicOptions);
+                return new QuicConnectionListener(quicOptions);
             });
         }
     }
@@ -325,21 +336,4 @@ public static class WebHostingExtensions
         }
     }
 
-    /// <summary>
-    /// Materializes a QUIC connection listener from the supplied options. Binding QUIC is asynchronous
-    /// (<c>QuicConnectionListener.CreateAsync</c>) but the transport's multiplexed listener factory seam
-    /// is synchronous, so this blocks once — at server start, when the
-    /// <see cref="HttpConnectionListener"/> invokes the deferred factory — offloading the bind to the
-    /// thread pool so no captured <see cref="System.Threading.SynchronizationContext"/> can deadlock it.
-    /// A <see cref="PlatformNotSupportedException"/> from an unsupported platform surfaces here (at start).
-    /// </summary>
-    /// <param name="quicOptions">The QUIC listener options to bind.</param>
-    /// <returns>The bound QUIC connection listener.</returns>
-    [SupportedOSPlatform("windows")]
-    [SupportedOSPlatform("linux")]
-    [SupportedOSPlatform("macos")]
-    private static QuicConnectionListener MaterializeQuicListener(QuicConnectionListenerOptions quicOptions)
-    {
-        return Task.Run(() => QuicConnectionListener.CreateAsync(quicOptions).AsTask()).GetAwaiter().GetResult();
-    }
 }

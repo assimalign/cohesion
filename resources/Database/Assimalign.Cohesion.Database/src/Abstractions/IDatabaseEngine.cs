@@ -10,14 +10,14 @@ namespace Assimalign.Cohesion.Database;
 /// </summary>
 /// <remarks>
 /// Each engine implementation is model-specific (SQL, Document, Graph, Blob, or
-/// Key-Value). Subsystems such as storage, write-ahead logging, indexing, and the
-/// engine's background workers are composed internally by the engine and are not
-/// exposed on this interface.
+/// Key-Value). Storage, write-ahead logging, and indexing remain model-specific.
+/// Model builders compose workers and optional servers; this interface exposes
+/// their read-only inventories.
 /// <para>
 /// <b>An engine is a data machine, not a service:</b> it is fully operational from
 /// creation — its background workers (<see cref="Workers"/>) spawn with it — and it
 /// has no start/stop ceremony. Disposal is the engine's one lifecycle transition:
-/// it quiesces the background workers, durably flushes every open database, and
+/// it disposes nested servers, quiesces the background workers, durably flushes every open database, and
 /// closes them — work committed before disposal is durable when
 /// <see cref="IAsyncDisposable.DisposeAsync"/> completes. Disposal is idempotent.
 /// "Running" belongs to the things built <em>on</em> engines (an
@@ -51,9 +51,15 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     /// Gets the engine-owned background workers (checkpointing, write-ahead-log
     /// flushing, page write-back, maintenance), for observability: name, role, and
     /// cadence. Workers spawn when the engine is created and quiesce when it is
-    /// disposed; scheduling is engine-internal and not composable from outside.
+    /// disposed; the engine owns scheduling for built-in and registered workers.
     /// </summary>
     IReadOnlyList<IDatabaseEngineWorker> Workers { get; }
+
+    /// <summary>
+    /// Gets the servers composed beneath this engine. The engine owns disposal;
+    /// the application snapshots this list at Build and drives start and stop.
+    /// </summary>
+    IReadOnlyList<IDatabaseServer> Servers { get; }
 
     /// <summary>
     /// Creates a new logical database with the specified name.
@@ -63,7 +69,7 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     /// <returns>The newly created database instance.</returns>
     /// <exception cref="DatabaseException">Thrown when a database with the same name already exists.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when the engine has been disposed.</exception>
-    ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default);
+    ValueTask<IDatabase> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Opens an existing logical database by name.
@@ -71,9 +77,9 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     /// <param name="name">The name of the database to open.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The opened database instance.</returns>
-    /// <exception cref="DatabaseException">Thrown when the database does not exist.</exception>
+    /// <exception cref="DatabaseNotFoundException">Thrown when the database does not exist.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when the engine has been disposed.</exception>
-    ValueTask<IDatabase> OpenDatabaseAsync(string name, CancellationToken cancellationToken = default);
+    ValueTask<IDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Drops an existing logical database and its associated storage.
@@ -82,7 +88,7 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <exception cref="DatabaseException">Thrown when the database does not exist.</exception>
     /// <exception cref="ObjectDisposedException">Thrown when the engine has been disposed.</exception>
-    ValueTask DropDatabaseAsync(string name, CancellationToken cancellationToken = default);
+    ValueTask DropDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Enumerates all logical databases managed by this engine.
@@ -99,5 +105,5 @@ public interface IDatabaseEngine : IAsyncDisposable, IDisposable
     /// <param name="database">When this method returns true, the database instance.</param>
     /// <returns>True if the database exists; otherwise false.</returns>
     /// <exception cref="ObjectDisposedException">Thrown when the engine has been disposed.</exception>
-    bool TryGetDatabase(string name, out IDatabase database);
+    bool TryGetDatabase(DatabaseName name, out IDatabase database);
 }

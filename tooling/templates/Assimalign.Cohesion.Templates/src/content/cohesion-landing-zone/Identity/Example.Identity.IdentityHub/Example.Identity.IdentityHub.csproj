@@ -1,0 +1,22 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.IdentityHub">
+  <!-- The organization's identity provider: an ordinary executable whose Program.cs composes the directory, the token
+       service, the OIDC issuer and the user-flow pipelines in C#. Signing keys and TLS come from the Platform SecretStore
+       across the application boundary. Default control plane commands: identityhub.audience, identityhub.client.
+       Sdk.IdentityHub defaults: endpoint `https` (8443), readiness http:/readyz, mount `data` (Volume, 10Gi), StatefulSet. -->
+  <PropertyGroup>
+    <CohesionResourceName>identity-hub</CohesionResourceName>
+    <!-- Opt-in to orchestration. Enabled: Sdk.IdentityHub generates resource.json (the manifest), Resource.g.cs (typed accessors:
+         Resource.Endpoints/Mounts/Settings/References over the ambient ResourceContext) and ResourceControlPlane.g.cs (the
+         IdentityHub default control plane — readiness, health, observed endpoints, stop, IdentityHub commands — owned by
+         IdentityHub.ApplicationModel). Disabled (the default): a plain executable that no gateway can reference. -->
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionEndpoint Update="https" Public="true" Certificate="tls" />
+    <CohesionMount Update="tls" Source="platform-secretstore:certs/identity-hub" />
+    <CohesionMount Include="signing" Kind="Secret" Source="platform-secretstore:identity/signing-keys" />
+    <CohesionSetting Include="IdentityHub:Issuer" Type="Uri" Default="https://identity.example.com" />
+    <!-- Application `platform`: generated as Externals.PlatformSecretStore in the identity gateway. -->
+    <CohesionResourceReference Include="..\..\Platform\Example.Platform.SecretStore\Example.Platform.SecretStore.csproj" />
+  </ItemGroup>
+</Project>

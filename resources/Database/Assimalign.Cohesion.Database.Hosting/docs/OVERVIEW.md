@@ -1,68 +1,35 @@
 # Assimalign.Cohesion.Database.Hosting
 
-## Summary
-
-The standalone hosting application for the database resource: a `Host<TContext>`
-subclass that composes the resource's units of work as hosted services on the
-per-service execution menu, and the one DI/Configuration/Logging seam for the
-area. Composition-only: it wraps the composed per-model wire-protocol servers
-(`IDatabaseServer`) generically as endpoint host services — the server machinery
-itself lives inside each model package (the SQL model's `SqlDatabaseServer` in
-`Assimalign.Cohesion.Database.Sql`), and engines are self-sufficient data
-machines this module never drives (see `docs/DESIGN.md`).
-
-## Current Evaluation
-
-- Status: Composition delivered on the redesigned shape (2026-07-13) — the
-  application runs the composition root's services, then the registered servers
-  (started last, drained first), and implements the root's application-builder
-  seam. Engines take no part in the host lifecycle; workers are engine-internal.
-- Project references: `Assimalign.Cohesion.Database` (area root) and
-  `Assimalign.Cohesion.Hosting` (non-area hosting foundation). Nothing else — no
-  `Connections`, no `CohesionHostingIsolationExemptions`.
-
-## Primary Responsibilities
-
-- `DatabaseApplication` owns the resource process lifecycle (start, run, stop)
-  via `Host<DatabaseApplicationContext>`, composing (in registration order) the
-  composition root's additional host services, then one endpoint service per
-  registered server — servers start last and drain first.
-- `DatabaseApplicationContext` implements the root's
-  `IDatabaseApplicationContext`: the registered servers (plural — one per model)
-  and the server-less engine registrations.
-- `DatabaseApplicationOptions` collects the servers, the embedded engine
-  registrations, and additional `IHostService`s.
-- `DatabaseHostConfiguration` binds the environment-variable conventions a
-  gateway injects (data path, endpoint port, durability).
-
-## Key Types
-
-- `DatabaseApplication` (implements the root's `IDatabaseApplication`; `CreateBuilder()` is the composition entry point)
-- `DatabaseApplicationBuilder` (implements the root's `IDatabaseApplicationBuilder`)
-- `DatabaseApplicationContext` (implements the root's `IDatabaseApplicationContext`)
-- `DatabaseApplicationOptions`
-- `DatabaseHostConfiguration`
-
-## Composing a host
-
-Builder-first — model packages register their engines *and servers* through the
-root's `IDatabaseApplicationBuilder` seam (verbs ship with the model package,
-e.g. `AddSqlDatabase` / `AddSqlServer` in `Database.Sql`):
+`DatabaseApplication.CreateBuilder(args)` composes a complete Database host through dependency-free model intent, one-shot Build, then ordinary engine access or the Hosting Run extensions. Engines are operational at Build; optional nested servers begin listening at Start.
 
 ```csharp
-var builder = DatabaseApplication.CreateBuilder();
+using Assimalign.Cohesion.Database.Hosting;
+using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Hosting;
 
-SqlDatabaseEngine engine = builder.AddSqlDatabase(options => options.RootPath = dataPath);
-SqlDatabaseServer server = builder.AddSqlServer(engine, options => options.Listener = listener);
+var builder = DatabaseApplication.CreateBuilder(args);
+builder.AddSql((_, engine) =>
+{
+    engine.EngineName = "orders";
+    engine.RootPath = dataPath;
+    engine.AddServer(value => SqlDatabaseServer.Create(
+        (SqlDatabaseEngine)value, new SqlDatabaseServerOptions { Listener = listener }));
+});
+builder.AddDatabase("orders", "orders", SqlSchema.Compile("orders", database =>
+    database.Table<Order>(table => table.Key(order => order.Id))));
 
 await using var app = builder.Build();
-await app.RunAsync();   // starts services, then the servers (the engine is already live)
+var orders = app.Context.GetEngine("orders");
+await app.RunAsync();
 ```
 
-Hosting-only composition (additional host services) lives on `builder.Options`;
-constructing `new DatabaseApplication(options)` directly from fully populated
-options remains supported. A custom or embedded host creates a model server
-(`SqlDatabaseServer.Create(engine, options)`) and drives
-`IDatabaseServer.StartAsync`/`StopAsync` on its own lifecycle — or skips servers
-entirely and uses the engine in-process. `Database.Client` is the counterpart on
-the other end of the wire.
+Model verbs are `AddSql`, `AddDocuments`, `AddGraph`, `AddKeyValue`, and `AddBlob`; they return the application builder and ship with their model package. Servers and workers are registered with deferred factories on the model engine builder. There is no application-level AddServer or Use composition method. Direct model `Engine.Create(options)` remains available for standalone use.
+
+The concrete hosting builder supplies `Configuration`, `Services`, build-aware `AddEngine(name, factory)`, additional lifecycle services, health contributions and named compiled-schema provisioning. Services start before servers; servers drain first. The root interfaces expose no configuration or DI types. Runtime context includes all engines, their nested servers, configuration and services.
+
+Instance engines and services remain caller-owned. Factory products belong to the application; engines own their nested servers/workers. Application disposal stops the host, disposes its owned services and engines, then its provider, configuration and configuration file system. Legacy options/direct construction remain borrowed-input paths. Each application supports one start lifecycle.
+
+Configuration loads optional base/environment JSON, `COHESION_CONFIG__` environment variables, captured args and explicit providers. Services use the Cohesion interpreted resolver (`EnableDynamicCode = false`) on both JIT and NativeAOT, with scope validation and explicit closed factories/instances. See [DESIGN.md](DESIGN.md) for ordering, rollback, isolation and ownership details.
+
+The runtime references the area root and non-area infrastructure, never Database model packages. Existing enabled-resource runner/admin/telemetry integration is preserved; this implementation adds no ApplicationModel functionality.

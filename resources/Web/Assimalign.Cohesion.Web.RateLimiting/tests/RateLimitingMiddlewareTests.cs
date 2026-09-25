@@ -24,7 +24,7 @@ namespace Assimalign.Cohesion.Web.RateLimiting.Tests;
 /// </summary>
 public class RateLimitingMiddlewareTests
 {
-    private static readonly TimeSpan TestBudget = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testBudget = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - UseRateLimiting: Should throw on a null pipeline builder")]
     public void UseRateLimiting_NullBuilder_ShouldThrow()
@@ -398,13 +398,13 @@ public class RateLimitingMiddlewareTests
 
         // Act — request one enters the handler holding the only permit.
         Task firstRequest = ExecuteAsync(pipeline, first);
-        await firstEntered.Task.WaitAsync(TestBudget);
+        await firstEntered.Task.WaitAsync(_testBudget);
 
         // Request two arrives while the permit is held.
         await ExecuteAsync(pipeline, second);
 
         releaseFirst.SetResult();
-        await firstRequest.WaitAsync(TestBudget);
+        await firstRequest.WaitAsync(_testBudget);
 
         // Assert
         second.Response.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
@@ -424,7 +424,7 @@ public class RateLimitingMiddlewareTests
 
     private static async Task ExecuteAsync(IWebApplicationPipeline pipeline, RateLimitTestContext context)
     {
-        using CancellationTokenSource cancellation = new(TestBudget);
+        using CancellationTokenSource cancellation = new(_testBudget);
         await pipeline.ExecuteAsync(context, cancellation.Token);
     }
 }

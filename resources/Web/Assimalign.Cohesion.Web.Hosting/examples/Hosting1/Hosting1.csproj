@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Hosting1</RootNamespace>
 		<OutputType>Exe</OutputType>
 	</PropertyGroup>
 	<ItemGroup>

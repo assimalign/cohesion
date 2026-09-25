@@ -1,0 +1,235 @@
+<Project>
+	<PropertyGroup>
+		<CohesionGatewaySourcePath Condition="'$(CohesionGatewaySourcePath)' == ''">$(IntermediateOutputPath)cohesion/Gateway.g.cs</CohesionGatewaySourcePath>
+	</PropertyGroup>
+
+	<!--
+		Gateway.g.cs is a build output: CohesionCreateResourceVerbs adds its Compile item, so
+		no obj path is a project item at evaluation time.
+	-->
+	<PropertyGroup>
+		<CohesionGatewayRequiresJit Condition="'$(CohesionGatewayRequiresJit)' == ''">false</CohesionGatewayRequiresJit>
+		<PublishAot Condition="'$(CohesionGatewayAot)' == 'true'">true</PublishAot>
+		<PublishAot Condition="'$(CohesionGatewayAot)' == 'false'">false</PublishAot>
+	</PropertyGroup>
+
+	<Target
+		Name="CohesionResolveGatewayAot"
+		BeforeTargets="CollectPackageReferences;ProcessFrameworkReferences;PrepareForBuild;Publish">
+		<ItemGroup>
+			<_CohesionGatewayJitProvider
+				Include="@(CohesionGatewayProvider)"
+				Condition="'%(CohesionGatewayProvider.RequiresJit)' == 'true'" />
+		</ItemGroup>
+		<PropertyGroup>
+			<CohesionGatewayRequiresJit Condition="'@(_CohesionGatewayJitProvider)' != ''">true</CohesionGatewayRequiresJit>
+			<CohesionGatewayRequiresJit Condition="'@(_CohesionGatewayJitProvider)' == ''">false</CohesionGatewayRequiresJit>
+			<PublishAot Condition="'$(CohesionGatewayAot)' == 'true'">true</PublishAot>
+			<PublishAot Condition="'$(CohesionGatewayAot)' == 'false'">false</PublishAot>
+			<PublishAot Condition="'$(CohesionGatewayAot)' == 'auto' and '$(CohesionGatewayRequiresJit)' == 'true'">false</PublishAot>
+			<PublishAot Condition="'$(CohesionGatewayAot)' == 'auto' and '$(CohesionGatewayRequiresJit)' != 'true'">true</PublishAot>
+		</PropertyGroup>
+	</Target>
+
+	<Target
+		Name="CohesionValidateGatewayConfiguration"
+		BeforeTargets="PrepareForBuild;CoreCompile"
+		DependsOnTargets="CohesionResolveGatewayAot">
+		<Error Condition="'$(CohesionApplicationName)' == ''" Text="Sdk.Gateway requires CohesionApplicationName." />
+		<Error Condition="'$(CohesionGatewayAot)' != 'auto' and '$(CohesionGatewayAot)' != 'true' and '$(CohesionGatewayAot)' != 'false'" Text="CohesionGatewayAot must be auto, true, or false." />
+		<Error Condition="'$(CohesionGatewayInProcess)' != 'true' and '$(CohesionGatewayInProcess)' != 'false'" Text="CohesionGatewayInProcess must be true or false." />
+		<Error
+			Condition="'$(_CohesionGatewayInProcessSelected)' == 'True' and '$(CohesionGatewayInProcess)' != 'true' and '@(_CohesionResourceProjectReference)' != ''"
+			Code="COHGW002"
+			File="$(MSBuildProjectFullPath)"
+			Text="Sdk.Gateway selected InProcess for project resources, but CohesionGatewayInProcess is not enabled. Set CohesionGatewayInProcess=true to opt into loading the enabled, composable project-resource closure in the gateway process." />
+		<Message
+			Condition="'$(CohesionGatewayAot)' != 'auto' or '$(CohesionGatewayRequiresJit)' == 'true'"
+			Importance="High"
+			Text="Sdk.Gateway AOT selection: CohesionGatewayAot=$(CohesionGatewayAot), CohesionGatewayRequiresJit=$(CohesionGatewayRequiresJit), PublishAot=$(PublishAot)." />
+	</Target>
+
+	<!--
+		The typed area verbs compile only against ApplicationModel assemblies this project
+		references: the ones the Gateway SDK derived from its resource references, plus any
+		the consumer added itself.
+	-->
+	<Target Name="_CohesionCollectAvailableApplicationModels">
+		<ItemGroup>
+			<_CohesionGatewayAvailableApplicationModel
+				Include="@(PackageReference)"
+				Condition="$([System.String]::Copy('%(Identity)').EndsWith('.ApplicationModel', System.StringComparison.OrdinalIgnoreCase))" />
+			<_CohesionGatewayAvailableApplicationModel
+				Include="@(ProjectReference->'%(Filename)')"
+				Condition="$([System.String]::Copy('%(Filename)').EndsWith('.ApplicationModel', System.StringComparison.OrdinalIgnoreCase))" />
+		</ItemGroup>
+	</Target>
+
+	<!--
+		Runs before BeforeCompile so Gateway.g.cs is part of the compile dependency cache, and
+		in design-time builds so Visual Studio compiles it. A design-time build never builds the
+		members (BuildProjectReferences=false), so their assemblies may be absent: it keeps an
+		existing Gateway.g.cs untouched and, when none exists, generates the surface without
+		the in-process pass. The real build regenerates with the bindings; the composition
+		surface IntelliSense sees is identical either way.
+	-->
+	<Target
+		Name="CohesionCreateResourceVerbs"
+		AfterTargets="ResolveProjectReferences"
+		BeforeTargets="BeforeCompile;CoreCompile"
+		DependsOnTargets="CohesionResolveResourceReferences;_CohesionCollectAvailableApplicationModels">
+		<PropertyGroup>
+			<_CohesionGatewayDesignTime Condition="'$(DesignTimeBuild)' == 'true'">true</_CohesionGatewayDesignTime>
+			<_CohesionGatewayInProcessPass>$(_CohesionGatewayInProcessActive)</_CohesionGatewayInProcessPass>
+			<_CohesionGatewayInProcessPass Condition="'$(_CohesionGatewayDesignTime)' == 'true'">false</_CohesionGatewayInProcessPass>
+		</PropertyGroup>
+		<CohesionCreateResourceVerbs
+			Condition="'$(_CohesionGatewayDesignTime)' != 'true' or !Exists('$(CohesionGatewaySourcePath)')"
+			SourceOutputPath="$(CohesionGatewaySourcePath)"
+			ProjectFullPath="$(MSBuildProjectFullPath)"
+			ApplicationName="$(CohesionApplicationName)"
+			Gateways="$(CohesionGateways)"
+			InProcessEnabled="$(_CohesionGatewayInProcessPass)"
+			ResourceReferences="@(CohesionResourceReference)"
+			ReferencedManifests="@(_CohesionReferencedManifest);@(CohesionResourceManifest->WithMetadataValue('IsSelf', 'false'))"
+			ResourceKinds="@(CohesionGatewayResourceKind)"
+			AvailableApplicationModels="@(_CohesionGatewayAvailableApplicationModel)"
+			GatewayProviders="@(CohesionGatewayProvider)"
+			ClientKinds="@(CohesionGatewayClientKind)">
+			<Output TaskParameter="RequiredApplicationModels" ItemName="_CohesionGatewayRequiredApplicationModel" />
+			<Output TaskParameter="RequiredClientPackages" ItemName="_CohesionGatewayRequiredClientPackage" />
+			<Output TaskParameter="InProcessProjectReferences" ItemName="_CohesionGatewayInProcessProjectReference" />
+		</CohesionCreateResourceVerbs>
+		<ItemGroup>
+			<_CohesionGatewayInProcessEntryAssembly
+				Include="@(_CohesionGatewayInProcessProjectReference->'%(TargetPath)')">
+				<CopyLocal>true</CopyLocal>
+				<Private>true</Private>
+				<DestinationSubPath>%(Filename)%(Extension)</DestinationSubPath>
+				<RelativePath>%(Filename)%(Extension)</RelativePath>
+				<CohesionAssetKind>EntryAssembly</CohesionAssetKind>
+			</_CohesionGatewayInProcessEntryAssembly>
+			<_CohesionGatewayInProcessEntryAssembly
+				Update="@(_CohesionGatewayInProcessEntryAssembly)"
+				RemoveMetadata="OutputItemType;ReferenceOutputAssembly;ResourceName;TargetPath" />
+		</ItemGroup>
+		<MSBuild
+			Projects="@(_CohesionGatewayInProcessProjectReference)"
+			Targets="CohesionGetInProcessRuntimeAssets"
+			BuildInParallel="$(BuildInParallel)"
+			Properties="Configuration=$(Configuration);Platform=$(Platform);TargetFramework=$(TargetFramework);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained)"
+			SkipNonexistentTargets="false"
+			RemoveProperties="OutDir;PublishDir"
+			Condition="'$(_CohesionGatewayInProcessPass)' == 'true' and '@(_CohesionGatewayInProcessProjectReference)' != ''">
+			<Output TaskParameter="TargetOutputs" ItemName="_CohesionGatewayInProcessRuntimeAsset" />
+		</MSBuild>
+		<Message Importance="Low" Text="Sdk.Gateway manifest application models: @(_CohesionGatewayRequiredApplicationModel)." />
+		<Message Importance="Low" Text="Sdk.Gateway manifest mount and command clients: @(_CohesionGatewayRequiredClientPackage)." />
+		<ItemGroup>
+			<_CohesionGatewayInProcessRuntimeAsset
+				Update="@(_CohesionGatewayInProcessRuntimeAsset)"
+				RemoveMetadata="OutputItemType;Private;ReferenceOutputAssembly;ResourceName;TargetPath" />
+			<Compile Include="$(CohesionGatewaySourcePath)" />
+			<FileWrites Include="$(CohesionGatewaySourcePath)" />
+			<!--
+				Transitive resource projects are manifest references in their immediate parent.
+				Add their built assemblies before ResolveAssemblyReferences so generated
+				bindings can statically root and load the complete in-process closure.
+			-->
+			<Reference Include="@(_CohesionGatewayInProcessEntryAssembly)">
+				<Private>true</Private>
+			</Reference>
+			<Reference Include="@(_CohesionGatewayInProcessRuntimeAsset->WithMetadataValue('CohesionAssetKind', 'Reference'))">
+				<Private>true</Private>
+			</Reference>
+			<RuntimeCopyLocalItems Include="@(_CohesionGatewayInProcessRuntimeAsset->WithMetadataValue('CohesionAssetKind', 'Runtime'))" />
+			<NativeCopyLocalItems Include="@(_CohesionGatewayInProcessRuntimeAsset->WithMetadataValue('CohesionAssetKind', 'Native'))" />
+			<ResourceCopyLocalItems Include="@(_CohesionGatewayInProcessRuntimeAsset->WithMetadataValue('CohesionAssetKind', 'Resource'))" />
+			<RuntimeTargetsCopyLocalItems Include="@(_CohesionGatewayInProcessRuntimeAsset->WithMetadataValue('CohesionAssetKind', 'RuntimeTarget'))" />
+			<_ResolvedCopyLocalBuildAssets Include="@(_CohesionGatewayInProcessEntryAssembly);@(_CohesionGatewayInProcessRuntimeAsset)" />
+			<ReferenceCopyLocalPaths Include="@(_CohesionGatewayInProcessEntryAssembly);@(_CohesionGatewayInProcessRuntimeAsset)" />
+		</ItemGroup>
+	</Target>
+
+	<!-- Preserve the selected child closure when publish recomputes assets from only the gateway lock file. -->
+	<Target
+		Name="CohesionAddInProcessRuntimeAssetsToPublish"
+		AfterTargets="_ResolveCopyLocalAssetsForPublish"
+		BeforeTargets="_HandlePackageFileConflictsForPublish"
+		DependsOnTargets="CohesionCreateResourceVerbs"
+		Condition="'$(_CohesionGatewayInProcessActive)' == 'true' and ('@(_CohesionGatewayInProcessEntryAssembly)' != '' or '@(_CohesionGatewayInProcessRuntimeAsset)' != '')">
+		<ItemGroup>
+			<_ResolvedCopyLocalPublishAssets
+				Include="@(_CohesionGatewayInProcessEntryAssembly);@(_CohesionGatewayInProcessRuntimeAsset)"
+				Exclude="@(_ResolvedCopyLocalPublishAssets)" />
+		</ItemGroup>
+	</Target>
+
+	<Target
+		Name="CohesionCollectInProcessResourceContent"
+		BeforeTargets="_GetCopyToOutputDirectoryItemsFromThisProject;GetCopyToPublishDirectoryItems"
+		DependsOnTargets="CohesionCreateResourceVerbs"
+		Condition="'$(_CohesionGatewayInProcessActive)' == 'true'">
+		<MSBuild
+			Projects="@(_CohesionGatewayInProcessProjectReference)"
+			Targets="CohesionGetInProcessContentItems"
+			BuildInParallel="$(BuildInParallel)"
+			Properties="Configuration=$(Configuration);Platform=$(Platform);TargetFramework=$(TargetFramework);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained)"
+			SkipNonexistentTargets="false"
+			RemoveProperties="OutDir;PublishDir"
+			Condition="'@(_CohesionGatewayInProcessProjectReference)' != ''">
+			<Output TaskParameter="TargetOutputs" ItemName="_CohesionGatewayInProcessContentFromResource" />
+		</MSBuild>
+
+		<ItemGroup Condition="'@(_CohesionGatewayInProcessProjectReference)' != ''">
+			<!-- Strip MSBuildSourceProjectFile so the remapped files are this project's isolated content. -->
+			<ContentWithTargetPath
+				Include="@(_CohesionGatewayInProcessContentFromResource->'%(FullPath)')"
+				KeepMetadata="CopyToOutputDirectory;CopyToPublishDirectory;ExcludeFromSingleFile;TargetPath" />
+		</ItemGroup>
+	</Target>
+
+	<Target Name="CohesionValidateGatewayHostingIsolation" AfterTargets="ResolveAssemblyReferences" Condition="'$(CohesionGatewayInProcess)' != 'true'">
+		<ItemGroup>
+			<_CohesionForbiddenGatewayHostingReference
+				Include="@(ReferencePath)"
+				Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(Filename)', '^Assimalign\.Cohesion\..+\.Hosting$', System.Text.RegularExpressions.RegexOptions.IgnoreCase))" />
+		</ItemGroup>
+		<Error
+			Condition="'@(_CohesionForbiddenGatewayHostingReference)' != ''"
+			Code="COHGW001"
+			File="$(MSBuildProjectFullPath)"
+			Text="Out-of-process Sdk.Gateway project '$(MSBuildProjectName)' resolved forbidden Hosting assembly '%(_CohesionForbiddenGatewayHostingReference.Filename)'. Remove the runtime reference or set CohesionGatewayInProcess=true for the sanctioned Composite boundary." />
+	</Target>
+
+	<!--
+		CoreClean deletes Gateway.g.cs with the other file writes; Clean then regenerates it
+		so IntelliSense keeps the generated verbs between a clean and the next build. This is
+		a separate target with its own task invocation rather than a dependency on
+		CohesionCreateResourceVerbs: a target runs once per build, so a Rebuild's Build phase
+		must still run the real target with its in-process pass, whose member assemblies do
+		not exist right after a Clean. The generated composition surface is identical; only
+		the in-process bindings and the Compile item are left to the next build. A project
+		that was never restored has no provider items and nothing an editor could have seen,
+		so Clean leaves it alone.
+	-->
+	<Target
+		Name="CohesionRegenerateGatewaySourceAfterClean"
+		AfterTargets="Clean"
+		DependsOnTargets="CohesionResolveResourceReferences;_CohesionCollectAvailableApplicationModels"
+		Condition="Exists('$(ProjectAssetsFile)') and '@(CohesionGatewayProvider)' != ''">
+		<CohesionCreateResourceVerbs
+			SourceOutputPath="$(CohesionGatewaySourcePath)"
+			ProjectFullPath="$(MSBuildProjectFullPath)"
+			ApplicationName="$(CohesionApplicationName)"
+			Gateways="$(CohesionGateways)"
+			InProcessEnabled="false"
+			ResourceReferences="@(CohesionResourceReference)"
+			ReferencedManifests="@(_CohesionReferencedManifest);@(CohesionResourceManifest->WithMetadataValue('IsSelf', 'false'))"
+			ResourceKinds="@(CohesionGatewayResourceKind)"
+			AvailableApplicationModels="@(_CohesionGatewayAvailableApplicationModel)"
+			GatewayProviders="@(CohesionGatewayProvider)"
+			ClientKinds="@(CohesionGatewayClientKind)" />
+	</Target>
+	<Import Project="Sdk.Gateway.Images.targets" />
+</Project>

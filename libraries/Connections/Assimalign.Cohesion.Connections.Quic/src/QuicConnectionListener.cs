@@ -5,38 +5,46 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Connections.Internal;
-
 namespace Assimalign.Cohesion.Connections.Quic;
 
 /// <summary>
 /// Listens for inbound QUIC connections and surfaces each as a <see cref="QuicMultiplexedConnection"/>.
 /// </summary>
 /// <remarks>
-/// Binding a QUIC listener is inherently asynchronous, so instances are created through
-/// <see cref="CreateAsync(QuicConnectionListenerOptions, CancellationToken)"/> rather than a constructor.
+/// Constructing a listener does not acquire its endpoint. Call <see cref="BindAsync(CancellationToken)"/>
+/// explicitly, or use <see cref="CreateAsync(QuicConnectionListenerOptions, CancellationToken)"/> as a
+/// compatibility convenience that constructs and binds in one operation.
 /// </remarks>
 [SupportedOSPlatform("windows")]
 [SupportedOSPlatform("linux")]
 [SupportedOSPlatform("macos")]
 public sealed class QuicConnectionListener : MultiplexedConnectionListener
 {
-    private readonly QuicListener _listener;
     private readonly QuicConnectionListenerOptions _options;
     private readonly ListenerId _listenerId = ListenerId.New();
+    private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
 
+    private QuicListener? _listener;
     private bool _isDisposed;
 
-    private QuicConnectionListener(QuicListener listener, QuicConnectionListenerOptions options)
+    /// <summary>
+    /// Initializes an unbound QUIC connection listener.
+    /// </summary>
+    /// <param name="options">The QUIC server options.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
+    public QuicConnectionListener(QuicConnectionListenerOptions options)
     {
-        _listener = listener;
-        _options = options;
+        ArgumentNullException.ThrowIfNull(options);
 
-        ConnectionEventSource.Log.ListenerInitialized(ConnectionProtocol.Quic, _listenerId);
+        _options = options;
     }
 
     /// <inheritdoc />
-    public override EndPoint EndPoint => _listener.LocalEndPoint;
+    /// <remarks>
+    /// Before the listener is bound this is the configured endpoint; afterwards it is the actual
+    /// local endpoint of the QUIC listener (relevant when binding to port 0).
+    /// </remarks>
+    public override EndPoint EndPoint => _listener?.LocalEndPoint ?? _options.EndPoint;
 
     /// <inheritdoc />
     public override ConnectionCapabilities Capabilities { get; } = new ConnectionCapabilities(
@@ -46,6 +54,55 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
         IsOrdered: true,
         IsMultiplexed: true,
         ConnectionSecurity.Tls);
+
+    /// <inheritdoc />
+    /// <exception cref="ObjectDisposedException">Thrown when the listener has been disposed.</exception>
+    /// <exception cref="PlatformNotSupportedException">Thrown when QUIC is not supported on the current platform.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when no server certificate or no ALPN application protocol is configured.
+    /// </exception>
+    public override async ValueTask BindAsync(CancellationToken cancellationToken = default)
+    {
+        await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            ObjectDisposedException.ThrowIf(_isDisposed, this);
+
+            if (_listener is not null)
+            {
+                return;
+            }
+
+            if (!QuicListener.IsSupported)
+            {
+                throw new PlatformNotSupportedException("QUIC is not supported on the current platform.");
+            }
+
+            ValidateServerAuthenticationOptions(_options);
+
+            _listener = await QuicListener.ListenAsync(new QuicListenerOptions
+            {
+                ListenEndPoint = _options.EndPoint,
+                ApplicationProtocols = _options.ServerAuthenticationOptions.ApplicationProtocols!,
+                ListenBacklog = _options.Backlog,
+                ConnectionOptionsCallback = (connection, sslClientHelloInfo, token) => ValueTask.FromResult(new QuicServerConnectionOptions
+                {
+                    ServerAuthenticationOptions = _options.ServerAuthenticationOptions,
+                    MaxInboundBidirectionalStreams = _options.MaxBidirectionalStreamCount,
+                    MaxInboundUnidirectionalStreams = _options.MaxUnidirectionalStreamCount,
+                    DefaultCloseErrorCode = _options.DefaultCloseErrorCode,
+                    DefaultStreamErrorCode = _options.DefaultStreamErrorCode
+                })
+            }, cancellationToken).ConfigureAwait(false);
+
+            ConnectionDiagnostics.ListenerInitialized(ConnectionProtocol.Quic, _listenerId);
+        }
+        finally
+        {
+            _lifecycleLock.Release();
+        }
+    }
 
     /// <summary>
     /// Creates a QUIC connection listener bound to the endpoint configured on <paramref name="options"/>.
@@ -60,31 +117,10 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
     /// </exception>
     public static async ValueTask<QuicConnectionListener> CreateAsync(QuicConnectionListenerOptions options, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(options);
+        QuicConnectionListener listener = new(options);
+        await listener.BindAsync(cancellationToken).ConfigureAwait(false);
 
-        if (!QuicListener.IsSupported)
-        {
-            throw new PlatformNotSupportedException("QUIC is not supported on the current platform.");
-        }
-
-        ValidateServerAuthenticationOptions(options);
-
-        QuicListener listener = await QuicListener.ListenAsync(new QuicListenerOptions
-        {
-            ListenEndPoint = options.EndPoint,
-            ApplicationProtocols = options.ServerAuthenticationOptions.ApplicationProtocols!,
-            ListenBacklog = options.Backlog,
-            ConnectionOptionsCallback = (connection, sslClientHelloInfo, token) => ValueTask.FromResult(new QuicServerConnectionOptions
-            {
-                ServerAuthenticationOptions = options.ServerAuthenticationOptions,
-                MaxInboundBidirectionalStreams = options.MaxBidirectionalStreamCount,
-                MaxInboundUnidirectionalStreams = options.MaxUnidirectionalStreamCount,
-                DefaultCloseErrorCode = options.DefaultCloseErrorCode,
-                DefaultStreamErrorCode = options.DefaultStreamErrorCode
-            })
-        }, cancellationToken).ConfigureAwait(false);
-
-        return new QuicConnectionListener(listener, options);
+        return listener;
     }
 
     /// <summary>
@@ -113,9 +149,23 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
     /// <exception cref="ObjectDisposedException">Thrown when the listener has been disposed.</exception>
     public override async ValueTask<MultiplexedConnection> AcceptAsync(CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_isDisposed, this);
+        await BindAsync(cancellationToken).ConfigureAwait(false);
 
-        QuicConnection connection = await _listener.AcceptConnectionAsync(cancellationToken).ConfigureAwait(false);
+        QuicListener listener;
+
+        await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            ObjectDisposedException.ThrowIf(_isDisposed, this);
+            listener = _listener!;
+        }
+        finally
+        {
+            _lifecycleLock.Release();
+        }
+
+        QuicConnection connection = await listener.AcceptConnectionAsync(cancellationToken).ConfigureAwait(false);
         StreamPipeOptionsContext streamOptions = _options.CreateStreamOptions();
 
         try
@@ -138,14 +188,30 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
     /// <inheritdoc />
     public override async ValueTask DisposeAsync()
     {
-        if (_isDisposed)
+        QuicListener? listener;
+
+        await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+
+        try
         {
-            return;
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            _isDisposed = true;
+            listener = _listener;
+            _listener = null;
+        }
+        finally
+        {
+            _lifecycleLock.Release();
         }
 
-        _isDisposed = true;
-
-        await _listener.DisposeAsync().ConfigureAwait(false);
+        if (listener is not null)
+        {
+            await listener.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     private static void ValidateServerAuthenticationOptions(QuicConnectionListenerOptions options)

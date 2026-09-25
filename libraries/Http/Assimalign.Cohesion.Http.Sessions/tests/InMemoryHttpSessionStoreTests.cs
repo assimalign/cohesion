@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Http.Tests;
 
 public class InMemoryHttpSessionStoreTests
 {
-    private static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(20);
+    private static readonly TimeSpan _idleTimeout = TimeSpan.FromMinutes(20);
 
     [Fact(DisplayName = "Cohesion Test [Http.Sessions] - InMemoryStore: Set then Get should round-trip the payload")]
     public async Task SetAsync_GetAsync_ShouldRoundTripPayload()
@@ -21,7 +21,7 @@ public class InMemoryHttpSessionStoreTests
         byte[] payload = [1, 2, 3, 4];
 
         // Act
-        await store.SetAsync("id", payload, IdleTimeout);
+        await store.SetAsync("id", payload, _idleTimeout);
         byte[]? loaded = await store.GetAsync("id");
 
         // Assert
@@ -41,7 +41,7 @@ public class InMemoryHttpSessionStoreTests
     {
         // Arrange
         InMemoryHttpSessionStore store = new();
-        await store.SetAsync("id", [9], IdleTimeout);
+        await store.SetAsync("id", [9], _idleTimeout);
 
         // Act
         await store.RemoveAsync("id");
@@ -57,8 +57,8 @@ public class InMemoryHttpSessionStoreTests
         InMemoryHttpSessionStore store = new();
 
         // Act
-        await store.SetAsync("id", [1], IdleTimeout);
-        await store.SetAsync("id", [2, 2], IdleTimeout);
+        await store.SetAsync("id", [1], _idleTimeout);
+        await store.SetAsync("id", [2, 2], _idleTimeout);
         byte[]? loaded = await store.GetAsync("id");
 
         // Assert
@@ -71,10 +71,10 @@ public class InMemoryHttpSessionStoreTests
         // Arrange
         MutableTimeProvider clock = new(DateTimeOffset.UnixEpoch);
         InMemoryHttpSessionStore store = new(clock);
-        await store.SetAsync("id", [7], IdleTimeout);
+        await store.SetAsync("id", [7], _idleTimeout);
 
         // Act
-        clock.Advance(IdleTimeout + TimeSpan.FromSeconds(1));
+        clock.Advance(_idleTimeout + TimeSpan.FromSeconds(1));
         byte[]? loaded = await store.GetAsync("id");
 
         // Assert
@@ -87,13 +87,13 @@ public class InMemoryHttpSessionStoreTests
         // Arrange
         MutableTimeProvider clock = new(DateTimeOffset.UnixEpoch);
         InMemoryHttpSessionStore store = new(clock);
-        await store.SetAsync("id", [7], IdleTimeout);
+        await store.SetAsync("id", [7], _idleTimeout);
 
         // Act — access just before expiry renews the window, then advance again
-        clock.Advance(IdleTimeout - TimeSpan.FromMinutes(1));
+        clock.Advance(_idleTimeout - TimeSpan.FromMinutes(1));
         (await store.GetAsync("id")).ShouldNotBeNull(); // renews to now + IdleTimeout
 
-        clock.Advance(IdleTimeout - TimeSpan.FromMinutes(1)); // still inside the renewed window
+        clock.Advance(_idleTimeout - TimeSpan.FromMinutes(1)); // still inside the renewed window
         byte[]? stillAlive = await store.GetAsync("id");
 
         // Assert
@@ -106,12 +106,12 @@ public class InMemoryHttpSessionStoreTests
         // Arrange
         MutableTimeProvider clock = new(DateTimeOffset.UnixEpoch);
         InMemoryHttpSessionStore store = new(clock);
-        await store.SetAsync("id", [5], IdleTimeout);
+        await store.SetAsync("id", [5], _idleTimeout);
 
         // Act
-        clock.Advance(IdleTimeout - TimeSpan.FromMinutes(1));
-        await store.RefreshAsync("id", IdleTimeout);
-        clock.Advance(IdleTimeout - TimeSpan.FromMinutes(1));
+        clock.Advance(_idleTimeout - TimeSpan.FromMinutes(1));
+        await store.RefreshAsync("id", _idleTimeout);
+        clock.Advance(_idleTimeout - TimeSpan.FromMinutes(1));
         byte[]? loaded = await store.GetAsync("id");
 
         // Assert
@@ -124,6 +124,6 @@ public class InMemoryHttpSessionStoreTests
         InMemoryHttpSessionStore store = new();
 
         await Should.ThrowAsync<ArgumentException>(async () => await store.GetAsync(""));
-        await Should.ThrowAsync<ArgumentException>(async () => await store.SetAsync("", [1], IdleTimeout));
+        await Should.ThrowAsync<ArgumentException>(async () => await store.SetAsync("", [1], _idleTimeout));
     }
 }

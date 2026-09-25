@@ -25,13 +25,13 @@ namespace Assimalign.Cohesion.Web.Sessions.Tests;
 /// </summary>
 public class SessionEndToEndTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Sessions] - E2E: A session should round-trip across requests via the session cookie")]
     public async Task UseSessions_AcrossTwoRequests_ShouldPersistStateViaCookie()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -65,7 +65,7 @@ public class SessionEndToEndTests
     public async Task UseSessions_SessionUntouched_ShouldNotSetCookie()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -90,7 +90,7 @@ public class SessionEndToEndTests
     public async Task UseSessions_FreshClient_ShouldStartIndependentSession()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();

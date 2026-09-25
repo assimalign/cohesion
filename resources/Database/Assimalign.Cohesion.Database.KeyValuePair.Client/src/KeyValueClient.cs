@@ -1,6 +1,7 @@
 using System;
 
 using Assimalign.Cohesion.Database.Client;
+using Assimalign.Cohesion.Database.KeyValuePair.Client.Internal;
 
 namespace Assimalign.Cohesion.Database.KeyValuePair.Client;
 
@@ -36,6 +37,7 @@ public static class KeyValueClient
         {
             Settings = options.Settings,
             ConnectionFactory = options.ConnectionFactory,
+            Family = KeyValueProtocol.Family,
         });
 
         return new DefaultKeyValueClient(client, options.Settings, options.Observer);

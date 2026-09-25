@@ -73,7 +73,7 @@ own packages and depend on the foundation.
 - `src/Internal/NoopScopedLogger.cs` - resilience helper.
 - `src/Internal/LoggerFilterRuleSelector.cs` - rule selection algorithm.
 - `src/LoggerEntry.cs`, `src/LoggerEntryBuilder.cs`, `src/LogLevel.cs` - event types.
-- `src/Logger.cs`, `src/ScopedLogger.cs`, `src/LoggerProvider.cs` - reusable abstract base
+- `src/Abstractions/Logger.cs`, `src/Abstractions/ScopedLogger.cs`, `src/Abstractions/LoggerProvider.cs` - reusable abstract base
   classes implementing the boilerplate with non-virtual hot paths.
 - `src/LoggerFactory.cs`, `src/LoggerFactoryBuilder.cs`, `src/LoggerFactoryOptions.cs` -
   factory plumbing.

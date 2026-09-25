@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Token;
+using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.Internal;
 
 namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
@@ -16,10 +17,11 @@ namespace Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 /// This is the concrete JOSE/JWT document layer. It parses compact serialization, models the
 /// typed JOSE header, and validates the document-level rules (algorithm, required claims, and
 /// the keyless <c>at_hash</c>/<c>c_hash</c> value comparison). It does <em>not</em> verify the
-/// signature — that keyed operation is exposed as a seam through
-/// <see cref="IJsonWebToken.SigningInput" /> and <see cref="Parts" /> and belongs to a
-/// Security-layer package. The OpenID Connect <em>protocol</em> data rules (nonce match,
-/// authorized-party posture, <c>max_age</c>) belong to the OpenID Connect branch.
+/// signature as part of <c>Validate</c>; callers explicitly pass
+/// <see cref="IJsonWebToken.SigningInput" /> and <see cref="Parts" /> to an
+/// <see cref="IJsonWebTokenSignatureVerifier" /> before trusting claims. The OpenID Connect
+/// <em>protocol</em> data rules (nonce match, authorized-party posture, <c>max_age</c>) belong
+/// to the OpenID Connect branch.
 /// </para>
 /// </remarks>
 public sealed class JsonWebToken : IdentityToken, IJsonWebToken

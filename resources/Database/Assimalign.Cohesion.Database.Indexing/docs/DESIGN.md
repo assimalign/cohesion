@@ -10,6 +10,14 @@ Every model needs ordered lookups: SQL secondary indexes, document indexes, grap
 
 This is the same design center as FoundationDB tuples and MySQL/InnoDB memcmp-able keys: one dumb, fast comparator at the bottom, all type intelligence pushed to encoding.
 
+`IndexKey.FromString(value, collation)` delegates to the shared writer. `Binary`,
+`CaseInsensitive`, and `CaseAccentInsensitive` produce deterministic transformed
+UTF-8 keys. Equivalent spellings have identical bytes, equality, content hashes,
+and unique-lock identities; original spelling never breaks a collation tie.
+`Invariant` is explicitly not index-backed and key construction rejects it. The
+owning model must resolve index collation and seek eligibility; the B+Tree itself
+continues to compare raw bytes.
+
 ## The B+Tree implementation
 
 `BTreeIndexManager.Create(options)` composes B+Trees over `PageType.Index` pages —
@@ -79,6 +87,17 @@ transaction context — they run where no statement bracket exists:
   that must never wait inside a serialized apply scope can pre-acquire the
   unique-key lock in its own lock phase and rely on the lock manager's
   same-owner re-grant when the tree acquires it again internally.
+
+### Shared record-version undo binding (#918)
+
+`RecordVersionIndex` implements the new `Database.Transactions.IRecordVersionIndex`
+contract by forwarding encoded key bytes to the existing `IIndex.EraseAsync`
+and `ClearDeleterAsync` operations. Engines supply this bridge to the shared
+`RecordSpaceVersionStore` ledger. Index key construction and stamp verification
+remain in Indexing; Transactions needs no Indexing or area-root reference, and
+the existing `IIndex` and `IStorageTransactionSource` interfaces are unchanged.
+Open-time index scrubbing still uses `IIndexManager.PurgeWritersAsync` between
+the coordinator's record scrub and its final checkpoint.
 
 ## Entry references are opaque `ulong`s
 

@@ -14,7 +14,7 @@ using Assimalign.Cohesion.Files.Bmff.Internal;
 [DebuggerDisplay("Bmff Box: Edit (edts)")]
 public sealed class EditBox : BmffBoxComposite
 {
-    private IList<BmffBox> children = new List<BmffBox>();
+    private IList<BmffBox> _children = new List<BmffBox>();
 
     public EditBox(long offset, long limit)
     {
@@ -28,7 +28,7 @@ public sealed class EditBox : BmffBoxComposite
 
     public override BmffBoxType BoxType => BmffBoxType.Edit;
 
-    public override IEnumerable<BmffBox> Children => this.children;
+    public override IEnumerable<BmffBox> Children => this._children;
 
     public override void Read(BmffStream stream)
     {
@@ -40,7 +40,7 @@ public sealed class EditBox : BmffBoxComposite
             boxes.Add(reader.Current);
         }
 
-        children = boxes;
+        _children = boxes;
     }
 
     public override void Write(BmffStream stream)

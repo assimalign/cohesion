@@ -23,17 +23,23 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] No hardcoded versions on `<Import Sdk>` elements
 - [ ] `<IsAotCompatible>true</IsAotCompatible>` not removed or weakened (`analyzers/` is the sanctioned exception)
 - [ ] No new reflection-based serialization, runtime code generation, or `Assembly.LoadFrom()`; runtime type inspection goes through source generators
-- [ ] If a new SDK or framework was added, the manifest in `frameworks/Assimalign.Cohesion.App.props` and the `KnownFrameworkReference` registration in the base SDK were both updated
+- [ ] If a new SDK or framework was added, its member list (the new Runtime producer's `Directory.Build.props`, imported by the Refs producer's) and the `KnownFrameworkReference` registration in the base SDK were both written
 - [ ] `FrameworkList.xml` / `RuntimeList.xml` were not hand-edited
 
 ## Code surface
 
 - [ ] All new files use file-scoped namespaces
-- [ ] Namespace matches assembly name exactly
+- [ ] The csproj declares `<RootNamespace>` (COHNS001); namespaces match it — `{RootNamespace}.Internal` for internal types, never `.Abstractions`/`.Exceptions`/`.Extensions`/`.ValueObjects`
+- [ ] Types sit in the right folder (`general-rules.md`, "Library folder structure"): interfaces/abstract classes in `Abstractions/`, exceptions and `{Name}ErrorCode` enums in `Exceptions/`, extension containers in `Extensions/`, value objects in `ValueObjects/`, every internal type under `Internal/`; the first four stay flat
+- [ ] No primary constructors on classes or structs (positional records are fine)
+- [ ] Every private field — instance or static — is `_camelCase`
+- [ ] Assembly attributes, `InternalsVisibleTo` included, live in `Properties/AssemblyInfo.cs`, not the csproj
 - [ ] One public type per file (with grouped root-first naming for variant families, e.g., `Http2Frame.Header.cs`)
 - [ ] New public APIs are interfaces, with internal implementations (unless a documented deviation applies — see the exception protocol in `deviations.md`)
 - [ ] Public APIs have complete XML documentation (`<summary>`, `<param>`, `<returns>`, `<exception>`)
 - [ ] Internal types are `internal`, not `public`
+- [ ] No new `InternalsVisibleTo` between two shipped libraries — tests only (see `general-rules.md`)
+- [ ] Any source shared between assemblies lives in the owning project's `shared/` folder, is pulled in by a `CohesionSharedSource` item **in each consuming csproj**, and passes the link-safety test — stateless statics only, or types whose instances never cross an assembly boundary (no static mutable state, singletons, `EventSource`, locks, or id generators). See `general-rules.md`
 - [ ] No global usings or `<Using Include="..." />` items in csproj files
 - [ ] Using directives ordered: System, third-party, Cohesion, blank line before code
 - [ ] Code follows the existing patterns established in its category/area
@@ -75,6 +81,9 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] Every library touched has a `docs/DESIGN.md` — if one was missing, it was created in this change (canonical example: `libraries/Dns/Assimalign.Cohesion.Dns/docs/DESIGN.md`)
 - [ ] If this change altered or extended a design decision (lifecycle, error model, contract shape, family layout, AOT posture, non-goals), `docs/DESIGN.md` was updated in the same commit
 - [ ] Public API additions are reflected in `docs/Assembly/<Namespace>/<Type>/OVERVIEW.md` if that page exists for the type
+- [ ] A newly created `docs/DESIGN.md` carries at least one `mermaid` diagram (family/dependency direction, lifecycle, protocol exchange, or pipeline); a new area `README.md` carries the area project map — see `documentation.md`
+- [ ] Existing diagrams in touched docs still match what they depict; arrows still read as "references", and no `%%{init}%%` theming or hardcoded `fill:`/`color:` was introduced
+- [ ] Any mermaid block added or edited was render-previewed — parse errors show up on GitHub and nothing in CI catches them
 
 ## Deviations from rules
 

@@ -1,6 +1,8 @@
 using System;
 using System.Text;
 
+using Assimalign.Cohesion.Content.Text.Internal;
+
 namespace Assimalign.Cohesion.Content.Text;
 
 /// <summary>
@@ -9,7 +11,7 @@ namespace Assimalign.Cohesion.Content.Text;
 /// </summary>
 public static class TextContentFactory
 {
-    private static readonly Encoding Utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+    private static readonly Encoding _utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     /// <summary>
     /// Creates read-only, reopenable text content from a string, stored as UTF-8.
@@ -22,8 +24,8 @@ public static class TextContentFactory
     public static ITextContent FromString(string text, ContentFormat? format = null, string? name = null, string? mediaType = null)
     {
         ArgumentNullException.ThrowIfNull(text);
-        var content = ContentFactory.FromBytes(Utf8.GetBytes(text), format, name, mediaType);
-        return new DecodedTextContent(content, Utf8, preambleLength: 0, leaveOpen: false);
+        var content = ContentFactory.FromBytes(_utf8.GetBytes(text), format, name, mediaType);
+        return new DecodedTextContent(content, _utf8, preambleLength: 0, leaveOpen: false);
     }
 
     /// <summary>

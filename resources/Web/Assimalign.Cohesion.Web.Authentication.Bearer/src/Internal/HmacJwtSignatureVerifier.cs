@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
-namespace Assimalign.Cohesion.Web.Authentication.Bearer;
+namespace Assimalign.Cohesion.Web.Authentication.Bearer.Internal;
 
 /// <summary>
 /// Verifies HMAC-signed tokens (<c>HS256</c>/<c>HS384</c>/<c>HS512</c>) with a shared secret.
@@ -29,7 +29,7 @@ internal sealed class HmacJwtSignatureVerifier : IJwtSignatureVerifier
     /// <inheritdoc />
     public bool CanVerify(string algorithm, string? keyId)
     {
-        if (!JwtSignatureAlgorithms.IsHmac(algorithm))
+        if (algorithm is not JoseAlgorithms.HS256 and not JoseAlgorithms.HS384 and not JoseAlgorithms.HS512)
         {
             return false;
         }

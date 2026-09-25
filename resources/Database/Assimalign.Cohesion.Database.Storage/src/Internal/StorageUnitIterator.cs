@@ -2,7 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Database.Storage;
+namespace Assimalign.Cohesion.Database.Storage.Internal;
 
 using Assimalign.Cohesion.Database.Storage.Units;
 
@@ -82,6 +82,8 @@ internal sealed unsafe class StorageUnitIterator : IStorageUnitIterator
 
             if (!_freeSpaceMap.IsAllocated((PageId)pageId))
             {
+                _currentHandle?.Dispose();
+                _currentHandle = null;
                 AdvancePage();
                 continue;
             }

@@ -4,7 +4,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Http;
+namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// HTTP/1.1 implementation of <see cref="IHttpProtocolUpgrade"/>. Owns the response transition
@@ -35,7 +35,7 @@ namespace Assimalign.Cohesion.Http;
 /// </remarks>
 internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
 {
-    private static readonly HttpHeaderKey[] ForbiddenResponseHeaders =
+    private static readonly HttpHeaderKey[] _forbiddenResponseHeaders =
     {
         HttpHeaderKey.ContentLength,
         HttpHeaderKey.TransferEncoding,
@@ -100,7 +100,7 @@ internal sealed class Http1ProtocolUpgrade : IHttpProtocolUpgrade
         // RFC 9110 §9.3.6 — a successful CONNECT response MUST NOT include Content-Length or
         // Transfer-Encoding; the tunnel carries opaque octets. A 101 is body-less by definition
         // (RFC 9112 §9.9), so the same scrub applies. Strip both unconditionally.
-        foreach (HttpHeaderKey key in ForbiddenResponseHeaders)
+        foreach (HttpHeaderKey key in _forbiddenResponseHeaders)
         {
             _responseHeaders.Remove(key);
         }

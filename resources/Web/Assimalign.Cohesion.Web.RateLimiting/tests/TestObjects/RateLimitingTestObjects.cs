@@ -214,19 +214,19 @@ internal sealed class FakeResponseStreamingFeature : IHttpResponseStreamingFeatu
 /// concurrency limiter (permit held for the request lifetime).</summary>
 internal static class TestPolicies
 {
-    private static readonly TimeSpan LongWindow = TimeSpan.FromHours(1);
+    private static readonly TimeSpan _longWindow = TimeSpan.FromHours(1);
 
     /// <summary>Fixed window, one permit, all requests in a single partition — deterministic reject-on-second.</summary>
     public static RateLimitingPolicy FixedWindowSingle(string key = "test")
         => RateLimitingPolicy.Create(_ => RateLimitPartition.GetFixedWindowLimiter(
             key,
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 1, Window = LongWindow, QueueLimit = 0 }));
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 1, Window = _longWindow, QueueLimit = 0 }));
 
     /// <summary>Fixed window, one permit, partitioned by effective client address.</summary>
     public static RateLimitingPolicy FixedWindowPerClient()
         => RateLimitingPolicy.Create(context => RateLimitPartition.GetFixedWindowLimiter(
             RateLimitPartitionKeys.ClientAddress(context),
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 1, Window = LongWindow, QueueLimit = 0 }));
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = 1, Window = _longWindow, QueueLimit = 0 }));
 
     /// <summary>Concurrency, one permit, single partition — the permit is held for the request lifetime.</summary>
     public static RateLimitingPolicy ConcurrencySingle(string key = "test")

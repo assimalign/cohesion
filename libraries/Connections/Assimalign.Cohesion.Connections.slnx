@@ -14,6 +14,12 @@
 		<File Path="Assimalign.Cohesion.Connections/docs/DESIGN.md" />
 		<File Path="Assimalign.Cohesion.Connections/docs/OVERVIEW.md" />
 	</Folder>
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections/shared/">
+		<File Path="Assimalign.Cohesion.Connections/shared/DuplexPipePair.cs" />
+		<File Path="Assimalign.Cohesion.Connections/shared/PipeOptionsContext.cs" />
+		<File Path="Assimalign.Cohesion.Connections/shared/PipeOptionsFactory.cs" />
+		<File Path="Assimalign.Cohesion.Connections/shared/StreamPipeOptionsContext.cs" />
+	</Folder>
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections/src/">
 		<Project Path="Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
 	</Folder>

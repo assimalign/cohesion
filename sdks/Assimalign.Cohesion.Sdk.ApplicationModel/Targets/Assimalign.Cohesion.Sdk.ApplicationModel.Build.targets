@@ -1,0 +1,9 @@
+<Project>
+	<!-- Reserved extension point used by cohesion-platforms container gathering. -->
+	<Import Project="Sdk.Resource.Paths.targets" />
+
+	<PropertyGroup>
+		<CohesionBuildResourceContainersDependsOn>$(CohesionBuildResourceContainersDependsOn)</CohesionBuildResourceContainersDependsOn>
+	</PropertyGroup>
+	<Import Project="Sdk.Image.targets" />
+</Project>

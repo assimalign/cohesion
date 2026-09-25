@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.CacheDb.Tests</RootNamespace>
 		<OutputType>Exe</OutputType>
 		<IsPackable>false</IsPackable>
 
@@ -25,6 +26,6 @@
 		<CohesionPackageReference Include="coverlet.collector" />
 	</ItemGroup>
 	<ItemGroup>
-		<Compile Include="xunit.runner.json" />
+		<Content Include="xunit.runner.json" />
 	</ItemGroup>
 </Project>

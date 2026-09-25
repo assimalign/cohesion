@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Amqp.Connections.Internal;
 
 internal static partial class AmqpEncoding
 {
-    private static readonly Encoding Utf8 = Encoding.UTF8;
+    private static readonly Encoding _utf8 = Encoding.UTF8;
 
     private static void WriteValue(ArrayBufferWriter<byte> writer, object? value)
     {
@@ -168,10 +168,10 @@ internal static partial class AmqpEncoding
             0x44 => (ulong) 0,
             0xa0 => reader.ReadBytes(reader.ReadByte()).ToArray(),
             0xb0 => reader.ReadBytes(reader.ReadInt32()).ToArray(),
-            0xa1 => Utf8.GetString(reader.ReadBytes(reader.ReadByte())),
-            0xb1 => Utf8.GetString(reader.ReadBytes(reader.ReadInt32())),
-            0xa3 => new AmqpSymbol(Utf8.GetString(reader.ReadBytes(reader.ReadByte()))),
-            0xb3 => new AmqpSymbol(Utf8.GetString(reader.ReadBytes(reader.ReadInt32()))),
+            0xa1 => _utf8.GetString(reader.ReadBytes(reader.ReadByte())),
+            0xb1 => _utf8.GetString(reader.ReadBytes(reader.ReadInt32())),
+            0xa3 => new AmqpSymbol(_utf8.GetString(reader.ReadBytes(reader.ReadByte()))),
+            0xb3 => new AmqpSymbol(_utf8.GetString(reader.ReadBytes(reader.ReadInt32()))),
             0x45 => Array.Empty<object?>(),
             0xc0 => ReadList(ref reader, reader.ReadByte(), false),
             0xd0 => ReadList(ref reader, reader.ReadInt32(), true),
@@ -383,7 +383,7 @@ internal static partial class AmqpEncoding
 
         for (int i = 0; i < values.Count; i++)
         {
-            int length = Utf8.GetByteCount(values[i].Value);
+            int length = _utf8.GetByteCount(values[i].Value);
             useEightBitLength &= length <= byte.MaxValue;
         }
 
@@ -391,7 +391,7 @@ internal static partial class AmqpEncoding
 
         for (int i = 0; i < values.Count; i++)
         {
-            byte[] utf8Bytes = Utf8.GetBytes(values[i].Value);
+            byte[] utf8Bytes = _utf8.GetBytes(values[i].Value);
 
             if (useEightBitLength)
             {
@@ -488,7 +488,7 @@ internal static partial class AmqpEncoding
 
     private static void WriteString(ArrayBufferWriter<byte> writer, string value, bool isSymbol)
     {
-        byte[] utf8Bytes = Utf8.GetBytes(value);
+        byte[] utf8Bytes = _utf8.GetBytes(value);
         byte smallCode = isSymbol ? (byte) 0xa3 : (byte) 0xa1;
         byte largeCode = isSymbol ? (byte) 0xb3 : (byte) 0xb1;
 

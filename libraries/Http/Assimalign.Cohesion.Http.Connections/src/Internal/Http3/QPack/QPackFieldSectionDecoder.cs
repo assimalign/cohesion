@@ -2,9 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-using Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Decodes a QPACK encoded field section (RFC 9204 §4.5) into its ordered

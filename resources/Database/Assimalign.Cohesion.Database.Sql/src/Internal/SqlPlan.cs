@@ -13,6 +13,25 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal abstract record SqlPlan;
 
+/// <summary>
+/// Groups the filtered rows of an input plan. Bound value ordinals address the
+/// group keys and aggregate results, never an arbitrary representative row.
+/// </summary>
+internal sealed record SqlGroupPlan(
+    SqlPlan Input,
+    IReadOnlyList<SqlCatalogColumn> SourceColumns,
+    IReadOnlyList<SqlTableBinding>? Bindings,
+    IReadOnlyList<SqlExpression> Keys,
+    IReadOnlyList<SqlFunctionCallExpression> Aggregates,
+    IReadOnlyDictionary<SqlExpression, int> ValueOrdinals,
+    IReadOnlyList<SqlProjection> Projections,
+    SqlExpression? Having,
+    IReadOnlyList<SqlOrderByColumn> OrderBy,
+    long? Limit,
+    long? Offset,
+    bool IsDistinct,
+    IReadOnlyDictionary<SqlExpression, int> OrderByProjections) : SqlPlan;
+
 /// <summary>One projected output column of a SELECT.</summary>
 /// <param name="Name">The output column name (alias, column name, or a synthesized name).</param>
 /// <param name="ColumnOrdinal">The source column ordinal for pass-through projections; null for computed ones.</param>
@@ -28,8 +47,48 @@ internal sealed record SqlSelectPlan(
     long? Limit,
     long? Offset,
     bool IsDistinct,
-    bool IsCountStar,
-    SqlAccessPath Access) : SqlPlan;
+    SqlAccessPath Access,
+    IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlPlan;
+
+/// <summary>A stored relation's identity and position in a joined row.</summary>
+internal sealed record SqlTableBinding(SqlCatalogTable Table, SqlTableReference Reference, int Offset);
+
+/// <summary>
+/// A two-relation inner join. Source columns retain FROM-then-JOIN order even
+/// when the selected index reverses which relation drives the nested loop.
+/// </summary>
+internal sealed record SqlJoinPlan(
+    IReadOnlyList<SqlTableBinding> Bindings,
+    IReadOnlyList<SqlCatalogColumn> Columns,
+    SqlExpression Condition,
+    IReadOnlyList<SqlProjection> Projections,
+    SqlExpression? Where,
+    IReadOnlyList<SqlOrderByColumn> OrderBy,
+    long? Limit,
+    long? Offset,
+    bool IsDistinct,
+    SqlJoinIndexPath? Access,
+    IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlPlan;
+
+/// <summary>
+/// A correlated equality-prefix seek into one input, with probe ordinals in
+/// the other input's local row. A null path means a buffered nested-loop scan.
+/// </summary>
+internal sealed record SqlJoinIndexPath(
+    int InnerBinding,
+    SqlCatalogIndex Index,
+    IReadOnlyList<int> OuterOrdinals);
+
+/// <summary>A catalog projection with no storage identity or physical access path.</summary>
+internal sealed record SqlSystemViewPlan(
+    SqlSystemViewDefinition View,
+    IReadOnlyList<SqlProjection> Projections,
+    SqlExpression? Where,
+    IReadOnlyList<SqlOrderByColumn> OrderBy,
+    long? Limit,
+    long? Offset,
+    bool IsDistinct,
+    IReadOnlyDictionary<SqlExpression, int>? OrderByProjections = null) : SqlPlan;
 
 /// <summary>
 /// How a SELECT reaches its table's rows — the seek node the thin IR gained when
@@ -83,11 +142,16 @@ internal sealed record SqlCreateTablePlan(
     string Name,
     IReadOnlyList<SqlCatalogColumn> Columns,
     IReadOnlyList<string> PrimaryKey,
-    bool IfNotExists) : SqlPlan;
+    bool IfNotExists,
+    IReadOnlyList<SqlConstraintDefinition> Constraints) : SqlPlan;
 
 internal sealed record SqlDropTablePlan(string Schema, string Name, bool IfExists) : SqlPlan;
 
-internal sealed record SqlAddColumnPlan(string Schema, string Name, SqlCatalogColumn Column) : SqlPlan;
+internal sealed record SqlAddColumnPlan(string Schema, string Name, SqlCatalogColumn Column, IReadOnlyList<SqlConstraintDefinition> Constraints) : SqlPlan;
+
+internal sealed record SqlAddConstraintPlan(SqlCatalogTable Table, SqlConstraintDefinition Constraint) : SqlPlan;
+
+internal sealed record SqlDropConstraintPlan(SqlCatalogTable Table, string ConstraintName) : SqlPlan;
 
 internal sealed record SqlDropColumnPlan(string Schema, string Name, string ColumnName) : SqlPlan;
 

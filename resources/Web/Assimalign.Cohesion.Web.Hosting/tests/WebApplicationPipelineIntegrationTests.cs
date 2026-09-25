@@ -23,14 +23,14 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 /// </summary>
 public class WebApplicationPipelineIntegrationTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Pipeline: Middleware should run in registration (onion) order end to end")]
     public async Task Pipeline_MultipleMiddleware_ShouldRunInRegistrationOnionOrder()
     {
         // Arrange — two wrapping middleware around a terminal handler; each records entry and
         // exit so both the inbound order and the unwind order are observable.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -75,7 +75,7 @@ public class WebApplicationPipelineIntegrationTests
     {
         // Arrange — the first middleware answers 403 without calling next; the downstream
         // middleware records whether it ever ran.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -109,7 +109,7 @@ public class WebApplicationPipelineIntegrationTests
     {
         // Arrange — the application-exception isolation boundary (#762): a throwing exchange
         // tears down its own connection while the accept loop keeps serving new ones.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();

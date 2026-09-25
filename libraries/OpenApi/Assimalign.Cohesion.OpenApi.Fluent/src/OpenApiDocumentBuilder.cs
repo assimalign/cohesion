@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.OpenApi.Fluent.Internal;
+
 namespace Assimalign.Cohesion.OpenApi.Fluent;
 
 /// <summary>

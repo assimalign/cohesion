@@ -27,7 +27,8 @@ public class DatabaseOrchestrationTests
         var gateway = new RecordingGateway(state, new RecordingController(reconciled, deleted));
 
         IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        IApplicationResourceDescriptor database = builder.AddDatabase("orders-db");
+        IApplicationResourceDescriptor database = builder.AddDatabase(
+            DatabaseManifestFactory.Create("orders-db"));
         IApplicationResourceDescriptor api = builder.AddResource(new FakeApplicationResource("api"));
         api.DependsOn(database);
         IApplicationModel model = builder.Build().Model;
@@ -41,21 +42,25 @@ public class DatabaseOrchestrationTests
         state.GetState(database.Resource.Id).ShouldBe(ResourceLifecycle.Running);
 
         ResourceEndpoint observed = state.GetObservedEndpoints(database.Resource.Id).ShouldHaveSingleItem();
-        observed.Scheme.ShouldBe(DatabaseResource.EndpointScheme);
+        observed.Scheme.ShouldBe("cohesion-db");
         observed.Port.ShouldBe(61000);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.ApplicationModel] - Orchestration: teardown stops the dependent before the database")]
-    public async Task StopAsync_AfterStart_TearsDownInReverseOrder()
+    [Fact(DisplayName = "Cohesion Test [Database.ApplicationModel] - Orchestration: stop retains objects and uninstall tears down in reverse")]
+    public async Task StopAsync_ThenUninstallAsync_UsesDistinctHooksInReverseOrder()
     {
         // Arrange
         var reconciled = new List<string>();
         var deleted = new List<string>();
+        var stopped = new List<string>();
         var state = new RecordingStateManager();
-        var gateway = new RecordingGateway(state, new RecordingController(reconciled, deleted));
+        var gateway = new RecordingGateway(
+            state,
+            new RecordingController(reconciled, deleted, stopped: stopped));
 
         IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        IApplicationResourceDescriptor database = builder.AddDatabase("orders-db");
+        IApplicationResourceDescriptor database = builder.AddDatabase(
+            DatabaseManifestFactory.Create("orders-db"));
         IApplicationResourceDescriptor api = builder.AddResource(new FakeApplicationResource("api"));
         api.DependsOn(database);
         IApplicationModel model = builder.Build().Model;
@@ -67,6 +72,11 @@ public class DatabaseOrchestrationTests
         await control.StopAsync();
 
         // Assert
+        stopped.ShouldBe(new[] { "api", "orders-db" });
+        deleted.ShouldBeEmpty();
+
+        await control.UninstallAsync(model);
+
         deleted.ShouldBe(new[] { "api", "orders-db" });
     }
 
@@ -81,7 +91,8 @@ public class DatabaseOrchestrationTests
         var gateway = new RecordingGateway(state, new RecordingController(reconciled, deleted, failing));
 
         IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        IApplicationResourceDescriptor database = builder.AddDatabase("orders-db");
+        IApplicationResourceDescriptor database = builder.AddDatabase(
+            DatabaseManifestFactory.Create("orders-db"));
         IApplicationResourceDescriptor api = builder.AddResource(new FakeApplicationResource("api"));
         api.DependsOn(database);
         IApplicationModel model = builder.Build().Model;

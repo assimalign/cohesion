@@ -13,8 +13,9 @@ change. This mirrors Kestrel's `ListenNamedPipe` surface.
 
 ## Scope
 
-- `NamedPipeConnectionListener` — the accept side: creates a fresh `NamedPipeServerStream`
-  instance per accepted client on a local pipe name, with builder-time access control.
+- `NamedPipeConnectionListener` — the accept side: reserves the pipe through `BindAsync`, then
+  creates a fresh `NamedPipeServerStream` instance per accepted client on a local pipe name, with
+  builder-time access control.
 - `NamedPipeConnectionFactory` — the dial side: opens a `NamedPipeClientStream` to a
   `NamedPipeEndPoint` (local or remote host) and returns a live `Connection`.
 - `NamedPipeEndPoint` — a name-addressed `EndPoint` (`ServerName` + `PipeName`), formatted as

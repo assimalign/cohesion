@@ -5,18 +5,18 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 
 internal sealed class MustContainValidationRule<TValue, TContains> : ValidationRuleBase<TValue>
     where TValue : IEnumerable, IEnumerable<TContains>
     where TContains : notnull, IEquatable<TContains>
 {
-    private readonly TContains contains;
+    private readonly TContains _contains;
 
     public MustContainValidationRule(TContains containes)
     {
-        this.contains = containes;
+        this._contains = containes;
     }
 
     public override string Name { get; set; }
@@ -46,7 +46,7 @@ internal sealed class MustContainValidationRule<TValue, TContains> : ValidationR
         {
             context = new ValidationContext<TValue>(value);
 
-            if (!value.Contains(this.contains))
+            if (!value.Contains(this._contains))
             {
                 context.AddFailure(this.Error);
             }

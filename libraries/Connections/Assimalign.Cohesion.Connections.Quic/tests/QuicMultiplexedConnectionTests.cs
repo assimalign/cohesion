@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Connections.Quic.Tests;
 [SupportedOSPlatform("macos")]
 public class QuicMultiplexedConnectionTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(10);
 
     [Fact]
     public async Task ConnectAsync_WithAcceptingListener_ShouldEstablishConnectedPair()
@@ -34,7 +34,7 @@ public class QuicMultiplexedConnectionTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         // Act
@@ -65,7 +65,7 @@ public class QuicMultiplexedConnectionTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
@@ -103,7 +103,7 @@ public class QuicMultiplexedConnectionTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
@@ -148,7 +148,7 @@ public class QuicMultiplexedConnectionTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
@@ -168,7 +168,7 @@ public class QuicMultiplexedConnectionTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);
@@ -192,7 +192,7 @@ public class QuicMultiplexedConnectionTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         // Distinct sentinel codes so the assertion proves which teardown signal reached the
@@ -237,7 +237,7 @@ public class QuicMultiplexedConnectionTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(certificate, cancellation.Token);

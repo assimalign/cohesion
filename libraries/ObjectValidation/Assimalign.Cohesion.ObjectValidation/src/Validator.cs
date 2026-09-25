@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.ObjectValidation;
 /// </summary>
 public sealed class Validator : IValidator
 {
-    private readonly ValidationOptions options;
+    private readonly ValidationOptions _options;
 
     /// <summary>
     /// 
@@ -25,7 +25,7 @@ public sealed class Validator : IValidator
     public Validator(IEnumerable<IValidationProfile> profiles, ValidationOptions options)
     {
         this.Profiles = profiles;
-        this.options = options ?? new ValidationOptions();
+        this._options = options ?? new ValidationOptions();
 
         var duplicates = Profiles
             .GroupBy(x => x.ValidationType)
@@ -50,9 +50,9 @@ public sealed class Validator : IValidator
     {
         return Validate(new ValidationContext<T>(instance, true)
         {
-            ContinueThroughValidationChain = options.ContinueThroughValidationChain,
-            ThrowExceptionOnFailure = options.ThrowExceptionOnFailure,
-            ValidationMode = options.ValidationMode
+            ContinueThroughValidationChain = _options.ContinueThroughValidationChain,
+            ThrowExceptionOnFailure = _options.ThrowExceptionOnFailure,
+            ValidationMode = _options.ValidationMode
 
         } as IValidationContext);
     }
@@ -107,7 +107,7 @@ public sealed class Validator : IValidator
         stopwatch.Stop();
 
         // Let's throw exception for any validation failure if requested.
-        if (this.options.ThrowExceptionOnFailure && context.Errors.Any())
+        if (this._options.ThrowExceptionOnFailure && context.Errors.Any())
         {
             throw new ValidationFailureException(context);
         }
@@ -120,9 +120,9 @@ public sealed class Validator : IValidator
     {
         return ValidateAsync(new ValidationContext<T>(instance, true)
         {
-            ContinueThroughValidationChain = options.ContinueThroughValidationChain,
-            ThrowExceptionOnFailure = options.ThrowExceptionOnFailure,
-            ValidationMode = options.ValidationMode
+            ContinueThroughValidationChain = _options.ContinueThroughValidationChain,
+            ThrowExceptionOnFailure = _options.ThrowExceptionOnFailure,
+            ValidationMode = _options.ValidationMode
 
         } as IValidationContext, cancellationToken);
     }
@@ -163,7 +163,7 @@ public sealed class Validator : IValidator
 
             stopwatch.Stop();
 
-            if (this.options.ThrowExceptionOnFailure && context.Errors.Any())
+            if (this._options.ThrowExceptionOnFailure && context.Errors.Any())
             {
                 throw new ValidationFailureException(context);
             }

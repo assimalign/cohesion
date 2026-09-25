@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Web.Authentication;
 /// </remarks>
 public static class HttpContextAuthenticationExtensions
 {
-    private static readonly ClaimsPrincipal EmptyPrincipal = new(new ClaimsIdentity());
+    private static readonly ClaimsPrincipal _emptyPrincipal = new(new ClaimsIdentity());
 
     extension(IHttpContext context)
     {
@@ -38,7 +38,7 @@ public static class HttpContextAuthenticationExtensions
             {
                 ArgumentNullException.ThrowIfNull(context);
                 return context.Features.Get<IAuthenticationFeature>()?.User
-                    ?? EmptyPrincipal;
+                    ?? _emptyPrincipal;
             }
             set
             {

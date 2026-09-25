@@ -24,9 +24,9 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
     internal class Resources {
         
-        private static global::System.Resources.ResourceManager resourceMan;
+        private static global::System.Resources.ResourceManager _resourceMan;
         
-        private static global::System.Globalization.CultureInfo resourceCulture;
+        private static global::System.Globalization.CultureInfo _resourceCulture;
         
         [global::System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1811:AvoidUncalledPrivateCode")]
         internal Resources() {
@@ -38,11 +38,11 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         [global::System.ComponentModel.EditorBrowsableAttribute(global::System.ComponentModel.EditorBrowsableState.Advanced)]
         internal static global::System.Resources.ResourceManager ResourceManager {
             get {
-                if (object.ReferenceEquals(resourceMan, null)) {
+                if (object.ReferenceEquals(_resourceMan, null)) {
                     global::System.Resources.ResourceManager temp = new global::System.Resources.ResourceManager("Assimalign.Cohesion.ObjectValidation.Properties.Resources", typeof(Resources).Assembly);
-                    resourceMan = temp;
+                    _resourceMan = temp;
                 }
-                return resourceMan;
+                return _resourceMan;
             }
         }
         
@@ -53,10 +53,10 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         [global::System.ComponentModel.EditorBrowsableAttribute(global::System.ComponentModel.EditorBrowsableState.Advanced)]
         internal static global::System.Globalization.CultureInfo Culture {
             get {
-                return resourceCulture;
+                return _resourceCulture;
             }
             set {
-                resourceCulture = value;
+                _resourceCulture = value;
             }
         }
         
@@ -65,7 +65,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationErrorCode {
             get {
-                return ResourceManager.GetString("DefaultValidationErrorCode", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationErrorCode", _resourceCulture);
             }
         }
         
@@ -74,7 +74,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageBetweenOrEqualToRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageBetweenOrEqualToRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageBetweenOrEqualToRule", _resourceCulture);
             }
         }
         
@@ -83,7 +83,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageBetweenRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageBetweenRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageBetweenRule", _resourceCulture);
             }
         }
         
@@ -92,7 +92,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageEmailAddressRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageEmailAddressRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageEmailAddressRule", _resourceCulture);
             }
         }
         
@@ -101,7 +101,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageEmptyRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageEmptyRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageEmptyRule", _resourceCulture);
             }
         }
         
@@ -110,7 +110,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageEndWithRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageEndWithRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageEndWithRule", _resourceCulture);
             }
         }
         
@@ -119,7 +119,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageEqualToRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageEqualToRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageEqualToRule", _resourceCulture);
             }
         }
         
@@ -128,7 +128,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageGreaterThanOrEqualToRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageGreaterThanOrEqualToRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageGreaterThanOrEqualToRule", _resourceCulture);
             }
         }
         
@@ -137,7 +137,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageGreaterThanRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageGreaterThanRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageGreaterThanRule", _resourceCulture);
             }
         }
         
@@ -146,7 +146,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageLengthBetweenRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageLengthBetweenRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageLengthBetweenRule", _resourceCulture);
             }
         }
         
@@ -155,7 +155,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageLengthRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageLengthRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageLengthRule", _resourceCulture);
             }
         }
         
@@ -164,7 +164,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageLessThanOrEqualToRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageLessThanOrEqualToRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageLessThanOrEqualToRule", _resourceCulture);
             }
         }
         
@@ -173,7 +173,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageLessThanRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageLessThanRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageLessThanRule", _resourceCulture);
             }
         }
         
@@ -182,7 +182,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageMatchesRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageMatchesRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageMatchesRule", _resourceCulture);
             }
         }
         
@@ -191,7 +191,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageMaxLengthRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageMaxLengthRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageMaxLengthRule", _resourceCulture);
             }
         }
         
@@ -200,7 +200,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageMinLengthRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageMinLengthRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageMinLengthRule", _resourceCulture);
             }
         }
         
@@ -209,7 +209,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageMustContains {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageMustContains", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageMustContains", _resourceCulture);
             }
         }
         
@@ -218,7 +218,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageMustNotContains {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageMustNotContains", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageMustNotContains", _resourceCulture);
             }
         }
         
@@ -227,7 +227,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageNotEmptyRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageNotEmptyRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageNotEmptyRule", _resourceCulture);
             }
         }
         
@@ -236,7 +236,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageNotEndWithRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageNotEndWithRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageNotEndWithRule", _resourceCulture);
             }
         }
         
@@ -245,7 +245,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageNotEqualToRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageNotEqualToRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageNotEqualToRule", _resourceCulture);
             }
         }
         
@@ -254,7 +254,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageNotNullRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageNotNullRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageNotNullRule", _resourceCulture);
             }
         }
         
@@ -263,7 +263,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageNotStartWithRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageNotStartWithRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageNotStartWithRule", _resourceCulture);
             }
         }
         
@@ -272,7 +272,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageNullRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageNullRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageNullRule", _resourceCulture);
             }
         }
         
@@ -281,7 +281,7 @@ namespace Assimalign.Cohesion.ObjectValidation.Properties {
         /// </summary>
         internal static string DefaultValidationMessageStartWithRule {
             get {
-                return ResourceManager.GetString("DefaultValidationMessageStartWithRule", resourceCulture);
+                return ResourceManager.GetString("DefaultValidationMessageStartWithRule", _resourceCulture);
             }
         }
     }

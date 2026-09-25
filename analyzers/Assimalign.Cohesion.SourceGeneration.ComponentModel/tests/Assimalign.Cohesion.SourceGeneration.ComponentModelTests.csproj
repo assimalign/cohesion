@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.SourceGeneration.ComponentModel.Tests</RootNamespace>
 		<!-- Override the analyzers-area netstandard2.0 default: a test host must be executable. -->
 		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
 		<IsRoslynComponent>false</IsRoslynComponent>
@@ -18,9 +19,7 @@
 		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" />
 	</ItemGroup>
 	<ItemGroup>
-		<!-- The CohesionProjectReference resolver only searches libraries/ and resources/, so the
-		     analyzer under test is referenced directly. This is a test host, not a shipped component. -->
-		<ProjectReference Include="..\src\Assimalign.Cohesion.SourceGeneration.ComponentModel.csproj" />
+		<CohesionAnalyzerAsProjectReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />

@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 /// </summary>
 public class WebHostingExtensionsTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(10);
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttp1: Should throw when the configure callback is null")]
     public void UseHttp1_WithNullConfigure_ShouldThrowArgumentNullException()
@@ -97,7 +97,7 @@ public class WebHostingExtensionsTests
     public async Task UseHttp1_WithConfiguredOptions_ShouldProduceListenerThatAcceptsConnections()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         IPEndPoint endPoint = new(IPAddress.Loopback, GetAvailableLoopbackPort());
 
         HttpConnectionListenerOptions options = new();
@@ -106,8 +106,8 @@ public class WebHostingExtensionsTests
         await using HttpConnectionListener listener = new(options);
 
         // Act
-        // The accept loop binds the wrapped TCP listener lazily on its first accept, so the
-        // client connect is retried until the loop is listening on the configured endpoint.
+        // The compatibility AcceptOrListenAsync path binds before it starts its transport accept
+        // loop; hosted servers call the same bind explicitly from StartAsync.
         Task<HttpConnection> acceptTask = listener.AcceptOrListenAsync(cancellation.Token);
 
         using Socket client = await ConnectWithRetryAsync(endPoint, cancellation.Token);

@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Text;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Text;
 
 using Assimalign.Cohesion.IdentityModel;
@@ -16,8 +17,8 @@ namespace Assimalign.Cohesion.IdentityModel.AotSample;
 /// <summary>
 /// Exercises the representative surfaces of every IdentityModel family assembly under
 /// NativeAOT: the typed claim-value model (the family's trim-safe substitute for reflection),
-/// the JWT compact-parse path (the family's only wire-format parser — reflection-free
-/// <c>System.Text.Json</c> readers plus <c>Base64Url</c> and one-shot SHA-2 hashing), both
+/// the JWT compact parse/write/signature paths (reflection-free <c>System.Text.Json</c>
+/// readers/writers plus <c>Base64Url</c> and one-shot SHA-2/ECDSA operations), both
 /// protocol contract branches, both token documents, and the cross-protocol canonicalization
 /// seam. Deterministic output; a non-zero exit means a check failed. SAML XML parsing is out
 /// of scope because no XML parser exists in the family yet — when one lands, this smoke
@@ -25,7 +26,7 @@ namespace Assimalign.Cohesion.IdentityModel.AotSample;
 /// </summary>
 internal static class AotSample
 {
-    private static readonly DateTimeOffset Now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
 
     // OpenID Connect Core §3.1.3.6 worked at_hash example (RS256).
     private const string SpecAccessToken = "jHkWEdUXMU1BwAsC4vtUsZwnNvTIxEl0z9K3vx5KF0Y";
@@ -37,6 +38,7 @@ internal static class AotSample
         {
             CheckClaimValueKinds();
             CheckJwtParseAndValidate();
+            CheckJwtWriteAndVerify();
             CheckSamlTokenValidate();
             CheckCrossProtocolCanonicalization();
 
@@ -61,7 +63,7 @@ internal static class AotSample
             IdentityClaimValue.FromInteger(42),
             IdentityClaimValue.FromDouble(4.2),
             IdentityClaimValue.FromDecimal(4.2m),
-            IdentityClaimValue.FromDateTime(Now),
+            IdentityClaimValue.FromDateTime(_now),
             IdentityClaimValue.FromBinary(new byte[] { 1, 2, 3 }),
             IdentityClaimValue.FromArray(new[] { IdentityClaimValue.FromString("a") }),
             IdentityClaimValue.FromObject(new[]
@@ -84,7 +86,7 @@ internal static class AotSample
     {
         // The family's only wire-format parse path: base64url + Utf8 JSON readers, then the
         // keyless at_hash comparison (SHA-256 under ILC) via the spec vector.
-        var exp = Now.AddHours(1).ToUnixTimeSeconds();
+        var exp = _now.AddHours(1).ToUnixTimeSeconds();
         var header = """{"alg":"RS256","typ":"JWT"}""";
         var payload =
             $$"""{"iss":"https://op.example.com","sub":"user-42","aud":"client-1","jti":"id-1","exp":{{exp}},"at_hash":"{{SpecAccessTokenHash}}"}""";
@@ -95,7 +97,7 @@ internal static class AotSample
         Require(token.Subject?.Value == "user-42", "JWT subject parses");
         Require(token.Id == "id-1", "JWT jti projects onto Id");
 
-        var result = token.Validate(new TokenJwt.JsonWebTokenValidationOptions(Now)
+        var result = token.Validate(new TokenJwt.JsonWebTokenValidationOptions(_now)
         {
             ExpectedIssuer = "https://op.example.com",
             ExpectedAudience = "client-1",
@@ -103,6 +105,46 @@ internal static class AotSample
         });
         Require(result.Succeeded, "JWT validation (incl. at_hash spec vector) succeeds");
         Console.WriteLine("OK: JWT parse + validate (at_hash spec vector)");
+    }
+
+    private static void CheckJwtWriteAndVerify()
+    {
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var descriptor = new TokenJwt.JsonWebTokenDescriptor
+        {
+            Id = "bootstrap-1",
+            Issuer = "https://gateway.example.com",
+            IssuedAt = _now,
+            ExpiresAt = _now.AddHours(1),
+        };
+        descriptor.Audiences.Add("secret-store");
+
+        TokenJwt.IJsonWebTokenWriter writer = TokenJwt.JsonWebTokenWriter.CreateEs256(key, "gateway-key-1");
+        var token = TokenJwt.JsonWebToken.Parse(writer.Write(descriptor));
+        TokenJwt.IJsonWebTokenSignatureVerifier verifier =
+            TokenJwt.JsonWebTokenSignatureVerifier.CreateEcdsa(key, "gateway-key-1");
+        byte[] signingInput = Encoding.ASCII.GetBytes(token.SigningInput!);
+        byte[] signature = Base64Url.DecodeFromChars(token.Parts!.Signature);
+
+        Require(
+            verifier.CanVerify(token.Algorithm!, token.Header.KeyId) &&
+            verifier.Verify(token.Algorithm!, signingInput, signature),
+            "ES256 JWT writes and verifies");
+        Require(token.Id == "bootstrap-1", "written JWT jti projects onto Id");
+
+        using RSA rsa = RSA.Create(2048);
+        byte[] rsaSigningInput = Encoding.ASCII.GetBytes("eyJhbGciOiJSUzI1NiJ9.e30");
+        byte[] rsaSignature = rsa.SignData(
+            rsaSigningInput,
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1);
+        TokenJwt.IJsonWebTokenSignatureVerifier rsaVerifier =
+            TokenJwt.JsonWebTokenSignatureVerifier.CreateRsa(rsa);
+        Require(
+            rsaVerifier.CanVerify(TokenJwt.JoseAlgorithms.RS256, keyId: null) &&
+            rsaVerifier.Verify(TokenJwt.JoseAlgorithms.RS256, rsaSigningInput, rsaSignature),
+            "RS256 JWT signature verifies");
+        Console.WriteLine("OK: JWT ES256 write + ECDSA/RSA verify");
     }
 
     private static void CheckSamlTokenValidate()
@@ -113,18 +155,18 @@ internal static class AotSample
             Issuer = "https://idp.example.com/saml",
             NameId = new TokenSaml.SamlNameId("user-42", format: SubjectIdentifierFormats.Persistent),
             Conditions = new TokenSaml.SamlConditions(
-                notBefore: Now.AddMinutes(-1),
-                notOnOrAfter: Now.AddMinutes(5),
+                notBefore: _now.AddMinutes(-1),
+                notOnOrAfter: _now.AddMinutes(5),
                 audienceRestrictions: new[] { (IReadOnlyList<string>)new[] { "https://sp.example.com" } }),
         };
         descriptor.SubjectConfirmations.Add(new TokenSaml.SamlSubjectConfirmation(
             TokenSaml.SamlConfirmationMethods.Bearer,
             data: new TokenSaml.SamlSubjectConfirmationData(
                 recipient: "https://sp.example.com/acs",
-                notOnOrAfter: Now.AddMinutes(5))));
+                notOnOrAfter: _now.AddMinutes(5))));
 
         var token = new TokenSaml.SamlToken(descriptor);
-        var result = token.Validate(new TokenSaml.SamlTokenValidationOptions(Now)
+        var result = token.Validate(new TokenSaml.SamlTokenValidationOptions(_now)
         {
             ExpectedIssuer = "https://idp.example.com/saml",
             ExpectedAudience = "https://sp.example.com",
@@ -141,8 +183,8 @@ internal static class AotSample
         {
             Issuer = "https://op.example.com",
             Subject = "user-42",
-            ExpiresAt = Now.AddHours(1),
-            IssuedAt = Now,
+            ExpiresAt = _now.AddHours(1),
+            IssuedAt = _now,
         };
         idTokenDescriptor.Audiences.Add("client-1");
         idTokenDescriptor.AdditionalClaims.Add(new IdentityClaim(

@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Security.DataProtection.Tests;
 
 public class FileSystemKeyRepositoryTests
 {
-    private static readonly byte[] Sample = Encoding.UTF8.GetBytes("filesystem-sample");
+    private static readonly byte[] _sample = Encoding.UTF8.GetBytes("filesystem-sample");
 
     /// <summary>A unique temp directory that is removed when the test finishes.</summary>
     private sealed class TempDirectory : IDisposable
@@ -45,7 +45,7 @@ public class FileSystemKeyRepositoryTests
         IDataProtector nodeA = DataProtectionProvider
             .Create(KeyRepository.CreateFileSystem(temp.Path), o => o.ApplicationDiscriminator = "app")
             .CreateProtector("purpose");
-        byte[] protectedData = nodeA.Protect(Sample);
+        byte[] protectedData = nodeA.Protect(_sample);
 
         // "Node B" is a fresh provider over the same directory — as after a restart or on a
         // second instance. It must read Node A's key and unprotect the payload.
@@ -53,7 +53,7 @@ public class FileSystemKeyRepositoryTests
             .Create(KeyRepository.CreateFileSystem(temp.Path), o => o.ApplicationDiscriminator = "app")
             .CreateProtector("purpose");
 
-        nodeB.Unprotect(protectedData).ShouldBe(Sample);
+        nodeB.Unprotect(protectedData).ShouldBe(_sample);
     }
 
     [Fact(DisplayName = "Cohesion Test [Security.DataProtection] - FileRepository: Should write one document per key")]
@@ -62,7 +62,7 @@ public class FileSystemKeyRepositoryTests
         using TempDirectory temp = new();
         IKeyRepository repository = KeyRepository.CreateFileSystem(temp.Path);
 
-        DataProtectionProvider.Create(repository).CreateProtector("purpose").Protect(Sample);
+        DataProtectionProvider.Create(repository).CreateProtector("purpose").Protect(_sample);
 
         Directory.GetFiles(temp.Path, "*.key").Length.ShouldBe(1);
         repository.GetAllKeys().Count.ShouldBe(1);

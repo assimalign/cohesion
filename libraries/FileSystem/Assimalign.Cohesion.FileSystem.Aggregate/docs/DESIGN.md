@@ -59,6 +59,29 @@ Translation lives in `AggregateMount.ToAggregatePath` /
 `ToProviderPath` with theory-driven unit tests so the conversion behavior
 is locked down.
 
+## Storage-engine handles
+
+`IFileSystemFile.OpenHandle(fileMode, fileAccess, fileShare)` returns the
+resolved underlying file's `IFileSystemFileHandle` directly. The caller owns
+the handle and must dispose it, synchronously or asynchronously. Existing
+`Open` overloads continue to return streams with their existing behavior.
+
+A storage engine addresses pages by byte offset and needs concurrent reads
+and writes without a shared stream cursor. It also needs a flush whose
+durability is explicit: `Stream` exposes neither positional operations nor
+the durable-flush guarantee. The handle supplies offset-based reads and
+writes, current length, `SetLength`, and sync/async durability-aware flush.
+
+Durability belongs to the resolved file, never to the aggregate or to another
+mount. `SupportsDurableFlush` therefore remains the provider's answer: a
+physical file supports durable flush while an in-memory file does not, even
+when a durable physical mount surrounds a nested in-memory mount.
+`Flush(durable: true)` and `FlushAsync(durable: true)` throw
+`NotSupportedException` when that handle reports `false`. A storage engine
+that asks for durability and silently does not get it is worse than one
+that cannot start. Aggregate delegation preserves this failure, cancellation,
+and disposal behavior without translating or weakening the provider's contract.
+
 ## Cross-provider Copy / Move
 
 ```csharp
@@ -97,15 +120,32 @@ caller-supplied glob.
 `OnRename` remaps both the old and new paths and dispatches a single
 remapped `FileSystemRenameEvent`.
 
-The fan-in tracks every mount subscription and disposes them all when the
-aggregate token is disposed. The aggregate file system also tracks every
-token it hands out and disposes them in its own `Dispose` for safety.
+The fan-in implements `IDisposable` independently of the unchanged
+`IFileSystemEventToken` interface. It owns every child token returned by its
+mount-level `Watch` calls, even when the mounted provider itself is borrowed.
+Disposing the fan-in releases its callback registrations and those child
+tokens; it never disposes a provider or an unrelated token. The aggregate file
+system tracks tokens returned by its own `Watch` and cleans them up on both
+`Dispose` and `DisposeAsync`, including when all mounts are borrowed. Explicit
+token disposal removes the token from that owner registry.
+
+Token and owner disposal are idempotent in either order. Registration and
+disposal coordinate through a gate; cleanup runs outside that gate because a
+child token may wait for an in-flight callback. Callbacks already selected may
+finish; each subsequent dispatch checks disposal, and registrations after
+disposal are inert. A partially
+constructed fan-in releases children already created if another mount's
+`Watch` fails. There is no aggregate polling timer to stop: timer lifetime
+belongs to each owned child token.
 
 ## Disposal
 
 ```csharp
 public void Dispose()
 {
+    if (!TryBeginDispose(out var tokens)) return;
+    foreach (var token in tokens) token.Dispose();
+
     foreach (var mount in _mountsSorted)
     {
         if (mount.OwnsFileSystem)
@@ -141,6 +181,7 @@ src/
     AssemblyInfo.cs   (InternalsVisibleTo)
 tests/
   AggregateFileSystemTests.cs            provider-specific behavior
+  AggregateFileSystemFileHandleTests.cs  positional I/O and resolved durability
   AggregateFileSystemStandardTests.cs    inherits shared contract suite
   AggregateRouterTests.cs                router primitives
   Shared/FileSystemStandardTests.cs      (linked from root package)

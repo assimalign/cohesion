@@ -1,10 +1,8 @@
 using System;
 using System.Text;
 
-using Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
-using Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Parses the QPACK encoder-stream instructions the peer sends and applies them

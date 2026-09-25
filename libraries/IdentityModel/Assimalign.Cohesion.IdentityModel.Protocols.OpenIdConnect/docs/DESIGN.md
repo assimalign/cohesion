@@ -20,10 +20,15 @@ specific to the project boundary; do not duplicate the keystone here.
 
 - Depends on `Assimalign.Cohesion.IdentityModel.Protocols` (transitively the
   root canonical model). Shared and root types resolve by namespace nesting.
-- Uses two shared-internal seams via `InternalsVisibleTo`: the root's
-  `ModelSnapshot` (descriptor materialization) and `…Protocols`'
-  `ProtocolEndpoint.IsValidLocation` (the endpoint well-formedness rule used by
-  metadata projection and redirect-URI validation).
+- Compiles two internal static helpers from their owners' `shared/` folders:
+  `ModelSnapshot` for descriptor materialization and `EndpointLocation` for
+  metadata projection and redirect-URI validation. This csproj names both owners
+  in `CohesionSharedSource` items. Both helpers exchange only public model
+  values or BCL types, so their assembly-local CLR identities never cross a
+  boundary; `ProtocolEndpoint` remains the public model owned by Protocols.
+  No public API or shipped-to-shipped friend grant is needed. The shared files
+  document the scoped namespace-alignment exception that lets family callers
+  retain the owning namespaces.
 
 ## Boundary with the JSON Web Token package
 

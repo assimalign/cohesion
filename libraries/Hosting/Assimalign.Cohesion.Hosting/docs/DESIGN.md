@@ -1,150 +1,185 @@
 # Assimalign.Cohesion.Hosting Design
 
-## Design Intent
+## Design intent
 
-The package splits host runtime concerns into explicit contracts: a host orchestrates lifecycle, a context carries state, and hosted services implement the start and stop behavior. That keeps runtime composition readable and testable.
+The plain Hosting package coordinates a host lifetime without assuming how an application is
+supervised, how health is transported, or whether the process represents a Cohesion resource.
+Those policies live in sibling packages and integrate through the public run seam.
 
-## Architecture
+## Lifecycle coordinator
 
-- Host<TContext> is the lifecycle coordinator that starts, stops, and tracks hosted services. It is threading-neutral: starting and stopping are pure await state machines that spawn no threads and install no SynchronizationContext or TaskScheduler.
-- HostContext and IHostEnvironment isolate runtime state from the host implementation itself.
-- BackgroundService is the convenience base class for long-running units of *asynchronous* work inside a host. It is pool-scheduled: `StartAsync` launches `ExecuteAsync` directly and stores the real work task (no `Task.Factory.StartNew` wrapper, no `LongRunning`), so `StopAsync` cancels and then joins that exact task within the caller's shutdown budget, and any fault thrown by `ExecuteAsync` surfaces to the host (synchronous faults during start, post-yield faults on stop) instead of being swallowed. A cooperative cancellation exit is treated as a clean stop.
-- DedicatedThreadService is the base class for *synchronous, blocking* units of work that own a dedicated background OS thread for their entire life.
+A normal start/stop cycle runs these phases:
 
-## Lifecycle
+`OnStartingAsync` → services `StartingAsync`/`StartAsync`/`StartedAsync` → `OnStartedAsync` →
+running → `OnStoppingAsync` → services `StoppingAsync`/`StopAsync`/`StoppedAsync` →
+`OnStoppedAsync`
 
-A start/stop cycle drives four host-level specialization hooks around the service phases, in this order:
+Startup is dependency-sensitive: serial startup stops at the first failure, while configured
+concurrent startup collects failures. Either path performs best-effort reverse-order compensation,
+marks the host `Failed`, completes its run signals, and preserves the original startup exception.
 
-`OnStartingAsync` → services `StartingAsync`/`StartAsync`/`StartedAsync` → `OnStartedAsync` → *(running)* → `OnStoppingAsync` → services `StoppingAsync`/`StopAsync`/`StoppedAsync` → `OnStoppedAsync`
+Graceful shutdown is best-effort. Every service receives a stop attempt, in reverse registration
+order or concurrently according to `StopServicesConcurrently`, and failures are reported after the
+host reaches `Stopped`. Stopping an `Idle`, already stopping, `Stopped`, or compensated `Failed`
+host is a no-op.
 
-- `OnStartingAsync`/`OnStartedAsync` bracket startup; `OnStoppingAsync`/`OnStoppedAsync` bracket shutdown (e.g. a database engine's checkpoint or a web app's connection drain hangs off `OnStoppingAsync`). The stop-side hooks receive the shutdown-budget token (`ShutdownTimeout`).
-- **Run-state reset is coordinator-owned.** After the host reaches `Stopped`, `StopAsync` itself resets the per-run state (run token source, run signal, shutdown callback, init flag). It is deliberately *not* the job of `OnStoppedAsync`: an overridable hook a subclass may forget to base-call must not own restart correctness. A cleanly stopped host can be started - or `RunAsync`-driven - again.
-- **The run token is a signal, not a stop budget.** `RunAsync` parks on a run signal completed by shutdown (`Context.Shutdown()` cancels the run token) and then stops with a *fresh* token: the run token is cancelled by definition at that point, so using it would pre-cancel every service's graceful drain. The stop budget always comes from `ShutdownTimeout` inside `StopAsync`.
-- A direct `StopAsync` (without a shutdown signal) also completes the run signal, so a parked `RunAsync` unwinds instead of hanging forever.
-- A shutdown signal arriving after the host has stopped is a no-op, not a fault.
-- **Shutdown is best-effort.** A failing service stop never leaks the services behind it: failures are collected while every service is still given its stop (serially in reverse registration order, or concurrently when `StopServicesConcurrently` is set), then thrown together after the host reaches `Stopped`. The abort policy is deliberately not coupled to the concurrency flag. Startup keeps the opposite default - serial start aborts on the first failure and the rollback path (below) compensates - because refusing to continue past a broken dependency is the safer start-side behavior.
-- Stopping or disposing a never-started (`Idle`) host is a no-op. Only a `Started` host actually runs the stop sequence, which also guarantees the per-run state exists - there is no "has not started" failure mode on the stop path.
+Per-run cancellation signals that shutdown should begin; it is not the graceful-drain budget.
+`StopAsync` creates a fresh linked token and applies `ShutdownTimeout`, preventing the already
+cancelled run token from pre-cancelling every service drain. Coordinator-owned reset makes a cleanly
+stopped or compensated host restartable without relying on a derived hook calling `base`.
 
-### Start failure
+A run token already cancelled at entry performs one complete lifecycle: startup uses
+`CancellationToken.None`, followed immediately by graceful shutdown with a fresh stop budget.
+The run completes in `Stopped` and delivers the normal observer sequence. A startup failure still
+rolls back to `Failed` and propagates. Both the concrete host and the plain `IHost` extension own
+this semantic; applications need no shadows. Stop completion is joined only if stopping actually
+began, so a rejected stop cannot strand a run on a completion signal that will never fire.
 
-A failed or cancelled start never wedges the host in `Starting` with partially-started services leaked (e.g. a bound socket). The coordinator compensates and rethrows:
+`IHostContext.WaitForShutdownAsync` is the public lifecycle observation seam. It completes when
+shutdown is requested or the current lifetime begins stopping, stops, or fails; cancelling one
+wait abandons only that caller and does not signal the host. A later start creates a fresh signal.
 
-- Every hosted service is stopped **best-effort** in reverse registration order, on a fresh `ShutdownTimeout` budget, *without* the lifecycle stop ceremony (`StoppingAsync`/`StoppedAsync` and the host stop hooks do not fire - this is compensation, not a graceful stop). Rollback failures are swallowed so the original fault is what the caller observes.
-- The host transitions to the terminal `HostState.Failed` - distinct from a clean `Stopped` - and the run/stopped signals complete, so a parked `RunAsync` or nested-host wrapper unwinds.
-- A `Failed` host is not wedged: `StopAsync` is a clean no-op (teardown already happened), disposal works, and a retried `StartAsync` is allowed (the state machine treats `Failed` like `Stopped` for restart, so a supervisor can retry a transient failure).
+## Complete-run pipeline
 
-## Execution model - the per-service menu
+`HostContext.Runner` is an optional pipeline around `IHost.RunAsync`. The host captures the runner
+once at the start of each run, creates a new `IHostRun`, and rejects concurrent re-entry even when a
+runner delays before executing that handle. Replacing `HostContext.Runner` affects only later runs.
 
-`Host<TContext>` imposes no execution model, so where a unit of work meets a thread is decided per service, by the service class that knows its own I/O profile, through static dispatch: pick a base class at authoring time. There is no host-level threading strategy and no reflection.
+`IHostRun` is deliberately one-shot. It exposes:
 
-| Kind of work | Menu member | How you author it |
+- the `IHost` being run;
+- a configurable `ShutdownTimeout` applied beginning with that run;
+- `RunAsync`, which performs startup, waits for shutdown, drains, and joins completion; and
+- `TryShutdown`, a race-safe request for the current run.
+
+A runner can subscribe to platform signals, enforce policy, or translate failures without an
+internal host decorator. Plain runs use the same handle with no observer, so the extension point
+does not create a second lifecycle implementation.
+
+## Nested host composition
+
+`IHost.AsService()` returns an internal `HostToServiceWrapper(IHost)` exposed only as an
+`IHostService`. Its `StartAsync` awaits the nested host's complete startup and returns only when the
+child reports `Started`, so the parent cannot report readiness early. The parent's startup token
+also bounds the await even for an external `IHost` implementation that does not itself observe the
+token; expiry is surfaced by the parent as `HostStartupException`.
+
+The wrapper retains the raw child startup operation for that nested lifetime. If the parent's
+bounded readiness wait ends while an external child is still starting, parent rollback records a
+deferred stop, makes an immediate best-effort stop request, and returns without awaiting the
+unbounded child operation. When that operation eventually settles, the wrapper retries the stop for
+a still-`Starting` or `Started` child, even when the outer token has already expired. A child that
+starts after the outer budget therefore cannot escape as a running orphan, and the incomplete
+cleanup prevents the same wrapper from beginning a new nested lifetime.
+
+Stopping the wrapper passes the parent's still-live drain token to the child. The child's own
+`ShutdownTimeout` is linked inside its `StopAsync`, making the effective budget the shorter of the
+remaining parent budget and the child's budget. One stop task is retained per nested lifetime so
+concurrent callers join the same child drain and observe the same failure. Serial parent shutdown
+uses the host's normal reverse-registration traversal; strict reverse dependency order therefore
+requires `StopServicesConcurrently` to remain disabled.
+
+Nesting is lifecycle composition, not process-policy composition. The wrapper calls only the
+child's `StartAsync` and `StopAsync`; it never invokes, replaces, or clears the child's
+`HostContext.Runner`. Only the outer host's direct `RunAsync` owns the process-level runner and its
+supervisor protocol. Child startup and stop failures flow through the wrapper and fault the
+parent's complete run.
+
+### Observer contract
+
+When `OnStartedAsync` completes before a stop is accepted, callbacks are delivered in this order:
+
+1. `Started`, after startup and `OnStartedAsync` complete.
+2. `Stopping`, after the host atomically accepts the transition to `Stopping` and before drain work.
+3. `Stopped`, after services, state reset, and `OnStoppedAsync` complete.
+
+The host enters `Started` before it awaits `OnStartedAsync`, allowing an external stop to be
+accepted during that hook. In that race, the observer never receives a late `Started`; its sequence
+begins with `Stopping` and continues through the completed stop.
+
+If the graceful-drain token is cancelled, `DrainAborted` occurs at most once between `Stopping` and
+`Stopped`. `Stopped` still reports the completed stop sequence. An observer callback is never
+allowed to strand teardown: its first exception is retained, shutdown proceeds, and the run
+surfaces it after coordinated stop unless a stop failure takes precedence. A `Started` observer
+failure requests shutdown immediately.
+
+### Stop join and per-run stop ownership
+
+The active run owns a stop-completion signal and a stop-begun marker. When an external caller invokes
+`IHost.StopAsync`, the state transition marks that run as stopping and wakes the parked run. The
+run sees that stopping already began, does not call `StopAsync` again, waits for the same completion,
+and observes the same stop exception. Disposal uses the same behavior rather than racing a second
+teardown.
+
+These fields belong to one `IHostRun`. After completion the host clears that handle; a subsequent
+run receives a fresh marker and completion signal. This prevents stop state from leaking across
+restarts.
+
+### `TryShutdown` acceptance
+
+`IHostRun.TryShutdown` returns true only when all three conditions hold atomically:
+
+- the host state is exactly `Started`;
+- the handle is still the host's current run; and
+- the current run's shutdown callback is installed.
+
+The optional `onAccepted` callback executes under the host state lock before cancellation is
+signalled. Calls made before `Started`, once `Stopping` begins, after `Stopped`/`Failed`, or through
+an old handle return false. This makes signal adapters race-safe and prevents a late signal from
+shutting down a later run.
+
+## Service execution menu
+
+The host supplies lifecycle, not a global scheduler. Each service chooses its execution shape:
+
+| Work | Type | Completion joined by `StopAsync` |
 | --- | --- | --- |
-| Async I/O loop (accept sockets, timer tick, queue polling) | `BackgroundService` (pool-scheduled) | override async `ExecuteAsync` |
-| Blocking loop (synchronous file/device I/O, flush worker, tight CPU loop) | `DedicatedThreadService` (its own OS thread) | override synchronous `Run` |
-| Component that owns N threads internally (e.g. per-core event loops) | implement `IHostService` directly | `StartAsync` spins up its loops; `StopAsync` joins them |
+| Asynchronous I/O loop | `BackgroundService` | The real task returned by `ExecuteAsync` |
+| Synchronous blocking loop | `DedicatedThreadService` | The owned background OS thread |
+| Component owning multiple loops or threads | Direct `IHostService` implementation | The component's explicit stop task |
 
-The crux distinction: `BackgroundService` gives you an **async** `ExecuteAsync` that cooperates with the thread pool via `await`; `DedicatedThreadService` gives you a **synchronous** `Run` that owns a dedicated background OS thread for its whole life (what `TaskCreationOptions.LongRunning` only pretended to give an async body).
+Both base classes signal their work token and join the real work. Cooperative cancellation is a
+clean stop; other faults surface to the host. A timed-out join retains run state so a later stop can
+join the same work.
 
-Both bases share one lifecycle contract: `StartAsync` launches the work and returns; `StopAsync` signals the work's token then joins the real work within the caller's shutdown budget; a cooperative `OperationCanceledException` exit is a clean stop; any other fault the work throws is rethrown from `StopAsync` so the host observes it (`DedicatedThreadService` additionally marshals the fault off its thread, where escaping would terminate the process). A drain timeout keeps run-state so a retried stop can rejoin the same work, and both bases can be started again after a clean stop.
+## Family map and dependency direction
 
-A single host composes whichever members its units of work need:
+| Package | Direct dependencies | Policy boundary |
+| --- | --- | --- |
+| `Assimalign.Cohesion.Hosting` | Core | Plain lifecycle only |
+| `Assimalign.Cohesion.Hosting.Health` | Core | Transport-neutral health data only |
+| `Assimalign.Cohesion.Hosting.Resources` | Core, Hosting, Hosting.Health, ProtectedData | Resource invocation, context, supervisor protocol, and process policy |
 
-```csharp
-// Database engine host - dedicated threads for blocking I/O, pooled for the async endpoint
-//   WriteAheadFlushService : DedicatedThreadService   // its own blocking thread
-//   PageWriterService      : DedicatedThreadService   // its own blocking thread
-//   QueryEndpointService   : BackgroundService        // pooled async accept loop
+Hosting does not reference either sibling. Health does not reference Hosting. Resources is the
+opt-in composition layer and installs its runner through `HostContext.Runner`.
 
-// Scheduler host - one pooled timer loop, nothing dedicated
-//   SchedulerTickService   : BackgroundService        // pooled: while (...) { await Task.Delay(...); Fire(); }
-```
+Both siblings still ship in the base `Assimalign.Cohesion.App` framework. All opt-in resource SDKs
+generate calls to `Hosting.Resources.ResourceRuntime`, so Resources belongs beside the shared
+Hosting assembly and Health follows transitively. Framework presence is not activation: only an
+enabled `CohesionApplicationModel` registration causes an area builder to install the runner.
 
-### Why `Run` is synchronous `void`, not `Task`
+## Non-goals
 
-"Async work on a dedicated thread" is a contradiction, and the signature is what keeps this base honest:
+- Process signal handling, stdout readiness messages, exit-code classification, and resource
+  invocation belong to `Assimalign.Cohesion.Hosting.Resources`.
+- Health contributors and aggregated health values belong to
+  `Assimalign.Cohesion.Hosting.Health`.
+- Dependency injection, configuration, logging, and HTTP delivery belong to their respective
+  packages.
+- Hosting does not install a synchronization context or task scheduler.
 
-- **A dedicated OS thread executes exactly one synchronous call frame** - start, run the delegate, exit. `void Run` maps one-to-one onto that life, so "the method returned" and "the work finished" are the same event. That identity is what lets the thread body marshal faults and complete the exit signal the stop path joins: thread exit *is* work completion.
-- **A `Task`-returning `Run` would evaporate off the thread at its first `await`.** An async body runs on its starting thread only up to its first await; with no `SynchronizationContext` installed, every continuation after that is scheduled on the thread pool. The "dedicated" thread would idle or exit while the real work migrated to the pool - exactly the illusion `TaskCreationOptions.LongRunning` created inside the old `BackgroundService` (a dedicated thread for the synchronous prologue only), which this feature removed. An async signature here would rebuild that bug into the base whose reason to exist is the real thread.
-- **Keeping genuinely async code pinned to one thread requires an event-loop substrate** - a single-threaded `SynchronizationContext`/`TaskScheduler` pumping continuations back onto that thread. That is a different and much larger component, and hiding a mini-pump inside this base would smuggle a scheduler into what is meant to be the dumbest, most predictable member of the menu. See Non-goals below for how the substrate case is modeled instead.
-- **The `void` signature is the menu's enforcement mechanism.** You cannot `await` in it, so the vocabulary that is correct on an owned thread - blocking waits, synchronous I/O, sleep-paced loops - is the natural one, and the moment a body wants `await` the compiler pushes it to `BackgroundService`. With a `Task` signature that misuse would compile cleanly and silently run on the pool, turning the menu's crux distinction into a lie with no compiler, analyzer, or runtime signal.
-- **A service that genuinely needs both shapes composes rather than merges**: register one `DedicatedThreadService` and one `BackgroundService` (the database-engine example above), or implement `IHostService` directly and own the threads (menu member three).
+## Environment names
 
-This mirrors `ThreadStart` itself being void: .NET has never shipped an "async on a dedicated thread" primitive, because the two do not compose without a pump.
+Host environment predicates use ordinal case-insensitive matching. `IsLocal()` identifies the
+developer-machine environment; `IsDevelopment()` identifies an ordinary deployable environment
+and grants no developer-only fallback. Names come from `AppEnvironment.Keys`; plain-host and
+Core unset defaults remain Production.
 
-### Escape hatch (reserved, not shipped): `IServiceExecutor`
+## Startup-hook rejection (Phase 29)
 
-The menu is static dispatch by design. The only case that justifies an injected launch seam is a service body that must be launched *differently by configuration* - the same loop pooled in one deployment, dedicated in another. That seam is reserved with this shape:
-
-```csharp
-public interface IServiceExecutor
-{
-    // Returns the REAL work task the host joins on shutdown.
-    Task Execute(Func<CancellationToken, Task> work, CancellationToken cancellationToken);
-}
-```
-
-It is intentionally not shipped until a configuration-varying launch actually exists; do not introduce it for cases the menu already covers.
-
-### Nesting hosts
-
-`Host.AsService()` adapts a host into an `IHostService` so one host can run inside another (the splithost / multiservice composition). The wrapper starts the wrapped host, then parks - without polling - on the context's stopped signal (`HostContext.WhenStoppedAsync()`, completed on the transition to `HostState.Stopped`, reset on a later start), so an idle nested host consumes no CPU. When the outer host stops the service, the wrapper stops the wrapped host with a fresh token so it receives its own shutdown budget (the outer token is already cancelled on that path); when the wrapped host stops on its own, the wrapper's work completes so the outer host's accounting reflects it. The signal is keyed to the explicit `Stopped` transition, never to the `HostState.Running`/`Started` alias.
-
-### Non-goals
-
-- No threading knob or strategy on `Host<TContext>`. The host imposes no execution model; the per-service bases above are the seam.
-- No host-owned execution substrate (process-wide `SynchronizationContext` / `TaskScheduler`). The one genuine substrate case - a thread-per-core server whose sibling services must resume on per-core event loops - should be modeled as a substrate service registered first (serial registration-order start installs it before siblings), not as a `Host<>` strategy.
-
-## Layout Example
-
-```text
-Assimalign.Cohesion.Hosting/
-  src/
-    Assimalign.Cohesion.Hosting.csproj
-    Abstractions/
-    Exceptions/
-    Extensions/
-    Implementation/
-    Internal/
-    Properties/
-    ValueObjects/
-  tests/
-  docs/
-    OVERVIEW.md
-    DESIGN.md
-```
-
-## Example 1: Implement a long-running hosted service
-
-```csharp
-internal sealed class Worker : BackgroundService
-{
-    protected override Task ExecuteAsync(CancellationToken cancellationToken)
-    {
-        return Task.CompletedTask;
-    }
-}
-```
-
-## Example 2: Implement a blocking hosted service on a dedicated thread
-
-```csharp
-internal sealed class FlushWorker : DedicatedThreadService
-{
-    protected override void Run(CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            // Synchronous flush work.
-        }
-    }
-}
-```
-
-## Example 3: Run a host or expose it as a service
-
-```csharp
-Host<MyHostContext> host = CreateHost();
-
-await host.RunAsync(cancellationToken);
-IHostService service = host.AsService();
-```
+A failure in `OnStartingAsync` consumes no service lifecycle work. The host resets
+its run signal and marks the attempt failed, but does not call service `StopAsync`
+for an attempt that never reached service startup. This lets area hosts enforce
+terminal lifecycle rules without stopping the prior run's services a second time.
+Once the hook succeeds, existing rollback still stops services in reverse order
+on lifecycle/startup failure. The generic host retains its supported restart behavior.

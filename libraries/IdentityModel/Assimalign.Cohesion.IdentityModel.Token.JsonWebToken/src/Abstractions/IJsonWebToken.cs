@@ -26,10 +26,10 @@ public interface IJsonWebToken : IIdentityToken
 
     /// <summary>
     /// Gets the JWS signing input (<c>header.payload</c> using the encoded segments as
-    /// received), when a compact form is available. This is the seam for a Security-layer
-    /// signature verifier; this package deliberately does not verify the signature, so a
-    /// successful <c>Validate</c> means "data and hash rules passed", never "signature
-    /// verified".
+    /// received), when a compact form is available. This is the input consumed by
+    /// <see cref="IJsonWebTokenSignatureVerifier" />. The token's <c>Validate</c> method
+    /// deliberately does not invoke a verifier, so a successful validation means "data and
+    /// hash rules passed", never "signature verified".
     /// </summary>
     string? SigningInput { get; }
 }

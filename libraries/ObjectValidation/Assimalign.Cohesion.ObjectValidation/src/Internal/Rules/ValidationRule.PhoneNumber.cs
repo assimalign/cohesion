@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 
 internal sealed class PhoneNumberValidationRule

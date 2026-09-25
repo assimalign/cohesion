@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion</RootNamespace>
+		<AssemblyName>Assimalign.Cohesion.App.Refs</AssemblyName>
+
+		<!--
+			This project produces the Assimalign.Cohesion.App targeting pack
+			(Assimalign.Cohesion.App.Ref.nupkg). It compiles nothing of its
+			own: libraries/App/Assimalign.Cohesion.App.targets derives the
+			@(CohesionFrameworkAssembly) list from App's kernel roots (imported
+			below), generates data/FrameworkList.xml from it, and packs the
+			matching ref assemblies that App.Runtime's bin folder contains
+			via CopyLocal.
+		-->
+		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+		<GenerateDependencyFile>false</GenerateDependencyFile>
+
+		<PackageId>Assimalign.Cohesion.App.Ref</PackageId>
+		<IsPackable>true</IsPackable>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<NoWarn>$(NoWarn);NU5128;NU5100;NU5131</NoWarn>
+
+		<CohesionFrameworkName>Assimalign.Cohesion.App</CohesionFrameworkName>
+		<CohesionFrameworkKind>Ref</CohesionFrameworkKind>
+	</PropertyGroup>
+
+	<!--
+		Pure build dependency on App.Runtime. ReferenceOutputAssembly=false
+		because the targeting pack consumes Runtime's bin folder (where every
+		framework assembly CopyLocal'd in) via the collection target, not
+		Runtime's compiled assembly directly. UndefineProperties drops our
+		TargetFramework/RuntimeIdentifier so Runtime builds in its default
+		(RID-less) configuration - that's the bin/ path the collection target
+		reads from.
+	-->
+	<ItemGroup>
+		<ProjectReference Include="..\..\Assimalign.Cohesion.App.Runtime\src\Assimalign.Cohesion.App.Runtime.csproj"
+			ReferenceOutputAssembly="false"
+			SkipGetTargetFrameworkProperties="true"
+			UndefineProperties="TargetFramework;RuntimeIdentifier" />
+	</ItemGroup>
+
+	<!-- Import App's kernel roots and the producer defaults; the manifest
+	     writer in Assimalign.Cohesion.App.targets iterates the list derived
+	     from those roots. -->
+	<Import Project="$(CohesionRepositoryDirectory)libraries\App\Assimalign.Cohesion.App.props" />
+
+	<Import Project="$(CohesionRepositoryDirectory)libraries\App\Assimalign.Cohesion.App.targets" />
+</Project>

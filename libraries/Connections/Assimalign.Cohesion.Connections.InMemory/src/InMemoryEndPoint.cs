@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Connections.InMemory;
 /// </remarks>
 public sealed class InMemoryEndPoint : EndPoint, IEquatable<InMemoryEndPoint>
 {
-    private static long ephemeralCounter;
+    private static long _ephemeralCounter;
 
     /// <summary>
     /// The default endpoint name used when a listener is created without an explicit endpoint.
@@ -58,7 +58,7 @@ public sealed class InMemoryEndPoint : EndPoint, IEquatable<InMemoryEndPoint>
     /// <returns>A new, uniquely named <see cref="InMemoryEndPoint"/>.</returns>
     public static InMemoryEndPoint CreateEphemeral(string baseName = "in-memory:client")
     {
-        long id = Interlocked.Increment(ref ephemeralCounter);
+        long id = Interlocked.Increment(ref _ephemeralCounter);
 
         return new InMemoryEndPoint($"{baseName}#{id}");
     }

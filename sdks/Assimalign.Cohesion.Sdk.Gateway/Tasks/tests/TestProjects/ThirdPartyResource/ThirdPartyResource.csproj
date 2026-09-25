@@ -1,0 +1,11 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
+  <PropertyGroup>
+    <RootNamespace>ThirdPartyResource</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>gateway-smoke</CohesionApplication>
+    <CohesionResourceName>third-party-resource</CohesionResourceName>
+    <CohesionResourceKind>ThirdParty</CohesionResourceKind>
+    <CohesionResourceApplicationModel>ThirdParty.ApplicationModel</CohesionResourceApplicationModel>
+    <CohesionResourceControlPlaneType></CohesionResourceControlPlaneType>
+  </PropertyGroup>
+</Project>

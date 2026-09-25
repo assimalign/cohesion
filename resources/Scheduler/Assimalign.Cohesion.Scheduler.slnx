@@ -7,18 +7,49 @@
 	<Folder Name="/Scheduler/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/">
 		<File Path="Assimalign.Cohesion.Scheduler/README.md" />
 	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/">
+		<File Path="Assimalign.Cohesion.Scheduler.ApplicationModel/README.md" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/src/">
+		<Project Path="Assimalign.Cohesion.Scheduler.ApplicationModel/src/Assimalign.Cohesion.Scheduler.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/tests/">
+		<Project Path="Assimalign.Cohesion.Scheduler.ApplicationModel/tests/Assimalign.Cohesion.Scheduler.ApplicationModel.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/docs/">
+		<File Path="Assimalign.Cohesion.Scheduler.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Scheduler.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Scheduler.ApplicationModel/">
+		<File Path="Assimalign.Cohesion.Scheduler.ApplicationModel/docs/Assembly/Assimalign.Cohesion.Scheduler.ApplicationModel/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/src/">
 		<Project Path="Assimalign.Cohesion.Scheduler/src/Assimalign.Cohesion.Scheduler.csproj" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/docs/">
+		<File Path="Assimalign.Cohesion.Scheduler/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Scheduler/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/docs/Assembly/Assimalign.Cohesion.Scheduler/ISchedulerApplication/">
+		<File Path="Assimalign.Cohesion.Scheduler/docs/Assembly/Assimalign.Cohesion.Scheduler/ISchedulerApplication/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/docs/Assembly/Assimalign.Cohesion.Scheduler/ISchedulerApplicationBuilder/">
+		<File Path="Assimalign.Cohesion.Scheduler/docs/Assembly/Assimalign.Cohesion.Scheduler/ISchedulerApplicationBuilder/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler/tests/">
 		<Project Path="Assimalign.Cohesion.Scheduler/tests/Assimalign.Cohesion.Scheduler.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Cron/">
 		<File Path="Assimalign.Cohesion.Scheduler.Cron/README.md" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Cron/docs/">
+		<File Path="Assimalign.Cohesion.Scheduler.Cron/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Scheduler.Cron/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Cron/src/">
 		<Project Path="Assimalign.Cohesion.Scheduler.Cron/src/Assimalign.Cohesion.Scheduler.Cron.csproj" />
@@ -29,6 +60,13 @@
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/">
 		<File Path="Assimalign.Cohesion.Scheduler.Hosting/README.md" />
 	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/docs/">
+		<File Path="Assimalign.Cohesion.Scheduler.Hosting/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Scheduler.Hosting/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/docs/Assembly/Assimalign.Cohesion.Scheduler.Hosting/SchedulerApplication/">
+		<File Path="Assimalign.Cohesion.Scheduler.Hosting/docs/Assembly/Assimalign.Cohesion.Scheduler.Hosting/SchedulerApplication/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Hosting/src/">
 		<Project Path="Assimalign.Cohesion.Scheduler.Hosting/src/Assimalign.Cohesion.Scheduler.Hosting.csproj" />
 	</Folder>
@@ -37,6 +75,10 @@
 	</Folder>
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Timer/">
 		<File Path="Assimalign.Cohesion.Scheduler.Timer/README.md" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Timer/docs/">
+		<File Path="Assimalign.Cohesion.Scheduler.Timer/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Scheduler.Timer/docs/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Timer/src/">
 		<Project Path="Assimalign.Cohesion.Scheduler.Timer/src/Assimalign.Cohesion.Scheduler.Timer.csproj" />
@@ -51,5 +93,17 @@
 		<Project Path="../../libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/src/Assimalign.Cohesion.DependencyInjection.csproj" />
 		<Project Path="../../libraries/Configuration/Assimalign.Cohesion.Configuration/src/Assimalign.Cohesion.Configuration.csproj" />
 		<Project Path="../../libraries/FileSystem/Assimalign.Cohesion.FileSystem/src/Assimalign.Cohesion.FileSystem.csproj" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Refs/">
+		<File Path="Assimalign.Cohesion.Scheduler.Refs/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Refs/src/">
+		<Project Path="Assimalign.Cohesion.Scheduler.Refs/src/Assimalign.Cohesion.Scheduler.Refs.csproj" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Runtime/">
+		<File Path="Assimalign.Cohesion.Scheduler.Runtime/Directory.Build.props" />
+	</Folder>
+	<Folder Name="/Scheduler/Assimalign.Cohesion.Scheduler.Runtime/src/">
+		<Project Path="Assimalign.Cohesion.Scheduler.Runtime/src/Assimalign.Cohesion.Scheduler.Runtime.csproj" />
 	</Folder>
 </Solution>

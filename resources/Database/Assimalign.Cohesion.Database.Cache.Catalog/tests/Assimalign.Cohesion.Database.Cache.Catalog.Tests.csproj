@@ -1,1 +1,5 @@
-<Project Sdk="Microsoft.NET.Sdk"/>
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Cache.Catalog.Tests</RootNamespace>
+	</PropertyGroup>
+</Project>

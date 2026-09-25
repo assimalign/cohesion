@@ -1,7 +1,43 @@
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" >
-    <!-- <Import Project="..\Targets\Assimalign.Cohesion.Sdk.Common.targets"/> -->
+	<!--
+		Every Cohesion framework a project needs is explicit: resource-area SDKs add App and
+		App.<Area>, a direct base-SDK consumer names its own framework references, and Gateway
+		adds App plus its referenced areas only for in-process composition. No transitive
+		framework reference therefore needs its own runtime-pack download. Without this, a
+		RID-specific or self-contained restore downloads the runtime pack of every registered
+		area.
+	-->
+	<PropertyGroup>
+		<DisableTransitiveFrameworkReferenceDownloads Condition="'$(DisableTransitiveFrameworkReferenceDownloads)' == ''">true</DisableTransitiveFrameworkReferenceDownloads>
+	</PropertyGroup>
+
     <Import Sdk="Microsoft.NET.Sdk" Project="Sdk.targets" />
+    <Import Project="..\Targets\Assimalign.Cohesion.Sdk.PinValidation.targets" />
     <Import Project="..\Targets\Assimalign.Cohesion.Sdk.StronglyTypedSettings.targets" />
     <Import Project="..\Targets\Assimalign.Cohesion.Sdk.NameOnly.ProjectReference.targets" />
+
+	<Target Name="CohesionValidateApplicationModelSdkImport" BeforeTargets="PrepareForBuild;CoreCompile">
+		<Error
+			Condition="'$(CohesionApplicationModel)' != 'disabled' and '$(CohesionApplicationModel)' != 'enabled'"
+			File="$(MSBuildProjectFullPath)"
+			Text="CohesionApplicationModel must be 'disabled' or 'enabled'." />
+		<Error
+			Condition="'$(CohesionApplicationModel)' == 'enabled' and '$(_CohesionApplicationModelSdkImported)' != 'true'"
+			Code="COHSDK011"
+			File="$(MSBuildProjectFullPath)"
+			Text="Project '$(MSBuildProjectName)' enables CohesionApplicationModel, but Assimalign.Cohesion.Sdk.ApplicationModel was not imported. Use a Cohesion resource-area SDK or add &lt;Import Project=&quot;Sdk.targets&quot; Sdk=&quot;Assimalign.Cohesion.Sdk.ApplicationModel&quot; Version=&quot;$(CohesionVersion)&quot; /&gt; after the enabling property." />
+	</Target>
+
+	<!-- Private handshake used to distinguish a disabled reference from a missing manifest. -->
+	<Target Name="_CohesionGetApplicationModelState" Returns="@(_CohesionApplicationModelState)">
+		<ItemGroup>
+			<_CohesionApplicationModelState Include="$(MSBuildProjectFullPath)">
+				<ApplicationModel>$(CohesionApplicationModel)</ApplicationModel>
+				<ProjectName>$(MSBuildProjectName)</ProjectName>
+				<ProjectFullPath>$(MSBuildProjectFullPath)</ProjectFullPath>
+				<IsSelf>true</IsSelf>
+			</_CohesionApplicationModelState>
+		</ItemGroup>
+	</Target>
 
 </Project>

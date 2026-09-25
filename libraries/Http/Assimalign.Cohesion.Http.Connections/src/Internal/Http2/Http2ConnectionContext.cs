@@ -9,13 +9,12 @@ using System.Threading.Channels;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
-using Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsyncDisposable
 {
-    private static readonly byte[] ClientPreface = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+    private static readonly byte[] _clientPreface = Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
 
     // RFC 9113 §6.8 — the graceful close waits for streams already accepted
     // to finish, but that wait is bounded: a slow or stuck in-flight
@@ -24,7 +23,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     // completed regardless. Not host-configurable in this package (a
     // host-facing drain trigger is a separate public-surface decision); a
     // conservative fixed ceiling keeps shutdown latency bounded.
-    private static readonly TimeSpan GracefulDrainWindow = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _gracefulDrainWindow = TimeSpan.FromSeconds(5);
 
     private readonly HPackDecoder _headerDecoder;
     private readonly Dictionary<int, Http2Stream> _streams;
@@ -665,9 +664,9 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
         // RFC 9113 §3.4 — the connection preface MUST appear before any
         // other client data. A mismatch is a connection error with code
         // PROTOCOL_ERROR.
-        byte[] preface = await ReadExactOrThrowAsync(Stream, ClientPreface.Length, cancellationToken).ConfigureAwait(false);
+        byte[] preface = await ReadExactOrThrowAsync(Stream, _clientPreface.Length, cancellationToken).ConfigureAwait(false);
 
-        if (!preface.AsSpan().SequenceEqual(ClientPreface))
+        if (!preface.AsSpan().SequenceEqual(_clientPreface))
         {
             await EmitGoAwayAsync(Http2ErrorCode.ProtocolError, cancellationToken).ConfigureAwait(false);
             throw new Http2ConnectionException(
@@ -1502,7 +1501,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 _requestInterceptors,
                 _http2Limits.MaxRequestBodySize).ConfigureAwait(false);
         }
-        catch (HPack.HPackHeaderListSizeExceededException error)
+        catch (HPackHeaderListSizeExceededException error)
         {
             // RFC 9113 §10.5.1 — the decoded field list exceeded the advertised
             // MAX_HEADER_LIST_SIZE. This is an excessive-load condition (the decode aborts before
@@ -1512,7 +1511,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
                 Http2ErrorCode.EnhanceYourCalm,
                 $"HTTP/2 HEADERS frame exceeded the maximum header list size: {error.Message}");
         }
-        catch (HPack.HPackDecodingException error)
+        catch (HPackDecodingException error)
         {
             // RFC 9113 §8.2 / §8.3 — malformed field sections (illegal
             // pseudo-header order, forbidden connection-specific
@@ -2151,7 +2150,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// <summary>
     /// Performs an RFC 9113 §6.8 graceful close: refuses new streams, emits a
     /// <c>GOAWAY</c> frame carrying <see cref="Http2ErrorCode.NoError"/>, waits —
-    /// bounded by <see cref="GracefulDrainWindow"/> — for the request exchanges
+    /// bounded by <see cref="_gracefulDrainWindow"/> — for the request exchanges
     /// already dispatched to finish their responses, then stops the frame pump and
     /// signals the transport's send pipeline that no further bytes will be
     /// written. The transport's send task reads the remaining bytes, performs its
@@ -2221,7 +2220,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     }
 
     /// <summary>
-    /// Waits — bounded by <see cref="GracefulDrainWindow"/> — for every request
+    /// Waits — bounded by <see cref="_gracefulDrainWindow"/> — for every request
     /// exchange already dispatched to the application to finish (its response
     /// sent, its stream reset, or its truncated request shutdown-aborted) before
     /// the caller stops the pump and completes the connection output. Returns
@@ -2248,7 +2247,7 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
             return;
         }
 
-        using CancellationTokenSource timeout = new(GracefulDrainWindow);
+        using CancellationTokenSource timeout = new(_gracefulDrainWindow);
         using CancellationTokenSource linked =
             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         try

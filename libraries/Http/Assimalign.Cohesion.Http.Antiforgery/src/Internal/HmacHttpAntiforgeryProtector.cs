@@ -2,7 +2,7 @@ using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 
-namespace Assimalign.Cohesion.Http;
+namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// The default <see cref="IHttpAntiforgeryProtector"/>: attaches an HMAC-SHA256 tag over a

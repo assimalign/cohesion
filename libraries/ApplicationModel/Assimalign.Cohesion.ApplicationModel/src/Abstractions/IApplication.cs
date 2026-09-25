@@ -4,9 +4,9 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// A built, runnable application: a desired-state graph of resources together with
-/// the gateway that realizes it. An application does not host anything itself — it
-/// hands its <see cref="Model"/> to a gateway and asks the gateway to make it so.
+/// A built application operation: a desired-state graph of resources together with
+/// the gateway selected for operations that require platform contact. An application
+/// does not host resource workloads itself.
 /// </summary>
 /// <remarks>
 /// <see cref="IApplication"/> deliberately does NOT extend a host abstraction. A host
@@ -22,11 +22,18 @@ public interface IApplication
     IApplicationModel Model { get; }
 
     /// <summary>
-    /// Hands <see cref="Model"/> to the configured gateway, starts realization, and
-    /// blocks until <paramref name="cancellationToken"/> is signalled, then tears the
-    /// application down gracefully.
+    /// Executes the operation selected by <see cref="IApplicationModel.RunMode"/>.
+    /// <see cref="GatewayRunMode.Run"/> realizes and supervises through the selected
+    /// gateway until cancellation, then releases supervision gracefully without
+    /// interpreting cancellation as teardown. <see cref="GatewayRunMode.Describe"/>
+    /// writes the model document without contacting the platform. <see cref="GatewayRunMode.Render"/>
+    /// and <see cref="GatewayRunMode.Bootstrap"/> dispatch through optional capabilities on the
+    /// selected gateway and write their platform representation to standard output.
     /// </summary>
-    /// <param name="cancellationToken">Signals that the application should stop and tear down.</param>
-    /// <returns>A task that completes once the application has fully stopped.</returns>
+    /// <param name="cancellationToken">Signals that the selected operation should stop.</param>
+    /// <returns>A task that completes once the selected operation has completed.</returns>
+    /// <exception cref="System.NotSupportedException">
+    /// The selected gateway does not implement the requested optional operation.
+    /// </exception>
     Task RunAsync(CancellationToken cancellationToken = default);
 }

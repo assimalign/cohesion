@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Execution;
+namespace Assimalign.Cohesion.Database.Execution.Internal;
 
 /// <summary>
 /// The composed pipeline: runs the stage chain and enforces the transaction

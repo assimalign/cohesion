@@ -1,0 +1,16 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+
+  <PropertyGroup>
+    <RootNamespace>ForbiddenHostingGateway</RootNamespace>
+    <CohesionApplicationName>hosting-guard</CohesionApplicationName>
+    <CohesionResourceName>hosting-guard-gateway</CohesionResourceName>
+    <CohesionGateways>Local</CohesionGateways>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionProjectReference
+      Include="Assimalign.Cohesion.Test.Hosting"
+      ProjectPath="..\ForbiddenHosting\ForbiddenHosting.csproj" />
+  </ItemGroup>
+
+</Project>

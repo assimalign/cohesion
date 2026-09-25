@@ -1,10 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
+        <RootNamespace>Assimalign.Cohesion.Connections.Tcp</RootNamespace>
         <Description>Reliable, ordered, single-stream TCP driver implementing the Cohesion connection contracts.</Description>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
     <ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Core" />
         <CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+    </ItemGroup>
+    <ItemGroup>
+        <!-- The driver's pipe plumbing (DuplexPipePair, PipeOptionsContext,
+             StreamPipeOptionsContext, PipeOptionsFactory) compiles in from the Connections
+             shared\ folder. All four are stateless or driver-owned, so a private copy per
+             driver is correct; none of them is part of the Connections public surface. -->
+        <CohesionSharedSource Include="Assimalign.Cohesion.Connections" />
     </ItemGroup>
 </Project>

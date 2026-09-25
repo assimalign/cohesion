@@ -1,9 +1,8 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// The QPACK dynamic table (RFC 9204 §3.2) maintained by the decoder side of an

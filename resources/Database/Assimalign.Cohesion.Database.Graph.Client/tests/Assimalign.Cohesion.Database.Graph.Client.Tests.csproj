@@ -1,1 +1,16 @@
-<Project Sdk="Microsoft.NET.Sdk"/>
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Graph.Client.Tests</RootNamespace>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+	</ItemGroup>
+</Project>

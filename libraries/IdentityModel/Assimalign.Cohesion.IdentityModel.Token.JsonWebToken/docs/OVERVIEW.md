@@ -13,6 +13,11 @@ takes the neutral token base (`…Token`) to OIDC-grade JWT document fidelity:
 - **Parsing** — `JsonWebToken.Parse` / `TryParse`: reflection-free compact-serialization
   parsing (base64url + `System.Text.Json` readers) that rejects the RFC 8725 §2.3
   duplicate-member ambiguity, bounds NumericDate conversion, and folds string-or-array `aud`.
+- **Writing** — `JsonWebTokenWriter.CreateEs256`: compact JWS creation over the existing
+  `JsonWebTokenDescriptor`, with `alg`/`kid` headers, registered-claim helpers, NIST P-256
+  curve binding, and IEEE P1363 signatures produced by `ECDsa.SignData`.
+- **Signature verification** — `JsonWebTokenSignatureVerifier.CreateEcdsa/CreateRsa`: reusable,
+  key-bound ECDSA (`ES*`) and RSA (`RS*`/`PS*`) verification over the exact compact signing input.
 - **Validation** — `JsonWebToken.Validate(JsonWebTokenValidationOptions)`: algorithm presence /
   `none` rejection (RFC 8725) / allowed-set membership, required-claim presence, `b64`/`crit`
   constraints, and the **keyless** `at_hash`/`c_hash` value comparison (OIDC Core §3.1.3.6 /
@@ -22,8 +27,9 @@ takes the neutral token base (`…Token`) to OIDC-grade JWT document fidelity:
 
 ## Status
 
-Delivered by feature `[L01.01.12.07]` (#608), with an OIDC Core at_hash spec fixture and a
-malformed-token corpus.
+Document parsing and validation were delivered by feature `[L01.01.12.07]` (#608). Compact
+ES256 writing and reusable asymmetric signature verification were delivered by design item 25b,
+`[L01.01.12.16]` (#970), before the bootstrap-credential feature.
 
 ## Dependencies
 
@@ -34,10 +40,12 @@ malformed-token corpus.
 
 ## Scope
 
-Document fidelity and document-level validation. It does **not** verify signatures (a keyed
-operation exposed as a seam via `SigningInput` + `Parts`), enforce OpenID Connect protocol
-rules (nonce/azp/`max_age` — the OIDC branch's concern), or handle JWE. A successful
-`Validate` means "data and hash rules passed", never "signature verified". See the family
+Compact JWT/JWS document fidelity, ES256 writing, reusable asymmetric signature primitives, and
+document-level validation. `Validate` deliberately does **not** invoke a signature verifier;
+callers verify `SigningInput` + `Parts.Signature` separately before trusting claims. The package
+does not manage keys/trust, enforce OpenID Connect protocol rules (nonce/azp/`max_age` — the OIDC
+branch's concern), or handle JWE. A successful `Validate` means "data and hash rules passed",
+never "signature verified". See the family
 [DESIGN.md](../../Assimalign.Cohesion.IdentityModel/docs/DESIGN.md) — "Token normalization
 decisions" — and this project's [DESIGN.md](DESIGN.md) for the boundary and compatibility
 matrix.

@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
-namespace Assimalign.Cohesion.OpenApi.Versioning;
+namespace Assimalign.Cohesion.OpenApi.Versioning.Internal;
 
 /// <summary>
 /// Enumerates every <see cref="OpenApiSchema"/> reachable in a document together with a JSON Pointer to

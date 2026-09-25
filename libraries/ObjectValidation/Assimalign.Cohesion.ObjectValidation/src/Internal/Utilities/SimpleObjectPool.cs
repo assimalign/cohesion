@@ -6,11 +6,11 @@ namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal static class SimpleObjectPool
 {
-    private static ConcurrentDictionary<Type, List<object>> pools = new();
+    private static ConcurrentDictionary<Type, List<object>> _pools = new();
 
     public static T Rent<T>(int poolSize = 20) where T : new()
     {
-        var pool = pools.GetOrAdd(typeof(T), type =>
+        var pool = _pools.GetOrAdd(typeof(T), type =>
         {
             var items = new List<object>();
             for (int i = 0; i < poolSize; i++)
@@ -35,7 +35,7 @@ internal static class SimpleObjectPool
 
     public static void Return<T>(T value)
     {
-        var pool = pools[typeof(T)];
+        var pool = _pools[typeof(T)];
         pool.Add(value);
     }
 }

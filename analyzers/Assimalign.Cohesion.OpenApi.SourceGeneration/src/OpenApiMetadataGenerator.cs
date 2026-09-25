@@ -8,6 +8,8 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
+using Assimalign.Cohesion.OpenApi.SourceGeneration.Internal;
+
 namespace Assimalign.Cohesion.OpenApi.SourceGeneration;
 
 /// <summary>

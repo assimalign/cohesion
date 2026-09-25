@@ -4,6 +4,42 @@ The connection layer of the Cohesion networking stack: the contracts for accepti
 establishing, layering, and using network connections, plus the concrete drivers that implement
 them.
 
+## Project map
+
+An arrow means "references": `Connections.Tcp --> Connections` reads
+`Assimalign.Cohesion.Connections.Tcp` references `Assimalign.Cohesion.Connections`.
+
+```mermaid
+flowchart LR
+    P0["Connections — area root"]
+    P1["Connections.InMemory"]
+    P2["Connections.NamedPipes"]
+    P3["Connections.Quic"]
+    P4["Connections.Security"]
+    P5["Connections.Tcp"]
+    P6["Connections.Udp"]
+    CORE["Assimalign.Cohesion.Core — L1"]
+    P0 --> CORE
+    P1 --> P0
+    P1 --> CORE
+    P2 --> P0
+    P2 --> CORE
+    P3 --> P0
+    P3 --> CORE
+    P4 --> P0
+    P4 --> CORE
+    P5 --> P0
+    P5 --> CORE
+    P6 --> P0
+    P6 --> CORE
+```
+
+Solid edges are the references this area permits; the dependency arrow always points from the
+consumer to what it consumes.
+
+The full reference graph for every Cohesion assembly, including the exact external dependencies
+collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
+
 ## Purpose
 
 Everything that produces or consumes a network byte channel goes through this area. The
@@ -16,7 +52,7 @@ deliberately no transport abstraction — see the naming rule and full design ra
 
 | Project | Role |
 |---|---|
-| `Assimalign.Cohesion.Connections` | The contracts: `IConnection` (a live duplex pipe), `IConnectionListener` / `IConnectionFactory`, `IMultiplexedConnection` (+ listener/factory), `IDatagramConnection`, the `IConnectionLayer` composition arrow, `ConnectionCapabilities`, and the guided abstract bases. Also carries the internal driver toolbox (pipe-pair wiring, pipe options, diagnostics). |
+| `Assimalign.Cohesion.Connections` | The contracts: `IConnection` (a live duplex pipe), `IConnectionListener` / `IConnectionFactory`, `IMultiplexedConnection` (+ listener/factory), `IDatagramConnection`, the `IConnectionLayer` composition arrow, `ConnectionCapabilities`, and the guided abstract bases. Also carries `ConnectionDiagnostics` and the `shared/` driver source (pipe-pair wiring, pooled pipe options) that the drivers compile in. |
 | `Assimalign.Cohesion.Connections.Tcp` | Reliable, ordered, single-stream socket driver (`TcpConnectionListener` / `TcpConnectionFactory`). Serves both TCP over IP and Unix domain sockets (with socket-file lifecycle and honest protocol stamping), plus socket-activation descriptor hand-off. |
 | `Assimalign.Cohesion.Connections.NamedPipes` | Reliable, ordered, single-stream named-pipe driver (`NamedPipeConnectionListener` / `NamedPipeConnectionFactory`) for Windows-native local IPC with ACL/filesystem access control; the peer of the `Tcp` driver's Unix domain socket path. |
 | `Assimalign.Cohesion.Connections.Udp` | Message-oriented UDP datagram driver (`UdpConnectionFactory` → `IDatagramConnection`). |
@@ -32,11 +68,15 @@ by protocol identity. Direction is structural — servers hold listeners, client
 and connection transformations compose at establishment via `listener.Use(layer)` /
 `factory.Use(layer)`.
 
+Listeners acquire their configured endpoints explicitly through `BindAsync`. Binding is idempotent
+while a listener is active; `DisposeAsync` releases the endpoint and terminally ends that listener
+instance. A later host start creates and binds a new listener rather than reusing a disposed one.
+
 ## Dependencies
 
 - `Assimalign.Cohesion.Core` (all projects)
-- Drivers additionally depend on `Assimalign.Cohesion.Connections` (contracts + internal toolbox
-  via `InternalsVisibleTo`).
+- Drivers additionally depend on `Assimalign.Cohesion.Connections` (contracts and lifecycle
+  diagnostics) and compile its `shared/` pipe-plumbing source through `CohesionSharedSource`.
 
 ## Further Reading
 

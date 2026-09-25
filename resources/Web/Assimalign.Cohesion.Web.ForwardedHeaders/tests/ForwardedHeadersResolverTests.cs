@@ -18,8 +18,8 @@ namespace Assimalign.Cohesion.Web.ForwardedHeaders.Tests;
 /// </summary>
 public class ForwardedHeadersResolverTests
 {
-    private static readonly IPEndPoint LoopbackRemote = new(IPAddress.Loopback, 52100);
-    private static readonly IPEndPoint UntrustedRemote = new(IPAddress.Parse("198.51.100.7"), 52100);
+    private static readonly IPEndPoint _loopbackRemote = new(IPAddress.Loopback, 52100);
+    private static readonly IPEndPoint _untrustedRemote = new(IPAddress.Parse("198.51.100.7"), 52100);
 
     private static ForwardedHeadersResolver CreateResolver(Action<ForwardedHeadersOptions>? configure = null)
     {
@@ -66,13 +66,13 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(xForwardedFor: "203.0.113.9");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("internal"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("internal"));
 
         // Assert
         feature.TrustedHopCount.ShouldBe(1);
         feature.RemoteIp.ShouldBe(IPAddress.Parse("203.0.113.9"));
         feature.RemotePort.ShouldBe(0);
-        feature.OriginalRemoteEndPoint.ShouldBe(LoopbackRemote);
+        feature.OriginalRemoteEndPoint.ShouldBe(_loopbackRemote);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: Headers from an untrusted direct peer should be ignored entirely (spoofing defense)")]
@@ -88,11 +88,11 @@ public class ForwardedHeadersResolverTests
             xForwardedHost: "spoofed.example");
 
         // Act
-        var feature = resolver.Resolve(UntrustedRemote, headers, HttpScheme.Http, new HttpHost("real.example"));
+        var feature = resolver.Resolve(_untrustedRemote, headers, HttpScheme.Http, new HttpHost("real.example"));
 
         // Assert
         feature.TrustedHopCount.ShouldBe(0);
-        feature.RemoteEndPoint.ShouldBe(UntrustedRemote);
+        feature.RemoteEndPoint.ShouldBe(_untrustedRemote);
         feature.Scheme.ShouldBe(HttpScheme.Http);
         feature.Host.Value.ShouldBe("real.example");
     }
@@ -121,7 +121,7 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(xForwardedFor: "203.0.113.9, 10.0.0.2");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert
         feature.TrustedHopCount.ShouldBe(2);
@@ -137,7 +137,7 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(xForwardedFor: "203.0.113.9, 203.0.113.50");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert — only the loopback-vouched entry applied.
         feature.TrustedHopCount.ShouldBe(1);
@@ -156,7 +156,7 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(xForwardedFor: "203.0.113.9, 10.0.0.3, 10.0.0.2");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert — two nearest entries accepted; the leftmost never evaluated.
         feature.TrustedHopCount.ShouldBe(2);
@@ -174,7 +174,7 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(xForwardedFor: "203.0.113.9, 127.0.0.1");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert — even though 127.0.0.1 is itself trusted, the limit stops the walk.
         feature.TrustedHopCount.ShouldBe(1);
@@ -189,7 +189,7 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(xForwardedFor: "203.0.113.9, not-an-address, 10.0.0.2");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert — the nearest entry applied; the malformed one and everything beyond it did not.
         feature.TrustedHopCount.ShouldBe(1);
@@ -204,11 +204,11 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(xForwardedFor: "203.0.113.9, garbage$value");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert
         feature.TrustedHopCount.ShouldBe(0);
-        feature.RemoteEndPoint.ShouldBe(LoopbackRemote);
+        feature.RemoteEndPoint.ShouldBe(_loopbackRemote);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: Bare and bracketed IPv6 entries should both resolve, brackets carrying the port")]
@@ -218,9 +218,9 @@ public class ForwardedHeadersResolverTests
         var resolver = CreateResolver();
 
         // Act — the de-facto bare spelling (no port can be carried).
-        var bare = resolver.Resolve(LoopbackRemote, CreateHeaders(xForwardedFor: "2001:db8::1"), HttpScheme.Http, new HttpHost("h"));
+        var bare = resolver.Resolve(_loopbackRemote, CreateHeaders(xForwardedFor: "2001:db8::1"), HttpScheme.Http, new HttpHost("h"));
         // Act — the bracketed spelling, which is how a port can be carried.
-        var bracketed = resolver.Resolve(LoopbackRemote, CreateHeaders(xForwardedFor: "[2001:db8::1]:4711"), HttpScheme.Http, new HttpHost("h"));
+        var bracketed = resolver.Resolve(_loopbackRemote, CreateHeaders(xForwardedFor: "[2001:db8::1]:4711"), HttpScheme.Http, new HttpHost("h"));
 
         // Assert
         bare.RemoteIp.ShouldBe(IPAddress.Parse("2001:db8::1"));
@@ -238,7 +238,7 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(xForwardedFor: "::ffff:203.0.113.9, ::ffff:10.0.0.2");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert
         feature.TrustedHopCount.ShouldBe(2);
@@ -253,7 +253,7 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(xForwardedFor: "203.0.113.9, unknown, 10.0.0.2");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert — 10.0.0.2 applied; 'unknown' was vouched for (counted) but carries no
         // address, so 203.0.113.9 is unreachable.
@@ -272,7 +272,7 @@ public class ForwardedHeadersResolverTests
             xForwardedHost: "public.example, edge.internal");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert
         feature.Scheme.ShouldBe(HttpScheme.Https);
@@ -288,12 +288,12 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(xForwardedProto: "https, http", xForwardedFor: "203.0.113.9");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert — rightmost proto applied; X-Forwarded-For ignored (not selected).
         feature.TrustedHopCount.ShouldBe(1);
         feature.Scheme.ShouldBe(HttpScheme.Http);
-        feature.RemoteEndPoint.ShouldBe(LoopbackRemote);
+        feature.RemoteEndPoint.ShouldBe(_loopbackRemote);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: Asymmetric X-Forwarded-* lists should apply values only at depths where entries exist")]
@@ -305,7 +305,7 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(xForwardedFor: "203.0.113.9, 10.0.0.2", xForwardedProto: "https");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert
         feature.TrustedHopCount.ShouldBe(2);
@@ -321,11 +321,11 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(xForwardedFor: "203.0.113.9", xForwardedProto: "gopher");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert — the whole hop is rejected, including its well-formed address entry.
         feature.TrustedHopCount.ShouldBe(0);
-        feature.RemoteEndPoint.ShouldBe(LoopbackRemote);
+        feature.RemoteEndPoint.ShouldBe(_loopbackRemote);
         feature.Scheme.ShouldBe(HttpScheme.Http);
     }
 
@@ -337,7 +337,7 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(xForwardedFor: "203.0.113.9", xForwardedHost: "evil.example/path");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("safe.example"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("safe.example"));
 
         // Assert
         feature.TrustedHopCount.ShouldBe(0);
@@ -356,11 +356,11 @@ public class ForwardedHeadersResolverTests
             xForwardedHost: "other.example");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert
         feature.Scheme.ShouldBe(HttpScheme.Https);
-        feature.RemoteEndPoint.ShouldBe(LoopbackRemote);
+        feature.RemoteEndPoint.ShouldBe(_loopbackRemote);
         feature.Host.Value.ShouldBe("h");
     }
 
@@ -372,7 +372,7 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(forwarded: "for=\"[2001:db8::1]:4711\";proto=https;host=api.example.com");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("internal"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("internal"));
 
         // Assert
         feature.TrustedHopCount.ShouldBe(1);
@@ -396,7 +396,7 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(forwarded: "for=203.0.113.9;proto=https, for=10.0.0.2");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert
         feature.TrustedHopCount.ShouldBe(2);
@@ -416,14 +416,14 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(forwarded: "for=203.0.113.9, for=_hidden;proto=https");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert — proto applied from the vouched hop; the effective client stays at the
         // transport peer because no address was disclosed, and the deeper entry is
         // unreachable without one.
         feature.TrustedHopCount.ShouldBe(1);
         feature.Scheme.ShouldBe(HttpScheme.Https);
-        feature.RemoteEndPoint.ShouldBe(LoopbackRemote);
+        feature.RemoteEndPoint.ShouldBe(_loopbackRemote);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: A present-but-malformed Forwarded header should resolve nothing and never fall back")]
@@ -436,11 +436,11 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(forwarded: "for=203.0.113.9;=broken", xForwardedFor: "203.0.113.77");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert
         feature.TrustedHopCount.ShouldBe(0);
-        feature.RemoteEndPoint.ShouldBe(LoopbackRemote);
+        feature.RemoteEndPoint.ShouldBe(_loopbackRemote);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolve: When both families are present and selected, RFC 7239 should win")]
@@ -451,7 +451,7 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(forwarded: "for=203.0.113.9", xForwardedFor: "203.0.113.77");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert — the RFC value, not the legacy one.
         feature.RemoteIp.ShouldBe(IPAddress.Parse("203.0.113.9"));
@@ -466,7 +466,7 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders(forwarded: "for=203.0.113.9", xForwardedFor: "203.0.113.77");
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Http, new HttpHost("h"));
 
         // Assert
         feature.RemoteIp.ShouldBe(IPAddress.Parse("203.0.113.77"));
@@ -514,16 +514,16 @@ public class ForwardedHeadersResolverTests
         var headers = CreateHeaders();
 
         // Act
-        var feature = resolver.Resolve(LoopbackRemote, headers, HttpScheme.Https, new HttpHost("wire.example"));
+        var feature = resolver.Resolve(_loopbackRemote, headers, HttpScheme.Https, new HttpHost("wire.example"));
 
         // Assert — the feature still answers, with effective == original.
         feature.TrustedHopCount.ShouldBe(0);
         feature.Scheme.ShouldBe(HttpScheme.Https);
         feature.Host.Value.ShouldBe("wire.example");
-        feature.RemoteEndPoint.ShouldBe(LoopbackRemote);
+        feature.RemoteEndPoint.ShouldBe(_loopbackRemote);
         feature.OriginalScheme.ShouldBe(HttpScheme.Https);
         feature.OriginalHost.Value.ShouldBe("wire.example");
-        feature.OriginalRemoteEndPoint.ShouldBe(LoopbackRemote);
+        feature.OriginalRemoteEndPoint.ShouldBe(_loopbackRemote);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.ForwardedHeaders] - Resolver: Options should be snapshotted at construction, not read per request")]
@@ -536,7 +536,7 @@ public class ForwardedHeadersResolverTests
         // Act — widen the trust boundary after the snapshot was taken.
         options.KnownProxies.Add(IPAddress.Parse("198.51.100.7"));
         options.Headers = ForwardedHeaderNames.None;
-        var feature = resolver.Resolve(UntrustedRemote, CreateHeaders(xForwardedFor: "203.0.113.9"), HttpScheme.Http, new HttpHost("h"));
+        var feature = resolver.Resolve(_untrustedRemote, CreateHeaders(xForwardedFor: "203.0.113.9"), HttpScheme.Http, new HttpHost("h"));
 
         // Assert — the late-added proxy is not trusted by the composed resolver.
         feature.TrustedHopCount.ShouldBe(0);

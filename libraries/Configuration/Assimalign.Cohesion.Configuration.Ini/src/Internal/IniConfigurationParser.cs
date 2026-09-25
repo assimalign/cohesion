@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Configuration.Ini;
+namespace Assimalign.Cohesion.Configuration.Ini.Internal;
 
 using Assimalign.Cohesion.Configuration;
 

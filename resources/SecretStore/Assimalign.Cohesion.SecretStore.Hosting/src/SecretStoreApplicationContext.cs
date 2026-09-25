@@ -1,31 +1,47 @@
 using System;
 using System.Collections.Generic;
-
-namespace Assimalign.Cohesion.SecretStore.Hosting;
+using System.IO;
 
 using Assimalign.Cohesion.Hosting;
 
-/// <summary>
-/// The host context for <see cref="SecretStoreApplication"/>.
-/// </summary>
-public sealed class SecretStoreApplicationContext : HostContext
-{
-    private readonly IHostEnvironment _environment;
-    private readonly IReadOnlyList<IHostService> _hostedServices;
+namespace Assimalign.Cohesion.SecretStore.Hosting;
 
-    internal SecretStoreApplicationContext(SecretStoreApplicationOptions options, IReadOnlyList<IHostService> hostedServices)
+/// <summary>
+/// Provides the SecretStore application environment and runtime composition.
+/// </summary>
+public sealed class SecretStoreApplicationContext : HostContext, ISecretStoreApplicationContext
+{
+    private IReadOnlyList<IHostService> _hostedServices = Array.Empty<IHostService>();
+    private readonly IHostEnvironment _environment;
+
+    internal SecretStoreApplicationContext(string environmentName, System.IO.FileSystemPath? contentRootPath)
     {
-        _environment = new HostEnvironment(options.Environment ?? "production");
-        _hostedServices = hostedServices;
+        ArgumentException.ThrowIfNullOrWhiteSpace(environmentName);
+
+        // The opt-in resource runner asserts that the host content root equals the ambient resource content root,
+        // so an enabled resource seeds it from the ambient context; a plain application keeps it unset.
+        _environment = new HostEnvironment(environmentName) { ContentRootPath = contentRootPath };
     }
 
     /// <summary>
-    /// Gets the host environment information.
+    /// Gets the configured application content root.
+    /// </summary>
+    public FileSystemPath? ContentRootPath => Environment.ContentRootPath;
+
+    /// <summary>
+    /// Gets the host environment for this application.
     /// </summary>
     public override IHostEnvironment Environment => _environment;
 
     /// <summary>
-    /// Gets the hosted services composed by the application.
+    /// Gets the hosted services in registration and startup order.
     /// </summary>
     public override IEnumerable<IHostService> HostedServices => _hostedServices;
+
+    internal void SetHostedServices(IReadOnlyList<IHostService> hostedServices)
+    {
+        ArgumentNullException.ThrowIfNull(hostedServices);
+
+        _hostedServices = hostedServices;
+    }
 }

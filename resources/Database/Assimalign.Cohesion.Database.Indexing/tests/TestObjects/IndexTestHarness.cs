@@ -4,7 +4,9 @@ using System.IO;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Tests;
 using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.FileSystem;
 
 namespace Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 
@@ -18,9 +20,9 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
     private readonly Dictionary<ITransactionContext, IStorageTransaction> _pairs = new();
     private readonly object _sync = new();
 
-    public IndexTestHarness(Stream? data = null, Stream? journal = null)
+    public IndexTestHarness(IFileSystemFileHandle? data = null, IFileSystemFileHandle? journal = null)
     {
-        Storage = HarnessStorage.Create(data ?? new MemoryStream(), journal ?? new MemoryStream());
+        Storage = HarnessStorage.Create(data ?? new SimulatedDurableFileHandle(), journal ?? new SimulatedDurableFileHandle());
         LockManager = Transactions.LockManager.Create();
         Manager = TransactionManager.Create(TransactionLog.CreateInMemory(), LockManager, VersionStore.CreateInMemory());
         IndexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
@@ -66,7 +68,7 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
         var journalStream = new MemoryStream();
         journalStream.Write(journal);
 
-        return new IndexTestHarness(HarnessStorage.Open(dataStream, journalStream), registrations);
+        return new IndexTestHarness(HarnessStorage.Open(new SimulatedDurableFileHandle(dataStream), new SimulatedDurableFileHandle(journalStream)), registrations);
     }
 
     public async Task<ITransactionContext> BeginAsync()
@@ -136,14 +138,14 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
 
         public override StorageModel Model => StorageModel.Custom;
 
-        public static HarnessStorage Create(Stream data, Stream journal)
+        public static HarnessStorage Create(IFileSystemFileHandle data, IFileSystemFileHandle journal)
         {
             var storage = new HarnessStorage(new StorageStream(data), new StorageStream(journal));
             storage.InitializeNew((Name)"index-harness");
             return storage;
         }
 
-        public static HarnessStorage Open(Stream data, Stream journal)
+        public static HarnessStorage Open(IFileSystemFileHandle data, IFileSystemFileHandle journal)
         {
             var storage = new HarnessStorage(new StorageStream(data), new StorageStream(journal));
             storage.OpenExisting();

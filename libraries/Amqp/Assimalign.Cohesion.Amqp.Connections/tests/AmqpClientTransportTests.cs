@@ -13,9 +13,9 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 public class AmqpClientTransportTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
-    private static readonly EndPoint TestEndPoint = new IPEndPoint(IPAddress.Loopback, 5672);
+    private static readonly EndPoint _testEndPoint = new IPEndPoint(IPAddress.Loopback, 5672);
 
     private static AmqpTransportOptions ManualNegotiationOptions => new()
     {
@@ -29,15 +29,15 @@ public class AmqpClientTransportTests
         TestConnection carrier = new();
         TestConnectionFactory factory = new();
         factory.Enqueue(carrier);
-        await using AmqpClientTransport transport = new(factory, TestEndPoint);
+        await using AmqpClientTransport transport = new(factory, _testEndPoint);
 
         // Act
         AmqpConnection connection = await transport.ConnectAsync();
 
         // Assert
         connection.Id.ShouldBe(carrier.Id);
-        factory.LastEndPoint.ShouldBeSameAs(TestEndPoint);
-        transport.EndPoint.ShouldBeSameAs(TestEndPoint);
+        factory.LastEndPoint.ShouldBeSameAs(_testEndPoint);
+        transport.EndPoint.ShouldBeSameAs(_testEndPoint);
         transport.Connections.ShouldHaveSingleItem().ShouldBeSameAs(connection);
     }
 
@@ -45,13 +45,13 @@ public class AmqpClientTransportTests
     public async Task OpenAsync_OnMultiplexedCarrier_ShouldOpenBidirectionalCarrierStream()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         TestConnection stream = new();
         TestMultiplexedConnection carrier = new();
         carrier.Enqueue(stream);
         TestMultiplexedConnectionFactory factory = new();
         factory.Enqueue(carrier);
-        await using AmqpClientTransport transport = new(factory, TestEndPoint, ManualNegotiationOptions);
+        await using AmqpClientTransport transport = new(factory, _testEndPoint, ManualNegotiationOptions);
         AmqpConnection connection = await transport.ConnectAsync(timeout.Token);
 
         // Act
@@ -72,7 +72,7 @@ public class AmqpClientTransportTests
     {
         // Arrange
         TestConnectionFactory factory = new();
-        AmqpClientTransport transport = new(factory, TestEndPoint);
+        AmqpClientTransport transport = new(factory, _testEndPoint);
         await transport.DisposeAsync();
 
         // Act + Assert
@@ -86,7 +86,7 @@ public class AmqpClientTransportTests
         TestConnection carrier = new();
         TestConnectionFactory factory = new();
         factory.Enqueue(carrier);
-        AmqpClientTransport transport = new(factory, TestEndPoint);
+        AmqpClientTransport transport = new(factory, _testEndPoint);
         await transport.ConnectAsync();
 
         // Act
@@ -101,13 +101,13 @@ public class AmqpClientTransportTests
     public async Task DisposeAsync_OnMultiplexedConnection_ShouldDisposeCarrierStreamAndConnection()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         TestConnection stream = new();
         TestMultiplexedConnection carrier = new();
         carrier.Enqueue(stream);
         TestMultiplexedConnectionFactory factory = new();
         factory.Enqueue(carrier);
-        await using AmqpClientTransport transport = new(factory, TestEndPoint, ManualNegotiationOptions);
+        await using AmqpClientTransport transport = new(factory, _testEndPoint, ManualNegotiationOptions);
         AmqpConnection connection = await transport.ConnectAsync(timeout.Token);
         await connection.OpenAsync(timeout.Token);
 

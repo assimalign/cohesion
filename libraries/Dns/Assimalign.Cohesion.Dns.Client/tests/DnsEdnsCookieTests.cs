@@ -13,10 +13,10 @@ namespace Assimalign.Cohesion.Dns.Tests;
 /// </summary>
 public sealed class DnsEdnsCookieTests
 {
-    private static readonly byte[] FixedClientCookie =
+    private static readonly byte[] _fixedClientCookie =
         new byte[] { 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF };
 
-    private static readonly byte[] ServerCookie =
+    private static readonly byte[] _serverCookie =
         new byte[] { 0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10 };
 
     [Fact]
@@ -35,13 +35,13 @@ public sealed class DnsEdnsCookieTests
         var stub = new StubDnsClient(new StubDnsClientOptions
         {
             Transport = udp,
-            EdnsClientCookie = FixedClientCookie,
+            EdnsClientCookie = _fixedClientCookie,
         });
 
         _ = await stub.QueryAsync(new DnsQuestion("example.com", DnsRecordType.A));
 
         Assert.NotNull(captured);
-        Assert.Equal(FixedClientCookie, captured!.ClientCookie.ToArray());
+        Assert.Equal(_fixedClientCookie, captured!.ClientCookie.ToArray());
         Assert.False(captured.HasServerCookie); // first query has no server cookie yet
     }
 
@@ -80,15 +80,15 @@ public sealed class DnsEdnsCookieTests
             return DnsTestMessages.BuildAnswerWithCookie(
                 query,
                 new DnsRecord[] { DnsTestMessages.ExampleComA() },
-                clientCookieEcho: FixedClientCookie,
-                serverCookie: ServerCookie);
+                clientCookieEcho: _fixedClientCookie,
+                serverCookie: _serverCookie);
         });
 
         using var udp = new UdpDnsTransport(new UdpDnsTransportOptions { EndPoint = server.EndPoint });
         var stub = new StubDnsClient(new StubDnsClientOptions
         {
             Transport = udp,
-            EdnsClientCookie = FixedClientCookie,
+            EdnsClientCookie = _fixedClientCookie,
         });
 
         _ = await stub.QueryAsync(new DnsQuestion("example.com", DnsRecordType.A));
@@ -99,8 +99,8 @@ public sealed class DnsEdnsCookieTests
         Assert.False(captured[0]!.HasServerCookie);
         Assert.NotNull(captured[1]);
         Assert.True(captured[1]!.HasServerCookie);
-        Assert.Equal(ServerCookie, captured[1]!.ServerCookie.ToArray());
-        Assert.Equal(FixedClientCookie, captured[1]!.ClientCookie.ToArray());
+        Assert.Equal(_serverCookie, captured[1]!.ServerCookie.ToArray());
+        Assert.Equal(_fixedClientCookie, captured[1]!.ClientCookie.ToArray());
     }
 
     [Fact]
@@ -118,8 +118,8 @@ public sealed class DnsEdnsCookieTests
                 return DnsTestMessages.BuildAnswerWithCookie(
                     query,
                     Array.Empty<DnsRecord>(),
-                    clientCookieEcho: FixedClientCookie,
-                    serverCookie: ServerCookie,
+                    clientCookieEcho: _fixedClientCookie,
+                    serverCookie: _serverCookie,
                     rcode: DnsResponseCode.BadCookie);
             }
             // Second request: accept with the server cookie + return real answer.
@@ -129,15 +129,15 @@ public sealed class DnsEdnsCookieTests
             return DnsTestMessages.BuildAnswerWithCookie(
                 query,
                 new DnsRecord[] { DnsTestMessages.ExampleComA() },
-                clientCookieEcho: FixedClientCookie,
-                serverCookie: ServerCookie);
+                clientCookieEcho: _fixedClientCookie,
+                serverCookie: _serverCookie);
         });
 
         using var udp = new UdpDnsTransport(new UdpDnsTransportOptions { EndPoint = server.EndPoint });
         var stub = new StubDnsClient(new StubDnsClientOptions
         {
             Transport = udp,
-            EdnsClientCookie = FixedClientCookie,
+            EdnsClientCookie = _fixedClientCookie,
         });
 
         DnsMessage answer = await stub.QueryAsync(new DnsQuestion("example.com", DnsRecordType.A));
@@ -152,7 +152,7 @@ public sealed class DnsEdnsCookieTests
         // ignore the server cookie attached to that response — subsequent queries still send
         // a client-cookie-only option.
         var captured = new List<DnsEdnsCookieOption?>();
-        byte[] wrongEcho = (byte[])FixedClientCookie.Clone();
+        byte[] wrongEcho = (byte[])_fixedClientCookie.Clone();
         wrongEcho[0] ^= 0xFF;
 
         await using var server = new LoopbackUdpDnsServer();
@@ -164,14 +164,14 @@ public sealed class DnsEdnsCookieTests
                 query,
                 new DnsRecord[] { DnsTestMessages.ExampleComA() },
                 clientCookieEcho: wrongEcho,
-                serverCookie: ServerCookie);
+                serverCookie: _serverCookie);
         });
 
         using var udp = new UdpDnsTransport(new UdpDnsTransportOptions { EndPoint = server.EndPoint });
         var stub = new StubDnsClient(new StubDnsClientOptions
         {
             Transport = udp,
-            EdnsClientCookie = FixedClientCookie,
+            EdnsClientCookie = _fixedClientCookie,
         });
 
         _ = await stub.QueryAsync(new DnsQuestion("example.com", DnsRecordType.A));
@@ -199,22 +199,22 @@ public sealed class DnsEdnsCookieTests
                 return DnsTestMessages.BuildAnswerWithCookie(
                     query,
                     Array.Empty<DnsRecord>(),
-                    clientCookieEcho: FixedClientCookie,
-                    serverCookie: ServerCookie,
+                    clientCookieEcho: _fixedClientCookie,
+                    serverCookie: _serverCookie,
                     rcode: DnsResponseCode.BadCookie);
             }
             return DnsTestMessages.BuildAnswerWithCookie(
                 query,
                 new DnsRecord[] { DnsTestMessages.ExampleComA() },
-                clientCookieEcho: FixedClientCookie,
-                serverCookie: ServerCookie);
+                clientCookieEcho: _fixedClientCookie,
+                serverCookie: _serverCookie);
         });
 
         using var udp = new UdpDnsTransport(new UdpDnsTransportOptions { EndPoint = server.EndPoint });
         var resolver = new ForwardingDnsResolver(new ForwardingDnsResolverOptions
         {
             Forwarders = { udp },
-            EdnsClientCookie = FixedClientCookie,
+            EdnsClientCookie = _fixedClientCookie,
         });
 
         DnsMessage answer = await resolver.ResolveAsync(new DnsQuestion("example.com", DnsRecordType.A));
@@ -243,7 +243,7 @@ public sealed class DnsEdnsCookieTests
             UdpTransportFactory = LoopbackDnsAuthority.CreateTransportFactory(),
             TcpTransportFactory = null,
             EnableQNameMinimization = false,
-            EdnsClientCookie = FixedClientCookie,
+            EdnsClientCookie = _fixedClientCookie,
         });
 
         _ = await resolver.ResolveAsync(new DnsQuestion("www.example.com", DnsRecordType.A));
@@ -253,7 +253,7 @@ public sealed class DnsEdnsCookieTests
         Assert.All(observedCookies, c =>
         {
             Assert.NotNull(c);
-            Assert.Equal(FixedClientCookie, c!.ClientCookie.ToArray());
+            Assert.Equal(_fixedClientCookie, c!.ClientCookie.ToArray());
         });
     }
 }
