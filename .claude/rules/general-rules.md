@@ -232,7 +232,7 @@ These folder rules apply to every shipped `src/` project (`libraries/`, `resourc
 | `Exceptions/` | Public exception types; the `{Name}ErrorCode` enum that pairs with an exception root | Flat | `RootNamespace` |
 | `Extensions/` | Public `static` classes that declare `extension(...)` members | Flat | `RootNamespace` |
 | `ValueObjects/` | Public value objects: structs / record structs with value equality (`IEquatable<Self>`), including every `CohesionValueType` (its `Include` path is `ValueObjects\<Name>.cs`) | Flat | `RootNamespace` |
-| `Internal/` | Every `internal` type, whatever its kind | Subfolders allowed: `Internal/EventSource/` for `EventSource` types, `Internal/Exceptions/` for internal exceptions, plus feature folders | `{RootNamespace}.Internal` |
+| `Internal/` | Every `internal` type, whatever its kind | Subfolders allowed: `Internal/EventSource/` for the assembly's one `EventSource` type (`event-source.md`), `Internal/Exceptions/` for internal exceptions, plus feature folders | `{RootNamespace}.Internal` |
 | `Properties/` | `AssemblyInfo.cs`; assembly-level attributes live here, not in the csproj | — | — |
 | `System/` | BCL-namespace extensions (`namespace System.*`) | Mirrors the BCL namespace | `System.*` — **only** in `Assimalign.Cohesion.Core` |
 
@@ -384,13 +384,14 @@ instances never cross an assembly boundary. No static mutable fields, no singlet
 state must stay in one assembly behind a seam. Linking duplicates the type: each assembly gets its
 own distinct CLR type and its own copy of any state.
 
-The canonical illustration is `Assimalign.Cohesion.Connections`, which does both at once.
+The canonical illustration is the `Connections` family, which does both at once.
 `DuplexPipePair` and the pool-owning pipe options are shared source — every instance is created,
-used and disposed inside the one driver that asked for them. `ConnectionEventSource` is not, and
-cannot be: it carries `[EventSource(Name = "Assimalign.Cohesion.Connections")]` and a static
-`Log` singleton holding counters, so four linked copies would be four providers claiming one
-process-global name, each under-reporting. It stays internal behind the public, stateless
-`ConnectionDiagnostics` forwarders.
+used and disposed inside the one driver that asked for them. Diagnostics are not, and cannot be:
+an event source carries a process-global name and a static `Log` singleton holding counters, so
+linked copies would be several providers claiming one name, each under-reporting. Each driver
+therefore owns its own internal event source (`event-source.md`). The family used to route every
+driver through one source in the contracts library behind public `ConnectionDiagnostics`
+forwarders; that exposed the event-writing surface as public API and was retired (2026-09).
 
 A shared-source link is a real coupling, so it is tracked in `docs/DEPENDENCIES.md` alongside the
 reference flavors — regenerate the graph when you add or remove one (`documentation.md`).
