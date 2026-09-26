@@ -47,7 +47,7 @@ question (see *Non-goals*).
 - **Not a builder verb, yet.** A listener must write into a *built* factory and stop when the application
   says so. `ILoggerFactoryBuilder` has no seam for a component that lives exactly as long as the factory
   it builds, so a `builder.Logging.ForwardEventSources()` verb would have nothing to attach to. Adding that
-  seam to the Logging root is tracked as follow-up work.
+  seam to the Logging root is tracked as follow-up work (#1036).
 - **Not a public class.** The implementation derives from `EventListener`, whose public surface
   (`EnableEvents`, `DisableEvents`, the `EventWritten` event) would let callers bypass the forwarding
   rules. The public API is the verb and an options object; the listener stays internal behind the

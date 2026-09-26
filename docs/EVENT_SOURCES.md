@@ -76,10 +76,10 @@ handshakes are already reported by the runtime's `System.Net.Security` source).
 These sources predate the convention. Their names will change when they are brought into line, so do
 not build tooling against them.
 
-| Assembly | Current name | Problem |
-| --- | --- | --- |
-| `Assimalign.Cohesion.DependencyInjection` | `Assimalign-Cohesion-DependencyInjection` | Dash-separated, not the assembly name. |
-| `Assimalign.Cohesion.Resilience` | `AssimalignCohesionResilience` | Concatenated name; public constructor; no events. |
-| `Assimalign.Cohesion.Resilience.Retry` | *(empty)* | Empty name; an event method that writes nothing. |
-| `Assimalign.Cohesion.Resilience.Timeout` | `Assimalign.Cohesion.Resilience.TimeoutResilienceEventSource` | Type name in the source name; no events. |
-| `Assimalign.Cohesion.Http.Connections` | `Assimalign.Cohesion.Http.Connections` | Correct name, but an empty placeholder with no events. |
+| Assembly | Current name | Problem | Tracked by |
+| --- | --- | --- | --- |
+| `Assimalign.Cohesion.DependencyInjection` | `Assimalign-Cohesion-DependencyInjection` | Dash-separated, not the assembly name. | #1037 |
+| `Assimalign.Cohesion.Resilience` | `AssimalignCohesionResilience` | Concatenated name; public constructor; no events. | #1038 |
+| `Assimalign.Cohesion.Resilience.Retry` | *(empty)* | Empty name; an event method that writes nothing. | #1038 |
+| `Assimalign.Cohesion.Resilience.Timeout` | `Assimalign.Cohesion.Resilience.TimeoutResilienceEventSource` | Type name in the source name; no events. | #1038 |
+| `Assimalign.Cohesion.Http.Connections` | `Assimalign.Cohesion.Http.Connections` | Correct name, but an empty placeholder with no events. | #1039 |
