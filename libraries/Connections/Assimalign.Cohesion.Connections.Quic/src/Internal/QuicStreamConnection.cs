@@ -26,7 +26,6 @@ namespace Assimalign.Cohesion.Connections.Quic.Internal;
 internal sealed class QuicStreamConnection : Connection
 {
     private readonly QuicStream _stream;
-    private readonly ListenerId _listenerId;
     private readonly long _defaultStreamErrorCode;
     private readonly Action<QuicStreamConnection> _onDisposed;
     private readonly CancellationTokenSource _connectionClosedSource = new();
@@ -34,13 +33,14 @@ internal sealed class QuicStreamConnection : Connection
 
     private volatile ConnectionState _state;
     private bool _isDisposed;
+    private int _closeReported;
 
     /// <summary>
     /// Creates a new connection over the supplied QUIC stream. The connection takes ownership
     /// of the stream but not of the shared <paramref name="streamOptions"/>.
     /// </summary>
     /// <param name="stream">The QUIC stream to wrap.</param>
-    /// <param name="listenerId">The identifier of the owning transport, for diagnostics.</param>
+    /// <param name="connectionId">The identifier of the owning QUIC connection, for diagnostics.</param>
     /// <param name="localEndPoint">The parent connection's local endpoint.</param>
     /// <param name="remoteEndPoint">The parent connection's remote endpoint.</param>
     /// <param name="streamOptions">The parent-owned shared stream pipe options.</param>
@@ -53,7 +53,7 @@ internal sealed class QuicStreamConnection : Connection
     /// <exception cref="ArgumentException">Thrown when the stream is neither readable nor writable.</exception>
     public QuicStreamConnection(
         QuicStream stream,
-        ListenerId listenerId,
+        ConnectionId connectionId,
         EndPoint? localEndPoint,
         EndPoint? remoteEndPoint,
         StreamPipeOptionsContext streamOptions,
@@ -73,7 +73,6 @@ internal sealed class QuicStreamConnection : Connection
         };
 
         _stream = stream;
-        _listenerId = listenerId;
         _defaultStreamErrorCode = defaultStreamErrorCode;
         _onDisposed = onDisposed;
         LocalEndPoint = localEndPoint;
@@ -86,7 +85,7 @@ internal sealed class QuicStreamConnection : Connection
             : UnwritablePipeWriter.Instance;
         _state = ConnectionState.Open;
 
-        ConnectionDiagnostics.ConnectionStart(ConnectionProtocol.Quic, listenerId, Id);
+        QuicConnectionEventSource.Log.StreamOpened(Id, connectionId, Direction);
     }
 
     /// <inheritdoc />
@@ -138,6 +137,7 @@ internal sealed class QuicStreamConnection : Connection
         _stream.Abort(QuicAbortDirection.Both, _defaultStreamErrorCode);
 
         CancelConnectionClosedToken();
+        ReportClosed();
     }
 
     /// <inheritdoc />
@@ -175,8 +175,7 @@ internal sealed class QuicStreamConnection : Connection
         CancelConnectionClosedToken();
 
         _onDisposed(this);
-
-        ConnectionDiagnostics.ConnectionStop(ConnectionProtocol.Quic, _listenerId, Id);
+        ReportClosed();
 
         lock (_stateLock)
         {
@@ -196,6 +195,15 @@ internal sealed class QuicStreamConnection : Connection
         catch (AggregateException)
         {
             // Exceptions thrown by ConnectionClosed registrations must not fault teardown.
+        }
+    }
+
+    // Abort and DisposeAsync both end the stream; whichever comes first reports it, once.
+    private void ReportClosed()
+    {
+        if (Interlocked.Exchange(ref _closeReported, 1) == 0)
+        {
+            QuicConnectionEventSource.Log.StreamClosed(Id);
         }
     }
 }

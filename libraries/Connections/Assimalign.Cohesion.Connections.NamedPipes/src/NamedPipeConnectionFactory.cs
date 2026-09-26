@@ -84,7 +84,8 @@ public sealed class NamedPipeConnectionFactory : ConnectionFactory
         {
             await client.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
-            return new NamedPipeConnection(client, localEndPoint: null, remoteEndPoint: namedPipeEndPoint);
+            // Dialed connections carry no listener id.
+            return new NamedPipeConnection(client, ListenerId.Empty, localEndPoint: null, remoteEndPoint: namedPipeEndPoint);
         }
         catch
         {

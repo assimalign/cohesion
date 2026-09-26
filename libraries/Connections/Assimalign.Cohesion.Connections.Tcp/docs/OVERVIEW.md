@@ -22,9 +22,9 @@ Local IPC is served here via Unix domain sockets; the Windows-native equivalent 
 
 ## Dependencies
 
-- `Assimalign.Cohesion.Connections` — the contracts this driver implements plus
-  `ConnectionDiagnostics`; its duplex-pipe wiring and pool-owning pipe options are compiled in
-  from that library's `shared/` folder (`CohesionSharedSource`).
+- `Assimalign.Cohesion.Connections` — the contracts this driver implements; its duplex-pipe wiring
+  and pool-owning pipe options are compiled in from that library's `shared/` folder
+  (`CohesionSharedSource`).
 - `Assimalign.Cohesion.Core` — `FileHandleEndPoint` and shared primitives.
 - `System.Net.Sockets` and `System.IO.Pipelines` from the shared framework. No third-party packages, no
   reflection.
@@ -46,6 +46,13 @@ TcpConnectionFactory factory = new();
 Connection dialed = await factory.ConnectAsync(listener.EndPoint, cancellationToken);
 Connection accepted = await accept;
 ```
+
+## Diagnostics
+
+Listener and connection lifecycle events, back-pressure and reset detail, errors, and connection counters
+are reported through the driver's internal event source, `Assimalign.Cohesion.Connections.Tcp`. Enable it
+by name in `dotnet-trace` / `dotnet-counters`, or forward it into an application's logging with
+`Assimalign.Cohesion.Logging.EventSource`. The event table is in [DESIGN.md](DESIGN.md#diagnostics).
 
 See [DESIGN.md](DESIGN.md) for the data path, the endpoint bind switch, the Unix domain socket file
 lifecycle, socket activation, and honest protocol stamping.

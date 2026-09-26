@@ -94,7 +94,7 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
 
             _pendingStream = CreateServerStream();
             _isBound = true;
-            ConnectionDiagnostics.ListenerInitialized(ConnectionProtocol.NamedPipe, _listenerId);
+            NamedPipeConnectionEventSource.Log.ListenerBound(_listenerId, _endPoint);
         }
 
         return ValueTask.CompletedTask;
@@ -150,7 +150,7 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
                 continue;
             }
 
-            NamedPipeConnection connection = new(server, _endPoint, _endPoint);
+            NamedPipeConnection connection = new(server, _listenerId, _endPoint, _endPoint);
 
             lock (_gate)
             {
@@ -180,8 +180,6 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
 
             }, (this, connection));
 
-            ConnectionDiagnostics.ConnectionStart(ConnectionProtocol.NamedPipe, _listenerId, connection.Id);
-
             return connection;
         }
 
@@ -194,6 +192,7 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
     public override async ValueTask DisposeAsync()
     {
         NamedPipeServerStream? pending;
+        bool wasBound;
 
         lock (_gate)
         {
@@ -203,6 +202,7 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
             }
 
             _isDisposed = true;
+            wasBound = _isBound;
             _isBound = false;
             _acceptPending = false;
             pending = _pendingStream;
@@ -223,6 +223,11 @@ public sealed class NamedPipeConnectionListener : ConnectionListener
         }
 
         _connections.Clear();
+
+        if (wasBound)
+        {
+            NamedPipeConnectionEventSource.Log.ListenerClosed(_listenerId);
+        }
     }
 
     /// <summary>
