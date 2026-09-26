@@ -93,6 +93,7 @@
 	<Folder Name="/cohesion/docs/">
 		<File Path="docs/DEPENDENCIES.md" />
 		<File Path="docs/DEVELOPER_EXPERIENCE_DESIGN.md" />
+		<File Path="docs/EVENT_SOURCES.md" />
 		<File Path="docs/OVERVIEW.md" />
 		<File Path="docs/REFERENCES.md" />
 		<File Path="docs/RUNTIME_CONTRACT.md" />
@@ -897,6 +898,7 @@
 		<Project Path="libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.Saml/tests/Assimalign.Cohesion.IdentityModel.Token.Saml.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Logging/">
+		<File Path="libraries/Logging/README.md" />
 		<File Path="libraries/Logging/Directory.Build.props" />
 		<File Path="libraries/Logging/Directory.Build.targets" />
 	</Folder>
@@ -942,6 +944,27 @@
 	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.Debug/tests/">
 		<Project Path="libraries/Logging/Assimalign.Cohesion.Logging.Debug/tests/Assimalign.Cohesion.Logging.Debug.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.EventSource/">
+		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.EventSource/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.EventSource/docs/">
+		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.EventSource/docs/DESIGN.md" />
+		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.EventSource/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.EventSource/docs/Assembly/" />
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.EventSource/docs/Assembly/Assimalign.Cohesion.Logging/" />
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.EventSource/docs/Assembly/Assimalign.Cohesion.Logging/EventSourceForwardingOptions/">
+		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.EventSource/docs/Assembly/Assimalign.Cohesion.Logging/EventSourceForwardingOptions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.EventSource/docs/Assembly/Assimalign.Cohesion.Logging/EventSourceLoggerFactoryExtensions/">
+		<File Path="libraries/Logging/Assimalign.Cohesion.Logging.EventSource/docs/Assembly/Assimalign.Cohesion.Logging/EventSourceLoggerFactoryExtensions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.EventSource/src/">
+		<Project Path="libraries/Logging/Assimalign.Cohesion.Logging.EventSource/src/Assimalign.Cohesion.Logging.EventSource.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/Logging/Assimalign.Cohesion.Logging.EventSource/tests/">
+		<Project Path="libraries/Logging/Assimalign.Cohesion.Logging.EventSource/tests/Assimalign.Cohesion.Logging.EventSource.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Connections/">
 		<File Path="libraries/Connections/README.md" />
 		<File Path="libraries/Connections/Directory.Build.props" />
@@ -983,6 +1006,10 @@
 		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.Tcp/tests/Assimalign.Cohesion.Connections.Tcp.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Udp/" />
+	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Udp/docs/">
+		<File Path="libraries/Connections/Assimalign.Cohesion.Connections.Udp/docs/DESIGN.md" />
+		<File Path="libraries/Connections/Assimalign.Cohesion.Connections.Udp/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Connections/Assimalign.Cohesion.Connections.Udp/src/">
 		<Project Path="libraries/Connections/Assimalign.Cohesion.Connections.Udp/src/Assimalign.Cohesion.Connections.Udp.csproj" />
 	</Folder>
