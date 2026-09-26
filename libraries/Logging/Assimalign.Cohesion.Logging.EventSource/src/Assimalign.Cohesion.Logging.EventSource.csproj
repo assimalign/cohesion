@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<!-- The Logging family shares one namespace. It also keeps an "EventSource" namespace segment
+		     from shadowing System.Diagnostics.Tracing.EventSource for every caller in the family. -->
+		<RootNamespace>Assimalign.Cohesion.Logging</RootNamespace>
+		<Description>EventSource bridge for Cohesion logging. Forwards the events of the Cohesion libraries' internal System.Diagnostics.Tracing event sources, and of any other event source named by prefix, into ILogger sinks.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
+	</ItemGroup>
+</Project>

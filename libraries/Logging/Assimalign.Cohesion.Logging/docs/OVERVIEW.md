@@ -33,6 +33,7 @@ and the scope lifecycle. Concrete sinks live in sibling packages.
 | `Assimalign.Cohesion.Logging` | Foundation contracts + factory composition. |
 | `Assimalign.Cohesion.Logging.Console` | Console sink. |
 | `Assimalign.Cohesion.Logging.Debug` | `System.Diagnostics.Debug` sink. |
+| `Assimalign.Cohesion.Logging.EventSource` | Bridge: forwards `System.Diagnostics.Tracing` events (every Cohesion library's internal event source by default) into a factory. |
 
 Future providers (file rolling, structured collectors, OpenTelemetry bridge) live in their
 own packages and depend on the foundation.
