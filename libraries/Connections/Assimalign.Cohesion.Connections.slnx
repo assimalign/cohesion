@@ -82,6 +82,10 @@
 		<Project Path="Assimalign.Cohesion.Connections.Tcp/tests/Assimalign.Cohesion.Connections.Tcp.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Udp/" />
+	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Udp/docs/">
+		<File Path="Assimalign.Cohesion.Connections.Udp/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Connections.Udp/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/Connections/Assimalign.Cohesion.Connections.Udp/src/">
 		<Project Path="Assimalign.Cohesion.Connections.Udp/src/Assimalign.Cohesion.Connections.Udp.csproj" />
 	</Folder>

@@ -27,8 +27,10 @@ unidirectional streams.
 ## Dependencies
 
 - `Assimalign.Cohesion.Connections` — the contracts this driver
-  implements, plus public diagnostic reporting; its pool-owning pipe options
-  are compiled in from that library's `shared/` folder (`CohesionSharedSource`).
+  implements; its pool-owning pipe options are compiled in from that
+  library's `shared/` folder (`CohesionSharedSource`). Diagnostics are the
+  driver's own internal event source, `Assimalign.Cohesion.Connections.Quic`
+  (see DESIGN.md, "Diagnostics").
 - `System.Net.Quic` (BCL) — the underlying QUIC implementation; platform
   support follows it (`windows` / `linux` / `macos`, gate with
   `QuicListener.IsSupported`).

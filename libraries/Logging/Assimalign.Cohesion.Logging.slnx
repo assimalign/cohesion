@@ -7,6 +7,7 @@
 	<Folder Name="/Logging/">
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
+		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/Logging/Assimalign.Cohesion.Logging/">
 		<File Path="Assimalign.Cohesion.Logging/README.md" />
@@ -103,6 +104,27 @@
 	</Folder>
 	<Folder Name="/Logging/Assimalign.Cohesion.Logging.Debug/tests/">
 		<Project Path="Assimalign.Cohesion.Logging.Debug/tests/Assimalign.Cohesion.Logging.Debug.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.EventSource/">
+		<File Path="Assimalign.Cohesion.Logging.EventSource/README.md" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.EventSource/docs/">
+		<File Path="Assimalign.Cohesion.Logging.EventSource/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Logging.EventSource/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.EventSource/docs/Assembly/" />
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.EventSource/docs/Assembly/Assimalign.Cohesion.Logging/" />
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.EventSource/docs/Assembly/Assimalign.Cohesion.Logging/EventSourceForwardingOptions/">
+		<File Path="Assimalign.Cohesion.Logging.EventSource/docs/Assembly/Assimalign.Cohesion.Logging/EventSourceForwardingOptions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.EventSource/docs/Assembly/Assimalign.Cohesion.Logging/EventSourceLoggerFactoryExtensions/">
+		<File Path="Assimalign.Cohesion.Logging.EventSource/docs/Assembly/Assimalign.Cohesion.Logging/EventSourceLoggerFactoryExtensions/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.EventSource/src/">
+		<Project Path="Assimalign.Cohesion.Logging.EventSource/src/Assimalign.Cohesion.Logging.EventSource.csproj" />
+	</Folder>
+	<Folder Name="/Logging/Assimalign.Cohesion.Logging.EventSource/tests/">
+		<Project Path="Assimalign.Cohesion.Logging.EventSource/tests/Assimalign.Cohesion.Logging.EventSource.Tests.csproj" />
 	</Folder>
 	<Folder Name="/Logging/refs/" >
 		<Project Path="../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />

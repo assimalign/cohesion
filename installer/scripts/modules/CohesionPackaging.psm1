@@ -147,6 +147,7 @@ $script:CohesionReleaseLibrary = @(
     'libraries/Logging/Assimalign.Cohesion.Logging'
     'libraries/Logging/Assimalign.Cohesion.Logging.Console'
     'libraries/Logging/Assimalign.Cohesion.Logging.Debug'
+    'libraries/Logging/Assimalign.Cohesion.Logging.EventSource'
 
     # libraries/ObjectMapping
     'libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping'

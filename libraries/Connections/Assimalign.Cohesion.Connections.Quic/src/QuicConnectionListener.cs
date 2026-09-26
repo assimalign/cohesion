@@ -5,6 +5,8 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections.Quic.Internal;
+
 namespace Assimalign.Cohesion.Connections.Quic;
 
 /// <summary>
@@ -96,7 +98,7 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
                 })
             }, cancellationToken).ConfigureAwait(false);
 
-            ConnectionDiagnostics.ListenerInitialized(ConnectionProtocol.Quic, _listenerId);
+            QuicConnectionEventSource.Log.ListenerBound(_listenerId, _listener.LocalEndPoint);
         }
         finally
         {
@@ -211,6 +213,8 @@ public sealed class QuicConnectionListener : MultiplexedConnectionListener
         if (listener is not null)
         {
             await listener.DisposeAsync().ConfigureAwait(false);
+
+            QuicConnectionEventSource.Log.ListenerClosed(_listenerId);
         }
     }
 

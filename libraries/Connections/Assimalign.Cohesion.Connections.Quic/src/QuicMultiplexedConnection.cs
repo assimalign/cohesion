@@ -29,7 +29,6 @@ namespace Assimalign.Cohesion.Connections.Quic;
 public sealed class QuicMultiplexedConnection : MultiplexedConnection
 {
     private readonly QuicConnection _connection;
-    private readonly ListenerId _listenerId;
     private readonly long _defaultStreamErrorCode;
     private readonly long _defaultCloseErrorCode;
     private readonly StreamPipeOptionsContext _streamOptions;
@@ -39,6 +38,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
 
     private volatile ConnectionState _state;
     private bool _isDisposed;
+    private int _closeReported;
 
     internal QuicMultiplexedConnection(
         QuicConnection connection,
@@ -51,7 +51,6 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         ArgumentNullException.ThrowIfNull(streamOptions);
 
         _connection = connection;
-        _listenerId = listenerId;
         _defaultStreamErrorCode = defaultStreamErrorCode;
         _defaultCloseErrorCode = defaultCloseErrorCode;
         _streamOptions = streamOptions;
@@ -59,7 +58,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         RemoteEndPoint = connection.RemoteEndPoint;
         _state = ConnectionState.Open;
 
-        ConnectionDiagnostics.ConnectionStart(ConnectionProtocol.Quic, listenerId, Id);
+        QuicConnectionEventSource.Log.ConnectionOpened(Id, listenerId, LocalEndPoint, RemoteEndPoint);
     }
 
     /// <inheritdoc />
@@ -138,6 +137,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         _ = CloseConnectionAsync();
 
         CancelConnectionClosedToken();
+        ReportClosed();
     }
 
     /// <inheritdoc />
@@ -188,8 +188,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         await _connection.DisposeAsync().ConfigureAwait(false);
 
         CancelConnectionClosedToken();
-
-        ConnectionDiagnostics.ConnectionStop(ConnectionProtocol.Quic, _listenerId, Id);
+        ReportClosed();
 
         // The stream options own the connection's shared memory pool; dispose them last, after
         // every stream and the connection itself have released their buffers.
@@ -212,7 +211,7 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         {
             connection = new QuicStreamConnection(
                 stream,
-                _listenerId,
+                Id,
                 LocalEndPoint,
                 RemoteEndPoint,
                 _streamOptions,
@@ -262,6 +261,15 @@ public sealed class QuicMultiplexedConnection : MultiplexedConnection
         catch (AggregateException)
         {
             // Exceptions thrown by ConnectionClosed registrations must not fault teardown.
+        }
+    }
+
+    // Abort and DisposeAsync both end the connection; whichever comes first reports it, once.
+    private void ReportClosed()
+    {
+        if (Interlocked.Exchange(ref _closeReported, 1) == 0)
+        {
+            QuicConnectionEventSource.Log.ConnectionClosed(Id);
         }
     }
 }

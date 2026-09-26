@@ -13,6 +13,7 @@ Repository-level documentation for the Cohesion mono repository. Coding standard
   - [Cohesion Custom MSBuild Items](./build/MSBUILD_COHESION_PROPS.md) — `CohesionProjectReference`, `CohesionPackageReference`, code generation
   - [Common MSBuild Properties](./build/MSBUILD_COMMON_PROPS.md) — where shared build properties are defined
   - [Common MSBuild Targets](./build/MSBUILD_COMMON_TARGETS.md) — standard MSBuild target execution order
+- [Event Sources](./EVENT_SOURCES.md) — the internal `EventSource`s Cohesion libraries ship, and how to observe them with tracing tools or forward them into logging
 - [Versioning and Release Channels](./VERSIONING_RELEASE_POLICY.md) — synchronized versions, staging, promotion, and local package policy
 - [References](./REFERENCES.md) — external MSBuild and tooling references
 

@@ -83,10 +83,10 @@ identity), but it must still be *honest*. The driver derives the protocol from t
 family — `AddressFamily.Unix → ConnectionProtocol.UnixDomainSocket`, otherwise
 `ConnectionProtocol.Tcp` (`SocketConnectionProtocol.FromAddressFamily`) — and stamps it on:
 
-- the **listener's** `Capabilities` (from the configured endpoint) and its `ListenerInitialized`
-  diagnostic (from the bound socket, which also resolves a `FileHandleEndPoint`'s real family);
-- every **connection's** `Capabilities` and all of its `ConnectionDiagnostics` events (from the
-  connected socket's family).
+- the **listener's** `Capabilities` (from the configured endpoint) and the `protocol` payload of its
+  `ListenerBound` event (from the bound socket, which also resolves a `FileHandleEndPoint`'s real family);
+- every **connection's** `Capabilities` and the `protocol` payload of its `ConnectionOpened` event (from
+  the connected socket's family).
 
 So a connection over a Unix domain socket reports `UnixDomainSocket` in its capabilities and event
 stream, not `Tcp`. The delivery guarantees (reliable, ordered byte stream, no multiplexing, no
@@ -103,6 +103,41 @@ transport security) are identical for both families — only the protocol identi
 - The listener tracks live accepted connections and disposes them on `DisposeAsync`, then disposes its
   per-IO-queue pipe options. Disposal also releases the listening endpoint and is terminal; restart uses
   a newly constructed listener.
+
+## Diagnostics
+
+The driver reports through its own internal event source, named for the assembly:
+`Assimalign.Cohesion.Connections.Tcp` (`Internal/EventSource/TcpConnectionEventSource.cs`), per the
+repository EventSource convention (`.claude/rules/event-source.md`). Nothing about it is public: tools
+enable it by name (`dotnet-trace collect --providers Assimalign.Cohesion.Connections.Tcp`,
+`dotnet-counters monitor --counters Assimalign.Cohesion.Connections.Tcp`), and an application forwards
+it into its logging with `Assimalign.Cohesion.Logging.EventSource`
+(`loggerFactory.ForwardEventSources()`), where the source name becomes the log category.
+
+| Id | Event | Level | Payload |
+|---|---|---|---|
+| 1 | `ListenerBound` | Informational | `listenerId`, `protocol`, `endPoint` |
+| 2 | `ListenerClosed` | Informational | `listenerId` |
+| 3 | `ConnectionOpened` | Informational | `connectionId`, `listenerId` (empty when dialed), `protocol`, `localEndPoint`, `remoteEndPoint` |
+| 4 | `ConnectionClosed` | Informational | `connectionId` |
+| 5 | `ConnectionFinished` | Verbose | `connectionId` — the peer finished sending (end of stream) |
+| 6 | `ConnectionPaused` | Verbose | `connectionId` — receiving paused under application back-pressure |
+| 7 | `ConnectionResumed` | Verbose | `connectionId` |
+| 8 | `ConnectionReset` | Verbose | `connectionId` |
+| 9 | `ConnectionError` | Error | `connectionId`, `operation` (`receiving`/`sending`), `exceptionType`, `exceptionMessage` |
+
+Counters: `current-connections`, `total-connections`, and `connections-per-second`.
+
+Ordering and pairing are guaranteed, which is what keeps `current-connections` exact:
+
+- `ConnectionOpened` is raised in the constructor **before** the pump loops start, so no loop event can
+  precede it.
+- `ConnectionClosed` is raised exactly once, from the receive loop's close path (the one place the
+  connection-closed signal is scheduled), and **before** that signal completes — so `DisposeAsync` never
+  returns ahead of it. The driver previously raised no close event at all.
+- Lifetimes use `Bound`/`Opened`/`Closed` names, not `Start`/`Stop`: a connection opens on the accept
+  loop's flow and closes on the receive loop's, and EventSource's activity tracking would otherwise
+  nest every connection under the previous one.
 
 ## AOT Posture
 
@@ -124,8 +159,9 @@ async socket-event args, and `System.Diagnostics.Tracing` counters — all from 
 ## Relationships
 
 - **`Assimalign.Cohesion.Connections`** — the guided bases (`Connection`, `ConnectionListener`,
-  `ConnectionFactory`), `ConnectionCapabilities` / `ConnectionProtocol`, the exception family, and the
-  public `ConnectionDiagnostics` and `ListenerId`. Its pipe plumbing (`DuplexPipePair`,
+  `ConnectionFactory`), `ConnectionCapabilities` / `ConnectionProtocol`, the exception family, and
+  `ListenerId`. Diagnostics are not taken from it: this driver owns its event source (see
+  *Diagnostics*). Its pipe plumbing (`DuplexPipePair`,
   `PipeOptionsContext`, `PipeOptionsFactory`) is compiled into this driver from that
   library's `shared/` folder via `CohesionSharedSource` - internal here, and never part of
   the contracts assembly's public surface.
