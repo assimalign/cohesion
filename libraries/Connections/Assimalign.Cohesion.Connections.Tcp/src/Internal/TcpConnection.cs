@@ -27,7 +27,6 @@ internal sealed class TcpConnection : Connection
     private readonly SocketPipeReceiver _receiver;
     private readonly SocketPipeSenderPool _senderPool;
     private readonly Socket _socket;
-    private readonly ListenerId _listenerId;
     private readonly ConnectionProtocol _protocol;
     private readonly IDisposable? _ownedResource;
     private readonly int _memoryPoolBlockSize;
@@ -46,7 +45,6 @@ internal sealed class TcpConnection : Connection
         IDisposable? ownedResource = null)
     {
         _socket = socket;
-        _listenerId = listenerId;
         _protocol = SocketConnectionProtocol.FromAddressFamily(socket.AddressFamily);
         _ownedResource = ownedResource;
 
@@ -68,12 +66,13 @@ internal sealed class TcpConnection : Connection
 
         _state = ConnectionState.Opening;
 
+        // Reported before the pump loops start, so no loop event can precede it.
+        TcpConnectionEventSource.Log.ConnectionOpened(Id, listenerId, _protocol, LocalEndPoint, RemoteEndPoint);
+
         _ = ReceiveAsync();
         _ = SendAsync();
 
         _state = ConnectionState.Open;
-
-        ConnectionDiagnostics.ConnectionStart(_protocol, listenerId, Id);
     }
 
     /// <inheritdoc />
@@ -178,7 +177,7 @@ internal sealed class TcpConnection : Connection
                 if (result.BytesTransferred == 0)
                 {
                     // Finished: the remote host has finished sending data.
-                    ConnectionDiagnostics.ConnectionFinished(_protocol, _listenerId, Id);
+                    TcpConnectionEventSource.Log.ConnectionFinished(Id);
                     break;
                 }
 
@@ -190,7 +189,7 @@ internal sealed class TcpConnection : Connection
                 if (flushResultTaskPaused)
                 {
                     // Paused: the consumer is applying back-pressure, so receiving is paused.
-                    ConnectionDiagnostics.ConnectionPaused(_protocol, _listenerId, Id);
+                    TcpConnectionEventSource.Log.ConnectionPaused(Id);
                 }
 
                 FlushResult flushResult = await flushResultTask;
@@ -198,7 +197,7 @@ internal sealed class TcpConnection : Connection
                 if (flushResultTaskPaused)
                 {
                     // Resumed: the consumer caught up and the connection has resumed receiving data.
-                    ConnectionDiagnostics.ConnectionResumed(_protocol, _listenerId, Id);
+                    TcpConnectionEventSource.Log.ConnectionResumed(Id);
                 }
                 if (flushResult.IsCompleted || flushResult.IsCanceled)
                 {
@@ -217,7 +216,7 @@ internal sealed class TcpConnection : Connection
             // avoid the duplicate is not worthwhile.
             if (!_isSocketDisposed)
             {
-                ConnectionDiagnostics.ConnectionReset(_protocol, _listenerId, Id);
+                TcpConnectionEventSource.Log.ConnectionReset(Id);
             }
         }
         catch (Exception exception)
@@ -230,16 +229,12 @@ internal sealed class TcpConnection : Connection
                 if (!_isSocketDisposed)
                 {
                     // This is unexpected if the socket hasn't been disposed yet.
-                    ConnectionDiagnostics.ConnectionError(_protocol, _listenerId, Id, exception.Message);
+                    TcpConnectionEventSource.Log.ConnectionError(Id, "receiving", exception);
                 }
             }
             else
             {
-                ConnectionDiagnostics.ConnectionError(
-                    _protocol,
-                    _listenerId,
-                    Id,
-                    $"A connection error occurred while receiving data: {exception.Message}");
+                TcpConnectionEventSource.Log.ConnectionError(Id, "receiving", exception);
             }
         }
         finally
@@ -251,6 +246,10 @@ internal sealed class TcpConnection : Connection
             if (!_isConnectionClosed)
             {
                 _isConnectionClosed = true;
+
+                // The one close report for this connection, made before the closing process completes so
+                // that DisposeAsync never returns ahead of it.
+                TcpConnectionEventSource.Log.ConnectionClosed(Id);
 
                 ThreadPool.UnsafeQueueUserWorkItem(static state =>
                 {
@@ -330,7 +329,7 @@ internal sealed class TcpConnection : Connection
         when (SocketHelper.IsConnectionResetError(exception.SocketErrorCode))
         {
             error = new ConnectionResetException(exception.Message, exception);
-            ConnectionDiagnostics.ConnectionReset(_protocol, _listenerId, Id);
+            TcpConnectionEventSource.Log.ConnectionReset(Id);
         }
         catch (Exception exception)
         when ((exception is SocketException socketException && SocketHelper.IsConnectionAbortError(socketException.SocketErrorCode)) || exception is ObjectDisposedException)
@@ -341,11 +340,7 @@ internal sealed class TcpConnection : Connection
         catch (Exception exception)
         {
             error = exception;
-            ConnectionDiagnostics.ConnectionError(
-                _protocol,
-                _listenerId,
-                Id,
-                $"A connection error occurred while sending data: {exception.Message}");
+            TcpConnectionEventSource.Log.ConnectionError(Id, "sending", exception);
         }
         finally
         {

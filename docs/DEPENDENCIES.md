@@ -29,11 +29,11 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 663 |
-| Shipped library/resource projects | 251 |
+| Projects indexed | 665 |
+| Shipped library/resource projects | 252 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 647 |
+| Declared project references | 648 |
 | Declared shared-source links | 14 |
 
 ## Ambiguous project names
@@ -480,7 +480,7 @@ flowchart LR
 
 ### `libraries/Logging`
 
-3 shipped projects.
+4 shipped projects.
 
 Intra-area references:
 
@@ -489,8 +489,10 @@ flowchart LR
     N0["Logging"]
     N1["Logging.Console"]
     N2["Logging.Debug"]
+    N3["Logging.EventSource"]
     N1 --> N0
     N2 --> N0
+    N3 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
@@ -498,6 +500,7 @@ flowchart LR
 | `Assimalign.Cohesion.Logging` | `Assimalign.Cohesion.Core` | — | — | — |
 | `Assimalign.Cohesion.Logging.Console` | `Assimalign.Cohesion.Logging` | — | — | — |
 | `Assimalign.Cohesion.Logging.Debug` | `Assimalign.Cohesion.Logging` | — | — | — |
+| `Assimalign.Cohesion.Logging.EventSource` | `Assimalign.Cohesion.Logging` | — | — | — |
 
 ### `libraries/ObjectMapping`
 
@@ -1106,7 +1109,7 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 
 ## Harnesses
 
-302 test, sample, and example projects are indexed for fan-in but excluded from the
+303 test, sample, and example projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
@@ -1120,7 +1123,7 @@ membership is an item list, not a project reference: App's kernel roots in
 | --- | --- |
 | `examples/` | 5 |
 | `samples/` | 9 |
-| `tests/` | 288 |
+| `tests/` | 289 |
 
 Samples, which live in the repository-root `samples/` tree:
 

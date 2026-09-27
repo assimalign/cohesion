@@ -8,5 +8,6 @@ Implementations:
 
 - `Assimalign.Cohesion.Logging.Console` - console sink.
 - `Assimalign.Cohesion.Logging.Debug` - `System.Diagnostics.Debug` sink.
+- `Assimalign.Cohesion.Logging.EventSource` - forwards `EventSource` events into a factory.
 
 See `docs/OVERVIEW.md` and `docs/DESIGN.md` for the full contract definition.

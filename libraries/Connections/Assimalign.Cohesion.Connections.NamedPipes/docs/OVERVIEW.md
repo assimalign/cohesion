@@ -29,8 +29,9 @@ Protocol semantics belong to the layers above; this driver only moves an ordered
 ## Dependencies
 
 - `Assimalign.Cohesion.Connections` — the contracts this driver implements (`Connection`,
-  `ConnectionListener`, `ConnectionFactory`) plus `ConnectionProtocol.NamedPipe` and the
-  shared diagnostics.
+  `ConnectionListener`, `ConnectionFactory`) plus `ConnectionProtocol.NamedPipe`. Diagnostics are
+  the driver's own internal event source, `Assimalign.Cohesion.Connections.NamedPipes` (see
+  DESIGN.md, "Diagnostics").
 - `Assimalign.Cohesion.Core`.
 - `System.IO.Pipes` and `System.IO.Pipelines` from the shared framework. No third-party
   packages, no reflection. Windows ACL support is isolated behind

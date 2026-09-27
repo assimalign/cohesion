@@ -40,6 +40,7 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 - [ ] Internal types are `internal`, not `public`
 - [ ] No new `InternalsVisibleTo` between two shipped libraries — tests only (see `general-rules.md`)
 - [ ] Any source shared between assemblies lives in the owning project's `shared/` folder, is pulled in by a `CohesionSharedSource` item **in each consuming csproj**, and passes the link-safety test — stateless statics only, or types whose instances never cross an assembly boundary (no static mutable state, singletons, `EventSource`, locks, or id generators). See `general-rules.md`
+- [ ] Any new or changed `EventSource` follows `event-source.md`: `internal sealed`, one per assembly, named exactly for its assembly, no public forwarder or trace-code type, its name/manifest/lifecycle tests present, and a row in `docs/EVENT_SOURCES.md`
 - [ ] No global usings or `<Using Include="..." />` items in csproj files
 - [ ] Using directives ordered: System, third-party, Cohesion, blank line before code
 - [ ] Code follows the existing patterns established in its category/area

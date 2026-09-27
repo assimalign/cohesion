@@ -111,13 +111,44 @@ is routine for streams released after their owning connection closed.
   serving a different ALPN protocol overrides the codes alongside
   `ApplicationProtocols`.
 
+## Diagnostics
+
+The driver reports through its own internal event source, named for the assembly:
+`Assimalign.Cohesion.Connections.Quic` (`Internal/EventSource/QuicConnectionEventSource.cs`), per the
+repository EventSource convention (`.claude/rules/event-source.md`). Tools enable it by name
+(`dotnet-trace`, `dotnet-counters`); an application forwards it into its logging with
+`Assimalign.Cohesion.Logging.EventSource`, where the source name becomes the log category.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `ListenerBound` | Informational | `listenerId`, `endPoint` |
+| 2 | `ListenerClosed` | Informational | `listenerId` |
+| 3 | `ConnectionOpened` | Informational | `connectionId`, `listenerId` (empty when dialed), `localEndPoint`, `remoteEndPoint` |
+| 4 | `ConnectionClosed` | Informational | `connectionId` |
+| 5 | `StreamOpened` | Verbose | `streamId`, `connectionId`, `direction` |
+| 6 | `StreamClosed` | Verbose | `streamId` |
+
+Counters: `current-connections`, `total-connections`, `connections-per-second`, `current-streams`,
+and `streams-per-second`.
+
+- Streams report at Verbose and apart from connections: HTTP/3 opens one per request, and folding them
+  into the connection events (as the retired shared forwarder did) made every stream look like a
+  connection.
+- `Abort` and `DisposeAsync` both end a connection or stream; whichever runs first reports the close,
+  once, behind an `Interlocked` flag, so the `current-*` gauges stay exact when an aborted object is
+  disposed later — or never.
+- Lifetimes use `Opened`/`Closed`/`Bound` names rather than `Start`/`Stop`: they begin and end on
+  different async flows, which EventSource's activity tracking would mis-nest.
+- TLS handshake events come from the runtime's own `System.Net.Security` and `System.Net.Quic`
+  sources; forward them by adding those prefixes to the forwarder.
+
 ## AOT posture
 
 No reflection, no runtime code generation, no serialization. The driver
 is `System.Net.Quic` calls plus pipe plumbing from the contracts
 library's `shared/` folder - `PipeOptionsFactory` and `StreamPipeOptionsContext` are compiled
-into this driver as internal types - with lifecycle reporting through the public
-`ConnectionDiagnostics`. Fully
+into this driver as internal types - with lifecycle reporting through its own
+internal event source (see "Diagnostics"). Fully
 NativeAOT compatible. Platform support follows `System.Net.Quic`
 (`windows` / `linux` / `macos`, gated by `QuicListener.IsSupported` at
 runtime).

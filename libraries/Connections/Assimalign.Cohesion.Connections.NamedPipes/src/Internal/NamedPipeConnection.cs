@@ -49,8 +49,16 @@ internal sealed class NamedPipeConnection : Connection
 
     private ConnectionState _state = ConnectionState.Open;
     private bool _isDisposed;
+    private int _closeReported;
 
-    public NamedPipeConnection(PipeStream stream, EndPoint? localEndPoint, EndPoint? remoteEndPoint)
+    /// <summary>
+    /// Wraps a connected pipe stream.
+    /// </summary>
+    /// <param name="stream">The connected pipe stream; the connection takes ownership.</param>
+    /// <param name="listenerId">The accepting listener, or <see cref="ListenerId.Empty"/> for a dialed connection.</param>
+    /// <param name="localEndPoint">The local endpoint, when known.</param>
+    /// <param name="remoteEndPoint">The remote endpoint, when known.</param>
+    public NamedPipeConnection(PipeStream stream, ListenerId listenerId, EndPoint? localEndPoint, EndPoint? remoteEndPoint)
     {
         _stream = stream;
         _localEndPoint = localEndPoint;
@@ -60,6 +68,8 @@ internal sealed class NamedPipeConnection : Connection
         // tear-down, so neither the reader nor the writer should close it underneath.
         _input = PipeReader.Create(stream, new StreamPipeReaderOptions(leaveOpen: true));
         _output = PipeWriter.Create(stream, new StreamPipeWriterOptions(leaveOpen: true));
+
+        NamedPipeConnectionEventSource.Log.ConnectionOpened(_id, listenerId, localEndPoint, remoteEndPoint);
     }
 
     /// <inheritdoc />
@@ -115,6 +125,7 @@ internal sealed class NamedPipeConnection : Connection
         CompleteWriter(abortReason);
         CompleteReader(abortReason);
         DisposeStream();
+        ReportClosed();
         CancelConnectionClosed();
     }
 
@@ -149,6 +160,7 @@ internal sealed class NamedPipeConnection : Connection
             }
         }
 
+        ReportClosed();
         CancelConnectionClosed();
     }
 
@@ -185,6 +197,15 @@ internal sealed class NamedPipeConnection : Connection
         catch (IOException)
         {
             // The pipe was already broken; the connection is being torn down regardless.
+        }
+    }
+
+    // Abort and DisposeAsync both end the connection; whichever comes first reports it, once.
+    private void ReportClosed()
+    {
+        if (Interlocked.Exchange(ref _closeReported, 1) == 0)
+        {
+            NamedPipeConnectionEventSource.Log.ConnectionClosed(_id);
         }
     }
 

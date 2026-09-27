@@ -112,7 +112,7 @@ public sealed class TcpConnectionListener : ConnectionListener
             _socketFilePath = socketFilePath;
             _socket = socket;
 
-            ConnectionDiagnostics.ListenerInitialized(_protocol, _listenerId);
+            TcpConnectionEventSource.Log.ListenerBound(_listenerId, _protocol, _endPoint);
         }
 
         return ValueTask.CompletedTask;
@@ -211,6 +211,11 @@ public sealed class TcpConnectionListener : ConnectionListener
 
         socket?.Close();
         socket?.Dispose();
+
+        if (socket is not null)
+        {
+            TcpConnectionEventSource.Log.ListenerClosed(_listenerId);
+        }
 
         // Unlink the Unix domain socket file this listener bound so the path is free for the next bind.
         // Only a filesystem-backed path that this listener created is removed (never an inherited

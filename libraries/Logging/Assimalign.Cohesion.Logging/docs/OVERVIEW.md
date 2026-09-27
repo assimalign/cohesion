@@ -9,7 +9,7 @@ and the scope lifecycle. Concrete sinks live in sibling packages.
 ## Status
 
 - Status: Stable foundation.
-- Production source files: 19.
+- Production source files: 25.
 - Project references: `Assimalign.Cohesion.Core` (for the `LogId` value type generator
   pipeline).
 - Package references: None.
@@ -33,6 +33,7 @@ and the scope lifecycle. Concrete sinks live in sibling packages.
 | `Assimalign.Cohesion.Logging` | Foundation contracts + factory composition. |
 | `Assimalign.Cohesion.Logging.Console` | Console sink. |
 | `Assimalign.Cohesion.Logging.Debug` | `System.Diagnostics.Debug` sink. |
+| `Assimalign.Cohesion.Logging.EventSource` | Bridge: forwards `System.Diagnostics.Tracing` events (every Cohesion library's internal event source by default) into a factory. |
 
 Future providers (file rolling, structured collectors, OpenTelemetry bridge) live in their
 own packages and depend on the foundation.
@@ -53,11 +54,15 @@ own packages and depend on the foundation.
 - `Logger` / `ScopedLogger` - abstract base classes that implement the boilerplate with
   non-virtual hot paths so derived sinks pay one virtual dispatch instead of two.
 - `ILoggerProvider` / `LoggerProvider` - sink factory contract + abstract base class.
-- `ILoggerFactory` / `LoggerFactory` - root cache + fan-out with per-provider rule gating.
+- `ILoggerFactory` / `LoggerFactory` - root cache + fan-out with per-provider rule gating. Exposes
+  its composition as read-only views: `Providers`, `Enrichers`, `Rules`, `Forwarders`.
   `LoggerFactory.Create(string)` returns the concrete `Logger` via covariant return.
 - `ILoggerFactoryBuilder` / `LoggerFactoryBuilder` - fluent registration.
 - `LoggerFactoryOptions` - mutable configuration shape consumed by the factory.
 - `ILoggerEnricher` - attribute pipeline.
+- `ILoggerForwarder` - a component that writes entries into the factory from an outside source
+  (`AddForwarder` on the builder); the factory creates it when built and disposes it before its
+  providers.
 - `LoggerFilterRule` - one rule (provider type + category + level + custom filter, all
   optional). `ILoggerFilter` is the custom filter shape.
 - `LoggerExtensions` - typed helpers (`LogTrace`, `LogInformation`, `LogError`, ...).
@@ -66,7 +71,7 @@ own packages and depend on the foundation.
 
 - `src/Abstractions/` - root contracts (`ILogger`, `ILogger.Scoped.cs` (`IScopedLogger`),
   `ILoggerEntry`, `ILoggerFactory`, `ILoggerProvider`, `ILoggerFactoryBuilder`,
-  `ILoggerEnricher`, `ILoggerFilter`).
+  `ILoggerEnricher`, `ILoggerFilter`, `ILoggerForwarder`).
 - `src/Extensions/LoggerExtensions.cs` - ergonomic helpers.
 - `src/Internal/CompositeLogger.cs` - per-category fan-out with per-provider rule gating.
 - `src/Internal/ScopedCompositeLogger.cs` - scope lifecycle.

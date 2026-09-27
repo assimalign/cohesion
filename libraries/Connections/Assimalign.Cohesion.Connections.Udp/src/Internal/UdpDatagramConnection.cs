@@ -19,6 +19,9 @@ internal sealed class UdpDatagramConnection : DatagramConnection
     private readonly EndPoint _localEndPoint;
     private readonly EndPoint? _remoteEndPoint;
     private readonly EndPoint _receiveTemplate;
+
+    // IDatagramConnection has no identity of its own; this one exists only to correlate diagnostics.
+    private readonly ConnectionId _diagnosticId = ConnectionId.New();
     private int _disposed;
 
     /// <summary>
@@ -43,6 +46,8 @@ internal sealed class UdpDatagramConnection : DatagramConnection
             AddressFamily.InterNetworkV6 => new IPEndPoint(IPAddress.IPv6Any, 0),
             _ => throw new NotSupportedException($"The UDP datagram connection only supports IPv4 and IPv6 sockets; address family '{socket.AddressFamily}' is not supported.")
         };
+
+        UdpConnectionEventSource.Log.ConnectionOpened(_diagnosticId, localEndPoint, remoteEndPoint);
     }
 
     /// <inheritdoc />
@@ -105,6 +110,7 @@ internal sealed class UdpDatagramConnection : DatagramConnection
         }
 
         _socket.Dispose();
+        UdpConnectionEventSource.Log.ConnectionClosed(_diagnosticId);
 
         return ValueTask.CompletedTask;
     }

@@ -155,6 +155,7 @@ public class LoggerFactoryBuilderTests
 
     private sealed class NoopEnricher : ILoggerEnricher
     {
+        public string Name => "Noop";
         public void Enrich(ILoggerEntry entry, IDictionary<string, object?> attributes) { }
     }
 
@@ -162,6 +163,7 @@ public class LoggerFactoryBuilderTests
     {
         private readonly string _key;
         public AttributeKeyFilter(string key) { _key = key; }
+        public string Name => "AttributeKey:" + _key;
         public bool ShouldLog(ILoggerEntry entry) => entry.Attributes.ContainsKey(_key);
     }
 }

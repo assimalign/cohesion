@@ -5,14 +5,36 @@ namespace Assimalign.Cohesion.Logging;
 
 /// <summary>
 /// Roots the Cohesion logging pipeline. Provides cached, composite loggers for callers and owns
-/// the registered <see cref="ILoggerProvider"/>s.
+/// the registered <see cref="ILoggerProvider"/>s and <see cref="ILoggerForwarder"/>s.
 /// </summary>
+/// <remarks>
+/// The factory's composition is fixed when it is constructed. <see cref="Providers"/>,
+/// <see cref="Enrichers"/>, <see cref="Rules"/>, and <see cref="Forwarders"/> are read-only views of
+/// it, in registration order.
+/// </remarks>
 public interface ILoggerFactory : IDisposable
 {
     /// <summary>
     /// The providers fan-out targets registered with this factory.
     /// </summary>
     IReadOnlyList<ILoggerProvider> Providers { get; }
+
+    /// <summary>
+    /// The enrichers every entry passes through before fan-out, in execution order.
+    /// </summary>
+    IReadOnlyList<ILoggerEnricher> Enrichers { get; }
+
+    /// <summary>
+    /// The filter rules the factory resolves per (provider, category) pair. A rule's optional
+    /// <see cref="LoggerFilterRule.Filter"/> is where each <see cref="ILoggerFilter"/> lives.
+    /// </summary>
+    IReadOnlyList<LoggerFilterRule> Rules { get; }
+
+    /// <summary>
+    /// The forwarders the factory owns, in creation order. A forwarder the caller created against the
+    /// factory, rather than registered with it, is not listed.
+    /// </summary>
+    IReadOnlyList<ILoggerForwarder> Forwarders { get; }
 
     /// <summary>
     /// Returns the cached logger for the supplied category, creating it from the registered

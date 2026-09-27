@@ -18,7 +18,8 @@ jobs:
         projects: [
             "Assimalign.Cohesion.Logging",
             "Assimalign.Cohesion.Logging.Console",
-            "Assimalign.Cohesion.Logging.Debug"
+            "Assimalign.Cohesion.Logging.Debug",
+            "Assimalign.Cohesion.Logging.EventSource"
           ]
     steps:
       - uses: actions/checkout@v4

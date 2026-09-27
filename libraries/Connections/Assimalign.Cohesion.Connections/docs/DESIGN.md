@@ -73,7 +73,8 @@ never as a type. The medium is described by data (`ConnectionCapabilities` and t
 diagnostics-only `ConnectionProtocol`), implemented by the **driver packages**
 (`Assimalign.Cohesion.Connections.Tcp/Udp/Quic`), and supported by this library's internal
 composition **primitives** — pipe-pair wiring and pool-owning options as `shared/` source the
-drivers compile in, diagnostic reporting as a public stateless forwarder. Transports are
+drivers compile in — while each driver reports its own diagnostics through an internal event
+source. Transports are
 configuration; connections are runtime. The naming rule
 follows: every type and package is named for the connection domain — the unit you consume
 (`IConnection`), its producers (`IConnectionListener`/`IConnectionFactory`), its description
@@ -242,11 +243,11 @@ source generator. Fully NativeAOT compatible.
 
 ## Relationships
 
-- **`Assimalign.Cohesion.Connections.Tcp` / `.Udp` / `.Quic`** — the drivers implementing these
-  contracts. Driver-support infrastructure is split by what it is: `DuplexPipePair` and the
-  pool-owning pipe options live in this library's `shared/` folder and are **compiled into**
-  each driver, `ConnectionDiagnostics` and `ListenerId` are public API, and the event source
-  and pool policy stay internal. There is no separate toolbox assembly and no
+- **`Assimalign.Cohesion.Connections.Tcp` / `.Udp` / `.Quic` / `.NamedPipes`** — the drivers
+  implementing these contracts. Driver-support infrastructure is split by what it is:
+  `DuplexPipePair` and the pool-owning pipe options live in this library's `shared/` folder and
+  are **compiled into** each driver, `ListenerId` is public API, and diagnostics are each
+  driver's own internal event source. There is no separate toolbox assembly and no
   `InternalsVisibleTo` between shipped assemblies.
 - **`Assimalign.Cohesion.Security`** — TLS as `TlsConnectionLayer` / `UpgradeToTlsAsync`.
 - **`Assimalign.Cohesion.Http.Connections` / `Assimalign.Cohesion.Amqp.Transports`** — application
@@ -254,9 +255,9 @@ source generator. Fully NativeAOT compatible.
 
 ## Driver composition seams
 
-Drivers get their pipe plumbing two different ways, and the split is the point: **shared source**
-where the type is an implementation detail, **public API** where a process-global resource is
-involved.
+Drivers get their plumbing from this library in exactly one way — **shared source** for types that
+are implementation details — and they get nothing for diagnostics: a process-global resource such as
+an event source stays inside the one assembly that owns it, so every driver owns its own.
 
 ### Shared source — `shared/`, compiled into each driver
 
@@ -288,15 +289,33 @@ replaces a briefly-public version of the same four types: they were never a cont
 outside a driver should implement against, and publishing them would have frozen the pipe
 topology and the pool-ownership shape as public API.
 
-### Public API — `ConnectionDiagnostics`
+### Diagnostics — one internal event source per driver
 
-`ConnectionDiagnostics` reports listener initialization and connection start, stop, finish,
-pause, resume, reset, and error events. It forwards to the single internal `ConnectionEventSource`;
-event-source construction, disposal, counters, and command handling are not public.
+Each driver owns an internal event source named for its assembly — `Assimalign.Cohesion.Connections.Tcp`,
+`.Quic`, `.NamedPipes`, `.Udp` — and reports its listener, connection, and (QUIC) stream lifecycle
+through it, with its own counters. This library has no event source and no diagnostics API: it performs
+no network operations of its own. The repository-wide rule is `.claude/rules/event-source.md`; the
+event tables live in each driver's `docs/DESIGN.md`; applications observe the drivers with
+`dotnet-trace`/`dotnet-counters` by name, or forward them into their logging with
+`Assimalign.Cohesion.Logging.EventSource`.
 
-This one **cannot** be shared source, and the reason is the rule that governs the `shared/` folder.
-`ConnectionEventSource` carries `[EventSource(Name = "Assimalign.Cohesion.Connections")]` and a
-`static readonly Log` singleton holding `PollingCounter`/`EventCounter` instances. Linking it would
-give every driver its own type, its own `Log`, and its own counters — four providers claiming one
-process-global name and four independent counter sets that each under-report. Process-global
-identity stays in one assembly behind a seam; only the stateless forwarders are public.
+This replaced a single `ConnectionEventSource` (`Assimalign.Cohesion.Connections`) that every driver
+reached through a public, stateless `ConnectionDiagnostics` forwarder. Why the shape changed:
+
+- **The forwarder was public diagnostics API.** Any caller could write fabricated events into a
+  process-global provider, and every event's shape was frozen as public surface. The owner's direction
+  (2026-09) is that event-source implementations are internal and never exposed to developers.
+- **Sharing the source could not be done internally.** It cannot be `shared/` source — linked copies
+  would be four providers claiming one process-global name, each under-reporting — and an
+  `InternalsVisibleTo` grant between shipped assemblies is not allowed. Per-driver ownership is the
+  only internal shape, and it is also how the runtime instruments its own networking
+  (`System.Net.Sockets`, `System.Net.Quic`, `System.Net.Security`).
+- **The shared source was broken in ways its shape invited.** Its counters were declared but never
+  written (issue #1027), `ListenerInitialized` wrote one argument where its method declared two, the
+  event methods declared domain value types (`ConnectionProtocol`, `ListenerId`, `ConnectionId`) as
+  payload, only QUIC reported a close, and QUIC streams were reported as connections. A per-driver source is small enough to test against its manifest and its real lifecycle,
+  which the convention now requires.
+
+`ListenerId` stays public: it is the correlation id every stream driver stamps on the connections its
+listeners produce, and a connection's `listenerId` payload is how a forwarded log line ties back to its
+listener.
