@@ -54,7 +54,8 @@ own packages and depend on the foundation.
 - `Logger` / `ScopedLogger` - abstract base classes that implement the boilerplate with
   non-virtual hot paths so derived sinks pay one virtual dispatch instead of two.
 - `ILoggerProvider` / `LoggerProvider` - sink factory contract + abstract base class.
-- `ILoggerFactory` / `LoggerFactory` - root cache + fan-out with per-provider rule gating.
+- `ILoggerFactory` / `LoggerFactory` - root cache + fan-out with per-provider rule gating. Exposes
+  its composition as read-only views: `Providers`, `Enrichers`, `Rules`, `Forwarders`.
   `LoggerFactory.Create(string)` returns the concrete `Logger` via covariant return.
 - `ILoggerFactoryBuilder` / `LoggerFactoryBuilder` - fluent registration.
 - `LoggerFactoryOptions` - mutable configuration shape consumed by the factory.

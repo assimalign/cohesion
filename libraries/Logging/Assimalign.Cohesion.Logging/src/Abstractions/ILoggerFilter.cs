@@ -18,6 +18,12 @@ namespace Assimalign.Cohesion.Logging;
 public interface ILoggerFilter
 {
     /// <summary>
+    /// A name that identifies the filter, for example when reading <see cref="ILoggerFactory.Rules"/>.
+    /// Names are not required to be unique: one filter instance may sit on several rules.
+    /// </summary>
+    string Name { get; }
+
+    /// <summary>
     /// Returns <see langword="true"/> when <paramref name="entry"/> should be admitted to the
     /// fan-out stage. Returning <see langword="false"/> drops the entry before any provider sees
     /// it.

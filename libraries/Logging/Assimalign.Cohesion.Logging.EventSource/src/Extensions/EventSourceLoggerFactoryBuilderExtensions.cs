@@ -38,8 +38,10 @@ public static class EventSourceLoggerFactoryBuilderExtensions
         /// <exception cref="InvalidOperationException">The builder has already been used to build a factory.</exception>
         /// <remarks>
         /// Level mapping, entry shape, and failure behavior are those of
-        /// <see cref="EventSourceLoggerFactoryExtensions.ForwardEventSources"/>. Register this once per
-        /// builder; two registrations forward every event twice.
+        /// <see cref="EventSourceLoggerFactoryExtensions.ForwardEventSources"/>. The forwarder is named
+        /// <c>EventSource</c> and forwarder names are unique within a factory, so registering this twice makes
+        /// <see cref="ILoggerFactoryBuilder.Build"/> throw <see cref="InvalidOperationException"/>; put every
+        /// prefix in one registration.
         /// </remarks>
         public ILoggerFactoryBuilder AddEventSourceForwarding(EventSourceForwardingOptions? options = null)
         {

@@ -35,8 +35,11 @@ Returns the builder, for chaining.
 ## Behavior
 
 The level rules, entry shape, and failure model are those of `ForwardEventSources`
-(`EventSourceLoggerFactoryExtensions`). Register forwarding once per builder: two registrations forward
-every event twice.
+(`EventSourceLoggerFactoryExtensions`).
+
+The forwarder is listed in `ILoggerFactory.Forwarders` under the name `EventSource`. Forwarder names are
+unique within a factory, so registering this verb twice makes `Build()` throw
+`InvalidOperationException`. Put every prefix in one registration.
 
 ## Example
 

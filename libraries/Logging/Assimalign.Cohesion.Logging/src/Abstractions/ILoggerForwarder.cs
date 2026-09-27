@@ -25,4 +25,11 @@ namespace Assimalign.Cohesion.Logging;
 /// </remarks>
 public interface ILoggerForwarder : IDisposable
 {
+    /// <summary>
+    /// A name that identifies the forwarder, for example in <see cref="ILoggerFactory.Forwarders"/>.
+    /// Names are unique within a factory, compared case-insensitively; a <see langword="null"/> name is
+    /// treated as empty. A factory whose registrations produce two forwarders with the same name fails
+    /// to construct.
+    /// </summary>
+    string Name { get; }
 }

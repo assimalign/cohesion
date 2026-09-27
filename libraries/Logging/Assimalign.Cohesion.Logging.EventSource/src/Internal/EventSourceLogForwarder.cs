@@ -54,6 +54,12 @@ internal sealed class EventSourceLogForwarder : EventListener, ILoggerForwarder
     }
 
     /// <summary>
+    /// The forwarder's name in <see cref="ILoggerFactory.Forwarders"/>. Every EventSource forwarder has the
+    /// same name, so a factory rejects a second one: one forwarder takes any number of prefixes.
+    /// </summary>
+    public string Name => "EventSource";
+
+    /// <summary>
     /// Validates <paramref name="options"/> and copies its prefixes, so a later change to the options
     /// cannot change what an existing or registered forwarder selects.
     /// </summary>

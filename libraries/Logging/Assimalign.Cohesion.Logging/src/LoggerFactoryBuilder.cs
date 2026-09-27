@@ -16,6 +16,7 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
 {
     private readonly LoggerFactoryOptions _options = new();
     private readonly HashSet<string> _providerNames = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _enricherNames = new(StringComparer.OrdinalIgnoreCase);
     private bool _built;
 
     /// <inheritdoc />
@@ -65,6 +66,13 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
     {
         ArgumentNullException.ThrowIfNull(enricher);
         ThrowIfBuilt();
+
+        if (!_enricherNames.Add(enricher.Name ?? string.Empty))
+        {
+            throw new InvalidOperationException(
+                $"An enricher named '{enricher.Name}' is already registered.");
+        }
+
         _options.Enrichers.Add(enricher);
         return this;
     }

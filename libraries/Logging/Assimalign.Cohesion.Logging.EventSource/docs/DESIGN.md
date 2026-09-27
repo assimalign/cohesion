@@ -138,7 +138,12 @@ belong in `dotnet-counters`.
   its providers, so this cannot happen to it. A forwarder from `ForwardEventSources` that outlives its
   factory writes to disposed providers (which drop the entries) and fails to attach new sources, silently:
   dispose it before the factory.
-- **One forwarder per factory.** Each forwarder is its own listener; two forward every event twice.
+- **One forwarder per factory.**
+  - Every EventSource forwarder is named `EventSource`, and forwarder names are unique within a factory.
+  - Registering the builder verb twice therefore fails the build instead of forwarding every event
+    twice. One registration takes any number of prefixes.
+  - Forwarders from `ForwardEventSources` are the caller's and are not checked. Two of them still
+    forward every event twice.
 
 ## Namespace
 

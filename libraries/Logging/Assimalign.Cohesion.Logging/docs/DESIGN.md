@@ -112,6 +112,24 @@ cannot silently drop entries.
    callers holding the strongly typed `LoggerFactory` reference avoid the interface cast.
    The interface bridge (`ILoggerFactory.Create`) returns the same instance through
    `ILogger`.
+5. Exposes its composition: `Providers`, `Enrichers`, `Rules`, and `Forwarders`, each a read-only view
+   over the snapshot the factory runs on, in registration order. Views rather than the arrays, because
+   composite loggers hold those arrays: a caller that cast one back could change what running loggers
+   do. The factory exposes filter **rules**, not filters. A filter exists only as
+   `LoggerFilterRule.Filter`, beside the category, provider type, and level that decide when it runs;
+   a flat filter list would lose that context, repeat a filter shared by two rules, and skip rules
+   without one.
+
+Every registered component carries a `Name` (`ILoggerProvider`, `ILoggerEnricher`, `ILoggerFilter`,
+`ILoggerForwarder`) so the composition can be read. Names are compared case-insensitively and a
+`null` name counts as empty.
+
+| Component | Unique? | Checked by |
+| --- | --- | --- |
+| Provider | Yes | `AddProvider` |
+| Enricher | Yes | `AddEnricher` |
+| Forwarder | Yes | Factory construction. Forwarders exist, and have names, only once the factory creates them. |
+| Filter | No | Not checked, because one filter instance may sit on several rules. |
 
 `LoggerFactoryBuilder` is single-use: once `Build` has been called the builder is locked.
 Duplicate provider names are rejected.
@@ -170,13 +188,17 @@ The factory owns its forwarders:
    constructor, after every snapshot is taken, so a forwarder can create loggers immediately.
    Forwarding therefore begins before any application code runs against the factory. In a host, that
    means before the host starts, so the events raised while listeners bind are not lost.
-3. **Failed construction.** If a registration throws or returns `null`:
+3. **Failed construction.** If a registration throws, returns `null`, or produces a forwarder whose
+   name another forwarder already has:
    - the factory marks itself disposed;
    - it disposes the forwarders it already created, newest first, and then its providers;
    - it rethrows.
 
    A factory that fails to construct is never returned, so nothing else could release them.
-4. **Disposal.** `Dispose` disposes forwarders newest first, then providers. A forwarder writes through
+4. **Visibility.** `Forwarders` lists what the factory owns. It is empty while the forwarders are
+   being created. A forwarder a caller creates against the factory, rather than registers with it,
+   is the caller's and is not listed.
+5. **Disposal.** `Dispose` disposes forwarders newest first, then providers. A forwarder writes through
    the providers, so it must stop before they go away. As with providers, a component that throws while
    being disposed does not stop the rest of teardown.
 

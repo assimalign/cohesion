@@ -271,6 +271,7 @@ public class CompositeLoggerTests
 
     private sealed class ProcessEnricher : ILoggerEnricher
     {
+        public string Name => "Process";
         public void Enrich(ILoggerEntry entry, IDictionary<string, object?> attributes)
         {
             attributes["process.id"] = Environment.ProcessId;
@@ -282,6 +283,7 @@ public class CompositeLoggerTests
         private readonly string _key;
         private readonly object? _value;
         public FixedValueEnricher(string key, object? value) { _key = key; _value = value; }
+        public string Name => "FixedValue:" + _key;
         public void Enrich(ILoggerEntry entry, IDictionary<string, object?> attributes)
         {
             attributes[_key] = _value;
@@ -290,6 +292,7 @@ public class CompositeLoggerTests
 
     private sealed class ThrowingEnricher : ILoggerEnricher
     {
+        public string Name => "Throwing";
         public void Enrich(ILoggerEntry entry, IDictionary<string, object?> attributes)
             => throw new InvalidOperationException("enrich failed");
     }
@@ -298,11 +301,13 @@ public class CompositeLoggerTests
     {
         private readonly string _key;
         public AttributeKeyFilter(string key) { _key = key; }
+        public string Name => "AttributeKey:" + _key;
         public bool ShouldLog(ILoggerEntry entry) => entry.Attributes.ContainsKey(_key);
     }
 
     private sealed class ThrowingFilter : ILoggerFilter
     {
+        public string Name => "Throwing";
         public bool ShouldLog(ILoggerEntry entry) => throw new InvalidOperationException("filter failed");
     }
 }

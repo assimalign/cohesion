@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Threading;
 using Assimalign.Cohesion.Logging.Internal;
 
@@ -25,6 +26,13 @@ public sealed class LoggerFactory : ILoggerFactory
     private readonly ILoggerEnricher[] _enrichersSnapshot;
     private readonly LoggerFilterRule[] _rulesSnapshot;
     private readonly ILoggerForwarder[] _forwarders = Array.Empty<ILoggerForwarder>();
+
+    // Read-only views over the snapshots. Returning the arrays themselves would let a caller cast
+    // back and change what running loggers already hold.
+    private readonly ReadOnlyCollection<ILoggerProvider> _providers;
+    private readonly ReadOnlyCollection<ILoggerEnricher> _enrichers;
+    private readonly ReadOnlyCollection<LoggerFilterRule> _rules;
+    private readonly ReadOnlyCollection<ILoggerForwarder> _forwardersView = ReadOnlyCollection<ILoggerForwarder>.Empty;
     private int _disposed;
 
     /// <summary>
@@ -37,7 +45,7 @@ public sealed class LoggerFactory : ILoggerFactory
     /// providers are disposed and the exception propagates.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">A forwarder registration is <see langword="null"/> or returned <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">A forwarder registration is <see langword="null"/> or returned <see langword="null"/>, or two forwarders have the same <see cref="ILoggerForwarder.Name"/>.</exception>
     public LoggerFactory(LoggerFactoryOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -55,13 +63,28 @@ public sealed class LoggerFactory : ILoggerFactory
         _rulesSnapshot = new LoggerFilterRule[options.FilterRules.Count];
         options.FilterRules.CopyTo(_rulesSnapshot, 0);
 
+        _providers = Array.AsReadOnly(_providersSnapshot);
+        _enrichers = Array.AsReadOnly(_enrichersSnapshot);
+        _rules = Array.AsReadOnly(_rulesSnapshot);
+
         // Last, because each forwarder receives this factory and may create loggers from it
         // immediately; everything above must already be in place.
         _forwarders = CreateForwarders(options.Forwarders);
+        _forwardersView = Array.AsReadOnly(_forwarders);
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ILoggerProvider> Providers => _providersSnapshot;
+    public IReadOnlyList<ILoggerProvider> Providers => _providers;
+
+    /// <inheritdoc />
+    public IReadOnlyList<ILoggerEnricher> Enrichers => _enrichers;
+
+    /// <inheritdoc />
+    public IReadOnlyList<LoggerFilterRule> Rules => _rules;
+
+    /// <inheritdoc />
+    /// <remarks>Empty while the forwarders are being created.</remarks>
+    public IReadOnlyList<ILoggerForwarder> Forwarders => _forwardersView;
 
     /// <summary>
     /// Returns the cached logger for <paramref name="category"/>, creating it from the
@@ -113,6 +136,7 @@ public sealed class LoggerFactory : ILoggerFactory
         registrations.CopyTo(snapshot, 0);
 
         var forwarders = new ILoggerForwarder[snapshot.Length];
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var created = 0;
 
         try
@@ -124,9 +148,16 @@ public sealed class LoggerFactory : ILoggerFactory
                     throw new InvalidOperationException("A forwarder registration is null.");
                 }
 
-                forwarders[created] = create(this)
+                var forwarder = create(this)
                     ?? throw new InvalidOperationException("A forwarder registration returned null.");
-                created++;
+                forwarders[created++] = forwarder;
+
+                // Checked after the forwarder is recorded, so a duplicate is released with the rest.
+                if (!names.Add(forwarder.Name ?? string.Empty))
+                {
+                    throw new InvalidOperationException(
+                        $"A forwarder named '{forwarder.Name}' is already registered.");
+                }
             }
         }
         catch

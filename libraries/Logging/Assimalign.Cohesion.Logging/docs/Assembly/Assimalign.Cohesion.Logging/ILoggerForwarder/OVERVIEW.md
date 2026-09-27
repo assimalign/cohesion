@@ -5,10 +5,14 @@ as runtime event sources. A provider is a sink the factory writes to; a forwarde
 
 ```csharp
 public interface ILoggerForwarder : IDisposable
+{
+    string Name { get; }
+}
 ```
 
-The interface adds no members to `IDisposable`. What it names is a role: its implementations are the
-components the factory creates, owns, and disposes.
+`Name` identifies the forwarder in `ILoggerFactory.Forwarders`. Names are unique within a factory
+(case-insensitive; `null` counts as empty). Names are only known once forwarders exist, so the factory
+checks them as it creates them: a duplicate fails construction like any other failed registration.
 
 ## Lifetime
 
@@ -20,8 +24,11 @@ components the factory creates, owns, and disposes.
 - **Disposal.**
   - Disposing the factory disposes its forwarders in reverse order, then its providers.
   - A forwarder that throws while being disposed does not stop the rest of teardown.
-- **Failure during construction.** If a registration throws or returns `null`, construction fails. The
-  forwarders already created and the providers are disposed, and the exception propagates.
+- **Failure during construction.** If a registration throws, returns `null`, or produces a duplicate
+  name, construction fails. The forwarders already created (including the duplicate) and the providers
+  are disposed, and the exception propagates.
+- **Visibility.** `ILoggerFactory.Forwarders` lists the forwarders the factory owns. A forwarder a caller
+  creates against the factory, rather than registers with it, is not listed.
 
 Forwarding is active for the forwarder's whole lifetime; there is no start or stop.
 
@@ -34,4 +41,4 @@ Forwarding is active for the forwarder's whole lifetime; there is no start or st
 ## Implementations
 
 - `Assimalign.Cohesion.Logging.EventSource` forwards `System.Diagnostics.Tracing` event sources
-  (`AddEventSourceForwarding`, `ForwardEventSources`).
+  (`AddEventSourceForwarding`, `ForwardEventSources`). Its name is `EventSource`.

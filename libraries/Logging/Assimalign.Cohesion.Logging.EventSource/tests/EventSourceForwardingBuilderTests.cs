@@ -86,6 +86,44 @@ public class EventSourceForwardingBuilderTests
         provider.EntriesFor(contoso.Name).ShouldHaveSingleItem();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Logging.EventSource] - AddEventSourceForwarding: Should list the forwarder as EventSource on the factory")]
+    public void AddEventSourceForwarding_Built_ShouldListForwarderNamedEventSource()
+    {
+        // Arrange / Act
+        using ILoggerFactory factory = new LoggerFactoryBuilder()
+            .AddEventSourceForwarding()
+            .Build();
+
+        // Assert
+        factory.Forwarders.ShouldHaveSingleItem().Name.ShouldBe("EventSource");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Logging.EventSource] - AddEventSourceForwarding: Should fail the build when registered twice")]
+    public void AddEventSourceForwarding_RegisteredTwice_ShouldThrowOnBuild()
+    {
+        // Arrange
+        ILoggerFactoryBuilder builder = new LoggerFactoryBuilder()
+            .AddEventSourceForwarding()
+            .AddEventSourceForwarding(new EventSourceForwardingOptions { Sources = { "Contoso." } });
+
+        // Act / Assert
+        Should.Throw<InvalidOperationException>(() => builder.Build());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Logging.EventSource] - ForwardEventSources: Should not list a caller-owned forwarder on the factory")]
+    public void ForwardEventSources_CallerOwnedForwarder_ShouldNotBeListed()
+    {
+        // Arrange
+        using ILoggerFactory factory = new LoggerFactoryBuilder().Build();
+
+        // Act
+        using ILoggerForwarder forwarder = factory.ForwardEventSources();
+
+        // Assert
+        forwarder.Name.ShouldBe("EventSource");
+        factory.Forwarders.ShouldBeEmpty();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Logging.EventSource] - AddEventSourceForwarding: Should reject options that select no source when registered")]
     public void AddEventSourceForwarding_EmptySources_ShouldThrowArgumentException()
     {

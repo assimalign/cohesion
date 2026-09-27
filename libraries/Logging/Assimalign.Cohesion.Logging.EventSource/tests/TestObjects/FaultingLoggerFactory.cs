@@ -23,6 +23,15 @@ internal sealed class FaultingLoggerFactory : ILoggerFactory
     public IReadOnlyList<ILoggerProvider> Providers { get; } = [];
 
     /// <inheritdoc />
+    public IReadOnlyList<ILoggerEnricher> Enrichers { get; } = [];
+
+    /// <inheritdoc />
+    public IReadOnlyList<LoggerFilterRule> Rules { get; } = [];
+
+    /// <inheritdoc />
+    public IReadOnlyList<ILoggerForwarder> Forwarders { get; } = [];
+
+    /// <inheritdoc />
     public ILogger Create(string category)
         => _throwOnCreate
             ? throw new InvalidOperationException("The factory refused to create a logger.")

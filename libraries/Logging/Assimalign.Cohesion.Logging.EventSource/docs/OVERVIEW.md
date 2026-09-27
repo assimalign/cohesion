@@ -39,7 +39,9 @@ using ILoggerFactory loggerFactory = new LoggerFactoryBuilder()
     .Build();
 ```
 
-Name more sources by prefix; the Cohesion default stays unless you clear it:
+Name more sources by prefix; the Cohesion default stays unless you clear it. Register forwarding once —
+the forwarder is listed as `EventSource` in `loggerFactory.Forwarders`, and a second registration fails
+the build:
 
 ```csharp
 builder.AddEventSourceForwarding(new EventSourceForwardingOptions
