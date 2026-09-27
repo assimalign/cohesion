@@ -14,7 +14,7 @@ providers' lifecycle.
 | Method | Description |
 | --- | --- |
 | `ILogger Create(string category)` | Returns the cached composite logger for `category` (case-insensitive). |
-| `void Dispose()` | Disposes every owned provider; subsequent operations throw `ObjectDisposedException`. |
+| `void Dispose()` | Disposes every owned forwarder (newest first, see `ILoggerForwarder`) and then every owned provider; subsequent operations throw `ObjectDisposedException`. |
 
 ## Exceptions
 

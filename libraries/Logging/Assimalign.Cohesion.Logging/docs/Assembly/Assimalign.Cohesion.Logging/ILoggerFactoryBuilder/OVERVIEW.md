@@ -12,13 +12,15 @@ publish the resulting (thread-safe) factory.
 | `AddRule(LoggerFilterRule rule)` | Adds a rule to the filter ruleset. Rules are evaluated per (provider, category) pair via the selection algorithm documented on `LoggerFilterRule`. |
 | `AddRule(string categoryPrefix, LogLevel minimumLevel)` | Convenience overload that constructs and adds a `LoggerFilterRule { Category = categoryPrefix, Level = minimumLevel }`. |
 | `AddEnricher(ILoggerEnricher enricher)` | Adds an enricher to the pipeline. Enrichers run in registration order. |
-| `Build()` | Materializes the factory. The builder is single-use; subsequent operations throw `InvalidOperationException`. |
+| `AddForwarder(Func<ILoggerFactory, ILoggerForwarder> create)` | Registers a forwarder. The built factory calls `create` once, with itself, as the last step of its construction, and disposes the forwarder (newest first) before its providers. See `ILoggerForwarder`. |
+| `Build()` | Materializes the factory and creates its forwarders. The builder is single-use; subsequent operations throw `InvalidOperationException`. If a forwarder registration throws, the forwarders already created and the providers are disposed and the exception propagates. |
 
 ## Exceptions
 
-- `ArgumentNullException` for null `provider`, `rule`, or `enricher`.
+- `ArgumentNullException` for null `provider`, `rule`, `enricher`, or `create`.
 - `ArgumentException` for an empty `categoryPrefix`.
-- `InvalidOperationException` for duplicate provider names or reuse after `Build`.
+- `InvalidOperationException` for duplicate provider names, reuse after `Build`, or a forwarder
+  registration that returns `null`.
 
 ## Implementation
 

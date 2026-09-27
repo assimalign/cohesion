@@ -40,18 +40,40 @@ so this package reads event sources and writes entries. Tracing tools already re
 directly by name, so they need nothing from this package. An outbound sink is a separate, still-open
 question (see *Non-goals*).
 
-## Why an extension on `ILoggerFactory` that returns `IDisposable`
+## Two entry points, one forwarder
 
+The forwarder is an `ILoggerForwarder` (`Assimalign.Cohesion.Logging`): a component that writes entries
+*into* a factory. There are two ways to get one, and they create the same internal listener.
+
+| Entry point | Owner | Use it when |
+| --- | --- | --- |
+| `ILoggerFactoryBuilder.AddEventSourceForwarding(options)` | The factory: it creates the forwarder as the last step of its construction and disposes it before its providers. | The factory is built from a builder, which includes every Cohesion host (`WebApplicationBuilder.Logging`). |
+| `ILoggerFactory.ForwardEventSources(options)` | The caller, who must dispose it before the factory. | Forwarding has to start or stop independently of the factory, or the factory was not built by you. |
+
+- **The builder verb is the default.** Forwarding starts before any application code runs against the
+  factory, so the events raised while the application starts — listeners binding, connections opening —
+  are forwarded, and there is no handle to hold. The prefixes are validated and copied when the verb is
+  called, so a bad option fails at registration and a later change to the options changes nothing.
+- **Not a host service.** Starting and stopping forwarding with the host (an `IHostService` with
+  `StartAsync`/`StopAsync`) was considered and rejected (#1036). Enabling an `EventListener` is
+  synchronous and nothing is queued, so the tasks would always be complete and `StopAsync` would promise
+  a flush that does not exist. A forwarder started as one host service among others misses the events of
+  services started before it. Logging is an L1 library and cannot reference Hosting in any case; if a
+  host ever needs to drive forwarding, that adapter belongs in the hosting family.
 - **Not a provider.** An `ILoggerProvider` is a sink the factory writes *to*; this component writes
   *into* a factory. Registering it as a provider would give it no factory to write into.
-- **Not a builder verb, yet.** A listener must write into a *built* factory and stop when the application
-  says so. `ILoggerFactoryBuilder` has no seam for a component that lives exactly as long as the factory
-  it builds, so a `builder.Logging.ForwardEventSources()` verb would have nothing to attach to. Adding that
-  seam to the Logging root is tracked as follow-up work (#1036).
 - **Not a public class.** The implementation derives from `EventListener`, whose public surface
   (`EnableEvents`, `DisableEvents`, the `EventWritten` event) would let callers bypass the forwarding
-  rules. The public API is the verb and an options object; the listener stays internal behind the
-  `IDisposable` it returns. That keeps the package interface-first without a one-member interface.
+  rules. The public API is two verbs and an options object; the listener stays internal behind
+  `ILoggerForwarder`.
+
+## Packaging: an opt-in package, not an App kernel member
+
+`Assimalign.Cohesion.Logging.EventSource` stays an ordinary NuGet package that an application references
+when it wants forwarding; it is not a member of the `Assimalign.Cohesion.App` hosting kernel. The kernel
+is derived from the hosting roots' own dependency closure (`build-system.md`), and no host needs this
+package to run: forwarding is a diagnostic choice an application makes, and an application that never
+forwards should not ship the assembly. Revisit if a hosting root starts forwarding by default.
 
 ## Selecting sources
 
@@ -112,10 +134,11 @@ belong in `dotnet-counters`.
   field initializers create (field initializers run before the base constructor) and attached once the
   factory and prefixes are set; a source created concurrently on another thread goes through the same
   lock, so none is missed or attached twice.
-- **Factory disposal.** After the factory is disposed, loggers it already created write to disposed
-  providers (which drop the entries) and new sources fail to attach, silently. Dispose the forwarding
-  handle before the factory.
-- **One handle per factory.** Each handle is its own listener; two forward every event twice.
+- **Factory disposal.** A forwarder registered with the builder verb is disposed by the factory before
+  its providers, so this cannot happen to it. A forwarder from `ForwardEventSources` that outlives its
+  factory writes to disposed providers (which drop the entries) and fails to attach new sources, silently:
+  dispose it before the factory.
+- **One forwarder per factory.** Each forwarder is its own listener; two forward every event twice.
 
 ## Namespace
 

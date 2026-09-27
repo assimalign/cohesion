@@ -9,7 +9,7 @@ and the scope lifecycle. Concrete sinks live in sibling packages.
 ## Status
 
 - Status: Stable foundation.
-- Production source files: 19.
+- Production source files: 25.
 - Project references: `Assimalign.Cohesion.Core` (for the `LogId` value type generator
   pipeline).
 - Package references: None.
@@ -59,6 +59,9 @@ own packages and depend on the foundation.
 - `ILoggerFactoryBuilder` / `LoggerFactoryBuilder` - fluent registration.
 - `LoggerFactoryOptions` - mutable configuration shape consumed by the factory.
 - `ILoggerEnricher` - attribute pipeline.
+- `ILoggerForwarder` - a component that writes entries into the factory from an outside source
+  (`AddForwarder` on the builder); the factory creates it when built and disposes it before its
+  providers.
 - `LoggerFilterRule` - one rule (provider type + category + level + custom filter, all
   optional). `ILoggerFilter` is the custom filter shape.
 - `LoggerExtensions` - typed helpers (`LogTrace`, `LogInformation`, `LogError`, ...).
@@ -67,7 +70,7 @@ own packages and depend on the foundation.
 
 - `src/Abstractions/` - root contracts (`ILogger`, `ILogger.Scoped.cs` (`IScopedLogger`),
   `ILoggerEntry`, `ILoggerFactory`, `ILoggerProvider`, `ILoggerFactoryBuilder`,
-  `ILoggerEnricher`, `ILoggerFilter`).
+  `ILoggerEnricher`, `ILoggerFilter`, `ILoggerForwarder`).
 - `src/Extensions/LoggerExtensions.cs` - ergonomic helpers.
 - `src/Internal/CompositeLogger.cs` - per-category fan-out with per-provider rule gating.
 - `src/Internal/ScopedCompositeLogger.cs` - scope lifecycle.

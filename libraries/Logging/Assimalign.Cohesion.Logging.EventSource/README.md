@@ -9,9 +9,8 @@ package forwards those events — and any other event source you name — into a
 using ILoggerFactory loggerFactory = new LoggerFactoryBuilder()
     .AddProvider(new ConsoleLoggerProvider())
     .AddRule("Assimalign.Cohesion.Connections", LogLevel.Debug)   // verbose connection detail
+    .AddEventSourceForwarding()                                     // the factory owns it
     .Build();
-
-using IDisposable forwarding = loggerFactory.ForwardEventSources();
 ```
 
 See `docs/OVERVIEW.md` and `docs/DESIGN.md` for the mapping, the level rules, and the failure model, and

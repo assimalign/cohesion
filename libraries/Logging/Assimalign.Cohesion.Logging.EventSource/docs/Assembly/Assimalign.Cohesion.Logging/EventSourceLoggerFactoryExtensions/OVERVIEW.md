@@ -6,12 +6,15 @@ factory's loggers. Declared with C# 14 `extension(ILoggerFactory loggerFactory)`
 ## Members
 
 ```csharp
-public IDisposable ForwardEventSources(EventSourceForwardingOptions? options = null)
+public ILoggerForwarder ForwardEventSources(EventSourceForwardingOptions? options = null)
 ```
 
 Starts forwarding every event source whose name starts with one of `options.Sources` (default:
-`Assimalign.Cohesion.`), including sources created later. Returns a handle; disposing it stops forwarding
-and disables the sources it enabled. Disposing the handle twice is a no-op.
+`Assimalign.Cohesion.`), including sources created later. Returns the forwarder; disposing it stops
+forwarding and disables the sources it enabled. Disposing it twice is a no-op. The caller owns it and
+must dispose it before the factory — when the factory is built from a builder, prefer
+`AddEventSourceForwarding` (`EventSourceLoggerFactoryBuilderExtensions`), which makes the factory the
+owner.
 
 | Parameter | Description |
 | --- | --- |
@@ -45,5 +48,5 @@ using ILoggerFactory loggerFactory = new LoggerFactoryBuilder()
     .AddRule("Assimalign.Cohesion.Connections", LogLevel.Debug)
     .Build();
 
-using IDisposable forwarding = loggerFactory.ForwardEventSources();
+using ILoggerForwarder forwarding = loggerFactory.ForwardEventSources();
 ```

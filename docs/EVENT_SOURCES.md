@@ -36,10 +36,14 @@ using ILoggerFactory loggerFactory = new LoggerFactoryBuilder()
     .AddProvider(new ConsoleLoggerProvider())
     .SetMinimumLevel(LogLevel.Information)
     .AddRule("Assimalign.Cohesion.Connections", LogLevel.Debug)
+    .AddEventSourceForwarding()
     .Build();
-
-using IDisposable forwarding = loggerFactory.ForwardEventSources();
 ```
+
+The factory owns the forwarder: forwarding starts when the factory is built and stops when it is
+disposed. In a host, call `builder.Logging.AddEventSourceForwarding()`; the factory is built before the
+host starts, so the events raised while listeners bind are forwarded too. To forward into a factory you
+did not build, `loggerFactory.ForwardEventSources()` returns a forwarder that you dispose yourself.
 
 By default every source named `Assimalign.Cohesion.*` is forwarded; a runtime source is added by
 prefix (`new EventSourceForwardingOptions { Sources = { "System.Net.Security" } }`). The package's

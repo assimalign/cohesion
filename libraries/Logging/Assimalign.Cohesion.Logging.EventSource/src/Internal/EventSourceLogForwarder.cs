@@ -7,9 +7,9 @@ using System.Threading;
 namespace Assimalign.Cohesion.Logging.Internal;
 
 /// <summary>
-/// The <see cref="EventListener"/> behind <see cref="EventSourceLoggerFactoryExtensions"/>: enables every
-/// matching event source at the level its logger accepts and writes each event as an
-/// <see cref="ILoggerEntry"/>.
+/// The <see cref="EventListener"/> behind <see cref="EventSourceLoggerFactoryExtensions"/> and
+/// <see cref="EventSourceLoggerFactoryBuilderExtensions"/>: enables every matching event source at the level
+/// its logger accepts and writes each event as an <see cref="ILoggerEntry"/>.
 /// </summary>
 /// <remarks>
 /// Both callbacks run inside the instrumented code: <see cref="OnEventSourceCreated"/> during the event
@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Logging.Internal;
 /// raised the event. EventSource rethrows a listener's exception into that code, so neither callback lets
 /// one escape.
 /// </remarks>
-internal sealed class EventSourceLogForwarder : EventListener
+internal sealed class EventSourceLogForwarder : EventListener, ILoggerForwarder
 {
     // EventListener's constructor reports every existing event source through OnEventSourceCreated before
     // this type's constructor body runs. Field initializers run before the base constructor, so these are
@@ -51,6 +51,31 @@ internal sealed class EventSourceLogForwarder : EventListener
         {
             Attach(eventSource);
         }
+    }
+
+    /// <summary>
+    /// Validates <paramref name="options"/> and copies its prefixes, so a later change to the options
+    /// cannot change what an existing or registered forwarder selects.
+    /// </summary>
+    /// <exception cref="ArgumentException">The options select no source, or contain a null, empty, or whitespace prefix.</exception>
+    public static string[] GetSourcePrefixes(EventSourceForwardingOptions? options)
+    {
+        string[] sourcePrefixes = [.. (options ?? new EventSourceForwardingOptions()).Sources];
+
+        if (sourcePrefixes.Length == 0)
+        {
+            throw new ArgumentException("At least one event source name prefix is required.", nameof(options));
+        }
+
+        foreach (string prefix in sourcePrefixes)
+        {
+            if (string.IsNullOrWhiteSpace(prefix))
+            {
+                throw new ArgumentException("Event source name prefixes cannot be null, empty, or whitespace.", nameof(options));
+            }
+        }
+
+        return sourcePrefixes;
     }
 
     /// <inheritdoc />

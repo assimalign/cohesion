@@ -35,7 +35,7 @@ public static class EventSourceLoggerFactoryExtensions
         /// <param name="options">
         /// The sources to forward, or <see langword="null"/> to forward every Cohesion event source.
         /// </param>
-        /// <returns>A handle that stops forwarding when disposed.</returns>
+        /// <returns>The forwarder; forwarding stops when it is disposed.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="loggerFactory"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">
         /// <see cref="EventSourceForwardingOptions.Sources"/> is empty or contains a null, empty, or
@@ -59,30 +59,21 @@ public static class EventSourceLoggerFactoryExtensions
         /// forward every event twice.
         /// </para>
         /// <para>
+        /// The caller owns the returned forwarder and must dispose it before the factory. When the factory is
+        /// built with a <see cref="ILoggerFactoryBuilder"/>, prefer
+        /// <see cref="EventSourceLoggerFactoryBuilderExtensions.AddEventSourceForwarding"/>, which makes the
+        /// factory the owner.
+        /// </para>
+        /// <para>
         /// NativeAOT applications receive events only when published with
         /// <c>&lt;EventSourceSupport&gt;true&lt;/EventSourceSupport&gt;</c>.
         /// </para>
         /// </remarks>
-        public IDisposable ForwardEventSources(EventSourceForwardingOptions? options = null)
+        public ILoggerForwarder ForwardEventSources(EventSourceForwardingOptions? options = null)
         {
             ArgumentNullException.ThrowIfNull(loggerFactory);
 
-            string[] sourcePrefixes = [.. (options ?? new EventSourceForwardingOptions()).Sources];
-
-            if (sourcePrefixes.Length == 0)
-            {
-                throw new ArgumentException("At least one event source name prefix is required.", nameof(options));
-            }
-
-            foreach (string prefix in sourcePrefixes)
-            {
-                if (string.IsNullOrWhiteSpace(prefix))
-                {
-                    throw new ArgumentException("Event source name prefixes cannot be null, empty, or whitespace.", nameof(options));
-                }
-            }
-
-            return new EventSourceLogForwarder(loggerFactory, sourcePrefixes);
+            return new EventSourceLogForwarder(loggerFactory, EventSourceLogForwarder.GetSourcePrefixes(options));
         }
     }
 }

@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Logging;
 
 /// <summary>
 /// Default <see cref="ILoggerFactory"/>. Caches composite loggers per category and owns the
-/// registered providers' lifecycle.
+/// lifecycle of the registered providers and forwarders.
 /// </summary>
 /// <remarks>
 /// <see cref="Create(string)"/> returns the concrete <see cref="Logger"/> via covariant
@@ -24,13 +24,20 @@ public sealed class LoggerFactory : ILoggerFactory
     private readonly ILoggerProvider[] _providersSnapshot;
     private readonly ILoggerEnricher[] _enrichersSnapshot;
     private readonly LoggerFilterRule[] _rulesSnapshot;
+    private readonly ILoggerForwarder[] _forwarders = Array.Empty<ILoggerForwarder>();
     private int _disposed;
 
     /// <summary>
     /// Initializes a factory with the supplied options. Most callers use
     /// <see cref="LoggerFactoryBuilder"/> instead of this constructor.
     /// </summary>
+    /// <remarks>
+    /// The registrations in <see cref="LoggerFactoryOptions.Forwarders"/> are invoked, in order,
+    /// as the last step of construction. If one throws, the forwarders already created and the
+    /// providers are disposed and the exception propagates.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">A forwarder registration is <see langword="null"/> or returned <see langword="null"/>.</exception>
     public LoggerFactory(LoggerFactoryOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -47,6 +54,10 @@ public sealed class LoggerFactory : ILoggerFactory
 
         _rulesSnapshot = new LoggerFilterRule[options.FilterRules.Count];
         options.FilterRules.CopyTo(_rulesSnapshot, 0);
+
+        // Last, because each forwarder receives this factory and may create loggers from it
+        // immediately; everything above must already be in place.
+        _forwarders = CreateForwarders(options.Forwarders);
     }
 
     /// <inheritdoc />
@@ -73,7 +84,11 @@ public sealed class LoggerFactory : ILoggerFactory
 
     ILogger ILoggerFactory.Create(string category) => Create(category);
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Disposes the factory's forwarders, newest first, and then its providers. A component that
+    /// throws while being disposed does not stop the rest. Calling this more than once has no
+    /// further effect.
+    /// </summary>
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -81,6 +96,71 @@ public sealed class LoggerFactory : ILoggerFactory
             return;
         }
 
+        // Forwarders write through the providers, so they stop first.
+        DisposeForwarders(_forwarders, _forwarders.Length);
+        DisposeProviders();
+    }
+
+    private ILoggerForwarder[] CreateForwarders(IList<Func<ILoggerFactory, ILoggerForwarder>> registrations)
+    {
+        if (registrations.Count == 0)
+        {
+            return Array.Empty<ILoggerForwarder>();
+        }
+
+        // Snapshot first: a registration may touch the options while it runs.
+        var snapshot = new Func<ILoggerFactory, ILoggerForwarder>[registrations.Count];
+        registrations.CopyTo(snapshot, 0);
+
+        var forwarders = new ILoggerForwarder[snapshot.Length];
+        var created = 0;
+
+        try
+        {
+            foreach (var create in snapshot)
+            {
+                if (create is null)
+                {
+                    throw new InvalidOperationException("A forwarder registration is null.");
+                }
+
+                forwarders[created] = create(this)
+                    ?? throw new InvalidOperationException("A forwarder registration returned null.");
+                created++;
+            }
+        }
+        catch
+        {
+            // A factory that fails to construct is never returned, so nothing else can release
+            // what it already owns. Anything a forwarder captured sees a disposed factory.
+            Volatile.Write(ref _disposed, 1);
+            DisposeForwarders(forwarders, created);
+            DisposeProviders();
+            throw;
+        }
+
+        return forwarders;
+    }
+
+    private static void DisposeForwarders(ILoggerForwarder[] forwarders, int count)
+    {
+        // Newest first, the reverse of creation, so a forwarder never outlives one created
+        // before it.
+        for (var i = count - 1; i >= 0; i--)
+        {
+            try
+            {
+                forwarders[i].Dispose();
+            }
+            catch
+            {
+                // Forwarder disposal failures must not abort the rest of teardown.
+            }
+        }
+    }
+
+    private void DisposeProviders()
+    {
         foreach (var provider in _providersSnapshot)
         {
             try

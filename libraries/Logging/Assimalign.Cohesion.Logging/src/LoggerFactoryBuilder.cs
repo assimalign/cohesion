@@ -70,6 +70,15 @@ public sealed class LoggerFactoryBuilder : ILoggerFactoryBuilder
     }
 
     /// <inheritdoc />
+    public ILoggerFactoryBuilder AddForwarder(Func<ILoggerFactory, ILoggerForwarder> create)
+    {
+        ArgumentNullException.ThrowIfNull(create);
+        ThrowIfBuilt();
+        _options.Forwarders.Add(create);
+        return this;
+    }
+
+    /// <inheritdoc />
     public ILoggerFactory Build()
     {
         ThrowIfBuilt();

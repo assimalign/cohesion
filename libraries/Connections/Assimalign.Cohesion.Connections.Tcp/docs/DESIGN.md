@@ -112,7 +112,8 @@ repository EventSource convention (`.claude/rules/event-source.md`). Nothing abo
 enable it by name (`dotnet-trace collect --providers Assimalign.Cohesion.Connections.Tcp`,
 `dotnet-counters monitor --counters Assimalign.Cohesion.Connections.Tcp`), and an application forwards
 it into its logging with `Assimalign.Cohesion.Logging.EventSource`
-(`loggerFactory.ForwardEventSources()`), where the source name becomes the log category.
+(`AddEventSourceForwarding()` on the logger factory builder), where the source name becomes the log
+category.
 
 | Id | Event | Level | Payload |
 |---|---|---|---|

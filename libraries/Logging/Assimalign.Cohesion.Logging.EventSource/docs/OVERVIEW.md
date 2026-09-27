@@ -27,34 +27,44 @@ event source type.
 
 ## Usage
 
+Register forwarding on the builder, and the factory owns it: forwarding starts when the factory is built
+and stops when it is disposed.
+
 ```csharp
 using ILoggerFactory loggerFactory = new LoggerFactoryBuilder()
     .AddProvider(new ConsoleLoggerProvider())
     .SetMinimumLevel(LogLevel.Information)
     .AddRule("Assimalign.Cohesion.Connections.Tcp", LogLevel.Debug)
+    .AddEventSourceForwarding()                       // every Cohesion event source
     .Build();
+```
 
-// Every Cohesion event source, at the levels the factory accepts.
-using IDisposable forwarding = loggerFactory.ForwardEventSources();
+Name more sources by prefix; the Cohesion default stays unless you clear it:
 
-// Cohesion sources plus one of the runtime's own.
-using IDisposable withTls = loggerFactory.ForwardEventSources(new EventSourceForwardingOptions
+```csharp
+builder.AddEventSourceForwarding(new EventSourceForwardingOptions
 {
     Sources = { "System.Net.Security" },
 });
 ```
 
-In a hosted application, forward from the factory the host built, for the life of the application:
+In a hosted application, register it on the host's logging builder. The factory is built before the host
+starts, so the events raised while listeners bind are forwarded too:
 
 ```csharp
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-builder.Logging.AddProvider(new ConsoleLoggerProvider());
+builder.Logging
+    .AddProvider(new ConsoleLoggerProvider())
+    .AddEventSourceForwarding();
 
-WebApplication app = builder.Build();
-using IDisposable forwarding = app.Context.ServiceProvider
-    .GetRequiredService<ILoggerFactory>()
-    .ForwardEventSources();
-await app.RunAsync();
+await builder.Build().RunAsync();
+```
+
+To forward into a factory you did not build, or for a span shorter than the factory's life, call
+`ForwardEventSources()` on the factory and dispose the forwarder it returns before the factory:
+
+```csharp
+using ILoggerForwarder forwarding = loggerFactory.ForwardEventSources();
 ```
 
 NativeAOT applications receive events only when published with
@@ -62,15 +72,19 @@ NativeAOT applications receive events only when published with
 
 ## Key Types
 
+- `EventSourceLoggerFactoryBuilderExtensions` — `AddEventSourceForwarding(EventSourceForwardingOptions?)`
+  on `ILoggerFactoryBuilder`; the factory owns the forwarder.
 - `EventSourceLoggerFactoryExtensions` — `ForwardEventSources(EventSourceForwardingOptions?)` on
-  `ILoggerFactory`; returns the `IDisposable` that stops forwarding.
+  `ILoggerFactory`; returns the `ILoggerForwarder`, which the caller disposes.
 - `EventSourceForwardingOptions` — `Sources`, the name prefixes to forward, and the
   `CohesionSourcePrefix` constant.
 
 ## Source Layout
 
 - `src/EventSourceForwardingOptions.cs` — the options shape.
-- `src/Extensions/EventSourceLoggerFactoryExtensions.cs` — the public verb.
-- `src/Internal/EventSourceLogForwarder.cs` — the `EventListener`: attach, enable, forward, contain.
+- `src/Extensions/EventSourceLoggerFactoryBuilderExtensions.cs` — the builder verb.
+- `src/Extensions/EventSourceLoggerFactoryExtensions.cs` — the factory verb.
+- `src/Internal/EventSourceLogForwarder.cs` — the `EventListener` and `ILoggerForwarder`: validate options,
+  attach, enable, forward, contain.
 - `src/Internal/EventSourceLogMapper.cs` — level mapping and event-to-entry translation.
 - `src/Properties/AssemblyInfo.cs` — `InternalsVisibleTo` for tests.

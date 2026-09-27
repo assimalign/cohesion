@@ -48,9 +48,25 @@ public interface ILoggerFactoryBuilder
     ILoggerFactoryBuilder AddEnricher(ILoggerEnricher enricher);
 
     /// <summary>
+    /// Registers a forwarder: a component that writes entries into the factory from an outside
+    /// source. The built factory invokes <paramref name="create"/> once, with itself, as the last
+    /// step of its construction, and disposes the returned forwarder before its providers.
+    /// </summary>
+    /// <param name="create">Creates the forwarder against the built factory. Must not return <see langword="null"/>.</param>
+    /// <returns>This builder, for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="create"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The builder has already been used to build a factory.</exception>
+    ILoggerFactoryBuilder AddForwarder(Func<ILoggerFactory, ILoggerForwarder> create);
+
+    /// <summary>
     /// Finalizes the registration phase and returns a configured factory. After this returns the
     /// builder is no longer usable.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The builder has already been used to build a factory.</exception>
+    /// <exception cref="InvalidOperationException">The builder has already been used to build a factory, or a forwarder registration returned <see langword="null"/>.</exception>
+    /// <remarks>
+    /// Registered forwarders are created during this call. An exception thrown by a forwarder
+    /// registration propagates after the forwarders already created and the registered providers
+    /// have been disposed.
+    /// </remarks>
     ILoggerFactory Build();
 }

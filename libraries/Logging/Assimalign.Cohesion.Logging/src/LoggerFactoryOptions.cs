@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Logging;
@@ -8,7 +9,7 @@ namespace Assimalign.Cohesion.Logging;
 /// <remarks>
 /// <para>
 /// The options expose mutable collections so callers can populate <see cref="Providers"/>,
-/// <see cref="Enrichers"/>, and <see cref="FilterRules"/> directly (or through
+/// <see cref="Enrichers"/>, <see cref="FilterRules"/>, and <see cref="Forwarders"/> directly (or through
 /// <see cref="LoggerFactoryBuilder"/>). After the factory is constructed the lists are read by
 /// reference; mutating them post-construction is not supported and may lead to undefined
 /// behavior.
@@ -28,6 +29,13 @@ public sealed class LoggerFactoryOptions
     /// rule applies, <see cref="MinimumLevel"/> is used as the gate.
     /// </summary>
     public IList<LoggerFilterRule> FilterRules { get; } = new List<LoggerFilterRule>();
+
+    /// <summary>
+    /// Forwarder registrations, in creation order. The factory invokes each delegate once, with
+    /// itself, as the last step of its construction, owns the returned
+    /// <see cref="ILoggerForwarder"/>, and disposes it (in reverse order) before its providers.
+    /// </summary>
+    public IList<Func<ILoggerFactory, ILoggerForwarder>> Forwarders { get; } = new List<Func<ILoggerFactory, ILoggerForwarder>>();
 
     /// <summary>Factory-wide minimum level. Used as the fallback when no <see cref="FilterRules"/> rule matches a (provider, category) pair. Defaults to <see cref="LogLevel.Information"/>.</summary>
     public LogLevel MinimumLevel { get; set; } = LogLevel.Information;

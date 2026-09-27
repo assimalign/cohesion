@@ -105,7 +105,8 @@ cannot silently drop entries.
 
 1. Caches composite loggers per category (`ConcurrentDictionary` keyed
    case-insensitively).
-2. Owns its providers: disposing the factory disposes every provider it was built with.
+2. Owns its providers and forwarders: disposing the factory disposes its forwarders, newest first,
+   and then every provider it was built with (see *Forwarders*).
 3. After `Dispose`, every other operation throws `ObjectDisposedException`.
 4. `Create(string category)` returns the concrete `Logger` via covariant return so
    callers holding the strongly typed `LoggerFactory` reference avoid the interface cast.
@@ -151,6 +152,44 @@ further nested scopes. Scopes are disposable; double-dispose is a no-op.
 
 If a provider throws while opening a scope, the composite substitutes a `NoopScopedLogger`
 so the composite stays stable.
+
+## Forwarders
+
+A provider is a sink the factory writes *to*. A forwarder (`ILoggerForwarder`) is the reverse: a
+component that writes entries *into* the factory from outside the logging pipeline. Runtime event sources
+are the first case (`Assimalign.Cohesion.Logging.EventSource`); `DiagnosticListener` and `Trace` fit the
+same shape. A forwarder writes through `factory.Create(category)`, so filter rules, enrichers, and
+providers apply to its entries exactly as they do to any other.
+
+The factory owns its forwarders:
+
+1. **Registration.** `ILoggerFactoryBuilder.AddForwarder(Func<ILoggerFactory, ILoggerForwarder>)`
+   appends to `LoggerFactoryOptions.Forwarders`. The registration is a delegate over the built factory,
+   not a service lookup: registration stays dependency-free.
+2. **Creation.** Each registration is invoked once, in order, as the *last* step of the factory's
+   constructor, after every snapshot is taken, so a forwarder can create loggers immediately.
+   Forwarding therefore begins before any application code runs against the factory. In a host, that
+   means before the host starts, so the events raised while listeners bind are not lost.
+3. **Failed construction.** If a registration throws or returns `null`:
+   - the factory marks itself disposed;
+   - it disposes the forwarders it already created, newest first, and then its providers;
+   - it rethrows.
+
+   A factory that fails to construct is never returned, so nothing else could release them.
+4. **Disposal.** `Dispose` disposes forwarders newest first, then providers. A forwarder writes through
+   the providers, so it must stop before they go away. As with providers, a component that throws while
+   being disposed does not stop the rest of teardown.
+
+There is deliberately no start or stop. Forwarding is active for the forwarder's whole lifetime.
+
+An asynchronous `StartAsync`/`StopAsync` contract was considered and rejected (#1036), for four reasons:
+
+- Enabling a listener is synchronous and nothing is queued, so the tasks would always complete at once.
+- The shape duplicates Hosting's `IHostService`, which this L1 library cannot reference.
+- A forwarder started as one host service among others would miss events raised by services started
+  before it.
+- An `IAsyncDisposable` forwarder owned by an `IDisposable` factory would force sync-over-async
+  disposal.
 
 ## Enrichment
 
@@ -199,6 +238,7 @@ Assimalign.Cohesion.Logging/
       ILoggerFactoryBuilder.cs
       ILoggerEnricher.cs
       ILoggerFilter.cs
+      ILoggerForwarder.cs
     Extensions/
       LoggerExtensions.cs
     Internal/
