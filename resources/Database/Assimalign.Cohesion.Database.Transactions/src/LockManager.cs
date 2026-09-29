@@ -1,3 +1,5 @@
+using Assimalign.Cohesion.Database.Transactions.Internal;
+
 namespace Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>

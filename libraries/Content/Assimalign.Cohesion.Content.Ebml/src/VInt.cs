@@ -24,12 +24,12 @@ public readonly struct VInt
     /// <summary>
     /// Gets the value
     /// </summary>
-    public ulong Value => EncodedValue & DataBitsMask[_length];
+    public ulong Value => EncodedValue & _dataBitsMask[_length];
 
     /// <summary>
     /// Gets true if value is reserved (i.e. all data bits are zeros or 1's)
     /// </summary>
-    public bool IsReserved => Value == DataBitsMask[_length];
+    public bool IsReserved => Value == _dataBitsMask[_length];
 
     /// <summary>
     /// Gets true if value is correct identifier
@@ -38,7 +38,7 @@ public readonly struct VInt
     {
         get
         {
-            var isShortest = _length == 1 || Value > DataBitsMask[_length - 1];
+            var isShortest = _length == 1 || Value > _dataBitsMask[_length - 1];
             return isShortest && !IsReserved;
         }
     }
@@ -76,14 +76,14 @@ public readonly struct VInt
         {
             throw new ArgumentOutOfRangeException(nameof(length));
         }
-        if (length > 0 && DataBitsMask[length] <= value)
+        if (length > 0 && _dataBitsMask[length] <= value)
         {
             throw new ArgumentException("Specified width is not sufficient to encode value", nameof(value));
         }
 
         if (length == 0)
         {
-            while (DataBitsMask[++length] <= value) { }
+            while (_dataBitsMask[++length] <= value) { }
         }
 
         var sizeMarker = 1UL << (7 * length);
@@ -143,7 +143,7 @@ public readonly struct VInt
         }
 
         var marker = (byte)((encodedValue >> mostSignificantOctetIndex * 8) & 0xff);
-        var extraBytes = (marker >> 4 > 0) ? ExtraBytesSize[marker >> 4] : 4 + ExtraBytesSize[marker];
+        var extraBytes = (marker >> 4 > 0) ? _extraBytesSize[marker >> 4] : 4 + _extraBytesSize[marker];
 
         if (extraBytes != mostSignificantOctetIndex)
         {
@@ -180,8 +180,8 @@ public readonly struct VInt
         // TODO handle EBMLMaxSizeWidth
 
         var extraBytes = (buffer[0] & 0xf0) != 0
-            ? ExtraBytesSize[buffer[0] >> 4]
-            : 4 + ExtraBytesSize[buffer[0]];
+            ? _extraBytesSize[buffer[0] >> 4]
+            : 4 + _extraBytesSize[buffer[0]];
 
         if (extraBytes + 1 > maxLength)
         {
@@ -218,12 +218,12 @@ public readonly struct VInt
         return buffer.Length;
     }
 
-    private static readonly sbyte[] ExtraBytesSize = { 4, 3, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0 };
+    private static readonly sbyte[] _extraBytesSize = { 4, 3, 2, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0 };
 
     /// <summary>
     /// Maps length to data bits mask
     /// </summary>
-    private static readonly ulong[] DataBitsMask =
+    private static readonly ulong[] _dataBitsMask =
     {
         (1L << 0) - 1,
         (1L << 7) - 1,

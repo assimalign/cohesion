@@ -121,4 +121,22 @@ internal sealed class IsolatedStorageFileSystemFile : IsolatedStorageFileSystemI
             throw;
         }
     }
+
+    /// <inheritdoc />
+    public IFileSystemFileHandle OpenHandle(FileMode fileMode, FileAccess fileAccess, FileShare fileShare)
+    {
+        // Match File.OpenHandle: Append opens or creates for positional writes without imposing
+        // FileStream's cursor-based restriction against overwriting earlier bytes.
+        if (fileMode == FileMode.Append)
+        {
+            if (fileAccess != FileAccess.Write)
+            {
+                throw new ArgumentException("Append mode requires write-only access.", nameof(fileAccess));
+            }
+
+            fileMode = FileMode.OpenOrCreate;
+        }
+
+        return new IsolatedStorageFileSystemFileHandle((IsolatedStorageFileStream)Open(fileMode, fileAccess, fileShare));
+    }
 }

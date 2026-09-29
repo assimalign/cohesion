@@ -11,8 +11,8 @@ re-validates the caller-supplied token on every request.
   allowed algorithms, clock skew, and the name/role claim types.
 - `JwtBearerDefaults` &mdash; the default scheme name (`"Bearer"`).
 - `IJwtSignatureVerifier` + `JwtSignatureVerifier.CreateHmac/CreateRsa/CreateEcdsa`
-  &mdash; the keyed signature-verification seam and its BCL-backed
-  implementations.
+  &mdash; the compatibility seam: HMAC remains Web-local, while the RSA/ECDSA factories
+  adapt the reusable IdentityModel JWT verifiers.
 - `JwtBearerAuthentication.CreateHandler(options)` &mdash; the factory the
   composition root calls; the concrete handler stays internal.
 
@@ -21,9 +21,9 @@ re-validates the caller-supplied token on every request.
 - Implements `IAuthenticationHandler` from
   `Assimalign.Cohesion.Web.Authentication` (the scheme model).
 - Consumes `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken` for
-  document validation (issuer / audience / lifetime / algorithm) rather
-  than embedding its own crypto; signature verification is this package's
-  seam.
+  document validation (issuer / audience / lifetime / algorithm) and asymmetric signature
+  verification. The public Bearer seam remains stable, and headless callers can use the lower
+  JWT verifier without referencing the Web area.
 - Emits RFC 6750 `WWW-Authenticate: Bearer` challenges.
 
 Register it at the composition root, not here:

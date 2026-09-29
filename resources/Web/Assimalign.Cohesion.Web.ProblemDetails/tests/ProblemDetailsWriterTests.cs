@@ -18,7 +18,7 @@ namespace Assimalign.Cohesion.Web.ProblemDetailsTests;
 /// </summary>
 public class ProblemDetailsWriterTests
 {
-    private static readonly IProblemDetailsWriter Writer = ProblemDetailsWriter.Default;
+    private static readonly IProblemDetailsWriter _writer = ProblemDetailsWriter.Default;
 
     [Fact(DisplayName = "Cohesion Test [Web.ProblemDetails] - ProblemDetailsWriter: renders all five standard members")]
     public void Write_WithAllStandardMembers_RendersEachMember()
@@ -32,7 +32,7 @@ public class ProblemDetailsWriterTests
             Instance = "/account/12345/msgs/abc"
         };
 
-        using JsonDocument document = JsonDocument.Parse(Writer.WriteToString(problem));
+        using JsonDocument document = JsonDocument.Parse(_writer.WriteToString(problem));
         JsonElement root = document.RootElement;
 
         root.GetProperty("type").GetString().ShouldBe("https://example.com/probs/out-of-credit");
@@ -47,7 +47,7 @@ public class ProblemDetailsWriterTests
     {
         var problem = new ProblemDetails { Status = 500 };
 
-        using JsonDocument document = JsonDocument.Parse(Writer.WriteToString(problem));
+        using JsonDocument document = JsonDocument.Parse(_writer.WriteToString(problem));
         JsonElement root = document.RootElement;
 
         root.GetProperty("type").GetString().ShouldBe("about:blank");
@@ -62,7 +62,7 @@ public class ProblemDetailsWriterTests
     {
         ProblemDetails problem = ProblemDetails.FromStatus(HttpStatusCode.NotFound);
 
-        using JsonDocument document = JsonDocument.Parse(Writer.WriteToString(problem));
+        using JsonDocument document = JsonDocument.Parse(_writer.WriteToString(problem));
         JsonElement root = document.RootElement;
 
         root.GetProperty("type").GetString().ShouldBe("about:blank");
@@ -83,7 +83,7 @@ public class ProblemDetailsWriterTests
             ["name"] = new List<string> { "required" }
         };
 
-        using JsonDocument document = JsonDocument.Parse(Writer.WriteToString(problem));
+        using JsonDocument document = JsonDocument.Parse(_writer.WriteToString(problem));
         JsonElement root = document.RootElement;
 
         root.GetProperty("traceId").GetString().ShouldBe("00-abc-def-01");
@@ -108,7 +108,7 @@ public class ProblemDetailsWriterTests
 
         // JsonDocument.Parse would throw on a duplicate property, so a successful parse plus the
         // original value proves the reserved key was skipped.
-        using JsonDocument document = JsonDocument.Parse(Writer.WriteToString(problem));
+        using JsonDocument document = JsonDocument.Parse(_writer.WriteToString(problem));
 
         document.RootElement.GetProperty("status").GetInt32().ShouldBe(409);
     }
@@ -119,7 +119,7 @@ public class ProblemDetailsWriterTests
         var problem = new ProblemDetails { Status = 500 };
         problem.Extensions["note"] = null;
 
-        using JsonDocument document = JsonDocument.Parse(Writer.WriteToString(problem));
+        using JsonDocument document = JsonDocument.Parse(_writer.WriteToString(problem));
 
         document.RootElement.GetProperty("note").ValueKind.ShouldBe(JsonValueKind.Null);
     }
@@ -129,11 +129,11 @@ public class ProblemDetailsWriterTests
     {
         ProblemDetails problem = ProblemDetails.FromStatus(HttpStatusCode.BadGateway, "upstream failed");
 
-        string fromString = Writer.WriteToString(problem);
-        string fromBytes = System.Text.Encoding.UTF8.GetString(Writer.WriteToUtf8Bytes(problem));
+        string fromString = _writer.WriteToString(problem);
+        string fromBytes = System.Text.Encoding.UTF8.GetString(_writer.WriteToUtf8Bytes(problem));
 
         using var stream = new MemoryStream();
-        Writer.Write(problem, stream);
+        _writer.Write(problem, stream);
         string fromStream = System.Text.Encoding.UTF8.GetString(stream.ToArray());
 
         fromBytes.ShouldBe(fromString);
@@ -143,6 +143,6 @@ public class ProblemDetailsWriterTests
     [Fact(DisplayName = "Cohesion Test [Web.ProblemDetails] - ProblemDetailsWriter: null argument throws")]
     public void Write_WithNullProblem_Throws()
     {
-        Should.Throw<ArgumentNullException>(() => Writer.WriteToString(null!));
+        Should.Throw<ArgumentNullException>(() => _writer.WriteToString(null!));
     }
 }

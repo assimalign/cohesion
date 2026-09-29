@@ -9,6 +9,7 @@ using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
@@ -22,18 +23,22 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     private readonly SqlStorage _storage;
     private readonly SqlStorage _catalogStorage;
     private readonly ISqlCatalog _catalog;
-    private readonly SqlTransactionCoordinator _coordinator;
+    private readonly TransactionCoordinator _coordinator;
     private readonly IIndexManager _indexManager;
+    private readonly SqlSchemaProvisioner _schemaProvisioner;
     private bool _disposed;
 
-    internal SqlDatabaseInstance(string name, IDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage, bool recover = false)
+    internal SqlDatabaseInstance(string name, IDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage,
+        bool recover = false, Collation? defaultCollation = null)
     {
         Name = name;
         Engine = engine;
         _storage = storage;
         _catalogStorage = catalogStorage;
-        _catalog = SqlCatalog.Open(catalogStorage);
-        _coordinator = new SqlTransactionCoordinator(storage);
+        _catalog = defaultCollation is null
+            ? SqlCatalog.Open(catalogStorage)
+            : SqlCatalog.Open(catalogStorage, defaultCollation);
+        _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new SqlTransactionRecordSpace(storage));
 
         // Re-attach the persisted secondary indexes before recovery: the
         // open-time scrub must be able to purge unproven writers' entries out of
@@ -43,10 +48,11 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         _indexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
             Storage = storage,
-            TransactionSource = _coordinator,
+            TransactionSource = new StatementTransactionSource(_coordinator),
             LockManager = _coordinator.LockManager,
             ExistingIndexes = _catalog.GetIndexRegistrations(),
         });
+        _schemaProvisioner = new SqlSchemaProvisioner(this, _catalog);
 
         if (recover)
         {
@@ -312,7 +318,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     /// Gets the database's transaction coordinator (the MVCC composition sessions
     /// bind to), for the engine's background workers and tests.
     /// </summary>
-    internal SqlTransactionCoordinator Coordinator => _coordinator;
+    internal TransactionCoordinator Coordinator => _coordinator;
 
     /// <summary>
     /// Checkpoints the data storage through the coordinator, so the truncating
@@ -332,6 +338,27 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         var session = new SqlDatabaseSession(this, _coordinator, executor);
 
         return new ValueTask<IDatabaseSession>(session);
+    }
+
+    /// <summary>
+    /// Creates the provisioner's private session. Only this path stamps schema ownership
+    /// and authorizes schema-owned DDL; ordinary sessions have no ownership bypass.
+    /// </summary>
+    internal IDatabaseSession CreateSchemaSession(string provisioningSchema, CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+        var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager);
+        return new SqlDatabaseSession(this, _coordinator, executor, provisioningSchema);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<SchemaMigrationResult> ApplySchemaAsync(
+        CompiledSchema schema,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        return _schemaProvisioner.ApplyAsync(schema, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -369,6 +396,36 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         SaveIndexRegistrationsIfChanged();
         await _storage.DisposeAsync().ConfigureAwait(false);
         await _catalogStorage.DisposeAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Keeps the area's pairing error at the engine boundary while the shared
+    /// coordinator owns the current statement bracket.
+    /// </summary>
+    private sealed class StatementTransactionSource : IStorageTransactionSource
+    {
+        private readonly TransactionCoordinator _coordinator;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="StatementTransactionSource"/> class.
+        /// </summary>
+        /// <param name="coordinator">The transaction coordinator that owns the current statement bracket.</param>
+        public StatementTransactionSource(TransactionCoordinator coordinator)
+        {
+            _coordinator = coordinator;
+        }
+
+        /// <inheritdoc />
+        public IStorageTransaction GetStorageTransaction(ITransactionContext context)
+        {
+            if (_coordinator.TryGetStorageTransaction(context, out var transaction))
+            {
+                return transaction;
+            }
+
+            throw new DatabaseException(
+                $"Transaction {context.Sequence} has no statement bracket applying on this database.");
+        }
     }
 
     private void ThrowIfDisposed()

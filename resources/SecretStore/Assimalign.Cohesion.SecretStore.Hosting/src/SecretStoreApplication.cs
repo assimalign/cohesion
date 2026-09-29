@@ -1,36 +1,88 @@
 using System;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Hosting;
+using Assimalign.Cohesion.SecretStore;
+using Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting;
 
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.SecretStore.Hosting.Internal;
-
 /// <summary>
-/// The standalone hosting application for the secret store resource. Composes the resource's
-/// units of work as hosted services, each selecting its execution model per the
-/// Assimalign.Cohesion.Hosting per-service execution menu (see docs/DESIGN.md).
+/// Hosts a SecretStore application and its ordered service lifecycle.
 /// </summary>
-public sealed class SecretStoreApplication : Host<SecretStoreApplicationContext>
+public sealed class SecretStoreApplication : Host<SecretStoreApplicationContext>, ISecretStoreApplication
 {
     private readonly SecretStoreApplicationContext _context;
+    private readonly SecretsEndpointService _endpointService;
+    private bool _endpointServiceDisposed;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="SecretStoreApplication"/> class.
-    /// </summary>
-    /// <param name="options">The application options.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
-    public SecretStoreApplication(SecretStoreApplicationOptions options) : base(options)
+    internal SecretStoreApplication(
+        SecretStoreApplicationOptions options,
+        SecretStoreApplicationContext context,
+        SecretsEndpointService endpointService)
+        : base(options)
     {
-        ArgumentNullException.ThrowIfNull(options);
-
-        _context = new SecretStoreApplicationContext(options, new IHostService[]
-        {
-            new SecretsEndpointService(),
-        });
+        _context = context;
+        _endpointService = endpointService;
     }
 
     /// <summary>
-    /// Gets the application context.
+    /// Gets the concrete application context.
     /// </summary>
     public override SecretStoreApplicationContext Context => _context;
+
+    /// <summary>
+    /// Disposes the host and its owned endpoint service.
+    /// </summary>
+    /// <param name="disposing">Whether to release managed resources.</param>
+    /// <returns>A task representing asynchronous disposal.</returns>
+    protected override async ValueTask DisposeAsync(bool disposing)
+    {
+        try
+        {
+            await base.DisposeAsync(disposing).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (disposing && !_endpointServiceDisposed)
+            {
+                _endpointServiceDisposed = true;
+                _endpointService.Dispose();
+            }
+        }
+    }
+
+    ISecretStoreApplicationContext ISecretStoreApplication.Context => _context;
+
+    Task ISecretStoreApplication.StartAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StartAsync(cancellationToken);
+
+    Task ISecretStoreApplication.StopAsync(CancellationToken cancellationToken) =>
+        ((IHost)this).StopAsync(cancellationToken);
+
+    /// <summary>
+    /// Creates a builder for a secret store application.
+    /// </summary>
+    /// <param name="args">The command-line arguments supplied to the application.</param>
+    /// <returns>A builder for the secret store application.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is <see langword="null"/>.</exception>
+    public static SecretStoreApplicationBuilder CreateBuilder(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(SecretStoreApplication).Assembly;
+        return new SecretStoreApplicationBuilder(args, resourceAssembly);
+    }
+
+    internal static SecretStoreApplicationBuilder CreateBuilder(
+        string[] args,
+        Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+
+        return new SecretStoreApplicationBuilder(args, resourceAssembly);
+    }
 }

@@ -95,8 +95,16 @@ public class TextContentFactoryTests
         return result;
     }
 
-    private sealed class NonSeekableStream(byte[] data) : MemoryStream(data)
+    private sealed class NonSeekableStream : MemoryStream
     {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="NonSeekableStream"/> class.
+        /// </summary>
+        /// <param name="data">The bytes the stream exposes for reading.</param>
+        public NonSeekableStream(byte[] data) : base(data)
+        {
+        }
+
         public override bool CanSeek => false;
     }
 }

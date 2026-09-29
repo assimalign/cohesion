@@ -1,4 +1,5 @@
 using Shouldly;
+using Xunit;
 
 namespace Assimalign.Cohesion.Web.Health.Tests;
 

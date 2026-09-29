@@ -1,13 +1,13 @@
 using System;
 using System.Collections.ObjectModel;
 
-namespace Assimalign.Cohesion.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
 /// <summary>
-/// The default <see cref="IApplicationResourceCollection"/>: an ordered list of resources
+/// The internal <see cref="ApplicationResourceCollection"/> is an ordered list of resources
 /// that enforces resource-name uniqueness on insert and replace.
 /// </summary>
-internal sealed class ApplicationResourceCollection : Collection<IApplicationResource>, IApplicationResourceCollection
+internal sealed class ApplicationResourceCollection : Collection<IApplicationResource>
 {
     protected override void InsertItem(int index, IApplicationResource item)
     {

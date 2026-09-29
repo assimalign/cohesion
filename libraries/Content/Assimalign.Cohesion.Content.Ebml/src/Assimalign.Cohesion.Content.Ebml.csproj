@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.IO.Ebml</RootNamespace>
 		<Description>
 			A .NET implementation for working with Extensible Binary Meta Language (EBML) format
 			as a binary container format designed for audio/video storage. EBML is designed as a binary 

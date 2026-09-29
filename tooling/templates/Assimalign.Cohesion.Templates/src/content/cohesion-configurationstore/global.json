@@ -1,0 +1,28 @@
+{
+  "sdk": {
+    "version": "__COHESION_DOTNET_SDK_VERSION__",
+    "rollForward": "__COHESION_DOTNET_ROLL_FORWARD__"
+  },
+  "msbuild-sdks": {
+    "Assimalign.Cohesion.Sdk": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.Web": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.Database": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.Gateway": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.ApiManager": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.ConfigurationStore": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.EmailHub": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.EventHub": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.IdentityHub": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.IoTHub": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.LoadBalancer": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.LogSpace": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.MediaHub": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.MessageHub": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.NatGateway": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.NotificationHub": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.Rezolvr": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.Scheduler": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.SecretStore": "__COHESION_PACKAGE_VERSION__",
+    "Assimalign.Cohesion.Sdk.VpnGateway": "__COHESION_PACKAGE_VERSION__"
+  }
+}

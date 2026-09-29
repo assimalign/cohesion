@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.Content.Yaml;
+namespace Assimalign.Cohesion.Content.Yaml.Internal;
 
 /// <summary>
 /// Composes the parse-event stream into the document model, resolving aliases to shared node

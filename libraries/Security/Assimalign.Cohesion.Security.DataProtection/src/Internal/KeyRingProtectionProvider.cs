@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Security.DataProtection;
+namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 
 /// <summary>
 /// The default <see cref="IDataProtectionProvider"/>: roots every protector's purpose chain at

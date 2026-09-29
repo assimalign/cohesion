@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
+        <RootNamespace>Assimalign.Cohesion.Connections.Udp</RootNamespace>
         <Description>Message-oriented UDP datagram driver implementing the Cohesion connection contracts.</Description>
     </PropertyGroup>
     <ItemGroup>

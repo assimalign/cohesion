@@ -1,7 +1,7 @@
 using System;
 using System.Globalization;
 
-namespace Assimalign.Cohesion.Content.Yaml;
+namespace Assimalign.Cohesion.Content.Yaml.Internal;
 
 /// <summary>
 /// Tag resolution and value parsing for the YAML 1.2 core schema (specification section 10.2):

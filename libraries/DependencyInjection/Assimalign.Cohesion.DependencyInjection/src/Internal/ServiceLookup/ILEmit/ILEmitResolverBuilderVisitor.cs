@@ -9,26 +9,26 @@ namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
 internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResolverBuilderContext, object>
 {
-    private static readonly MethodInfo ResolvedServicesGetter = typeof(ServiceProviderEngineScope).GetProperty(
+    private static readonly MethodInfo _resolvedServicesGetter = typeof(ServiceProviderEngineScope).GetProperty(
         nameof(ServiceProviderEngineScope.ResolvedServices), BindingFlags.Instance | BindingFlags.NonPublic).GetMethod;
 
-    private static readonly MethodInfo ScopeLockGetter = typeof(ServiceProviderEngineScope).GetProperty(
+    private static readonly MethodInfo _scopeLockGetter = typeof(ServiceProviderEngineScope).GetProperty(
         nameof(ServiceProviderEngineScope.Sync), BindingFlags.Instance | BindingFlags.NonPublic).GetMethod;
 
-    private static readonly MethodInfo ScopeIsRootScope = typeof(ServiceProviderEngineScope).GetProperty(
+    private static readonly MethodInfo _scopeIsRootScope = typeof(ServiceProviderEngineScope).GetProperty(
         nameof(ServiceProviderEngineScope.IsRootScope), BindingFlags.Instance | BindingFlags.Public).GetMethod;
 
-    private static readonly MethodInfo CallSiteRuntimeResolverResolveMethod = typeof(CallSiteRuntimeResolverVisitor).GetMethod(
+    private static readonly MethodInfo _callSiteRuntimeResolverResolveMethod = typeof(CallSiteRuntimeResolverVisitor).GetMethod(
         nameof(CallSiteRuntimeResolverVisitor.Resolve), BindingFlags.Public | BindingFlags.Instance);
 
-    private static readonly MethodInfo CallSiteRuntimeResolverInstanceField = typeof(CallSiteRuntimeResolverVisitor).GetProperty(
+    private static readonly MethodInfo _callSiteRuntimeResolverInstanceField = typeof(CallSiteRuntimeResolverVisitor).GetProperty(
         nameof(CallSiteRuntimeResolverVisitor.Instance), BindingFlags.Static | BindingFlags.Public | BindingFlags.Instance).GetMethod;
 
 
-    private static readonly FieldInfo FactoriesField = typeof(ILEmitResolverBuilderRuntimeContext).GetField(nameof(ILEmitResolverBuilderRuntimeContext.Factories));
-    private static readonly FieldInfo ConstantsField = typeof(ILEmitResolverBuilderRuntimeContext).GetField(nameof(ILEmitResolverBuilderRuntimeContext.Constants));
-    private static readonly MethodInfo GetTypeFromHandleMethod = typeof(Type).GetMethod(nameof(Type.GetTypeFromHandle));
-    private static readonly ConstructorInfo CacheKeyCtor = typeof(CallSiteServiceCacheKey).GetConstructors()[0];
+    private static readonly FieldInfo _factoriesField = typeof(ILEmitResolverBuilderRuntimeContext).GetField(nameof(ILEmitResolverBuilderRuntimeContext.Factories));
+    private static readonly FieldInfo _constantsField = typeof(ILEmitResolverBuilderRuntimeContext).GetField(nameof(ILEmitResolverBuilderRuntimeContext.Constants));
+    private static readonly MethodInfo _getTypeFromHandleMethod = typeof(Type).GetMethod(nameof(Type.GetTypeFromHandle));
+    private static readonly ConstructorInfo _cacheKeyCtor = typeof(CallSiteServiceCacheKey).GetConstructors()[0];
 
     private sealed class ILEmitResolverBuilderRuntimeContext
     {
@@ -239,7 +239,7 @@ internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResol
 
         // this.Factories[i](ProviderScope)
         argument.Generator.Emit(OpCodes.Ldarg_0);
-        argument.Generator.Emit(OpCodes.Ldfld, FactoriesField);
+        argument.Generator.Emit(OpCodes.Ldfld, _factoriesField);
 
         argument.Generator.Emit(OpCodes.Ldc_I4, argument.Factories.Count);
         argument.Generator.Emit(OpCodes.Ldelem, typeof(Func<IServiceProvider, object>));
@@ -257,7 +257,7 @@ internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResol
 
         // this.Constants[i]
         argument.Generator.Emit(OpCodes.Ldarg_0);
-        argument.Generator.Emit(OpCodes.Ldfld, ConstantsField);
+        argument.Generator.Emit(OpCodes.Ldfld, _constantsField);
 
         argument.Generator.Emit(OpCodes.Ldc_I4, argument.Constants.Count);
         argument.Generator.Emit(OpCodes.Ldelem, typeof(object));
@@ -270,9 +270,9 @@ internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResol
 
         // new ServiceCacheKey(typeof(key.Type), key.Slot)
         argument.Generator.Emit(OpCodes.Ldtoken, key.Type);
-        argument.Generator.Emit(OpCodes.Call, GetTypeFromHandleMethod);
+        argument.Generator.Emit(OpCodes.Call, _getTypeFromHandleMethod);
         argument.Generator.Emit(OpCodes.Ldc_I4, key.Slot);
-        argument.Generator.Emit(OpCodes.Newobj, CacheKeyCtor);
+        argument.Generator.Emit(OpCodes.Newobj, _cacheKeyCtor);
     }
 
     private ILEmitResolverBuilderRuntimeContext GenerateMethodBody(CallSiteService callSite, ILGenerator generator)
@@ -327,13 +327,13 @@ internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResol
 
             // Check if scope IsRootScope
             context.Generator.Emit(OpCodes.Ldarg_1);
-            context.Generator.Emit(OpCodes.Callvirt, ScopeIsRootScope);
+            context.Generator.Emit(OpCodes.Callvirt, _scopeIsRootScope);
             context.Generator.Emit(OpCodes.Brfalse_S, defaultLabel);
 
-            context.Generator.Emit(OpCodes.Call, CallSiteRuntimeResolverInstanceField);
+            context.Generator.Emit(OpCodes.Call, _callSiteRuntimeResolverInstanceField);
             AddConstant(context, callSite);
             context.Generator.Emit(OpCodes.Ldarg_1);
-            context.Generator.Emit(OpCodes.Callvirt, CallSiteRuntimeResolverResolveMethod);
+            context.Generator.Emit(OpCodes.Callvirt, _callSiteRuntimeResolverResolveMethod);
             context.Generator.Emit(OpCodes.Ret);
 
             // Generate cache key
@@ -347,14 +347,14 @@ internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResol
             // scope
             context.Generator.Emit(OpCodes.Ldarg_1);
             // .ResolvedServices
-            context.Generator.Emit(OpCodes.Callvirt, ResolvedServicesGetter);
+            context.Generator.Emit(OpCodes.Callvirt, _resolvedServicesGetter);
             // Store resolved services
             context.Generator.Emit(OpCodes.Stloc, resolvedServicesLocal);
 
             // scope
             context.Generator.Emit(OpCodes.Ldarg_1);
             // .Sync
-            context.Generator.Emit(OpCodes.Callvirt, ScopeLockGetter);
+            context.Generator.Emit(OpCodes.Callvirt, _scopeLockGetter);
             // Store syncLocal
             context.Generator.Emit(OpCodes.Stloc, syncLocal);
 

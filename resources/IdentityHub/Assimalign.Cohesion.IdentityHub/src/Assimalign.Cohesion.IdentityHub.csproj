@@ -1,8 +1,12 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.IdentityHub</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<Folder Include="Client\" />
 	</ItemGroup>
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
 	</ItemGroup>
 	<ItemGroup>

@@ -1,0 +1,10 @@
+<Project>
+	<ItemGroup>
+		<CohesionResourceManifest
+			Include="$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../cohesion/resource.json'))"
+			ManifestPath="$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../cohesion/resource.json'))"
+			PackageId="$(MSBuildThisFileName)"
+			ReferenceIdentity="$(MSBuildThisFileName)"
+			IsSelf="false" />
+	</ItemGroup>
+</Project>

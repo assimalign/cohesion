@@ -3,7 +3,7 @@ using System.IO;
 
 using Assimalign.Cohesion.Http.Connections.Internal;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Parses the payload of an RFC 9218 §7.2 HTTP/3 <c>PRIORITY_UPDATE</c> frame:

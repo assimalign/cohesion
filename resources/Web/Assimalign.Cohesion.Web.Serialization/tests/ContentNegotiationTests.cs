@@ -17,8 +17,8 @@ namespace Assimalign.Cohesion.Web.Serialization.Tests;
 /// </summary>
 public class ContentNegotiationTests
 {
-    private static readonly HttpMediaType ProblemJson = HttpMediaType.Parse("application/problem+json");
-    private static readonly HttpMediaType TextJson = HttpMediaType.Parse("text/json");
+    private static readonly HttpMediaType _problemJson = HttpMediaType.Parse("application/problem+json");
+    private static readonly HttpMediaType _textJson = HttpMediaType.Parse("text/json");
 
     private static IHttpContentSerializationFeature Compose(params IHttpContentWriter[] writers)
     {
@@ -129,14 +129,14 @@ public class ContentNegotiationTests
     public void TryNegotiate_AlternateMediaType_ShouldBeSelectable()
     {
         // Arrange — the writer canonically emits application/json but also advertises text/json.
-        IHttpContentSerializationFeature feature = Compose(new FakeContentWriter(HttpMediaType.ApplicationJson, TextJson));
+        IHttpContentSerializationFeature feature = Compose(new FakeContentWriter(HttpMediaType.ApplicationJson, _textJson));
 
         // Act
         bool negotiated = feature.TryNegotiate("text/json", out HttpMediaType selected);
 
         // Assert
         negotiated.ShouldBeTrue();
-        selected.ShouldBe(TextJson);
+        selected.ShouldBe(_textJson);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Serialization] - Negotiate: Should satisfy a base-type Accept from a structured-suffix writer")]
@@ -144,21 +144,21 @@ public class ContentNegotiationTests
     {
         // Arrange — only a problem+json writer is registered; a client asking for application/json
         // should be served it rather than a spurious 406.
-        IHttpContentSerializationFeature feature = Compose(new FakeContentWriter(ProblemJson));
+        IHttpContentSerializationFeature feature = Compose(new FakeContentWriter(_problemJson));
 
         // Act
         bool negotiated = feature.TryNegotiate("application/json", out HttpMediaType selected);
 
         // Assert
         negotiated.ShouldBeTrue();
-        selected.ShouldBe(ProblemJson);
+        selected.ShouldBe(_problemJson);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Serialization] - Negotiate: Should not widen an already-suffixed Accept range")]
     public void TryNegotiate_SuffixFallback_ShouldNotWidenSuffixedAccept()
     {
         // Arrange — a client asking for a specific +json schema must not be handed a different one.
-        IHttpContentSerializationFeature feature = Compose(new FakeContentWriter(ProblemJson));
+        IHttpContentSerializationFeature feature = Compose(new FakeContentWriter(_problemJson));
 
         // Act
         bool negotiated = feature.TryNegotiate("application/vnd.foo+json", out HttpMediaType selected);
@@ -175,7 +175,7 @@ public class ContentNegotiationTests
         // to the exact writer, not the suffixed fallback.
         IHttpContentSerializationFeature feature = Compose(
             new FakeContentWriter(HttpMediaType.ApplicationJson),
-            new FakeContentWriter(ProblemJson));
+            new FakeContentWriter(_problemJson));
 
         // Act
         bool negotiated = feature.TryNegotiate("application/json", out HttpMediaType selected);
@@ -190,7 +190,7 @@ public class ContentNegotiationTests
     {
         // Arrange — the client broadly accepts json but explicitly refuses problem+json; the suffix
         // fallback must not serve the crossed-out representation.
-        IHttpContentSerializationFeature feature = Compose(new FakeContentWriter(ProblemJson));
+        IHttpContentSerializationFeature feature = Compose(new FakeContentWriter(_problemJson));
 
         // Act
         bool negotiated = feature.TryNegotiate("application/json, application/problem+json;q=0", out HttpMediaType selected);

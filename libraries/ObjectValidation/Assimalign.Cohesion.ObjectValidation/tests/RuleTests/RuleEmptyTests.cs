@@ -6,7 +6,6 @@ namespace  Assimalign.Cohesion.ObjectValidation.Tests;
 
 using  Assimalign.Cohesion.ObjectValidation;
 using  Assimalign.Cohesion.ObjectValidation.Internal;
-using  Assimalign.Cohesion.ObjectValidation.Internal.Rules;
 
 
 public class RuleEmptyTests

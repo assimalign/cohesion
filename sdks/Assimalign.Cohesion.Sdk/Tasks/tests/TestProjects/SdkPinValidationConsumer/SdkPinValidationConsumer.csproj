@@ -1,0 +1,7 @@
+<Project Sdk="Assimalign.Cohesion.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SdkPinValidationConsumer</RootNamespace>
+  </PropertyGroup>
+
+</Project>

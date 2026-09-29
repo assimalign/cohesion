@@ -8,9 +8,13 @@ logical database), `IDatabaseSession` (scoped execution context), and
 (`IDatabaseServer`, `IDatabaseServerContext`, `IDatabaseServerSession`; servers
 are per-model, each implemented inside its model package),
 the application seam (`IDatabaseApplication`, `IDatabaseApplicationContext`,
-`IDatabaseApplicationBuilder`), the area's exception root (`DatabaseException`,
-`DatabaseParseException`), and shared value objects (`DatabaseName`,
-`EngineState`, `EngineModel`). The root is also the area's **rollup**: it
+`IDatabaseApplicationBuilder`), the model-agnostic provisioning surface
+(`CompiledSchema`, `IDatabaseSchemaProvisioner`, `SchemaMigrationResult`), object
+ownership (`DatabaseObjectOwner`, `DatabaseObjectLockedException`), the area's
+exception root (`DatabaseException`, `DatabaseNotFoundException`,
+`DatabaseParseException`), and shared value
+objects (`DatabaseName`, `EngineState`, `EngineModel`). The root is also the
+area's **rollup**: it
 references every child root (Types, Language, Storage, Transactions, Execution,
 Indexing, Protocol, Security, Governance), so one reference to the root delivers
 the whole base surface — including child-owned vocabulary the contracts speak
@@ -32,32 +36,52 @@ the whole base surface — including child-owned vocabulary the contracts speak
   (`SqlDatabaseServer` in `Database.Sql`).
 - **Application composition seam** — `IDatabaseApplicationBuilder` /
   `IDatabaseApplication` / `IDatabaseApplicationContext`: model packages
-  register their engines and servers against this root seam (e.g.
-  `Database.Sql`'s `AddSqlDatabase(...)` / `AddSqlServer(...)` verbs) without
-  knowing the hosting layer; `Database.Hosting` implements it
-  (`DatabaseApplication.CreateBuilder()`).
+  register deferred engines against this root seam (e.g.
+  `Database.Sql`'s `AddSql((context, engine) => ...)` with nested server factories) without
+  knowing the hosting implementation. Composition roots register background work
+  through the concrete `DatabaseApplicationBuilder.AddService` in `Database.Hosting`;
+  the root contracts expose no hosting-library types.
+  `Database.Hosting` implements the seam (`DatabaseApplication.CreateBuilder(args)`)
+  so services start before servers and stop after them in reverse order.
+- **Model-agnostic provisioning** — `CompiledSchema` carries identity, the
+  canonical document, and its content hash. `IDatabaseSchemaProvisioner` applies
+  it and returns `SchemaMigrationResult`. SQL declarations and relational
+  shapes live in `Database.Sql.Schema`; Hosting receives an already compiled
+  schema through `AddDatabase(engine, name, schema)`.
+- **Object ownership** — `DatabaseObjectOwner` distinguishes code-first
+  provisioning from ad-hoc statements. Schema-owned objects require schema
+  apply to change; ad-hoc objects remain mutable through session statements.
+  `DatabaseObjectLockedException` identifies the refused object, owning schema,
+  and operation.
 - **Session contracts** — query execution (typed `QueryRequest` and
   language-text overloads) and transaction management. Sessions are
   single-threaded by contract; disposing one rolls back its active transaction.
 - **Error root** — `DatabaseException` for the contract root and everything
-  built above it; `DatabaseParseException` for statement text a session's
-  language rejects. Child roots own independent exception roots (see
+  built above it; `DatabaseNotFoundException` for the exact missing-database
+  outcome of `IDatabaseEngine.OpenDatabaseAsync`; `DatabaseParseException` for
+  statement text a session's language rejects. Child roots own independent exception roots (see
   [DESIGN.md](DESIGN.md)).
 
 ## Dependencies
 
-`Core`, the nine child roots the root rolls up (`Database.Execution`,
+`Core`, the nine
+child roots the root rolls up (`Database.Execution`,
 `Database.Governance`, `Database.Indexing`, `Database.Language`,
 `Database.Protocol`, `Database.Security`, `Database.Storage`,
 `Database.Transactions`, `Database.Types` — child roots never reference the
-root), and a private `Web` reference (internal admin-surface concern, excluded
-from the package dependency list).
+root), and the existing private `Web` implementation reference (excluded from
+the package dependency list). The HTTP `admin` control plane is a separate
+Hosting concern implemented through that project's private
+`Web.Hosting`/`Web.Health` references.
 
 ## Consumers
 
 Every `resources/Database/*` project. Model engines (`Database.Sql`, …)
 implement the contracts; each model's server (`SqlDatabaseServer`, …) pumps
-wire-protocol frames into sessions; `Database.Client` mirrors results on the
-caller side; `Database.Hosting` composes servers into a host.
+wire-protocol frames into sessions; `Database.Client` owns connection pooling and
+framed exchanges, while each model client materializes results; `Database.Hosting`
+composes servers into a host.
 
 See [DESIGN.md](DESIGN.md) for the contract-shape decisions.
+
+Phase 29 adds `IDatabaseEngineBuilder` for model-agnostic deferred worker/server factories, inherited by each model's options-bearing builder. `IDatabaseEngine.Servers` exposes nested servers for host lifecycle discovery; engines retain their disposal ownership. Named engine operations now use `DatabaseName`. `IDatabaseApplication` is asynchronously disposable, its context includes all engines and ordinal `GetEngine(name)`, and its builder exposes AddEngine(instance/factory) plus one-shot Build without a mutable registry or Use stage.

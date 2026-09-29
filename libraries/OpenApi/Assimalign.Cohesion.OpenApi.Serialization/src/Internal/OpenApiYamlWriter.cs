@@ -3,7 +3,7 @@ using System.IO;
 
 using Assimalign.Cohesion.Content.Yaml;
 
-namespace Assimalign.Cohesion.OpenApi.Serialization;
+namespace Assimalign.Cohesion.OpenApi.Serialization.Internal;
 
 /// <summary>
 /// The YAML implementation of <see cref="IOpenApiWriter"/>. Composes the version-aware model-to-node

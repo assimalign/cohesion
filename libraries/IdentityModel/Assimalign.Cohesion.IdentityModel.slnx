@@ -6,7 +6,6 @@
 	</Configurations>
 	<Folder Name="/IdentityModel/">
 		<File Path="Directory.Build.props" />
-		<File Path="Directory.Build.targets" />
 		<File Path="README.md" />
 	</Folder>
 	<Folder Name="/IdentityModel/Assimalign.Cohesion.IdentityModel/" />

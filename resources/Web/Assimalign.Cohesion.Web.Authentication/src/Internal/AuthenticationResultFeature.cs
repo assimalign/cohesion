@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Web.Authentication;
+namespace Assimalign.Cohesion.Web.Authentication.Internal;
 
 /// <summary>
 /// Default <see cref="IAuthenticationResultFeature"/> implementation — a typed holder for the

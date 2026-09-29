@@ -10,8 +10,9 @@ namespace Assimalign.Cohesion.Web.Authentication.Bearer;
 /// </summary>
 /// <remarks>
 /// The handler consumes the IdentityModel JSON Web Token validation contracts for the
-/// document-level rules and this type's <see cref="SigningKeys"/> for signature verification, so
-/// it never embeds its own crypto policy beyond selecting a BCL primitive.
+/// document-level rules and this type's <see cref="SigningKeys"/> for signature verification.
+/// Built-in RSA and ECDSA keys delegate to the reusable IdentityModel verifiers; the Bearer
+/// package retains its HMAC verifier and compatibility adapter.
 /// </remarks>
 public sealed class JwtBearerOptions
 {

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Indexing;
+namespace Assimalign.Cohesion.Database.Indexing.Internal;
 
 /// <summary>
 /// Cursor over the entries a scan materialized under the tree's read latch: the

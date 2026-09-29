@@ -1,0 +1,6 @@
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<!--
+		This auxiliary SDK is imported through Sdk.targets after the consumer project body.
+		Its props surface is intentionally empty; the base or area SDK owns the props chain.
+	-->
+</Project>

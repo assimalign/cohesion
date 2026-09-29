@@ -28,7 +28,7 @@ public static class HttpDate
     // RFC 9110 §5.6.7 accepts three date formats. The framework has no space-padded-day specifier,
     // so the asctime form (single-digit days are space-padded to two columns) is covered by two
     // explicit patterns: a double-space form for days 1–9 and a single-space form for days 10–31.
-    private static readonly string[] AcceptedFormats =
+    private static readonly string[] _acceptedFormats =
     [
         "ddd, dd MMM yyyy HH:mm:ss 'GMT'",   // IMF-fixdate (preferred)
         "dddd, dd'-'MMM'-'yy HH:mm:ss 'GMT'", // RFC 850 (obsolete)
@@ -58,7 +58,7 @@ public static class HttpDate
             return false;
         }
 
-        if (DateTimeOffset.TryParseExact(trimmed, AcceptedFormats, CultureInfo.InvariantCulture, ParseStyles, out DateTimeOffset parsed))
+        if (DateTimeOffset.TryParseExact(trimmed, _acceptedFormats, CultureInfo.InvariantCulture, ParseStyles, out DateTimeOffset parsed))
         {
             date = parsed;
             return true;

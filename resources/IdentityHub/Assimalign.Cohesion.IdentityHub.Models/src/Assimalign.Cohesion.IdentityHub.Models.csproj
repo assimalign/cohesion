@@ -1,58 +1,62 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.IdentityHub.Models</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionValueType
-			Include="ValueTypes\Username.cs"
+			Include="ValueObjects\Username.cs"
 			ObjectRuntimeType="String"
 			ObjectNamespace="Assimalign.Cohesion.IdentityHub.Models"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
 		<CohesionValueType
-			Include="ValueTypes\Domain.cs"
+			Include="ValueObjects\Domain.cs"
 			ObjectRuntimeType="String"
 			ObjectNamespace="Assimalign.Cohesion.IdentityHub.Models"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
 		<CohesionValueType
-			Include="ValueTypes\ObjectId.cs"
+			Include="ValueObjects\ObjectId.cs"
 			ObjectRuntimeType="Ulid"
 			ObjectNamespace="Assimalign.Cohesion.IdentityHub.Models"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
 		<CohesionValueType
-			Include="ValueTypes\TenantId.cs"
+			Include="ValueObjects\TenantId.cs"
 			ObjectRuntimeType="Ulid"
 			ObjectNamespace="Assimalign.Cohesion.IdentityHub.Models"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
 		<CohesionValueType
-			Include="ValueTypes\UserId.cs"
+			Include="ValueObjects\UserId.cs"
 			ObjectRuntimeType="Ulid"
 			ObjectNamespace="Assimalign.Cohesion.IdentityHub.Models"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
 		<CohesionValueType
-			Include="ValueTypes\GroupId.cs"
+			Include="ValueObjects\GroupId.cs"
 			ObjectRuntimeType="Ulid"
 			ObjectNamespace="Assimalign.Cohesion.IdentityHub.Models"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
 		<CohesionValueType
-			Include="ValueTypes\ApplicationId.cs"
+			Include="ValueObjects\ApplicationId.cs"
 			ObjectRuntimeType="Ulid"
 			ObjectNamespace="Assimalign.Cohesion.IdentityHub.Models"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
 		<CohesionValueType
-			Include="ValueTypes\RoleId.cs"
+			Include="ValueObjects\RoleId.cs"
 			ObjectRuntimeType="Ulid"
 			ObjectNamespace="Assimalign.Cohesion.IdentityHub.Models"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
 		<CohesionValueType
-			Include="ValueTypes\PermissionId.cs"
+			Include="ValueObjects\PermissionId.cs"
 			ObjectRuntimeType="Ulid"
 			ObjectNamespace="Assimalign.Cohesion.IdentityHub.Models"
 			ObjectAccessModifier="public"

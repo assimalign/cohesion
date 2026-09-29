@@ -21,13 +21,19 @@ what is specific to the project boundary; do not duplicate the keystone here.
 - Depends only on `Assimalign.Cohesion.IdentityModel`. The canonical model's
   types (`IdentityClaimValue`, `SubjectIdentifier`, `AuthenticationProtocol`,
   `IdentityModelException`) resolve by namespace nesting — no `using` needed —
-  and the shared internal `ModelSnapshot` helper is reachable because the root
-  project grants `InternalsVisibleTo` to this assembly.
-- Exposes its own internal helper `ProtocolEndpoint.IsValidLocation` (the
-  wire-exact absolute-URI rule) to the protocol branches via `InternalsVisibleTo`.
-  When a new protocol project is added it goes on both `InternalsVisibleTo`
-  lists (root's, for `ModelSnapshot`; this project's, for `IsValidLocation`) —
-  see the keystone's "Adding a protocol package".
+  and the internal `ModelSnapshot` helper is compiled locally from the single
+  `Assimalign.Cohesion.IdentityModel/shared/ModelSnapshot.cs` source.
+- `ProtocolEndpoint` keeps its single public CLR identity in this assembly.
+  Its string-to-boolean location validation is factored into internal static
+  `EndpointLocation`, held in this project's own `shared/` folder and linked into
+  this assembly and OpenIdConnect. Only that stateless algorithm is duplicated at
+  compilation; endpoint instances are never compiled into another assembly.
+- Each assembly declares its own `CohesionSharedSource` items, so the csproj a
+  reader opens states which source it compiles; there is no area
+  `Directory.Build.targets`. The helpers remain implementation details with no added public surface and no
+  shipped-to-shipped friend grants. Their retained namespaces are a documented,
+  narrowly scoped exception to namespace alignment. See the keystone's
+  "Shared implementation source" and "Adding a protocol package" sections.
 
 ## AOT posture
 

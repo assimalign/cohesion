@@ -1,333 +1,304 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.Linq;
-using System.Runtime.InteropServices;
-using System.Runtime.Serialization;
 
-namespace System;
+namespace Assimalign.Cohesion.Scheduler.Cron;
 
-/// <summary> 
-///
+/// <summary>
+/// Represents a parsed five-field cron expression: minute, hour, day of month, month,
+/// and day of week.
 /// </summary>
 /// <remarks>
-/// Crontab expression format: <para />
-/// <para /> 
-/// *****	<para />
-/// -----	 <para />
-/// | | | | |	<para />
-/// | | | | +-------- day of week (0 - 6) (Sunday=0)<para />
-/// | | | +---------- month (1 - 12)<para />
-/// | | +------------ day of month (1 - 31) <para />
-/// | +-------------- hour (0 - 23) <para />
-/// +---------------- min (0 - 59) <para />
-/// 
-/// Star (*) in the value field above means all legal values as in
-/// braces for that column. The value column can have a * or a list
-/// of elements separated by commas. An element is either a number in
-/// the ranges shown above or two numbers in the range separated by a
-/// hyphen (meaning an inclusive range).
-///
-/// Source: http://www.adminschoice.com/docs/crontab.htm
-///
-///
-/// Six-part expression format:
-///
-/// * * * * * *
-/// - - - - - -
-/// ||||||
-/// | | | | | +--- day of week (0 - 6) (Sunday=0)
-/// | | | | +----- month (1 - 12)
-/// | | | +------- day of month (1 - 31)
-/// | | +--------- hour (0 - 23)
-/// | +----------- min (0 - 59)
-/// +------------- sec (0 - 59)
-/// 
-/// The six-part expression behaves similarly to the traditional
-/// crontab format except that it can denotate more precise schedules
-/// that use a seconds component.
+/// Fields accept wildcards, comma-separated lists, inclusive ranges, and positive
+/// <c>/step</c> suffixes. Sunday is 0 or 7. When both day fields are restricted,
+/// standard cron OR semantics apply; otherwise the restricted field governs.
 /// </remarks>
-[Serializable]
-[StructLayout(LayoutKind.Sequential)]
-public readonly struct Crontab : IEquatable<Crontab>, IEnumerable<DateTime>, ISerializable, IFormattable
+public readonly struct Crontab : IEquatable<Crontab>, IEnumerable<DateTime>, IFormattable
 {
-    public const char RangValue = '-';
+    /// <summary>The range separator.</summary>
+    public const char RangeValue = '-';
+
+    /// <summary>The step separator.</summary>
     public const char StepValue = '/';
+
+    /// <summary>The wildcard token.</summary>
     public const char Any = '*';
+
+    /// <summary>The list separator.</summary>
     public const char ListSeparator = ',';
-    /** <summary> */
-    /** This is a test */
-    /** another test */
-    /** </summary> */
-    private Crontab(CrontabField minute, CrontabField hour, CrontabField dayOfMonth, CrontabField month, CrontabField dayOfWeek)
+
+    private Crontab(
+        CrontabField minute,
+        CrontabField hour,
+        CrontabField dayOfMonth,
+        CrontabField month,
+        CrontabField dayOfWeek)
     {
-        this.Minute = minute;
-        this.Hour = hour;
-        this.DayOfMonth = dayOfMonth;
-        this.Month = month;
-        this.DayOfWeek = dayOfWeek;
+        Minute = minute;
+        Hour = hour;
+        DayOfMonth = dayOfMonth;
+        Month = month;
+        DayOfWeek = dayOfWeek;
     }
 
-    /// <summary>
-    /// 
-    /// </summary>
+    /// <summary>Gets the minute field.</summary>
     public CrontabField Minute { get; }
-    /// <summary>
-    /// 
-    /// </summary>
+
+    /// <summary>Gets the hour field.</summary>
     public CrontabField Hour { get; }
-    /// <summary>
-    /// 
-    /// </summary>
+
+    /// <summary>Gets the day-of-month field.</summary>
     public CrontabField DayOfMonth { get; }
-    /// <summary>
-    /// 
-    /// </summary>
+
+    /// <summary>Gets the month field.</summary>
     public CrontabField Month { get; }
-    /// <summary>
-    /// 
-    /// </summary>
+
+    /// <summary>Gets the day-of-week field.</summary>
     public CrontabField DayOfWeek { get; }
 
     /// <summary>
-    /// Get's the amount of time until the next occurrence from the current local time.
+    /// Gets the delay from local time until the next occurrence.
     /// </summary>
-    /// <returns></returns>
-    /// <exception cref="NotImplementedException"></exception>
-    public TimeSpan GetTimeSpan()
-    {
-        return GetDateTime().Subtract(DateTime.Now);
-    }
+    /// <returns>The positive delay.</returns>
+    public TimeSpan GetTimeSpan() => GetDateTime().Subtract(DateTime.Now);
 
     /// <summary>
-    /// Get's the next occurrence in DateTime from the current local time.
+    /// Gets the first occurrence strictly after local time.
     /// </summary>
-    /// <returns></returns>
-    public DateTime GetDateTime()
-    {
-        return GetDateTime(DateTime.Now);
-    }
+    /// <returns>The next occurrence at minute precision.</returns>
+    public DateTime GetDateTime() => GetDateTime(DateTime.Now);
 
     /// <summary>
-    /// 
+    /// Gets the first occurrence strictly after a supplied instant.
     /// </summary>
-    /// <param name="start"></param>
-    /// <returns></returns>
+    /// <param name="start">The exclusive lower bound.</param>
+    /// <returns>The next occurrence at minute precision.</returns>
+    /// <exception cref="InvalidOperationException">The expression cannot occur in a Gregorian calendar cycle.</exception>
     public DateTime GetDateTime(DateTime start)
     {
-        var index = 0;
-        var next = new DateTime(start.Year, 1, 1, 0, 0, 0);
+        DateTime candidate = new(
+            start.Year,
+            start.Month,
+            start.Day,
+            start.Hour,
+            start.Minute,
+            0,
+            start.Kind);
+        candidate = candidate.AddMinutes(1);
 
-    restart:
-        for (int a = 0; a < 12; a++)
+        int limitYear = Math.Min(DateTime.MaxValue.Year, start.Year + 400);
+        DateTime limit = new(limitYear, 12, 31, 23, 59, 0, start.Kind);
+
+        while (candidate <= limit)
         {
-            if (!Month.Occurrences.Contains(a + 1))
+            if (!Month.Contains(candidate.Month))
             {
-                next = next.AddMonths(1);
+                candidate = FirstMinuteOfNextMonth(candidate);
                 continue;
             }
-            for (int b = 0; b < DateTime.DaysInMonth(next.Year, a + 1); b++)
+
+            if (!MatchesDay(candidate))
             {
-                if (!DayOfMonth.Occurrences.Contains(b + 1) || !DayOfWeek.Occurrences.Contains((int)next.DayOfWeek))
-                {
-                    next = next.AddDays(1);
-                    continue;
-                }
-                for (int c = 0; c < 24; c++)
-                {
-                    if (!Hour.Occurrences.Contains(c))
-                    {
-                        next = next.AddHours(1);
-                        continue;
-                    }
-                    for (int d = 0; d < 60; d++)
-                    {
-                        if (Minute.Occurrences.Contains(d) && next > start)
-                        {
-                            return next;
-                        }
-                        else
-                        {
-                            next = next.AddMinutes(1);
-                        }
-                    }
-                }
+                candidate = candidate.Date.AddDays(1);
+                continue;
             }
+
+            if (!Hour.Contains(candidate.Hour))
+            {
+                candidate = candidate.AddHours(1);
+                candidate = new DateTime(
+                    candidate.Year,
+                    candidate.Month,
+                    candidate.Day,
+                    candidate.Hour,
+                    0,
+                    0,
+                    candidate.Kind);
+                continue;
+            }
+
+            if (!Minute.Contains(candidate.Minute))
+            {
+                candidate = candidate.AddMinutes(1);
+                continue;
+            }
+
+            return candidate;
         }
 
-        if (index >= 2)
-        {
-            throw new Exception("The provided expression was parsed but has an invalid tab. ");
-        }
-        index++;
-        goto restart;
+        throw new InvalidOperationException(
+            $"Cron expression '{this}' has no occurrence in a complete Gregorian calendar cycle.");
     }
 
     /// <summary>
-    /// 
+    /// Determines whether a minute matches this expression.
     /// </summary>
-    /// <param name="other"></param>
-    /// <returns></returns>
-    /// <exception cref="NotImplementedException"></exception>
-    public bool Equals(Crontab other)
+    /// <param name="value">The minute to evaluate.</param>
+    /// <returns><see langword="true"/> when the minute matches.</returns>
+    public bool IsMatch(DateTime value)
     {
-        return
-            this.Minute.Expression == other.Minute.Expression &&
-            this.Hour.Expression == other.Hour.Expression &&
-            this.DayOfMonth.Expression == other.DayOfMonth.Expression &&
-            this.Month.Expression == other.Month.Expression &&
-            this.DayOfWeek.Expression == other.DayOfWeek.Expression;
+        return Month.Contains(value.Month) &&
+            MatchesDay(value) &&
+            Hour.Contains(value.Hour) &&
+            Minute.Contains(value.Minute);
     }
 
     /// <summary>
-    /// 
+    /// Parses an exact five-field cron expression.
     /// </summary>
-    /// <param name="format"></param>
-    /// <param name="formatProvider"></param>
-    /// <returns></returns>
-    public string ToString(string format, IFormatProvider formatProvider)
-    {
-        switch (format)
-        {
-            case "E":
-                {
-                    return $"{Minute} {Hour} {DayOfMonth} {Month} {DayOfWeek}";
-                }
-            default:
-                {
-                    return $"{Minute} {Hour} {DayOfMonth} {Month} {DayOfWeek}";
-                }
-        }
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <returns></returns>
-    public override string ToString()
-    {
-        return ToString("E", default);
-    }
-
-    /// <summary>
-    /// 
-    /// </summary>
-    /// <param name="instance"></param>
-    /// <returns></returns>
-    public override bool Equals([NotNullWhen(true)] object instance) => instance is Crontab crontab ? Equals(crontab) : false;
-    public static bool operator ==(Crontab left, Crontab right) => left.Equals(right);
-    public static bool operator !=(Crontab left, Crontab right) => !left.Equals(right);
-
-    public static implicit operator Crontab(string expression) => Crontab.Parse(expression);
+    /// <param name="expression">The expression to parse.</param>
+    /// <returns>The parsed expression.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="expression"/> is <see langword="null"/>.</exception>
+    /// <exception cref="FormatException">The expression does not contain exactly five valid fields.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A field value is outside its legal bounds.</exception>
     public static Crontab Parse(string expression)
     {
-        var segments = expression.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-        // Let's ensure that the expression segments has the proper length 
+        ArgumentNullException.ThrowIfNull(expression);
+        string[] segments = expression.Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (segments.Length != 5)
         {
-            throw new ArgumentException("The expression is not in the proper format.");
+            throw new FormatException(
+                $"Cron expression '{expression}' must contain exactly five fields.");
         }
 
-        var minute = default(CrontabField);      // index - 1 or 2
-        var hour = default(CrontabField);
-        var dayOfMonth = default(CrontabField);
-        var month = default(CrontabField);
-        var dayOfWeek = default(CrontabField);
+        return new Crontab(
+            CrontabField.ParseMinute(segments[0]),
+            CrontabField.ParseHour(segments[1]),
+            CrontabField.ParseDayOfMonth(segments[2]),
+            CrontabField.ParseMonth(segments[3]),
+            CrontabField.ParseDayOfWeek(segments[4]));
+    }
 
-        for (int i = 0; i < segments.Length; i++)
+    /// <summary>
+    /// Attempts to parse an exact five-field cron expression.
+    /// </summary>
+    /// <param name="expression">The expression to parse.</param>
+    /// <param name="crontab">The parsed expression on success.</param>
+    /// <returns><see langword="true"/> when parsing succeeds.</returns>
+    public static bool TryParse(
+        [NotNullWhen(true)] string? expression,
+        out Crontab crontab)
+    {
+        if (expression is null)
         {
-            if (i == 0)
-            {
-                minute = CrontabField.ParseMinute(segments[i]);
-                continue;
-            }
-            if (i == 1)
-            {
-                hour = CrontabField.ParseHour(segments[i]);
-                continue;
-            }
-            if (i == 2)
-            {
-                dayOfMonth = CrontabField.ParseDayOfMonth(segments[i]);
-                continue;
-            }
-            if (i == 3)
-            {
-                month = CrontabField.ParseMonth(segments[i]);
-                continue;
-            }
-            if (i == 4)
-            {
-                dayOfWeek = CrontabField.ParseDayOfWeek(segments[i]);
-                continue;
-            }
+            crontab = default;
+            return false;
         }
 
-        return new Crontab(minute, hour, dayOfMonth, month, dayOfWeek);
-    }
-
-
-    void ISerializable.GetObjectData(SerializationInfo info, StreamingContext context)
-    {
-        if (info is null)
+        try
         {
-            throw new ArgumentNullException("info");
+            crontab = Parse(expression);
+            return true;
         }
-
-        info.AddValue("crontabExpression", this.ToString());
+        catch (FormatException)
+        {
+            crontab = default;
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            crontab = default;
+            return false;
+        }
     }
 
-    #region Crontab Enumeration
-    IEnumerator IEnumerable.GetEnumerator() => this.GetEnumerator();
-    public IEnumerator<DateTime> GetEnumerator()
+    /// <inheritdoc />
+    public bool Equals(Crontab other) =>
+        Minute.Expression == other.Minute.Expression &&
+        Hour.Expression == other.Hour.Expression &&
+        DayOfMonth.Expression == other.DayOfMonth.Expression &&
+        Month.Expression == other.Month.Expression &&
+        DayOfWeek.Expression == other.DayOfWeek.Expression;
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is Crontab other && Equals(other);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(
+        Minute.Expression,
+        Hour.Expression,
+        DayOfMonth.Expression,
+        Month.Expression,
+        DayOfWeek.Expression);
+
+    /// <inheritdoc />
+    public string ToString(string? format, IFormatProvider? formatProvider) =>
+        $"{Minute} {Hour} {DayOfMonth} {Month} {DayOfWeek}";
+
+    /// <inheritdoc />
+    public override string ToString() => ToString(null, null);
+
+    /// <summary>Converts a string expression to a parsed crontab.</summary>
+    /// <param name="expression">The five-field expression.</param>
+    public static implicit operator Crontab(string expression) => Parse(expression);
+
+    /// <summary>Compares two parsed expressions.</summary>
+    public static bool operator ==(Crontab left, Crontab right) => left.Equals(right);
+
+    /// <summary>Compares two parsed expressions.</summary>
+    public static bool operator !=(Crontab left, Crontab right) => !left.Equals(right);
+
+    /// <inheritdoc />
+    public IEnumerator<DateTime> GetEnumerator() => new CrontabEnumerator(this);
+
+    /// <inheritdoc />
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    private bool MatchesDay(DateTime candidate)
     {
-        return new CrontabEnumerator(this);
+        bool dayOfMonthMatches = DayOfMonth.Contains(candidate.Day);
+        bool dayOfWeekMatches = DayOfWeek.Contains((int)candidate.DayOfWeek);
+        bool dayOfMonthRestricted = !DayOfMonth.IsWildcard;
+        bool dayOfWeekRestricted = !DayOfWeek.IsWildcard;
+
+        return dayOfMonthRestricted && dayOfWeekRestricted
+            ? dayOfMonthMatches || dayOfWeekMatches
+            : dayOfMonthMatches && dayOfWeekMatches;
     }
 
-
-
-    private class CrontabEnumerator : IEnumerator<DateTime>
+    private static DateTime FirstMinuteOfNextMonth(DateTime candidate)
     {
-        private readonly Crontab crontab;
-        private DateTime? index;
+        DateTime first = new(
+            candidate.Year,
+            candidate.Month,
+            1,
+            0,
+            0,
+            0,
+            candidate.Kind);
+        return first.AddMonths(1);
+    }
 
+    private sealed class CrontabEnumerator : IEnumerator<DateTime>
+    {
+        private readonly Crontab _crontab;
+        private DateTime? _current;
+
+        /// <summary>Initializes a new instance of the <see cref="CrontabEnumerator"/> class.</summary>
+        /// <param name="crontab">The cron expression whose occurrences are enumerated.</param>
         public CrontabEnumerator(Crontab crontab)
         {
-            this.crontab = crontab;
+            _crontab = crontab;
         }
 
-        public DateTime Current
+        public DateTime Current => _current ?? throw new InvalidOperationException(
+            "MoveNext must be called before reading the cron occurrence.");
+
+        object IEnumerator.Current => Current;
+
+        public bool MoveNext()
         {
-            get
-            {
-                if (!index.HasValue)
-                {
-                    index = crontab.GetDateTime();
-                    return index.GetValueOrDefault();
-                }
-                else
-                {
-                    index = crontab.GetDateTime(index.Value);
-                    return index.GetValueOrDefault();
-                }
-            }
+            _current = _crontab.GetDateTime(_current ?? DateTime.Now);
+            return true;
         }
 
-        object IEnumerator.Current => this.Current;
+        public void Reset() => _current = null;
 
         public void Dispose()
         {
-
-        }
-
-        public bool MoveNext() => true;
-
-        public void Reset()
-        {
-            index = null;
         }
     }
-    #endregion
 }

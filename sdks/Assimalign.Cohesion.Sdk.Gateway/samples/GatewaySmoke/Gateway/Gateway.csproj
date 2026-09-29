@@ -1,0 +1,18 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnablePreviewFeatures>true</EnablePreviewFeatures>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>GatewaySmoke.Gateway</RootNamespace>
+    <AppSettingsNamespace>GatewaySmoke.Gateway</AppSettingsNamespace>
+    <CohesionApplicationName>gateway-smoke</CohesionApplicationName>
+    <CohesionResourceName>gateway-smoke-gateway</CohesionResourceName>
+    <CohesionGateways>Local;InProcess</CohesionGateways>
+    <CohesionGatewayInProcess>true</CohesionGatewayInProcess>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionResourceReference Include="..\Web\Web.csproj" />
+    <CohesionResourceReference Include="..\Database\Database.csproj" />
+  </ItemGroup>
+</Project>

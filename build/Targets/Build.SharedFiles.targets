@@ -1,13 +1,13 @@
 <Project>
     <!-- DON'T USE. THIS IS NOT READY -->
-    <!-- 
-        <CohesionSharedFile 
+    <!--
+        <CohesionSharedFile
             Include="{ The Project name. Exclude '.csproj' }"
 			File="{ The relative path of the file within the project you want to use }"
 			FileDirectory="{ The relative path to link the file in the current project }" />
 
-        Example: 
-        <CohesionSharedFile 
+        Example:
+        <CohesionSharedFile
                     Include="Assimalign.Cohesion.ObjectPool"
 					File="DefaultObjectPool.T.TArgs.cs"
 					FileDirectory="Shared" />
@@ -21,4 +21,82 @@
         <Compile Update="@(CohesionSharedFile->'%(FilePath)')" Link="%(File)" />
         <CohesionSharedFile Remove="@(CohesionSharedFile)" />
 	</ItemGroup>
+
+    <!--
+        Shared Source By Project Name Only.
+
+            <CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel" />
+
+        Compiles every *.cs under THAT project's shared\ folder into THIS project. The
+        item goes in the CONSUMING csproj - never in a Directory.Build.targets - so a
+        reader of the csproj can see which source the assembly is built from without
+        hunting up the directory tree.
+
+        A project that shares source keeps it in a shared\ folder beside src\, tests\
+        and docs\:
+
+            libraries\<Area>\Assimalign.Cohesion.<Lib>\
+            |   src\
+            |   shared\      (linked into siblings by name)
+            |   tests\
+            |   docs\
+
+        The folder - not the file - is the unit: naming a project links everything under
+        its shared\ tree. A project that wants its OWN shared\ folder compiled in names
+        itself; shared\ sits outside the csproj's src\ directory, so nothing about it is
+        implicit.
+
+        Resolution is the same mechanism as CohesionProjectReference
+        (Build.References.Projects.targets): the same libraries\ + resources\ csproj glob,
+        matched on the project file name, so a name that works for one works for the other
+        and no consuming csproj ever spells a relative path. The glob string is deliberately
+        identical to that file's so MSBuild's glob cache serves both.
+
+        WHAT MAY LIVE IN shared\ - see .claude/rules/general-rules.md. Linking DUPLICATES
+        the type: each assembly gets its own distinct CLR type and its own copy of any
+        state. Stateless static types only, or types whose instances never cross an
+        assembly boundary.
+    -->
+    <ItemGroup>
+        <_CohesionSharedSourceProject Include="$(CohesionRepositoryDirectory)libraries\**\*.csproj;$(CohesionRepositoryDirectory)resources\**\*.csproj" />
+        <_CohesionSharedSourceProject Update="@(_CohesionSharedSourceProject)"
+                                      ProjectId="%(_CohesionSharedSourceProject.Filename)"
+                                      SharedDirectory="$([System.IO.Path]::GetFullPath('%(_CohesionSharedSourceProject.RelativeDir)..\shared'))\" />
+
+        <CohesionSharedSource Update="@(_CohesionSharedSourceProject->'%(ProjectId)')"
+                              SharedDirectory="%(_CohesionSharedSourceProject.SharedDirectory)" />
+
+        <_CohesionSharedSourceProject Remove="@(_CohesionSharedSourceProject)" />
+    </ItemGroup>
+
+    <!--
+        Resolution of the shared\ files themselves has to happen in a target, not in the
+        ItemGroup above: MSBuild does not expand a wildcard that arrives through an item
+        transform, so `Include="@(CohesionSharedSource->'%(SharedDirectory)**\*.cs')"` is
+        handed to the compiler as the literal string `...\shared\**\*.cs` (CS2021/CS2001).
+        Task batching inside a target expands it correctly, and design-time builds run
+        CoreCompile's dependencies, so the IDE still lists the linked files.
+
+        The target's Condition is load-bearing, not an optimization: batching over an EMPTY
+        CohesionSharedSource still runs one bucket with empty metadata, which both reports a
+        bogus '' project name and leaves the ItemGroup globbing a bare `**\*.cs` relative to
+        the project directory - every .cs file in the project, added a second time.
+    -->
+    <Target Name="ResolveCohesionSharedSource"
+            BeforeTargets="CoreCompile"
+            Condition="'@(CohesionSharedSource)' != ''">
+        <Error Condition="'%(CohesionSharedSource.SharedDirectory)' == ''"
+               Text="CohesionSharedSource '%(CohesionSharedSource.Identity)' does not name a project under libraries\ or resources\. Use the project's file name without '.csproj', exactly as CohesionProjectReference does." />
+
+        <Error Condition="'%(CohesionSharedSource.SharedDirectory)' != '' AND !Exists('%(CohesionSharedSource.SharedDirectory)')"
+               Text="CohesionSharedSource '%(CohesionSharedSource.Identity)' has no shared\ folder. Expected '%(CohesionSharedSource.SharedDirectory)'. Shared source lives in a shared\ folder beside the project's src\ - see .claude/rules/general-rules.md." />
+
+        <ItemGroup>
+            <_CohesionSharedSourceFile Include="%(CohesionSharedSource.SharedDirectory)**\*.cs" />
+        </ItemGroup>
+        <ItemGroup>
+            <Compile Include="@(_CohesionSharedSourceFile)"
+                     Link="shared\%(_CohesionSharedSourceFile.RecursiveDir)%(_CohesionSharedSourceFile.Filename)%(_CohesionSharedSourceFile.Extension)" />
+        </ItemGroup>
+    </Target>
 </Project>

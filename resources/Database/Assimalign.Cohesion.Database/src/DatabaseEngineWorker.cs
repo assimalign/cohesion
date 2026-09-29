@@ -9,8 +9,8 @@ namespace Assimalign.Cohesion.Database;
 /// per-pass work.
 /// </summary>
 /// <remarks>
-/// The public contract (<see cref="IDatabaseEngineWorker"/>) is observational; the
-/// pump members on this base — <see cref="Run"/>, <see cref="RunIteration"/>,
+/// The public contract (<see cref="IDatabaseEngineWorker"/>) includes the engine's
+/// pump seam. Members on this base — <see cref="Run"/>, <see cref="RunIteration"/>,
 /// <see cref="WaitForTrigger"/> — exist for the <em>owning engine</em>, which spawns
 /// one dedicated thread (or timer loop) per worker at engine creation and cancels it
 /// on dispose. Nothing outside the engine may pump a worker; a worker never runs

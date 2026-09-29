@@ -20,6 +20,10 @@ keys order by unsigned lexicographic byte comparison.
   database (`<name>` + `<name>.catalog`).
 - `IKeyValueDatabase` — the typed model surface (get/put/delete/exists/scan with
   etag-conditional writes).
+- Sessions address exactly one database (A5). All five typed operations reject
+  sessions from another database; text and typed requests execute only against
+  the receiving session's database. Database/server administration stays on the
+  host-owned engine and is absent from the command grammar.
 - The typed request family (`KeyValueGetRequest`, `KeyValuePutRequest`,
   `KeyValueDeleteRequest`, `KeyValueExistsRequest`, `KeyValueScanRequest`) —
   the model's members of the shared `Database.Execution` request family.
@@ -42,8 +46,8 @@ keys order by unsigned lexicographic byte comparison.
   and the shared tuple codec (direct references; the rest of the kernel arrives
   through the root).
 - `Assimalign.Cohesion.Connections` — the transport listeners the model's
-  wire-protocol server accepts from (the composition root binds and owns the
-  listener).
+  wire-protocol server binds and accepts from (the server owns listener
+  lifecycle once start is attempted).
 
 ## Usage
 

@@ -7,7 +7,9 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// <remarks>
 /// This is not an ordered lattice: readiness waits are membership tests over an explicit
 /// terminal set, never "reached or passed" comparisons. <see cref="Blocked"/> and
-/// <see cref="Skipped"/> mark dependents of a failed prerequisite.
+/// <see cref="Skipped"/> mark dependents of a prerequisite that did not satisfy readiness.
+/// <see cref="Degraded"/> is an observed post-readiness health state and never re-gates
+/// dependents that passed their initial readiness gate.
 /// </remarks>
 public enum ResourceLifecycle
 {
@@ -41,9 +43,9 @@ public enum ResourceLifecycle
     /// <summary>Failed to provision or start.</summary>
     Failed,
 
-    /// <summary>Not started because a prerequisite failed.</summary>
+    /// <summary>Not started because a prerequisite did not satisfy readiness.</summary>
     Blocked,
 
-    /// <summary>Deliberately skipped because a prerequisite failed.</summary>
+    /// <summary>Deliberately skipped because a prerequisite did not satisfy readiness.</summary>
     Skipped
 }

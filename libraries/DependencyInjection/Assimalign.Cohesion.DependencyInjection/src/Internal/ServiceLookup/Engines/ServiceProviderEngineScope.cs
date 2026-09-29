@@ -8,10 +8,10 @@ namespace Assimalign.Cohesion.DependencyInjection.Internal;
 internal sealed class ServiceProviderEngineScope : IServiceScope, IServiceProvider, IServiceScopeFactory, IAsyncDisposable
 {
     // For testing only
-    internal IList<object> Disposables => this.disposables ?? (IList<object>)Array.Empty<object>();
+    internal IList<object> Disposables => this._disposables ?? (IList<object>)Array.Empty<object>();
 
-    private bool disposed;
-    private List<object> disposables;
+    private bool _disposed;
+    private List<object> _disposables;
 
     public ServiceProviderEngineScope(ServiceProvider provider, bool isRootScope)
     {
@@ -33,7 +33,7 @@ internal sealed class ServiceProviderEngineScope : IServiceScope, IServiceProvid
 
     public object GetService(Type serviceType)
     {
-        if (disposed)
+        if (_disposed)
         {
             ThrowHelper.ThrowObjectDisposedException();
         }
@@ -52,14 +52,14 @@ internal sealed class ServiceProviderEngineScope : IServiceScope, IServiceProvid
         var disposed = false;
         lock (Sync)
         {
-            if (this.disposed)
+            if (this._disposed)
             {
                 disposed = true;
             }
             else
             {
-                this.disposables ??= new List<object>();
-                this.disposables.Add(service);
+                this._disposables ??= new List<object>();
+                this._disposables.Add(service);
             }
         }
         // Don't run customer code under the lock
@@ -163,18 +163,18 @@ internal sealed class ServiceProviderEngineScope : IServiceScope, IServiceProvid
     {
         lock (Sync)
         {
-            if (disposed)
+            if (_disposed)
             {
                 return null;
             }
 
             // Track statistics about the scope (number of disposable objects and number of disposed services)
-            ServiceEventSource.Log.ScopeDisposed(RootProvider.GetHashCode(), ResolvedServices.Count, disposables?.Count ?? 0);
+            ServiceEventSource.Log.ScopeDisposed(RootProvider.GetHashCode(), ResolvedServices.Count, _disposables?.Count ?? 0);
 
             // We've transitioned to the disposed state, so future calls to
             // CaptureDisposable will immediately dispose the object.
             // No further changes to _state.Disposables, are allowed.
-            disposed = true;
+            _disposed = true;
 
             // ResolvedServices is never cleared for singletons because there might be a compilation running in background
             // trying to get a cached singleton service. If it doesn't find it
@@ -188,6 +188,6 @@ internal sealed class ServiceProviderEngineScope : IServiceScope, IServiceProvid
             // Note, if the RootProvider get disposed first, it will automatically dispose all attached ServiceProviderEngineScope objects.
             RootProvider.Dispose();
         }
-        return disposables;
+        return _disposables;
     }
 }

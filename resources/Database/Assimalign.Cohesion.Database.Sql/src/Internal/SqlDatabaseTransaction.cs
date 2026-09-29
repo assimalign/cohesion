@@ -17,10 +17,10 @@ using Assimalign.Cohesion.Database.Transactions;
 /// </summary>
 internal sealed class SqlDatabaseTransaction : IDatabaseTransaction
 {
-    private readonly SqlTransactionCoordinator _coordinator;
+    private readonly TransactionCoordinator _coordinator;
     private readonly ITransactionContext _context;
 
-    internal SqlDatabaseTransaction(SqlTransactionCoordinator coordinator, ITransactionContext context)
+    internal SqlDatabaseTransaction(TransactionCoordinator coordinator, ITransactionContext context)
     {
         _coordinator = coordinator;
         _context = context;

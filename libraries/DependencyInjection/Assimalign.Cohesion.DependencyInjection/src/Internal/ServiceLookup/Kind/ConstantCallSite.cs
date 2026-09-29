@@ -6,12 +6,12 @@ using Assimalign.Cohesion.DependencyInjection.Properties;
 
 internal sealed class ConstantCallSite : CallSiteService
 {
-    private readonly Type serviceType;
+    private readonly Type _serviceType;
     internal object DefaultValue => Value;
 
     public ConstantCallSite(Type serviceType, object defaultValue) : base(CallSiteResultCache.None)
     {
-        this.serviceType = serviceType ?? throw new ArgumentNullException(nameof(serviceType));
+        this._serviceType = serviceType ?? throw new ArgumentNullException(nameof(serviceType));
         
         if (defaultValue != null && !serviceType.IsInstanceOfType(defaultValue))
         {
@@ -21,7 +21,7 @@ internal sealed class ConstantCallSite : CallSiteService
         Value = defaultValue;
     }
 
-    public override Type ServiceType => serviceType;
-    public override Type ImplementationType => DefaultValue?.GetType() ?? serviceType;
+    public override Type ServiceType => _serviceType;
+    public override Type ImplementationType => DefaultValue?.GetType() ?? _serviceType;
     public override CallSiteKind Kind { get; } = CallSiteKind.Constant;
 }

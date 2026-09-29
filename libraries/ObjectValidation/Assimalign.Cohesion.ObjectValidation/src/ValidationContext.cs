@@ -11,9 +11,9 @@ namespace Assimalign.Cohesion.ObjectValidation;
 /// <typeparam name="T"></typeparam>
 public sealed class ValidationContext<T> : IValidationContext
 {
-    private readonly Type type;
-    private readonly ConcurrentStack<IValidationError> errors;
-    private readonly ConcurrentStack<ValidationInvocation> invocations;
+    private readonly Type _type;
+    private readonly ConcurrentStack<IValidationError> _errors;
+    private readonly ConcurrentStack<ValidationInvocation> _invocations;
 
     private ValidationContext() { }
 
@@ -24,9 +24,9 @@ public sealed class ValidationContext<T> : IValidationContext
     /// <exception cref="ArgumentNullException">An exception is thrown if the <paramref name="instance"/> is null.</exception>
     public ValidationContext(T instance)
     {
-        this.type = typeof(T);
-        this.errors = new ConcurrentStack<IValidationError>();
-        this.invocations = new ConcurrentStack<ValidationInvocation>();
+        this._type = typeof(T);
+        this._errors = new ConcurrentStack<IValidationError>();
+        this._invocations = new ConcurrentStack<ValidationInvocation>();
 
         Instance = instance;
     }
@@ -40,9 +40,9 @@ public sealed class ValidationContext<T> : IValidationContext
                 paramName: nameof(instance),
                 message: $"The instance of type '{typeof(T).Name}' cannot be null");
         } 
-        this.type = typeof(T);
-        this.errors = new ConcurrentStack<IValidationError>();
-        this.invocations = new ConcurrentStack<ValidationInvocation>();
+        this._type = typeof(T);
+        this._errors = new ConcurrentStack<IValidationError>();
+        this._invocations = new ConcurrentStack<ValidationInvocation>();
 
         Instance = instance;
     }
@@ -57,17 +57,17 @@ public sealed class ValidationContext<T> : IValidationContext
     /// <summary>
     /// The <see cref="Type"/> of the instance being validated.
     /// </summary>
-    public Type InstanceType => this.type;
+    public Type InstanceType => this._type;
 
     /// <summary>
     /// A collection of validation failures that occurred.
     /// </summary>
-    public IEnumerable<IValidationError> Errors => this.errors;
+    public IEnumerable<IValidationError> Errors => this._errors;
 
     /// <summary>
     /// A collection of invoked 
     /// </summary>
-    public IEnumerable<ValidationInvocation> Invocations => this.invocations;
+    public IEnumerable<ValidationInvocation> Invocations => this._invocations;
 
    
     /// <inheritdoc cref="IValidationContext.ThrowExceptionOnFailure"/>
@@ -83,7 +83,7 @@ public sealed class ValidationContext<T> : IValidationContext
     /// 
     /// </summary>
     /// <param name="error"></param>
-    public void AddFailure(IValidationError error) => this.errors.Push(new ValidationError(error));
+    public void AddFailure(IValidationError error) => this._errors.Push(new ValidationError(error));
 
     /// <summary>
     /// 
@@ -91,7 +91,7 @@ public sealed class ValidationContext<T> : IValidationContext
     /// <param name="failureMessage"></param>
     public void AddFailure(string failureMessage)
     {
-        errors.Push(new ValidationError()
+        _errors.Push(new ValidationError()
         {
             Message = failureMessage
         });
@@ -104,7 +104,7 @@ public sealed class ValidationContext<T> : IValidationContext
     /// <param name="failureMessage"></param>
     public void AddFailure(string failureSource, string failureMessage)
     {
-        errors.Push(new ValidationError()
+        _errors.Push(new ValidationError()
         {
             Message = failureMessage,
             Source = failureSource
@@ -117,6 +117,6 @@ public sealed class ValidationContext<T> : IValidationContext
     /// <param name="invocation"></param>
     public void AddInvocation(ValidationInvocation invocation)
     {
-        this.invocations.Push(invocation);
+        this._invocations.Push(invocation);
     }
 }

@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Database.Execution — Design
 
 The shared execution substrate (area architecture:
-[resources/Database/DESIGN.md](../../DESIGN.md) §3.2). Planners and model semantics
+[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.2). Planners and model semantics
 deliberately live outside it — this layer owns the *shape* of an execution (context,
 stages, results) and the *guarantees* around its transaction boundary, nothing about
 what a query means.

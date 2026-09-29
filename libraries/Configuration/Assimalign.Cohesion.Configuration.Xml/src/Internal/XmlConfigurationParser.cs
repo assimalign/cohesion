@@ -4,7 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Xml;
 
-namespace Assimalign.Cohesion.Configuration.Xml;
+namespace Assimalign.Cohesion.Configuration.Xml.Internal;
 
 using Assimalign.Cohesion.Configuration;
 

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.ConfigurationStore.Client</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+  </ItemGroup>
+
+</Project>

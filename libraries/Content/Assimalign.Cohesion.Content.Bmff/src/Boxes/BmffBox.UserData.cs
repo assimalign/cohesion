@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Files.Bmff;
 [DebuggerDisplay("Bmff Box: User Data (udta)")]
 public sealed class UserDataBox : BmffBoxComposite
 {
-    private IEnumerable<BmffBox> children;
+    private IEnumerable<BmffBox> _children;
     public UserDataBox(long offset, long limit)
     {
         this.Offset = offset;
@@ -24,7 +24,7 @@ public sealed class UserDataBox : BmffBoxComposite
     public override long Offset { get; }
     public override BmffBoxType BoxType => BmffBoxType.UserData;
 
-    public override IEnumerable<BmffBox> Children => children;
+    public override IEnumerable<BmffBox> Children => _children;
 
     public override void Read(BmffStream stream)
     {
@@ -36,7 +36,7 @@ public sealed class UserDataBox : BmffBoxComposite
             boxes.Add(reader.Current);
         }
 
-        children = boxes;
+        _children = boxes;
     }
 
     public override void Write(BmffStream stream)

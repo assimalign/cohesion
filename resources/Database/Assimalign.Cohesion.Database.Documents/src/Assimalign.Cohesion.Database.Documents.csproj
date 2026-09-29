@@ -1,5 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Documents</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Language" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Storage" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.Catalog" />
 	</ItemGroup>
 </Project>

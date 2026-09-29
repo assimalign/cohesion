@@ -4,7 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Http;
+namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// An <see cref="IHttpSession"/> whose state round-trips through an
@@ -16,11 +16,11 @@ namespace Assimalign.Cohesion.Http;
 /// <remarks>
 /// This is the session the Web session middleware installs over the configured
 /// store; it is internal because consumers interact with it only through
-/// <see cref="IHttpSession"/> and the <c>UseSessions</c> pipeline. Framing is
+/// <see cref="IHttpStoredSession"/> and the <c>UseSessions</c> pipeline. Framing is
 /// delegated to <see cref="HttpSessionSerializer"/> so the exact bytes are
 /// backend-independent.
 /// </remarks>
-internal sealed class HttpSessionStoreSession : IHttpSession
+internal sealed class HttpSessionStoreSession : IHttpStoredSession
 {
     private readonly Dictionary<string, byte[]> _values = new(StringComparer.Ordinal);
     private readonly IHttpSessionStore _store;

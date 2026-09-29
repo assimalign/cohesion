@@ -2,11 +2,12 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Http.Connections.Internal.Http2;
 
 using Shouldly;
 
 using Xunit;
+
+using Assimalign.Cohesion.Http.Connections.Internal;
 
 namespace Assimalign.Cohesion.Http.Connections.Tests;
 

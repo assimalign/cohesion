@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect.Tests;
 /// </summary>
 public sealed class OpenIdConnectIdTokenTests
 {
-    private static readonly DateTimeOffset now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
 
     private static OpenIdConnectIdTokenDescriptor CreateConformantDescriptor()
     {
@@ -25,9 +25,9 @@ public sealed class OpenIdConnectIdTokenTests
         {
             Issuer = "https://server.example.com",
             Subject = "24400320",
-            ExpiresAt = now.AddMinutes(10),
-            IssuedAt = now.AddMinutes(-1),
-            AuthTime = now.AddMinutes(-2),
+            ExpiresAt = _now.AddMinutes(10),
+            IssuedAt = _now.AddMinutes(-1),
+            AuthTime = _now.AddMinutes(-2),
             Nonce = "n-0S6_WzA2Mj",
             JwtId = "jti-8842",
             RawToken = "eyJhbGciOiJSUzI1NiJ9.payload.signature",
@@ -38,7 +38,7 @@ public sealed class OpenIdConnectIdTokenTests
     }
 
     private static OpenIdConnectIdTokenValidationOptions CreateOptions()
-        => new(validateAt: now)
+        => new(validateAt: _now)
         {
             ExpectedIssuer = "https://server.example.com",
             ExpectedAudience = "s6BhdRkqt3",
@@ -162,13 +162,13 @@ public sealed class OpenIdConnectIdTokenTests
     {
         // Expired token.
         var expired = CreateConformantDescriptor();
-        expired.ExpiresAt = now.AddHours(-1);
+        expired.ExpiresAt = _now.AddHours(-1);
         new OpenIdConnectIdToken(expired).Validate(CreateOptions())
             .Errors.ShouldContain(d => d.Code == ProtocolValidationCodes.Expired);
 
         // Issued in the future.
         var future = CreateConformantDescriptor();
-        future.IssuedAt = now.AddHours(1);
+        future.IssuedAt = _now.AddHours(1);
         new OpenIdConnectIdToken(future).Validate(CreateOptions())
             .Errors.ShouldContain(d => d.Code == ProtocolValidationCodes.NotYetValid);
 
@@ -180,7 +180,7 @@ public sealed class OpenIdConnectIdTokenTests
 
         // max_age: auth_time becomes required and its age is enforced.
         var stale = CreateConformantDescriptor();
-        stale.AuthTime = now.AddHours(-3);
+        stale.AuthTime = _now.AddHours(-3);
         var maxAge = CreateOptions();
         maxAge.MaxAge = 3600;
         new OpenIdConnectIdToken(stale).Validate(maxAge)

@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Indexing;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
@@ -21,6 +22,23 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 /// </remarks>
 public interface ISqlCatalog
 {
+    /// <summary>
+    /// Gets the persisted default string collation, or Binary when none was configured.
+    /// </summary>
+    /// <remarks>
+    /// Read-only by design. The default is established when the catalog is opened
+    /// (<c>SqlCatalog.Open(storage, defaultCollation)</c>) and never changes afterwards,
+    /// because every index key on a column that inherited it is encoded through its
+    /// byte transform.
+    /// </remarks>
+    Collation DefaultCollation { get; }
+
+    /// <summary>
+    /// Gets the canonical compiled schema most recently applied to this database,
+    /// or <see langword="null"/> when no schema has been recorded.
+    /// </summary>
+    SqlCatalogSchemaState? SchemaState { get; }
+
     /// <summary>
     /// Gets every table in the catalog.
     /// </summary>
@@ -156,4 +174,12 @@ public interface ISqlCatalog
     /// <param name="version">The format version to persist.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     ValueTask SetRecordSpaceFormatVersionAsync(int version, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persists the canonical compiled schema most recently applied to this database.
+    /// The state is replaced atomically in one self-committing catalog transaction.
+    /// </summary>
+    /// <param name="state">The applied schema state to persist.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    ValueTask SaveSchemaStateAsync(SqlCatalogSchemaState state, CancellationToken cancellationToken = default);
 }

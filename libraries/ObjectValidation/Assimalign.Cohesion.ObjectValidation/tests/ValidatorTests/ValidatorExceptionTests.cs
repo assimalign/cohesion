@@ -18,14 +18,14 @@ public class ValidatorExceptionTests
 
     public class TestObjectValidationProfile : ValidationProfile<TestObject>
     {
-        private Action<IValidationRuleDescriptor<TestObject>> descriptor;
+        private Action<IValidationRuleDescriptor<TestObject>> _descriptor;
         public TestObjectValidationProfile(Action<IValidationRuleDescriptor<TestObject>> descriptor)
         {
-            this.descriptor = descriptor;
+            this._descriptor = descriptor;
         }
         public override void Configure(IValidationRuleDescriptor<TestObject> descriptor)
         {
-            this.descriptor.Invoke(descriptor);
+            this._descriptor.Invoke(descriptor);
         }
     }
 

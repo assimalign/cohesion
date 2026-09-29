@@ -13,8 +13,8 @@ namespace Assimalign.Cohesion.Http.Tests;
 /// </summary>
 public class HttpConditionalRequestTests
 {
-    private static readonly DateTimeOffset LastModified = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
-    private static readonly HttpEntityTag CurrentTag = HttpEntityTag.Strong("v2");
+    private static readonly DateTimeOffset _lastModified = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+    private static readonly HttpEntityTag _currentTag = HttpEntityTag.Strong("v2");
 
     // ============================================================================
     // If-None-Match (§13.1.2)
@@ -26,7 +26,7 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Get,
-            ETag = CurrentTag,
+            ETag = _currentTag,
             IfNoneMatch = HttpEntityTagCondition.Parse("\"v2\""),
         };
 
@@ -39,7 +39,7 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Put,
-            ETag = CurrentTag,
+            ETag = _currentTag,
             IfNoneMatch = HttpEntityTagCondition.Parse("\"v2\""),
         };
 
@@ -52,7 +52,7 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Get,
-            ETag = CurrentTag,
+            ETag = _currentTag,
             IfNoneMatch = HttpEntityTagCondition.Parse("W/\"v2\""),
         };
 
@@ -65,7 +65,7 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Get,
-            ETag = CurrentTag,
+            ETag = _currentTag,
             IfNoneMatch = HttpEntityTagCondition.Parse("*"),
         };
 
@@ -78,7 +78,7 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Get,
-            ETag = CurrentTag,
+            ETag = _currentTag,
             IfNoneMatch = HttpEntityTagCondition.Parse("\"v1\""),
         };
 
@@ -95,8 +95,8 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Get,
-            LastModified = LastModified,
-            IfModifiedSince = LastModified,
+            LastModified = _lastModified,
+            IfModifiedSince = _lastModified,
         };
 
         HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.NotModified);
@@ -108,8 +108,8 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Get,
-            LastModified = LastModified,
-            IfModifiedSince = LastModified.AddSeconds(-60),
+            LastModified = _lastModified,
+            IfModifiedSince = _lastModified.AddSeconds(-60),
         };
 
         HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.Proceed);
@@ -121,8 +121,8 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Post,
-            LastModified = LastModified,
-            IfModifiedSince = LastModified,
+            LastModified = _lastModified,
+            IfModifiedSince = _lastModified,
         };
 
         HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.Proceed);
@@ -136,10 +136,10 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Get,
-            ETag = CurrentTag,
-            LastModified = LastModified,
+            ETag = _currentTag,
+            LastModified = _lastModified,
             IfNoneMatch = HttpEntityTagCondition.Parse("\"v1\""),
-            IfModifiedSince = LastModified,
+            IfModifiedSince = _lastModified,
         };
 
         HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.Proceed);
@@ -155,7 +155,7 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Put,
-            ETag = CurrentTag,
+            ETag = _currentTag,
             IfMatch = HttpEntityTagCondition.Parse("\"v2\""),
         };
 
@@ -168,7 +168,7 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Put,
-            ETag = CurrentTag,
+            ETag = _currentTag,
             IfMatch = HttpEntityTagCondition.Parse("\"v1\""),
         };
 
@@ -208,8 +208,8 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Put,
-            LastModified = LastModified,
-            IfUnmodifiedSince = LastModified.AddSeconds(-60),
+            LastModified = _lastModified,
+            IfUnmodifiedSince = _lastModified.AddSeconds(-60),
         };
 
         HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.PreconditionFailed);
@@ -223,10 +223,10 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Put,
-            ETag = CurrentTag,
-            LastModified = LastModified,
+            ETag = _currentTag,
+            LastModified = _lastModified,
             IfMatch = HttpEntityTagCondition.Parse("\"v2\""),
-            IfUnmodifiedSince = LastModified.AddSeconds(-60),
+            IfUnmodifiedSince = _lastModified.AddSeconds(-60),
         };
 
         HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.Proceed);
@@ -242,8 +242,8 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Get,
-            ETag = CurrentTag,
-            LastModified = LastModified,
+            ETag = _currentTag,
+            LastModified = _lastModified,
         };
 
         HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.Proceed);
@@ -261,7 +261,7 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Query,
-            ETag = CurrentTag,
+            ETag = _currentTag,
             IfNoneMatch = HttpEntityTagCondition.Parse("\"v2\""),
         };
 
@@ -275,8 +275,8 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Query,
-            LastModified = LastModified,
-            IfModifiedSince = LastModified,
+            LastModified = _lastModified,
+            IfModifiedSince = _lastModified,
         };
 
         HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.NotModified);
@@ -288,7 +288,7 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Query,
-            ETag = CurrentTag,
+            ETag = _currentTag,
             IfMatch = HttpEntityTagCondition.Parse("\"v1\""),
         };
 
@@ -301,8 +301,8 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Query,
-            LastModified = LastModified,
-            IfUnmodifiedSince = LastModified.AddSeconds(-60),
+            LastModified = _lastModified,
+            IfUnmodifiedSince = _lastModified.AddSeconds(-60),
         };
 
         HttpConditionalRequest.Evaluate(context).ShouldBe(HttpPreconditionOutcome.PreconditionFailed);
@@ -314,7 +314,7 @@ public class HttpConditionalRequestTests
         var context = new HttpConditionalRequestContext
         {
             Method = HttpMethod.Query,
-            ETag = CurrentTag,
+            ETag = _currentTag,
             IfNoneMatch = HttpEntityTagCondition.Parse("\"v1\""),
         };
 

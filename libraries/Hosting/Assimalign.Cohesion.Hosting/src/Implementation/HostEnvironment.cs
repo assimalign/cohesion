@@ -1,6 +1,6 @@
 ﻿using System;
-using System.IO;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 
 namespace Assimalign.Cohesion.Hosting;
 
@@ -22,5 +22,5 @@ public class HostEnvironment : IHostEnvironment
     /// <summary>
     /// Gets the root directory path for content files, or null if no content root is specified.
     /// </summary>
-    public FileSystemPath? ContentRootPath { get; init; } 
+    public FileSystemPath? ContentRootPath { get; init; }
 }

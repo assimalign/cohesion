@@ -6,21 +6,22 @@ using Assimalign.Cohesion.Database.Security;
 namespace Assimalign.Cohesion.Database.Sql;
 
 /// <summary>
-/// Options controlling the SQL database server front-end: the bound transport
+/// Options controlling the SQL database server front-end: the transport
 /// listener, the authenticator, and the DoS guardrails.
 /// </summary>
 /// <remarks>
 /// The options deliberately carry no engine: servers are per-model and the
 /// composition root supplies the single engine directly
-/// (<see cref="SqlDatabaseServer.Create"/>, or the <c>AddSqlServer(engine, configure)</c>
+/// (<see cref="SqlDatabaseServer.Create"/>, or the <c>engineBuilder.AddServer(factory)</c>
 /// builder verb).
 /// </remarks>
 public sealed class SqlDatabaseServerOptions
 {
     /// <summary>
-    /// Gets or sets the bound transport listener the server accepts connections
-    /// from. The composition root composes the listener (TCP, named pipe,
-    /// in-memory, …) and retains ownership — the server never disposes it.
+    /// Gets or sets the transport listener the server binds and accepts
+    /// connections from. The composition root configures the listener (TCP,
+    /// named pipe, in-memory, …), then transfers its lifecycle to the server.
+    /// Stop terminally disposes the listener.
     /// </summary>
     public IConnectionListener? Listener { get; set; }
 

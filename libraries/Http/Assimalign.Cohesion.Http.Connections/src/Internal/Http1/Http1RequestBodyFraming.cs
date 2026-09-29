@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// How an HTTP/1.1 request body is delimited on the wire, decided from the request headers before

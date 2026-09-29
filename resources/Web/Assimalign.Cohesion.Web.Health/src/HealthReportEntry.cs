@@ -13,10 +13,10 @@ namespace Assimalign.Cohesion.Web.Health;
 /// </remarks>
 public readonly struct HealthReportEntry
 {
-    private static readonly IReadOnlyDictionary<string, object> EmptyData =
+    private static readonly IReadOnlyDictionary<string, object> _emptyData =
         new Dictionary<string, object>(0);
 
-    private static readonly IReadOnlyCollection<string> EmptyTags = Array.Empty<string>();
+    private static readonly IReadOnlyCollection<string> _emptyTags = Array.Empty<string>();
 
     /// <summary>
     /// Initializes a new <see cref="HealthReportEntry"/>.
@@ -39,8 +39,8 @@ public readonly struct HealthReportEntry
         Description = description;
         Duration = duration;
         Exception = exception;
-        Data = data ?? EmptyData;
-        Tags = tags ?? EmptyTags;
+        Data = data ?? _emptyData;
+        Tags = tags ?? _emptyTags;
     }
 
     /// <summary>

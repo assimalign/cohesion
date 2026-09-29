@@ -26,7 +26,7 @@ public static class HttpFieldRules
     // §8.2.2 / RFC 9114 §4.2 make their presence in HTTP/2 and HTTP/3 a
     // malformed message (with the narrow TE: trailers exception, handled by
     // ProhibitsInHttp2Or3 below).
-    private static readonly HashSet<string> ConnectionSpecific = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> _connectionSpecific = new(StringComparer.OrdinalIgnoreCase)
     {
         "Connection",
         "Proxy-Connection",
@@ -39,7 +39,7 @@ public static class HttpFieldRules
     // message as malformed (or use only the first), because combining them
     // changes meaning. This is the curated set of well-known singletons from
     // RFC 9110 and the field-specific definitions.
-    private static readonly HashSet<string> Singletons = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> _singletons = new(StringComparer.OrdinalIgnoreCase)
     {
         "Content-Length",
         "Content-Type",
@@ -66,7 +66,7 @@ public static class HttpFieldRules
     // Grouped by the categories the RFC enumerates: message framing, routing,
     // request modifiers, authentication, and content-processing controls. The
     // "Trailer" field and "Set-Cookie" are also excluded.
-    private static readonly HashSet<string> TrailerProhibited = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> _trailerProhibited = new(StringComparer.OrdinalIgnoreCase)
     {
         // Message framing.
         "Transfer-Encoding",
@@ -115,7 +115,7 @@ public static class HttpFieldRules
     /// <returns><see langword="true"/> when the field is connection-specific.</returns>
     public static bool IsConnectionSpecific(HttpHeaderKey key)
     {
-        return !key.IsEmpty && ConnectionSpecific.Contains(key.Value);
+        return !key.IsEmpty && _connectionSpecific.Contains(key.Value);
     }
 
     /// <summary>
@@ -127,7 +127,7 @@ public static class HttpFieldRules
     /// <returns><see langword="true"/> when the field must appear at most once.</returns>
     public static bool IsSingleton(HttpHeaderKey key)
     {
-        return !key.IsEmpty && Singletons.Contains(key.Value);
+        return !key.IsEmpty && _singletons.Contains(key.Value);
     }
 
     /// <summary>
@@ -168,6 +168,6 @@ public static class HttpFieldRules
     /// <returns><see langword="true"/> when the field must not be used as a trailer.</returns>
     public static bool IsProhibitedInTrailers(HttpHeaderKey key)
     {
-        return !key.IsEmpty && TrailerProhibited.Contains(key.Value);
+        return !key.IsEmpty && _trailerProhibited.Contains(key.Value);
     }
 }

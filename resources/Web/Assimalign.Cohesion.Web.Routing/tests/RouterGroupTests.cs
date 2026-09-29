@@ -5,7 +5,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Http;
-using Assimalign.Cohesion.Web.Routing.Exceptions;
 using Assimalign.Cohesion.Web.Routing.Metadata;
 using Assimalign.Cohesion.Web.Routing.Policies;
 using Assimalign.Cohesion.Web.Routing.Tests.TestObjects;

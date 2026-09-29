@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Assimalign.Cohesion.OpenApi.Attributes;
 using Assimalign.Cohesion.OpenApi.Generation;
 
-namespace Assimalign.Cohesion.OpenApi.Integration;
+namespace Assimalign.Cohesion.OpenApi.Integration.Internal;
 
 /// <summary>
 /// The default <see cref="IOpenApiDescriptionProvider"/>: aggregates the metadata contributed by one or

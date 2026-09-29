@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Sql</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database" />
+        <CohesionSharedSource Include="Assimalign.Cohesion.Database" />
 		<!-- Transport listeners/connections for the SQL model's wire-protocol server
 		     (SqlDatabaseServer and its machinery are implemented in this package —
 		     servers are per-model and each model carries its own copy, owner decision
@@ -10,6 +14,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Storage" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Language" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Catalog" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Schema" />
 		<!-- Direct (not just transitive via Sql.Storage): the engine's public options
 		     surface exposes StorageCommitDurability and its workers drive the IStorage
 		     worker seams. -->

@@ -1,5 +1,4 @@
 using System;
-using System.Buffers.Binary;
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
@@ -16,7 +15,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// catalog column order. The object-id prefix is what lets multiple tables share
 /// one record space (scans filter by it); the fixed-width stamp header is what
 /// makes tombstoning an in-place, same-length update (a deleter stamp never
-/// relocates a record) and keeps ADD COLUMN's O(1) null-tail decode intact
+/// relocates a record) and keeps ADD COLUMN's missing-tail decode intact
 /// (stamps sit in front of the tuple, never after the columns).
 /// </summary>
 internal static class SqlRowCodec
@@ -34,7 +33,7 @@ internal static class SqlRowCodec
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.
     /// </summary>
-    internal const int StampHeaderSize = 16;
+    internal const int StampHeaderSize = RecordVersionStamp.HeaderSize;
 
     internal static byte[] Encode(ulong objectId, IReadOnlyList<SqlCatalogColumn> columns, object?[] values, TransactionSequence writer)
     {
@@ -48,7 +47,7 @@ internal static class SqlRowCodec
 
         byte[] payload = writerCodec.ToArray();
         var record = new byte[StampHeaderSize + payload.Length];
-        BinaryPrimitives.WriteUInt64LittleEndian(record.AsSpan(0, 8), writer.Value);
+        RecordVersionStamp.WriteWriter(record, writer);
         // Deleter starts at zero (no visible delete); bytes are already zeroed.
         payload.CopyTo(record.AsSpan(StampHeaderSize));
         return record;
@@ -58,11 +57,7 @@ internal static class SqlRowCodec
     /// Reads the version stamps from a stamped record.
     /// </summary>
     internal static (TransactionSequence Writer, TransactionSequence Deleter) ReadStamps(ReadOnlySpan<byte> record)
-    {
-        return (
-            new TransactionSequence(BinaryPrimitives.ReadUInt64LittleEndian(record.Slice(0, 8))),
-            new TransactionSequence(BinaryPrimitives.ReadUInt64LittleEndian(record.Slice(8, 8))));
-    }
+        => RecordVersionStamp.ReadStamps(record);
 
     /// <summary>
     /// Returns a same-length copy of a stamped record with the deleter stamp set —
@@ -70,22 +65,14 @@ internal static class SqlRowCodec
     /// place: a delete can never relocate a record.
     /// </summary>
     internal static byte[] WithDeleter(ReadOnlySpan<byte> record, TransactionSequence deleter)
-    {
-        var tombstoned = record.ToArray();
-        BinaryPrimitives.WriteUInt64LittleEndian(tombstoned.AsSpan(8, 8), deleter.Value);
-        return tombstoned;
-    }
+        => RecordVersionStamp.WithDeleter(record, deleter);
 
     /// <summary>
     /// Returns a same-length copy of a stamped record with the deleter stamp
     /// cleared — the logical undo of a tombstone.
     /// </summary>
     internal static byte[] WithoutDeleter(ReadOnlySpan<byte> record)
-    {
-        var restored = record.ToArray();
-        restored.AsSpan(8, 8).Clear();
-        return restored;
-    }
+        => RecordVersionStamp.WithoutDeleter(record);
 
     /// <summary>
     /// Prepends a zeroed stamp header to a pre-MVCC (format-version-1) record —
@@ -103,19 +90,22 @@ internal static class SqlRowCodec
     /// <summary>
     /// Decodes a stamped record when it belongs to the expected table; returns
     /// null when the record belongs to a different object or is too short to
-    /// carry a stamp header. Missing trailing columns read as nulls, which is how
-    /// ADD COLUMN stays O(1). The version stamps are returned alongside the
-    /// values — visibility is the caller's decision, made against its snapshot.
+    /// carry a stamp header. Returns the stored column count so the caller can
+    /// resolve absent trailing fields from its bound catalog definition without
+    /// confusing them with explicitly stored NULLs. Visibility is the caller's
+    /// decision, made against its snapshot and the returned version stamps.
     /// </summary>
     internal static object?[]? TryDecode(
         ReadOnlySpan<byte> record,
         ulong objectId,
         int columnCount,
         out TransactionSequence writer,
-        out TransactionSequence deleter)
+        out TransactionSequence deleter,
+        out int storedColumnCount)
     {
         writer = default;
         deleter = default;
+        storedColumnCount = 0;
 
         if (record.Length < StampHeaderSize)
         {
@@ -137,11 +127,11 @@ internal static class SqlRowCodec
         {
             if (reader.IsAtEnd)
             {
-                values[i] = null; // column added after this row was written
-                continue;
+                break; // column added after this row version was written
             }
 
             values[i] = ReadValue(ref reader);
+            storedColumnCount++;
         }
 
         return values;
@@ -149,10 +139,10 @@ internal static class SqlRowCodec
 
     /// <summary>
     /// Appends one typed value as a self-describing, order-preserving component —
-    /// shared by the row payload encoder and the index-key builder, so a key
-    /// component always encodes exactly like the row value it indexes.
+    /// shared by row and index encoding. Rows preserve original strings under
+    /// Binary; index callers supply the column's effective collation.
     /// </summary>
-    internal static void AppendValue(DatabaseKeyWriter writer, DatabaseType type, object? value)
+    internal static void AppendValue(DatabaseKeyWriter writer, DatabaseType type, object? value, Collation? collation = null)
     {
         if (value is null)
         {
@@ -170,7 +160,7 @@ internal static class SqlRowCodec
             case DatabaseType.Float32: writer.AppendFloat32((float)value); break;
             case DatabaseType.Float64: writer.AppendFloat64((double)value); break;
             case DatabaseType.Decimal: writer.AppendDecimal((decimal)value); break;
-            case DatabaseType.String or DatabaseType.Json: writer.AppendString((string)value, Collation.Binary); break;
+            case DatabaseType.String or DatabaseType.Json: writer.AppendString((string)value, collation ?? Collation.Binary); break;
             case DatabaseType.Binary or DatabaseType.JsonBinary: writer.AppendBinary((byte[])value); break;
             case DatabaseType.Date: writer.AppendDate((DateOnly)value); break;
             case DatabaseType.Time: writer.AppendTime((TimeOnly)value); break;

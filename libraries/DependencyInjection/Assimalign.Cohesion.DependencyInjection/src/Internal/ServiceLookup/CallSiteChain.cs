@@ -8,22 +8,22 @@ using Assimalign.Cohesion.DependencyInjection.Properties;
 
 internal sealed class CallSiteChain
 {
-    private readonly Dictionary<Type, ChainItemInfo> callSiteChain;
+    private readonly Dictionary<Type, ChainItemInfo> _callSiteChain;
 
     public CallSiteChain()
     {
-        callSiteChain = new Dictionary<Type, ChainItemInfo>();
+        _callSiteChain = new Dictionary<Type, ChainItemInfo>();
     }
 
     public void CheckCircularDependency(Type serviceType)
     {
-        if (callSiteChain.ContainsKey(serviceType))
+        if (_callSiteChain.ContainsKey(serviceType))
         {
             throw new InvalidOperationException(CreateCircularDependencyExceptionMessage(serviceType));
         }
     }
-    public void Remove(Type serviceType) => callSiteChain.Remove(serviceType);
-    public void Add(Type serviceType, Type implementationType = null) => callSiteChain[serviceType] = new ChainItemInfo(callSiteChain.Count, implementationType);
+    public void Remove(Type serviceType) => _callSiteChain.Remove(serviceType);
+    public void Add(Type serviceType, Type implementationType = null) => _callSiteChain[serviceType] = new ChainItemInfo(_callSiteChain.Count, implementationType);
     private string CreateCircularDependencyExceptionMessage(Type type)
     {
         var messageBuilder = new StringBuilder()
@@ -36,7 +36,7 @@ internal sealed class CallSiteChain
     }
     private void AppendResolutionPath(StringBuilder builder, Type currentlyResolving)
     {
-        var ordered = new List<KeyValuePair<Type, ChainItemInfo>>(callSiteChain);
+        var ordered = new List<KeyValuePair<Type, ChainItemInfo>>(_callSiteChain);
         
         ordered.Sort((a, b) => a.Value.Order.CompareTo(b.Value.Order));
 

@@ -11,9 +11,9 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 public class AmqpConnectionContextTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
-    private static readonly byte[] Amqp10HeaderBytes = { (byte)'A', (byte)'M', (byte)'Q', (byte)'P', 0, 1, 0, 0 };
+    private static readonly byte[] _amqp10HeaderBytes = { (byte)'A', (byte)'M', (byte)'Q', (byte)'P', 0, 1, 0, 0 };
 
     private static async Task<(AmqpServerTransport Transport, TestConnection Carrier, AmqpConnection Connection)> AcceptAsync(
         AmqpTransportOptions? options,
@@ -64,12 +64,12 @@ public class AmqpConnectionContextTests
     public async Task ReceiveAsync_OnInboundOpenFrame_ShouldDecodeOpenPerformative()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         (AmqpServerTransport transport, TestConnection carrier, AmqpConnection connection) =
             await AcceptAsync(options: null, timeout.Token);
         await using AmqpServerTransport _ = transport;
 
-        await carrier.WritePeerAsync(Amqp10HeaderBytes, timeout.Token);
+        await carrier.WritePeerAsync(_amqp10HeaderBytes, timeout.Token);
 
         // Act
         AmqpConnectionContext context = await connection.OpenAsync(timeout.Token);
@@ -98,13 +98,13 @@ public class AmqpConnectionContextTests
     public async Task ReceiveAsync_OnHeaderCoalescedWithFrame_ShouldDecodeOpenPerformative()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         (AmqpServerTransport transport, TestConnection carrier, AmqpConnection connection) =
             await AcceptAsync(options: null, timeout.Token);
         await using AmqpServerTransport _ = transport;
 
         byte[] inbound = Combine(
-            Amqp10HeaderBytes,
+            _amqp10HeaderBytes,
             AmqpFrameCodec.Encode(new AmqpFrame(
                 0,
                 new AmqpOpenPerformative { ContainerId = "remote-container" })));
@@ -122,12 +122,12 @@ public class AmqpConnectionContextTests
     public async Task SendAsync_OnBeginFrame_ShouldWriteEncodedFrameToCarrier()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         (AmqpServerTransport transport, TestConnection carrier, AmqpConnection connection) =
             await AcceptAsync(options: null, timeout.Token);
         await using AmqpServerTransport _ = transport;
 
-        await carrier.WritePeerAsync(Amqp10HeaderBytes, timeout.Token);
+        await carrier.WritePeerAsync(_amqp10HeaderBytes, timeout.Token);
         AmqpConnectionContext context = await connection.OpenAsync(timeout.Token);
 
         // Act
@@ -144,7 +144,7 @@ public class AmqpConnectionContextTests
         byte[] outbound = await carrier.ReadBufferedPeerBytesAsync(timeout.Token);
 
         // Assert
-        outbound.AsSpan(0, 8).ToArray().ShouldBe(Amqp10HeaderBytes);
+        outbound.AsSpan(0, 8).ToArray().ShouldBe(_amqp10HeaderBytes);
         AmqpFrame beginFrame = AmqpFrameCodec.Decode(outbound.AsSpan(8));
         AmqpBeginPerformative begin = beginFrame.Performative.ShouldBeOfType<AmqpBeginPerformative>();
         begin.NextOutgoingId.ShouldBe((uint)1);
@@ -156,7 +156,7 @@ public class AmqpConnectionContextTests
     public async Task AsStream_OnOpenedContext_ShouldRoundTripCarrierBytes()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         AmqpTransportOptions options = new() { AutoNegotiateProtocolHeader = false };
         (AmqpServerTransport transport, TestConnection carrier, AmqpConnection connection) =
             await AcceptAsync(options, timeout.Token);
@@ -182,7 +182,7 @@ public class AmqpConnectionContextTests
     public async Task SendAsync_WithoutNegotiation_ShouldThrowInvalidOperationException()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         AmqpTransportOptions options = new() { AutoNegotiateProtocolHeader = false };
         (AmqpServerTransport transport, TestConnection carrier, AmqpConnection connection) =
             await AcceptAsync(options, timeout.Token);
@@ -200,7 +200,7 @@ public class AmqpConnectionContextTests
     public async Task ReceiveAsync_WithoutNegotiation_ShouldThrowInvalidOperationException()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         AmqpTransportOptions options = new() { AutoNegotiateProtocolHeader = false };
         (AmqpServerTransport transport, TestConnection carrier, AmqpConnection connection) =
             await AcceptAsync(options, timeout.Token);
@@ -221,13 +221,13 @@ public class AmqpConnectionContextTests
     public async Task ReceiveAsync_OnTruncatedFrame_ShouldThrowAmqpProtocolException()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         (AmqpServerTransport transport, TestConnection carrier, AmqpConnection connection) =
             await AcceptAsync(options: null, timeout.Token);
         await using AmqpServerTransport _ = transport;
 
         byte[] truncatedFrame = { 0, 0, 0, 100, 2, 0, 0, 0 };
-        await carrier.WritePeerAsync(Combine(Amqp10HeaderBytes, truncatedFrame), timeout.Token);
+        await carrier.WritePeerAsync(Combine(_amqp10HeaderBytes, truncatedFrame), timeout.Token);
         carrier.CompletePeerOutput();
 
         AmqpConnectionContext context = await connection.OpenAsync(timeout.Token);
@@ -245,13 +245,13 @@ public class AmqpConnectionContextTests
     public async Task SendAsync_OnFrameExceedingMaxFrameSize_ShouldThrowAmqpProtocolException()
     {
         // Arrange
-        using CancellationTokenSource timeout = new(TestTimeout);
+        using CancellationTokenSource timeout = new(_testTimeout);
         AmqpTransportOptions options = new() { MaxFrameSize = 512 };
         (AmqpServerTransport transport, TestConnection carrier, AmqpConnection connection) =
             await AcceptAsync(options, timeout.Token);
         await using AmqpServerTransport _ = transport;
 
-        await carrier.WritePeerAsync(Amqp10HeaderBytes, timeout.Token);
+        await carrier.WritePeerAsync(_amqp10HeaderBytes, timeout.Token);
         AmqpConnectionContext context = await connection.OpenAsync(timeout.Token);
 
         AmqpFrame oversizedFrame = new(

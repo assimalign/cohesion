@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Database.Storage.Internal;
 
 internal static class Crc32
 {
-    private static readonly uint[] Table = CreateTable();
+    private static readonly uint[] _table = CreateTable();
 
     private const uint initialState = 0xFFFFFFFFu;
 
@@ -24,7 +24,7 @@ internal static class Crc32
         for (int i = 0; i < data.Length; i++)
         {
             byte index = (byte)(state ^ data[i]);
-            state = Table[index] ^ (state >> 8);
+            state = _table[index] ^ (state >> 8);
         }
 
         return state;
@@ -38,7 +38,7 @@ internal static class Crc32
         for (int i = 0; i < count; i++)
         {
             byte index = (byte)state;
-            state = Table[index] ^ (state >> 8);
+            state = _table[index] ^ (state >> 8);
         }
 
         return state;

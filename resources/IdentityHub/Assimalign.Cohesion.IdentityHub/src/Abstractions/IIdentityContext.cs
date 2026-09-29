@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Identity;
+namespace Assimalign.Cohesion.IdentityHub;
 
 public interface IIdentityContext
 {

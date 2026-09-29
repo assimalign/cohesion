@@ -16,8 +16,8 @@ namespace Assimalign.Cohesion.Http.Tests;
 /// </summary>
 public class HttpRangePreconditionCompositionTests
 {
-    private static readonly DateTimeOffset LastModified = new(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
-    private static readonly HttpEntityTag CurrentTag = HttpEntityTag.Strong("v1");
+    private static readonly DateTimeOffset _lastModified = new(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    private static readonly HttpEntityTag _currentTag = HttpEntityTag.Strong("v1");
     private const long ContentLength = 1000;
 
     private enum ResponseKind
@@ -45,8 +45,8 @@ public class HttpRangePreconditionCompositionTests
         HttpPreconditionOutcome outcome = HttpConditionalRequest.Evaluate(new HttpConditionalRequestContext
         {
             Method = method,
-            ETag = CurrentTag,
-            LastModified = LastModified,
+            ETag = _currentTag,
+            LastModified = _lastModified,
             IfMatch = ifMatch,
             IfNoneMatch = ifNoneMatch,
             IfModifiedSince = ifModifiedSince,
@@ -67,7 +67,7 @@ public class HttpRangePreconditionCompositionTests
         }
 
         // Step 5: honor the range only when there is no If-Range or its validator still matches.
-        bool applyRange = ifRange is not HttpIfRange gate || gate.Matches(CurrentTag, LastModified);
+        bool applyRange = ifRange is not HttpIfRange gate || gate.Matches(_currentTag, _lastModified);
         if (!applyRange)
         {
             return ResponseKind.Ok200;

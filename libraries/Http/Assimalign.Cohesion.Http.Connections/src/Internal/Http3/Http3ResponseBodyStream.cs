@@ -4,9 +4,8 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
-using Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// HTTP/3 raw response body sink. Commits the HEADERS frame on first write/flush and emits the body

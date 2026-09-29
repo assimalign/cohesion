@@ -5,6 +5,8 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Configuration.Json.Internal;
+
 namespace Assimalign.Cohesion.Configuration.Json;
 
 using Assimalign.Cohesion.Configuration;

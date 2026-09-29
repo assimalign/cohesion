@@ -39,8 +39,9 @@ public sealed class DatabaseConnectionSettings
     /// <summary>
     /// Gets or sets the server endpoint handed to the connection factory. Parsed
     /// connection strings produce a <see cref="DnsEndPoint"/> from the
-    /// <c>Endpoint=host[:port]</c> key; transports with non-network addressing
-    /// take a typed endpoint here instead.
+    /// <c>Endpoint=host[:port]</c> key. Resource endpoint URIs also produce a
+    /// <see cref="DnsEndPoint"/> using their socket-facing <see cref="Uri.IdnHost"/> value;
+    /// transports with non-network addressing take a typed endpoint here instead.
     /// </summary>
     public EndPoint? EndPoint { get; set; }
 
@@ -53,6 +54,41 @@ public sealed class DatabaseConnectionSettings
     /// The default port assumed when a connection string endpoint omits one.
     /// </summary>
     public const int DefaultPort = 5740;
+
+    /// <summary>
+    /// Creates client settings for a resource endpoint supplied by the Cohesion
+    /// application model or ambient resource context.
+    /// </summary>
+    /// <param name="endpoint">The resolved endpoint URI.</param>
+    /// <param name="database">The optional database to bind to.</param>
+    /// <param name="principal">The principal to claim during authentication.</param>
+    /// <returns>Connection settings that target <paramref name="endpoint"/>.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="endpoint"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="endpoint"/> is not an endpoint URI or
+    /// <paramref name="principal"/> is null or whitespace.
+    /// </exception>
+    /// <remarks>
+    /// The socket-facing host uses <see cref="Uri.IdnHost"/> by convention, which removes IPv6
+    /// brackets and converts internationalized domain names to their ASCII-compatible form.
+    /// </remarks>
+    public static DatabaseConnectionSettings For(
+        Uri endpoint,
+        string? database = null,
+        string principal = "anonymous")
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(principal);
+        Uri.ThrowIfNotEndpoint(endpoint);
+
+        EndPoint endPoint = new DnsEndPoint(endpoint.IdnHost, endpoint.Port);
+
+        return new DatabaseConnectionSettings
+        {
+            Database = database,
+            Principal = principal,
+            EndPoint = endPoint,
+        };
+    }
 
     /// <summary>
     /// Parses a <c>key=value;</c> connection string. Supported keys

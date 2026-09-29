@@ -13,8 +13,9 @@ change. This mirrors Kestrel's `ListenNamedPipe` surface.
 
 ## Scope
 
-- `NamedPipeConnectionListener` — the accept side: creates a fresh `NamedPipeServerStream`
-  instance per accepted client on a local pipe name, with builder-time access control.
+- `NamedPipeConnectionListener` — the accept side: reserves the pipe through `BindAsync`, then
+  creates a fresh `NamedPipeServerStream` instance per accepted client on a local pipe name, with
+  builder-time access control.
 - `NamedPipeConnectionFactory` — the dial side: opens a `NamedPipeClientStream` to a
   `NamedPipeEndPoint` (local or remote host) and returns a live `Connection`.
 - `NamedPipeEndPoint` — a name-addressed `EndPoint` (`ServerName` + `PipeName`), formatted as
@@ -28,8 +29,9 @@ Protocol semantics belong to the layers above; this driver only moves an ordered
 ## Dependencies
 
 - `Assimalign.Cohesion.Connections` — the contracts this driver implements (`Connection`,
-  `ConnectionListener`, `ConnectionFactory`) plus `ConnectionProtocol.NamedPipe` and the
-  shared diagnostics.
+  `ConnectionListener`, `ConnectionFactory`) plus `ConnectionProtocol.NamedPipe`. Diagnostics are
+  the driver's own internal event source, `Assimalign.Cohesion.Connections.NamedPipes` (see
+  DESIGN.md, "Diagnostics").
 - `Assimalign.Cohesion.Core`.
 - `System.IO.Pipes` and `System.IO.Pipelines` from the shared framework. No third-party
   packages, no reflection. Windows ACL support is isolated behind

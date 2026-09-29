@@ -1,7 +1,9 @@
 using System;
 using System.Globalization;
 
-namespace Assimalign.Cohesion.Web.Routing.Policies;
+using Assimalign.Cohesion.Web.Routing.Policies;
+
+namespace Assimalign.Cohesion.Web.Routing.Internal;
 
 /// <summary>
 /// Validates that a route value is an integer greater than or equal to an inclusive minimum

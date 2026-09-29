@@ -1,5 +1,7 @@
+using System;
 using System.IO;
 using System.IO.Compression;
+using System.Net.Http;
 
 namespace Assimalign.IO.Mkv.Tests
 {
@@ -53,7 +55,8 @@ namespace Assimalign.IO.Mkv.Tests
 
 
 
-        [Fact]
+        [Fact(DisplayName = "Cohesion Test [Content.Mkv] - Read the Matroska archive fixture",
+            Skip = "requires a local media fixture: the Matroska matroska_test_w1_1.zip test-file archive")]
         public void Test1()
         {
             Download();

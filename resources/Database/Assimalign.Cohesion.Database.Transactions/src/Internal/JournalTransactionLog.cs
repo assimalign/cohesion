@@ -1,7 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Transactions;
+namespace Assimalign.Cohesion.Database.Transactions.Internal;
 
 using Assimalign.Cohesion.Database.Storage;
 

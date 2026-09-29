@@ -1,28 +1,31 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionValueType 
-			Include="ValueTypes\ResourceName.cs" 
+			Include="ValueObjects\ResourceName.cs" 
 			ObjectRuntimeType="String" 
 			ObjectNamespace="Assimalign.Cohesion.ApplicationModel" 
 			ObjectAccessModifier="public" 
 			ObjectHasImplicitOperators="true" />
 		<CohesionValueType
-			Include="ValueTypes\ResourceId.cs"
+			Include="ValueObjects\ResourceId.cs"
 			ObjectRuntimeType="Guid"
 			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
 		<CohesionValueType
-			Include="ValueTypes\ApplicationName.cs"
+			Include="ValueObjects\ApplicationName.cs"
 			ObjectRuntimeType="String"
 			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
 			ObjectAccessModifier="public"
 			ObjectHasImplicitOperators="true" />
 		<CohesionValueType
-			Include="ValueTypes\EnvironmentName.cs"
+			Include="ValueObjects\EnvironmentName.cs"
 			ObjectRuntimeType="String"
 			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
 			ObjectAccessModifier="public"

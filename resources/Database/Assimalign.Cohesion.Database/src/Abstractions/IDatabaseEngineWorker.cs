@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Database;
 
@@ -11,11 +12,9 @@ namespace Assimalign.Cohesion.Database;
 /// <b>The engine owns the work and its scheduling.</b> Workers spawn when their
 /// engine is created and quiesce when it is disposed — an embedded consumer and a
 /// hosted server get identical durability behavior because nothing outside the
-/// engine participates in running these loops. This contract is deliberately
-/// observational: diagnostics, health surfaces, and tests can enumerate an engine's
-/// workers (<see cref="IDatabaseEngine.Workers"/>) and read their cadence, but the
-/// pump machinery lives on the guided base class
-/// (<see cref="DatabaseEngineWorker"/>) for the engine's internal use only.
+/// engine participates in running these loops. Diagnostics can enumerate workers
+/// and read their cadence. The engine alone calls <see cref="Run"/>; the guided
+/// <see cref="DatabaseEngineWorker"/> base supplies its usual trigger-and-pass loop.
 /// </remarks>
 public interface IDatabaseEngineWorker
 {
@@ -35,4 +34,8 @@ public interface IDatabaseEngineWorker
     /// between passes. Configured through the owning engine's options.
     /// </summary>
     TimeSpan Interval { get; }
+
+    /// <summary>Runs the worker pump on the owning engine's dedicated thread until cancellation.</summary>
+    /// <param name="cancellationToken">Signaled when the engine quiesces its workers.</param>
+    void Run(CancellationToken cancellationToken);
 }

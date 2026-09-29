@@ -1,0 +1,28 @@
+<Solution>
+	<Configurations>
+		<Platform Name="Any CPU" />
+		<Platform Name="x64" />
+		<Platform Name="x86" />
+	</Configurations>
+	<Folder Name="/Assimalign.Cohesion.Connections/" />
+	<Folder Name="/Assimalign.Cohesion.Connections/docs/">
+		<File Path="docs/DESIGN.md" />
+		<File Path="docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Connections/shared/">
+		<File Path="shared/DuplexPipePair.cs" />
+		<File Path="shared/PipeOptionsContext.cs" />
+		<File Path="shared/PipeOptionsFactory.cs" />
+		<File Path="shared/StreamPipeOptionsContext.cs" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Connections/src/">
+		<Project Path="src/Assimalign.Cohesion.Connections.csproj" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Connections/tests/">
+		<Project Path="tests/Assimalign.Cohesion.Connections.Tests.csproj" />
+	</Folder>
+	<Folder Name="/Assimalign.Cohesion.Connections/refs/" >
+		<Project Path="../../Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../Assimalign.Cohesion.Connections.InMemory/src/Assimalign.Cohesion.Connections.InMemory.csproj" />
+	</Folder>
+</Solution>

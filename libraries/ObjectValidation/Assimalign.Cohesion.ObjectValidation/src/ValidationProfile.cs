@@ -10,28 +10,28 @@ using Assimalign.Cohesion.ObjectValidation.Internal;
 /// <typeparam name="T"></typeparam>
 public abstract class ValidationProfile<T> : IValidationProfile<T>
 {
-    private readonly Type validationType;
-    private readonly IValidationItemQueue validationItems;
+    private readonly Type _validationType;
+    private readonly IValidationItemQueue _validationItems;
 
     /// <summary>
     /// 
     /// </summary>
     public ValidationProfile()
     {
-        this.validationType = typeof(T);
-        this.validationItems = new ValidationItemQueue();
+        this._validationType = typeof(T);
+        this._validationItems = new ValidationItemQueue();
     }
 
     /// <summary>
     /// A collection validation rules to apply to the instance of <typeparamref name="T"/>
     /// for a given context.
     /// </summary>
-    public IValidationItemQueue ValidationItems => this.validationItems;
+    public IValidationItemQueue ValidationItems => this._validationItems;
 
     /// <summary>
     /// The type of <typeparamref name="T"/> being validated.
     /// </summary>
-    public Type ValidationType => this.validationType;
+    public Type ValidationType => this._validationType;
 
     /// <summary>
     /// 
@@ -57,27 +57,27 @@ public abstract class ValidationProfile<T> : IValidationProfile<T>
 /// </summary>
 public abstract class ValidationProfile : IValidationProfile
 {
-    private readonly Type validationType;
-    private readonly IValidationItemQueue validationItems;
+    private readonly Type _validationType;
+    private readonly IValidationItemQueue _validationItems;
 
     /// <summary>
     /// 
     /// </summary>
     public ValidationProfile(Type type)
     {
-        this.validationType = type;
-        this.validationItems = new ValidationItemQueue();
+        this._validationType = type;
+        this._validationItems = new ValidationItemQueue();
     }
 
     /// <summary>
     /// 
     /// </summary>
-    public Type ValidationType => this.validationType;
+    public Type ValidationType => this._validationType;
 
     /// <summary>
     /// 
     /// </summary>
-    public IValidationItemQueue ValidationItems => this.validationItems;
+    public IValidationItemQueue ValidationItems => this._validationItems;
 
     /// <summary>
     /// 

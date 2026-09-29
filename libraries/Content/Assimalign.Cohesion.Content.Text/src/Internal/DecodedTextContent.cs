@@ -4,7 +4,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Content.Text;
+namespace Assimalign.Cohesion.Content.Text.Internal;
 
 /// <summary>
 /// Text content decoding an underlying <see cref="IContent"/> through a known encoding, skipping a

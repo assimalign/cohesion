@@ -1,9 +1,9 @@
 namespace Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
-/// How a storage transaction's commit reaches stable storage. In both modes a commit
-/// is acknowledged only after its journal records are durable — the modes differ in
-/// <em>who</em> performs the durable flush, never in the guarantee.
+/// How a storage transaction's commit reaches stable storage. Durable modes wait
+/// for their journal records to become durable; non-durable storage makes no such
+/// guarantee. All modes append the same commit records and preserve visibility.
 /// </summary>
 public enum StorageCommitDurability : byte
 {
@@ -20,5 +20,12 @@ public enum StorageCommitDurability : byte
     /// commit whose window lapses without a worker flush performs the flush inline
     /// itself — durability is never weakened, only batched.
     /// </summary>
-    Grouped,
+    Grouped = 1,
+
+    /// <summary>
+    /// Commits do not flush to durable storage because the backing store cannot
+    /// provide it. Commit records, transaction visibility, and rollback semantics
+    /// are unchanged, but no persistence across a crash is promised.
+    /// </summary>
+    None = 2,
 }

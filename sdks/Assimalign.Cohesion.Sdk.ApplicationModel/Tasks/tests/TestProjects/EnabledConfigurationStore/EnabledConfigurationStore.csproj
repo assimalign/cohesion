@@ -1,0 +1,8 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.ConfigurationStore">
+  <PropertyGroup>
+    <RootNamespace>EnabledConfigurationStore</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>inventory</CohesionApplication>
+    <CohesionResourceName>inventory-configuration</CohesionResourceName>
+  </PropertyGroup>
+</Project>

@@ -1,5 +1,8 @@
 using System;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using Assimalign.Cohesion.FileSystem;
 
 namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
@@ -14,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 /// transaction resolves. In the default mode only <see cref="Flush"/> makes prior
 /// writes durable, which models losing journal appends that were never fsynced.
 /// </remarks>
-public sealed class CrashSimulationStream : Stream
+public sealed class CrashSimulationStream : IFileSystemFileHandle
 {
     private readonly MemoryStream _live = new();
     private readonly bool _writeThrough;
@@ -61,39 +64,36 @@ public sealed class CrashSimulationStream : Stream
     public byte[] CaptureLive() => _live.ToArray();
 
     /// <inheritdoc />
-    public override bool CanRead => true;
+    public bool SupportsDurableFlush => true;
 
     /// <inheritdoc />
-    public override bool CanSeek => true;
+    public long Length => _live.Length;
 
     /// <inheritdoc />
-    public override bool CanWrite => true;
-
-    /// <inheritdoc />
-    public override long Length => _live.Length;
-
-    /// <inheritdoc />
-    public override long Position
+    public void Flush(bool durable = false)
     {
-        get => _live.Position;
-        set => _live.Position = value;
-    }
-
-    /// <inheritdoc />
-    public override void Flush()
-    {
+        // Preserve the fixture's flush-gated persistence, including ordinary
+        // flushes. Durable requests now have an explicit, simulated contract.
         FlushCount++;
         _durable = _live.ToArray();
     }
 
     /// <inheritdoc />
-    public override int Read(byte[] buffer, int offset, int count) => _live.Read(buffer, offset, count);
+    public int Read(Span<byte> buffer, long offset)
+    {
+        _live.Position = offset;
+        return _live.Read(buffer);
+    }
 
     /// <inheritdoc />
-    public override long Seek(long offset, SeekOrigin origin) => _live.Seek(offset, origin);
+    public ValueTask<int> ReadAsync(Memory<byte> buffer, long offset, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<int>(Read(buffer.Span, offset));
+    }
 
     /// <inheritdoc />
-    public override void SetLength(long value)
+    public void SetLength(long value)
     {
         _live.SetLength(value);
 
@@ -104,13 +104,36 @@ public sealed class CrashSimulationStream : Stream
     }
 
     /// <inheritdoc />
-    public override void Write(byte[] buffer, int offset, int count)
+    public void Write(ReadOnlySpan<byte> buffer, long offset)
     {
-        _live.Write(buffer, offset, count);
+        _live.Position = offset;
+        _live.Write(buffer);
 
         if (_writeThrough)
         {
             _durable = _live.ToArray();
         }
     }
+
+    /// <inheritdoc />
+    public ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, long offset, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Write(buffer.Span, offset);
+        return default;
+    }
+
+    /// <inheritdoc />
+    public ValueTask FlushAsync(bool durable, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Flush(durable);
+        return default;
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => _live.Dispose();
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync() => _live.DisposeAsync();
 }

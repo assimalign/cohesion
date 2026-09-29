@@ -216,7 +216,7 @@ public class IniConfigurationParserTests
     }
 
     // The parser is internal to the production assembly. Reach it via reflection so
-    // these tests stay grammar-focused without needing an InternalsVisibleTo hook.
+    // these tests stay grammar-focused without needing a friend-assembly grant.
     // Trim warnings (IL2026/IL2075) are intentional: this is test-only reflection
     // and we never trim the test assembly.
     [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(
@@ -230,7 +230,7 @@ public class IniConfigurationParserTests
     private static async Task IniConfigurationParser_ParseAsync(Stream stream, IDictionary<Path, string?> entries)
     {
         Assembly asm = typeof(ConfigurationIniProvider).Assembly;
-        Type parser = asm.GetType("Assimalign.Cohesion.Configuration.Ini.IniConfigurationParser")
+        Type parser = asm.GetType("Assimalign.Cohesion.Configuration.Ini.Internal.IniConfigurationParser")
             ?? throw new InvalidOperationException("IniConfigurationParser type not found in production assembly.");
         MethodInfo method = parser.GetMethod("ParseAsync", BindingFlags.Public | BindingFlags.Static)
             ?? throw new InvalidOperationException("IniConfigurationParser.ParseAsync(Stream, IDictionary, CancellationToken) not found.");

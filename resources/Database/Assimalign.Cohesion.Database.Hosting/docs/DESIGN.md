@@ -1,185 +1,59 @@
 # Assimalign.Cohesion.Database.Hosting — Design
 
-## Design intent
+## Composition
 
-`DatabaseApplication` is the standalone host for the database resource. Per the
-Cohesion hosting model, each resource type runs as its own `Host<TContext>`
-subclass owning its own lifecycle in its own process; this project is that hosting
-shell — and, since the 2026-07-13 redesign, it is **composition-only in the
-strictest sense**: it wraps composed `IDatabaseServer` instances generically as
-endpoint host services, runs any additional services the composition root adds,
-and implements the root's application-builder seam. It owns no server machinery
-(servers are per-model, implemented inside the model packages — the SQL model's
-`SqlDatabaseServer` lives in `Database.Sql`), no engine lifecycle
-(engines are data machines — operational from creation, disposed by their
-composition root), and no worker scheduling (engines own their loops
-unconditionally). Its references shrank accordingly: the area root plus the
-non-area `Hosting` foundation — nothing else, not even `Connections`.
+Phase 29 implements the owner-approved [Database hosting design](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md), including its nested-engine corrections. The public path is `DatabaseApplication.CreateBuilder(args)` → Add intent → one-shot `Build()` → engine access / `RunAsync()`. There is no composition `Use` method or application-builder `AddServer`.
 
-## Execution model
+The root builder accepts borrowed engines and dependency-free engine factories receiving the application context. Model packages supply `AddSql`, `AddDocuments`, `AddGraph`, `AddKeyValue`, and `AddBlob` using `extension(IDatabaseApplicationBuilder)`. Their callbacks run at Build against a model engine builder; worker and server factories run after that engine exists. Hosting never references a model package, resolves model services, or binds model configuration. A concrete hosting overload, `AddEngine(name, factory)`, receives built `Configuration` and `Services` explicitly.
 
-Threading is a per-service decision made by static dispatch from the execution
-menu defined by `Assimalign.Cohesion.Hosting` (see
-`libraries/Hosting/Assimalign.Cohesion.Hosting/docs/DESIGN.md`):
+```mermaid
+flowchart LR
+    Runtime["Database.Hosting"] --> Root["Database"]
+    Runtime --> Host["Hosting"]
+    Runtime --> DI["DependencyInjection"]
+    Runtime --> Config["Configuration and providers"]
+    Runtime --> FS["FileSystem.Physical"]
+    Model["Database model packages"] --> Root
+```
 
-| Service | Menu member | Why |
-| --- | --- | --- |
-| `DatabaseServerHostService` (one per registered server) | `BackgroundService` (pool-scheduled) | an async accept loop belongs on the pool |
-| Composition-root services (`DatabaseApplicationOptions.Services`) | caller's choice | e.g. the Application executable's default-database provisioner |
+COHRES001–004 remain enforced. Existing private Web hosting/health references serve the pre-existing enabled-resource admin integration. Phase 29 adds no ApplicationModel surface, manifest, resource command, resource control plane, or orchestration behavior. The existing `ResourceRuntime.HostBuilt` hook remains in place so an installed `HostContext.Runner` still controls complete runs through `IHostRunner` / `IHostRun`.
 
-Registration order is the additional services first, then one endpoint service
-per registered server. A host starts services in registration order and stops
-them in reverse, so **the servers start last and drain first** — the unchanged
-ordering rule — and provisioning-style services complete before any endpoint
-accepts.
+## Build and configuration
 
-Everything that used to sit between those two rows is gone by design:
+Build consumes the builder before user code runs, even if construction fails. Registration methods and retained configuration/service facades reject late mutation. The facades reject independent Build/BuildAsync; the application is the sole owner of materialization. Legacy `Options` scalar settings and borrowed instance lists are copied at Build and cannot alter runtime registries later. The root builder has no live `Engines` property.
 
-- **No engine host services.** Engines have no `StartAsync`/`StopAsync` to
-  forward (the data-machine decision — root DESIGN.md). The composition root
-  creates engines before building the application and disposes them after
-  stopping it; durability rides engine disposal, not host stop.
-- **No worker slot services.** The engine spawns its own worker loops at
-  creation — the latency-critical WAL flusher and page write-back on dedicated
-  threads the engine itself owns (the Lane-H dedicated-thread guardrail is
-  satisfied inside the engine), checkpoint/maintenance on engine-owned timers —
-  and quiesces them on dispose. The host cannot schedule, claim, enable, or
-  disable them. See "Worker ownership" below for the reversal record.
+Construction order is optional `appsettings.json`, optional `appsettings.{Environment}.json`, environment variables prefixed `COHESION_CONFIG__`, copied command-line arguments, then explicitly registered configuration providers; later values win. Paths resolve against `Options.ContentRootPath`, defaulting to `AppContext.BaseDirectory`. Environment uses the existing Hosting default; `Local` remains `Local`. JSON reload is disabled. The default physical file system is allocated only at Build and disposed after configuration.
 
-## Worker ownership — engine-owned, always (the claim handshake is gone)
+One Cohesion service provider is built with `EnableDynamicCode = false`, `ValidateScopes = true`, and `ValidateOnBuild = true`. This selects the interpreted resolver on JIT and NativeAOT. Hosting permits closed factories and instances only, rejects implementation-type/open-generic activation, and reserves `IConfiguration` as a borrowed registration for the application's configuration. Model construction uses explicit assignments rather than reflection-based binding. Provider-owned services must not be returned from application factories; doing so would create two owners.
 
-The #902 delivery (2026-07-12) let a host *claim* engine workers before engine
-start and drive them on its own execution menu (`TryClaim`/`Release`, per-kind
-slot options, four named slot services). The 2026-07-13 redesign **deleted that
-model**: `IDatabaseEngineWorker` is now observational (name, kind, cadence), the
-pump lives on the guided base for the engine's internal use, and the engine is
-the one and only scheduler of its loops, from creation to disposal.
+Root engine factories observe preceding engine registrations. They cannot depend on later registrations. This follows the approved context-taking factory correction; names from arbitrary factories can only be validated when the factory returns. Concrete named factories reserve names at Add and must return an exact ordinal name match. Names are nonempty, case-sensitive, and unique across models. `Context.GetEngine(name)` returns a borrowed reference.
 
-Why the reversal: R10 (engine self-sufficiency) already forced the worker
-*bodies* and their default scheduling into the engine — the claim handshake only
-added a second possible owner for the *pump*, and with it a two-owner protocol
-whose failure modes (claim races between host composition and engine start,
-disabled slots silently handing loops back, half-claimed inventories across
-restarts) each needed rules, tests, and documentation. No composition ever needed
-a different scheduler than the engine's own — the host's dedicated-thread slots
-were re-implementing exactly the threads the engine spawns for itself. One owner
-means a worker can never run twice, with no handshake to verify. The execution
-menu still matters — for the services this module *does* compose (endpoint on the
-pool) — but engine durability threading is the engine's internal affair.
+## Nested servers and ownership
 
-What survives for hosts: observability. `IDatabaseEngine.Workers` (name, kind,
-interval) and the engine's observational `State` (`Running`/`Faulted`/`Disposed`)
-are the surface a health endpoint (#168) reads; a worker fault flips the engine
-to `Faulted` without stopping service (durability self-help holds — see the Sql
-DESIGN.md).
+Application Build flattens each engine's `Servers` snapshot in engine/attachment order. Engines own these servers and dispose them before workers and databases. The application drives their Start/Stop through `DatabaseServerHostService` but never enrolls them for a second disposal. A server must front its owning engine. Legacy `Options.Servers` remains a borrowed input path; its referenced engines are implicitly borrowed and included in the runtime registry. Duplicate lifecycle references and conflicting engine names fail Build.
 
-## Why-this-not-that
+| Input | Disposal owner |
+| --- | --- |
+| `AddEngine(instance)` / `Options.Engines` | Caller |
+| Root or hosting `AddEngine(factory)` / model Add verb | Application after Build; builder on failed Build |
+| Model builder worker/server factory | Engine |
+| `Options.Servers` | Caller; application drives start/stop only |
+| `AddService(instance)` / `Options.Services` | Caller |
+| `AddService(factory)` | Application if disposable |
+| Provider-created service | Provider |
+| Provider instance registration | Caller |
+| Configuration and default configuration file system | Application |
 
-### The server machinery moved out — servers are per-model (2026-07-13, settled 2026-07-14)
+A factory transfers a fresh product, and cleans up partial allocations if it throws before returning. Detectable borrowed/owned aliases are rejected before re-enrollment. Fresh invalid products are enrolled before validation so rollback disposes them. Build compensation attempts owned services, engines (including their servers), provider, configuration, and file system in reverse dependency order. Synchronous Build bridges asynchronous cleanup on a worker without capturing the caller's synchronization context. Original construction exceptions are preserved; cleanup failures produce an aggregate with the original first. Files created by a factory are never silently deleted.
 
-The wire-protocol server was folded INTO this module on 2026-07-12 (mirroring
-`Web.Server`→`Web.Hosting`). The 2026-07-13 redesign **half-unwound that fold**:
-the approved architecture makes servers per-model (`SqlDatabaseServer` fronting
-one `SqlDatabaseEngine`), and COHRES001 makes this module unreferenceable by
-area libraries — so server machinery living here is unreachable by exactly the
-packages that need it. The machinery's placement then settled through evidence
-discipline (area DESIGN decision log): a shared `Database.Server` base above
-the root (2026-07-13) → judged premature abstraction from n=1 and folded into
-`Database.Sql` (2026-07-14) → the second model server fired the recorded
-extraction trigger and the proven core was extracted back out → **the owner
-reviewed the extraction evidence and chose per-model duplication (2026-07-14,
-the settled placement)**: the shared library was removed and each model package
-carries its own full copy of the machinery (the preserved evidence table lives
-in the area DESIGN §3.10). The root's `IDatabaseServer` contract is the only
-area-wide server requirement. What the 2026-07-12 fold got right is retained
-here: composing servers into a host process is this module's job — it wraps any
-`IDatabaseServer` in `DatabaseServerHostService`, registered last. This module
-references **no model package**: it composes through the root's
-`IDatabaseServer` seam alone, which is what keeps it transport-free (no
-`Connections` reference).
+## Runtime lifetime
 
-### One host service shape per server, plural servers
+Additional services start in registration order, then servers; shutdown drains servers first and stops services in reverse. Compiled-schema `Provision` / `AddDatabase` uses the existing provisioner and runs before listener accept. Named overloads resolve deferred engines at Build. Instance overloads require the engine to belong to the composition.
 
-`IDatabaseApplicationContext.Servers` is plural — one server per model the
-application serves. Each registered server is wrapped in its own
-`DatabaseServerHostService`; they start in registration order and drain in
-reverse. The earlier singular `DatabaseApplicationOptions.Server` shape (one
-endpoint per application, enforced by an `AddServer`-throws-on-second rule)
-was superseded by the per-model server decision — plurality is structural now.
+`DatabaseApplication` remains `Host<DatabaseApplicationContext>` and its context remains `HostContext` / `IHealthContributor`. `Run`, `RunAsync`, and `AsService` use the Hosting extensions. Embedded applications can use engines immediately after Build, or Run to wait for host shutdown without a listener.
 
-### The host drives servers, not engines
+The application permits one start lifecycle. Repeated Start while started is a host no-op; restart after Stop or a failed start is rejected through the protected start hook, including interface/Run paths. Stop before first Start does not consume the attempt. Concurrent Start/Stop/Dispose is unsupported; concurrent Dispose calls alone share one cleanup task. Dispose is idempotent, stops if needed, and attempts all application-owned roots after failures. Provider/configuration outlive products that depend on them. Sessions remain caller-owned and must finish before application disposal. Borrowed SQL/KeyValue servers may terminally close their listeners during Stop despite remaining caller-owned for disposal.
 
-The pre-redesign application registered a per-engine lifecycle service first so
-engines started before everything and stopped last. With engines as data
-machines there is nothing to drive: an engine registered on the application
-(`DatabaseApplicationOptions.Engines`) is an **observational** entry on the
-context — the composition root that created it owns it. Durability-on-shutdown
-moved from "host stops engines last" to "composition root disposes engines after
-the host stops," which the Application executable's composition object does in
-dependency order (application → server → listener → engine).
+Health observes distinct engines, states and workers from the frozen runtime registry. Existing enabled-resource admin endpoints, telemetry order and health aggregation remain compatible; this phase does not extend those systems.
 
-## Configuration conventions
-
-`DatabaseHostConfiguration.FromEnvironment()` binds the environment-variable
-conventions a gateway injects when it launches the host —
-`COHESION_DATABASE_DATA_PATH`, `COHESION_DATABASE_ENDPOINT_PORT`,
-`COHESION_DATABASE_DURABILITY`. Binding lives here because the hosting module is
-the area's one Configuration seam; the bound values shape how the composition
-root builds the engine (data path, durability) and the listener (port). The
-`Database.ApplicationModel` resource sets the same variable names on its realized
-process, so the manifest side and the host side agree by convention (the two
-projects share no assembly).
-
-## The builder-first composition surface
-
-`DatabaseApplication.CreateBuilder()` is the composition entry point, following
-the `WebApplication.CreateBuilder()` idiom. The split of responsibilities:
-
-- **The root's `IDatabaseApplicationBuilder`** carries what model packages need:
-  engine registration (`AddEngine` — server-less, embedded registrations) and
-  server registration (`AddServer` — an instance, or a factory deferred to
-  `Build` that receives the **application context**, mirroring the Web area's
-  context-receiving factory). Model verbs like `Database.Sql`'s
-  `AddSqlDatabase(...)` / `AddSqlServer(...)` compose against this seam only, so
-  a model registers itself **without knowing the hosting layer** — registration
-  is dependency-free (values and options objects; no container).
-- **This module's `DatabaseApplicationBuilder`** implements the seam over a
-  `DatabaseApplicationOptions` instance and exposes it (`builder.Options`) for
-  the hosting-only surface the root interface deliberately omits: additional
-  host services. Deferred server factories resolve at `Build()` in registration
-  order against the live context (instance registrations are wrapped as trivial
-  factories, so ordering is registration-faithful across both overloads); the
-  context wraps the live option lists, so a factory observes every registration
-  made before it — engines *and* earlier servers. `Build()` returns the concrete
-  `DatabaseApplication` (the guided richer signature; the interface member
-  forwards), which implements the root's `IDatabaseApplication` — `Context` +
-  start/stop, the Web shape.
-- Direct construction (`new DatabaseApplication(options)`) remains supported for
-  fully manual hosts; the builder is sugar over the same options object, never a
-  second composition model.
-
-The `Database.Application` executable is the proof-of-pattern consumer: its
-bootstrap registers the SQL engine through `AddSqlDatabase`, fronts it with
-`AddSqlServer` over the TCP listener, and parks the default-database provisioner
-on `builder.Options.Services`.
-
-## Status and non-goals
-
-- No DI-container surface on the builder — registration stays values/options
-  only, per the area composition rules (`*.Hosting` remains the DI seam for
-  everything else).
-- No governance/quotas (#167) or health/readiness (#168) surfaces yet — separate
-  features (the health surface will read the engines' and servers' observational
-  contexts; see the area DESIGN.md next-iteration scoping).
-- No server machinery — servers are per-model and live inside the model
-  packages (`SqlDatabaseServer` in `Database.Sql`); this module composes them
-  through the root's `IDatabaseServer` seam.
-- No HTTP admin surface — that is the root `Database` project's private-Web
-  concern, deliberately separate from the wire protocol path.
-- Direct references: the area root and the non-area `Hosting` foundation.
-  Nothing else — no `Connections`, no `CohesionHostingIsolationExemptions`.
-
-## AOT posture
-
-Static composition: the composition root hands the application its servers and
-engines; nothing is discovered at runtime. No reflection.
+The public static `CreateBuilder()` on each model engine provides deferred standalone composition and the bridge for hosting-aware engine factories that also need nested servers. It returns the model interface; its implementation remains internal. Configuration and service reads still occur in the hosting callback, outside the model package.

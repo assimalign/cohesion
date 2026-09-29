@@ -3,17 +3,17 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class MustNotContainValidationRule<TValue, TContains> : ValidationRuleBase<TValue>
     where TValue : IEnumerable, IEnumerable<TContains>
     where TContains : notnull, IEquatable<TContains>
 {
-    private readonly TContains contains;
+    private readonly TContains _contains;
 
     public MustNotContainValidationRule(TContains contains)
     {
-        this.contains = contains;
+        this._contains = contains;
     }
 
     public override string Name { get; set; }
@@ -43,7 +43,7 @@ internal sealed class MustNotContainValidationRule<TValue, TContains> : Validati
         {
             context = new ValidationContext<TValue>(value);
 
-            if (value.Contains(this.contains))
+            if (value.Contains(this._contains))
             {
                 context.AddFailure(this.Error);
             }

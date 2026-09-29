@@ -4,14 +4,16 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace Assimalign.Cohesion.Web.Routing.Policies;
+using Assimalign.Cohesion.Web.Routing.Policies;
+
+namespace Assimalign.Cohesion.Web.Routing.Internal;
 
 /// <summary>
 /// Validates a route parameter using a regular expression.
 /// </summary>
 internal sealed class RegexRouteParameterPolicy : RouteParameterPolicy
 {
-    private static readonly TimeSpan RegexMatchTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _regexMatchTimeout = TimeSpan.FromSeconds(10);
     private readonly Func<Regex>? _regexFactory;
     private Regex? _constraint;
 
@@ -41,7 +43,7 @@ internal sealed class RegexRouteParameterPolicy : RouteParameterPolicy
         _regexFactory = () => new Regex(
             regexPattern,
             RegexOptions.CultureInvariant | RegexOptions.Compiled | RegexOptions.IgnoreCase,
-            RegexMatchTimeout);
+            _regexMatchTimeout);
     }
 
     /// <summary>

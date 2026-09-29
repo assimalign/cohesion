@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// HTTP/3 SETTINGS parameter identifiers (RFC 9114 §7.2.4.1, RFC 9204 §5,

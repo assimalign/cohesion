@@ -1,0 +1,417 @@
+<Project>
+	<PropertyGroup>
+		<CohesionApplication Condition="'$(CohesionApplication)' == '' and '$(CohesionApplicationName)' != ''">$(CohesionApplicationName)</CohesionApplication>
+		<CohesionApplicationName Condition="'$(CohesionApplicationName)' == '' and '$(CohesionApplication)' != ''">$(CohesionApplication)</CohesionApplicationName>
+		<_CohesionResourceEnabled Condition="'$(CohesionApplicationModel)' == 'enabled'">true</_CohesionResourceEnabled>
+		<_CohesionGetManifestDependsOn Condition="'$(_CohesionResourceEnabled)' == 'true'">CohesionCreateResourceManifest</_CohesionGetManifestDependsOn>
+		<_CohesionOutputTypeLower>$([System.String]::Copy('$(OutputType)').ToLowerInvariant())</_CohesionOutputTypeLower>
+
+		<_CohesionResolvedResourceKind>$([System.String]::Copy('$(CohesionResourceKind)').Trim())</_CohesionResolvedResourceKind>
+		<_CohesionResourceNameSeed Condition="'$(CohesionResourceName)' == ''">$([System.Text.RegularExpressions.Regex]::Replace('$(MSBuildProjectName)', '^[^.]+\.', ''))</_CohesionResourceNameSeed>
+		<_CohesionResourceNameSeed Condition="'$(CohesionResourceName)' != ''">$([System.String]::Copy('$(CohesionResourceName)').Trim())</_CohesionResourceNameSeed>
+		<_CohesionResourceNameLower>$([System.String]::Copy('$(_CohesionResourceNameSeed)').ToLowerInvariant())</_CohesionResourceNameLower>
+		<_CohesionResourceNameSlug>$([System.Text.RegularExpressions.Regex]::Replace('$(_CohesionResourceNameLower)', '[^a-z0-9]+', '-'))</_CohesionResourceNameSlug>
+		<_CohesionResolvedResourceName Condition="'$(CohesionResourceName)' == ''">$([System.String]::Copy('$(_CohesionResourceNameSlug)').Trim('-'))</_CohesionResolvedResourceName>
+		<_CohesionResolvedResourceName Condition="'$(CohesionResourceName)' != ''">$(_CohesionResourceNameSeed)</_CohesionResolvedResourceName>
+
+		<_CohesionProjectNameHasTwoSegments>$([System.Text.RegularExpressions.Regex]::IsMatch('$(MSBuildProjectName)', '^[^.]+\.[^.]+$'))</_CohesionProjectNameHasTwoSegments>
+		<_CohesionProjectNameHasThreeOrMoreSegments>$([System.Text.RegularExpressions.Regex]::IsMatch('$(MSBuildProjectName)', '^[^.]+\.[^.]+\..+$'))</_CohesionProjectNameHasThreeOrMoreSegments>
+		<_CohesionApplicationSeed Condition="'$(CohesionApplication)' != ''">$([System.String]::Copy('$(CohesionApplication)').Trim())</_CohesionApplicationSeed>
+		<_CohesionApplicationSeed Condition="'$(CohesionApplication)' == '' and '$(_CohesionProjectNameHasTwoSegments)' == 'True'">$([System.Text.RegularExpressions.Regex]::Replace('$(MSBuildProjectName)', '^([^.]+)\.[^.]+$', '$1'))</_CohesionApplicationSeed>
+		<_CohesionApplicationSeed Condition="'$(CohesionApplication)' == '' and '$(_CohesionProjectNameHasThreeOrMoreSegments)' == 'True'">$([System.Text.RegularExpressions.Regex]::Replace('$(MSBuildProjectName)', '^[^.]+\.([^.]+)\..+$', '$1'))</_CohesionApplicationSeed>
+		<_CohesionApplicationSeed Condition="'$(_CohesionApplicationSeed)' == ''">$(MSBuildProjectName)</_CohesionApplicationSeed>
+		<_CohesionApplicationLower>$([System.String]::Copy('$(_CohesionApplicationSeed)').ToLowerInvariant())</_CohesionApplicationLower>
+		<_CohesionApplicationSlug>$([System.Text.RegularExpressions.Regex]::Replace('$(_CohesionApplicationLower)', '[^a-z0-9]+', '-'))</_CohesionApplicationSlug>
+		<_CohesionResolvedApplicationName>$([System.String]::Copy('$(_CohesionApplicationSlug)').Trim('-'))</_CohesionResolvedApplicationName>
+
+		<_CohesionPackManifest Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(_CohesionRuntimePack)' != 'true'">true</_CohesionPackManifest>
+		<CohesionManifestPackageId Condition="'$(CohesionManifestPackageId)' == ''">$(AssemblyName).Manifest</CohesionManifestPackageId>
+		<PackageId Condition="'$(_CohesionPackManifest)' == 'true'">$(CohesionManifestPackageId)</PackageId>
+		<PackageType Condition="'$(_CohesionPackManifest)' == 'true'">CohesionResourceManifest</PackageType>
+		<PackageReadmeFile Condition="'$(_CohesionPackManifest)' == 'true'">README.md</PackageReadmeFile>
+		<IncludeBuildOutput Condition="'$(_CohesionPackManifest)' == 'true'">false</IncludeBuildOutput>
+		<SuppressDependenciesWhenPacking Condition="'$(_CohesionPackManifest)' == 'true'">true</SuppressDependenciesWhenPacking>
+		<TargetsForTfmSpecificContentInPackage Condition="'$(_CohesionPackManifest)' == 'true'">$(TargetsForTfmSpecificContentInPackage);CohesionPackManifest</TargetsForTfmSpecificContentInPackage>
+	</PropertyGroup>
+
+	<!--
+		An enabled resource executable is its composition root, so it receives the
+		area's ApplicationModel package. Repository builds keep the dependency as a
+		name-only CohesionProjectReference; packaged consumers receive the matching
+		CohesionPackageReference at the SDK's frozen CohesionVersion. The base SDK's
+		shared reference converter projects these canonical items after this target
+		has evaluated.
+	-->
+	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(CohesionResourceApplicationModel)' != '' and '$(CohesionSkipResourceApplicationModelReference)' != 'true'">
+		<_CohesionResourceApplicationModelProject
+			Include="$(CohesionRepositoryDirectory)resources\**\src\$(CohesionResourceApplicationModel).csproj"
+			Condition="'$(CohesionRepositoryDirectory)' != ''" />
+
+		<CohesionProjectReference
+			Include="$(CohesionResourceApplicationModel)"
+			Condition="'@(_CohesionResourceApplicationModelProject)' != ''">
+			<ProjectPath>@(_CohesionResourceApplicationModelProject)</ProjectPath>
+			<CohesionSdkApplicationModel>true</CohesionSdkApplicationModel>
+		</CohesionProjectReference>
+
+		<CohesionPackageReference
+			Include="$(CohesionResourceApplicationModel)"
+			Version="$(CohesionVersion)"
+			Condition="'@(_CohesionResourceApplicationModelProject)' == ''">
+			<CohesionSdkApplicationModel>true</CohesionSdkApplicationModel>
+		</CohesionPackageReference>
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(_CohesionPackManifest)' == 'true'">
+		<FrameworkReference Update="Assimalign.Cohesion.App*" PrivateAssets="all" />
+	</ItemGroup>
+
+	<Target Name="CohesionValidateApplicationModel" BeforeTargets="PrepareForBuild;CoreCompile">
+		<Error
+			Condition="'$(CohesionApplicationModel)' != 'disabled' and '$(CohesionApplicationModel)' != 'enabled'"
+			Text="CohesionApplicationModel must be 'disabled' or 'enabled'." />
+		<Error
+			Condition="'$(CohesionApplicationModel)' == 'enabled' and '$(_CohesionOutputTypeLower)' != 'exe'"
+			Code="COHSDK008"
+			File="$(MSBuildProjectFullPath)"
+			Text="$(MSBuildProjectName) has CohesionApplicationModel enabled but OutputType is '$(OutputType)'; set OutputType to 'Exe'." />
+	</Target>
+
+	<ItemGroup Condition="'$(_CohesionResourceEnabled)' == 'true'">
+		<_CohesionResourceProjectReference Include="@(CohesionResourceReference->WithMetadataValue('Extension', '.csproj'))" />
+		<_CohesionResourcePackageReference Include="@(CohesionResourceReference)" Exclude="@(_CohesionResourceProjectReference)" />
+		<ProjectReference
+			Include="@(_CohesionResourceProjectReference)"
+			ReferenceOutputAssembly="false"
+			Private="false"
+			OutputItemType="CohesionResourceManifest"
+			Condition="'$(CohesionResourceReferencesAreRuntime)' != 'true'" />
+		<!--
+			Keep the build-order and compile edge real, but let Sdk.Gateway's
+			manifest-selected closure own runtime asset flow.
+		-->
+		<ProjectReference
+			Include="@(_CohesionResourceProjectReference)"
+			ReferenceOutputAssembly="true"
+			Private="false"
+			PrivateAssets="all"
+			ExcludeAssets="all"
+			Condition="'$(CohesionResourceReferencesAreRuntime)' == 'true'" />
+		<PackageReference
+			Include="@(_CohesionResourcePackageReference)"
+			PrivateAssets="all" />
+
+		<!--
+			The generated sources and the embedded manifest are build outputs, so their items are
+			added by the targets that produce them (CohesionCreateResourceManifest and
+			CohesionAddResourceManifestItems), the way Microsoft.NET.Sdk adds its generated
+			AssemblyInfo. Nothing under the intermediate directory is a project item at
+			evaluation time, so Visual Studio never shows an obj folder for them.
+		-->
+		<ContainerLabel Include="org.cohesion.manifest" Value="cohesion/resource.json" />
+	</ItemGroup>
+
+	<Target
+		Name="CohesionResolveResourceReferences"
+		AfterTargets="ResolveProjectReferences"
+		Condition="'$(_CohesionResourceEnabled)' == 'true'">
+		<MSBuild
+			Projects="@(_CohesionResourceProjectReference)"
+			Targets="_CohesionGetApplicationModelState"
+			BuildInParallel="$(BuildInParallel)"
+			Condition="'@(_CohesionResourceProjectReference)' != ''">
+			<Output TaskParameter="TargetOutputs" ItemName="_CohesionReferencedApplicationModelState" />
+		</MSBuild>
+		<MSBuild
+			Projects="@(_CohesionReferencedApplicationModelState->WithMetadataValue('ApplicationModel', 'enabled'))"
+			Targets="CohesionGetManifest"
+			BuildInParallel="$(BuildInParallel)"
+			SkipNonexistentTargets="true"
+			Condition="'@(_CohesionReferencedApplicationModelState->WithMetadataValue('ApplicationModel', 'enabled'))' != ''">
+			<Output TaskParameter="TargetOutputs" ItemName="_CohesionReferencedManifest" />
+		</MSBuild>
+		<ItemGroup>
+			<_CohesionReferencedManifest Include="@(_CohesionReferencedApplicationModelState->WithMetadataValue('ApplicationModel', 'disabled'))" />
+		</ItemGroup>
+	</Target>
+
+	<!--
+		The manifest is embedded as a resource, so its item must exist before
+		AssignTargetPaths and the culture split that feed CoreCompile's resource inputs.
+		The file itself is produced by CohesionCreateResourceManifest before CoreCompile.
+	-->
+	<Target
+		Name="CohesionAddResourceManifestItems"
+		BeforeTargets="AssignTargetPaths"
+		Condition="'$(_CohesionResourceEnabled)' == 'true'">
+		<ItemGroup>
+			<EmbeddedResource Include="$(CohesionResourceManifestPath)" LogicalName="cohesion/resource.json" Visible="false" />
+		</ItemGroup>
+	</Target>
+
+	<!--
+		Runs before BeforeCompile so the generated sources are part of the compile
+		dependency cache, and in design-time builds so Visual Studio compiles them after a
+		clean. ResolveProjectReferences is deliberately not a dependency: manifests are
+		evaluated project facts, and after a Clean this target regenerates them without
+		building the referenced projects.
+	-->
+	<Target
+		Name="CohesionCreateResourceManifest"
+		BeforeTargets="PrepareResourceNames;BeforeCompile;CoreCompile"
+		DependsOnTargets="CohesionValidateApplicationModel;CohesionResolveResourceReferences"
+		Inputs="$(MSBuildProjectFullPath);$(MSBuildAllProjects);@(_CohesionReferencedManifest)"
+		Outputs="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath)"
+		Condition="'$(_CohesionResourceEnabled)' == 'true'">
+		<CohesionCreateResourceManifest
+			ManifestOutputPath="$(CohesionResourceManifestPath)"
+			ResourceSourceOutputPath="$(CohesionResourceSourcePath)"
+			ControlPlaneSourceOutputPath="$(CohesionResourceControlPlaneSourcePath)"
+			ProjectFullPath="$(MSBuildProjectFullPath)"
+			ProjectName="$(MSBuildProjectName)"
+			RootNamespace="$(RootNamespace)"
+			AssemblyName="$(AssemblyName)"
+			OutputType="$(OutputType)"
+			TargetPath="$(TargetPath)"
+			AppHostPath="$(TargetDir)$(TargetName)$(_NativeExecutableExtension)"
+			ResourceName="$(CohesionResourceName)"
+			ResourceKind="$(CohesionResourceKind)"
+			ApplicationName="$(CohesionApplication)"
+			ApplicationModelName="$(CohesionResourceApplicationModel)"
+			ControlPlaneType="$(CohesionResourceControlPlaneType)"
+			Composable="$(CohesionResourceComposable)"
+			ControlPlaneEndpoint="$(CohesionControlPlaneEndpoint)"
+			ControlPlanePath="$(CohesionControlPlanePath)"
+			WorkloadKind="$(CohesionWorkloadKind)"
+			Replicas="$(CohesionReplicas)"
+			MaxReplicas="$(CohesionMaxReplicas)"
+			StopGraceSeconds="$(CohesionStopGraceSeconds)"
+			RestartPolicy="$(CohesionRestartPolicy)"
+			Endpoints="@(CohesionEndpoint)"
+			Probes="@(CohesionProbe)"
+			Mounts="@(CohesionMount)"
+			Settings="@(CohesionSetting)"
+			Commands="@(CohesionCommand)"
+			ResourceReferences="@(CohesionResourceReference)"
+			ReferencedManifests="@(_CohesionReferencedManifest);@(CohesionResourceManifest)"
+			ResourceProperties="@(CohesionResourceProperty)">
+			<Output TaskParameter="ResolvedResourceName" PropertyName="_CohesionResolvedResourceName" />
+			<Output TaskParameter="ResolvedApplicationName" PropertyName="_CohesionResolvedApplicationName" />
+			<Output TaskParameter="ResolvedResourceKind" PropertyName="_CohesionResolvedResourceKind" />
+		</CohesionCreateResourceManifest>
+
+		<ItemGroup>
+			<Compile Include="$(CohesionResourceSourcePath)" />
+			<Compile Include="$(CohesionResourceControlPlaneSourcePath)" />
+			<FileWrites Include="$(CohesionResourceManifestPath);$(CohesionResourceSourcePath);$(CohesionResourceControlPlaneSourcePath)" />
+		</ItemGroup>
+	</Target>
+
+	<Target
+		Name="CohesionValidateManifestPackageImage"
+		Condition="'$(_CohesionPackManifest)' == 'true'">
+		<CohesionValidateImageManifest ImageManifestPath="$(CohesionImageManifestPath)">
+			<Output TaskParameter="HasDigestPinnedImage" PropertyName="_CohesionHasDigestPinnedImage" />
+		</CohesionValidateImageManifest>
+		<Warning
+			Condition="'$(_CohesionHasDigestPinnedImage)' != 'true' and '$(CohesionImageRequired)' != 'true'"
+			Code="COHSDK004"
+			File="$(MSBuildProjectFullPath)"
+			Text="$(MSBuildProjectName) is packing a Cohesion resource manifest without a digest-pinned image manifest at '$(CohesionImageManifestPath)'; the package will be manifest-only." />
+		<Error
+			Condition="'$(_CohesionHasDigestPinnedImage)' != 'true' and '$(CohesionImageRequired)' == 'true'"
+			Code="COHSDK004"
+			File="$(MSBuildProjectFullPath)"
+			Text="$(MSBuildProjectName) requires a digest-pinned image before packing because CohesionImageRequired=true; '$(CohesionImageManifestPath)' is missing or does not contain a valid SHA-256 digest." />
+	</Target>
+
+	<Target
+		Name="CohesionPackManifest"
+		DependsOnTargets="CohesionCreateResourceManifest;CohesionValidateManifestPackageImage"
+		Condition="'$(_CohesionPackManifest)' == 'true'">
+		<CohesionPrepareResourceManifestPackage
+			SourceManifestPath="$(CohesionResourceManifestPath)"
+			PackageManifestPath="$(CohesionPackResourceManifestPath)" />
+		<PropertyGroup>
+			<_CohesionPackImageArchivePath Condition="'$(CohesionPackImageArchive)' == 'true' and Exists('$(CohesionContainerArchiveOutputPath)')">$(CohesionContainerArchiveOutputPath)</_CohesionPackImageArchivePath>
+		</PropertyGroup>
+		<CohesionPrepareImagePackage SourcePath="$(CohesionImageManifestPath)" OutputPath="$(_CohesionPackImageManifestPath)"
+			ArchivePath="$(_CohesionPackImageArchivePath)" Condition="Exists('$(CohesionImageManifestPath)')" />
+
+		<ItemGroup>
+			<CohesionResourcePackAsset
+				Include="$(_CohesionPackImageManifestPath)"
+				PackagePath="cohesion/image.json"
+				Condition="Exists('$(CohesionImageManifestPath)')" />
+			<CohesionResourcePackAsset
+				Include="$(CohesionContainerArchiveOutputPath)"
+				PackagePath="cohesion/images/$([System.IO.Path]::GetFileName('$(CohesionContainerArchiveOutputPath)'))"
+				Condition="'$(CohesionPackImageArchive)' == 'true' and '$(CohesionContainerArchiveOutputPath)' != '' and Exists('$(CohesionContainerArchiveOutputPath)')" />
+			<TfmSpecificPackageFile Include="@(CohesionResourcePackAsset)" />
+			<TfmSpecificPackageFile Include="$(MSBuildThisFileDirectory)Assimalign.Cohesion.Sdk.ResourceManifest.props">
+				<PackagePath>buildTransitive/$(PackageId).props</PackagePath>
+			</TfmSpecificPackageFile>
+			<TfmSpecificPackageFile Include="$(MSBuildThisFileDirectory)RESOURCE_MANIFEST_README.md">
+				<PackagePath>README.md</PackagePath>
+			</TfmSpecificPackageFile>
+			<FileWrites Include="$(CohesionPackResourceManifestPath)" />
+		</ItemGroup>
+	</Target>
+
+	<Target
+		Name="CohesionPackRuntimePackage"
+		AfterTargets="Pack"
+		Condition="'$(_CohesionPackManifest)' == 'true' and '$(CohesionPackRuntime)' == 'true'">
+		<MSBuild
+			Projects="$(MSBuildProjectFullPath)"
+			Targets="Pack"
+			BuildInParallel="false"
+			Properties="_CohesionRuntimePack=true;CohesionPackRuntime=false;PackageId=$(AssemblyName);Configuration=$(Configuration);PackageOutputPath=$(PackageOutputPath)" />
+	</Target>
+
+	<Target
+		Name="CohesionGetManifest"
+		DependsOnTargets="CohesionValidateApplicationModel;$(_CohesionGetManifestDependsOn)"
+		Returns="@(_CohesionGetManifestResult)">
+		<ItemGroup>
+			<_CohesionGetManifestResult
+				Include="$(_CohesionResourceManifestFullPath)"
+				Condition="'$(_CohesionResourceEnabled)' == 'true'">
+				<ManifestPath>$(_CohesionResourceManifestFullPath)</ManifestPath>
+				<ApplicationModel>enabled</ApplicationModel>
+				<ProjectName>$(MSBuildProjectName)</ProjectName>
+				<ProjectFullPath>$(MSBuildProjectFullPath)</ProjectFullPath>
+				<RootNamespace>$(RootNamespace)</RootNamespace>
+				<TargetPath>$(TargetPath)</TargetPath>
+				<AppHostPath>$(TargetDir)$(TargetName)$(_NativeExecutableExtension)</AppHostPath>
+				<Application>$(_CohesionResolvedApplicationName)</Application>
+				<Resource>$(_CohesionResolvedResourceName)</Resource>
+				<Kind>$(_CohesionResolvedResourceKind)</Kind>
+				<IsSelf>true</IsSelf>
+			</_CohesionGetManifestResult>
+			<_CohesionGetManifestResult
+				Include="$(MSBuildProjectFullPath)"
+				Condition="'$(_CohesionResourceEnabled)' != 'true'">
+				<ApplicationModel>disabled</ApplicationModel>
+				<ProjectName>$(MSBuildProjectName)</ProjectName>
+				<ProjectFullPath>$(MSBuildProjectFullPath)</ProjectFullPath>
+				<IsSelf>true</IsSelf>
+			</_CohesionGetManifestResult>
+			<_CohesionGetManifestResult
+				Include="@(_CohesionReferencedManifest)"
+				Condition="'$(_CohesionResourceEnabled)' == 'true'">
+				<IsSelf>false</IsSelf>
+			</_CohesionGetManifestResult>
+		</ItemGroup>
+	</Target>
+
+	<!--
+		Returns only this resource's declared copy-to-output/publish content, remapped
+		beneath its stable in-process content root. The Gateway SDK calls this target
+		on the enabled, composable project closure and disables normal child-content copy.
+	-->
+	<Target
+		Name="CohesionGetInProcessContentItems"
+		DependsOnTargets="CohesionCreateResourceManifest;AssignTargetPaths;DefaultCopyToPublishDirectoryMetadata"
+		Returns="@(_CohesionInProcessContentResult)"
+		Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(CohesionResourceComposable)' == 'true'">
+		<PropertyGroup>
+			<_CohesionIntermediateAppHostFullPath Condition="'$(AppHostIntermediatePath)' != ''">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(AppHostIntermediatePath)'))</_CohesionIntermediateAppHostFullPath>
+		</PropertyGroup>
+		<ItemGroup>
+			<_CohesionInProcessContentCandidate
+				Include="@(ContentWithTargetPath)"
+				Condition="'%(ContentWithTargetPath.CopyToOutputDirectory)' == 'Always' or '%(ContentWithTargetPath.CopyToOutputDirectory)' == 'PreserveNewest' or '%(ContentWithTargetPath.CopyToOutputDirectory)' == 'IfDifferent' or '%(ContentWithTargetPath.CopyToPublishDirectory)' == 'Always' or '%(ContentWithTargetPath.CopyToPublishDirectory)' == 'PreserveNewest' or '%(ContentWithTargetPath.CopyToPublishDirectory)' == 'IfDifferent'" />
+			<_CohesionInProcessContentCandidate
+				Include="@(EmbeddedResource)"
+				Condition="'%(EmbeddedResource.CopyToOutputDirectory)' == 'Always' or '%(EmbeddedResource.CopyToOutputDirectory)' == 'PreserveNewest' or '%(EmbeddedResource.CopyToOutputDirectory)' == 'IfDifferent' or '%(EmbeddedResource.CopyToPublishDirectory)' == 'Always' or '%(EmbeddedResource.CopyToPublishDirectory)' == 'PreserveNewest' or '%(EmbeddedResource.CopyToPublishDirectory)' == 'IfDifferent'" />
+			<_CohesionInProcessContentCandidate
+				Include="@(_NoneWithTargetPath)"
+				Condition="'%(_NoneWithTargetPath.CopyToOutputDirectory)' == 'Always' or '%(_NoneWithTargetPath.CopyToOutputDirectory)' == 'PreserveNewest' or '%(_NoneWithTargetPath.CopyToOutputDirectory)' == 'IfDifferent' or '%(_NoneWithTargetPath.CopyToPublishDirectory)' == 'Always' or '%(_NoneWithTargetPath.CopyToPublishDirectory)' == 'PreserveNewest' or '%(_NoneWithTargetPath.CopyToPublishDirectory)' == 'IfDifferent'" />
+			<_CohesionInProcessCompileCandidate
+				Include="@(Compile)"
+				Condition="'%(Compile.CopyToOutputDirectory)' == 'Always' or '%(Compile.CopyToOutputDirectory)' == 'PreserveNewest' or '%(Compile.CopyToOutputDirectory)' == 'IfDifferent' or '%(Compile.CopyToPublishDirectory)' == 'Always' or '%(Compile.CopyToPublishDirectory)' == 'PreserveNewest' or '%(Compile.CopyToPublishDirectory)' == 'IfDifferent'" />
+			<!-- Apphost is a generated build artifact, not project-declared resource content. -->
+			<_CohesionInProcessContentCandidate
+				Remove="@(_CohesionInProcessContentCandidate)"
+				Condition="'$(_CohesionIntermediateAppHostFullPath)' != '' and '%(_CohesionInProcessContentCandidate.FullPath)' == '$(_CohesionIntermediateAppHostFullPath)'" />
+		</ItemGroup>
+
+		<AssignTargetPath Files="@(_CohesionInProcessCompileCandidate)" RootFolder="$(MSBuildProjectDirectory)">
+			<Output TaskParameter="AssignedFiles" ItemName="_CohesionInProcessCompileWithTargetPath" />
+		</AssignTargetPath>
+
+		<ItemGroup>
+			<_CohesionInProcessContentCandidate Include="@(_CohesionInProcessCompileWithTargetPath)" />
+			<_CohesionInProcessContentResult
+				Include="@(_CohesionInProcessContentCandidate->'%(FullPath)')"
+				KeepMetadata="CopyToOutputDirectory;CopyToPublishDirectory;TargetPath">
+				<TargetPath>cohesion/resources/$(_CohesionResolvedResourceName)/%(_CohesionInProcessContentCandidate.TargetPath)</TargetPath>
+				<ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+			</_CohesionInProcessContentResult>
+			<_CohesionInProcessContentResult Include="$(_CohesionResourceManifestFullPath)">
+				<TargetPath>cohesion/resources/$(_CohesionResolvedResourceName)/.cohesion-resource.json</TargetPath>
+				<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+				<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+				<ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+			</_CohesionInProcessContentResult>
+		</ItemGroup>
+	</Target>
+
+	<!--
+		Returns the resolved package assets required to execute this resource in the
+		gateway process. Project content is intentionally handled by the isolated
+		content target above and is never included here.
+	-->
+	<Target
+		Name="CohesionGetInProcessRuntimeAssets"
+		DependsOnTargets="ResolveReferences"
+		Returns="@(_CohesionInProcessRuntimeAssetResult)"
+		Condition="'$(_CohesionResourceEnabled)' == 'true' and '$(CohesionResourceComposable)' == 'true'">
+		<ItemGroup>
+			<_CohesionInProcessRuntimeAssetResult
+				Include="@(ReferenceCopyLocalPaths)"
+				Exclude="@(RuntimeCopyLocalItems);@(NativeCopyLocalItems);@(ResourceCopyLocalItems);@(RuntimeTargetsCopyLocalItems)"
+				Condition="'%(ReferenceCopyLocalPaths.Private)' != 'false' and '%(ReferenceCopyLocalPaths.ReferenceSourceTarget)' == 'ProjectReference'">
+				<AssetType>runtime</AssetType>
+				<CopyLocal>true</CopyLocal>
+				<CohesionAssetKind>Reference</CohesionAssetKind>
+			</_CohesionInProcessRuntimeAssetResult>
+			<_CohesionInProcessRuntimeAssetResult
+				Include="@(RuntimeCopyLocalItems)"
+				Condition="'%(RuntimeCopyLocalItems.CopyLocal)' == 'true'">
+				<CohesionAssetKind>Runtime</CohesionAssetKind>
+			</_CohesionInProcessRuntimeAssetResult>
+			<_CohesionInProcessRuntimeAssetResult
+				Include="@(NativeCopyLocalItems)"
+				Exclude="@(_NativeRestoredAppHostNETCore)"
+				Condition="'%(NativeCopyLocalItems.CopyLocal)' == 'true'">
+				<CohesionAssetKind>Native</CohesionAssetKind>
+			</_CohesionInProcessRuntimeAssetResult>
+			<_CohesionInProcessRuntimeAssetResult
+				Include="@(ResourceCopyLocalItems)"
+				Condition="'%(ResourceCopyLocalItems.CopyLocal)' == 'true'">
+				<CohesionAssetKind>Resource</CohesionAssetKind>
+			</_CohesionInProcessRuntimeAssetResult>
+			<_CohesionInProcessRuntimeAssetResult
+				Include="@(RuntimeTargetsCopyLocalItems)"
+				Condition="'%(RuntimeTargetsCopyLocalItems.CopyLocal)' == 'true'">
+				<CohesionAssetKind>RuntimeTarget</CohesionAssetKind>
+			</_CohesionInProcessRuntimeAssetResult>
+		</ItemGroup>
+	</Target>
+
+	<!--
+		CoreClean deletes the generated manifest and sources with every other file write.
+		They are derived from the project and its referenced manifests, and IntelliSense
+		compiles them, so Clean regenerates them once it has finished removing outputs;
+		an editor that watched them disappear sees them return in the same command. The
+		pack manifests are ordinary file writes and stay deleted. A project that was never
+		restored has nothing an editor could have seen, so Clean leaves it alone.
+	-->
+	<Target
+		Name="CohesionRegenerateResourceManifestAfterClean"
+		AfterTargets="Clean"
+		DependsOnTargets="CohesionCreateResourceManifest"
+		Condition="'$(_CohesionResourceEnabled)' == 'true' and Exists('$(ProjectAssetsFile)')" />
+</Project>

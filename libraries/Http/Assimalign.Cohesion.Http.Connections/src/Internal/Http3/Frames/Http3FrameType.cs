@@ -1,4 +1,4 @@
-﻿namespace Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
+﻿namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// HTTP3 frame types.

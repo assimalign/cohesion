@@ -82,5 +82,9 @@ internal sealed class AggregateFileSystemFile : IFileSystemFile
         => _inner.Open(fileMode, fileAccess, fileShare);
 
     /// <inheritdoc />
+    public IFileSystemFileHandle OpenHandle(FileMode fileMode, FileAccess fileAccess, FileShare fileShare)
+        => _inner.OpenHandle(fileMode, fileAccess, fileShare);
+
+    /// <inheritdoc />
     public IFileSystemEventToken Watch() => _inner.Watch();
 }

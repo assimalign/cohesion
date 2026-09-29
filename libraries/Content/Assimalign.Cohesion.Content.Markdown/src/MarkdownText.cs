@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 
+using Assimalign.Cohesion.Content.Markdown.Internal;
 using Assimalign.Cohesion.Content.Text;
 
 namespace Assimalign.Cohesion.Content.Markdown;

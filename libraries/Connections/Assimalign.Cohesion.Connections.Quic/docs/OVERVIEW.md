@@ -10,8 +10,8 @@ as every other transport.
 
 ## Scope
 
-- `QuicConnectionListener` — server-side: binds and accepts inbound QUIC
-  connections.
+- `QuicConnectionListener` — server-side: constructed from options, then explicitly binds and
+  accepts inbound QUIC connections.
 - `QuicConnectionFactory` — client-side: dials outbound QUIC connections.
 - `QuicMultiplexedConnection` — one QUIC connection; accepts and opens
   streams, each surfaced as a `Connection`.
@@ -27,8 +27,10 @@ unidirectional streams.
 ## Dependencies
 
 - `Assimalign.Cohesion.Connections` — the contracts this driver
-  implements, plus shared internal pipe/diagnostics infrastructure via
-  `InternalsVisibleTo`.
+  implements; its pool-owning pipe options are compiled in from that
+  library's `shared/` folder (`CohesionSharedSource`). Diagnostics are the
+  driver's own internal event source, `Assimalign.Cohesion.Connections.Quic`
+  (see DESIGN.md, "Diagnostics").
 - `System.Net.Quic` (BCL) — the underlying QUIC implementation; platform
   support follows it (`windows` / `linux` / `macos`, gate with
   `QuicListener.IsSupported`).
@@ -36,12 +38,14 @@ unidirectional streams.
 ## Usage
 
 ```csharp
-QuicConnectionListener listener = await QuicConnectionListener.CreateAsync(options =>
-{
-    options.EndPoint = new IPEndPoint(IPAddress.Loopback, 4433);
-    options.ServerAuthenticationOptions.ServerCertificate = certificate;
-});
+QuicConnectionListenerOptions options = new();
+options.EndPoint = new IPEndPoint(IPAddress.Loopback, 4433);
+options.ServerAuthenticationOptions.ServerCertificate = certificate;
 
+await using QuicConnectionListener listener = new(options);
+await listener.BindAsync(cancellationToken);
+
+// CreateAsync(options, cancellationToken) remains available as construct-and-bind shorthand.
 IMultiplexedConnection connection = await listener.AcceptAsync(cancellationToken);
 IConnection stream = await connection.AcceptStreamAsync(cancellationToken);
 ```

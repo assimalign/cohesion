@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Web.Diagnostics.Tests;
 /// </summary>
 public class W3CAccessLogFormatterTests
 {
-    private static readonly DateTimeOffset Timestamp = new(2026, 7, 11, 13, 45, 30, TimeSpan.Zero);
+    private static readonly DateTimeOffset _timestamp = new(2026, 7, 11, 13, 45, 30, TimeSpan.Zero);
 
     private static LoggerEntry CreateEntry(Action<Dictionary<string, object?>>? mutate = null)
     {
@@ -36,7 +36,7 @@ public class W3CAccessLogFormatterTests
 
         mutate?.Invoke(attributes);
 
-        return new LoggerEntry(LogLevel.Information, "test", "msg", attributes: attributes, timestamp: Timestamp);
+        return new LoggerEntry(LogLevel.Information, "test", "msg", attributes: attributes, timestamp: _timestamp);
     }
 
     private static string Render(ILoggerEntry entry, AccessLogFormat format)
@@ -66,7 +66,7 @@ public class W3CAccessLogFormatterTests
             "test",
             "msg",
             attributes: new Dictionary<string, object?> { [HttpLoggingAttributes.Event] = HttpLoggingAttributes.EventExchange },
-            timestamp: Timestamp);
+            timestamp: _timestamp);
 
         // Act
         string line = Render(entry, AccessLogFormat.W3CExtended);
@@ -95,7 +95,7 @@ public class W3CAccessLogFormatterTests
     {
         // Act
         StringBuilder builder = new();
-        W3CAccessLogFormatter.AppendExtendedDirectives(builder, Timestamp);
+        W3CAccessLogFormatter.AppendExtendedDirectives(builder, _timestamp);
         string directives = builder.ToString();
 
         // Assert

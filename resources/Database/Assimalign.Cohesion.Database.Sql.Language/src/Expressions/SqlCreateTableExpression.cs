@@ -22,12 +22,14 @@ public sealed class SqlCreateTableExpression : SqlQueryExpression
         IReadOnlyList<SqlColumnDefinition> columns,
         bool ifNotExists,
         string? text,
-        Location? location)
+        Location? location,
+        IReadOnlyList<SqlConstraintDefinition>? constraints = null)
         : base(SqlQueryCommandType.Create, text, location)
     {
         Table = table;
         Columns = columns;
         IfNotExists = ifNotExists;
+        Constraints = constraints ?? [];
     }
 
     /// <summary>
@@ -44,4 +46,7 @@ public sealed class SqlCreateTableExpression : SqlQueryExpression
     /// Gets whether IF NOT EXISTS was specified.
     /// </summary>
     public bool IfNotExists { get; }
+
+    /// <summary>Gets all normalized column and table constraints.</summary>
+    public IReadOnlyList<SqlConstraintDefinition> Constraints { get; }
 }

@@ -19,6 +19,18 @@ public abstract class MultiplexedConnectionListener : IMultiplexedConnectionList
     /// <inheritdoc />
     public abstract ConnectionCapabilities Capabilities { get; }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The default implementation represents a listener that is logically bound when constructed or
+    /// does not own an external endpoint. Resource-owning listeners override this member to acquire
+    /// their endpoint explicitly.
+    /// </remarks>
+    public virtual ValueTask BindAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.CompletedTask;
+    }
+
     /// <summary>
     /// Accepts the next inbound multiplexed connection.
     /// </summary>

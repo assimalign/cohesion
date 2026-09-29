@@ -1,0 +1,111 @@
+{
+  "schema": "cohesion/plan/v1",
+  "resource": "appa-database",
+  "kind": "Database",
+  "workload": {
+    "kind": "StatefulSet",
+    "replicas": 1,
+    "stableIdentity": true,
+    "gate": {
+      "terminals": [
+        "Running",
+        "Failed",
+        "Stopped"
+      ],
+      "satisfying": [
+        "Running"
+      ]
+    },
+    "stopGraceSeconds": 30,
+    "restartPolicy": "OnFailure"
+  },
+  "container": {
+    "name": "appa-database",
+    "artifact": "self",
+    "ports": [
+      {
+        "endpoint": "db",
+        "containerPort": 5740,
+        "protocol": "tcp",
+        "scheme": "cohesion-db",
+        "certificate": ""
+      },
+      {
+        "endpoint": "admin",
+        "containerPort": 8081,
+        "protocol": "tcp",
+        "scheme": "http",
+        "certificate": ""
+      }
+    ],
+    "mounts": [
+      {
+        "mount": "data",
+        "containerPath": "/data",
+        "kind": "Volume",
+        "source": null
+      }
+    ],
+    "environment": {
+      "COHESION_APPLICATION": "appa",
+      "COHESION_RESOURCE": "appa-database",
+      "COHESION_ENVIRONMENT": "Development"
+    },
+    "probes": [
+      {
+        "role": "readiness",
+        "endpoint": "admin",
+        "kind": "Http",
+        "value": "/readyz",
+        "command": []
+      },
+      {
+        "role": "liveness",
+        "endpoint": "admin",
+        "kind": "Http",
+        "value": "/livez",
+        "command": []
+      }
+    ]
+  },
+  "controlPlane": {
+    "endpoint": "admin",
+    "path": "/cohesion/v1"
+  },
+  "volumes": [
+    {
+      "name": "data",
+      "kind": "Volume",
+      "size": "10Gi",
+      "perReplicaClaim": true
+    }
+  ],
+  "services": [
+    {
+      "name": "appa-database-db",
+      "endpoint": "db",
+      "port": 5740,
+      "protocol": "tcp",
+      "headless": false,
+      "governing": false
+    },
+    {
+      "name": "appa-database-admin",
+      "endpoint": "admin",
+      "port": 8081,
+      "protocol": "tcp",
+      "headless": false,
+      "governing": false
+    },
+    {
+      "name": "appa-database-headless",
+      "endpoint": null,
+      "port": null,
+      "protocol": "tcp",
+      "headless": true,
+      "governing": true
+    }
+  ],
+  "exposures": [],
+  "hints": {}
+}

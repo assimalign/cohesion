@@ -22,7 +22,76 @@ namespace Assimalign.Cohesion.Connections.Quic.Tests;
 [SupportedOSPlatform("macos")]
 public class QuicConnectionListenerTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(10);
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - BindAsync: Construction should remain unbound until explicit bind")]
+    public async Task BindAsync_OnUnboundListener_ShouldBindConcreteEndPoint()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        QuicConnectionListenerOptions options = CreateOptions(certificate, new IPEndPoint(IPAddress.Loopback, 0));
+        await using QuicConnectionListener listener = new(options);
+
+        ((IPEndPoint)listener.EndPoint).Port.ShouldBe(0);
+
+        // Act
+        await listener.BindAsync(cancellation.Token);
+        EndPoint firstBoundEndPoint = listener.EndPoint;
+        await listener.BindAsync(cancellation.Token);
+
+        // Assert
+        ((IPEndPoint)listener.EndPoint).Port.ShouldNotBe(0);
+        listener.EndPoint.ShouldBe(firstBoundEndPoint);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - BindAsync: Dispose should release a fixed endpoint for a new listener")]
+    public async Task BindAsync_AfterDisposedListenerOnSameEndPoint_ShouldSucceed()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        QuicConnectionListener first = new(CreateOptions(certificate, new IPEndPoint(IPAddress.Loopback, 0)));
+        await first.BindAsync(cancellation.Token);
+        IPEndPoint endPoint = first.EndPoint.ShouldBeOfType<IPEndPoint>();
+
+        // Act
+        await first.DisposeAsync();
+
+        await using QuicConnectionListener second = new(CreateOptions(certificate, endPoint));
+        await second.BindAsync(cancellation.Token);
+
+        // Assert
+        second.EndPoint.ShouldBe(endPoint);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Quic] - BindAsync: Disposed listener should reject bind and accept")]
+    public async Task BindAsync_AfterDispose_ShouldThrowObjectDisposedException()
+    {
+        if (!QuicListener.IsSupported)
+        {
+            return;
+        }
+
+        // Arrange
+        using X509Certificate2 certificate = QuicTestCertificate.Create();
+        QuicConnectionListener listener = new(CreateOptions(certificate, new IPEndPoint(IPAddress.Loopback, 0)));
+        await listener.DisposeAsync();
+
+        // Act / Assert
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await listener.BindAsync());
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await listener.AcceptAsync());
+    }
 
     [Fact]
     public async Task CreateAsync_WithEphemeralEndPoint_ShouldBindConcreteEndPoint()
@@ -33,7 +102,7 @@ public class QuicConnectionListenerTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         // Act
@@ -121,7 +190,7 @@ public class QuicConnectionListenerTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         using X509Certificate2 certificate = QuicTestCertificate.Create();
 
         await using QuicConnectionListener listener = await QuicConnectionListener.CreateAsync(options =>
@@ -146,5 +215,19 @@ public class QuicConnectionListenerTests
             IsOrdered: true,
             IsMultiplexed: true,
             ConnectionSecurity.Tls));
+    }
+
+    private static QuicConnectionListenerOptions CreateOptions(X509Certificate2 certificate, IPEndPoint endPoint)
+    {
+        return new QuicConnectionListenerOptions
+        {
+            EndPoint = endPoint,
+            ServerAuthenticationOptions = new SslServerAuthenticationOptions
+            {
+                ServerCertificate = certificate,
+                ApplicationProtocols = [new SslApplicationProtocol("cohesion-test")],
+                EnabledSslProtocols = SslProtocols.Tls13
+            }
+        };
     }
 }

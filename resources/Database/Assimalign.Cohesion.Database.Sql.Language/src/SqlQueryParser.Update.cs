@@ -51,7 +51,7 @@ public sealed partial class SqlQueryParser
         string columnName = string.Empty;
         if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
         {
-            columnName = CurrentText(ref lexer);
+            columnName = CurrentIdentifierText(ref lexer);
             Advance(ref lexer);
         }
 

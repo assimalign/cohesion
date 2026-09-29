@@ -9,15 +9,14 @@ namespace Assimalign.Cohesion.ObjectValidation.Tests;
 
 using Assimalign.Cohesion.ObjectValidation;
 using Assimalign.Cohesion.ObjectValidation.Internal;
-using Assimalign.Cohesion.ObjectValidation.Internal.Rules;
 
 public class RuleChildMemberTests
 {
-    private IValidator validator;
+    private IValidator _validator;
 
     public RuleChildMemberTests()
     {
-        this.validator = Validator.Create(configure =>
+        this._validator = Validator.Create(configure =>
         {
             configure.AddOptions(options =>
             {
@@ -110,7 +109,7 @@ public class RuleChildMemberTests
             }
         };
 
-        var results = this.validator.Validate(person);
+        var results = this._validator.Validate(person);
         Assert.Equal(4, results.Errors.Count());
     }
 
@@ -125,7 +124,7 @@ public class RuleChildMemberTests
             }
         };
 
-        var results = this.validator.Validate(person);
+        var results = this._validator.Validate(person);
         Assert.Equal(3, results.Errors.Count());
     }
 
@@ -141,7 +140,7 @@ public class RuleChildMemberTests
             }
         };
 
-        var results = this.validator.Validate(person);
+        var results = this._validator.Validate(person);
         Assert.Equal(4, results.Errors.Count());
     }
 
@@ -157,7 +156,7 @@ public class RuleChildMemberTests
             }
         };
 
-        var results = this.validator.Validate(person);
+        var results = this._validator.Validate(person);
         Assert.Equal(2, results.Errors.Count());
     }
 
@@ -170,7 +169,7 @@ public class RuleChildMemberTests
 
         };
 
-        var results = this.validator.Validate(person);
+        var results = this._validator.Validate(person);
         Assert.Empty(results.Errors);
     }
 }

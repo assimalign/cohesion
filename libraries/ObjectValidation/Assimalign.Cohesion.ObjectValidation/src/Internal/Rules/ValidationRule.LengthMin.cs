@@ -3,17 +3,17 @@ using System.Collections;
 using System.Linq;
 using System.Linq.Expressions;
 
-namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 
 internal sealed class LengthMinValidationRule<TValue> : ValidationRuleBase<TValue>
     where TValue : IEnumerable
 {
-    private readonly int length;
+    private readonly int _length;
 
     public LengthMinValidationRule(int length)
     {
-        this.length = length;
+        this._length = length;
     }
 
     public override string Name { get; set; }
@@ -63,10 +63,10 @@ internal sealed class LengthMinValidationRule<TValue> : ValidationRuleBase<TValu
         return member switch
         {
             null => true,
-            string stringValue      when stringValue is not null && stringValue.Length < this.length => true,
-            ICollection collection  when collection.Count < this.length => true,
-            Array array             when array.Length < this.length => true,
-            IEnumerable enumerable  when enumerable.Cast<object>().Count() < this.length => true,
+            string stringValue      when stringValue is not null && stringValue.Length < this._length => true,
+            ICollection collection  when collection.Count < this._length => true,
+            Array array             when array.Length < this._length => true,
+            IEnumerable enumerable  when enumerable.Cast<object>().Count() < this._length => true,
             _ => false
         };
     }

@@ -72,6 +72,25 @@ resource, database) will implement already runs in-process. The standalone
 use; the store-backed session (`HttpSessionStoreSession`, internal) is what the
 Web session middleware installs over the configured store.
 
+### Session construction and identifier reassignment
+
+`HttpSessionStoreExtensions.CreateSession` is the public composition entry point
+on `IHttpSessionStore`. It validates the id and positive idle timeout, then returns
+an unloaded `IHttpStoredSession` without performing store I/O. The implementation
+remains internal; callers use the existing `IHttpSession` lifecycle and value
+operations. `IHttpStoredSession.ReassignId` is the additional capability for
+preserving buffered state under a replacement identifier. It marks the session
+modified but performs no I/O: the hosting pipeline removes the old store entry
+and delivers the new identifier to the client.
+
+This contract is public because middleware and other HTTP hosts legitimately
+compose store-backed sessions without owning their framing or buffering logic.
+It replaces shipped-library friend access while keeping modification tracking
+and serialization implementation details internal. The interfaces and extension
+retain the existing `Assimalign.Cohesion.Http` family namespace, a scoped deviation
+from the namespace-matches-assembly rule. Instances are per exchange and are not
+thread-safe; store concurrency remains last-commit-wins.
+
 ### Payload framing — `HttpSessionSerializer`
 
 Any store must round-trip **identical bytes**, so the dictionary→bytes framing

@@ -1,71 +1,190 @@
 # Assimalign.Cohesion.Database.Client — Design
 
-The client half of the #852 spine (area architecture:
-[resources/Database/DESIGN.md](../../DESIGN.md)): one model-agnostic protocol
-client the five per-model clients wrap, exactly mirroring the one
-model-agnostic server. Model semantics live in the statement text and the
-per-model packages; this project owns everything that is true for all of them —
-dialing, handshake, execute exchange, value encoding, pooling, error mapping.
+The shared client owns transport dialing, startup/authentication, framing, pooling,
+and connection health. Model clients own request encoding, response validation, and
+result materialization. The shared client references no model package and imposes
+no result shape.
 
-## Why-this-not-that decisions
+## Family boundary
 
-- **Text in, materialized values out.** The connection executes statement
-  *text* plus boxed parameters — the same shape the wire carries and the same
-  seam the server calls on `IDatabaseSession`. Typed request/result surfaces
-  (SQL command objects, document APIs) belong to the per-model clients that
-  know their language; putting any of them here would make the shared core
-  model-aware.
-- **Results materialize (MVP).** The wire streams `ResultHeader → ResultRow* →
-  ResultComplete`, but a pooled connection is only reusable once its exchange is
-  fully drained — handing the application an unfinished stream would couple row
-  consumption to pool health (the classic leaked-reader bug). Buffering rows
-  keeps pooling correct and simple; an incremental surface can be added by the
-  per-model clients once cursors/paging give it real semantics.
-- **Pooling reuses the authenticated session.** A pooled connection returns to
-  an idle stack with its wire session still in the ready state; the next rent
-  skips dial + handshake entirely (the acceptance criterion behind the pool). A
-  slot semaphore bounds total connections at `MaxPoolSize`; exhausted rents wait
-  for a return rather than failing. Health at return decides reuse: only
-  statement-level errors (`ParseFailure`/`ExecutionFailure`) leave a connection
-  poolable — every other error frame, transport fault, or mid-exchange close
-  marks it broken and it is closed instead of pooled. Known limitation: a
-  server-side eviction (idle timeout) of an *idle pooled* connection is
-  discovered at next use, not at return — a rent-time liveness ping is future
-  hardening, not MVP.
-- **Connection string carries identity, never the driver.** `key=value;` parsing
-  covers `Database`, `Principal`, `Endpoint=host[:port]` (→ `DnsEndPoint`), and
-  `MaxPoolSize`. The transport factory is a typed option
-  (`DatabaseClientOptions.ConnectionFactory`) because drivers are composed
-  statically for AOT — a driver name in a string implies runtime plugin
-  loading, which the platform forbids. Non-network endpoints (the in-memory
-  transport's named endpoints) cannot be expressed as strings at all; the typed
-  `EndPoint` property is the escape hatch, and it is how tests compose against
-  `Connections.InMemory`.
-- **Errors carry the wire code.** `DatabaseClientException : DatabaseException`
-  exposes the stable `ProtocolErrorCode` so callers program against the wire
-  contract, not message text. Handshake rejections (unsupported version,
-  unknown database, capacity, failed authentication) surface the server's code
-  verbatim from the error frame.
+Clients depend on shared mechanism and their own model's wire codecs:
 
-## Lifecycle pattern
+```mermaid
+flowchart LR
+    SqlClient["Database.Sql.Client"] --> Client["Database.Client"]
+    SqlClient --> Sql["Database.Sql"]
+    KvClient["Database.KeyValuePair.Client"] --> Client
+    KvClient --> Kv["Database.KeyValuePair"]
+    BlobClient["Database.Blob.Client"] --> Client
+    BlobClient --> Blob["Database.Blob"]
+    Client --> Protocol["Database.Protocol"]
+    Sql --> Protocol
+    Kv --> Protocol
+    Blob --> Protocol
+```
 
-`DatabaseClient.Create` performs no I/O. Rent → open-or-reuse → execute →
-dispose-returns-to-pool. Disposing the client closes all idle connections;
-connections still rented at that moment close for real when they return. Real
-closure sends a best-effort `Terminate` frame before transport teardown.
+| Package | Responsibility |
+| --- | --- |
+| Database.Client | Dial, handshake, bounded pooling, framed exchange lifetime |
+| Database.Protocol | Framing, shared messages, immutable family binding |
+| Database.Sql.Client | SQL parameter encoding, decoding, and materialization |
+| Database.KeyValuePair.Client | Key-value encoding, decoding, and materialization |
+| Database.Blob.Client | Blob transfer validation, acknowledgements, and typed metadata responses |
+| Model packages | Model identifiers and payload codecs |
 
-## AOT posture
+`DatabaseClientOptions.Family` is mandatory. The pool captures the exact immutable
+`ProtocolMessageFamily` instance before dialing. Every connection uses a
+`ProtocolChannel` bound to that family throughout its lifetime. An
+`IDatabaseProtocolExchange<TResult>` supplies its required family and consumes one
+exchange through the channel reader and writer. A different family instance is
+rejected before execution, including a family that reuses the same identifier bytes.
 
-No reflection: parameter and row values go through `DatabaseValueCodec`'s
-runtime-type switch, results are boxed scalars, and transports are composed
-statically.
+The materialized operation returns only after consuming the complete response and
+must not retain or dispose the borrowed reader/writer. SQL and Key-Value materialize;
+Blob uploads transfer bounded chunks from caller-owned streams. Downloads use the
+shared streaming exchange described below. Model payloads, result shapes, and
+acknowledgement rules remain owned by their model packages.
 
-## Non-goals
+## Lifecycle and errors
 
-- No per-model APIs, no LINQ, no ORM surface — per-model clients build here.
-- No client-side statement parsing or validation; the server's session owns its
-  language.
-- No transaction frames yet (the wire's `Transaction` message lands with the
-  protocol's transaction payload schema).
-- No TLS logic — security layers compose in the connection factory
-  (`Connections.Security`).
+Creation performs no I/O. Rent opens or reuses an authenticated session.
+Disposing a healthy rental returns it to an idle stack; `MaxPoolSize` bounds
+rentals and exhausted rents wait. Disposing the client closes idle connections;
+outstanding rentals close when returned. Closure sends best-effort `Terminate`.
+
+The pool does not infer connection health from an error code. On failure,
+`IDatabaseProtocolExchange<TResult>.IsResponseComplete` certifies that the exchange
+consumed the entire response and left the server session ready for another request.
+Its default is false, so an exchange that supplies no evidence is discarded after
+failure. Successful return already guarantees a complete response; existing
+successful exchanges do not need to implement this property. Framing violations,
+transport failure, and an unfinished response invalidate the connection.
+
+SQL and Key-Value reset the signal before each request and set it only after decoding
+a terminal response. Their server implementations send `ParseFailure` and
+`ExecutionFailure` as complete statement responses before any result frames and
+return to their ready loop; the model exchanges certify that initial response phase
+before throwing the unchanged
+`DatabaseClientException`. Other server errors terminate those sessions. This
+knowledge belongs to the statement exchange, not to a pool-wide list of safe codes.
+Blob failures do not certify completion: a transfer can leave unread frames even
+when its error code is `ExecutionFailure`. Wire codes and messages reach callers
+unchanged, independently of the health decision.
+
+Handshake rejections preserve their wire code in `DatabaseClientException`.
+Idle server-side evictions remain discoverable at next use; rent-time pings are
+future work.
+
+Only one exchange may use a connection at a time. An overlapping exchange is rejected
+before it writes any frames. Disposing a connection cancels and joins its current
+operation before returning the rental, so an active exchange cannot enter the idle
+pool. Disposal and failure release each rental exactly once.
+
+`IDatabaseConnection.AbortAsync` explicitly discards a rental when a model cannot
+reset its application-level session state. It marks the connection unusable before
+cancelling/joining any active exchange and disposing the rental, so the pool closes
+its transport instead of reusing the session. This is non-cancellable and idempotent
+on the current rental. It makes no claim about whether the server completed an
+unacknowledged command; transaction outcome and reconciliation remain model concerns.
+
+## Streaming exchange and ownership
+
+`IDatabaseStreamingExchange` supplies the exact `Family`, an `OpenAsync` phase that
+writes the request and validates startup metadata, and a `CopyToAsync` phase that
+copies content into a borrowed destination and verifies the terminal response.
+The shared client owns the asynchronous producer, bounded handoff, cancellation,
+read stream, and connection lifetime. The model owns framing semantics, metadata,
+counts, and acknowledgements; it never owns the handoff queue or producer task.
+Startup failures reach the opening call. After startup, failures reach stream reads.
+Streaming frame adapters normalize completed transport pipes that report
+`InvalidOperationException` into transport failures. This normalization is confined
+to streaming frame I/O; materialized SQL and Key-Value exchanges retain their
+existing transport exception behavior, and caller stream exceptions are unchanged.
+
+There are two deliberate ownership forms. `IDatabaseConnection.ExecuteStreamingAsync`
+uses a caller-owned rental and preserves that rental after verified completion and
+stream disposal, allowing another operation on the same typed connection. A failed
+or abandoned transfer invalidates and returns that rental immediately. The
+`IDatabaseClient.ExecuteStreamingAsync` extension rents on the caller's behalf; its
+returned stream owns that rental until disposal or failure. Verified EOF alone does
+not return a client-owned stream's healthy rental: the caller must dispose the stream.
+These forms serve Blob's existing connection API and model clients that expose a
+download directly from their pooled client.
+
+The destination copies content into chunks no larger than 65,536 bytes and writes
+them through a single-slot bounded queue. Backpressure stops the producer when the
+consumer's current chunk and queued chunk have not advanced. Content memory stays
+bounded by those chunks, a pending destination chunk, and model/transport buffers,
+independent of transfer length. The producer must finish validating the terminal
+response before the stream can report EOF. A recorded failure is sticky: it takes
+precedence over buffered content and subsequent reads keep reporting it.
+
+The opening token remains active throughout the transfer. Canceling any asynchronous
+read cancels the whole producer, including a destination write blocked on a full
+queue. Early synchronous or asynchronous stream disposal cancels and joins the
+producer and closes the unfinished connection; completed stream disposal preserves
+connection health. Disposal suppresses recorded transfer errors because reads carry
+those errors. Streams are read-only and sequential, reject overlapping reads, and
+do not support length or seeking.
+
+The lifecycle below distinguishes verified completion from release of the rental.
+For a caller-owned connection, healthy stream disposal retains the rental until
+connection disposal; for a client-owned stream, it returns the rental to the pool.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Opening: reserve connection
+    Opening --> Streaming: validate startup
+    Opening --> Broken: failure or cancellation
+    Streaming --> Completed: verify terminal response
+    Streaming --> Broken: failure, cancellation, or early disposal
+    Completed --> Retained: dispose stream with caller-owned connection
+    Completed --> Returned: dispose client-owned stream
+    Retained --> Returned: dispose connection
+    Broken --> Closed: join producer and return broken rental
+    Returned --> [*]
+    Closed --> [*]
+```
+
+The completion signal serves SQL, Key-Value, Blob, and future exchanges with their
+own terminal semantics. The streaming contract and its two ownership forms serve
+Blob and test-level model consumers; future Documents and Graph clients implement
+only their startup and content protocol. No Blob-specific type enters the shared
+contract, and those clients need not copy Blob's former lifetime machinery.
+
+## Settings and compatibility
+
+Connection strings carry database, principal, endpoint, and pool size. Drivers are
+typed `IConnectionFactory` options, composed statically. Typed endpoints also
+support in-memory transports. The endpoint selects the model; startup carries no
+model discriminator.
+
+SQL and Key-Value wire bytes stay at version 1.0. Moving APIs is a managed API
+migration: direct SQL callers import `Database.Sql.Client` and bind
+`SqlProtocol.Family`, or use the existing typed client. `DatabaseClientResult`
+and `DatabaseClientColumn` now live in the SQL client's namespace. New model
+clients implement the generic exchange interface using their model's exact family.
+
+No reflection, code generation, driver discovery, model parser, or model result
+policy is required. The streaming path adds no dependencies or shipped-library
+`InternalsVisibleTo` grants and remains compatible with `net10.0` and NativeAOT.
+TLS remains a connection-factory concern.
+
+
+## Declarative command delivery
+
+`DatabaseCommandClient.Create(Uri controlPlaneAddress, string bearerToken, HttpMessageInvoker transport)`
+accepts a caller-owned transport, including its TLS trust policy. Disposing the returned client
+does not dispose that transport; the caller retains it until requests finish and disposes it
+afterward. The two-argument factory still creates a transport owned and disposed by the client.
+Both overloads perform the same endpoint and credential validation; a null supplied transport
+throws `ArgumentNullException`. The client does not discover application trust.
+
+IDatabaseCommandClient is the separate HTTP admin command contract. DatabaseCommandClient.Create
+accepts the full manifest control-plane URI (including its path) and an opaque bootstrap bearer.
+SendCommandAsync posts the camel-case id/kind/owner/key/payload envelope to commands; payload is
+base64. DeleteCommandAsync sends DELETE to the same route and envelope. Both return package-local
+ResourceCommandObservation with Status and Detail, retaining actionable provider refusal text.
+Transport failures propagate; HTTP refusals become Rejected observations. Serialization uses explicit
+Utf8JsonWriter/JsonDocument access. The caller disposes the client; redirect following and cookies
+are disabled. No runtime Hosting or ApplicationModel dependency was added.

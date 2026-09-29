@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.ApplicationModel.Tests</RootNamespace>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
@@ -14,6 +15,12 @@
 
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.TestHost" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="TestHost/**/*.cs" />
+    <None Update="Fixtures\plans\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

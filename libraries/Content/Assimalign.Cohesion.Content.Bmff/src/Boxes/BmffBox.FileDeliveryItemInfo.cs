@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Files.Bmff;
 [DebuggerDisplay("Bmff Box: File Delivery Item Information (fiin)")]
 public sealed class FileDeliveryItemInfoBox : BmffBoxComposite
 {
-    private IEnumerable<BmffBox> children;
+    private IEnumerable<BmffBox> _children;
 
     public FileDeliveryItemInfoBox(long offset, long limit)
     {
@@ -36,7 +36,7 @@ public sealed class FileDeliveryItemInfoBox : BmffBoxComposite
             boxes.Add(reader.Current);
         }
 
-        children = boxes;
+        _children = boxes;
     }
 
     public override void Write(BmffStream stream)

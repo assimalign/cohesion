@@ -72,8 +72,10 @@ reaching for exists correctly as `IConnectionLayer` (below).
 never as a type. The medium is described by data (`ConnectionCapabilities` and the
 diagnostics-only `ConnectionProtocol`), implemented by the **driver packages**
 (`Assimalign.Cohesion.Connections.Tcp/Udp/Quic`), and supported by this library's internal
-implementation **toolbox** (pipe-pair wiring, pipe options, diagnostics — shared with the drivers
-via `InternalsVisibleTo`). Transports are configuration; connections are runtime. The naming rule
+composition **primitives** — pipe-pair wiring and pool-owning options as `shared/` source the
+drivers compile in — while each driver reports its own diagnostics through an internal event
+source. Transports are
+configuration; connections are runtime. The naming rule
 follows: every type and package is named for the connection domain — the unit you consume
 (`IConnection`), its producers (`IConnectionListener`/`IConnectionFactory`), its description
 (`ConnectionCapabilities`/`ConnectionProtocol`/`ConnectionDelivery`/`ConnectionSecurity`), and its
@@ -144,8 +146,8 @@ for the same reasons:
   mirror into consumer code. Flattening makes the connection itself the only pipe-bearing object:
   `connection.Input` is what the peer sent you, `connection.Output` is what you send — anchored,
   documented, and identical at every level of the recursion (a TCP connection and a QUIC stream
-  read the same). The mirrored pump end lives in the transports' internal toolbox
-  (`DuplexPipePair`), never on a contract.
+  read the same). The mirrored pump end lives in the drivers' compiled-in shared source
+  (`DuplexPipePair`), separate from the consumer-facing connection contract.
 - **Polarity.** Pipe → stream is a cheap lazy adapter (`DuplexPipeStream`, `AsStream()`);
   stream → pipe re-buffers. Making the pipe canonical lets hot consumers (HTTP/AMQP frame
   parsers) read zero-copy sequences while stream-based APIs (`SslStream`) adapt at their own
@@ -204,6 +206,12 @@ to it. The interface remains the canonical surface consumers depend on.
 
 ## Lifecycle and Error Model
 
+- A listener is configured when constructed and acquires its endpoint through `BindAsync`. Binding is
+  idempotent while active. `DisposeAsync` releases the endpoint and is terminal for that listener
+  instance; restart constructs and binds a new listener. Guided bases provide a completed logical-bind
+  default for custom listeners that are pre-bound or own no external endpoint, while resource-owning
+  drivers override it. `AcceptAsync` remains the connection-production operation, not the endpoint-
+  acquisition signal.
 - A connection is **live when produced** — there is no separate open step and no
   connection-versus-context duality. Read and write immediately.
 - Three teardown paths: complete `Output` for a graceful half-close; `DisposeAsync()` to close;
@@ -235,11 +243,79 @@ source generator. Fully NativeAOT compatible.
 
 ## Relationships
 
-- **`Assimalign.Cohesion.Connections.Tcp` / `.Udp` / `.Quic`** — the drivers implementing these
-  contracts. Driver-support infrastructure (the `DuplexPipePair` wiring, pipe options and
-  adaptive memory pooling, `ConnectionEventSource` diagnostics, `ListenerId`) lives in this
-  library's `Internal` namespace and is shared with the drivers via `InternalsVisibleTo`; there is
-  no separate toolbox assembly.
+- **`Assimalign.Cohesion.Connections.Tcp` / `.Udp` / `.Quic` / `.NamedPipes`** — the drivers
+  implementing these contracts. Driver-support infrastructure is split by what it is:
+  `DuplexPipePair` and the pool-owning pipe options live in this library's `shared/` folder and
+  are **compiled into** each driver, `ListenerId` is public API, and diagnostics are each
+  driver's own internal event source. There is no separate toolbox assembly and no
+  `InternalsVisibleTo` between shipped assemblies.
 - **`Assimalign.Cohesion.Security`** — TLS as `TlsConnectionLayer` / `UpgradeToTlsAsync`.
 - **`Assimalign.Cohesion.Http.Connections` / `Assimalign.Cohesion.Amqp.Transports`** — application
   protocols consuming these contracts by capability.
+
+## Driver composition seams
+
+Drivers get their plumbing from this library in exactly one way — **shared source** for types that
+are implementation details — and they get nothing for diagnostics: a process-global resource such as
+an event source stays inside the one assembly that owns it, so every driver owns its own.
+
+### Shared source — `shared/`, compiled into each driver
+
+`DuplexPipePair`, `PipeOptionsContext`, `StreamPipeOptionsContext`, and `PipeOptionsFactory` live
+in this project's `shared/` folder and are **not** part of the `Assimalign.Cohesion.Connections`
+assembly at all. A driver names this project in a `CohesionSharedSource` item and compiles its own
+internal copy (`.claude/rules/general-rules.md`, *Shared source*):
+
+```xml
+<CohesionSharedSource Include="Assimalign.Cohesion.Connections" />
+```
+
+- `DuplexPipePair.Create` constructs the fixed mirrored topology; `Input`/`Output` are
+  consumer-facing and `TransportOutput`/`TransportInput` belong to the driver's pumps.
+- `PipeOptionsFactory.CreatePipeOptions` takes explicit application/driver schedulers and
+  receive/send thresholds. Its `PipeOptionsContext` owns one pool and exposes `InputOptions`,
+  `OutputOptions`, and `BlockSize`. `CreateStreamOptions` returns
+  `StreamPipeOptionsContext` with `ReaderOptions` and `WriterOptions`. The driver completes
+  all dependent pipes before calling the context's idempotent `Dispose`.
+
+Linking is safe here precisely because nothing crosses an assembly boundary: `PipeOptionsFactory`
+holds only constants, and every context and pipe pair it creates is constructed, used, and
+disposed inside the one driver assembly that asked for it. `Assimalign.Cohesion.Connections`
+itself neither produces nor consumes one, which is why it does not compile them in either — the
+only assemblies that carry these types are the drivers and this project's own test suite.
+
+This replaces what used to be `InternalsVisibleTo` to `Tcp`, `Quic`, and `NamedPipes`, and it
+replaces a briefly-public version of the same four types: they were never a contract anyone
+outside a driver should implement against, and publishing them would have frozen the pipe
+topology and the pool-ownership shape as public API.
+
+### Diagnostics — one internal event source per driver
+
+Each driver owns an internal event source named for its assembly — `Assimalign.Cohesion.Connections.Tcp`,
+`.Quic`, `.NamedPipes`, `.Udp` — and reports its listener, connection, and (QUIC) stream lifecycle
+through it, with its own counters. This library has no event source and no diagnostics API: it performs
+no network operations of its own. The repository-wide rule is `.claude/rules/event-source.md`; the
+event tables live in each driver's `docs/DESIGN.md`; applications observe the drivers with
+`dotnet-trace`/`dotnet-counters` by name, or forward them into their logging with
+`Assimalign.Cohesion.Logging.EventSource`.
+
+This replaced a single `ConnectionEventSource` (`Assimalign.Cohesion.Connections`) that every driver
+reached through a public, stateless `ConnectionDiagnostics` forwarder. Why the shape changed:
+
+- **The forwarder was public diagnostics API.** Any caller could write fabricated events into a
+  process-global provider, and every event's shape was frozen as public surface. The owner's direction
+  (2026-09) is that event-source implementations are internal and never exposed to developers.
+- **Sharing the source could not be done internally.** It cannot be `shared/` source — linked copies
+  would be four providers claiming one process-global name, each under-reporting — and an
+  `InternalsVisibleTo` grant between shipped assemblies is not allowed. Per-driver ownership is the
+  only internal shape, and it is also how the runtime instruments its own networking
+  (`System.Net.Sockets`, `System.Net.Quic`, `System.Net.Security`).
+- **The shared source was broken in ways its shape invited.** Its counters were declared but never
+  written (issue #1027), `ListenerInitialized` wrote one argument where its method declared two, the
+  event methods declared domain value types (`ConnectionProtocol`, `ListenerId`, `ConnectionId`) as
+  payload, only QUIC reported a close, and QUIC streams were reported as connections. A per-driver source is small enough to test against its manifest and its real lifecycle,
+  which the convention now requires.
+
+`ListenerId` stays public: it is the correlation id every stream driver stamps on the connections its
+listeners produce, and a connection's `listenerId` payload is how a forwarded log line ties back to its
+listener.

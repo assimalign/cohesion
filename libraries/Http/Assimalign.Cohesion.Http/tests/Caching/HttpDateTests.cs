@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Http.Tests;
 /// </summary>
 public class HttpDateTests
 {
-    private static readonly DateTimeOffset Reference = new(1994, 11, 6, 8, 49, 37, TimeSpan.Zero);
+    private static readonly DateTimeOffset _reference = new(1994, 11, 6, 8, 49, 37, TimeSpan.Zero);
 
     [Theory]
     [InlineData("Sun, 06 Nov 1994 08:49:37 GMT")]     // IMF-fixdate (preferred)
@@ -24,7 +24,7 @@ public class HttpDateTests
         bool ok = HttpDate.TryParse(raw, out DateTimeOffset date);
 
         ok.ShouldBeTrue();
-        date.ShouldBe(Reference);
+        date.ShouldBe(_reference);
         date.Offset.ShouldBe(TimeSpan.Zero);
     }
 
@@ -63,7 +63,7 @@ public class HttpDateTests
     [Fact(DisplayName = "Cohesion Test [Http] - HttpDate: Format emits IMF-fixdate")]
     public void Format_ShouldEmitImfFixdate()
     {
-        string formatted = HttpDate.Format(Reference);
+        string formatted = HttpDate.Format(_reference);
 
         formatted.ShouldBe("Sun, 06 Nov 1994 08:49:37 GMT");
     }
@@ -79,9 +79,9 @@ public class HttpDateTests
     [Fact(DisplayName = "Cohesion Test [Http] - HttpDate: Format then parse round-trips")]
     public void Format_ThenParse_ShouldRoundTrip()
     {
-        string formatted = HttpDate.Format(Reference);
+        string formatted = HttpDate.Format(_reference);
 
         HttpDate.TryParse(formatted, out DateTimeOffset parsed).ShouldBeTrue();
-        parsed.ShouldBe(Reference);
+        parsed.ShouldBe(_reference);
     }
 }

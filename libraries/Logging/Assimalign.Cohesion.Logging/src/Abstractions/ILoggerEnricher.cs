@@ -20,6 +20,13 @@ namespace Assimalign.Cohesion.Logging;
 public interface ILoggerEnricher
 {
     /// <summary>
+    /// A name that identifies the enricher, for example in <see cref="ILoggerFactory.Enrichers"/>.
+    /// Names are unique within a builder, compared case-insensitively; a <see langword="null"/> name
+    /// is treated as empty.
+    /// </summary>
+    string Name { get; }
+
+    /// <summary>
     /// Add attributes for <paramref name="entry"/>.
     /// </summary>
     /// <param name="entry">The entry being enriched. Required.</param>

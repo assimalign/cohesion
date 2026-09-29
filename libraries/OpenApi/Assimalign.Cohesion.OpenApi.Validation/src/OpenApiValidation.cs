@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.OpenApi.Validation.Internal;
+
 namespace Assimalign.Cohesion.OpenApi.Validation;
 
 /// <summary>

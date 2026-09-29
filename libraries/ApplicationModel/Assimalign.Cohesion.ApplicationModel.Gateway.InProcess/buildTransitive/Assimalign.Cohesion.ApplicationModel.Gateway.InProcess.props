@@ -1,0 +1,10 @@
+<Project>
+	<ItemGroup>
+		<CohesionGatewayProvider Include="InProcess">
+			<Name>inprocess</Name>
+			<GatewayType>global::Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.InProcessGateway</GatewayType>
+			<OptionsType>global::Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.InProcessGatewayOptions</OptionsType>
+			<RequiresJit>false</RequiresJit>
+		</CohesionGatewayProvider>
+	</ItemGroup>
+</Project>

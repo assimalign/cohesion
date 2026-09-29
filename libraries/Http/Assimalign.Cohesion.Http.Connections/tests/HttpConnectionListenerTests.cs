@@ -15,6 +15,69 @@ namespace Assimalign.Cohesion.Http.Connections.Tests;
 
 public class HttpConnectionListenerTests
 {
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: BindAsync should bind every transport before completing")]
+    public async Task BindAsync_WithStreamAndMultiplexedListeners_ShouldBindEveryTransportOnce()
+    {
+        // Arrange
+        TestConnectionListener streamListener = new();
+        TestMultiplexedConnectionListener multiplexedListener = new();
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp1(streamListener).UseHttp3(multiplexedListener);
+
+        await using HttpConnectionListener listener = new(options);
+
+        // Act
+        await listener.BindAsync();
+        await listener.BindAsync();
+
+        // Assert
+        streamListener.BindCount.ShouldBe(1);
+        multiplexedListener.BindCount.ShouldBe(1);
+        streamListener.AcceptCount.ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: BindAsync should release listeners after a partial bind failure")]
+    public async Task BindAsync_WhenLaterListenerFails_ShouldReleaseEveryListenerAndPreserveFailure()
+    {
+        // Arrange
+        InvalidOperationException failure = new("bind failed");
+        TestConnectionListener firstListener = new();
+        FailingBindConnectionListener failingListener = new(failure);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp1(firstListener).UseHttp1(failingListener);
+
+        HttpConnectionListener listener = new(options);
+
+        // Act
+        InvalidOperationException observed = await Should.ThrowAsync<InvalidOperationException>(
+            () => listener.BindAsync().AsTask());
+
+        // Assert
+        observed.ShouldBeSameAs(failure);
+        firstListener.BindCount.ShouldBe(1);
+        firstListener.IsDisposed.ShouldBeTrue();
+        failingListener.DisposeCount.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Accept should bind before starting transport accepts")]
+    public async Task AcceptOrListenAsync_BeforeExplicitBind_ShouldBindBeforeAccepting()
+    {
+        // Arrange
+        TestConnection connection = new(HttpProtocolPayloadFactory.CreateHttp1Request("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"));
+        TestConnectionListener transportListener = new(connection);
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp1(transportListener);
+
+        await using HttpConnectionListener listener = new(options);
+
+        // Act
+        await listener.AcceptOrListenAsync();
+
+        // Assert
+        transportListener.BindCount.ShouldBe(1);
+        transportListener.AcceptCount.ShouldBeGreaterThan(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Should accept and adapt an HTTP/1.1 transport connection")]
     public async Task AcceptOrListenAsync_OnQueuedHttp1Connection_ShouldAdaptConnection()
     {
@@ -193,6 +256,35 @@ public class HttpConnectionListenerTests
         multiplexedListener.IsDisposed.ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Disposal should release HTTP/3 connections queued or waiting on the backlog")]
+    public async Task DisposeAsync_WithBackloggedHttp3Connections_ShouldDisposeOwnedConnections()
+    {
+        // Arrange
+        TestMultiplexedConnection acceptedTransport = new();
+        TestMultiplexedConnection queuedTransport = new();
+        TestMultiplexedConnection pendingTransport = new();
+        TestMultiplexedConnectionListener transportListener = new(acceptedTransport, queuedTransport, pendingTransport);
+        HttpConnectionListenerOptions options = new()
+        {
+            BacklogCapacity = 1
+        };
+        options.UseHttp3(transportListener);
+        HttpConnectionListener listener = new(options);
+
+        IHttpConnection acceptedConnection = await listener.AcceptOrListenAsync();
+        await WaitForAsync(() => transportListener.AcceptCount >= 3, TimeSpan.FromSeconds(1));
+
+        // Act
+        await listener.DisposeAsync();
+
+        // Assert
+        acceptedTransport.IsDisposed.ShouldBeFalse();
+        queuedTransport.IsDisposed.ShouldBeTrue();
+        pendingTransport.IsDisposed.ShouldBeTrue();
+
+        await acceptedConnection.DisposeAsync();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - HttpConnectionListener: Should surface an accept-loop failure to the caller")]
     public async Task AcceptOrListenAsync_OnAcceptLoopFailure_ShouldRethrowListenerException()
     {
@@ -230,6 +322,16 @@ public class HttpConnectionListenerTests
         return enumerator.Current;
     }
 
+    private static async Task WaitForAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        using CancellationTokenSource cancellationTokenSource = new(timeout);
+
+        while (!condition())
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(10), cancellationTokenSource.Token);
+        }
+    }
+
     /// <summary>
     /// A listener whose accept always faults, for exercising the accept
     /// loop's failure propagation path.
@@ -251,5 +353,33 @@ public class HttpConnectionListenerTests
             => ValueTask.FromException<Connection>(_exception);
 
         public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class FailingBindConnectionListener : ConnectionListener
+    {
+        private readonly Exception _exception;
+
+        public FailingBindConnectionListener(Exception exception)
+        {
+            _exception = exception;
+        }
+
+        public int DisposeCount { get; private set; }
+
+        public override EndPoint EndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 17001);
+
+        public override ConnectionCapabilities Capabilities => TestConnection.DefaultCapabilities;
+
+        public override ValueTask BindAsync(CancellationToken cancellationToken = default)
+            => ValueTask.FromException(_exception);
+
+        public override ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Accept must not run after binding fails.");
+
+        public override ValueTask DisposeAsync()
+        {
+            DisposeCount++;
+            return ValueTask.CompletedTask;
+        }
     }
 }

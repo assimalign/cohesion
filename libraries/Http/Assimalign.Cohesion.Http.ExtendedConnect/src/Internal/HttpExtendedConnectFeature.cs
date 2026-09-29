@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Http;
+namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// Default <see cref="IHttpExtendedConnectFeature"/> implementation, backed by

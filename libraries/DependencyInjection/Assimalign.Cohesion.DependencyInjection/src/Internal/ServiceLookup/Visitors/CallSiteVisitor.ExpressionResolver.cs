@@ -15,28 +15,28 @@ using Assimalign.Cohesion.DependencyInjection.Properties;
 
 internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor<object?, Expression>
 {
-    private static readonly ParameterExpression ScopeParameter = Expression.Parameter(typeof(ServiceProviderEngineScope));
+    private static readonly ParameterExpression _scopeParameter = Expression.Parameter(typeof(ServiceProviderEngineScope));
 
-    private static readonly ParameterExpression ResolvedServices = Expression.Variable(typeof(IDictionary<CallSiteServiceCacheKey, object>), ScopeParameter.Name + "resolvedServices");
-    private static readonly ParameterExpression Sync = Expression.Variable(typeof(object), ScopeParameter.Name + "sync");
-    private static readonly BinaryExpression ResolvedServicesVariableAssignment =
-        Expression.Assign(ResolvedServices,
+    private static readonly ParameterExpression _resolvedServices = Expression.Variable(typeof(IDictionary<CallSiteServiceCacheKey, object>), _scopeParameter.Name + "resolvedServices");
+    private static readonly ParameterExpression _sync = Expression.Variable(typeof(object), _scopeParameter.Name + "sync");
+    private static readonly BinaryExpression _resolvedServicesVariableAssignment =
+        Expression.Assign(_resolvedServices,
             Expression.Property(
-                ScopeParameter,
+                _scopeParameter,
                 typeof(ServiceProviderEngineScope).GetProperty(nameof(ServiceProviderEngineScope.ResolvedServices), BindingFlags.Instance | BindingFlags.NonPublic)!));
 
-    private static readonly BinaryExpression SyncVariableAssignment =
-        Expression.Assign(Sync,
+    private static readonly BinaryExpression _syncVariableAssignment =
+        Expression.Assign(_sync,
             Expression.Property(
-                ScopeParameter,
+                _scopeParameter,
                 typeof(ServiceProviderEngineScope).GetProperty(nameof(ServiceProviderEngineScope.Sync), BindingFlags.Instance | BindingFlags.NonPublic)!));
 
-    private static readonly ParameterExpression CaptureDisposableParameter = Expression.Parameter(typeof(object));
-    private static readonly LambdaExpression CaptureDisposable = Expression.Lambda(
-                Expression.Call(ScopeParameter, ServiceLookupHelpers.CaptureDisposableMethodInfo, CaptureDisposableParameter),
-                CaptureDisposableParameter);
+    private static readonly ParameterExpression _captureDisposableParameter = Expression.Parameter(typeof(object));
+    private static readonly LambdaExpression _captureDisposable = Expression.Lambda(
+                Expression.Call(_scopeParameter, ServiceLookupHelpers.CaptureDisposableMethodInfo, _captureDisposableParameter),
+                _captureDisposableParameter);
 
-    private static readonly ConstantExpression CallSiteRuntimeResolverInstanceExpression = Expression.Constant(
+    private static readonly ConstantExpression _callSiteRuntimeResolverInstanceExpression = Expression.Constant(
         CallSiteRuntimeResolverVisitor.Instance,
         typeof(CallSiteRuntimeResolverVisitor));
 
@@ -78,16 +78,16 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
         {
             return Expression.Lambda<Func<ServiceProviderEngineScope, object>>(
                 Expression.Block(
-                    new[] { ResolvedServices, Sync },
-                    ResolvedServicesVariableAssignment,
-                    SyncVariableAssignment,
+                    new[] { _resolvedServices, _sync },
+                    _resolvedServicesVariableAssignment,
+                    _syncVariableAssignment,
                     BuildScopedExpression(callSite)),
-                ScopeParameter);
+                _scopeParameter);
         }
 
         return Expression.Lambda<Func<ServiceProviderEngineScope, object>>(
             Convert(VisitCallSite(callSite, null), typeof(object), forceValueTypeConversion: true),
-            ScopeParameter);
+            _scopeParameter);
     }
 
     protected override Expression VisitRootCache(CallSiteService singletonCallSite, object? context)
@@ -102,12 +102,12 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
 
     protected override Expression VisitServiceProvider(ServiceProviderCallSite serviceProviderCallSite, object? context)
     {
-        return ScopeParameter;
+        return _scopeParameter;
     }
 
     protected override Expression VisitFactory(FactoryCallSite factoryCallSite, object? context)
     {
-        return Expression.Invoke(Expression.Constant(factoryCallSite.Factory), ScopeParameter);
+        return Expression.Invoke(Expression.Constant(factoryCallSite.Factory), _scopeParameter);
     }
 
     protected override Expression VisitEnumerable(EnumerableCallSite callSite, object? context)
@@ -141,7 +141,7 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
         // Elide calls to GetCaptureDisposable if the implementation type isn't disposable
         return TryCaptureDisposable(
             callSite,
-            ScopeParameter,
+            _scopeParameter,
             VisitCallSiteMain(callSite, context));
     }
 
@@ -195,7 +195,7 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
     protected override Expression VisitScopeCache(CallSiteService callSite, object? context)
     {
         Func<ServiceProviderEngineScope, object> lambda = Build(callSite);
-        return Expression.Invoke(Expression.Constant(lambda), ScopeParameter);
+        return Expression.Invoke(Expression.Constant(lambda), _scopeParameter);
     }
 
     // Move off the main stack
@@ -209,10 +209,10 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
         // We've already called into the RuntimeResolver and pre-computed any singletons or root scope
         // Avoid the compilation for singletons (or promoted singletons)
         MethodCallExpression resolveRootScopeExpression = Expression.Call(
-            CallSiteRuntimeResolverInstanceExpression,
+            _callSiteRuntimeResolverInstanceExpression,
             ServiceLookupHelpers.ResolveCallSiteAndScopeMethodInfo,
             callSiteExpression,
-            ScopeParameter);
+            _scopeParameter);
 
         ConstantExpression keyExpression = Expression.Constant(
             callSite.Cache.Key,
@@ -220,7 +220,7 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
 
         ParameterExpression resolvedVariable = Expression.Variable(typeof(object), "resolved");
 
-        ParameterExpression resolvedServices = ResolvedServices;
+        ParameterExpression resolvedServices = _resolvedServices;
 
         MethodCallExpression tryGetValueExpression = Expression.Call(
             resolvedServices,
@@ -228,7 +228,7 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
             keyExpression,
             resolvedVariable);
 
-        Expression captureDisposible = TryCaptureDisposable(callSite, ScopeParameter, VisitCallSiteMain(callSite, null));
+        Expression captureDisposible = TryCaptureDisposable(callSite, _scopeParameter, VisitCallSiteMain(callSite, null));
 
         BinaryExpression assignExpression = Expression.Assign(
             resolvedVariable,
@@ -257,7 +257,7 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
         // The C# compiler would copy the lock object to guard against mutation.
         // We don't, since we know the lock object is readonly.
         ParameterExpression lockWasTaken = Expression.Variable(typeof(bool), "lockWasTaken");
-        ParameterExpression sync = Sync;
+        ParameterExpression sync = _sync;
 
         MethodCallExpression monitorEnter = Expression.Call(ServiceLookupHelpers.MonitorEnterMethodInfo, sync, lockWasTaken);
         MethodCallExpression monitorExit = Expression.Call(ServiceLookupHelpers.MonitorExitMethodInfo, sync);
@@ -267,7 +267,7 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
 
         return Expression.Condition(
                 Expression.Property(
-                    ScopeParameter,
+                    _scopeParameter,
                     typeof(ServiceProviderEngineScope)
                         .GetProperty(nameof(ServiceProviderEngineScope.IsRootScope), BindingFlags.Instance | BindingFlags.Public)!),
                 resolveRootScopeExpression,
@@ -280,10 +280,10 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
 
     public static Expression GetCaptureDisposable(ParameterExpression scope)
     {
-        if (scope != ScopeParameter)
+        if (scope != _scopeParameter)
         {
             throw new NotSupportedException(Resources.GetCaptureDisposableNotSupported);
         }
-        return CaptureDisposable;
+        return _captureDisposable;
     }
 }

@@ -7,15 +7,15 @@ SQL-scoped error taxonomy, and a telemetry hook — layered over the shared
 ## Purpose
 
 `Database.Client` is the model-agnostic client core: it dials the server, runs the
-wire handshake, pools authenticated connections, and materializes rows as boxed
-values. This package adds the SQL-shaped ergonomics an application expects — an
+wire handshake, and pools authenticated connections. This package owns SQL result
+materialization and the SQL-shaped ergonomics an application expects — an
 ADO.NET-familiar command/parameter/result-set surface with typed column access —
 without re-implementing any of the transport, framing, or pooling below it.
 
 The client **does not parse SQL**. It sends statement text and parameters over the
 wire; the server's SQL session parses, plans, and executes them. That keeps the
-client contract stable and independent of the engine's internal plan structures, and
-is why this package does **not** reference `Sql.Language`.
+client contract stable and independent of the engine's internal plan structures.
+The model reference supplies wire codecs; the client never calls its parser.
 
 ## Scope
 
@@ -37,6 +37,7 @@ is why this package does **not** reference `Sql.Language`.
 
 - `Assimalign.Cohesion.Database` — the `DatabaseException` area root.
 - `Assimalign.Cohesion.Database.Client` — the pooling client core this layers over.
+- `Assimalign.Cohesion.Database.Sql` — the SQL family identifiers and payload codecs.
 - `Assimalign.Cohesion.Database.Types` — `DatabaseType` column identities.
 - `Assimalign.Cohesion.Connections` — the transport `IConnectionFactory` handed to
   the client core.

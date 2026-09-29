@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "AssimAlign",
+  "classifications": [
+    "Cohesion",
+    "Cloud"
+  ],
+  "identity": "Assimalign.Cohesion.Templates.landing-zone.CSharp",
+  "name": "Cohesion landing-zone",
+  "shortName": "cohesion-landing-zone",
+  "sourceName": "Example",
+  "preferNameDirectory": true,
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "symbols": {
+    "Framework": {
+      "type": "parameter",
+      "dataType": "choice",
+      "choices": [
+        {
+          "choice": "net10.0",
+          "description": ".NET 10"
+        }
+      ],
+      "defaultValue": "net10.0",
+      "description": "The SDK target framework."
+    },
+    "nameLower": {
+      "type": "generated",
+      "generator": "casing",
+      "parameters": {
+        "source": "name",
+        "toLower": true
+      },
+      "replaces": "example"
+    },
+    "topology": {
+      "type": "parameter",
+      "dataType": "choice",
+      "defaultValue": "single",
+      "choices": [
+        {
+          "choice": "single",
+          "description": "One root application set over six domains."
+        },
+        {
+          "choice": "federated",
+          "description": "Six independent domain gateways."
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "source": "./",
+      "target": "./",
+      "exclude": [
+        "**/[Bb]in/**",
+        "**/[Oo]bj/**",
+        ".template.config/**",
+        ".topologies/**"
+      ],
+      "modifiers": [
+        {
+          "condition": "(topology == \"federated\")",
+          "exclude": [
+            "Gateway/**",
+            "Example.K8s.slnx",
+            "Identity/Example.Identity.Gateway/appsettings.json",
+            "Networking/Example.Networking.Gateway/appsettings.json",
+            "Platform/Example.Platform.Gateway/appsettings.json",
+            "README.md",
+            "Zones/AppA/Example.AppA.Gateway/appsettings.json",
+            "Zones/AppB/Example.AppB.Gateway/appsettings.json",
+            "Zones/AppC/Example.AppC.Gateway/appsettings.json"
+          ]
+        }
+      ]
+    },
+    {
+      "condition": "(topology == \"federated\")",
+      "source": ".topologies/federated/",
+      "target": "./"
+    }
+  ]
+}

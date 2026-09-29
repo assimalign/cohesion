@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Http.Tests;
 /// </summary>
 public class HttpContentNegotiationTests
 {
-    private static readonly IReadOnlyList<HttpMediaType> JsonThenXml = new[]
+    private static readonly IReadOnlyList<HttpMediaType> _jsonThenXml = new[]
     {
         HttpMediaType.ApplicationJson,
         HttpMediaType.ApplicationXml,
@@ -26,7 +26,7 @@ public class HttpContentNegotiationTests
     [Fact]
     public void NegotiateMediaType_NoAccept_ShouldReturnServerPreferred()
     {
-        HttpContentNegotiation.TryNegotiateMediaType((string?)null, JsonThenXml, out HttpMediaType selected)
+        HttpContentNegotiation.TryNegotiateMediaType((string?)null, _jsonThenXml, out HttpMediaType selected)
             .ShouldBeTrue();
 
         selected.ShouldBe(HttpMediaType.ApplicationJson);
@@ -35,7 +35,7 @@ public class HttpContentNegotiationTests
     [Fact]
     public void NegotiateMediaType_ExactMatch_ShouldSelectIt()
     {
-        HttpContentNegotiation.TryNegotiateMediaType("application/xml", JsonThenXml, out HttpMediaType selected)
+        HttpContentNegotiation.TryNegotiateMediaType("application/xml", _jsonThenXml, out HttpMediaType selected)
             .ShouldBeTrue();
 
         selected.ShouldBe(HttpMediaType.ApplicationXml);

@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.IdentityModel.Tests;
 /// </summary>
 public sealed class IdentityCredentialTests
 {
-    private static readonly DateTimeOffset now = new(2026, 7, 3, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 7, 3, 12, 0, 0, TimeSpan.Zero);
 
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - Credential: IsUsable should combine state and validity window")]
     public void IsUsable_WhenEvaluated_ShouldCombineStateAndValidityWindow()
@@ -25,14 +25,14 @@ public sealed class IdentityCredentialTests
             Id = "thumbprint-1",
             Kind = IdentityCredentialKind.Certificate,
             State = IdentityCredentialState.Active,
-            NotBefore = now.AddDays(-1),
-            ExpiresAt = now.AddDays(1),
+            NotBefore = _now.AddDays(-1),
+            ExpiresAt = _now.AddDays(1),
         });
 
         // Assert
-        credential.IsUsable(now).ShouldBeTrue();
-        credential.IsUsable(now.AddDays(-2)).ShouldBeFalse();       // before NotBefore
-        credential.IsUsable(now.AddDays(2)).ShouldBeFalse();        // after ExpiresAt
+        credential.IsUsable(_now).ShouldBeTrue();
+        credential.IsUsable(_now.AddDays(-2)).ShouldBeFalse();       // before NotBefore
+        credential.IsUsable(_now.AddDays(2)).ShouldBeFalse();        // after ExpiresAt
         credential.IsUsable(credential.ExpiresAt!.Value).ShouldBeFalse(); // expiry is exclusive
         credential.IsUsable(credential.NotBefore!.Value).ShouldBeTrue(); // start is inclusive
     }
@@ -53,13 +53,13 @@ public sealed class IdentityCredentialTests
                 State = state,
             });
 
-            credential.IsUsable(now).ShouldBeFalse($"state {state} must not be usable");
+            credential.IsUsable(_now).ShouldBeFalse($"state {state} must not be usable");
         }
 
         // A forgotten state assignment defaults to Unknown — and Unknown is never usable.
         var defaulted = new IdentityCredential(new IdentityCredentialDescriptor { Id = "defaulted" });
         defaulted.State.ShouldBe(IdentityCredentialState.Unknown);
-        defaulted.IsUsable(now).ShouldBeFalse();
+        defaulted.IsUsable(_now).ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - Credential: Materialization should reject invalid descriptors")]
@@ -69,8 +69,8 @@ public sealed class IdentityCredentialTests
         Should.Throw<IdentityModelException>(() => new IdentityCredential(new IdentityCredentialDescriptor
         {
             Id = "backwards-window",
-            NotBefore = now,
-            ExpiresAt = now, // must be strictly after NotBefore
+            NotBefore = _now,
+            ExpiresAt = _now, // must be strictly after NotBefore
         }));
         Should.Throw<ArgumentNullException>(() => new IdentityCredential(null!));
     }
@@ -85,7 +85,7 @@ public sealed class IdentityCredentialTests
             Kind = IdentityCredentialKind.Key,
             State = IdentityCredentialState.Active,
             Subject = new SubjectIdentifier("client-1", SubjectIdentifierFormats.ClientIdentifier),
-            CreatedAt = now.AddDays(-30),
+            CreatedAt = _now.AddDays(-30),
         };
         descriptor.Properties["algorithm"] = "ES256";
 

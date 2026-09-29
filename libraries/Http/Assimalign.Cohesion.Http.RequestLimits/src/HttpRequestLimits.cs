@@ -1,3 +1,5 @@
+using Assimalign.Cohesion.Http.Internal;
+
 namespace Assimalign.Cohesion.Http;
 
 /// <summary>

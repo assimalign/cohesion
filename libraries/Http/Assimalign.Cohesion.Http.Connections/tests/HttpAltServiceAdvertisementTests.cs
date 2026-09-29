@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -33,6 +34,31 @@ public class HttpAltServiceAdvertisementTests
 
         // Assert
         responseText.ShouldContain($"Alt-Svc: h3=\":{Http3Port}\"; ma=86400", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - AltSvc: Should advertise the endpoint assigned during HTTP/3 binding")]
+    public async Task Http1_OnPortAssignedDuringHttp3Bind_ShouldEmitAssignedPort()
+    {
+        // Arrange
+        const int assignedPort = 16001;
+        byte[] payload = HttpProtocolPayloadFactory.CreateHttp1Request("GET / HTTP/1.1\r\nHost: api.test\r\n\r\n");
+        TestConnection connection = new(payload);
+        TestMultiplexedConnectionListener http3Listener = new()
+        {
+            EndPointAfterBind = new IPEndPoint(IPAddress.Loopback, assignedPort)
+        };
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp1(new TestConnectionListener(connection));
+        options.UseHttp3(http3Listener);
+        options.AdvertiseAltService(_ => { });
+
+        // Act
+        string responseText = await RunHttp1ExchangeAsync(connection, options);
+
+        // Assert
+        http3Listener.BindCount.ShouldBe(1);
+        responseText.ShouldContain($"Alt-Svc: h3=\":{assignedPort}\"", Case.Sensitive);
+        responseText.ShouldNotContain($"h3=\":{Http3Port}\"", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http.Connections] - AltSvc: Should not advertise when no HTTP/3 listener is registered")]

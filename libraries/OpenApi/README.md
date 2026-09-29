@@ -5,6 +5,44 @@ descriptions across the officially published **3.0.4**, **3.1.2**, and **3.2.0**
 foundation library family: it has no dependency on Web, ApiManager, or any service runtime, so L2/L3
 service layers can compose it through contracts and adapters rather than inheriting hosting concerns.
 
+## Project map
+
+An arrow means "references": `OpenApi.Serialization --> OpenApi` reads
+`Assimalign.Cohesion.OpenApi.Serialization` references `Assimalign.Cohesion.OpenApi`.
+
+```mermaid
+flowchart LR
+    P0["OpenApi — area root"]
+    P1["OpenApi.Attributes"]
+    P2["OpenApi.Fluent"]
+    P3["OpenApi.Generation"]
+    P4["OpenApi.Integration"]
+    P5["OpenApi.Serialization"]
+    P6["OpenApi.Validation"]
+    P7["OpenApi.Versioning"]
+    P1 --> P0
+    P2 --> P0
+    P3 --> P0
+    P3 --> P1
+    P4 --> P0
+    P4 --> P1
+    P4 --> P3
+    P4 --> P5
+    P4 --> P7
+    P5 --> P0
+    P6 --> P0
+    P6 --> P5
+    P7 --> P0
+    P7 --> P5
+    P7 --> P6
+```
+
+Solid edges are the references this area permits; the dependency arrow always points from the
+consumer to what it consumes.
+
+The full reference graph for every Cohesion assembly, including the exact external dependencies
+collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
+
 ## Layering
 
 - **L1 (this area):** the document model, serialization, and validation — pure description machinery.

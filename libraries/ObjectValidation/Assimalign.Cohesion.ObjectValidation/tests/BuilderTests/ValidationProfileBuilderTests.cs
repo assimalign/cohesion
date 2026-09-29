@@ -5,6 +5,8 @@ using System.Text;
 using System.Threading.Tasks;
 using Xunit;
 
+using Assimalign.Cohesion.ObjectValidation.Internal;
+
 namespace Assimalign.Cohesion.ObjectValidation.Tests;
 
 public class ValidationProfileBuilderTests

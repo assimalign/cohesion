@@ -10,8 +10,8 @@ using Assimalign.Cohesion.Internal;
 
 public abstract class PollingChangeToken<T> : IChangeToken, IDisposable
 {
-    private readonly Timer timer;
-    private readonly List<IDisposable> subscribers;
+    private readonly Timer _timer;
+    private readonly List<IDisposable> _subscribers;
 
     protected PollingChangeToken(TimeSpan startAfter, TimeSpan interval)
         : this(startAfter, interval, null)
@@ -20,8 +20,8 @@ public abstract class PollingChangeToken<T> : IChangeToken, IDisposable
 
     protected PollingChangeToken(TimeSpan startAfter, TimeSpan interval, object? state)
     {
-        subscribers = new List<IDisposable>();
-        timer = new Timer((state =>
+        _subscribers = new List<IDisposable>();
+        _timer = new Timer((state =>
         {
             if (HasChanged(state, out var data))
             {
@@ -54,7 +54,7 @@ public abstract class PollingChangeToken<T> : IChangeToken, IDisposable
 
     public void Dispose()
     {
-        timer.Dispose();
+        _timer.Dispose();
     }
 }
 

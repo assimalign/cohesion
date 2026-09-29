@@ -37,7 +37,7 @@ internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
 {
     // The status source when a timeout fires with no configured policy — possible only when a
     // handler armed the timer itself through IHttpRequestTimeoutFeature.SetTimeout.
-    private static readonly RequestTimeoutPolicy FallbackPolicy = new();
+    private static readonly RequestTimeoutPolicy _fallbackPolicy = new();
 
     private readonly RequestTimeoutOptions _options;
 
@@ -67,7 +67,7 @@ internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
             }
             catch (OperationCanceledException) when (feature.TimedOut && !context.RequestCancelled.IsCancellationRequested)
             {
-                await WriteTimeoutResponseAsync(context, feature.EffectivePolicy ?? FallbackPolicy).ConfigureAwait(false);
+                await WriteTimeoutResponseAsync(context, feature.EffectivePolicy ?? _fallbackPolicy).ConfigureAwait(false);
             }
         }
         finally

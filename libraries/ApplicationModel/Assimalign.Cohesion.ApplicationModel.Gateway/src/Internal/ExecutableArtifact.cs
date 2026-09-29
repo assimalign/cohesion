@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 /// <summary>
 /// The default <see cref="IExecutableArtifact"/>: a resolved executable path on disk.

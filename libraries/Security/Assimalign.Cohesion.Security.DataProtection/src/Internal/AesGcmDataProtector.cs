@@ -1,7 +1,7 @@
 using System;
 using System.Security.Cryptography;
 
-namespace Assimalign.Cohesion.Security.DataProtection;
+namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 
 /// <summary>
 /// The default <see cref="IDataProtector"/>: AES-256-GCM over a per-purpose subkey derived

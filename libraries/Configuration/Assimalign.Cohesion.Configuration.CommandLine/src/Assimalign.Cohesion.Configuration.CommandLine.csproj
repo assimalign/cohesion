@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Configuration.CommandLine</RootNamespace>
 		<Description>Command line configuration provider implementation for Assimalign.Cohesion.Configuration.</Description>
 	</PropertyGroup>
 	<ItemGroup>

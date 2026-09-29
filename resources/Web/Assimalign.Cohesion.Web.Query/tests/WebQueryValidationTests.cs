@@ -25,8 +25,8 @@ namespace Assimalign.Cohesion.Web.Query.Tests;
 /// </summary>
 public class WebQueryValidationTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
-    private static readonly NetHttpMethod QueryMethod = new("QUERY");
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
+    private static readonly NetHttpMethod _queryMethod = new("QUERY");
 
     private static async Task<(WebApplicationTestFactory Factory, HttpClient Client)> CreateEchoAppAsync(
         Action<WebQueryValidationOptions>? configure = null,
@@ -53,13 +53,13 @@ public class WebQueryValidationTests
     }
 
     private static HttpRequestMessage CreateQuery(string uri, HttpContent? content)
-        => new(QueryMethod, uri) { Content = content };
+        => new(_queryMethod, uri) { Content = content };
 
     [Fact(DisplayName = "Cohesion Test [Web.Query] - Validation: QUERY content without a Content-Type is rejected 400 (RFC 10008 §2.3)")]
     public async Task UseQueryValidation_BodyWithoutContentType_ShouldRejectBadRequest()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client) = await CreateEchoAppAsync(cancellationToken: cancellation.Token);
         await using WebApplicationTestFactory ownedFactory = factory;
         using HttpClient ownedClient = client;
@@ -79,7 +79,7 @@ public class WebQueryValidationTests
     public async Task UseQueryValidation_BodyWithoutContentTypeAndUnsupportedMediaTypePolicy_ShouldReject415()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client) = await CreateEchoAppAsync(
             options => options.InvalidContentTypeStatusCode = CohesionHttpStatusCode.UnsupportedMediaType,
             cancellation.Token);
@@ -98,7 +98,7 @@ public class WebQueryValidationTests
     public async Task UseQueryValidation_MalformedContentType_ShouldRejectBadRequest()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client) = await CreateEchoAppAsync(cancellationToken: cancellation.Token);
         await using WebApplicationTestFactory ownedFactory = factory;
         using HttpClient ownedClient = client;
@@ -117,7 +117,7 @@ public class WebQueryValidationTests
     public async Task UseQueryValidation_ContentTypeOutsideAcceptedSet_ShouldReject415WithAcceptQuery()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client) = await CreateEchoAppAsync(
             options => options.AcceptedMediaTypes.Add(CohesionMediaType.Parse("application/json")),
             cancellation.Token);
@@ -138,7 +138,7 @@ public class WebQueryValidationTests
     public async Task UseQueryValidation_AcceptedContentType_ShouldProceedUnchanged()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client) = await CreateEchoAppAsync(
             options => options.AcceptedMediaTypes.Add(CohesionMediaType.Parse("application/json")),
             cancellation.Token);
@@ -160,7 +160,7 @@ public class WebQueryValidationTests
     public async Task UseQueryValidation_UnsatisfiableAccept_ShouldReject406()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client) = await CreateEchoAppAsync(
             options => options.SupportedResponseMediaTypes.Add(CohesionMediaType.Parse("application/json")),
             cancellation.Token);
@@ -181,7 +181,7 @@ public class WebQueryValidationTests
     public async Task UseQueryValidation_MissingAccept_ShouldProceed()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client) = await CreateEchoAppAsync(
             options => options.SupportedResponseMediaTypes.Add(CohesionMediaType.Parse("application/json")),
             cancellation.Token);
@@ -200,7 +200,7 @@ public class WebQueryValidationTests
     public async Task UseQueryValidation_BodilessQuery_ShouldProceed()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client) = await CreateEchoAppAsync(cancellationToken: cancellation.Token);
         await using WebApplicationTestFactory ownedFactory = factory;
         using HttpClient ownedClient = client;
@@ -217,7 +217,7 @@ public class WebQueryValidationTests
     public async Task UseQueryValidation_NonQueryMethod_ShouldPassThroughUntouched()
     {
         // Arrange — a POST with an untyped body would fail QUERY validation; it must not be touched.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client) = await CreateEchoAppAsync(
             options => options.AcceptedMediaTypes.Add(CohesionMediaType.Parse("application/json")),
             cancellation.Token);
@@ -243,7 +243,7 @@ public class WebQueryValidationTests
     {
         // Arrange — the 400 short-circuits without reading the request body; the transport owns
         // the unread remainder, and the client's next request must still complete.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (WebApplicationTestFactory factory, HttpClient client) = await CreateEchoAppAsync(cancellationToken: cancellation.Token);
         await using WebApplicationTestFactory ownedFactory = factory;
         using HttpClient ownedClient = client;

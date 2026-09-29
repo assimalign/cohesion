@@ -13,7 +13,7 @@ using Assimalign.Cohesion.Files.Bmff.Internal;
 [DebuggerDisplay("Bmff Box: Media (mdia)")]
 public sealed class MediaBox : BmffBoxComposite
 {
-    private IList<BmffBox> children = new List<BmffBox>();
+    private IList<BmffBox> _children = new List<BmffBox>();
 
     public MediaBox(long offset)
     {
@@ -27,7 +27,7 @@ public sealed class MediaBox : BmffBoxComposite
     public override long Limit { get; }
     public override long Offset { get; }
     public override BmffBoxType BoxType => BmffBoxType.Media;
-    public override IEnumerable<BmffBox> Children => this.children;
+    public override IEnumerable<BmffBox> Children => this._children;
 
     public override void Read(BmffStream stream)
     {
@@ -39,7 +39,7 @@ public sealed class MediaBox : BmffBoxComposite
             boxes.Add(reader.Current);
         }
 
-        children = boxes;
+        _children = boxes;
     }
 
     public override void Write(BmffStream stream)

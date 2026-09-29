@@ -25,13 +25,13 @@ namespace Assimalign.Cohesion.Web.Testing.Tests;
 /// </summary>
 public class WebApplicationTestFactoryTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Testing] - CreateClient: Should flow a request through the full pipeline end to end")]
     public async Task CreateClient_GetRequest_ShouldFlowFullPipelineEndToEnd()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -62,7 +62,7 @@ public class WebApplicationTestFactoryTests
     public async Task CreateClient_PostRequest_ShouldEchoRequestBody()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -89,7 +89,7 @@ public class WebApplicationTestFactoryTests
     {
         // Arrange — the in-memory driver mints a distinct ephemeral client endpoint per dialed
         // connection, so the remote endpoint the server observes identifies the connection.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -117,7 +117,7 @@ public class WebApplicationTestFactoryTests
     public async Task CreateClient_BeforeStart_ShouldStartTheFactory()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -142,7 +142,7 @@ public class WebApplicationTestFactoryTests
     public async Task StartAsync_CalledTwice_ShouldBeIdempotent()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -166,7 +166,7 @@ public class WebApplicationTestFactoryTests
     public async Task DisposeAsync_AfterServing_ShouldRefuseNewDials()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         WebApplicationTestFactory factory = new();
@@ -192,7 +192,7 @@ public class WebApplicationTestFactoryTests
     {
         // Arrange — after a completed request the pooled connection parks idle in the server's
         // receive loop; disposal must unblock it rather than hang the drain on it.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         WebApplicationTestFactory factory = new();

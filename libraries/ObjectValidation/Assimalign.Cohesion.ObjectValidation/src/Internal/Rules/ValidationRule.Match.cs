@@ -5,17 +5,17 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
 
-namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class MatchValidationRule : ValidationRuleBase<string>
 {
-    private readonly string pattern;
-    private readonly RegexOptions? options;
+    private readonly string _pattern;
+    private readonly RegexOptions? _options;
 
     public MatchValidationRule(string pattern, RegexOptions? options = null)
     {
-        this.pattern = pattern;
-        this.options = options;
+        this._pattern = pattern;
+        this._options = options;
     }
 
 
@@ -46,11 +46,11 @@ internal sealed class MatchValidationRule : ValidationRuleBase<string>
         {
             context = new ValidationContext<string>(value);
 
-            if (this.options is not null && !Regex.IsMatch(value, this.pattern, this.options ?? default))
+            if (this._options is not null && !Regex.IsMatch(value, this._pattern, this._options ?? default))
             {
                 context.AddFailure(this.Error);
             }
-            else if (!Regex.IsMatch(value, this.pattern))
+            else if (!Regex.IsMatch(value, this._pattern))
             {
                 context.AddFailure(this.Error);
             }

@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Transactions;
+namespace Assimalign.Cohesion.Database.Transactions.Internal;
 
 /// <summary>
 /// Default transaction manager: assigns sequences, maintains the active-transaction

@@ -1,0 +1,10 @@
+<Project>
+  <!-- Repository identity; executable and language defaults belong to the Cohesion SDK. -->
+  <PropertyGroup>
+    <CohesionOrganization>__ORGANIZATION_NAME__</CohesionOrganization>
+    <CohesionApplication>__APPLICATION_NAME__</CohesionApplication>
+    <!-- Replace the organization/registry with your own, or leave the registry empty for OCI archives. -->
+    <CohesionContainerRegistry>ghcr.io/__ORGANIZATION_NAME__</CohesionContainerRegistry>
+    <VersionPrefix>0.1.0</VersionPrefix>
+  </PropertyGroup>
+</Project>

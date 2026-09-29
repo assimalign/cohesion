@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Web.Health.Internal;
 /// </remarks>
 internal sealed class HealthCheckService : IHealthCheckService
 {
-    private static readonly IReadOnlyDictionary<string, object> EmptyData =
+    private static readonly IReadOnlyDictionary<string, object> _emptyData =
         new Dictionary<string, object>(0);
 
     private readonly HealthCheckRegistration[] _registrations;
@@ -91,7 +91,7 @@ internal sealed class HealthCheckService : IHealthCheckService
                 $"The health check '{registration.Name}' timed out after {registration.Timeout}.",
                 Stopwatch.GetElapsedTime(start),
                 exception: null,
-                EmptyData,
+                _emptyData,
                 registration.Tags);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -101,7 +101,7 @@ internal sealed class HealthCheckService : IHealthCheckService
                 exception.Message,
                 Stopwatch.GetElapsedTime(start),
                 exception,
-                EmptyData,
+                _emptyData,
                 registration.Tags);
         }
         finally

@@ -19,6 +19,7 @@ internal sealed class RecordingGateway : ApplicationGateway
     private readonly IReadOnlyList<IApplicationResourceController> _controllers;
 
     public RecordingGateway(RecordingStateManager state, RecordingController controller)
+        : base(new ApplicationGatewayOptions { ReadinessBudget = TimeSpan.FromSeconds(5) })
     {
         State = state;
         _controllers = new[] { controller };
@@ -29,8 +30,6 @@ internal sealed class RecordingGateway : ApplicationGateway
     protected override IReadOnlyList<IApplicationResourceController> Controllers => _controllers;
 
     protected override IApplicationResourceStateManager State { get; }
-
-    protected override TimeSpan ReadinessBudget => TimeSpan.FromSeconds(5);
 
     protected override Task<IResourceArtifact> GatherAsync(IApplicationResource resource, CancellationToken cancellationToken)
         => Task.FromResult<IResourceArtifact>(new RecordingArtifact(resource.Id));

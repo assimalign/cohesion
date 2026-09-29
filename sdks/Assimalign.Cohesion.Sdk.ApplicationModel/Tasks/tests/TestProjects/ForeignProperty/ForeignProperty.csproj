@@ -1,0 +1,14 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>ForeignProperty</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>inventory</CohesionApplication>
+    <CohesionResourceName>inventory-web</CohesionResourceName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionResourceProperty Include="database.engine" Value="PostgreSql" />
+  </ItemGroup>
+
+</Project>

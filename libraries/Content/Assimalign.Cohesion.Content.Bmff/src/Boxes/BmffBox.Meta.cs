@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Files.Bmff.Internal;
 [DebuggerDisplay("Bmff Box: Meta (meta)")]
 public sealed class MetaBox : BmffBoxComposite
 {
-    private IEnumerable<BmffBox> children;
+    private IEnumerable<BmffBox> _children;
 
     public MetaBox(long offset, long limit)
     {

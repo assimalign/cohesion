@@ -34,13 +34,20 @@ contract: the engine runs `TransactionRecovery.Analyze` over the recovered journ
 before any truncation (classification reads lifecycle records a checkpoint would
 destroy) and checkpoints through its coordinator once analysis completes.
 
+`WriteAheadJournal` publicly returns the existing `IStorageJournal` contract so a
+transaction coordinator can share the storage's actual WAL. This is the same
+composition seam exposed by Documents, Graph, and Blob storage and replaces the
+shipped-to-shipped friend grant. Storage retains ownership of the journal; callers
+coordinate writes and checkpoints through the transaction coordinator and do not
+dispose the journal separately.
+
 ## Non-goals
 
 - Model-specific page layouts (adjacency pages, blob streams) — the key-value
   model needs none.
 - Public exposure of the kernel's full record surface — only what the engine
-  composes is exposed, and `WriteAheadJournal` stays internal to the family
-  (`InternalsVisibleTo` the engine package, the `SqlStorage` precedent).
+  composes is exposed, including the journal contract required for transaction
+  coordination. Paging, buffer management, and WAL implementation remain private.
 
 ## AOT posture
 

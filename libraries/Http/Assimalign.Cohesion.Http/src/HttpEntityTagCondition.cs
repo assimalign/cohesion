@@ -27,12 +27,12 @@ namespace Assimalign.Cohesion.Http;
 [DebuggerDisplay("{DebuggerDisplay,nq}")]
 public readonly struct HttpEntityTagCondition
 {
-    private readonly HttpEntityTag[]? tags;
+    private readonly HttpEntityTag[]? _tags;
 
     private HttpEntityTagCondition(bool isAny, HttpEntityTag[]? tags)
     {
         IsAny = isAny;
-        this.tags = tags;
+        this._tags = tags;
     }
 
     /// <summary>
@@ -44,7 +44,7 @@ public readonly struct HttpEntityTagCondition
     /// <summary>
     /// Gets the listed entity-tags. Empty when the condition is the <c>*</c> wildcard.
     /// </summary>
-    public IReadOnlyList<HttpEntityTag> Tags => tags ?? (IReadOnlyList<HttpEntityTag>)Array.Empty<HttpEntityTag>();
+    public IReadOnlyList<HttpEntityTag> Tags => _tags ?? (IReadOnlyList<HttpEntityTag>)Array.Empty<HttpEntityTag>();
 
     private string DebuggerDisplay => IsAny ? "*" : ToString();
 
@@ -146,11 +146,11 @@ public readonly struct HttpEntityTagCondition
         {
             return hasCurrentRepresentation;
         }
-        if (current is not { } tag || tags is null)
+        if (current is not { } tag || _tags is null)
         {
             return false;
         }
-        foreach (HttpEntityTag candidate in tags)
+        foreach (HttpEntityTag candidate in _tags)
         {
             if (candidate.StrongEquals(tag))
             {
@@ -174,11 +174,11 @@ public readonly struct HttpEntityTagCondition
         {
             return hasCurrentRepresentation;
         }
-        if (current is not { } tag || tags is null)
+        if (current is not { } tag || _tags is null)
         {
             return false;
         }
-        foreach (HttpEntityTag candidate in tags)
+        foreach (HttpEntityTag candidate in _tags)
         {
             if (candidate.WeakEquals(tag))
             {
@@ -198,19 +198,19 @@ public readonly struct HttpEntityTagCondition
         {
             return "*";
         }
-        if (tags is null || tags.Length == 0)
+        if (_tags is null || _tags.Length == 0)
         {
             return string.Empty;
         }
 
         var builder = new StringBuilder();
-        for (int i = 0; i < tags.Length; i++)
+        for (int i = 0; i < _tags.Length; i++)
         {
             if (i > 0)
             {
                 builder.Append(", ");
             }
-            builder.Append(tags[i].ToString());
+            builder.Append(_tags[i].ToString());
         }
         return builder.ToString();
     }

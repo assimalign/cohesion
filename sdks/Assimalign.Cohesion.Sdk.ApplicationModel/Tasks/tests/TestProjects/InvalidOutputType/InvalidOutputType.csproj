@@ -1,0 +1,11 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <RootNamespace>InvalidOutputType</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>inventory</CohesionApplication>
+    <CohesionResourceName>inventory-library</CohesionResourceName>
+  </PropertyGroup>
+
+</Project>

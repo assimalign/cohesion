@@ -1,0 +1,8 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.ConfigurationStore">
+  <PropertyGroup>
+    <RootNamespace>CommandConfigurationStore</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>gateway-smoke</CohesionApplication>
+    <CohesionResourceName>command-configuration</CohesionResourceName>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "Example.Networking.Gateway": {
+      "commandName": "Project"
+    }
+  }
+}

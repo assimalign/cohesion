@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Http.Tests;
 /// </summary>
 public class HttpFreshnessTests
 {
-    private static readonly DateTimeOffset Base = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _base = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     // ============================================================================
     // Freshness lifetime (§4.2.1)
@@ -41,7 +41,7 @@ public class HttpFreshnessTests
     {
         HttpCacheControl cc = default;
 
-        HttpFreshness.GetFreshnessLifetime(cc, expires: Base.AddSeconds(300), date: Base, shared: false)
+        HttpFreshness.GetFreshnessLifetime(cc, expires: _base.AddSeconds(300), date: _base, shared: false)
             .ShouldBe(TimeSpan.FromSeconds(300));
     }
 
@@ -50,7 +50,7 @@ public class HttpFreshnessTests
     {
         HttpCacheControl cc = default;
 
-        HttpFreshness.GetFreshnessLifetime(cc, expires: Base, date: Base.AddSeconds(60), shared: false)
+        HttpFreshness.GetFreshnessLifetime(cc, expires: _base, date: _base.AddSeconds(60), shared: false)
             .ShouldBe(TimeSpan.Zero);
     }
 
@@ -60,7 +60,7 @@ public class HttpFreshnessTests
         HttpCacheControl cc = default;
 
         HttpFreshness.GetFreshnessLifetime(cc, expires: null, date: null, shared: false).ShouldBeNull();
-        HttpFreshness.GetFreshnessLifetime(cc, expires: Base, date: null, shared: false).ShouldBeNull();
+        HttpFreshness.GetFreshnessLifetime(cc, expires: _base, date: null, shared: false).ShouldBeNull();
     }
 
     // ============================================================================
@@ -70,8 +70,8 @@ public class HttpFreshnessTests
     [Fact(DisplayName = "Cohesion Test [Http] - HttpFreshness: current age follows §4.2.3 algorithm")]
     public void CalculateCurrentAge_ShouldFollowAlgorithm()
     {
-        DateTimeOffset date = Base;
-        DateTimeOffset responseTime = Base.AddSeconds(3);   // apparent_age = 3
+        DateTimeOffset date = _base;
+        DateTimeOffset responseTime = _base.AddSeconds(3);   // apparent_age = 3
         DateTimeOffset requestTime = responseTime.AddSeconds(-2); // response_delay = 2
         DateTimeOffset now = responseTime.AddSeconds(4);    // resident_time = 4
         TimeSpan ageHeader = TimeSpan.FromSeconds(10);      // corrected_age_value = 12
@@ -85,8 +85,8 @@ public class HttpFreshnessTests
     [Fact(DisplayName = "Cohesion Test [Http] - HttpFreshness: apparent age dominates when Age is small")]
     public void CalculateCurrentAge_LargeApparentAge_ShouldDominate()
     {
-        DateTimeOffset date = Base;
-        DateTimeOffset responseTime = Base.AddSeconds(100); // apparent_age = 100
+        DateTimeOffset date = _base;
+        DateTimeOffset responseTime = _base.AddSeconds(100); // apparent_age = 100
         DateTimeOffset requestTime = responseTime;          // response_delay = 0
         DateTimeOffset now = responseTime;                  // resident_time = 0
 
@@ -98,10 +98,10 @@ public class HttpFreshnessTests
     [Fact(DisplayName = "Cohesion Test [Http] - HttpFreshness: null Age and Date treated as zero")]
     public void CalculateCurrentAge_NoAgeNoDate_ShouldUseResidentTime()
     {
-        DateTimeOffset responseTime = Base;
-        DateTimeOffset now = Base.AddSeconds(7);
+        DateTimeOffset responseTime = _base;
+        DateTimeOffset now = _base.AddSeconds(7);
 
-        TimeSpan age = HttpFreshness.CalculateCurrentAge(ageValue: null, dateValue: null, requestTime: Base, responseTime: responseTime, now: now);
+        TimeSpan age = HttpFreshness.CalculateCurrentAge(ageValue: null, dateValue: null, requestTime: _base, responseTime: responseTime, now: now);
 
         age.ShouldBe(TimeSpan.FromSeconds(7));
     }

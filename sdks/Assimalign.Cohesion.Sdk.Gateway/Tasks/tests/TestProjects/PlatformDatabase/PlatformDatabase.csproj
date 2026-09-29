@@ -1,0 +1,10 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Database">
+
+  <PropertyGroup>
+    <RootNamespace>PlatformDatabase</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>platform</CohesionApplication>
+    <CohesionResourceName>platform-configuration-store</CohesionResourceName>
+  </PropertyGroup>
+
+</Project>

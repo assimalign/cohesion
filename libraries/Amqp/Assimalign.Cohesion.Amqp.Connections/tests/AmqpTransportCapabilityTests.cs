@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Amqp.Connections.Tests;
 
 public class AmqpTransportCapabilityTests
 {
-    private static readonly EndPoint TestEndPoint = new IPEndPoint(IPAddress.Loopback, 5672);
+    private static readonly EndPoint _testEndPoint = new IPEndPoint(IPAddress.Loopback, 5672);
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Constructor: Should reject a datagram carrier listener")]
     public async Task Constructor_OnDatagramCarrierListener_ShouldThrowArgumentException()
@@ -82,7 +82,7 @@ public class AmqpTransportCapabilityTests
             TestConnection.DefaultCapabilities with { Delivery = ConnectionDelivery.Datagram });
 
         // Act
-        ArgumentException exception = Should.Throw<ArgumentException>(() => new AmqpClientTransport(factory, TestEndPoint));
+        ArgumentException exception = Should.Throw<ArgumentException>(() => new AmqpClientTransport(factory, _testEndPoint));
 
         // Assert
         exception.ParamName.ShouldBe("factory");
@@ -96,7 +96,7 @@ public class AmqpTransportCapabilityTests
             TestMultiplexedConnection.DefaultCapabilities with { IsReliable = false });
 
         // Act + Assert
-        Should.Throw<ArgumentException>(() => new AmqpClientTransport(factory, TestEndPoint));
+        Should.Throw<ArgumentException>(() => new AmqpClientTransport(factory, _testEndPoint));
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Constructor: Should reject an unordered carrier factory")]
@@ -107,7 +107,7 @@ public class AmqpTransportCapabilityTests
             TestConnection.DefaultCapabilities with { IsOrdered = false });
 
         // Act + Assert
-        Should.Throw<ArgumentException>(() => new AmqpClientTransport(factory, TestEndPoint));
+        Should.Throw<ArgumentException>(() => new AmqpClientTransport(factory, _testEndPoint));
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Constructor: Should accept reliable ordered stream carrier factories")]
@@ -118,12 +118,12 @@ public class AmqpTransportCapabilityTests
         TestMultiplexedConnectionFactory multiplexedFactory = new();
 
         // Act
-        await using AmqpClientTransport singleStreamTransport = new(factory, TestEndPoint);
-        await using AmqpClientTransport multiplexedTransport = new(multiplexedFactory, TestEndPoint);
+        await using AmqpClientTransport singleStreamTransport = new(factory, _testEndPoint);
+        await using AmqpClientTransport multiplexedTransport = new(multiplexedFactory, _testEndPoint);
 
         // Assert
-        singleStreamTransport.EndPoint.ShouldBeSameAs(TestEndPoint);
-        multiplexedTransport.EndPoint.ShouldBeSameAs(TestEndPoint);
+        singleStreamTransport.EndPoint.ShouldBeSameAs(_testEndPoint);
+        multiplexedTransport.EndPoint.ShouldBeSameAs(_testEndPoint);
     }
 
     [Fact(DisplayName = "Cohesion Test [Amqp.Connections] - Constructor: Should reject null carrier factory arguments")]
@@ -133,8 +133,8 @@ public class AmqpTransportCapabilityTests
         TestConnectionFactory factory = new();
 
         // Act + Assert
-        Should.Throw<ArgumentNullException>(() => new AmqpClientTransport((IConnectionFactory)null!, TestEndPoint));
-        Should.Throw<ArgumentNullException>(() => new AmqpClientTransport((IMultiplexedConnectionFactory)null!, TestEndPoint));
+        Should.Throw<ArgumentNullException>(() => new AmqpClientTransport((IConnectionFactory)null!, _testEndPoint));
+        Should.Throw<ArgumentNullException>(() => new AmqpClientTransport((IMultiplexedConnectionFactory)null!, _testEndPoint));
         Should.Throw<ArgumentNullException>(() => new AmqpClientTransport(factory, null!));
     }
 }

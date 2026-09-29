@@ -6,10 +6,11 @@ using System.Text;
 using System.Threading.Tasks;
 using Xunit;
 
+using Assimalign.Cohesion.ObjectValidation.Internal;
+
 namespace  Assimalign.Cohesion.ObjectValidation.Tests;
 
 using  Assimalign.Cohesion.ObjectValidation;
-using  Assimalign.Cohesion.ObjectValidation.Internal.Rules;
 
 public class RuleStartsWithTests
 {

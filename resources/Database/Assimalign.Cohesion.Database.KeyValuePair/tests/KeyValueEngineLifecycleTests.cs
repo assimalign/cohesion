@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.KeyValuePair.Internal;
+
 namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 
 using static KeyValueTestHarness;
@@ -78,7 +80,7 @@ public sealed class KeyValueEngineLifecycleTests : IDisposable
         // Assert
         names.ShouldBe(["kv"]);
         engine.TryGetDatabase("kv", out _).ShouldBeFalse();
-        await Should.ThrowAsync<DatabaseException>(async () => await engine.OpenDatabaseAsync("kv", TestTimeout.Token()));
+        await Should.ThrowAsync<DatabaseNotFoundException>(async () => await engine.OpenDatabaseAsync("kv", TestTimeout.Token()));
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - Engine: Disposal is idempotent and terminal")]

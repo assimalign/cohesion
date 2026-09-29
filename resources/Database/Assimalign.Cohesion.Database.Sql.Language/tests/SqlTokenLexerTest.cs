@@ -16,7 +16,9 @@ public class SqlTokenLexerTest
     public void MoveNext_SimpleQuery_ShouldClassifyTokens()
     {
         // Arrange
-        var lexer = new TokenLexer("SELECT Count(*) FROM dbo.Users", TokenLexerOptions.Sql);
+        var lexer = new TokenLexer(
+            "SELECT Count(*) FROM dbo.Users",
+            SqlLanguageProfile.Instance.ToLexerOptions());
         var tokens = new List<(string Value, TokenType Type)>();
 
         // Act

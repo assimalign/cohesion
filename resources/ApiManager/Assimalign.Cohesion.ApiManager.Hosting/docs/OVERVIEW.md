@@ -1,22 +1,13 @@
 # Assimalign.Cohesion.ApiManager.Hosting
 
-## Summary
+`ApiManagerApplication.CreateBuilder(args)` returns the public concrete `ApiManagerApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. Enabled resources discover their area control plane and serve health, readiness, liveness, endpoint discovery, stop, and command envelopes on the ambient `http` endpoint (http). The plain host opens no listener without registration.
 
-Standalone hosting application for the API gateway and management plane resource: a `Host<TContext>` subclass composing the resource's units of work as hosted services on the per-service execution model.
+Managed namespaced routes use ES256 bootstrap verification. The private Web implementation stays out of consumer reference packs. Domain service behavior and command kinds remain deferred.
 
-## Current Evaluation
+See [DESIGN.md](DESIGN.md).
 
-- Status: Scaffold (execution model selected and documented; service bodies are placeholders)
-- Project references: Assimalign.Cohesion.Hosting
+## Concrete composition (T10 / O34)
 
-## Primary Responsibilities
+`ApiManagerApplication.CreateBuilder(args)` returns the public concrete `ApiManagerApplicationBuilder`; its `Build()` returns the public `ApiManagerApplication : Host<ApiManagerApplicationContext>`. The public `ApiManagerApplicationContext` implements `IApiManagerApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
 
-- ApiManagerApplication owns the resource process lifecycle (start, run, stop) via Host<ApiManagerApplicationContext>.
-- ApiManagerApplicationContext carries the environment and the composed hosted services.
-- Internal services select their execution base per the menu: GatewayEndpointService (pooled).
-
-## Key Types
-
-- ApiManagerApplication
-- ApiManagerApplicationContext
-- ApiManagerApplicationOptions
+Background-work registration belongs to the concrete `ApiManagerApplicationBuilder`: `AddService(IHostService)` and `AddService(Func<ApiManagerApplicationContext, IHostService>)`. The factory receives the same concrete context as Web's and Database's AddService, so hosting consumers can use environment, state, and hosted-service members beyond the small root contract. Database's root-level AddServer keeps the interface context. Factories run once per build against the same context retained by the application; the hosted-service snapshot is installed after factory evaluation. Services start in registration order and stop in reverse. No area-owned service abstraction is introduced.

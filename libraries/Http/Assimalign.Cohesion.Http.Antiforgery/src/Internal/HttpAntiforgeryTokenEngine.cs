@@ -2,7 +2,7 @@ using System;
 using System.Buffers.Text;
 using System.Security.Cryptography;
 
-namespace Assimalign.Cohesion.Http;
+namespace Assimalign.Cohesion.Http.Internal;
 
 /// <summary>
 /// Mints and verifies the antiforgery cookie/request token pair using a signed double-submit

@@ -9,20 +9,20 @@ namespace Assimalign.Cohesion.Internal;
 
 internal class XorShift64
 {
-    UInt64 x = 88172645463325252UL;
+    UInt64 _x = 88172645463325252UL;
 
     public XorShift64(UInt64 seed)
     {
         if (seed != 0)
         {
-            x = seed;
+            _x = seed;
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public UInt64 Next()
     {
-        x = x ^ (x << 7);
-        return x = x ^ (x >> 9);
+        _x = _x ^ (_x << 7);
+        return _x = _x ^ (_x >> 9);
     }
 }

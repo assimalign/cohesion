@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace Assimalign.Cohesion.Content.Markdown;
+namespace Assimalign.Cohesion.Content.Markdown.Internal;
 
 /// <summary>
 /// Writes a document back to canonical Markdown. The emitted form is normalized — ATX headings,

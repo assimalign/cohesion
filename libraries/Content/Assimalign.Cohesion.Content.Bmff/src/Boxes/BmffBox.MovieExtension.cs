@@ -12,13 +12,13 @@ namespace Assimalign.Cohesion.Files.Bmff;
 [DebuggerDisplay("Bmff Box: Movie Extension (mvex)")]
 public sealed class MovieExtensionBox : BmffBoxComposite
 {
-    private IEnumerable<BmffBox> children;
+    private IEnumerable<BmffBox> _children;
     public MovieExtensionBox(long offset, long limit)
     {
         this.Offset = offset;
         this.Limit = limit;
     }
-    public override IEnumerable<BmffBox> Children => children;
+    public override IEnumerable<BmffBox> Children => _children;
 
     public override long Limit { get;}
 
@@ -36,7 +36,7 @@ public sealed class MovieExtensionBox : BmffBoxComposite
             boxes.Add(reader.Current);
         }
 
-        children = boxes;
+        _children = boxes;
     }
 
     public override void Write(BmffStream stream)

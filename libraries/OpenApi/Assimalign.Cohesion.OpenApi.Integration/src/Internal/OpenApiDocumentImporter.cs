@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.OpenApi.Serialization;
 
-namespace Assimalign.Cohesion.OpenApi.Integration;
+namespace Assimalign.Cohesion.OpenApi.Integration.Internal;
 
 /// <summary>The default <see cref="IOpenApiDocumentImporter"/>, delegating to the JSON and YAML readers.</summary>
 internal sealed class OpenApiDocumentImporter : IOpenApiDocumentImporter

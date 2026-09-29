@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		
+		<RootNamespace>Assimalign.Cohesion</RootNamespace>
+		<AssemblyName>Assimalign.Cohesion.App.IdentityHub.Refs</AssemblyName>
+
+		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+		<GenerateDependencyFile>false</GenerateDependencyFile>
+
+		<PackageId>Assimalign.Cohesion.App.IdentityHub.Ref</PackageId>
+		<IsPackable>true</IsPackable>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<NoWarn>$(NoWarn);NU5128;NU5100;NU5131</NoWarn>
+
+		<CohesionFrameworkName>Assimalign.Cohesion.App.IdentityHub</CohesionFrameworkName>
+		<CohesionFrameworkKind>Ref</CohesionFrameworkKind>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\Assimalign.Cohesion.IdentityHub.Runtime\src\Assimalign.Cohesion.IdentityHub.Runtime.csproj"
+			ReferenceOutputAssembly="false"
+			SkipGetTargetFrameworkProperties="true"
+			UndefineProperties="TargetFramework;RuntimeIdentifier" />
+	</ItemGroup>
+
+	<Import Project="$(CohesionRepositoryDirectory)libraries\App\Assimalign.Cohesion.App.props" />
+	<Import Project="$(CohesionRepositoryDirectory)libraries\App\Assimalign.Cohesion.App.targets" />
+</Project>

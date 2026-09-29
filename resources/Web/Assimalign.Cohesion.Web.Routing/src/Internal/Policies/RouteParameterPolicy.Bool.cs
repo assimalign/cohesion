@@ -1,6 +1,8 @@
 using System;
 
-namespace Assimalign.Cohesion.Web.Routing.Policies;
+using Assimalign.Cohesion.Web.Routing.Policies;
+
+namespace Assimalign.Cohesion.Web.Routing.Internal;
 
 /// <summary>
 /// Validates that a route value is a boolean (<c>true</c> or <c>false</c>, case-insensitive) and

@@ -1,0 +1,24 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
+  <!-- An ordinary executable: Program.cs composes the web application. Only orchestration-facing facts live here. -->
+  <PropertyGroup>
+    <CohesionResourceName>appc-api</CohesionResourceName>
+    <!-- Opt-in to orchestration. Enabled: Sdk.Web generates resource.json (the manifest), Resource.g.cs (typed accessors:
+         Resource.Endpoints/Mounts/Settings/References over the ambient ResourceContext) and ResourceControlPlane.g.cs (the
+         Web default control plane — readiness, health, observed endpoints, stop, Web commands — owned by
+         Web.ApplicationModel). Disabled (the default): a plain executable that no gateway can reference. -->
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Sdk.Web defaults: endpoint `http` (8080), readiness=http:/readyz and liveness=http:/livez on `http`; the Web default control plane rides `http` under /cohesion/v1/*. Override with Update, never Include. -->
+    <CohesionEndpoint Update="http" Public="true" />
+    <!-- Gateway-visible defaults (delivered as COHESION_CONFIG__*); the Platform ConfigurationStore can promote a different value at run time. -->
+    <CohesionSetting Include="Inventory:PageSize" Type="int" Default="50" />
+
+    <!-- Same application (appc): realized by the appc gateway; typed accessor Resource.References.AppCDatabase.Db. -->
+    <CohesionResourceReference Include="..\Example.AppC.Database\Example.AppC.Database.csproj" />
+
+    <!-- Other applications (identity, platform): the gateway generates Externals.IdentityHub / Externals.PlatformConfigurationStore for these crossings. -->
+    <CohesionResourceReference Include="..\..\..\Identity\Example.Identity.IdentityHub\Example.Identity.IdentityHub.csproj" Optional="true" />
+    <CohesionResourceReference Include="..\..\..\Platform\Example.Platform.ConfigurationStore\Example.Platform.ConfigurationStore.csproj" />
+  </ItemGroup>
+</Project>

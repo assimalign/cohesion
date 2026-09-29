@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Assimalign.Cohesion.OpenApi.Validation;
+namespace Assimalign.Cohesion.OpenApi.Validation.Internal;
 
 /// <summary>
 /// The default <see cref="IOpenApiValidator"/>. Runs an ordered set of <see cref="IOpenApiValidationRule"/>

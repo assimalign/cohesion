@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Decides how an HTTP/1.1 request body is framed (RFC 9112 §6 / §7) from the request headers,

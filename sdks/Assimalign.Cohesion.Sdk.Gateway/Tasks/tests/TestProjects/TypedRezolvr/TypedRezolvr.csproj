@@ -1,0 +1,8 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Rezolvr">
+  <PropertyGroup>
+    <RootNamespace>TypedRezolvr</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>gateway-smoke</CohesionApplication>
+    <CohesionResourceName>typed-rezolvr</CohesionResourceName>
+  </PropertyGroup>
+</Project>

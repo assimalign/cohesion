@@ -1,0 +1,117 @@
+name: Templates
+on:
+  push:
+    paths:
+      - "tooling/templates/**"
+      - "sdks/**"
+      - "libraries/App/**"
+      # Template gateway programs call the ApplicationModel, area-verb and Orchestration APIs directly.
+      - "libraries/ApplicationModel/**"
+      - "resources/*/Assimalign.Cohesion.*.ApplicationModel/**"
+      - "resources/*/Assimalign.Cohesion.*.ApplicationModel.Orchestration/**"
+      - "resources/*/Assimalign.Cohesion.*.Refs/**"
+      - "resources/*/Assimalign.Cohesion.*.Runtime/**"
+      - "build/**"
+      - "installer/scripts/**"
+      - ".github/workflows/tooling-templates.yml"
+  pull_request:
+    paths:
+      - "tooling/templates/**"
+      - "sdks/**"
+      - "libraries/App/**"
+      - "libraries/ApplicationModel/**"
+      - "resources/*/Assimalign.Cohesion.*.ApplicationModel/**"
+      - "resources/*/Assimalign.Cohesion.*.ApplicationModel.Orchestration/**"
+      - "resources/*/Assimalign.Cohesion.*.Refs/**"
+      - "resources/*/Assimalign.Cohesion.*.Runtime/**"
+      - "build/**"
+      - "installer/scripts/**"
+      - ".github/workflows/tooling-templates.yml"
+permissions:
+  contents: read
+jobs:
+  build:
+    name: "Templates [${{ matrix.os }}]"
+    runs-on: ${{ matrix.os }}
+    env:
+      COHESION_TEMPLATES_TEST_FEED: _out/packages
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: [ "Assimalign.Cohesion.Templates" ]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - name: Resolve host RID and canonical version
+        id: host
+        shell: pwsh
+        env:
+          HOST_OS: ${{ runner.os }}
+          HOST_ARCH: ${{ runner.arch }}
+        run: |
+          $prefix = switch ($env:HOST_OS) { 'Windows' { 'win' } 'Linux' { 'linux' } 'macOS' { 'osx' } default { throw "Unsupported OS $env:HOST_OS" } }
+          $rid = "$prefix-$($env:HOST_ARCH.ToLowerInvariant())"
+          "rid=$rid" >> $env:GITHUB_OUTPUT
+          $version = ./installer/scripts/Get-CohesionVersion.ps1
+          "COHESION_TEMPLATES_TEST_PACKAGE_VERSION=$version" >> $env:GITHUB_ENV
+      - name: Pack template library closure
+        shell: pwsh
+        run: |
+          Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force
+          $repository = (Get-Location).Path
+          $packageDirectory = Join-Path $repository '_out/packages'
+          dotnet build build/Tasks --configuration Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Build tasks failed.' }
+          $packageIds = @(
+            'Assimalign.Cohesion.Core'
+            'Assimalign.Cohesion.ApplicationModel'
+            'Assimalign.Cohesion.IdentityModel'
+            'Assimalign.Cohesion.IdentityModel.Token'
+            'Assimalign.Cohesion.IdentityModel.Token.JsonWebToken'
+            'Assimalign.Cohesion.Security.DataProtection'
+            'Assimalign.Cohesion.ApplicationModel.Gateway'
+            'Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane'
+            'Assimalign.Cohesion.ApplicationModel.Gateway.InProcess'
+            'Assimalign.Cohesion.Connections'
+            'Assimalign.Cohesion.Connections.Tcp'
+            'Assimalign.Cohesion.Hosting'
+            'Assimalign.Cohesion.Hosting.Health'
+            'Assimalign.Cohesion.Hosting.Resources'
+            'Assimalign.Cohesion.Http'
+            'Assimalign.Cohesion.Http.Connections'
+            # Sdk.Gateway injects no area client and Gateway.ControlPlane no longer references
+            # Web.Routing, so neither Web nor the Database.Client closure reaches a template restore.
+            'Assimalign.Cohesion.Web.ApplicationModel'
+            'Assimalign.Cohesion.Database.ApplicationModel'
+            'Assimalign.Cohesion.ConfigurationStore.ApplicationModel'
+            # The landing-zone Platform and root set gateways reference the opt-in store providers
+            # explicitly; each Orchestration package depends on ApplicationModel and its area client.
+            'Assimalign.Cohesion.SecretStore.Client'
+            'Assimalign.Cohesion.ConfigurationStore.Client'
+            'Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration'
+            'Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration'
+            'Assimalign.Cohesion.IdentityHub.ApplicationModel'
+            'Assimalign.Cohesion.SecretStore.ApplicationModel'
+            'Assimalign.Cohesion.Rezolvr.ApplicationModel'
+            'Assimalign.Cohesion.VpnGateway.ApplicationModel'
+            'Assimalign.Cohesion.LogSpace.ApplicationModel'
+          )
+          $inventoryById = @{}
+          foreach ($item in @(Get-CohesionReleaseLibrary -RepositoryDirectory $repository)) {
+            $inventoryById[$item.PackageId] = $item
+          }
+          foreach ($packageId in $packageIds) {
+            if (-not $inventoryById.ContainsKey($packageId)) { throw "Missing inventory package $packageId." }
+            dotnet pack $inventoryById[$packageId].ProjectPath --configuration Release --nologo "-p:PackageOutputPath=$packageDirectory"
+            if ($LASTEXITCODE -ne 0) { throw "Packing $packageId failed." }
+          }
+      - uses: ./.github/actions/build
+        with:
+          area: 'tooling'
+          category: 'templates'
+          project: ${{ matrix.projects }}
+          local-sdk-rids: ${{ steps.host.outputs.rid }}
+          local-sdk-use-canonical-version: 'true'

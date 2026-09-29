@@ -1,6 +1,8 @@
 using System;
 using System.Globalization;
 
+using Assimalign.Cohesion.Content.Yaml.Internal;
+
 namespace Assimalign.Cohesion.Content.Yaml;
 
 /// <summary>

@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Hosting;
 
@@ -27,6 +29,16 @@ public interface IHostContext
     /// A collection of hosted services.
     /// </summary>
     IEnumerable<IHostService> HostedServices { get; }
+
+    /// <summary>
+    /// Waits until shutdown is requested for the current host lifetime.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels this caller's wait without stopping the host.</param>
+    /// <returns>
+    /// A task that completes when shutdown is requested or the host begins stopping, stops,
+    /// or fails.
+    /// </returns>
+    Task WaitForShutdownAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Signals the host to shutdown

@@ -29,7 +29,7 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
 
     // Precompressed sibling codings in server preference order (RFC 9110 §12.5.3 lets the
     // server break client ties): brotli first, then gzip.
-    private static readonly (string Coding, string Suffix)[] PrecompressedCodings =
+    private static readonly (string Coding, string Suffix)[] _precompressedCodings =
     [
         ("br", ".br"),
         ("gzip", ".gz"),
@@ -331,11 +331,11 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
         ref string? contentEncoding,
         ref bool varyByAcceptEncoding)
     {
-        Span<int> available = stackalloc int[PrecompressedCodings.Length];
+        Span<int> available = stackalloc int[_precompressedCodings.Length];
         int count = 0;
-        for (int i = 0; i < PrecompressedCodings.Length; i++)
+        for (int i = 0; i < _precompressedCodings.Length; i++)
         {
-            if (TryGetInfo(FileSystemPath.Parse(candidate + PrecompressedCodings[i].Suffix), out IFileSystemInfo? info)
+            if (TryGetInfo(FileSystemPath.Parse(candidate + _precompressedCodings[i].Suffix), out IFileSystemInfo? info)
                 && info is IFileSystemFile)
             {
                 available[count++] = i;
@@ -354,7 +354,7 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
         string[] serverCodings = new string[count];
         for (int i = 0; i < count; i++)
         {
-            serverCodings[i] = PrecompressedCodings[available[i]].Coding;
+            serverCodings[i] = _precompressedCodings[available[i]].Coding;
         }
 
         string? acceptEncoding = context.Request.Headers.TryGetValue(HttpHeaderKey.AcceptEncoding, out HttpHeaderValue acceptEncodingValue)
@@ -372,7 +372,7 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
 
         for (int i = 0; i < count; i++)
         {
-            (string coding, string suffix) = PrecompressedCodings[available[i]];
+            (string coding, string suffix) = _precompressedCodings[available[i]];
             if (coding == selected
                 && TryGetInfo(FileSystemPath.Parse(candidate + suffix), out IFileSystemInfo? sibling)
                 && sibling is IFileSystemFile siblingFile)

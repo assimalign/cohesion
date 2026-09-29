@@ -210,8 +210,10 @@ callers don't have to be defensive.
 3. Inherit from the relevant abstract class(es).
 4. Add an entry to the workflow matrix in
    `.github/workflows/library-dns.yml`.
-5. Register the assembly in `frameworks/Assimalign.Cohesion.App.props`
-   under the active `<CohesionFrameworkAssembly>` block.
+5. Add the project to `$script:CohesionReleaseLibrary` in
+   `installer/scripts/modules/CohesionPackaging.psm1`. Dns packages ship
+   as ordinary NuGet packages: no shared framework lists the family, so
+   there is no framework list to edit.
 6. Add `docs/OVERVIEW.md` + `docs/DESIGN.md` + populate the package
    `README.md`.
 

@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 using Assimalign.Cohesion.Database.Sql.Storage;
+using Assimalign.Cohesion.Database.Storage;
 
 /// <summary>
 /// In-memory storage strategy that uses MemoryStreams for all three storage files.
@@ -14,6 +14,12 @@ internal sealed class InMemorySqlStorageStrategy : ISqlStorageStrategy
 {
     private readonly HashSet<string> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _syncRoot = new();
+    private readonly StorageCommitDurability? _durability;
+
+    internal InMemorySqlStorageStrategy(StorageCommitDurability? durability = null)
+    {
+        _durability = durability;
+    }
 
     /// <inheritdoc />
     public SqlStorage CreateStorage(string databaseName)
@@ -26,7 +32,7 @@ internal sealed class InMemorySqlStorageStrategy : ISqlStorageStrategy
             }
         }
 
-        return SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), databaseName);
+        return SqlStorage.Create(StorageStream.FromInMemory(), StorageStream.FromInMemory(), StorageStream.FromInMemory(), databaseName, _durability);
     }
 
     /// <inheritdoc />
@@ -42,7 +48,7 @@ internal sealed class InMemorySqlStorageStrategy : ISqlStorageStrategy
 
         // In-memory storage cannot truly reopen persisted data without snapshot support.
         // For now, open returns a fresh instance. Recovery scenarios require file-based storage.
-        return SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), databaseName);
+        return SqlStorage.Create(StorageStream.FromInMemory(), StorageStream.FromInMemory(), StorageStream.FromInMemory(), databaseName, _durability);
     }
 
     /// <inheritdoc />

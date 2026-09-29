@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.Content.Yaml;
 
-namespace Assimalign.Cohesion.OpenApi.Serialization;
+namespace Assimalign.Cohesion.OpenApi.Serialization.Internal;
 
 /// <summary>
 /// Converts between the format-agnostic <see cref="OpenApiNode"/> tree and the YAML document model.

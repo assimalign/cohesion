@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Web.Routing;
+namespace Assimalign.Cohesion.Web.Routing.Internal;
 
 /// <summary>
 /// Default per-application <see cref="IRouterFeature"/>. Each web application owns exactly one

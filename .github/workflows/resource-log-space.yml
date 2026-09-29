@@ -3,6 +3,9 @@ on:
   push:
     paths:
       - "resources/LogSpace/**"
+      # The area's acceptance fixture lives in the fixtures/ folder of the project whose
+      # tests drive it (.claude/rules/resource-areas.md) - still this area's input.
+      - "libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost/**"
       - ".github/workflows/resource-log-space.yml" # When Pipeline File Changes
 
 permissions:
@@ -14,7 +17,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        projects: ["Assimalign.Cohesion.LogSpace"]
+        projects: ["Assimalign.Cohesion.LogSpace", "Assimalign.Cohesion.LogSpace.ApplicationModel", "Assimalign.Cohesion.LogSpace.Hosting"]
     steps:
       - uses: actions/checkout@v4
         name: "Checkout: ${{ matrix.projects }}"
@@ -25,3 +28,17 @@ jobs:
           area: "resources"
           category: "LogSpace"
           project: ${{ matrix.projects }}
+
+  sink-sample:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: ['Assimalign.Cohesion.LogSpace.SinkHost']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - run: dotnet build build/Tasks -c Release
+      - run: dotnet build libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/${{ matrix.projects }}/${{ matrix.projects }}.csproj -c Release

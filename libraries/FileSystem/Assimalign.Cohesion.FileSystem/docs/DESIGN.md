@@ -11,10 +11,44 @@ its consumer surface.
 The contract is intentionally narrow:
 
 - File / directory / info hierarchy
-- Read-write streams (no async file I/O surface — `Stream` already gives that)
+- Read-write streams for sequential consumers
+- Random-access handles with synchronous and asynchronous positional I/O and explicit durability
 - Change-token-shaped watch events
 - Enumeration with optional recursion
 - Lifetime via `IDisposable` + `IAsyncDisposable`
+
+## Positional I/O and durability
+
+`IFileSystemFile.OpenHandle(FileMode, FileAccess, FileShare)` returns a caller-owned
+`IFileSystemFileHandle`. A storage engine reads and writes pages at explicit byte offsets;
+`Stream` has a shared cursor and does not expose a durable-flush contract. The handle supplies
+`Read` / `ReadAsync`, `Write` / `WriteAsync`, current `Length`, `SetLength`, and
+`Flush(bool)` / `FlushAsync(bool)`. Offset-addressed operations can be issued concurrently
+without changing another operation's position. Reads may return fewer bytes at end of file,
+and writes beyond the end extend the file. The existing `Open` overloads remain unchanged for
+Configuration and Web.StaticFiles consumers.
+
+`SupportsDurableFlush` describes the actual backing file, not an optimistic default. When it
+is `true`, `Flush(durable: true)` must reach durable storage before returning. When it is
+`false`, both synchronous and asynchronous durable flush throw `NotSupportedException`.
+A storage engine that asks for durability and silently does not get it is worse than one
+that cannot start; non-durable providers must fail explicitly, never silently degrade.
+`Flush(durable: false)` only flushes buffers and makes no persistence guarantee.
+
+| Provider | `SupportsDurableFlush` | Mechanism |
+|----------|:----------------------:|-----------|
+| Physical | `true` | `File.OpenHandle` and `RandomAccess`; durable flush uses `RandomAccess.FlushToDisk`. |
+| InMemory | `false` | Offset I/O over the existing buffer; durable flush throws. |
+| IsolatedStorage | `true` | The store's `IsolatedStorageFileStream.Flush(true)` forwards to its backing `FileStream.Flush(true)`. The store does not expose a usable `SafeFileHandle`, so each handle serializes seek and I/O internally. |
+| Aggregate | Underlying file's value | Returns the resolved provider's handle directly, including its durability behavior. |
+
+Dispose the handle with `using` or `await using` to release its resources and sharing
+registration. Disposal is idempotent, and operations on a disposed handle throw
+`ObjectDisposedException`. Async methods accept cancellation tokens; cancellation prevents
+an operation from starting or waiting further, but cannot undo already completed I/O.
+The interface and providers retain `net10.0`, NativeAOT compatibility, and no reflection or
+`Microsoft.Extensions.*` dependencies. Routing database storage through this handle belongs
+to a separate implementation step.
 
 ## Error model
 
@@ -22,6 +56,10 @@ Every provider raises `FileSystemException` with one of the explicit codes
 in `FileSystemErrorCode`. The base class has `[DoesNotReturn]` static helpers
 (`ThrowFileNotFound`, `ThrowReadOnly`, etc.) so providers don't construct
 exceptions inline.
+
+Handle I/O also exposes the BCL argument, access, cancellation, and disposal exceptions.
+In particular, unsupported durable flush raises `NotSupportedException` as required by the
+handle contract; it is not wrapped as a generic file-system error.
 
 | Code | When |
 |------|------|
@@ -90,8 +128,13 @@ their root before any further work.
    `FileSystemStandardTests`, plus any provider-specific tests in a
    separate file.
 5. Add an entry to `.github/workflows/library-filesystem.yml`'s matrix.
-6. List the assembly in `frameworks/Assimalign.Cohesion.App.props` under
-   the active `<CohesionFrameworkAssembly>` block.
+6. Add the project to `$script:CohesionReleaseLibrary` in
+   `installer/scripts/modules/CohesionPackaging.psm1`; a provider ships as an
+   ordinary NuGet package. It needs no framework entry: `Assimalign.Cohesion.App`
+   derives its members from its kernel roots (`FileSystem.Physical` is one),
+   and an area framework carries a provider only through a
+   `CohesionFrameworkAssembly` line in that area's
+   `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props`.
 7. Update `libraries/FileSystem/README.md` and add per-package
    `README.md` + `docs/{OVERVIEW,DESIGN}.md`. Update
    `Assimalign.Cohesion.FileSystem/docs/COMPATIBILITY.md` with the

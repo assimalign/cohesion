@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Graph.Tests</RootNamespace>
+		<OutputType>Exe</OutputType>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.RecoveryFixture" ReferenceOutputAssembly="false" />
+	</ItemGroup>
+	<Target Name="CopyGraphRecoveryFixture" AfterTargets="Build">
+		<ItemGroup>
+			<GraphRecoveryFixtureOutput Include="$(MSBuildThisFileDirectory)..\fixtures\Assimalign.Cohesion.Database.Graph.RecoveryFixture\bin\$(Configuration)\$(TargetFramework)\**\*" />
+		</ItemGroup>
+		<Copy SourceFiles="@(GraphRecoveryFixtureOutput)"
+		      DestinationFiles="@(GraphRecoveryFixtureOutput->'$(OutDir)GraphRecoveryFixture\%(RecursiveDir)%(Filename)%(Extension)')"
+		      SkipUnchangedFiles="true" />
+	</Target>
+</Project>

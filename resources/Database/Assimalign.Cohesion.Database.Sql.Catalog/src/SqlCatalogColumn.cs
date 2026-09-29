@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 /// <summary>
 /// The catalog's description of one column: name, shared type identity, nullability,
-/// and optional default literal.
+/// optional default literal, and optional collation override.
 /// </summary>
 public sealed class SqlCatalogColumn
 {
@@ -17,15 +17,21 @@ public sealed class SqlCatalogColumn
     /// <param name="type">The shared type identity and constraints.</param>
     /// <param name="isNullable">Whether the column accepts nulls.</param>
     /// <param name="defaultLiteral">The default value literal text, when declared.</param>
-    public SqlCatalogColumn(string name, DatabaseTypeInfo type, bool isNullable = true, string? defaultLiteral = null)
+    /// <param name="collation">The string collation override; null inherits the database default.</param>
+    public SqlCatalogColumn(string name, DatabaseTypeInfo type, bool isNullable = true, string? defaultLiteral = null, Collation? collation = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(type);
+        if (collation is not null && type.Type != DatabaseType.String)
+        {
+            throw new ArgumentException("Only string columns may declare a collation.", nameof(collation));
+        }
 
         Name = name;
         Type = type;
         IsNullable = isNullable;
         DefaultLiteral = defaultLiteral;
+        Collation = collation;
     }
 
     /// <summary>
@@ -47,4 +53,9 @@ public sealed class SqlCatalogColumn
     /// Gets the default value literal text, when one was declared.
     /// </summary>
     public string? DefaultLiteral { get; }
+
+    /// <summary>
+    /// Gets the declared string collation, or null to inherit the database default.
+    /// </summary>
+    public Collation? Collation { get; }
 }

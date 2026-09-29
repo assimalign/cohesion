@@ -25,7 +25,7 @@ namespace Assimalign.Cohesion.Caching.InMemory.Tests;
 public class MemoryCachePerformanceBaselineTests
 {
     private const int HotIterations = 100_000;
-    private static readonly TimeSpan Budget = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _budget = TimeSpan.FromSeconds(10);
 
     [Fact(DisplayName = "Cohesion Test [Caching.InMemory] - Baseline: 100k Set operations complete inside budget")]
     public void Set_HotPath_StaysInsideBudget()
@@ -40,8 +40,8 @@ public class MemoryCachePerformanceBaselineTests
 
         sw.Stop();
         Assert.True(
-            sw.Elapsed < Budget,
-            $"Set hot path took {sw.Elapsed}, budget {Budget}.");
+            sw.Elapsed < _budget,
+            $"Set hot path took {sw.Elapsed}, budget {_budget}.");
     }
 
     [Fact(DisplayName = "Cohesion Test [Caching.InMemory] - Baseline: 100k TryGetValue lookups complete inside budget")]
@@ -61,8 +61,8 @@ public class MemoryCachePerformanceBaselineTests
 
         sw.Stop();
         Assert.True(
-            sw.Elapsed < Budget,
-            $"TryGetValue hot path took {sw.Elapsed}, budget {Budget}.");
+            sw.Elapsed < _budget,
+            $"TryGetValue hot path took {sw.Elapsed}, budget {_budget}.");
     }
 
     [Fact(DisplayName = "Cohesion Test [Caching.InMemory] - Baseline: 50k GetOrCreate operations complete inside budget")]
@@ -78,8 +78,8 @@ public class MemoryCachePerformanceBaselineTests
 
         sw.Stop();
         Assert.True(
-            sw.Elapsed < Budget,
-            $"GetOrCreate hot path took {sw.Elapsed}, budget {Budget}.");
+            sw.Elapsed < _budget,
+            $"GetOrCreate hot path took {sw.Elapsed}, budget {_budget}.");
     }
 
     [Fact(DisplayName = "Cohesion Test [Caching.InMemory] - Baseline: parallel hot reads on a small working set scale")]
@@ -108,8 +108,8 @@ public class MemoryCachePerformanceBaselineTests
         sw.Stop();
 
         Assert.True(
-            sw.Elapsed < Budget,
-            $"Parallel reads took {sw.Elapsed}, budget {Budget}.");
+            sw.Elapsed < _budget,
+            $"Parallel reads took {sw.Elapsed}, budget {_budget}.");
     }
 
     private static System.Collections.Generic.IEnumerable<int> Workers(int count)

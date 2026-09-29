@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// </remarks>
 public sealed class Route : IRouterRoute
 {
-    private static readonly IRouterRouteHandler EmptyHandler = new EmptyRouterRouteHandler();
+    private static readonly IRouterRouteHandler _emptyHandler = new EmptyRouterRouteHandler();
 
     private readonly HttpMethod[] _methods;
 
@@ -30,7 +30,7 @@ public sealed class Route : IRouterRoute
     /// <param name="method">The HTTP method accepted by the route.</param>
     /// <param name="pattern">The raw route pattern.</param>
     public Route(HttpMethod method, string pattern)
-        : this(new[] { method }, RoutePatternParser.Parse(pattern), RouteParameterPolicyMap.CreateDefault(), EmptyHandler)
+        : this(new[] { method }, RoutePatternParser.Parse(pattern), RouteParameterPolicyMap.CreateDefault(), _emptyHandler)
     {
     }
 
@@ -64,7 +64,7 @@ public sealed class Route : IRouterRoute
     /// <param name="pattern">The raw route pattern.</param>
     /// <param name="policyMap">The policy map used to resolve parameter policies.</param>
     public Route(HttpMethod method, string pattern, RouteParameterPolicyMap policyMap)
-        : this(new[] { method }, RoutePatternParser.Parse(pattern), policyMap, EmptyHandler)
+        : this(new[] { method }, RoutePatternParser.Parse(pattern), policyMap, _emptyHandler)
     {
     }
 
@@ -86,7 +86,7 @@ public sealed class Route : IRouterRoute
     /// <param name="method">The HTTP method accepted by the route.</param>
     /// <param name="pattern">The parsed route pattern.</param>
     public Route(HttpMethod method, RoutePattern pattern)
-        : this(new[] { method }, pattern, RouteParameterPolicyMap.CreateDefault(), EmptyHandler)
+        : this(new[] { method }, pattern, RouteParameterPolicyMap.CreateDefault(), _emptyHandler)
     {
     }
 
@@ -108,7 +108,7 @@ public sealed class Route : IRouterRoute
     /// <param name="pattern">The parsed route pattern.</param>
     /// <param name="policyMap">The policy map used to resolve parameter policies.</param>
     public Route(HttpMethod method, RoutePattern pattern, RouteParameterPolicyMap policyMap)
-        : this(new[] { method }, pattern, policyMap, EmptyHandler)
+        : this(new[] { method }, pattern, policyMap, _emptyHandler)
     {
     }
 
@@ -118,7 +118,7 @@ public sealed class Route : IRouterRoute
     /// <param name="methods">The HTTP methods accepted by the route. An empty sequence accepts any method.</param>
     /// <param name="pattern">The raw route pattern.</param>
     public Route(IEnumerable<HttpMethod> methods, string pattern)
-        : this(methods, RoutePatternParser.Parse(pattern), RouteParameterPolicyMap.CreateDefault(), EmptyHandler)
+        : this(methods, RoutePatternParser.Parse(pattern), RouteParameterPolicyMap.CreateDefault(), _emptyHandler)
     {
     }
 
@@ -140,7 +140,7 @@ public sealed class Route : IRouterRoute
     /// <param name="pattern">The raw route pattern.</param>
     /// <param name="policyMap">The policy map used to resolve parameter policies.</param>
     public Route(IEnumerable<HttpMethod> methods, string pattern, RouteParameterPolicyMap policyMap)
-        : this(methods, RoutePatternParser.Parse(pattern), policyMap, EmptyHandler)
+        : this(methods, RoutePatternParser.Parse(pattern), policyMap, _emptyHandler)
     {
     }
 
@@ -162,7 +162,7 @@ public sealed class Route : IRouterRoute
     /// <param name="methods">The HTTP methods accepted by the route. An empty sequence accepts any method.</param>
     /// <param name="pattern">The parsed route pattern.</param>
     public Route(IEnumerable<HttpMethod> methods, RoutePattern pattern)
-        : this(methods, pattern, RouteParameterPolicyMap.CreateDefault(), EmptyHandler)
+        : this(methods, pattern, RouteParameterPolicyMap.CreateDefault(), _emptyHandler)
     {
     }
 
@@ -184,7 +184,7 @@ public sealed class Route : IRouterRoute
     /// <param name="pattern">The parsed route pattern.</param>
     /// <param name="policyMap">The policy map used to resolve parameter policies.</param>
     public Route(IEnumerable<HttpMethod> methods, RoutePattern pattern, RouteParameterPolicyMap policyMap)
-        : this(methods, pattern, policyMap, EmptyHandler)
+        : this(methods, pattern, policyMap, _emptyHandler)
     {
     }
 

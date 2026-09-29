@@ -1,0 +1,17 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
+  <!-- The zone's browser front end: an ordinary Web executable whose Program.cs serves wwwroot/ and publishes the
+       referenced endpoints to the browser. Sdk.Web defaults: endpoint `http` (8080), readiness/liveness on `http`. -->
+  <PropertyGroup>
+    <CohesionResourceName>appc-spa</CohesionResourceName>
+    <!-- Opt-in to orchestration. Enabled: Sdk.Web generates resource.json (the manifest), Resource.g.cs (typed accessors:
+         Resource.Endpoints/Mounts/Settings/References over the ambient ResourceContext) and ResourceControlPlane.g.cs (the
+         Web default control plane — readiness, health, observed endpoints, stop, Web commands — owned by
+         Web.ApplicationModel). Disabled (the default): a plain executable that no gateway can reference. -->
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionEndpoint Update="http" Public="true" />
+    <CohesionResourceReference Include="..\Example.AppC.Api\Example.AppC.Api.csproj" />
+    <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

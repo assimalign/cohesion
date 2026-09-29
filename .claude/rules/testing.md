@@ -67,6 +67,28 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/tests/
 └── {Feature}Tests.cs
 ```
 
+## Running tests — pass the project, not the folder
+
+`dotnet test <dir>` works only while a `tests/` folder holds exactly one project. Where it holds
+two — a test project beside a `.TestHost` or fixture project — the command fails with
+`MSB1050: Specify which project or solution file to use`, and **a scripted loop that filters
+output cannot tell that failure apart from a project with no tests**, so the suite silently never
+runs. Verification loops must pass the csproj path:
+
+```bash
+dotnet test <project>/tests/<project>.Tests.csproj
+```
+
+This is not hypothetical: it hid `Assimalign.Cohesion.Database.Testing` — the one suite that
+builds a fixture through the real SDK and runs the generated apphost end to end — from twenty
+consecutive verification passes on a single branch.
+
+**A suite with a setup prerequisite states it in the project's `README.md`.** If tests need a
+packed local feed, a generated build task, or anything else a plain `dotnet test` does not do, say
+so where someone editing that project will read it, and name the existing repo command that does
+it (`installer/scripts/Install-Local.ps1` for the local package feed). Do not write a new bootstrap
+script for what the dev loop already does.
+
 ## Coverage expectations
 
 - Add or update tests for behavior changes.

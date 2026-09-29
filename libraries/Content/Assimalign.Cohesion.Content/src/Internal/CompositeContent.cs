@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Content;
+namespace Assimalign.Cohesion.Content.Internal;
 
 /// <summary>
 /// A pure composite assembled from existing items. It has no serialized representation of its own; the

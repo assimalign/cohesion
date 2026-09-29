@@ -1,33 +1,49 @@
 ﻿using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
 using Assimalign.Cohesion.Internal;
 
-internal class InMemoryFileSystemEventToken : IFileSystemEventToken
+internal class InMemoryFileSystemEventToken : IFileSystemEventToken, IDisposable
 {
-    // TODO: Need to create a file system polling object. FileSystemWatcher is only available on Windows.
     private readonly Glob _glob;
     private readonly List<Subscriber> _subscribers;
+    private readonly object _gate = new();
+    private readonly InMemoryFileSystemDispatcher _dispatcher;
+    private readonly Action<InMemoryFileSystemEventToken> _onDispose;
+    private int _disposed;
 
-    private InMemoryFileSystemInfo _fileSystemInfo;
-
-    public InMemoryFileSystemEventToken(InMemoryFileSystemInfo fileSystemInfo, Glob glob)
+    public InMemoryFileSystemEventToken(InMemoryFileSystemInfo fileSystemInfo, Glob glob, Action<InMemoryFileSystemEventToken> onDispose)
     {
-        _fileSystemInfo = fileSystemInfo;
+        _dispatcher = fileSystemInfo.Dispatcher;
+        _onDispose = onDispose;
         _glob = glob;
         _subscribers = new List<Subscriber>();
-        _fileSystemInfo.Dispatcher.Created += (sender, args) => Notify(sender, args, ChangeType.Created);
-        _fileSystemInfo.Dispatcher.Deleted += (sender, args) => Notify(sender, args, ChangeType.Deleted);
-        _fileSystemInfo.Dispatcher.Changed += (sender, args) => Notify(sender, args, ChangeType.Changed);
-        _fileSystemInfo.Dispatcher.Renamed += (sender, args) => Notify(sender, args, ChangeType.Renamed);
+        _dispatcher.Created += OnCreated;
+        _dispatcher.Deleted += OnDeleted;
+        _dispatcher.Changed += OnChanged;
+        _dispatcher.Renamed += OnRenamed;
     }
 
     public void Dispose()
     {
-        _subscribers.Clear();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        _dispatcher.Created -= OnCreated;
+        _dispatcher.Deleted -= OnDeleted;
+        _dispatcher.Changed -= OnChanged;
+        _dispatcher.Renamed -= OnRenamed;
+        lock (_gate)
+        {
+            _subscribers.Clear();
+        }
+        _onDispose(this);
     }
 
     public IDisposable OnChange(Action<object?> callback, object? state)
@@ -39,10 +55,10 @@ internal class InMemoryFileSystemEventToken : IFileSystemEventToken
             ChangeType = ChangeType.Changed,
             State = state,
             Callback = args => callback(args.State),
-            OnDispose = subscriber => _subscribers.Remove(subscriber)
+            OnDispose = RemoveSubscriber
         };
 
-        _subscribers.Add(disposable);
+        AddSubscriber(disposable);
 
         return disposable;
     }
@@ -55,10 +71,10 @@ internal class InMemoryFileSystemEventToken : IFileSystemEventToken
             ChangeType = ChangeType.Changed,
             State = state,
             Callback = callback,
-            OnDispose = subscriber => _subscribers.Remove(subscriber)
+            OnDispose = RemoveSubscriber
         };
 
-        _subscribers.Add(disposable);
+        AddSubscriber(disposable);
 
         return disposable;
     }
@@ -71,10 +87,10 @@ internal class InMemoryFileSystemEventToken : IFileSystemEventToken
             ChangeType = ChangeType.Created,
             State = state,
             Callback = callback,
-            OnDispose = Subscriber => _subscribers.Remove(Subscriber)
+            OnDispose = RemoveSubscriber
         };
 
-        _subscribers.Add(disposable);
+        AddSubscriber(disposable);
 
         return disposable;
     }
@@ -87,10 +103,10 @@ internal class InMemoryFileSystemEventToken : IFileSystemEventToken
             ChangeType = ChangeType.Deleted,
             State = state,
             Callback = callback,
-            OnDispose = Subscriber => _subscribers.Remove(Subscriber)
+            OnDispose = RemoveSubscriber
         };
 
-        _subscribers.Add(disposable);
+        AddSubscriber(disposable);
 
         return disposable;
     }
@@ -103,15 +119,39 @@ internal class InMemoryFileSystemEventToken : IFileSystemEventToken
             ChangeType = ChangeType.Renamed,
             State = state,
             Callback = callback,
-            OnDispose = Subscriber => _subscribers.Remove(Subscriber)
+            OnDispose = RemoveSubscriber
         };
 
-        _subscribers.Add(disposable);
+        AddSubscriber(disposable);
 
         return disposable;
     }
 
-    private void Notify(object? sender, FileSystemEventArgs args, ChangeType changeType)
+    private void OnCreated(object? sender, FileSystemEventArgs args) => Notify(args, ChangeType.Created);
+    private void OnDeleted(object? sender, FileSystemEventArgs args) => Notify(args, ChangeType.Deleted);
+    private void OnChanged(object? sender, FileSystemEventArgs args) => Notify(args, ChangeType.Changed);
+    private void OnRenamed(object? sender, RenamedEventArgs args) => Notify(args, ChangeType.Renamed);
+
+    private void AddSubscriber(Subscriber subscriber)
+    {
+        lock (_gate)
+        {
+            if (Volatile.Read(ref _disposed) == 0)
+            {
+                _subscribers.Add(subscriber);
+            }
+        }
+    }
+
+    private void RemoveSubscriber(Subscriber subscriber)
+    {
+        lock (_gate)
+        {
+            _subscribers.Remove(subscriber);
+        }
+    }
+
+    private void Notify(FileSystemEventArgs args, ChangeType changeType)
     {
         FileSystemPath fileSystemPath = args.FullPath;
 
@@ -120,9 +160,25 @@ internal class InMemoryFileSystemEventToken : IFileSystemEventToken
             return;
         }
 
-        foreach (var subscriber in _subscribers)
+        Subscriber[] subscribers;
+        lock (_gate)
         {
-            if (subscriber.ChangeType == changeType)
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                return;
+            }
+            subscribers = _subscribers.ToArray();
+        }
+
+        // Callers can unregister or dispose this token inside a callback. Never enumerate
+        // the mutable list or hold its lock across user code.
+        foreach (var subscriber in subscribers)
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                return;
+            }
+            if (!subscriber.IsDisposed && subscriber.ChangeType == changeType)
             {
                 subscriber.Invoke(args);
             }
@@ -138,12 +194,17 @@ internal class InMemoryFileSystemEventToken : IFileSystemEventToken
 
     abstract partial class Subscriber : IDisposable
     {
+        private int _disposed;
+        public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
         public required ChangeType ChangeType { get; init; }
         public Action<Subscriber> OnDispose { get; init; } = default!;
         public abstract void Invoke(FileSystemEventArgs args);
         public void Dispose()
         {
-            OnDispose.Invoke(this);
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                OnDispose.Invoke(this);
+            }
         }
     }
 

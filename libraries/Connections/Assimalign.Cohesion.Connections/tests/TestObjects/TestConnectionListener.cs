@@ -20,11 +20,20 @@ internal sealed class TestConnectionListener : ConnectionListener
 
     public bool IsDisposed { get; private set; }
 
+    public int BindCount { get; private set; }
+
     public override EndPoint EndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 15000);
 
     public override ConnectionCapabilities Capabilities => _capabilities;
 
     public void Enqueue(Connection connection) => _pending.Enqueue(connection);
+
+    public override ValueTask BindAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        BindCount++;
+        return ValueTask.CompletedTask;
+    }
 
     public override ValueTask<Connection> AcceptAsync(CancellationToken cancellationToken = default)
         => ValueTask.FromResult(_pending.Dequeue());

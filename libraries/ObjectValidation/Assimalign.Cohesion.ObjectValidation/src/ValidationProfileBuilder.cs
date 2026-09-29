@@ -10,12 +10,12 @@ using Assimalign.Cohesion.ObjectValidation.Internal;
 /// </summary>
 public abstract class ValidationProfileBuilder : IValidationProfileBuilder
 {
-    private bool isBuilt;
-    private IList<IValidationProfile> profiles;
+    private bool _isBuilt;
+    private IList<IValidationProfile> _profiles;
 
     public ValidationProfileBuilder()
     {
-        this.profiles = new List<IValidationProfile>();
+        this._profiles = new List<IValidationProfile>();
     }
 
 
@@ -37,7 +37,7 @@ public abstract class ValidationProfileBuilder : IValidationProfileBuilder
 
         profile.Configure(descriptor);
 
-        profiles.Add(profile);
+        _profiles.Add(profile);
 
         return this;
     }
@@ -48,11 +48,11 @@ public abstract class ValidationProfileBuilder : IValidationProfileBuilder
     /// </remarks>
     IEnumerable<IValidationProfile> IValidationProfileBuilder.Build()
     {
-        if (!isBuilt)
+        if (!_isBuilt)
         {
             OnBuild(this);
-            isBuilt = true;
+            _isBuilt = true;
         }
-        return profiles;
+        return _profiles;
     }
 }

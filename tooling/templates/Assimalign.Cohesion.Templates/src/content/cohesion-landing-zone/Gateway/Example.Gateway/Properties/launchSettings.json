@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "Example.Gateway": {
+      "commandName": "Project"
+    }
+  }
+}

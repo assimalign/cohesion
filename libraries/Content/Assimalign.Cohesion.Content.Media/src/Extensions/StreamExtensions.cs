@@ -6,7 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.IO;
+namespace Assimalign.Cohesion.Content.Media;
 
 public static class StreamExtensions
 {

@@ -1,60 +1,47 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text;
-
 namespace Assimalign.Cohesion.Scheduler;
 
 /// <summary>
-/// 
+/// Supplies schedules to a scheduler application and controls per-provider job enablement.
 /// </summary>
 public interface IScheduleProvider
 {
-    ///// <summary>
-    ///// 
-    ///// </summary>
-    //void Start(ScheduleId id);
-
-    ///// <summary>
-    ///// 
-    ///// </summary>
-    ///// <param name="id"></param>
-    //void Stop(ScheduleId id);
-
-    ///// <summary>
-    ///// 
-    ///// </summary>
-    ///// <param name="id"></param>
-    //void Begin(ScheduleId id);
-
-    ///// <summary>
-    ///// 
-    ///// </summary>
-    //void End(ScheduleId id);
-
     /// <summary>
-    /// 
+    /// Gets one schedule by identifier.
     /// </summary>
-    /// <param name="id"></param>
-    /// <returns></returns>
+    /// <param name="id">The schedule identifier.</param>
+    /// <returns>The registered schedule.</returns>
+    /// <exception cref="KeyNotFoundException">No schedule has the requested identifier.</exception>
     ISchedule GetSchedule(ScheduleId id);
 
     /// <summary>
-    /// Get all schedules within a given provider
+    /// Gets an immutable snapshot of all schedules in the provider.
     /// </summary>
-    /// <returns></returns>
+    /// <returns>The schedule snapshot.</returns>
     IEnumerable<ISchedule> GetSchedules();
 
     /// <summary>
-    /// Disableds a given job under a specific schedule.
+    /// Disables a job under a specific schedule.
     /// </summary>
-    /// <param name="scheduleId"></param>
-    /// <param name="jobId"></param>
+    /// <param name="scheduleId">The schedule identifier.</param>
+    /// <param name="jobId">The job identifier.</param>
+    /// <exception cref="KeyNotFoundException">The schedule or job is not registered.</exception>
     void DisableJob(ScheduleId scheduleId, JobId jobId);
 
     /// <summary>
-    /// 
+    /// Enables a job under a specific schedule.
     /// </summary>
-    /// <param name="scheduleId"></param>
-    /// <param name="jobId"></param>
+    /// <param name="scheduleId">The schedule identifier.</param>
+    /// <param name="jobId">The job identifier.</param>
+    /// <exception cref="KeyNotFoundException">The schedule or job is not registered.</exception>
     void EnableJob(ScheduleId scheduleId, JobId jobId);
+
+    /// <summary>
+    /// Determines whether a job is enabled by this provider.
+    /// </summary>
+    /// <param name="scheduleId">The schedule identifier.</param>
+    /// <param name="jobId">The job identifier.</param>
+    /// <returns><see langword="true"/> when the provider permits the job to run.</returns>
+    bool IsJobEnabled(ScheduleId scheduleId, JobId jobId);
 }

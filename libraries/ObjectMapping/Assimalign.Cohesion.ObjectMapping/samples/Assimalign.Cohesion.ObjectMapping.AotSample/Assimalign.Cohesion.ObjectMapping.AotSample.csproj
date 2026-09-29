@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.ObjectMapping.AotSample</RootNamespace>
 		<!--
 		    AOT-compatibility guard. IsAotCompatible=true turns on the trim/AOT/single-file
 		    Roslyn analyzers; promoting their diagnostics to errors means a clean build proves

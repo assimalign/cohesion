@@ -23,13 +23,13 @@ namespace Assimalign.Cohesion.Web.Compression.Tests;
 /// </summary>
 public class ResponseCompressionTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Compression] - Response: gzip-accepting client gets a gzip-coded body that round-trips")]
     public async Task UseResponseCompression_GzipAccepted_CompressesAndRoundTrips()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseResponseCompression();
         WriteJson(factory, CompressionPayloads.LargeJson);
@@ -50,7 +50,7 @@ public class ResponseCompressionTests
     public async Task UseResponseCompression_BrotliAccepted_UsesBrotli()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseResponseCompression();
         WriteJson(factory, CompressionPayloads.LargeJson);
@@ -69,7 +69,7 @@ public class ResponseCompressionTests
     public async Task UseResponseCompression_BelowThreshold_DoesNotCompressButVaries()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseResponseCompression();
         WriteJson(factory, CompressionPayloads.SmallJson);
@@ -89,7 +89,7 @@ public class ResponseCompressionTests
     public async Task UseResponseCompression_IneligibleMediaType_DoesNothing()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseResponseCompression();
         byte[] payload = new byte[4096];
@@ -115,7 +115,7 @@ public class ResponseCompressionTests
     public async Task UseResponseCompression_NoAcceptEncoding_ServesIdentityWithVary()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseResponseCompression();
         WriteJson(factory, CompressionPayloads.LargeJson);
@@ -135,7 +135,7 @@ public class ResponseCompressionTests
     public async Task UseResponseCompression_AlreadyEncoded_HandsOff()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         byte[] preEncoded = CompressionPayloads.GzipCompress(CompressionPayloads.Utf8(CompressionPayloads.LargeJson));
         factory.Application.UseResponseCompression();
@@ -161,7 +161,7 @@ public class ResponseCompressionTests
     public async Task UseResponseCompression_ClientPrefersGzip_SelectsGzip()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseResponseCompression();
         WriteJson(factory, CompressionPayloads.LargeJson);
@@ -178,7 +178,7 @@ public class ResponseCompressionTests
     public async Task UseResponseCompression_IdentityRefusedBelowThreshold_CompressesAnyway()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseResponseCompression();
         WriteJson(factory, CompressionPayloads.SmallJson);
@@ -197,7 +197,7 @@ public class ResponseCompressionTests
     public async Task UseResponseCompression_FeatureDisabled_SkipsCompression()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseResponseCompression();
         factory.Application.Use(async (context, next) =>
@@ -221,7 +221,7 @@ public class ResponseCompressionTests
     public async Task UseResponseCompression_ExistingVary_AppendsAcceptEncoding()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseResponseCompression();
         factory.Application.Use(async (context, next) =>

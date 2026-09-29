@@ -1,0 +1,169 @@
+<Project>
+    <!--
+        Framework-family manifest: the Assimalign.Cohesion.App hosting kernel
+        and the defaults every framework producer shares. App.<Area>
+        frameworks add each resource area's surface; each lists its own
+        members in resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/
+        Directory.Build.props (see the end of this file).
+
+        Every framework producer imports this file from its project body:
+
+          1. Every Runtime producer - libraries/App/Assimalign.Cohesion.App.Runtime
+             and resources/<Area>/Assimalign.Cohesion.<Area>.Runtime (src/...csproj).
+             It turns the framework's members into <CohesionProjectReference>
+             items so each library is built and CopyLocal'd into the Runtime
+             project's bin folder.
+
+          2. Every Refs producer - libraries/App/Assimalign.Cohesion.App.Refs
+             and resources/<Area>/Assimalign.Cohesion.<Area>.Refs (src/...csproj)
+             (and indirectly, Assimalign.Cohesion.App.targets) drives
+             FrameworkList.xml and RuntimeList.xml generation - no DLL
+             inspection needed.
+
+        The App ItemGroup below is conditioned on $(CohesionFrameworkName),
+        which every Refs/Runtime csproj sets in its PropertyGroup BEFORE
+        importing this file, so App's items exist only in App's producers.
+        Property-based conditions on top-level ItemGroups are MSBuild-legal
+        (item-metadata-based conditions are not). An area's list needs no
+        condition: its Directory.Build.props is read only by that area's two
+        producers.
+
+        The umbrella assembly per framework is included so the manifest lists
+        it; the corresponding Runtime csproj skips it when generating project
+        references (a project cannot reference itself).
+
+        SDK policy:
+            Sdk          -> no implicit framework (library SDK)
+            Sdk.<Area>   -> App + App.<Area> (resource SDK)
+            Sdk.Gateway  -> no framework unless in-process composition is active
+        CohesionAutoIncludeAppFramework=false suppresses both resource-SDK
+        references. The base SDK still registers every framework so direct
+        consumers can add an explicit FrameworkReference.
+
+        App is derived, not curated assembly-by-assembly. The
+        @(CohesionAppKernelRoot) list below is its only policy input: the host
+        and siblings, Connections, host-composed configuration providers,
+        console logging, telemetry, dependency injection, and the physical file system. The
+        Runtime project references only those roots; App.targets computes their
+        transitive Assimalign.Cohesion project-reference closure for the Ref and
+        Runtime manifests, then adds the App umbrella assembly. Framework tests
+        compare that effective set with the repository project graph.
+
+        ================================================================
+        Public vs private assemblies
+        ================================================================
+        Two parallel item types are recognized per framework:
+
+          @(CohesionFrameworkAssembly)         - PUBLIC. Listed on the Ref
+                                                 pack's FrameworkList.xml AND
+                                                 shipped in the Runtime pack.
+                                                 Visible to consumers at
+                                                 compile time (IntelliSense
+                                                 sees these types).
+
+          @(CohesionFrameworkPrivateAssembly)  - PRIVATE. NOT listed on the
+                                                 Ref pack. Shipped in the
+                                                 Runtime pack only, and
+                                                 enumerated in RuntimeList.xml
+                                                 so the host resolves them.
+
+        Use the private bucket when a framework needs another framework's
+        library as an *implementation detail* at runtime but should not
+        surface that library to consumers at compile time. The canonical
+        example: App.Database needs Assimalign.Cohesion.Web internally to
+        host its database server, but a developer using Sdk.Database should
+        see only database types in IntelliSense - never web types.
+
+        The library that needs the cross-resource type takes a
+        CohesionPrivateProjectReference on the other library inside the repo,
+        and keeps every cross-resource use `internal`. The private-assembly
+        list is what hides that detail in the shipped artifact.
+    -->
+
+    <!--
+        Framework producer defaults. Every Refs/Runtime producer imports this
+        file from its project body, so these apply to the producers and nothing
+        else, wherever they live (libraries/App/ or resources/<Area>/). They
+        were frameworks/Directory.Build.props until the producers moved beside
+        their areas.
+
+        TargetFramework follows $(TargetFrameworkForFrameworks), not the TFM
+        of the libraries/ or resources/ tree a producer sits in.
+
+        Microsoft.NET.Sdk defaults VersionPrefix to 1.0.0, which would land a
+        framework .nupkg at 1.0.0 instead of $(CohesionVersion). Setting the
+        prefix/suffix split here - after the global props define
+        $(CohesionVersionPrefix) / $(CohesionVersionSuffix), before
+        Microsoft.NET.Sdk.targets composes Version - keeps every framework
+        package on $(CohesionVersion). Use the split, not $(CohesionVersion)
+        directly: a prerelease semver fed to [assembly: AssemblyVersion]
+        fails with CS7034.
+
+        Description: build/Targets/Build.Branding.props words it from the
+        project name, and a producer's project name follows its area
+        (Assimalign.Cohesion.Web.Refs) while everything a consumer sees
+        follows the framework. Naming the producer <framework>.Refs /
+        <framework>.Runtime keeps the published text unchanged.
+    -->
+    <PropertyGroup>
+        <TargetFramework>$(TargetFrameworkForFrameworks)</TargetFramework>
+        <VersionPrefix>$(CohesionVersionPrefix)</VersionPrefix>
+        <VersionSuffix Condition="'$(CohesionVersionSuffix)' != ''">$(CohesionVersionSuffix)</VersionSuffix>
+        <_CohesionFrameworkProducerName Condition="'$(CohesionFrameworkKind)' == 'Ref'">$(CohesionFrameworkName).Refs</_CohesionFrameworkProducerName>
+        <_CohesionFrameworkProducerName Condition="'$(CohesionFrameworkKind)' == 'Runtime'">$(CohesionFrameworkName).Runtime</_CohesionFrameworkProducerName>
+        <Description Condition="'$(_CohesionFrameworkProducerName)' != ''">$(Description.Replace('$(MSBuildProjectName)', '$(_CohesionFrameworkProducerName)'))</Description>
+    </PropertyGroup>
+
+    <!-- ================================================================
+         Assimalign.Cohesion.App: hosting kernel. Resource-area SDKs include it;
+         direct base-SDK consumers opt in explicitly.
+         ================================================================ -->
+    <ItemGroup Condition="'$(CohesionFrameworkName)' == 'Assimalign.Cohesion.App'">
+        <!-- This is the sole policy list for the hosting kernel. App.targets derives
+             every transitive Assimalign.Cohesion dependency from these roots. -->
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Hosting" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Hosting.Health" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Hosting.Resources" />
+        <!-- Generated resource accessors and every area hosting module depend on Connections. -->
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Connections" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Hosting.Telemetry" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Configuration.CommandLine" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Configuration.EnvironmentVariables" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Configuration.FileSystem" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Configuration.Json" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.Logging.Console" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.OpenTelemetry" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.DependencyInjection" />
+        <CohesionAppKernelRoot Include="Assimalign.Cohesion.FileSystem.Physical" />
+
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App" />
+
+        <!--
+            Roslyn analyzers / source generators shipped INSIDE this framework's
+            Ref pack at analyzers/dotnet/cs/. SDK-path consumers (i.e. anyone
+            using <Project Sdk="Assimalign.Cohesion.Sdk">) auto-pick these up
+            via the .NET SDK's ResolveTargetingPackAssets, the same way a
+            direct <PackageReference> consumer auto-picks up the analyzer
+            bundled inside the owning library's own .nupkg. By-name lookup
+            against analyzers/**/*.csproj.
+
+            The general component-integration generator is required because
+            kernel assemblies carry ComponentIntegration declarations. Feature
+            analyzers travel with their ordinary NuGet packages or area packs.
+        -->
+        <!-- Projects [assembly: ComponentIntegration] declarations into consuming-compilation extension verbs. -->
+        <CohesionFrameworkAnalyzer Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />
+    </ItemGroup>
+
+    <!-- ================================================================
+         Resource-domain frameworks. Each corresponds to a folder under
+         resources/, whose Assimalign.Cohesion.<Area>.Refs and .Runtime
+         projects produce it. Its public/private inventory lives with its
+         Runtime producer, in
+         resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props,
+         which the sibling Refs producer imports as its own Directory.Build.props.
+         The inventory covers the transitive Assimalign.Cohesion closure of the
+         area's shipped surface; the framework tests enforce that coverage
+         against the project graph.
+         ================================================================ -->
+</Project>

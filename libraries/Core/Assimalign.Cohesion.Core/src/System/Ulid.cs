@@ -34,12 +34,12 @@ public readonly partial struct Ulid :
     IUtf8SpanFormattable
 {
     // https://en.wikipedia.org/wiki/Base32
-    static readonly char[] Base32Text = "0123456789ABCDEFGHJKMNPQRSTVWXYZ".ToCharArray();
-    static readonly byte[] Base32Bytes = Encoding.UTF8.GetBytes(Base32Text);
-    static readonly byte[] CharToBase32 = new byte[] { 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 255, 255, 255, 255, 255, 255, 255, 10, 11, 12, 13, 14, 15, 16, 17, 255, 18, 19, 255, 20, 21, 255, 22, 23, 24, 25, 26, 255, 27, 28, 29, 30, 31, 255, 255, 255, 255, 255, 255, 10, 11, 12, 13, 14, 15, 16, 17, 255, 18, 19, 255, 20, 21, 255, 22, 23, 24, 25, 26, 255, 27, 28, 29, 30, 31 };
-    static readonly DateTimeOffset UnixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+    static readonly char[] _base32Text = "0123456789ABCDEFGHJKMNPQRSTVWXYZ".ToCharArray();
+    static readonly byte[] _base32Bytes = Encoding.UTF8.GetBytes(_base32Text);
+    static readonly byte[] _charToBase32 = new byte[] { 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 255, 255, 255, 255, 255, 255, 255, 10, 11, 12, 13, 14, 15, 16, 17, 255, 18, 19, 255, 20, 21, 255, 22, 23, 24, 25, 26, 255, 27, 28, 29, 30, 31, 255, 255, 255, 255, 255, 255, 10, 11, 12, 13, 14, 15, 16, 17, 255, 18, 19, 255, 20, 21, 255, 22, 23, 24, 25, 26, 255, 27, 28, 29, 30, 31 };
+    static readonly DateTimeOffset _unixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    public static readonly Ulid MinValue = new Ulid(UnixEpoch.ToUnixTimeMilliseconds(), new byte[] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
+    public static readonly Ulid MinValue = new Ulid(_unixEpoch.ToUnixTimeMilliseconds(), new byte[] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
     public static readonly Ulid MaxValue = new Ulid(DateTimeOffset.MaxValue.ToUnixTimeMilliseconds(), new byte[] { 255, 255, 255, 255, 255, 255, 255, 255, 255, 255 });
     public static readonly Ulid Empty = new Ulid();
 
@@ -212,24 +212,24 @@ public readonly partial struct Ulid :
     {
         // unroll-code is based on NUlid.
 
-        _randomness9 = (byte)((CharToBase32[base32[24]] << 5) | CharToBase32[base32[25]]); // eliminate bounds-check of span
+        _randomness9 = (byte)((_charToBase32[base32[24]] << 5) | _charToBase32[base32[25]]); // eliminate bounds-check of span
 
-        _timestamp0 = (byte)((CharToBase32[base32[0]] << 5) | CharToBase32[base32[1]]);
-        _timestamp1 = (byte)((CharToBase32[base32[2]] << 3) | (CharToBase32[base32[3]] >> 2));
-        _timestamp2 = (byte)((CharToBase32[base32[3]] << 6) | (CharToBase32[base32[4]] << 1) | (CharToBase32[base32[5]] >> 4));
-        _timestamp3 = (byte)((CharToBase32[base32[5]] << 4) | (CharToBase32[base32[6]] >> 1));
-        _timestamp4 = (byte)((CharToBase32[base32[6]] << 7) | (CharToBase32[base32[7]] << 2) | (CharToBase32[base32[8]] >> 3));
-        _timestamp5 = (byte)((CharToBase32[base32[8]] << 5) | CharToBase32[base32[9]]);
+        _timestamp0 = (byte)((_charToBase32[base32[0]] << 5) | _charToBase32[base32[1]]);
+        _timestamp1 = (byte)((_charToBase32[base32[2]] << 3) | (_charToBase32[base32[3]] >> 2));
+        _timestamp2 = (byte)((_charToBase32[base32[3]] << 6) | (_charToBase32[base32[4]] << 1) | (_charToBase32[base32[5]] >> 4));
+        _timestamp3 = (byte)((_charToBase32[base32[5]] << 4) | (_charToBase32[base32[6]] >> 1));
+        _timestamp4 = (byte)((_charToBase32[base32[6]] << 7) | (_charToBase32[base32[7]] << 2) | (_charToBase32[base32[8]] >> 3));
+        _timestamp5 = (byte)((_charToBase32[base32[8]] << 5) | _charToBase32[base32[9]]);
 
-        _randomness0 = (byte)((CharToBase32[base32[10]] << 3) | (CharToBase32[base32[11]] >> 2));
-        _randomness1 = (byte)((CharToBase32[base32[11]] << 6) | (CharToBase32[base32[12]] << 1) | (CharToBase32[base32[13]] >> 4));
-        _randomness2 = (byte)((CharToBase32[base32[13]] << 4) | (CharToBase32[base32[14]] >> 1));
-        _randomness3 = (byte)((CharToBase32[base32[14]] << 7) | (CharToBase32[base32[15]] << 2) | (CharToBase32[base32[16]] >> 3));
-        _randomness4 = (byte)((CharToBase32[base32[16]] << 5) | CharToBase32[base32[17]]);
-        _randomness5 = (byte)((CharToBase32[base32[18]] << 3) | CharToBase32[base32[19]] >> 2);
-        _randomness6 = (byte)((CharToBase32[base32[19]] << 6) | (CharToBase32[base32[20]] << 1) | (CharToBase32[base32[21]] >> 4));
-        _randomness7 = (byte)((CharToBase32[base32[21]] << 4) | (CharToBase32[base32[22]] >> 1));
-        _randomness8 = (byte)((CharToBase32[base32[22]] << 7) | (CharToBase32[base32[23]] << 2) | (CharToBase32[base32[24]] >> 3));
+        _randomness0 = (byte)((_charToBase32[base32[10]] << 3) | (_charToBase32[base32[11]] >> 2));
+        _randomness1 = (byte)((_charToBase32[base32[11]] << 6) | (_charToBase32[base32[12]] << 1) | (_charToBase32[base32[13]] >> 4));
+        _randomness2 = (byte)((_charToBase32[base32[13]] << 4) | (_charToBase32[base32[14]] >> 1));
+        _randomness3 = (byte)((_charToBase32[base32[14]] << 7) | (_charToBase32[base32[15]] << 2) | (_charToBase32[base32[16]] >> 3));
+        _randomness4 = (byte)((_charToBase32[base32[16]] << 5) | _charToBase32[base32[17]]);
+        _randomness5 = (byte)((_charToBase32[base32[18]] << 3) | _charToBase32[base32[19]] >> 2);
+        _randomness6 = (byte)((_charToBase32[base32[19]] << 6) | (_charToBase32[base32[20]] << 1) | (_charToBase32[base32[21]] >> 4));
+        _randomness7 = (byte)((_charToBase32[base32[21]] << 4) | (_charToBase32[base32[22]] >> 1));
+        _randomness8 = (byte)((_charToBase32[base32[22]] << 7) | (_charToBase32[base32[23]] << 2) | (_charToBase32[base32[24]] >> 3));
     }
 
     public Ulid(ReadOnlySpan<byte> bytes) : this()
@@ -380,24 +380,24 @@ public readonly partial struct Ulid :
 
         var ulid = default(Ulid);
 
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 15) = (byte)((CharToBase32[base32[24]] << 5) | CharToBase32[base32[25]]);
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 15) = (byte)((_charToBase32[base32[24]] << 5) | _charToBase32[base32[25]]);
 
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 0) = (byte)((CharToBase32[base32[0]] << 5) | CharToBase32[base32[1]]);
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 1) = (byte)((CharToBase32[base32[2]] << 3) | (CharToBase32[base32[3]] >> 2));
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 2) = (byte)((CharToBase32[base32[3]] << 6) | (CharToBase32[base32[4]] << 1) | (CharToBase32[base32[5]] >> 4));
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 3) = (byte)((CharToBase32[base32[5]] << 4) | (CharToBase32[base32[6]] >> 1));
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 4) = (byte)((CharToBase32[base32[6]] << 7) | (CharToBase32[base32[7]] << 2) | (CharToBase32[base32[8]] >> 3));
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 5) = (byte)((CharToBase32[base32[8]] << 5) | CharToBase32[base32[9]]);
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 0) = (byte)((_charToBase32[base32[0]] << 5) | _charToBase32[base32[1]]);
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 1) = (byte)((_charToBase32[base32[2]] << 3) | (_charToBase32[base32[3]] >> 2));
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 2) = (byte)((_charToBase32[base32[3]] << 6) | (_charToBase32[base32[4]] << 1) | (_charToBase32[base32[5]] >> 4));
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 3) = (byte)((_charToBase32[base32[5]] << 4) | (_charToBase32[base32[6]] >> 1));
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 4) = (byte)((_charToBase32[base32[6]] << 7) | (_charToBase32[base32[7]] << 2) | (_charToBase32[base32[8]] >> 3));
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 5) = (byte)((_charToBase32[base32[8]] << 5) | _charToBase32[base32[9]]);
 
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 6) = (byte)((CharToBase32[base32[10]] << 3) | (CharToBase32[base32[11]] >> 2));
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 7) = (byte)((CharToBase32[base32[11]] << 6) | (CharToBase32[base32[12]] << 1) | (CharToBase32[base32[13]] >> 4));
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 8) = (byte)((CharToBase32[base32[13]] << 4) | (CharToBase32[base32[14]] >> 1));
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 9) = (byte)((CharToBase32[base32[14]] << 7) | (CharToBase32[base32[15]] << 2) | (CharToBase32[base32[16]] >> 3));
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 10) = (byte)((CharToBase32[base32[16]] << 5) | CharToBase32[base32[17]]);
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 11) = (byte)((CharToBase32[base32[18]] << 3) | CharToBase32[base32[19]] >> 2);
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 12) = (byte)((CharToBase32[base32[19]] << 6) | (CharToBase32[base32[20]] << 1) | (CharToBase32[base32[21]] >> 4));
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 13) = (byte)((CharToBase32[base32[21]] << 4) | (CharToBase32[base32[22]] >> 1));
-        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 14) = (byte)((CharToBase32[base32[22]] << 7) | (CharToBase32[base32[23]] << 2) | (CharToBase32[base32[24]] >> 3));
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 6) = (byte)((_charToBase32[base32[10]] << 3) | (_charToBase32[base32[11]] >> 2));
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 7) = (byte)((_charToBase32[base32[11]] << 6) | (_charToBase32[base32[12]] << 1) | (_charToBase32[base32[13]] >> 4));
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 8) = (byte)((_charToBase32[base32[13]] << 4) | (_charToBase32[base32[14]] >> 1));
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 9) = (byte)((_charToBase32[base32[14]] << 7) | (_charToBase32[base32[15]] << 2) | (_charToBase32[base32[16]] >> 3));
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 10) = (byte)((_charToBase32[base32[16]] << 5) | _charToBase32[base32[17]]);
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 11) = (byte)((_charToBase32[base32[18]] << 3) | _charToBase32[base32[19]] >> 2);
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 12) = (byte)((_charToBase32[base32[19]] << 6) | (_charToBase32[base32[20]] << 1) | (_charToBase32[base32[21]] >> 4));
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 13) = (byte)((_charToBase32[base32[21]] << 4) | (_charToBase32[base32[22]] >> 1));
+        Unsafe.Add(ref Unsafe.As<Ulid, byte>(ref ulid), 14) = (byte)((_charToBase32[base32[22]] << 7) | (_charToBase32[base32[23]] << 2) | (_charToBase32[base32[24]] >> 3));
 
         return ulid;
     }
@@ -442,36 +442,36 @@ public readonly partial struct Ulid :
             return false;
         }
 
-        span[25] = Base32Bytes[_randomness9 & 31]; // eliminate bounds-check of span
+        span[25] = _base32Bytes[_randomness9 & 31]; // eliminate bounds-check of span
 
         // timestamp
-        span[0] = Base32Bytes[(_timestamp0 & 224) >> 5];
-        span[1] = Base32Bytes[_timestamp0 & 31];
-        span[2] = Base32Bytes[(_timestamp1 & 248) >> 3];
-        span[3] = Base32Bytes[((_timestamp1 & 7) << 2) | ((_timestamp2 & 192) >> 6)];
-        span[4] = Base32Bytes[(_timestamp2 & 62) >> 1];
-        span[5] = Base32Bytes[((_timestamp2 & 1) << 4) | ((_timestamp3 & 240) >> 4)];
-        span[6] = Base32Bytes[((_timestamp3 & 15) << 1) | ((_timestamp4 & 128) >> 7)];
-        span[7] = Base32Bytes[(_timestamp4 & 124) >> 2];
-        span[8] = Base32Bytes[((_timestamp4 & 3) << 3) | ((_timestamp5 & 224) >> 5)];
-        span[9] = Base32Bytes[_timestamp5 & 31];
+        span[0] = _base32Bytes[(_timestamp0 & 224) >> 5];
+        span[1] = _base32Bytes[_timestamp0 & 31];
+        span[2] = _base32Bytes[(_timestamp1 & 248) >> 3];
+        span[3] = _base32Bytes[((_timestamp1 & 7) << 2) | ((_timestamp2 & 192) >> 6)];
+        span[4] = _base32Bytes[(_timestamp2 & 62) >> 1];
+        span[5] = _base32Bytes[((_timestamp2 & 1) << 4) | ((_timestamp3 & 240) >> 4)];
+        span[6] = _base32Bytes[((_timestamp3 & 15) << 1) | ((_timestamp4 & 128) >> 7)];
+        span[7] = _base32Bytes[(_timestamp4 & 124) >> 2];
+        span[8] = _base32Bytes[((_timestamp4 & 3) << 3) | ((_timestamp5 & 224) >> 5)];
+        span[9] = _base32Bytes[_timestamp5 & 31];
 
         // randomness
-        span[10] = Base32Bytes[(_randomness0 & 248) >> 3];
-        span[11] = Base32Bytes[((_randomness0 & 7) << 2) | ((_randomness1 & 192) >> 6)];
-        span[12] = Base32Bytes[(_randomness1 & 62) >> 1];
-        span[13] = Base32Bytes[((_randomness1 & 1) << 4) | ((_randomness2 & 240) >> 4)];
-        span[14] = Base32Bytes[((_randomness2 & 15) << 1) | ((_randomness3 & 128) >> 7)];
-        span[15] = Base32Bytes[(_randomness3 & 124) >> 2];
-        span[16] = Base32Bytes[((_randomness3 & 3) << 3) | ((_randomness4 & 224) >> 5)];
-        span[17] = Base32Bytes[_randomness4 & 31];
-        span[18] = Base32Bytes[(_randomness5 & 248) >> 3];
-        span[19] = Base32Bytes[((_randomness5 & 7) << 2) | ((_randomness6 & 192) >> 6)];
-        span[20] = Base32Bytes[(_randomness6 & 62) >> 1];
-        span[21] = Base32Bytes[((_randomness6 & 1) << 4) | ((_randomness7 & 240) >> 4)];
-        span[22] = Base32Bytes[((_randomness7 & 15) << 1) | ((_randomness8 & 128) >> 7)];
-        span[23] = Base32Bytes[(_randomness8 & 124) >> 2];
-        span[24] = Base32Bytes[((_randomness8 & 3) << 3) | ((_randomness9 & 224) >> 5)];
+        span[10] = _base32Bytes[(_randomness0 & 248) >> 3];
+        span[11] = _base32Bytes[((_randomness0 & 7) << 2) | ((_randomness1 & 192) >> 6)];
+        span[12] = _base32Bytes[(_randomness1 & 62) >> 1];
+        span[13] = _base32Bytes[((_randomness1 & 1) << 4) | ((_randomness2 & 240) >> 4)];
+        span[14] = _base32Bytes[((_randomness2 & 15) << 1) | ((_randomness3 & 128) >> 7)];
+        span[15] = _base32Bytes[(_randomness3 & 124) >> 2];
+        span[16] = _base32Bytes[((_randomness3 & 3) << 3) | ((_randomness4 & 224) >> 5)];
+        span[17] = _base32Bytes[_randomness4 & 31];
+        span[18] = _base32Bytes[(_randomness5 & 248) >> 3];
+        span[19] = _base32Bytes[((_randomness5 & 7) << 2) | ((_randomness6 & 192) >> 6)];
+        span[20] = _base32Bytes[(_randomness6 & 62) >> 1];
+        span[21] = _base32Bytes[((_randomness6 & 1) << 4) | ((_randomness7 & 240) >> 4)];
+        span[22] = _base32Bytes[((_randomness7 & 15) << 1) | ((_randomness8 & 128) >> 7)];
+        span[23] = _base32Bytes[(_randomness8 & 124) >> 2];
+        span[24] = _base32Bytes[((_randomness8 & 3) << 3) | ((_randomness9 & 224) >> 5)];
 
         return true;
     }
@@ -483,36 +483,36 @@ public readonly partial struct Ulid :
             return false;
         }
 
-        span[25] = Base32Text[_randomness9 & 31]; // eliminate bounds-check of span
+        span[25] = _base32Text[_randomness9 & 31]; // eliminate bounds-check of span
 
         // timestamp
-        span[0] = Base32Text[(_timestamp0 & 224) >> 5];
-        span[1] = Base32Text[_timestamp0 & 31];
-        span[2] = Base32Text[(_timestamp1 & 248) >> 3];
-        span[3] = Base32Text[((_timestamp1 & 7) << 2) | ((_timestamp2 & 192) >> 6)];
-        span[4] = Base32Text[(_timestamp2 & 62) >> 1];
-        span[5] = Base32Text[((_timestamp2 & 1) << 4) | ((_timestamp3 & 240) >> 4)];
-        span[6] = Base32Text[((_timestamp3 & 15) << 1) | ((_timestamp4 & 128) >> 7)];
-        span[7] = Base32Text[(_timestamp4 & 124) >> 2];
-        span[8] = Base32Text[((_timestamp4 & 3) << 3) | ((_timestamp5 & 224) >> 5)];
-        span[9] = Base32Text[_timestamp5 & 31];
+        span[0] = _base32Text[(_timestamp0 & 224) >> 5];
+        span[1] = _base32Text[_timestamp0 & 31];
+        span[2] = _base32Text[(_timestamp1 & 248) >> 3];
+        span[3] = _base32Text[((_timestamp1 & 7) << 2) | ((_timestamp2 & 192) >> 6)];
+        span[4] = _base32Text[(_timestamp2 & 62) >> 1];
+        span[5] = _base32Text[((_timestamp2 & 1) << 4) | ((_timestamp3 & 240) >> 4)];
+        span[6] = _base32Text[((_timestamp3 & 15) << 1) | ((_timestamp4 & 128) >> 7)];
+        span[7] = _base32Text[(_timestamp4 & 124) >> 2];
+        span[8] = _base32Text[((_timestamp4 & 3) << 3) | ((_timestamp5 & 224) >> 5)];
+        span[9] = _base32Text[_timestamp5 & 31];
 
         // randomness
-        span[10] = Base32Text[(_randomness0 & 248) >> 3];
-        span[11] = Base32Text[((_randomness0 & 7) << 2) | ((_randomness1 & 192) >> 6)];
-        span[12] = Base32Text[(_randomness1 & 62) >> 1];
-        span[13] = Base32Text[((_randomness1 & 1) << 4) | ((_randomness2 & 240) >> 4)];
-        span[14] = Base32Text[((_randomness2 & 15) << 1) | ((_randomness3 & 128) >> 7)];
-        span[15] = Base32Text[(_randomness3 & 124) >> 2];
-        span[16] = Base32Text[((_randomness3 & 3) << 3) | ((_randomness4 & 224) >> 5)];
-        span[17] = Base32Text[_randomness4 & 31];
-        span[18] = Base32Text[(_randomness5 & 248) >> 3];
-        span[19] = Base32Text[((_randomness5 & 7) << 2) | ((_randomness6 & 192) >> 6)];
-        span[20] = Base32Text[(_randomness6 & 62) >> 1];
-        span[21] = Base32Text[((_randomness6 & 1) << 4) | ((_randomness7 & 240) >> 4)];
-        span[22] = Base32Text[((_randomness7 & 15) << 1) | ((_randomness8 & 128) >> 7)];
-        span[23] = Base32Text[(_randomness8 & 124) >> 2];
-        span[24] = Base32Text[((_randomness8 & 3) << 3) | ((_randomness9 & 224) >> 5)];
+        span[10] = _base32Text[(_randomness0 & 248) >> 3];
+        span[11] = _base32Text[((_randomness0 & 7) << 2) | ((_randomness1 & 192) >> 6)];
+        span[12] = _base32Text[(_randomness1 & 62) >> 1];
+        span[13] = _base32Text[((_randomness1 & 1) << 4) | ((_randomness2 & 240) >> 4)];
+        span[14] = _base32Text[((_randomness2 & 15) << 1) | ((_randomness3 & 128) >> 7)];
+        span[15] = _base32Text[(_randomness3 & 124) >> 2];
+        span[16] = _base32Text[((_randomness3 & 3) << 3) | ((_randomness4 & 224) >> 5)];
+        span[17] = _base32Text[_randomness4 & 31];
+        span[18] = _base32Text[(_randomness5 & 248) >> 3];
+        span[19] = _base32Text[((_randomness5 & 7) << 2) | ((_randomness6 & 192) >> 6)];
+        span[20] = _base32Text[(_randomness6 & 62) >> 1];
+        span[21] = _base32Text[((_randomness6 & 1) << 4) | ((_randomness7 & 240) >> 4)];
+        span[22] = _base32Text[((_randomness7 & 15) << 1) | ((_randomness8 & 128) >> 7)];
+        span[23] = _base32Text[(_randomness8 & 124) >> 2];
+        span[24] = _base32Text[((_randomness8 & 3) << 3) | ((_randomness9 & 224) >> 5)];
 
         return true;
     }
@@ -778,12 +778,12 @@ public readonly partial struct Ulid :
     #region Partials 
     partial class UlidTypeConverter : TypeConverter
     {
-        private static readonly Type StringType = typeof(string);
-        private static readonly Type GuidType = typeof(Guid);
+        private static readonly Type _stringType = typeof(string);
+        private static readonly Type _guidType = typeof(Guid);
 
         public override bool CanConvertFrom(ITypeDescriptorContext context, Type sourceType)
         {
-            if (sourceType == StringType || sourceType == GuidType)
+            if (sourceType == _stringType || sourceType == _guidType)
             {
                 return true;
             }
@@ -793,7 +793,7 @@ public readonly partial struct Ulid :
 
         public override bool CanConvertTo(ITypeDescriptorContext context, Type destinationType)
         {
-            if (destinationType == StringType || destinationType == GuidType)
+            if (destinationType == _stringType || destinationType == _guidType)
             {
                 return true;
             }
@@ -823,12 +823,12 @@ public readonly partial struct Ulid :
         {
             if (value is Ulid ulid)
             {
-                if (destinationType == StringType)
+                if (destinationType == _stringType)
                 {
                     return ulid.ToString();
                 }
 
-                if (destinationType == GuidType)
+                if (destinationType == _guidType)
                 {
                     return ulid.ToGuid();
                 }

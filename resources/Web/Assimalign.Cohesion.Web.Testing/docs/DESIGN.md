@@ -16,6 +16,9 @@ the framework already ships:
 - **Client side** — `SocketsHttpHandler.ConnectCallback`: the real .NET HTTP client dials the
   in-memory listener's bound `InMemoryConnectionFactory` and speaks over the returned
   duplex-pipe stream.
+- **Resource-program side** — `FromProgram<Program>()` installs a scoped ambient
+  `Hosting.Resources` `ResourceContext`, invokes the generated entry registration, waits for
+  the Web default control plane's readiness route, and owns graceful stop for that invocation.
 
 Nothing in the middle is faked. A test request crosses the real HTTP/1.1 or HTTP/2 wire
 format, the real `HttpConnectionListener` receive loop, the real `WebApplicationServer`
@@ -53,13 +56,12 @@ configured on `Application` after. When the factory starts it resolves the defau
 pipeline snapshot — pipeline mutations after start are not observed. This mirrors the
 production composition order rather than inventing a test-only one.
 
-**The factory drives the server, not the host.** Starting resolves and starts the default
-`IWebApplicationServer` directly — the same documented drive path the Web.Hosting test suite
-uses — rather than running the whole `Host` lifecycle. The default server's registration is
-`IWebApplicationServer`-keyed (it is not among the host's `IHostService`s today), and host
-lifecycle orchestration is the hosting epic's concern (#26); the factory stays scoped to
-"serve requests against the pipeline". User-registered `IHostService`s are not started by
-the factory — a deliberate non-goal below.
+**Two explicit drive paths.** The existing constructor preserves mutable, socketless tests and
+starts the default server directly. `FromProgram<Program>()` instead invokes the real resource
+entry point; its `RunAsync()` flows through the `Hosting.Resources` `ResourceHost`, so every
+registered host service participates and the factory controls it only through the default control
+plane. The two modes
+do not share hidden hooks or process-wide mutable lists.
 
 **Start-on-first-client.** `CreateClient()` starts the factory when it has not been started
 yet (ASP.NET `WebApplicationFactory.CreateClient` parity). The blocking wait inside is safe
@@ -110,6 +112,15 @@ Web.Hosting.
 | `StopAsync` | Server's graceful stop: stop accepting, drain in-flight connections, dispose the listener chain. New dials are refused (`ConnectionAbortedException` → client `HttpRequestException`). Idempotent; no-op before start. |
 | `DisposeAsync` | `StopAsync`, then application disposal, then defensive in-memory listener teardown (idempotent for the never-started factory). Safe to call twice. |
 
+For Program-backed factories, construction reserves an ambient loopback endpoint but starts
+nothing; `StartAsync` creates a `Hosting.Resources` `ResourceRuntime` scope, invokes the
+registered entry, and waits
+for `/readyz`; `StopAsync` posts `/cohesion/v1/stop` and joins the entry completion task;
+disposal then releases the captured host. The factory presents the invocation's bootstrap
+credential only on its internal graceful-stop request. Public clients are deliberately
+uncredentialed so user middleware never receives the privileged token; tests that call a
+namespaced control-plane route directly must add the credential to that individual request.
+
 Stop semantics — including cancellation-as-drain for in-flight exchanges — are owned and
 documented by Web.Hosting (`docs/DESIGN.md`, "Stop semantics"); the factory adds no policy of
 its own on top.
@@ -124,22 +135,24 @@ two live factories with disjoint route maps serve their own routes and 404 each 
 sequentially and concurrently. This is what makes the factory safe under parallel xUnit
 execution — the intended usage, not an edge case.
 
+Program-backed factories extend this guarantee to full hosts: each entry runs on its own
+execution flow under an `AsyncLocal` resource frame, so endpoints, settings, references,
+mounts, environment, credentials, health contributions, and control-plane state remain local
+to that invocation.
+
 ## AOT posture
 
-`IsAotCompatible=true` holds with no special handling and **zero reflection**: composition is
-plain delegate wiring over the builder seams, the client is BCL `SocketsHttpHandler` +
-`HttpClient`, and the connection stream is a pipe adapter. No runtime code generation, no
-`Assembly.LoadFrom`, no reflection-based serialization — unlike ASP.NET's
-`WebApplicationFactory<TEntryPoint>`, there is no entry-point discovery via reflection;
-composition is explicit on the factory's `Builder`/`Application`.
+`IsAotCompatible=true` holds. Manual composition is delegate wiring with zero reflection.
+Program-backed composition uses the one reflection operation explicitly sanctioned by the
+developer-experience design: the compiler-rooted `Assembly.EntryPoint`. The generated
+`ResourceControlPlane.g.cs` registers that assembly with `Hosting.Resources` without naming the
+user entry type, so both
+top-level statements and an explicitly named `Main` remain valid. There is no assembly scan,
+dynamic load, runtime code generation, or reflection-based serialization.
 
 ## Non-goals
 
 - **HTTP/3 / QUIC-over-memory** — see "Protocol scope" above; tracked with #767.
-- **Full host lifecycle orchestration.** The factory starts the default web server only; it
-  does not run `IHost.StartAsync` or user-registered `IHostService`s. When the hosting
-  integration epic (#26) lands a canonical "run the whole host" path, the factory can grow
-  an opt-in for it.
 - **TLS composition over the in-memory pair** — compose `Connections.Security` directly in a
   dedicated test if ever needed; the factory stays plaintext.
 - **Assertion/fixture surface.** No response-assertion helpers, no xUnit fixtures — hosting
@@ -162,3 +175,10 @@ composition is explicit on the factory's `Builder`/`Application`.
   (`WebApplication`/`WebApplicationBuilder`), which cannot be done through abstractions alone.
 - **`Assimalign.Cohesion.Web.Routing`** — per-application router state (#789) is what makes
   the parallel-isolation guarantee hold; the isolation regression tests live here.
+
+## Bootstrap identity (O35)
+
+Default program factories issue an ephemeral ES256 JWT with issuer `tests`, subject `inprocess`,
+and the program assembly name as audience. The ambient context carries the token and its public
+P-256 trust JWK. Internal stop requests send that JWT as Bearer; public clients remain uncredentialed.
+Custom managed contexts must supply a matching JWT and public trust key.

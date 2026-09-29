@@ -39,6 +39,11 @@ internal sealed class TestConnectionListener : ConnectionListener
     public bool IsDisposed { get; private set; }
 
     /// <summary>
+    /// The number of times <see cref="BindAsync"/> has been invoked.
+    /// </summary>
+    public int BindCount { get; private set; }
+
+    /// <summary>
     /// The number of times <see cref="AcceptAsync"/> has been invoked — lets
     /// tests assert the accept loop re-arms after each accepted connection.
     /// </summary>
@@ -53,6 +58,12 @@ internal sealed class TestConnectionListener : ConnectionListener
     public override EndPoint EndPoint { get; } = new IPEndPoint(IPAddress.Loopback, 15000);
 
     public override ConnectionCapabilities Capabilities => _capabilities;
+
+    public override ValueTask BindAsync(CancellationToken cancellationToken = default)
+    {
+        BindCount++;
+        return ValueTask.CompletedTask;
+    }
 
     public void Enqueue(Connection connection)
     {

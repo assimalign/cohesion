@@ -21,10 +21,11 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 /// <summary>
 /// Covers the HTTP/3 (QUIC) registration surface (<c>UseHttp3</c>) added to
 /// <see cref="HttpConnectionListenerOptions"/> for issue #767. The deterministic tests pin argument
-/// validation, ALPN/TLS-1.3 defaulting (and preservation), and that the QUIC listener creation is
-/// deferred to materialization rather than run at configuration time — none of which need a QUIC
+/// validation, ALPN/TLS-1.3 defaulting (and preservation), and that QUIC listener creation is
+/// deferred to materialization while endpoint acquisition is deferred to
+/// <see cref="IHttpConnectionListener.BindAsync(System.Threading.CancellationToken)"/> — none of which need a QUIC
 /// implementation on the host. The platform-sensitive tests gate on <see cref="QuicListener.IsSupported"/>
-/// and either assert the bind succeeds or assert the documented <see cref="PlatformNotSupportedException"/>,
+/// and either await a successful bind or assert the documented <see cref="PlatformNotSupportedException"/>,
 /// so a CI machine without libmsquic never hard-fails. The full request round-trip over QUIC lives in
 /// <see cref="WebHttp3HostingIntegrationTests"/>.
 /// </summary>
@@ -132,8 +133,8 @@ public class WebHttp3HostingExtensionsTests
         configured.ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttp3: Should bind the QUIC listener at materialization or throw PlatformNotSupportedException at start")]
-    public async Task UseHttp3_OnMaterialization_ShouldBindOrThrowPlatformNotSupported()
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttp3: Should construct unbound and bind QUIC explicitly or throw PlatformNotSupportedException")]
+    public async Task UseHttp3_OnBindAsync_ShouldBindOrThrowPlatformNotSupported()
     {
         // Arrange
         using X509Certificate2 certificate = TestObjects.SelfSignedCertificateFactory.Create("localhost");
@@ -144,18 +145,18 @@ public class WebHttp3HostingExtensionsTests
             quic.ServerAuthenticationOptions.ServerCertificate = certificate;
         });
 
-        // Act / Assert — materialization happens in the HttpConnectionListener constructor.
+        // Act — materialization constructs an unbound QUIC listener on every supported target OS.
+        await using HttpConnectionListener listener = new(options);
+        listener.Protocols.ShouldBe(HttpProtocol.Http30);
+
+        // Assert — operating-system endpoint acquisition happens only at the awaited bind boundary.
         if (QuicListener.IsSupported)
         {
-            await using HttpConnectionListener listener = new(options);
-
-            listener.Protocols.ShouldBe(HttpProtocol.Http30);
+            await listener.BindAsync();
         }
         else
         {
-            // On a platform without a QUIC implementation the deferred factory surfaces the driver's
-            // PlatformNotSupportedException at start, exactly as QuicConnectionListener.CreateAsync does.
-            Should.Throw<PlatformNotSupportedException>(() => new HttpConnectionListener(options));
+            await Should.ThrowAsync<PlatformNotSupportedException>(() => listener.BindAsync().AsTask());
         }
     }
 
@@ -189,8 +190,9 @@ public class WebHttp3HostingExtensionsTests
 
         // Act
         await using HttpConnectionListener listener = new(options);
+        await listener.BindAsync();
 
-        // Assert — both protocols are registered on the single listener.
+        // Assert — both protocols are registered and both endpoint binds completed.
         listener.Protocols.ShouldBe(HttpProtocol.Http20 | HttpProtocol.Http30);
     }
 }

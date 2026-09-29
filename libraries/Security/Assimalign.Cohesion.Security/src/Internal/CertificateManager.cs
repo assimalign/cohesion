@@ -3,7 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
-namespace Assimalign.Cohesion.Security;
+namespace Assimalign.Cohesion.Security.Internal;
 
 /// <summary>
 /// Default <see cref="ICertificateManager"/> backed by the platform-neutral BCL

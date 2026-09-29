@@ -1,19 +1,19 @@
 ﻿using System;
 
-namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class BetweenValidationRule<TValue> : ValidationRuleBase<TValue>
     where TValue : struct, IComparable, IComparable<TValue>
 {
-    private readonly TValue lowerBound;
-    private readonly TValue upperBound;
-    private readonly Func<TValue, TValue, TValue, bool> isOutOfBounds;
+    private readonly TValue _lowerBound;
+    private readonly TValue _upperBound;
+    private readonly Func<TValue, TValue, TValue, bool> _isOutOfBounds;
 
     public BetweenValidationRule(TValue lowerBound, TValue upperBound) 
     {
-        this.lowerBound = lowerBound;
-        this.upperBound = upperBound;
-        this.isOutOfBounds = (lower, upper, value) =>
+        this._lowerBound = lowerBound;
+        this._upperBound = upperBound;
+        this._isOutOfBounds = (lower, upper, value) =>
         {
             var lowerResults = lower.CompareTo(value);
             var upperResults = upper.CompareTo(value);
@@ -48,7 +48,7 @@ internal sealed class BetweenValidationRule<TValue> : ValidationRuleBase<TValue>
         {
             context = new ValidationContext<TValue>(value);
 
-            if (isOutOfBounds(this.lowerBound, this.upperBound, value))
+            if (_isOutOfBounds(this._lowerBound, this._upperBound, value))
             {
                 context.AddFailure(this.Error);
             }

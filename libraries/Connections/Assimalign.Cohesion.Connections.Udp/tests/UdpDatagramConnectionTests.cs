@@ -11,13 +11,13 @@ namespace Assimalign.Cohesion.Connections.Udp.Tests;
 
 public class UdpDatagramConnectionTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     [Fact]
     public async Task SendAsync_ClientToServer_ShouldDeliverPayloadWithSenderEndPoint()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         UdpConnectionFactory factory = new();
 
@@ -42,7 +42,7 @@ public class UdpDatagramConnectionTests
     public async Task SendAsync_ServerReplyToClient_ShouldDeliverPayload()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         UdpConnectionFactory factory = new();
 
@@ -72,7 +72,7 @@ public class UdpDatagramConnectionTests
     public async Task ReceiveAsync_AfterTwoSends_ShouldPreserveMessageBoundaries()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         UdpConnectionFactory factory = new();
 
@@ -126,7 +126,7 @@ public class UdpDatagramConnectionTests
     public async Task ReceiveAsync_AfterDispose_ShouldThrowObjectDisposedException()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         UdpConnectionFactory factory = new();
 
@@ -143,7 +143,7 @@ public class UdpDatagramConnectionTests
     public async Task SendAsync_AfterDispose_ShouldThrowObjectDisposedException()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         UdpConnectionFactory factory = new();
 

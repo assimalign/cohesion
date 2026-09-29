@@ -8,7 +8,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionValueType
-			Include="ValueTypes\LogId.cs"
+			Include="ValueObjects\LogId.cs"
 			ObjectRuntimeType="Ulid"
 			ObjectNamespace="Assimalign.Cohesion.Logging"
 			ObjectAccessModifier="public"

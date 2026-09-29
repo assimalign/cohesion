@@ -3,9 +3,6 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Http.Connections.Internal;
-using Assimalign.Cohesion.Http.Connections.Internal.Http1;
-using Assimalign.Cohesion.Http.Connections.Internal.Http2;
-using Assimalign.Cohesion.Http.Connections.Internal.Http3;
 
 namespace Assimalign.Cohesion.Http.Connections;
 

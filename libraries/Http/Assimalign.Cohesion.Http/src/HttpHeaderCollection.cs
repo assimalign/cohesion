@@ -7,8 +7,8 @@ namespace Assimalign.Cohesion.Http;
 
 public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
 {
-    private static readonly IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>> EmptyIEnumeratorType = default(Enumerator);
-    private static readonly IEnumerator EmptyIEnumerator = default(Enumerator);
+    private static readonly IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>> _emptyIEnumeratorType = default(Enumerator);
+    private static readonly IEnumerator _emptyIEnumerator = default(Enumerator);
 
     private Dictionary<HttpHeaderKey, HttpHeaderValue> _store;
 
@@ -169,7 +169,7 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
     {
         if (_store == null || _store!.Count == 0)
         {
-            return EmptyIEnumerator;
+            return _emptyIEnumerator;
         }
         return _store!.GetEnumerator();
     }
@@ -193,16 +193,16 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
     #region Partials
     private struct Enumerator : IEnumerator<KeyValuePair<HttpHeaderKey, HttpHeaderValue>>, IEnumerator, IDisposable
     {
-        private Dictionary<HttpHeaderKey, HttpHeaderValue>.Enumerator enumerator;
-        private readonly bool isNotEmpty;
+        private Dictionary<HttpHeaderKey, HttpHeaderValue>.Enumerator _enumerator;
+        private readonly bool _isNotEmpty;
 
         public KeyValuePair<HttpHeaderKey, HttpHeaderValue> Current
         {
             get
             {
-                if (isNotEmpty)
+                if (_isNotEmpty)
                 {
-                    return enumerator.Current;
+                    return _enumerator.Current;
                 }
                 return default(KeyValuePair<HttpHeaderKey, HttpHeaderValue>);
             }
@@ -211,16 +211,16 @@ public sealed partial class HttpHeaderCollection : IHttpHeaderCollection
         object IEnumerator.Current => Current;
         internal Enumerator(Dictionary<HttpHeaderKey, HttpHeaderValue>.Enumerator dictionaryEnumerator)
         {
-            enumerator = dictionaryEnumerator;
-            isNotEmpty = true;
+            _enumerator = dictionaryEnumerator;
+            _isNotEmpty = true;
         }
-        public bool MoveNext() => isNotEmpty ? enumerator.MoveNext() : false;
+        public bool MoveNext() => _isNotEmpty ? _enumerator.MoveNext() : false;
         public void Dispose() { }
         void IEnumerator.Reset()
         {
-            if (isNotEmpty)
+            if (_isNotEmpty)
             {
-                ((IEnumerator)enumerator).Reset();
+                ((IEnumerator)_enumerator).Reset();
             }
         }
     }

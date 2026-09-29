@@ -6,8 +6,8 @@ namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal abstract class ValidationItemBase<T, TValue> : IValidationItem<T, TValue>
 {
-    private string expressionBody;
-    private Expression<Func<T, TValue>> expression;
+    private string _expressionBody;
+    private Expression<Func<T, TValue>> _expression;
 
     public ValidationItemBase()
     {
@@ -16,14 +16,14 @@ internal abstract class ValidationItemBase<T, TValue> : IValidationItem<T, TValu
 
     public Expression<Func<T, TValue>> ItemExpression
     {
-        get => expression;
+        get => _expression;
         set
         {
             // Only member expressions are supported for validation
             if (value.Body is MemberExpression)
             {
-                this.expression = value;
-                this.expressionBody = expression.ToString();
+                this._expression = value;
+                this._expressionBody = _expression.ToString();
             }
             else
             {
@@ -47,7 +47,7 @@ internal abstract class ValidationItemBase<T, TValue> : IValidationItem<T, TValu
             // time and is unavailable under NativeAOT (IL3050); walking the resolved PropertyInfo/
             // FieldInfo is reflection-only and preserves the same member-access and null-in-chain
             // semantics (a null owner throws and is caught below, yielding default).
-            return (TValue)EvaluateMember(expression.Body, instance);
+            return (TValue)EvaluateMember(_expression.Body, instance);
         }
         catch // Null Reference Exceptions tend to be thrown when chained members in a type are null.
         {
@@ -55,7 +55,7 @@ internal abstract class ValidationItemBase<T, TValue> : IValidationItem<T, TValu
         }
     }
 
-    public override string ToString() => this.expressionBody;
+    public override string ToString() => this._expressionBody;
 
     private static object EvaluateMember(Expression node, object instance)
     {

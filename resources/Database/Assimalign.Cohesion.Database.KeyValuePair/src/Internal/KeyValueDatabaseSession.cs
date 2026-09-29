@@ -16,13 +16,13 @@ using Assimalign.Cohesion.Database.Transactions;
 /// </summary>
 internal sealed class KeyValueDatabaseSession : IDatabaseSession
 {
-    private readonly KeyValueTransactionCoordinator _coordinator;
+    private readonly TransactionCoordinator _coordinator;
     private readonly KeyValueOperationExecutor _executor;
 
     private KeyValueDatabaseTransaction? _transaction;
     private SessionState _state;
 
-    internal KeyValueDatabaseSession(IKeyValueDatabase database, KeyValueTransactionCoordinator coordinator, KeyValueOperationExecutor executor)
+    internal KeyValueDatabaseSession(IKeyValueDatabase database, TransactionCoordinator coordinator, KeyValueOperationExecutor executor)
     {
         Database = database;
         _coordinator = coordinator;
@@ -154,7 +154,7 @@ internal sealed class KeyValueDatabaseSession : IDatabaseSession
     /// <remarks>
     /// The model-agnostic text-execute seam: key-value sessions parse the command
     /// grammar (<c>docs/COMMANDS.md</c> — <c>GET</c>/<c>PUT</c>/<c>DELETE</c>/
-    /// <c>EXISTS</c>/<c>SCAN</c> with parameter operands) into the same typed
+    /// <c>EXISTS</c>/<c>SCAN</c> with parameter operands, and <c>KEYSPACES</c>) into the same typed
     /// requests the typed seam executes — this is what lets the wire-protocol
     /// server execute key-value commands through the existing Execute message
     /// with zero protocol changes.

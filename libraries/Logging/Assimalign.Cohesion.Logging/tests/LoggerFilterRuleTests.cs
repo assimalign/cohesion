@@ -34,6 +34,7 @@ public class LoggerFilterRuleTests
 
     private sealed class NoopFilter : ILoggerFilter
     {
+        public string Name => "Noop";
         public bool ShouldLog(ILoggerEntry entry) => true;
     }
 }

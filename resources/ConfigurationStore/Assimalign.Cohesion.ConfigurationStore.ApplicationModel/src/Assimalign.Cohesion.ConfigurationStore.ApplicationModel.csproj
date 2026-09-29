@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!--
+		Declarative ApplicationModel project: describes configuration-store resources and
+		supplies the area's default control-plane factory. It references only ApplicationModel
+		and the Core-only Hosting seam, never the ConfigurationStore runtime.
+	-->
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>
+		<!-- Enforce the strict ApplicationModel dependency closure (COHAM001). -->
+		<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+	</ItemGroup>
+</Project>

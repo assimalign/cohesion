@@ -2,7 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Globalization;
 
-namespace Assimalign.Cohesion.Database.Types;
+namespace Assimalign.Cohesion.Database.Types.Internal;
 
 /// <summary>
 /// Shared low-level helpers for the order-preserving key component encodings used by

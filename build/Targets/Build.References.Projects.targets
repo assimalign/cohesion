@@ -31,14 +31,22 @@
                                             should not expose X to its consumers".
                                             Pair with a matching
                                             <CohesionFrameworkPrivateAssembly>
-                                            entry in
-                                            frameworks/Assimalign.Cohesion.App.props
-                                            so the containing framework's
+                                            entry in the containing framework's
+                                            list (resources/<Area>/
+                                            Assimalign.Cohesion.<Area>.Runtime/
+                                            Directory.Build.props) so its
                                             Runtime pack still ships X.dll at
                                             run time.
     -->
     <ItemGroup>
-        <!-- Index code projects ONCE. -->
+        <!-- Index code projects ONCE.
+
+             libraries\ and resources\ cover the executable acceptance fixtures too:
+             a fixture lives in a fixtures\ folder inside the project whose tests
+             drive it (.claude/rules/resource-areas.md), so a test project resolves
+             it by name through this same index - e.g. Database.Testing.Tests ->
+             Assimalign.Cohesion.Database.SampleHost. Fixtures are IsPackable=false,
+             so one can never become a .nuspec <dependency> of a shipped library. -->
         <_CohesionProject Include="$(CohesionRepositoryDirectory)libraries\**\*.csproj;$(CohesionRepositoryDirectory)resources\**\*.csproj" />
         <_CohesionProject Update="@(_CohesionProject)" ProjectId="%(_CohesionProject.Filename)" ProjectPath="%(_CohesionProject.Identity)" />
 

@@ -7,6 +7,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
+using Assimalign.Cohesion.FileSystem;
 
 namespace Assimalign.Cohesion.Database.Storage.Tests;
 
@@ -30,8 +31,11 @@ public sealed class StorageWorkerSupportTests
         public IStorageJournal Wal => WriteAheadLog;
 
         public static WorkerStorage Create(Stream data, Stream journal)
+            => Create(data, new SimulatedDurableFileHandle(journal));
+
+        public static WorkerStorage Create(Stream data, IFileSystemFileHandle journal)
         {
-            var storage = new WorkerStorage(new StorageStream(data), new StorageStream(journal));
+            var storage = new WorkerStorage(new StorageStream(new SimulatedDurableFileHandle(data)), new StorageStream(journal));
             storage.InitializeNew((Name)"worker-support");
             return storage;
         }

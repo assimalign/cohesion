@@ -3,7 +3,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 
-namespace Assimalign.Cohesion.Content.Text;
+namespace Assimalign.Cohesion.Content.Text.Internal;
 
 /// <summary>
 /// The compiled form of <see cref="TextTokenizerOptions"/>: definitions grouped by first character

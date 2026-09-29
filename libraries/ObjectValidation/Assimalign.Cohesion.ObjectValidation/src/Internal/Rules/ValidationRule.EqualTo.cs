@@ -1,15 +1,15 @@
 ﻿using System;
 
-namespace Assimalign.Cohesion.ObjectValidation.Internal.Rules;
+namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class EqualToValidationRule<TValue> : ValidationRuleBase<TValue>
 {
-    private readonly TValue argument;
+    private readonly TValue _argument;
 
     public EqualToValidationRule(TValue argument)
     {
         this.ArgumentType = typeof(TValue);
-        this.argument = argument;
+        this._argument = argument;
     }
 
     public Type ArgumentType { get; }
@@ -41,7 +41,7 @@ internal sealed class EqualToValidationRule<TValue> : ValidationRuleBase<TValue>
         {
             context = new ValidationContext<TValue>(value);
 
-            if (!this.argument.Equals(value))
+            if (!this._argument.Equals(value))
             {
                 context.AddFailure(this.Error);
             }
@@ -52,7 +52,7 @@ internal sealed class EqualToValidationRule<TValue> : ValidationRuleBase<TValue>
         {
             context = new ValidationContext<TValue>(value);
 
-            if (!this.argument.Equals(value))
+            if (!this._argument.Equals(value))
             {
                 this.Error.Source = $"{this.Error.Source}. Comparison of type '{this.ArgumentType.Name}' and '{this.ValueType.Name}' is not allowed.";
                 context.AddFailure(this.Error);

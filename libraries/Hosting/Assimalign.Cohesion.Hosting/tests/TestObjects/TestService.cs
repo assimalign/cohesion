@@ -10,28 +10,28 @@ namespace Assimalign.Cohesion.Hosting.Tests;
 
 internal class TestService : IHostService
 {
-    private readonly Func<CancellationToken, Task> factory;
+    private readonly Func<CancellationToken, Task> _factory;
 
-    private Task? task;
-    private CancellationTokenSource? cancellationTokenSource;
+    private Task? _task;
+    private CancellationTokenSource? _cancellationTokenSource;
 
 
     public TestService(Func<CancellationToken, Task> factory)
     {
-        this.factory = factory;
+        this._factory = factory;
     }
 
     public ServiceId Id => throw new NotImplementedException();
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        task = factory(cancellationTokenSource.Token);
+        _task = _factory(_cancellationTokenSource.Token);
 
-        if (task.IsCompleted)
+        if (_task.IsCompleted)
         {
-            return task;
+            return _task;
         }
 
         return Task.CompletedTask;

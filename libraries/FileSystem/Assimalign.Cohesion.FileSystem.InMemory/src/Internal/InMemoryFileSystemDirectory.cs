@@ -69,7 +69,7 @@ internal class InMemoryFileSystemDirectory : InMemoryFileSystemInfo, IFileSystem
 
     public IFileSystemEventToken Watch(Glob? glob)
     {
-        return new InMemoryFileSystemEventToken(
+        return FileSystem.CreateWatchToken(
             this,
             glob ?? Glob.Parse(Path));
     }

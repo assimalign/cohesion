@@ -2,27 +2,27 @@
     <!--
         Registers the Cohesion shared framework family with the .NET SDK.
 
-        Three frameworks are registered here, all on the base SDK so the
-        registrations are available to consumers using any chained SDK:
+        The complete framework family is registered here on the base SDK so
+        registrations are available to direct base-SDK consumers and every
+        chained SDK.
 
             Assimalign.Cohesion.App           (base)
             Assimalign.Cohesion.App.Web       (web extension)
             Assimalign.Cohesion.App.Database  (database extension)
 
-        Each SDK auto-includes the right set of <FrameworkReference>s:
-            Sdk          -> App                (this file)
-            Sdk.Web      -> App + App.Web      (Sdk.Web's Sdk.props adds App.Web)
-            Sdk.Database -> App + App.Database (Sdk.Database's Sdk.props adds App.Database)
+        The base SDK auto-includes no framework: it is a library SDK like
+        Microsoft.NET.Sdk. Each resource-area SDK adds App plus App.<Area>
+        under the CohesionAutoIncludeAppFramework switch. A direct base-SDK
+        executable opts in with an explicit FrameworkReference to App.
 
         Pack resolution: the SDK looks for these packs locally under
         $(NetCoreTargetingPackRoot) / $(NetCoreRuntimePackRoot). When not
         found there (the normal case for third-party frameworks), the SDK
         auto-restores them from the configured NuGet feeds.
 
-        CohesionAutoIncludeAppFramework=false disables the implicit
-        <FrameworkReference> on App (and any chained SDK's auto-include).
-        The KnownFrameworkReference registrations stay so explicit
-        <FrameworkReference> entries keep working.
+        CohesionAutoIncludeAppFramework=false disables a resource-area SDK's
+        two implicit FrameworkReferences. The registrations stay available,
+        so explicit FrameworkReference entries work in every SDK project.
 
         CohesionAppFrameworkVersion lets consumers pin or roll forward
         independently of the SDK version. All three frameworks share it.
@@ -68,10 +68,9 @@
 
         <!-- ============================================================
              Resource-domain frameworks. Each corresponds to a folder under
-             resources/ and is auto-included by its matching Sdk.<Name>.
-             Currently each contains just the umbrella assembly; add
-             <CohesionFrameworkAssembly> entries to App.props as the
-             resources/<Name>/* projects come online.
+             resources/ and is auto-included together with App by its matching
+             Sdk.<Name>. Each framework's assembly inventory lives in
+             resources/<Name>/Assimalign.Cohesion.<Name>.Runtime/Directory.Build.props.
              ============================================================ -->
         <KnownFrameworkReference Include="Assimalign.Cohesion.App.ApiManager"
             TargetFramework="net10.0"
@@ -250,10 +249,4 @@
             IsTrimmable="true" />
     </ItemGroup>
 
-    <!-- The base SDK auto-includes only the App framework. Sdk.Web and
-         Sdk.Database layer their own framework references on top in their
-         own Sdk.props files. -->
-    <ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
-        <FrameworkReference Include="Assimalign.Cohesion.App" />
-    </ItemGroup>
 </Project>

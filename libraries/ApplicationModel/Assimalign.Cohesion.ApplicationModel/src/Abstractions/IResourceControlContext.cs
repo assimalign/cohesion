@@ -5,15 +5,25 @@ namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
 /// Everything an <see cref="IApplicationResourceController"/> needs to reconcile one
-/// resource: the resource itself, the model it belongs to, its already-realized
-/// dependencies, the shared observed-state store, and the gathered deployable artifact.
+/// resource: its immutable plan, the model it belongs to, already-admitted and observed
+/// dependencies, resolved inputs, the shared observed-state store, and the gathered artifact.
 /// </summary>
 public interface IResourceControlContext
 {
     /// <summary>
+    /// The immutable built descriptor being reconciled.
+    /// </summary>
+    IApplicationResourceDescriptor Descriptor { get; }
+
+    /// <summary>
     /// The resource being reconciled.
     /// </summary>
     IApplicationResource Resource { get; }
+
+    /// <summary>
+    /// The platform-neutral realization plan compiled by the selected controller.
+    /// </summary>
+    ResourcePlan Plan { get; }
 
     /// <summary>
     /// The model the resource belongs to.
@@ -29,6 +39,16 @@ public interface IResourceControlContext
     /// The resources this resource depends on, already realized when reconciliation runs.
     /// </summary>
     IReadOnlyList<IApplicationResource> Dependencies { get; }
+
+    /// <summary>
+    /// The mount contents and bootstrap credential resolved for this reconcile pass.
+    /// </summary>
+    ResourceInputs Inputs { get; }
+
+    /// <summary>
+    /// Immutable observations for referenced dependencies at the start of this reconcile pass.
+    /// </summary>
+    IReadOnlyList<ResourceDependencyObservation> ObservedDependencies { get; }
 
     /// <summary>
     /// The deployable artifact the gateway gathered for this resource, as the requested

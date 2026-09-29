@@ -12,7 +12,7 @@ namespace Assimalign.IO.Ebml;
 /// </summary>
 public class EbmlStream : Stream
 {
-    private readonly Stream stream;
+    private readonly Stream _stream;
 
     public EbmlStream(Stream stream)
     {
@@ -21,7 +21,7 @@ public class EbmlStream : Stream
             throw new ArgumentNullException(nameof(stream));
         }
 
-        this.stream = stream;
+        this._stream = stream;
     }
 
     public override bool CanRead => throw new NotImplementedException();

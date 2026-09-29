@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.IdentityModel.Token.Tests;
 /// </summary>
 public sealed class IdentityTokenTests
 {
-    private static readonly DateTimeOffset now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
 
     [Fact(DisplayName = "Cohesion Test [IdentityModel.Token] - IdentityToken: The default kind should be Unknown")]
     public void Kind_WhenDefaulted_ShouldBeUnknown()
@@ -111,7 +111,7 @@ public sealed class IdentityTokenTests
     {
         var contextDescriptor = new AuthenticationContextDescriptor
         {
-            AuthenticatedAt = now.AddMinutes(-1),
+            AuthenticatedAt = _now.AddMinutes(-1),
             ContextClass = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
         };
         contextDescriptor.Methods.Add("pwd");
@@ -148,11 +148,11 @@ public sealed class IdentityTokenTests
     {
         var token = new TestIdentityToken(IdentityTokenKind.JsonWebToken, ConformantDescriptor());
 
-        token.IsActive(now).ShouldBeTrue();
-        token.IsExpired(now).ShouldBeFalse();
+        token.IsActive(_now).ShouldBeTrue();
+        token.IsExpired(_now).ShouldBeFalse();
 
         // One minute past expiry, but within a five-minute skew, is still active.
-        var justAfter = now.AddMinutes(56);
+        var justAfter = _now.AddMinutes(56);
         token.IsExpired(justAfter).ShouldBeTrue();
         token.IsActive(justAfter, TimeSpan.FromMinutes(5)).ShouldBeTrue();
     }
@@ -162,7 +162,7 @@ public sealed class IdentityTokenTests
     {
         var token = new TestIdentityToken(IdentityTokenKind.JsonWebToken, ConformantDescriptor());
 
-        var result = token.Validate(new IdentityTokenValidationOptions(now)
+        var result = token.Validate(new IdentityTokenValidationOptions(_now)
         {
             ExpectedIssuer = "https://issuer.example.com",
             ExpectedAudience = "api://orders",
@@ -176,7 +176,7 @@ public sealed class IdentityTokenTests
     {
         var token = new TestIdentityToken(IdentityTokenKind.JsonWebToken, ConformantDescriptor());
 
-        var result = token.Validate(new IdentityTokenValidationOptions(now)
+        var result = token.Validate(new IdentityTokenValidationOptions(_now)
         {
             ExpectedIssuer = "https://attacker.example.com",
         });
@@ -190,7 +190,7 @@ public sealed class IdentityTokenTests
     {
         var token = new TestIdentityToken(IdentityTokenKind.JsonWebToken, ConformantDescriptor());
 
-        var result = token.Validate(new IdentityTokenValidationOptions(now)
+        var result = token.Validate(new IdentityTokenValidationOptions(_now)
         {
             ExpectedAudience = "api://not-this-one",
         });
@@ -204,7 +204,7 @@ public sealed class IdentityTokenTests
     {
         var token = new TestIdentityToken(IdentityTokenKind.JsonWebToken, ConformantDescriptor());
 
-        var result = token.Validate(new IdentityTokenValidationOptions(now.AddHours(2)));
+        var result = token.Validate(new IdentityTokenValidationOptions(_now.AddHours(2)));
 
         result.Succeeded.ShouldBeFalse();
         result.Errors.ShouldContain(error => error.Code == TokenValidationCodes.Expired);
@@ -215,7 +215,7 @@ public sealed class IdentityTokenTests
     {
         var token = new TestIdentityToken(IdentityTokenKind.JsonWebToken, ConformantDescriptor());
 
-        var result = token.Validate(new IdentityTokenValidationOptions(now.AddHours(-2)));
+        var result = token.Validate(new IdentityTokenValidationOptions(_now.AddHours(-2)));
 
         result.Succeeded.ShouldBeFalse();
         result.Errors.ShouldContain(error => error.Code == TokenValidationCodes.NotYetValid);
@@ -227,7 +227,7 @@ public sealed class IdentityTokenTests
         var token = new TestIdentityToken(IdentityTokenKind.JsonWebToken, ConformantDescriptor());
 
         // Expiry is now+55m; validating at now+57m is past expiry but within a five-minute skew.
-        var result = token.Validate(new IdentityTokenValidationOptions(now.AddMinutes(57))
+        var result = token.Validate(new IdentityTokenValidationOptions(_now.AddMinutes(57))
         {
             ClockSkew = TimeSpan.FromMinutes(5),
         });
@@ -272,9 +272,9 @@ public sealed class IdentityTokenTests
             Issuer = "https://issuer.example.com",
             TokenType = "Bearer",
             RawData = "raw-token-value",
-            IssuedAt = now,
-            NotBefore = now.AddMinutes(-5),
-            ExpiresAt = now.AddMinutes(55),
+            IssuedAt = _now,
+            NotBefore = _now.AddMinutes(-5),
+            ExpiresAt = _now.AddMinutes(55),
         };
 
         descriptor.Audiences.Add("api://orders");

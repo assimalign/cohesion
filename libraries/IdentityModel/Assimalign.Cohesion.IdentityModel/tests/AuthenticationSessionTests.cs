@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.IdentityModel.Tests;
 /// </summary>
 public sealed class AuthenticationSessionTests
 {
-    private static readonly DateTimeOffset now = new(2026, 7, 3, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 7, 3, 12, 0, 0, TimeSpan.Zero);
 
     private static AuthenticationSessionDescriptor CreateDescriptor()
     {
@@ -25,8 +25,8 @@ public sealed class AuthenticationSessionTests
             SubjectKind = IdentityKind.User,
             Protocol = AuthenticationProtocol.Saml2,
             Issuer = "https://idp.example",
-            CreatedAt = now,
-            ExpiresAt = now.AddHours(8),
+            CreatedAt = _now,
+            ExpiresAt = _now.AddHours(8),
             State = AuthenticationSessionState.Active,
         };
         descriptor.ProviderSessionIds.Add("index-a");
@@ -56,23 +56,23 @@ public sealed class AuthenticationSessionTests
     {
         var active = new AuthenticationSession(CreateDescriptor());
 
-        active.IsActive(now).ShouldBeTrue();
-        active.IsActive(now.AddHours(1)).ShouldBeTrue();
-        active.IsActive(now.AddMinutes(-1)).ShouldBeFalse();       // before creation
-        active.IsActive(now.AddHours(8)).ShouldBeFalse();          // expiry is exclusive
-        active.IsActive(now.AddHours(9)).ShouldBeFalse();          // after expiry
+        active.IsActive(_now).ShouldBeTrue();
+        active.IsActive(_now.AddHours(1)).ShouldBeTrue();
+        active.IsActive(_now.AddMinutes(-1)).ShouldBeFalse();       // before creation
+        active.IsActive(_now.AddHours(8)).ShouldBeFalse();          // expiry is exclusive
+        active.IsActive(_now.AddHours(9)).ShouldBeFalse();          // after expiry
 
         var terminatedDescriptor = CreateDescriptor();
         terminatedDescriptor.State = AuthenticationSessionState.Terminated;
         var terminated = new AuthenticationSession(terminatedDescriptor);
 
-        terminated.IsActive(now).ShouldBeFalse();
+        terminated.IsActive(_now).ShouldBeFalse();
 
         var unboundedDescriptor = CreateDescriptor();
         unboundedDescriptor.ExpiresAt = null;
         var unbounded = new AuthenticationSession(unboundedDescriptor);
 
-        unbounded.IsActive(now.AddYears(10)).ShouldBeTrue();
+        unbounded.IsActive(_now.AddYears(10)).ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [IdentityModel] - Session: A defaulted state should never be active")]
@@ -86,7 +86,7 @@ public sealed class AuthenticationSessionTests
         var session = new AuthenticationSession(descriptor);
 
         session.State.ShouldBe(AuthenticationSessionState.Unknown);
-        session.IsActive(now).ShouldBeFalse();
+        session.IsActive(_now).ShouldBeFalse();
         ((int)AuthenticationSessionState.Unknown).ShouldBe(0);
     }
 

@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Connections.Security</RootNamespace>
 		<Description>TLS connection-upgrade for Cohesion connections: wraps an established IConnection in a TLS session.</Description>
 	</PropertyGroup>
 	<ItemGroup>

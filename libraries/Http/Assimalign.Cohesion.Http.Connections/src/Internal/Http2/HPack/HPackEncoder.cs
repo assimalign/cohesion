@@ -6,7 +6,7 @@ using System.Text;
 
 using Assimalign.Cohesion.Http.Internal;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal static partial class HPackEncoder
 {

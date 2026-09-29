@@ -90,19 +90,21 @@ public class EmbeddedDatabaseTests
 
         public IReadOnlyList<IDatabaseEngineWorker> Workers => Array.Empty<IDatabaseEngineWorker>();
 
-        public ValueTask<IDatabase> CreateDatabaseAsync(string name, CancellationToken cancellationToken = default)
+        public IReadOnlyList<IDatabaseServer> Servers => [];
+
+        public ValueTask<IDatabase> CreateDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public ValueTask<IDatabase> OpenDatabaseAsync(string name, CancellationToken cancellationToken = default)
+        public ValueTask<IDatabase> OpenDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public ValueTask DropDatabaseAsync(string name, CancellationToken cancellationToken = default)
+        public ValueTask DropDatabaseAsync(DatabaseName name, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
         public IAsyncEnumerable<IDatabase> GetDatabasesAsync(CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public bool TryGetDatabase(string name, out IDatabase database)
+        public bool TryGetDatabase(DatabaseName name, out IDatabase database)
         {
             database = null!;
             return false;

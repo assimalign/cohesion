@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Connections.Security.Tests;
 
 public class TlsOptionsTests : IClassFixture<TestCertificateFixture>
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     private readonly TestCertificateFixture _fixture;
 
@@ -120,7 +120,7 @@ public class TlsOptionsTests : IClassFixture<TestCertificateFixture>
     private static async Task<Exception?> RecordWithinTestTimeoutAsync(Func<Task> action)
     {
         Task<Exception?> record = Record.ExceptionAsync(action);
-        Task completed = await Task.WhenAny(record, Task.Delay(TestTimeout));
+        Task completed = await Task.WhenAny(record, Task.Delay(_testTimeout));
 
         completed.ShouldBeSameAs(record, "The TLS handshake neither completed nor faulted within the test timeout.");
 

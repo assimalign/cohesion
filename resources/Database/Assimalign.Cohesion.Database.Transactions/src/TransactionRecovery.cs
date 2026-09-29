@@ -30,7 +30,10 @@ public static class TransactionRecovery
         var seen = new HashSet<TransactionSequence>();
         ulong maxSequence = 0;
 
-        foreach (var record in journal.ReadAll())
+        IEnumerable<JournalRecord> records = journal is StorageJournal streaming
+            ? streaming.ReadSequential()
+            : journal.ReadAll();
+        foreach (var record in records)
         {
             // A checkpoint record's payload lists the transaction sequences that
             // were still active when the journal was truncated — their begin

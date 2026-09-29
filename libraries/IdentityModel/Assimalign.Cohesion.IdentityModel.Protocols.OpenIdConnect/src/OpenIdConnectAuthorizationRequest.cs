@@ -192,7 +192,7 @@ public sealed class OpenIdConnectAuthorizationRequest : ProtocolRequest
                 "An OpenID Connect authentication request must carry a redirect URI.",
                 member: "redirect_uri"));
         }
-        else if (!ProtocolEndpoint.IsValidLocation(RedirectUri))
+        else if (!EndpointLocation.IsValid(RedirectUri))
         {
             diagnostics.Add(new ProtocolValidationDiagnostic(
                 ProtocolValidationSeverity.Error,

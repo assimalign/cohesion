@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Hosting.Resources</RootNamespace>
+		<Description>Cohesion opt-in resource hosting context, runtime, control plane, lifecycle wrapper, commands, and protected mount access.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
+		<CohesionPackageReference Include="System.Security.Cryptography.ProtectedData" />
+	</ItemGroup>
+</Project>

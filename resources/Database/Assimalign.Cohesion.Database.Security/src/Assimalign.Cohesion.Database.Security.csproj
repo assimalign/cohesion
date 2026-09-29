@@ -1,3 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Security</RootNamespace>
+	</PropertyGroup>
 
 </Project>

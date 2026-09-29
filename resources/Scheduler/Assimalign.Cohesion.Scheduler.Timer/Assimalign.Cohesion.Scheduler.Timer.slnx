@@ -1,4 +1,9 @@
 <Solution>
+  <Folder Name="/docs/">
+    <File Path="README.md" />
+    <File Path="docs/DESIGN.md" />
+    <File Path="docs/OVERVIEW.md" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Assimalign.Cohesion.Scheduler.Timer.csproj" />
   </Folder>

@@ -41,3 +41,11 @@ public sealed class SqlStorage : Storage
 ```
 
 See [DESIGN.md](DESIGN.md) for the architecture and the decisions behind it.
+
+## Large streamed records
+
+Model packages can chain records larger than a page while retaining the shared
+kernel. Deleting a record releases its page transactionally once its last live
+slot disappears. `StorageJournal.ReadSequential` permits startup recovery without
+materializing WAL page payloads; `ReadAll` remains available for callers that need
+a materialized snapshot. See [DESIGN.md](DESIGN.md) for replay and reclamation.

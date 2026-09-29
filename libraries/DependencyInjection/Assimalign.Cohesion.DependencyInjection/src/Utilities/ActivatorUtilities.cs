@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Utilities
     /// </summary>
     public static class ActivatorUtilities
     {
-        private static readonly MethodInfo GetServiceInfo =
+        private static readonly MethodInfo _getServiceInfo =
             GetMethodInfo<Func<IServiceProvider, Type, Type, bool, object?>>((sp, t, r, c) => GetService(sp, t, r, c));
 
 
@@ -214,7 +214,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Utilities
 
                 constructorArguments[i] = parameterMap[i] != null ?
                     Expression.ArrayAccess(factoryArgumentArray, Expression.Constant(parameterMap[i])) :
-                    Expression.Call(GetServiceInfo, new Expression[]
+                    Expression.Call(_getServiceInfo, new Expression[]
                     {
                         serviceProvider,
                         Expression.Constant(parameterType, typeof(Type)),

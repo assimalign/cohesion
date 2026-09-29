@@ -83,14 +83,14 @@ public class HttpIfRangeTests
     // Matches (RFC 9110 § 13.1.5 / § 13.2.2 step 5) — the range-application decision
     // ============================================================================
 
-    private static readonly DateTimeOffset LastModified = new(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _lastModified = new(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     [Fact]
     public void Matches_EntityTagStrongMatch_ShouldApplyRange()
     {
         HttpIfRange ifRange = HttpIfRange.FromEntityTag(HttpEntityTag.Strong("v1"));
 
-        ifRange.Matches(HttpEntityTag.Strong("v1"), LastModified).ShouldBeTrue();
+        ifRange.Matches(HttpEntityTag.Strong("v1"), _lastModified).ShouldBeTrue();
     }
 
     [Fact]
@@ -98,7 +98,7 @@ public class HttpIfRangeTests
     {
         HttpIfRange ifRange = HttpIfRange.FromEntityTag(HttpEntityTag.Strong("v1"));
 
-        ifRange.Matches(HttpEntityTag.Strong("v2"), LastModified).ShouldBeFalse();
+        ifRange.Matches(HttpEntityTag.Strong("v2"), _lastModified).ShouldBeFalse();
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class HttpIfRangeTests
         // If-Range uses strong comparison, so a weak current validator never applies the range.
         HttpIfRange ifRange = HttpIfRange.FromEntityTag(HttpEntityTag.Strong("v1"));
 
-        ifRange.Matches(HttpEntityTag.Weak("v1"), LastModified).ShouldBeFalse();
+        ifRange.Matches(HttpEntityTag.Weak("v1"), _lastModified).ShouldBeFalse();
     }
 
     [Fact]
@@ -115,13 +115,13 @@ public class HttpIfRangeTests
     {
         HttpIfRange ifRange = HttpIfRange.FromEntityTag(HttpEntityTag.Strong("v1"));
 
-        ifRange.Matches(currentETag: null, LastModified).ShouldBeFalse();
+        ifRange.Matches(currentETag: null, _lastModified).ShouldBeFalse();
     }
 
     [Fact]
     public void Matches_DateEqualsLastModified_ShouldApplyRange()
     {
-        HttpIfRange.FromDate(LastModified).Matches(null, LastModified).ShouldBeTrue();
+        HttpIfRange.FromDate(_lastModified).Matches(null, _lastModified).ShouldBeTrue();
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public class HttpIfRangeTests
         // Representation was modified after the client's date → serve the full 200.
         HttpIfRange ifRange = HttpIfRange.FromDate(new DateTimeOffset(2019, 6, 1, 0, 0, 0, TimeSpan.Zero));
 
-        ifRange.Matches(null, LastModified).ShouldBeFalse();
+        ifRange.Matches(null, _lastModified).ShouldBeFalse();
     }
 
     [Fact]
@@ -138,19 +138,19 @@ public class HttpIfRangeTests
     {
         HttpIfRange ifRange = HttpIfRange.FromDate(new DateTimeOffset(2020, 6, 1, 0, 0, 0, TimeSpan.Zero));
 
-        ifRange.Matches(null, LastModified).ShouldBeTrue();
+        ifRange.Matches(null, _lastModified).ShouldBeTrue();
     }
 
     [Fact]
     public void Matches_SubSecondLastModification_ShouldStillApplyRange()
     {
         // A sub-second bump does not count as modified at HTTP-date (one-second) granularity.
-        HttpIfRange.FromDate(LastModified).Matches(null, LastModified.AddMilliseconds(500)).ShouldBeTrue();
+        HttpIfRange.FromDate(_lastModified).Matches(null, _lastModified.AddMilliseconds(500)).ShouldBeTrue();
     }
 
     [Fact]
     public void Matches_DateFormButNoLastModified_ShouldIgnoreRange()
     {
-        HttpIfRange.FromDate(LastModified).Matches(HttpEntityTag.Strong("v1"), currentLastModified: null).ShouldBeFalse();
+        HttpIfRange.FromDate(_lastModified).Matches(HttpEntityTag.Strong("v1"), currentLastModified: null).ShouldBeFalse();
     }
 }

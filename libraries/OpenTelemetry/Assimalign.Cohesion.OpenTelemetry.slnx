@@ -8,8 +8,20 @@
 		<File Path="Directory.Build.props" />
 		<File Path="Directory.Build.targets" />
 	</Folder>
-	<Folder Name="/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/" />
 	<Folder Name="/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/src/">
 		<Project Path="Assimalign.Cohesion.OpenTelemetry/src/Assimalign.Cohesion.OpenTelemetry.csproj" />
+	</Folder>
+	<Folder Name="/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/">
+		<File Path="Assimalign.Cohesion.OpenTelemetry/README.md" />
+	</Folder>
+	<Folder Name="/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/">
+		<File Path="Assimalign.Cohesion.OpenTelemetry/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.OpenTelemetry/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/tests/">
+		<Project Path="Assimalign.Cohesion.OpenTelemetry/tests/Assimalign.Cohesion.OpenTelemetry.Tests.csproj" />
+	</Folder>
+	<Folder Name="/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/Assembly/Assimalign.Cohesion.OpenTelemetry/">
+		<File Path="Assimalign.Cohesion.OpenTelemetry/docs/Assembly/Assimalign.Cohesion.OpenTelemetry/OVERVIEW.md" />
 	</Folder>
 </Solution>

@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Web.Authentication.Cookie.Internal;
+
 namespace Assimalign.Cohesion.Web.Authentication.Cookie;
 
 /// <summary>

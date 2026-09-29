@@ -6,31 +6,31 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Storage;
 
 using Assimalign.Cohesion.Database.Storage.Units;
+using Assimalign.Cohesion.Database.Storage.Internal;
+using Assimalign.Cohesion.FileSystem;
 
 /// <summary>
-/// Wraps any <see cref="Stream"/> to provide page-aligned I/O for storage files.
-/// Supports any seekable, readable, and writable stream including
-/// <see cref="FileStream"/>, <see cref="MemoryStream"/>, or custom implementations.
+/// Provides positional page I/O and explicit durability through a file handle.
+/// Legacy streams remain supported for non-durable I/O only.
 /// </summary>
 /// <example>
 /// <code>
 /// // Use a MemoryStream for in-memory storage
 /// var stream = new StorageStream(new MemoryStream());
 ///
-/// // Use a FileStream for disk-backed storage
-/// var stream = new StorageStream(new FileStream("data.db", FileMode.OpenOrCreate, FileAccess.ReadWrite));
-///
 /// // Or use the convenience factory methods
 /// var stream = StorageStream.FromFile("data.db");
 /// var stream = StorageStream.FromInMemory();
 /// </code>
 /// </example>
-public class StorageStream : Stream
+public class StorageStream : Stream, IFileSystemFileHandle
 {
     private readonly Stream _inner;
+    private readonly IFileSystemFileHandle _handle;
 
     /// <summary>
-    /// Initializes a new <see cref="StorageStream"/> that delegates all I/O to the specified inner stream.
+    /// Initializes a non-durable adapter over a stream. Even a physical stream must
+    /// be opened through a file handle to carry an explicit durability contract.
     /// </summary>
     /// <param name="innerStream">The backing stream. Must support read, write, and seek operations.</param>
     /// <exception cref="ArgumentNullException"><paramref name="innerStream"/> is <c>null</c>.</exception>
@@ -38,7 +38,24 @@ public class StorageStream : Stream
     {
         ArgumentNullException.ThrowIfNull(innerStream);
         _inner = innerStream;
+        _handle = new StreamFileHandle(innerStream);
     }
+
+    /// <summary>Initializes storage over an explicitly durability-aware handle.</summary>
+    /// <param name="handle">The owned backing handle.</param>
+    public StorageStream(IFileSystemFileHandle handle)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        _handle = handle;
+        _inner = new FileHandleStream(handle);
+    }
+
+    /// <summary>Wraps storage while retaining its explicit handle contract.</summary>
+    /// <param name="stream">The owned backing storage stream.</param>
+    public StorageStream(StorageStream stream) : this((IFileSystemFileHandle)stream) { }
+
+    /// <inheritdoc />
+    public bool SupportsDurableFlush => _handle.SupportsDurableFlush;
 
     /// <inheritdoc />
     public override bool CanRead => _inner.CanRead;
@@ -60,25 +77,49 @@ public class StorageStream : Stream
     }
 
     /// <inheritdoc />
-    public override void Flush() => _inner.Flush();
+    public override void Flush() => Flush(durable: false);
 
     /// <summary>
-    /// Flushes with durable (power-safe) semantics where the underlying stream
-    /// supports them: file streams flush through the operating system cache to disk.
+    /// Flushes to durable storage, or throws when the handle cannot provide durability.
     /// </summary>
-    public void FlushDurable()
-    {
-        if (_inner is FileStream fileStream)
-        {
-            fileStream.Flush(flushToDisk: true);
-            return;
-        }
+    public void FlushDurable() => Flush(durable: true);
 
-        _inner.Flush();
+    /// <inheritdoc />
+    public void Flush(bool durable)
+    {
+        if (durable && !SupportsDurableFlush)
+        {
+            throw new NotSupportedException("The backing handle cannot provide a durable flush.");
+        }
+        _handle.Flush(durable);
     }
 
     /// <inheritdoc />
-    public override Task FlushAsync(CancellationToken cancellationToken) => _inner.FlushAsync(cancellationToken);
+    public override Task FlushAsync(CancellationToken cancellationToken) => FlushAsync(false, cancellationToken).AsTask();
+
+    /// <inheritdoc />
+    public ValueTask FlushAsync(bool durable, CancellationToken cancellationToken = default)
+    {
+        if (durable && !SupportsDurableFlush)
+        {
+            throw new NotSupportedException("The backing handle cannot provide a durable flush.");
+        }
+        return _handle.FlushAsync(durable, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public int Read(Span<byte> buffer, long offset) => _handle.Read(buffer, offset);
+
+    /// <inheritdoc />
+    public ValueTask<int> ReadAsync(Memory<byte> buffer, long offset, CancellationToken cancellationToken = default)
+        => _handle.ReadAsync(buffer, offset, cancellationToken);
+
+    /// <inheritdoc />
+    public void Write(ReadOnlySpan<byte> buffer, long offset) => _handle.Write(buffer, offset);
+
+    /// <inheritdoc />
+    public ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, long offset, CancellationToken cancellationToken = default)
+        => _handle.WriteAsync(buffer, offset, cancellationToken);
 
     /// <inheritdoc />
     public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
@@ -123,12 +164,10 @@ public class StorageStream : Stream
     public void ReadPage(PageId pageId, byte[] buffer)
     {
         long offset = (long)pageId * Page.Size;
-        _inner.Seek(offset, SeekOrigin.Begin);
-
         int totalRead = 0;
         while (totalRead < Page.Size)
         {
-            int bytesRead = _inner.Read(buffer, totalRead, Page.Size - totalRead);
+            int bytesRead = _handle.Read(buffer.AsSpan(totalRead, Page.Size - totalRead), offset + totalRead);
             if (bytesRead == 0)
             {
                 throw new StorageIOException($"Unexpected end of stream reading page {(long)pageId}.");
@@ -145,8 +184,7 @@ public class StorageStream : Stream
     public void WritePage(PageId pageId, byte[] buffer)
     {
         long offset = (long)pageId * Page.Size;
-        _inner.Seek(offset, SeekOrigin.Begin);
-        _inner.Write(buffer, 0, Page.Size);
+        _handle.Write(buffer.AsSpan(0, Page.Size), offset);
     }
 
     /// <summary>
@@ -159,12 +197,10 @@ public class StorageStream : Stream
     public void ReadPageHeader(PageId pageId, Span<byte> buffer)
     {
         long offset = (long)pageId * Page.Size;
-        _inner.Seek(offset, SeekOrigin.Begin);
-
         int totalRead = 0;
         while (totalRead < Page.HeaderSize)
         {
-            int bytesRead = _inner.Read(buffer[totalRead..Page.HeaderSize]);
+            int bytesRead = _handle.Read(buffer[totalRead..Page.HeaderSize], offset + totalRead);
             if (bytesRead == 0)
             {
                 throw new StorageIOException($"Unexpected end of stream reading the header of page {(long)pageId}.");
@@ -183,12 +219,10 @@ public class StorageStream : Stream
     public async ValueTask ReadPageAsync(PageId pageId, Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
         long offset = (long)pageId * Page.Size;
-        _inner.Seek(offset, SeekOrigin.Begin);
-
         int totalRead = 0;
         while (totalRead < Page.Size)
         {
-            int bytesRead = await _inner.ReadAsync(buffer.Slice(totalRead, Page.Size - totalRead), cancellationToken);
+            int bytesRead = await _handle.ReadAsync(buffer.Slice(totalRead, Page.Size - totalRead), offset + totalRead, cancellationToken);
             if (bytesRead == 0)
             {
                 throw new StorageIOException($"Unexpected end of stream reading page {(long)pageId}.");
@@ -207,8 +241,7 @@ public class StorageStream : Stream
     public async ValueTask WritePageAsync(PageId pageId, ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
         long offset = (long)pageId * Page.Size;
-        _inner.Seek(offset, SeekOrigin.Begin);
-        await _inner.WriteAsync(buffer[..Page.Size], cancellationToken);
+        await _handle.WriteAsync(buffer[..Page.Size], offset, cancellationToken);
     }
 
     /// <summary>
@@ -218,7 +251,25 @@ public class StorageStream : Stream
     /// <returns>A new <see cref="StorageStream"/> wrapping the file.</returns>
     public static StorageStream FromFile(string path)
     {
-        return new StorageStream(new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None));
+        return new StorageStream(StorageFileSystem.OpenHandle(path, null, FileShare.None));
+    }
+
+    /// <summary>Opens physical storage with an explicit creation and sharing policy.</summary>
+    /// <param name="path">The file path.</param>
+    /// <param name="mode">Open, OpenOrCreate, Create, or CreateNew.</param>
+    /// <param name="share">Access permitted to other handles.</param>
+    /// <returns>A storage stream retaining the physical handle's durability contract.</returns>
+    public static StorageStream FromFile(string path, FileMode mode, FileShare share)
+        => new(StorageFileSystem.OpenHandle(path, null, share, mode));
+
+    /// <summary>Opens storage through the supplied file system.</summary>
+    /// <param name="path">A path understood by the supplied file system.</param>
+    /// <param name="fileSystem">The file system, whose lifetime remains owned by the caller.</param>
+    /// <returns>A new storage stream owning the opened handle.</returns>
+    public static StorageStream FromFile(string path, IFileSystem fileSystem)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        return new StorageStream(StorageFileSystem.OpenHandle(path, fileSystem, FileShare.None));
     }
 
     /// <summary>

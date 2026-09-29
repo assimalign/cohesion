@@ -67,6 +67,7 @@ internal sealed class DatabaseHostTestHarness : IAsyncDisposable
 
         var client = DatabaseClient.Create(new DatabaseClientOptions
         {
+            Family = SqlProtocol.Family,
             Settings = new DatabaseConnectionSettings { Database = DatabaseName, EndPoint = listener.EndPoint },
             ConnectionFactory = listener.CreateFactory(),
         });
@@ -87,6 +88,7 @@ internal sealed class DatabaseHostTestHarness : IAsyncDisposable
     {
         await Client.DisposeAsync();
         await ((IHost)Application).StopAsync();
+        await ((IAsyncDisposable)Application).DisposeAsync();
         await Server.DisposeAsync();
         await Listener.DisposeAsync();
         await Engine.DisposeAsync();

@@ -3,7 +3,7 @@ using System.Text.Json;
 
 using Assimalign.Cohesion.OpenApi.Serialization;
 
-namespace Assimalign.Cohesion.OpenApi.Validation;
+namespace Assimalign.Cohesion.OpenApi.Validation.Internal;
 
 /// <summary>
 /// The official-schema conformance stage: serializes the document for its declared version and
@@ -13,18 +13,18 @@ namespace Assimalign.Cohesion.OpenApi.Validation;
 /// </summary>
 internal sealed class OpenApiSchemaConformanceRule : IOpenApiValidationRule
 {
-    private static readonly Lazy<JsonSchemaEvaluator> Schema30 = new(() => Load("oas-3.0-schema.json"));
-    private static readonly Lazy<JsonSchemaEvaluator> Schema31 = new(() => Load("oas-3.1-schema.json"));
-    private static readonly Lazy<JsonSchemaEvaluator> Schema32 = new(() => Load("oas-3.2-schema.json"));
+    private static readonly Lazy<JsonSchemaEvaluator> _schema30 = new(() => Load("oas-3.0-schema.json"));
+    private static readonly Lazy<JsonSchemaEvaluator> _schema31 = new(() => Load("oas-3.1-schema.json"));
+    private static readonly Lazy<JsonSchemaEvaluator> _schema32 = new(() => Load("oas-3.2-schema.json"));
 
     public void Validate(OpenApiValidationContext context)
     {
         var version = context.Document.SpecVersion;
         var evaluator = version switch
         {
-            OpenApiSpecVersion.V3_0 => Schema30.Value,
-            OpenApiSpecVersion.V3_1 => Schema31.Value,
-            _ => Schema32.Value
+            OpenApiSpecVersion.V3_0 => _schema30.Value,
+            OpenApiSpecVersion.V3_1 => _schema31.Value,
+            _ => _schema32.Value
         };
 
         using var instance = JsonDocument.Parse(OpenApiJson.Serialize(context.Document, version, indented: false));

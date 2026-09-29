@@ -23,6 +23,9 @@ internal sealed class LayeredConnectionListener : IConnectionListener
 
     public ConnectionCapabilities Capabilities => _layer.Describe(_inner.Capabilities);
 
+    public ValueTask BindAsync(CancellationToken cancellationToken = default)
+        => _inner.BindAsync(cancellationToken);
+
     public async ValueTask<IConnection> AcceptAsync(CancellationToken cancellationToken = default)
     {
         IConnection connection = await _inner.AcceptAsync(cancellationToken).ConfigureAwait(false);

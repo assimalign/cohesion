@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.IntegrationCheck</RootNamespace>
 		<!-- build/ has no per-area Directory.Build.props applying the central TFM, so derive it here. -->
 		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
 		<IsPackable>false</IsPackable>

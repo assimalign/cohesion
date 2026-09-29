@@ -1,0 +1,7 @@
+{
+  "Organization": "example",
+  "Region": "us-east",
+  "FeatureFlags": {
+    "NewCheckout": false
+  }
+}

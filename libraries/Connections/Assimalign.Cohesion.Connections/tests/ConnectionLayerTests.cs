@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Connections.Tests;
 
 public class ConnectionLayerTests
 {
-    private static readonly EndPoint TestEndPoint = new IPEndPoint(IPAddress.Loopback, 16000);
+    private static readonly EndPoint _testEndPoint = new IPEndPoint(IPAddress.Loopback, 16000);
 
     [Fact]
     public async Task Use_OnListener_ShouldYieldLayerUpgradedConnection()
@@ -85,12 +85,12 @@ public class ConnectionLayerTests
 
         // Act
         IConnectionFactory layered = factory.Use(layer);
-        IConnection connected = await layered.ConnectAsync(TestEndPoint);
+        IConnection connected = await layered.ConnectAsync(_testEndPoint);
 
         // Assert
         LayerWrappedConnection wrapped = connected.ShouldBeOfType<LayerWrappedConnection>();
         wrapped.Inner.ShouldBeSameAs(inner);
-        factory.LastEndPoint.ShouldBeSameAs(TestEndPoint);
+        factory.LastEndPoint.ShouldBeSameAs(_testEndPoint);
     }
 
     [Fact]
@@ -105,7 +105,7 @@ public class ConnectionLayerTests
         RecordingConnectionLayer second = new("second", upgrades);
 
         // Act
-        IConnection connected = await factory.Use(first).Use(second).ConnectAsync(TestEndPoint);
+        IConnection connected = await factory.Use(first).Use(second).ConnectAsync(_testEndPoint);
 
         // Assert
         upgrades.ShouldBe(["first", "second"]);
@@ -163,6 +163,21 @@ public class ConnectionLayerTests
         // Assert
         layered.EndPoint.ShouldBeSameAs(listener.EndPoint);
         listener.IsDisposed.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections] - BindAsync: Layered listener should delegate to inner listener")]
+    public async Task BindAsync_OnLayeredListener_ShouldDelegateToInnerListener()
+    {
+        // Arrange
+        TestConnectionListener listener = new();
+        RecordingConnectionLayer layer = new("noop", [], wrapConnection: false);
+        IConnectionListener layered = listener.Use(layer);
+
+        // Act
+        await layered.BindAsync();
+
+        // Assert
+        listener.BindCount.ShouldBe(1);
     }
 
     [Fact]

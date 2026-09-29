@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.OpenApi.SourceGeneration.Tests</RootNamespace>
 		<!-- Override the analyzers-area netstandard2.0 default: a test host must be executable. -->
 		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
 		<IsRoslynComponent>false</IsRoslynComponent>

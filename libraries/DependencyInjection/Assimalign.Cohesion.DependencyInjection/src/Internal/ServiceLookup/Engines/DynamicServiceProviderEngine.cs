@@ -6,11 +6,11 @@ namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
 internal sealed class DynamicServiceProviderEngine : CompiledServiceProviderEngine
 {
-    private readonly ServiceProvider serviceProvider;
+    private readonly ServiceProvider _serviceProvider;
 
     public DynamicServiceProviderEngine(ServiceProvider serviceProvider) : base(serviceProvider)
     {
-        this.serviceProvider = serviceProvider;
+        this._serviceProvider = serviceProvider;
     }
 
     public override Func<ServiceProviderEngineScope, object> RealizeService(CallSiteService callSite)
@@ -30,11 +30,11 @@ internal sealed class DynamicServiceProviderEngine : CompiledServiceProviderEngi
                 {
                     try
                     {
-                        serviceProvider.ReplaceServiceAccessor(callSite, base.RealizeService(callSite));
+                        _serviceProvider.ReplaceServiceAccessor(callSite, base.RealizeService(callSite));
                     }
                     catch (Exception ex)
                     {
-                        ServiceEventSource.Log.ServiceRealizationFailed(ex, serviceProvider.GetHashCode());
+                        ServiceEventSource.Log.ServiceRealizationFailed(ex, _serviceProvider.GetHashCode());
 
                         Debug.Fail($"We should never get exceptions from the background compilation.{Environment.NewLine}{ex}");
                     }

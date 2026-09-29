@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Connections.Tcp.Internal;
 
 internal class SocketPipeSender : SocketPipeAsyncArgs
 {
-    private List<ArraySegment<byte>> bufferList = default!;
+    private List<ArraySegment<byte>> _bufferList = default!;
 
     public SocketPipeSender(PipeScheduler pipeScheduler) : base(pipeScheduler)
     {
@@ -71,7 +71,7 @@ internal class SocketPipeSender : SocketPipeAsyncArgs
         {
             BufferList = null;
 
-            bufferList?.Clear();
+            _bufferList?.Clear();
         }
         else
         {
@@ -117,15 +117,15 @@ internal class SocketPipeSender : SocketPipeAsyncArgs
         Debug.Assert(!buffer.IsEmpty);
         Debug.Assert(!buffer.IsSingleSegment);
 
-        bufferList ??= new List<ArraySegment<byte>>();
+        _bufferList ??= new List<ArraySegment<byte>>();
 
         foreach (var b in buffer)
         {
-            bufferList.Add(GetArray(b));
+            _bufferList.Add(GetArray(b));
         }
 
         // The act of setting this list, sets the buffers in the internal buffer list
-        BufferList = bufferList;
+        BufferList = _bufferList;
     }
     private ArraySegment<byte> GetArray(ReadOnlyMemory<byte> memory)
     {

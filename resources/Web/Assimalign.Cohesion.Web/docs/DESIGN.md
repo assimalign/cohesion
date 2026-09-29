@@ -22,10 +22,11 @@ dependency cost is always opt-in. The breakdown signal — this file's reason to
 is the root absorbing anything feature- or model-specific; that is an architecture
 conversation, not a convenience call.
 
-The root references `Assimalign.Cohesion.Http` and nothing else. No DI, no
-configuration, no logging: composition integration is `Web.Hosting`'s one job, and the
-root must stay importable by every feature library without dragging a composition
-surface along.
+The root references `Assimalign.Cohesion.Http` and no `Assimalign.Cohesion.Hosting*`
+library (O34). `IWebApplication` exposes `Context`, `StartAsync`, and `StopAsync`;
+`IWebApplicationBuilder` supplies Web registration verbs and `Build()`. Background-work
+registration belongs to the concrete `WebApplicationBuilder` in `Web.Hosting`.
+DI, configuration, and logging integration remain builder-time hosting concerns.
 
 ## The pipeline model (middleware-first)
 
@@ -42,6 +43,45 @@ extensibility mechanism, which is why the pipeline contracts here stay this smal
 `Use(Func<IHttpContext, WebApplicationMiddleware, Task>)` adapter that bridges
 application lambdas onto the core `Use(Func<WebApplicationMiddleware, WebApplicationMiddleware>)`
 registration form.
+
+## Application lifecycle services
+
+The concrete `WebApplicationBuilder.AddService` in `Web.Hosting` accepts an
+`IHostService` instance or a factory over the final concrete `WebApplicationContext`. The
+factory runs once at build time. The root builder has no service-registration member
+or hosting-library reference; no area-owned service abstraction is introduced (O34).
+
+Application services and Web servers form two ordered phases rather than one interleaved
+list: services start first in service-registration order, then servers start in
+server-registration order. Host shutdown reverses the full sequence, so every server
+drains before application services stop. This ordering holds regardless of whether an
+`AddService` call appeared before or after an `AddServer` call in the fluent composition.
+
+## Server lifecycle contract
+
+`IWebResponseCompletionFeature` is the response-transmission seam beside
+`IWebApplicationServer`. The default server installs it on every exchange and invokes callbacks
+in registration order after writing the response to the transport. Registration after completion
+throws `InvalidOperationException`. Custom servers may omit it; middleware must handle a missing
+feature. This lets a terminal defer lifecycle signals until its acknowledgement has been sent.
+
+`IWebApplicationServer.StartAsync` is the endpoint-acquisition boundary: it does not
+complete until every listener is bound and ready to accept. Binding failures propagate
+through startup instead of surfacing later from an accept loop. `StopAsync` is the
+symmetric release boundary and does not complete until the endpoints are released.
+Hosted restart constructs a fresh server/listener instance after the prior instance
+stops; a disposed listener is not rebound.
+
+`IWebApplicationBuilder.AddServer` accepts that contracts-only server directly or through
+a factory over the final `IWebApplicationContext`. The Hosting implementation supplies its
+own lifecycle adapter, so a server is not required to reference or implement Hosting's
+`IHostService`. Multiple servers start in registration order and stop in reverse order;
+`IWebApplicationContext.Servers` exposes the original server objects rather than their
+runtime adapters.
+
+`AddPipeline` is the complete user-pipeline replacement seam. A Hosting runtime may still
+place fixed runtime terminals ahead of the supplied pipeline; replacing user dispatch does
+not replace host-owned lifecycle or management surfaces.
 
 ## Ordering is registration order
 

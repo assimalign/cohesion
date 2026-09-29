@@ -104,8 +104,9 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
         CancellationTokenRegistration abortRegistration = hardAbort.Register(static state => ((KeyValueDatabaseServerSession)state!).Abort(), this);
 
         Stream stream = _connection.AsStream();
-        _reader = ProtocolFraming.CreateReader(stream, leaveOpen: true);
-        _writer = ProtocolFraming.CreateWriter(stream, leaveOpen: true);
+        await using var channel = new ProtocolChannel(stream, KeyValueProtocol.Family, leaveOpen: true);
+        _reader = channel.Reader;
+        _writer = channel.Writer;
 
         try
         {
@@ -178,13 +179,13 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
 
         ProtocolStartupMessage startup = ProtocolStartupMessage.Decode(frame.Value.Payload.Span);
 
-        if (startup.Version.Major != ProtocolVersion.Current.Major)
+        if (!ProtocolVersion.TryNegotiate(startup.Version, out var negotiatedVersion))
         {
             await TryWriteErrorAsync(ProtocolErrorCode.UnsupportedVersion, $"Protocol major version {startup.Version.Major} is not supported; the server speaks {ProtocolVersion.Current}.").ConfigureAwait(false);
             return false;
         }
 
-        ProtocolVersion = ProtocolVersion.Current;
+        ProtocolVersion = negotiatedVersion;
 
         IDatabase? database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
 
@@ -271,7 +272,7 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
 
             switch (frame.Value.Type)
             {
-                case ProtocolMessageType.Execute:
+                case (ProtocolMessageType)KeyValueProtocolMessageType.Execute:
                     // Executions run on the session lifetime token, not the soft-stop
                     // token: a drain lets in-flight statements finish.
                     await ExecuteAsync(frame.Value, rowWriter, _lifetimeSource.Token).ConfigureAwait(false);
@@ -344,7 +345,7 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
                     columns.Add((column.Name, (byte)column.Type));
                 }
 
-                await WriteFrameAsync(ProtocolMessageType.ResultHeader, new ProtocolResultHeaderMessage(columns).Encode(), cancellationToken).ConfigureAwait(false);
+                await WriteFrameAsync((ProtocolMessageType)KeyValueProtocolMessageType.ResultHeader, new ProtocolResultHeaderMessage(columns).Encode(), cancellationToken).ConfigureAwait(false);
 
                 await foreach (QueryRow row in resultSet.GetRowsAsync(cancellationToken).ConfigureAwait(false))
                 {
@@ -355,13 +356,13 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
                         DatabaseValueCodec.Append(rowWriter, row.GetValue(ordinal));
                     }
 
-                    await WriteFrameAsync(ProtocolMessageType.ResultRow, rowWriter.ToArray(), cancellationToken).ConfigureAwait(false);
+                    await WriteFrameAsync((ProtocolMessageType)KeyValueProtocolMessageType.ResultRow, rowWriter.ToArray(), cancellationToken).ConfigureAwait(false);
                 }
 
                 // ResultComplete carries the set's real AffectedCount: the model's
                 // one-row outcome sets (PUT / conditional PUT) report 1/0 on the
                 // wire; plain query sets report -1.
-                await WriteFrameAsync(ProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(resultSet.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
+                await WriteFrameAsync((ProtocolMessageType)KeyValueProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(resultSet.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
             }
 
             return;
@@ -377,7 +378,7 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
             return;
         }
 
-        await WriteFrameAsync(ProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
+        await WriteFrameAsync((ProtocolMessageType)KeyValueProtocolMessageType.ResultComplete, new ProtocolResultCompleteMessage(result.AffectedCount).Encode(), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -400,7 +401,7 @@ internal sealed class KeyValueDatabaseServerSession : IDatabaseServerSession
         {
             return await _engine.OpenDatabaseAsync(name, cancellationToken).ConfigureAwait(false);
         }
-        catch (DatabaseException)
+        catch (DatabaseNotFoundException)
         {
             // The engine has no database by that name.
         }

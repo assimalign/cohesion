@@ -1,0 +1,519 @@
+# Cohesion Data Platform — Area Design
+
+**Status:** scaffold-complete, engines in build-out · **Owner:** Chase Crawford · **Scope:** everything under `resources/Database/`, plus the `Assimalign.Cohesion.Sdk.Database` build tooling under `sdks/` and the `App.Database` framework family.
+
+This document is the durable architecture record for the multi-model OLTP database engine. It captures the requirements, the project decomposition, the dependency directions, and the reasoning behind them. Sequencing and work-item tracking live in [docs/programs/DATABASE_PROGRAM_PLAN.md](../../programs/DATABASE_PROGRAM_PLAN.md) (temporary program scaffolding); this file is what survives after the backlog drains.
+
+---
+
+## 1. What we are building
+
+A **multi-model OLTP database platform**: five independent database engines — **SQL**, **Documents**, **Graph**, **Blob**, and **KeyValuePair** — that share one durable kernel (storage, write-ahead logging, transactions, indexing) while keeping model semantics explicit and separate. Inspirations: PostgreSQL (relational engine discipline, MVCC, WAL), RavenDB (document model, embedded + server duality), Neo4j (native graph storage and traversal).
+
+The platform runs in two modes, matching Cohesion's identity:
+
+- **Out-of-process:** a standalone database server hosted by `Database.Hosting` (a `Host<TContext>` composition), fronted by the wire protocol server, orchestrated as a resource through the ApplicationModel.
+- **In-process (embedded):** an engine linked directly into an application process — no server, no wire protocol, same engines, same ACID guarantees. `Database.Embedded` is the facade for this mode, and it is a first-class deliverable: the Database area is the **data layer for the rest of the Cohesion platform** (R10) — resources like ConfigurationStore, SecretStore, Scheduler, and the hubs embed engines for their own state rather than depending on a separate database service.
+
+## 2. Requirements
+
+### 2.1 Platform requirements (all models)
+
+| # | Requirement | Where it lands |
+|---|---|---|
+| R1 | **ACID compliance for every model.** Atomicity and durability via WAL + recovery; isolation via MVCC snapshots with pessimistic locks where required; consistency via per-model constraint enforcement. | `Database.Storage` (WAL, recovery), `Database.Transactions` (MVCC, locks, isolation levels), per-model catalogs (constraints) |
+| R2 | **Every model has its own independent engine.** One `IDatabaseEngine` implementation per model (`SqlDatabaseEngine`, `DocumentDatabaseEngine`, `GraphDatabaseEngine`, `BlobDatabaseEngine`, `KeyValueDatabaseEngine`). Engines compose kernel subsystems internally; no engine depends on another engine. | `Database.{Model}` root projects |
+| R3 | **Every model builds on the shared kernel.** Storage, journaling, transactions, and indexing are reused, never duplicated per model. A model may bring a model-specific storage *layout* (e.g. graph adjacency pages) but it lives on the shared page/WAL substrate. *(Assumption: the original requirement statement was cut short — "every model should utilize …" — and has been read as "…the shared core engine", consistent with the existing backlog language and issue #31. Flag if wrong.)* | kernel projects (§4.1) |
+| R4 | **Hosting via `libraries/Hosting`.** The database host is a `Host<DatabaseApplicationContext>` whose composed services follow the per-service execution menu: provisioning and the private HTTP default-control-plane service run as additional host services; each wire-protocol endpoint is adapted directly to `IHostService`, so its `StartAsync` bind must complete before the host reports `Started`. Additional services start before servers, so provisioning precedes accept; concurrent lifecycle options are rejected and post-build mutation cannot weaken that order. No second lifecycle model. The Lane-H dedicated-thread guardrail (WAL flush and page write-back on dedicated threads, immune to pool starvation) is satisfied *inside the engine* — the engine spawns and owns those threads for its whole life (2026-07-13; engines are data machines, see §3.5). | `Database.Hosting` (composition, provisioning, admin control plane), engines (durability threads) |
+| R5 | **Orchestration via the ApplicationModel.** `Database.ApplicationModel` supplies a manifest-backed `DatabaseResource : PlannedResource`, `AddDatabase(manifest, options)`, the platform-neutral Database planner, and the Database default-control-plane factory. It never references the runtime host; the runtime host never references it. An enabled customer executable's generated code connects both sides through the `Hosting.Resources` `ResourceRuntime`. | `Database.ApplicationModel` |
+| R6 | **NativeAOT throughout.** No reflection-based serialization, no runtime codegen, no plugin discovery via `Assembly.LoadFrom`. Model engines are composed statically. | all projects (`IsAotCompatible=true`) |
+| R10 | **The platform data layer.** Every other Cohesion resource can use this area as its data layer. That mandates the **engine self-sufficiency principle**: an engine owns its internal background workers (WAL flush, checkpoint, version pruning) whether embedded or hosted, so `Database.Hosting` is composition-only and `Database.Embedded` is thin. Cross-resource packaging rides the `CohesionPrivateProjectReference` + `CohesionFrameworkPrivateAssembly` pattern when a resource hides its data layer from consumers. | `Database.Embedded` (facade, shipped), every engine (#862) |
+| R11 | **Enterprise readiness.** Beyond correctness: encryption at rest keyed by the platform key ring (#861, consuming `Security.DataProtection` #774), per-model authorization (#177 …), quotas/tenancy/audit (#167), backup/restore with version compatibility (#161, PITR via WAL archiving as the follow-on), health/readiness/diagnostics (#168, delivered by #973). Security and governance run in parallel with engine work, not after it (roadmap feature-ordering rule). | kernel + governance features |
+
+### 2.2 Tooling requirements (Database SDK)
+
+| # | Requirement | Where it lands |
+|---|---|---|
+| R7 | **Database projects.** A consumer creates an ordinary executable (`<Project Sdk="Assimalign.Cohesion.Sdk.Database">`) whose `Program.cs` composes engines, servers, and a model-compiled C# schema through `builder.AddDatabase(engine, name, schema)`. `Database.Sql.Schema` owns SQL tables, custom types, functions, triggers, database-scoped principals, and extensions. Runtime and static build compilation produce the same canonical `SqlCompiledSchema` document/hash. The area root retains only `CompiledSchema` identity and provisioning contracts; other models own their own vocabulary. Setting `CohesionApplicationModel=enabled` also produces the resource manifest and typed ambient accessors. | `Database.Sql.Schema` + `Sdk.Database` targets/Tasks (#857–#859, A3) |
+| R8 | **Migrations as a build tool.** The SQL model gets a migration tool implemented in the Database SDK: diff the compiled schema model against an ordinal baseline (or a live catalog), emit ordered engine-dialect migration scripts, and apply with destructive compatibility checks, idempotent catalog hashing, and reverse-order compensation of completed reversible statements. The landed catalog remains self-committing per statement, so fully atomic destructive multi-statement DDL awaits a batch-transaction seam. | `Sdk.Database` Tasks (`Assimalign.Cohesion.Sdk.Database.Migration.targets`), runtime apply engine in `Database.Sql` + durable state in `Database.Sql.Catalog` |
+| R9 | **Model-specific build tools, loaded by model.** The SDK inspects `$(CohesionDatabaseModel)` on the consumer project and selects from explicit static imports (`Sdk.Database.Sql.targets`, `Sdk.Database.KeyValuePair.targets`). SQL compiles schema artifacts and generates migrations. After A3 removed the shared collection shape, KeyValuePair compilation and migration generation fail explicitly until that model supplies its own schema package and catalog/statement surface. Static allowlisted MSBuild imports — no consumer-controlled path or runtime plugin loading — keep this AOT-clean. | `sdks/Assimalign.Cohesion.Sdk.Database/Targets/` |
+
+### 2.3 Explicit non-goals (for the MVP)
+
+- **No distributed consensus / sharding.** Replication contracts exist (`Database.Replication`) and single-leader log shipping is the post-MVP path; Raft-style clustering is out of scope until the engines are durable and correct on one node.
+- **No cross-model queries.** Each engine owns its language and its data. Multi-model joins are a product decision for later, not an engine seam to pre-build.
+- **Cache model is not in the MVP.** The `Database.Cache.*` projects remain (coherence/eviction is a real, distinct model) but all Cache work is deferred behind KeyValuePair.
+- **No query optimizer sophistication.** MVP planners are rule-based (predicate pushdown, index selection); cost-based optimization is a later feature with its own epic.
+
+### 2.4 Standing design principles (owner direction, 2026-07-14)
+
+These are permanent commitments, not MVP scoping — features that contradict them need the owner's explicit sign-off, not a convenient exception.
+
+- **Code-first is the prime directive.** Databases are declared and provisioned by application code — the composition path (engine API at composition time, the manifest/SDK experience) — never by server administration. Consequence: **the wire protocol deliberately carries no database-management verbs** (no `CREATE DATABASE`/`DROP DATABASE` on the wire); a client connects to a database its deployment already declared, and the resource host's before-accept provisioning (`builder.Provision`, implemented in `Database.Hosting`) is the intended shape of this principle.
+- **The database is the maximal scope of a statement.** Session statement surfaces (DDL and DML alike) are bounded by the database the session is bound to; there are no server/cluster-level statements and there will not be. Why: the recurring industry failure mode where application databases and ETL/reporting databases intertwine on one server — separation of concerns erodes, "additive" becomes indistinguishable from "functionally needed," and the operational service bogs down under analytical weight. Scoping the statement surface to the database makes that entanglement structurally inexpressible.
+- **Identity is database-scoped.** Authentication and authorization attach to the database, not the server — there are no server-level principals granted across databases. The rejected pattern is the SQL Server-style login-vs-user split: a second principal directory layered on top of the real one, managed forever in parallel. The wire startup already binds `(database, principal)` in one handshake — that is deliberate and stays. Direction for #177 and the `Database.Security` child root: principal stores and authenticator resolution are per-database.
+- **External integration happens through explicit hooks, not shared databases.** Warehouses, ETL, and reporting tools will integrate by tapping purpose-built engine seams (future direction: change-feed/CDC-style hooks on the engines) — never by pointing analytical workloads at operational databases. The hooks are the sanctioned path that keeps the separation principle real when integration pressure arrives. (Future epic; no contracts pre-built.)
+
+## 3. Architecture
+
+### 3.1 Layering
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ Orchestration      Database.ApplicationModel (typed resource,       │
+│                    planner, default control plane)                  │
+├─────────────────────────────────────────────────────────────────────┤
+│ Hosting            Database.Hosting (Host<TContext> composition,    │
+│                    DI/Config/Logging seam — the ONLY DI seam;       │
+│                    before-accept provisioning + private HTTP admin  │
+│                    plane; wraps IDatabaseServer instances as        │
+│                    endpoint host services)                          │
+├─────────────────────────────────────────────────────────────────────┤
+│ Service surface    Database.Client · Database.Replication           │
+│                    (servers are per-model and live in the model     │
+│                    packages, each carrying its own copy of the      │
+│                    server machinery — the root's IDatabaseServer    │
+│                    contract is the only area-wide server            │
+│                    requirement)                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│ Model engines      Sql · Documents · Graph · Blob · KeyValuePair    │
+│  (per model)       {Model} (engine + {Model}DatabaseServer)         │
+│                    {Model}.Language · {Model}.Storage               │
+│                    {Model}.Catalog · {Model}.Client · {Model}.Security
+│                    {Model}.Replication                              │
+├─────────────────────────────────────────────────────────────────────┤
+│ Kernel (shared)    Database (contracts; rolls up the child roots)   │
+│                    Database.Execution · Database.Transactions       │
+│                    Database.Indexing · Database.Storage (pages,     │
+│                    buffer pool, WAL, recovery) · Database.Types     │
+│                    Database.Language · Database.Protocol            │
+│                    Database.Security · Database.Governance          │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+Dependency direction is strictly downward. Model engines depend on kernel projects; kernel projects never depend on a model. The shared service surface (`Database.Client`, `Database.Replication`) depends on the root contracts and is model-agnostic; each model's wire-protocol server lives in its model package, implements the root's `IDatabaseServer` contract, and carries its **own copy** of the server machinery (per-model duplication, owner decision 2026-07-14 — decision log).
+
+**The root rolls up the child roots** (2026-07-13 inversion — decision log). `Assimalign.Cohesion.Database` references its nine child roots — `Types`, `Language`, `Storage`, `Transactions`, `Execution`, `Indexing`, `Protocol`, `Security`, `Governance` — and **no child root references the root**. A database has a vast base-component surface; the child roots break it out for separation of concerns and testability, and stay independently consumable precisely because the arrow points root → child. Child-to-child references are fine (`Transactions → Storage`, `Execution → Language/Types`); each child owns its own vocabulary (`ProtocolVersion` in `Protocol`, `TransactionId`/`TransactionState` in `Transactions`) and its own exception root (`StorageException`, `ProtocolException`, `TransactionAbortedException`, `IndexException`, … inherit `Exception` directly — `DatabaseException` covers the root and everything built *above* it). `Database.Indexing` joined the child roots on 2026-07-13 (owner direction) once its only root coupling — `DatabaseException` ancestry — was re-rooted onto its own `IndexException`.
+
+### 3.2 The kernel
+
+- **`Database`** — the public area root: `IDatabase`, `IDatabaseEngine`, `IDatabaseSession`, `IDatabaseTransaction`, `DatabaseException`, `DatabaseNotFoundException`, `DatabaseName`, lifecycle enums, model-agnostic `CompiledSchema` identity/canonical-document hash, `IDatabaseSchemaProvisioner`, `SchemaMigrationResult`, and the `DatabaseObjectOwner`/`DatabaseObjectLockedException` ownership contract. It rolls up the child roots so their common vocabulary arrives transitively. A shape that differs by model belongs in that model family, never here. A3 moved the former relational declaration/compiler/serializer/migration model into `Database.Sql.Schema`; that thin package is shared by SQL and SDK Tasks without referencing the SQL engine or Hosting.
+- **`Database.Storage`** — the physical layer: slotted pages, buffer pool with pin/evict, free-space map, journal (WAL) streams, backup/recovery seams. Owns `PageId`, `JournalRecord`, CRC integrity. The WAL contract is ARIES-shaped: append redo/undo records under an LSN discipline, checkpoint, replay on open. Durability policy (fsync cadence, group commit) is an engine-level option surfaced through storage. Data pages carry an owner tag driving **per-owner record chains** (2026-07-14): owner-scoped inserts, iteration, and transactional chain release, so a model's "scan one object" costs O(object) instead of O(storage) — the SQL engine keys chains by table object id.
+- **`Database.Transactions`** — the ACID heart (new): `ITransactionManager` (begin/commit/rollback under an `IsolationLevel`), `TransactionSnapshot` (MVCC visibility: xmin/xmax/active-set), `ILockManager` (shared/update/exclusive + intent modes, deadlock detection), `ITransactionLog` (the seam that binds transaction lifecycle to the WAL). Engines *use* the manager; sessions *expose* the resulting `IDatabaseTransaction`.
+- **`Database.Indexing`** — shared index infrastructure: order-preserving byte-comparable `IndexKey` encoding, `IIndex` (point/range search, insert/delete), `IIndexCursor` streaming iteration, B+Tree first and hash later, built on shared pages so index updates ride the same WAL/transaction path as data. **SQL was the first live consumer** (2026-07-14); Documents now uses the same package for OQL `CREATE INDEX`/`DROP INDEX`, transactional write-path maintenance, planner seeks, and recovery. Graph adjacency lookups and the KV primary structure follow the same seams.
+- **`Database.Types`** — the shared scalar type system: type identity, comparison/collation, binary encoding. Anything that ends up inside an `IndexKey` or a stored value goes through here so ordering is consistent across models.
+- **`Database.Execution`** — model-agnostic execution contracts: `QueryRequest`/`QueryResult` families, result streaming, and (build-out) the plan/operator seam per-model planners implement.
+- **`Database.Language`** — shared lexer/parser/diagnostics infrastructure the per-model languages build on.
+
+### 3.3 Model engines
+
+Each model root project owns a public engine (`{Model}DatabaseEngine`, static `Create(options)` factory, `IDatabaseEngine` implementation) and the model's public database interface:
+
+| Model | Interface | Shape | Language |
+|---|---|---|---|
+| SQL | `ISqlDatabase` | tables/schemas/views over row-oriented slotted pages | SQL dialect (declared matrix, conformance corpus) — `Sql.Language` |
+| Documents | `IDocumentDatabase` | named collections of versioned documents (`IDocumentCollection`) | OQL query and index-DDL contract — `Documents.Language` |
+| Graph | `IGraphDatabase` | property graph: nodes, typed directed relationships, traversal | standard TBD (ISO GQL is the recommended default; decision gates deep language work) — `Graph.Language` |
+| Blob | `IBlobDatabase` | containers of streamed large objects + metadata catalog | none (API-driven) |
+| KeyValuePair | `IKeyValueDatabase` | ordered key space, point/range ops, TTL | none for MVP (commands ride the wire protocol directly) |
+
+Per-model satellite projects follow one matrix: `.Language` (where a language exists), `.Storage` (model-specific layouts on the shared substrate), `.Catalog` (schema/metadata, constraint enforcement, migration apply for SQL), `.Client` (typed client over the shared client core), `.Security` (model-specific authorization), `.Replication` (model-specific replication semantics on the shared contracts).
+
+**Layout verdict:** the pre-existing matrix layout is kept. It is granular, but the granularity maps 1:1 to the backlog structure and keeps per-model concerns out of the kernel. Deliberate asymmetries: Blob and KeyValuePair have no `.Language` project (Blob is API-driven; KV commands are protocol verbs); `Sql.Replication` was added for parity; `Database.Memory` remains the in-memory storage strategy used by tests and embedded scenarios; `Database.Embedded` is the in-process consumption facade for the platform data layer (R10).
+
+### 3.4 Service surface
+
+- **`Database.Protocol`** — shared wire mechanism: the bounded big-endian frame envelope (`u32 length + u8 type`), startup/authentication, session lifecycle, errors, version negotiation, and immutable `ProtocolMessageFamily` / `ProtocolChannel` binding. Each model package owns its request and result vocabulary. SQL and Key-Value retain their deployed 1.0 bytes; Blob owns bounded chunk transfer, Documents owns nested JSON results, and Graph owns path-shaped results alongside its existing catalog exchange. No sockets or model payload policy live in this child root.
+- **The per-model servers** — the network front-end. **Servers are per-model** (2026-07-13): each model ships its own `{Model}DatabaseServer` fronting exactly one engine (`SqlDatabaseServer` in `Database.Sql`, `KeyValueDatabaseServer` in `Database.KeyValuePair`), which is where model-specific wire behavior grows. The **root contracts are the only area-wide requirement**: a model server implements `IDatabaseServer`/`IDatabaseServerContext` (+ `IDatabaseServerSession`) against `Connections` and the protocol child root (via the root's rollup). **Each model package carries its own full copy of the server machinery** — accept loop, session table, the session state machine and frame pump, authentication/idle/session-limit guardrails, two-phase drain — per-model duplication chosen by the owner (2026-07-14) with the second model's extraction evidence in hand: model independence outweighs the duplication/drift cost, and **wire-behavior parity is maintained by the protocol contract plus per-model E2E suites, not by shared code** (see the decision log and the preserved evidence table in §3.10). "Running" lives on the server; engines beneath it are data machines with no lifecycle.
+- **`Database.Client`** — the shared client core: connection settings, pooling, handshake, framing, and a generic model-exchange seam. A pool fixes its message family at composition and rejects an exchange from another family. Per-model `.Client` projects own parameter encoding and result materialization.
+- **`Database.Security`** — authn/authz contracts (principals, roles, permission checks) consumed by the server and per-model security projects.
+- **`Database.Replication` / `Database.Governance`** — shared replication contracts (log shipping seam over the WAL) and operational governance (quotas, tenancy, audit events). Post-MVP build-out; contracts stay in place so model services don't invent local equivalents.
+
+#### Request flow when one host runs more than one model
+
+The diagram below traces a query from client to kernel in a host composing two models, and the
+facts it depicts are stated here in prose so the section stands without it:
+
+- **The endpoint is the model selector; there is no multiplexing front door.** Each model server
+  owns its own `IConnectionListener` (`SqlDatabaseServerOptions.Listener`,
+  `KeyValueDatabaseServerOptions.Listener`), so a host running two models binds two listeners in
+  one process. `ProtocolStartupMessage(Version, Database, Principal)` carries **no model field** —
+  connecting to a given endpoint has already chosen the model. Routing several models behind one
+  endpoint would require a model discriminator in the handshake, which is a protocol change.
+  Each accepted session binds one immutable message family. Core codes 1–4 and 10–13 retain
+  their meanings; model codes 5–9 preserve legacy clients and 64–255 allow new family messages.
+  Bytes are interpreted only by the bound endpoint family, never by a union of model codecs.
+- **Provisioning always precedes accept, regardless of composition order.** `Provision(...)`
+  registers as an *additional host service*, and the built application starts every service before
+  any server adapter. Shutdown reverses it: servers drain first, then services stop in reverse
+  registration order.
+- **A session binds to exactly one database at handshake and cannot leave it.**
+  `OpenDatabaseAsync(startup.Database)` happens once, during authentication, which is the
+  area-wide rule that no API or query language is scoped above a single database.
+- **Engines share the kernel and never reference each other.** Both reach `Database.Storage`,
+  `Database.Transactions`, and `Database.Indexing`; neither depends on the other. Writes serialize
+  per database at the apply gate, so a write in one model never contends with a write in another.
+- **SQL, KeyValuePair, Blob, and Graph ship servers and clients today.** Graph serves scalar
+  `MATCH` results, `CREATE`, `DELETE`, `DETACH DELETE`, and the existing read-only `SHOW` surface
+  through the engine's database-bound session. Its separate `ExecutePaths` request returns real
+  engine paths for a single bound node, relationship, or named MATCH path projection, preserving
+  identities, labels, relationship types, properties and traversal order. Paths are materialized
+  under one engine snapshot, then streamed as `Path` frames ending in `PathsComplete`. The shared
+  client decides connection reuse from the exchange's terminal-frame state. Explicit Graph
+  transactions remain in-process only: GQL transaction statements are unsupported and reserved
+  `Transaction` byte 9 is rejected with `ProtocolViolation`. Blob bounds each content frame and
+  acknowledges chunks. Documents publishes its nested JSON protocol family but still needs its
+  production server/client. `Graph.Client` ships as a NuGet package, outside `App.Database`.
+- **Transport selection belongs to the composition root.** All engine servers accept
+  `IConnectionListener`; `Database.Sql.Tcp` supplies the existing `Listen(Uri)` convenience
+  for consumers that choose TCP. Engine packages reference no concrete transport.
+- **Wire version stays 1.0.** SQL/Key-Value identifiers and payloads are unchanged. Servers
+  reject incompatible majors before authentication and negotiate the supported minor baseline.
+
+<!-- Deviates from the repo documentation rule "no colors, no themes" in diagrams, per owner
+     direction 2026-09-17: the owner asked to see a colored band rendered before deciding whether
+     to relax that rule. Scoped to this diagram only; every other diagram in the repo stays
+     color-free. If the rule stands, replace the `rect rgb(...)` band with a `Note over`. -->
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor SqlCli as "SQL client"
+    actor KvCli as "Key-Value client"
+    participant Host as "DatabaseApplication (one process)"
+    participant SqlSrv as "SqlDatabaseServer — own listener"
+    participant KvSrv as "KeyValueDatabaseServer — own listener"
+    participant SqlEng as "SqlDatabaseEngine"
+    participant KvEng as "KeyValueDatabaseEngine"
+    participant Kernel as "Shared kernel: Storage, Transactions, Indexing"
+
+    Note over Host: Program.cs composes both models into one host
+
+    rect rgb(245,245,245)
+    Note over Host,Kernel: Startup — services before servers, so Provision precedes accept
+    Host->>SqlEng: Build deferred AddSql intent — engine runs from creation
+    Host->>KvEng: Build deferred AddKeyValue intent
+    SqlEng->>Kernel: spawn workers (checkpoint, WAL flush, write-back, purge)
+    KvEng->>Kernel: spawn workers
+    Host->>SqlEng: Provision(compiled schema) — additional host service
+    SqlEng->>Kernel: apply schema in a transaction
+    Host->>SqlSrv: StartAsync — bind listener, begin accept
+    Host->>KvSrv: StartAsync — bind listener, begin accept
+    end
+
+    Note over SqlCli,KvSrv: The endpoint fixes one immutable message family; no multiplexing front door.
+
+    par SQL connection
+        SqlCli->>SqlSrv: connect to the SQL endpoint
+        SqlSrv->>SqlSrv: Bind SqlProtocol.Family to the accepted channel
+        SqlCli->>SqlSrv: Startup(Version, Database, Principal)
+        SqlSrv->>SqlSrv: reject if sessions >= MaxSessions
+        SqlSrv-->>SqlCli: Authenticate (challenge)
+        SqlCli->>SqlSrv: AuthenticateResponse
+        SqlSrv->>SqlEng: OpenDatabaseAsync(startup.Database)
+        SqlEng-->>SqlSrv: IDatabase — session bound to ONE database
+        SqlSrv->>SqlEng: CreateSessionAsync
+        SqlSrv-->>SqlCli: Ready
+        SqlCli->>SqlSrv: SQL-family Execute("SELECT ...", parameters)
+        SqlSrv->>SqlEng: session.ExecuteAsync
+        SqlEng->>SqlEng: parse against SqlLanguageProfile
+        Note right of SqlEng: clause outside the profile returns COHDBL001
+        SqlEng->>SqlEng: plan — selects a secondary index if one applies
+        SqlEng->>Kernel: snapshot, index seek, versioned reads
+        Kernel-->>SqlEng: rows at the session snapshot
+        SqlSrv-->>SqlCli: SQL-family result messages (unchanged 1.0 encoding)
+    and Key-Value connection
+        KvCli->>KvSrv: connect to the Key-Value endpoint
+        KvSrv->>KvSrv: Bind KeyValueProtocol.Family to the accepted channel
+        KvCli->>KvSrv: Startup(Version, Database, Principal)
+        KvSrv-->>KvCli: Authenticate then Ready
+        KvCli->>KvSrv: Key-Value-family Execute("GET key")
+        KvSrv->>KvEng: session.ExecuteAsync
+        KvEng->>Kernel: snapshot read
+        Kernel-->>KvEng: value at snapshot
+        KvSrv-->>KvCli: Key-Value-family result messages (unchanged 1.0 encoding)
+    end
+
+    Note over SqlCli,KvSrv: Other endpoint families: Blob chunks, nested Documents, Graph paths
+
+    Note over SqlEng,Kernel: Both engines share the kernel but never each other. Writes serialize per database at the apply gate, not across the host.
+
+    SqlCli->>SqlSrv: Terminate
+    KvCli->>KvSrv: Terminate
+    Note over Host: Stop — servers drain first, then services stop in reverse order
+```
+
+### 3.5 Hosting and orchestration
+
+`Database.Hosting` remains **composition-only** with respect to the Database area: its only
+same-area reference is the root, it wraps composed `IDatabaseServer` instances generically as
+endpoint host services (started last, drained first), and the per-model server machinery remains
+inside each model package (§3.4). The module also owns the resource-host concerns that belong at
+the composition seam: before-accept provisioning and the Database default control plane. Its
+private cross-area references to `Web.Hosting` and `Web.Health` are the sanctioned
+`CohesionPrivateProjectReference`/`CohesionFrameworkPrivateAssembly` pattern; Web implements the
+HTTP surface without becoming part of the Database reference API.
+
+Composition is **builder-first**. The root's `IDatabaseApplicationBuilder` is the seam model
+packages register deferred engines on — `Database.Sql` ships `AddSql((context, engine) => ...)`,
+with servers nested under `engine.AddServer(factory)`. Composition roots register ordered lifecycle services through the
+concrete `DatabaseApplicationBuilder.AddService` verb in `Database.Hosting`; the root
+contract references no hosting library (O34). `Database.Hosting` implements the builder and exposes
+`DatabaseApplication.CreateBuilder(args)`. The `args` overload checks the calling assembly's
+generated registration: when `CohesionApplicationModel=enabled` generated a Database default
+control plane, the builder honors it together with `Hosting.Resources`
+`ResourceRuntime.Current`; when no registration exists, it behaves as a plain application. There
+is no Database-specific environment-variable bridge. Generated `Resource` accessors and the
+ambient `Hosting.Resources` `ResourceContext` carry endpoints, mounts, settings, references,
+environment, and the bootstrap credential.
+
+`builder.Provision(engine, compiledSchema)` registers `DefaultDatabaseProvisioner` as an additional host
+service. `builder.AddDatabase(engine, name, schema)` receives a schema already compiled by its
+model package, retains that immutable `CompiledSchema`, and registers the
+same provisioning step. `DatabaseApplication` materializes **all additional
+services before all server wrappers**; because the host starts in registration order, provisioning
+precedes accept regardless of the order in which application verbs appear in `Program.cs`.
+The provisioner creates only after `OpenDatabaseAsync` throws the root's exact
+`DatabaseNotFoundException`, then applies the compiled schema through the model database's
+`IDatabaseSchemaProvisioner`; every other open, validation, or migration failure propagates and
+aborts startup.
+Engines still own their background loops unconditionally and the customer composition root owns
+their disposal, preserving the embedded/hosted equivalence from R10.
+
+SQL compilation lives in `Database.Sql.Schema`: `SqlSchema.Compile` declares and
+compiles the C# schema in one step, while the public `SqlSchema.Create` and
+`SqlSchemaCompiler` pair remains available for separately retained declarations. Its tables,
+indexes, and constraints carry schema ownership. The SQL catalog durably records
+ownership and the owning compiled schema's name. Session `DROP TABLE`, `ALTER TABLE`,
+and `DROP INDEX` refuse schema-owned targets with `DatabaseObjectLockedException`;
+the internal compiled-schema apply path may change them. Objects created by ad-hoc
+statements remain ad-hoc and fully mutable through those statements.
+
+For an enabled resource, the internal `DatabaseAdminEndpointService : BackgroundService` binds
+the ambient `admin` endpoint and hosts a private `WebApplication`. `Web.Health` maps
+`/healthz`, `/readyz`, and `/livez`; the shared Web control-plane middleware supplies observed
+endpoints, graceful stop, and Database command dispatch. This is the area's **default control
+plane**, whose contract is delivered by `Database.ApplicationModel` and registered by generated
+`ResourceControlPlane.g.cs`; it is never a user composition verb.
+
+`Database.ApplicationModel` now consumes the build-produced `ResourceManifest` rather than
+inventing a framework-owned artifact or injecting resource-specific variables. Its
+`DatabaseResource : PlannedResource` delegates to the Database planner, whose platform-neutral
+`ResourcePlan` requires stable workload identity, a sized per-replica claim for every persistent
+volume, and exactly one headless governing service. Platform compilers — not the planner — turn
+that IR into Kubernetes, Docker, or local objects. `DatabaseConnectionSettings.For(Uri)` bridges
+generated or ambient endpoints to the client, while `SqlDatabaseServerOptions.Listen(Uri)` in
+`Database.Sql.Tcp` bridges the same typed endpoint into server binding. Both validate the Cohesion endpoint shape before using
+`Uri.IdnHost` and `Uri.Port` at the socket boundary; callers never reconstruct endpoint strings.
+
+The framework-owned `Assimalign.Cohesion.Database.Application` executable is deleted; #973
+supersedes the target described by #906. The resource instance is the customer's ordinary
+`Sdk.Database` executable and its real `Program.cs`. The non-packable
+`resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost` is the in-repo executable proof with
+`CohesionApplicationModel=enabled`. `Database.Testing` is the area's sole explicit
+hosting-isolation exemption holder: `DatabaseApplicationTestFactory.FromProgram<Program>()`
+invokes the real entry point inside `Hosting.Resources` `ResourceRuntime.CreateScope(...)`, while
+the real-process E2E obtains the sample apphost through `ReferenceOutputAssembly=false`.
+
+### 3.6 ACID, concretely
+
+- **Atomicity** — all writes stage through the transaction's WAL records; commit is a single durable WAL commit record; rollback replays undo.
+- **Consistency** — per-model catalogs enforce constraints (SQL: PK/unique/FK/check; Documents: optional schema + unique indexes; Graph: relationship endpoint integrity; KV/Blob: key/etag uniqueness) inside the transaction boundary.
+- **Isolation** — MVCC snapshots (`ReadCommitted`, `Snapshot` default) with a lock manager for write-write conflicts and `Serializable` upgrade later. Readers never block writers.
+- **Durability** — WAL flushed per durability policy before commit acknowledges; group commit batches fsyncs; recovery replays the journal to the last committed LSN on open; torn pages detected via per-page CRC.
+
+Crash/recovery test suites (kill the process mid-commit, replay, verify) are the acceptance bar for R1 — per-model correctness tests build on a shared crash-harness in the kernel.
+
+**The three transaction layers.** The area deliberately has three transaction contracts, one per layer — they are not redundant names for one thing:
+
+| Contract | Lives in | What it is | Lifetime |
+|---|---|---|---|
+| `IDatabaseTransaction` | `Database` (root) | The **caller's ACID bracket** a session hands out: `Id`, `IsolationLevel`, `CommitAsync`/`RollbackAsync` | one per user transaction |
+| `ITransactionContext` | `Database.Transactions` | The **logical transaction**: sequence, snapshot, lock scope, version visibility | 1:1 with the caller's bracket (the model engine binds them) |
+| `IStorageTransaction` | `Database.Storage` | The **physical WAL bracket**: pages touched, journaled mutations, page-image undo | **many per logical transaction** (per-statement brackets since the MVCC integration, §3.8) |
+
+How one `UPDATE` flows through them: the session's `IDatabaseTransaction` is bound to an MVCC `ITransactionContext` (snapshot captured, sequence allocated from the storage counter); the statement takes its row lock, then opens a *short* `IStorageTransaction` that journals only that statement's page mutations and inner-commits **non-durably**; the caller's `CommitAsync` writes one logical commit record and awaits durability once. Rollback never touches the physical layer — it is a logical undo of version stamps through the record-space version store. Crash recovery composes the same way: storage recovery replays the physical layer (page images), then transaction recovery classifies the logical layer (committed writers stand; unproven writers are scrubbed).
+
+The 1:N shape is why the physical and logical contracts cannot merge (the ARIES-style physical/logical split): a logical transaction spans many storage brackets, acknowledges durability once at the logical layer, and rolls back logically while its physical brackets stay committed. It is also why `Database.Transactions` stays a separate child root from `Database.Storage`: the reference is one-way and thin (only the journal-bound `TransactionLog` touches Storage; locks/snapshots/deadlock detection know nothing about pages), storage-only consumers exist (`Indexing`'s page surface; append-heavy models may want brackets with no MVCC), and each model engine *binds* the same concurrency machinery differently rather than reimplementing it. Watch item: Storage currently knows only two small logical-transaction facts (the shared sequence counter it allocates from, and in-flight sequences carried in checkpoint records) — if that back-channel ever grows into Storage making isolation-aware decisions, revisit the split.
+
+### 3.7 The platform data layer (embedded consumption)
+
+Other Cohesion resources consume this area in one of two ways:
+
+- **Embedded (the default for platform resources):** reference the model engine packages + `Database.Embedded`, compose engines with `EmbeddedDatabase.Create(...)`, and operate on `IDatabaseEngine`/`IDatabase` directly. Same engines, same ACID, no server process. A resource that hides its data layer from its own consumers pairs the reference with `CohesionPrivateProjectReference` and a `CohesionFrameworkPrivateAssembly` entry (the repo cross-resource pattern — `.claude/rules/build-system.md`).
+- **Hosted (shared database service):** depend on a `DatabaseResource` in the application graph (`AddDatabase(...).DependsOn(...)`) and connect through `Database.Client` over the wire protocol. Right when several resources share one database service or the data outlives any single resource.
+
+Because embedded and hosted use the same engine surfaces, a resource can start embedded and move to the hosted service without rewriting its data access. Feature #862 enforces the self-sufficiency invariant and lands a reference adoption (ConfigurationStore or SecretStore) as the pattern-setter.
+
+### 3.8 Transaction/MVCC integration — closing the isolation split-brain (implemented 2026-07-13, #907–#910)
+
+**The problem this section solved: the area had a split-brain.** `Database.Transactions` shipped a complete MVCC manager — `TransactionManager` with snapshot capture and per-level refresh semantics, the S/U/X/IS/IX `LockManager` with wait-for-graph deadlock detection, `VersionStore` with `IVersionStore.PurgeWriterAsync`, the journal-bound `TransactionLog` — and **no engine used any of it**. The SQL engine isolated through `Database.Storage`'s transactions instead: page-grain, single-writer, no-wait locks (conflict = throw), full-page-image WAL. Consequences at the time: writers to the same page serialized even on disjoint rows; concurrent readers scanned pooled pages with **no snapshot filtering**, so they could observe uncommitted in-flight page state; the `SqlVersionPurgeWorker` was an inert stub because there was no version store to purge. R1's "isolation via MVCC snapshots" was therefore not yet true end-to-end. The four steps below (work items under #862) closed the gap — **all four are implemented in the SQL engine**; each step's entry records where reality refined the design.
+
+The integration architecture, in the order the work items landed:
+
+1. **Session ↔ manager binding + isolation levels** — **implemented (#907)**. The model engine owns both vocabularies — the root's `IDatabaseTransaction` and the Transactions child root's `ITransactionContext` — so the *engine session* is where they bind (the placement decision recorded with the child-root inversion: the child never sees the root's contracts; whoever owns both translates). `SqlDatabaseSession.BeginTransactionAsync(isolationLevel, ct)` begins an `ITransactionContext` on a per-database `ITransactionManager` **and** a storage transaction, pairing them for the executor via `IStorageTransactionSource` (`Database.Indexing`'s existing seam — implemented by the per-database `SqlTransactionCoordinator`); `SqlDatabaseTransaction` commits/rolls back through the *manager* (which owns commit ordering and durability await through its journal-bound `ITransactionLog`), with the storage transaction as the physical WAL bracket beneath it. Two refinements reality added to the design: (a) **one sequence namespace** — the manager allocates from the storage's counter (`IStorage.ReserveTransactionSequence`) and the paired bracket *adopts* the sequence (`IStorage.BeginTransaction(long)`), so the bracket's commit record proves the logical transaction at recovery, with a header-persisted sequence floor keeping the namespace monotonic across checkpoint truncation and reopen; (b) **classification-safe checkpoints** — the data storage checkpoints through the coordinator so the truncating checkpoint record carries in-flight logical sequences (`TransactionRecovery.Analyze` reads them back), and the open-time checkpoint is deferred until after recovery analysis has driven `IVersionStore.PurgeWriterAsync` for unproven sequences. The per-level snapshot semantics are real (`ReadCommitted` = per-statement refresh, `Snapshot` = fixed at begin); `Serializable` is rejected until conflict detection exists (never weaker than requested); kernel aborts surface wrapped in the root's `DatabaseTransactionAbortedException`.
+2. **Row-level version stamping + snapshot-visible scans** — **implemented (#908)**. Rows in the SQL record space carry a fixed 16-byte writer/deleter `TransactionSequence` stamp header ahead of the tuple payload — precedent: the B+Tree's leaf entries already carry exactly these MVCC stamps (tombstone deletes; aborted stamps revert physically via page images), so the record layer adopted the proven design. Scans evaluate `TransactionSnapshot.IsVisible(writer)` per row (and treat a visible deleter as absence), which removed the dirty-read window: a reader's snapshot never admits an uncommitted writer. **Where the design said version chains ride `IVersionStore` "where in-place rewrite would destroy a version a live snapshot still needs", the implementation went one step further and eliminated destructive rewrites entirely:** updates tombstone the old version in place (same-length stamp write) and insert the new version — the chain lives in the record space itself, WAL-covered, so restart visibility is correct by construction and no stable row identity is needed. The record-space format is versioned in the catalog (v1 unstamped → v2 stamped, one-time idempotent in-place upgrade at open). The Sql DESIGN.md records the layout and migration decisions.
+3. **Row-grain write conflicts through the lock manager** — **implemented (#909)**. Write-write detection moved from page-grain no-wait to row-grain waits via `ILockManager` — exclusive locks on row identity (packed page/slot location, the same identity the version-store ledger keys on) plus IntentExclusive table locks, the precedent the B+Tree's uniqueness enforcement set; DDL takes the Exclusive table lock, so DROP/ALTER wait for in-flight row writers. Page-level single-writer locks *remain* beneath as the storage invariant that makes full-page-image logging correct — realized as **per-statement brackets applied under a per-database gate** (the migration path's "per-statement brackets" option): page locks never outlive a statement and one writer statement applies at a time, so page contention cannot surface to users at all; the trade (physical apply serialization per database, which page-grain single-writer never bettered anyway) and the rejected alternative (concurrent appliers with page-conflict retry, which reintroduces unbounded retries and lock-manager-invisible wait cycles) are recorded in the Sql DESIGN.md. Same-row writers wait, then resolve **first-updater-wins** by a latest-state re-validation under the lock (snapshot-only checks would admit write skew — the B+Tree lesson). Transaction rollback consequently became *logical* — the version store's ledger undoes the writer's stamps before its locks release — while statement failures and crash recovery still revert physically. Deadlocks surface to sessions as the manager's `TransactionDeadlockException` (retryable by construction), wrapped in the root's `DatabaseTransactionDeadlockException` at the model boundary per the area error policy — `ExecutionFailure` on the wire, session stays usable.
+4. **Version-purge worker activation** — **implemented (#910)**. `SqlVersionPurgeWorker`'s body is real: per pass it retries `IVersionStore.PurgeWriterAsync` for aborted writers whose inline undo failed (the normal unlink happens at rollback, before locks release — a correctness requirement, not a worker courtesy) and prunes reclaimable versions — with one refinement over the design's "prune below the manager's `OldestActive`": the safe bound is the **minimum snapshot floor across open transactions** (anchored above the recovered sequence namespace after reopen), because a live snapshot can hold a lower minimum than the oldest active sequence and must keep seeing versions whose deleters are below `OldestActive` (the pinned-snapshot proof in the Sql suite). The stub and its inventory slot were kept precisely so this landed without touching the worker seam — and it did.
+
+**Migration path (page-grain → row-grain), as built:** storage transactions were not replaced — they remain the physical WAL bracket (before-images, after-images + commit record, recovery replay), and the MVCC layer sits **above** them; `IStorageTransactionSource` is the seam that pairs an `ITransactionContext` with its bracket — since step 3, its *current statement bracket* (the migration path's per-statement-bracket option, taken). Each step shipped independently in order: binding first (semantics unchanged, level carried for real), stamps + visibility next (dirty reads closed), row locks after (disjoint-row concurrency), purge last (space amplification bounded). Recovery gained the step-2 obligation as designed: `TransactionRecovery.Analyze` results drive the version store's aborted-writer purge for every sequence the journal cannot prove committed — at open, in bulk (one record-space pass), since the in-memory ledger dies with the process.
+
+### 3.9 Operational root seams
+
+- **Health/diagnostics (#168, delivered by #973):** `DatabaseApplicationContext` implements the
+  `Hosting.Health` `IHealthContributor` contract and aggregates each distinct registered or
+  server-fronted engine. `Running` is healthy, `Faulted` is degraded, and `Disposed` or an unknown
+  state is unhealthy; diagnostic data includes the engine state and its complete worker
+  name/kind/cadence inventory. User checks added through `builder.AddHealthCheck(name, check)` and
+  any other registered `Hosting.Health` `IHealthContributor`s join the same generated control
+  plane. `Database.Hosting`'s internal admin service exposes the aggregate over private
+  `Web.Health` routes (`/healthz`, `/readyz`, `/livez`) and the control-plane endpoints on `admin`.
+  This realizes the observational
+  surface without adding a Database-specific health abstraction or treating the wire protocol's
+  `Ping` frame as readiness. The generated registration and ambient `Hosting.Resources`
+  `ResourceContext` are scoped
+  per resource invocation, so multiple in-process resource hosts do not share health state.
+- **Backup/restore (#161):** becomes an **engine-level, per-model operation on the data-machine contract** — a data machine that can be snapshotted while running (checkpoint + copy of the file sets; PITR later via WAL archiving per R11), not a host service (embedded consumers need it identically, R10). The storage layer already reserves the backup seams (`.bak` asset naming in the strategy contract). Design note only; the contract lands with #161.
+- **Authorization (#177 family):** `Database.Security` (child root) grows the authorization vocabulary (principals, roles, permission checks — beside the existing `IDatabaseAuthenticator` authentication seam), and **per-model enforcement composes in the model packages** (`Sql.Security` enforcing over the SQL catalog's objects), consistent with per-model servers: the server authenticates, the model authorizes. Design note only.
+
+### 3.10 The second model: the kernel-generality verdict (2026-07-14, KeyValuePair bring-up)
+
+The KeyValuePair engine was built as the deliberate test of R3's premise — that the kernel is model-general, not SQL-shaped. The test was honest by construction: the model composes the kernel in the **inverse shape** of the SQL engine (index-primary — the B+Tree primary key index *is* the key structure, and every read is a seek — versus SQL's scan-primary record space with secondary-index accelerators), with a different conflict grain (key locks only; no per-row location locks — one key lock subsumes them because every mutation is keyed by exactly one key), a different statement surface (a five-verb command grammar, no language), and a near-empty catalog. What follows is what the second model **proved** and what it **exposed**, both earned by the delivered story list (engine #205, server + extraction #917, typed client #207, builder verbs + wire E2E), not asserted.
+
+**What composed cleanly (proved, with the proving artifact):**
+
+| Kernel piece | Composed by | Proof |
+|---|---|---|
+| Storage substrate (slotted pages, WAL v2, recovery, per-owner record chains, transactional page surface) | `KeyValueStorage` — a `Storage` subclass exposing only the entry-record surface; **zero model-specific physical layout** | restart-recovery suites over both file sets; the satellite is ~150 lines |
+| Transactions (MVCC manager, snapshots, per-level semantics, lock manager, one sequence namespace, `IStorageTransactionSource` pairing) | the per-database coordinator, bound by sessions exactly as SQL binds it | snapshot/read-committed visibility, disjoint-key concurrency, first-updater-wins, deadlock-victim, and logical-rollback suites |
+| Indexing (B+Tree with MVCC stamps, latest-state uniqueness under hashed-key locks, snapshot cursors, `PurgeWritersAsync`, registration export/re-attach) | **as the primary structure** — the role the design reserved for it ("the KV primary structure follows the same seams") | ordered/prefix/bounded scans; index re-attachment proven by reads-after-restart (a get *is* an index seek); open-time scrub through the tree |
+| Types (order-preserving self-describing tuple codec, `DatabaseValueCodec`) | entry records (key/value binary components) and every wire value | raw key bytes double as `IndexKey`s — the model's ordering contract *is* the codec's |
+| Execution (request/result families) | `KeyValueRequest` family + materialized result sets | the typed seam and the wire ride the same shapes |
+| Protocol + the server machinery | the command grammar rides the existing `Execute` message; results ride the generic result framing — **zero protocol changes** | the extraction evidence (preserved below; the owner subsequently chose per-model duplication): even the execute pump proved model-agnostic |
+| The composition surface (`IDatabaseApplicationBuilder`, per-model verbs, root server contracts) | `AddKeyValue` / nested `AddServer(factory)` + `KeyValueDatabaseServer` (the model's own `IDatabaseServer`) | the TCP E2E composes the whole stack builder-first, restart included |
+| The engine-owned worker discipline (data machines, five-worker inventory) | same inventory, same pump base; the version-purge worker is **live** from the first cut | worker-inventory and purge-pass suites |
+
+**What it exposed (the gaps, each filed rather than hacked around):**
+
+1. **The per-database MVCC composition has no kernel home — the one substantive gap ([#918](https://github.com/assimalign/cohesion/issues/918)).** The transaction coordinator (gated journal-bound log, per-statement brackets under the apply gate, recovery analyze/scrub/checkpoint interlock, safe prune bound) and the record-space version store (stamp ledger, logical undo, prune, open-time scrub) had to be adapted **near-verbatim** from `Database.Sql` (`KeyValueTransactionCoordinator`/`KeyValueVersionStore`). The mechanics are model-agnostic; only the record codec behind them is model policy. The copy was deliberate for this bring-up (re-homing proven machinery mid-bring-up would have put the SQL engine's stability at stake for a refactor the third model can validate instead — the same n-of-2 discipline the server extraction followed), but the third model must not pay it again.
+2. **The 16-byte stamp discipline is convention, not contract.** Three copies of the same `[writer u64][deleter u64]` prefix logic now exist (B+Tree leaves, `SqlRowCodec`, `KeyValueRecordCodec`). It travels with #918 — the shared composition is where the stamp helpers belong.
+3. **Model-shape residue in the area vocabulary, not the kernel:** `EngineModel.KeyValueStore` vs the `KeyValuePair` project naming (pre-existing decision-log row — unchanged), and `docs/programs/DATABASE_PROGRAM_PLAN.md` lane wording that predates the grammar decision ("KV commands are protocol verbs" — realized instead as the COMMANDS.md grammar over the existing Execute message, recorded in the model DESIGN). Documentation drift, not kernel work.
+4. **Deferred model features, filed:** per-entry TTL ([#919](https://github.com/assimalign/cohesion/issues/919) — in the §3.3 model table, deliberately not in the first cut). Not a kernel gap.
+
+**Verdict:** the kernel held. No `IDatabaseEngine`/`IDatabaseSession`/storage/transaction/index contract needed changing to build a non-SQL model in the kernel's inverse composition shape; the wire protocol and the server machinery needed literally nothing. The gap the exercise found is a *missing extraction*, not a wrong abstraction — the kernel's pieces are general, and the thing that isn't shared yet (#918) is machinery both models already run identically.
+
+**#918 resolution (Phase 1 / Run 3):** the per-database composition now lives in
+the existing `Database.Transactions` child root as `TransactionCoordinator` and
+`RecordSpaceVersionStore`. Both engines compose these types; their private
+coordinator/version-store copies are removed. `ITransactionRecordSpace` keeps
+record access and location encoding in each engine, while `IRecordVersionIndex`
+lets Indexing supply stamp-checked undo without a reverse Transactions → Indexing
+dependency. `RecordVersionStamp` owns the 16-byte little-endian writer/deleter
+prefix used by both record codecs; the contract and recovery ordering are
+documented in `Database.Transactions/docs/DESIGN.md`. Existing public interfaces,
+snapshot/conflict semantics, and model-specific index recovery remain unchanged.
+This closes gaps 1 and 2 above for the shared record-space composition; the
+historical bring-up findings are retained as the extraction evidence.
+
+#### The server-core extraction evidence (preserved record) and the final placement outcome
+
+Building `KeyValueDatabaseServer` fired the extraction trigger the decision log
+had recorded on the Sql-internal fold (*"on the second model server, extract the
+then-proven common core — predicted: session table + guardrails + two-phase
+drain, NOT the execute pump — with evidence"*). The evidence, gathered by
+executing the extraction into a shared `Database.Server` library, **exceeded
+the prediction** — this table is that evidence, preserved verbatim from the
+deleted library's DESIGN.md because the knowledge must outlive the placement:
+
+| Machinery | Predicted common? | Proved common? | Why |
+|---|---|---|---|
+| Session table + `MaxSessions` rejection | yes | **yes** | model-free bookkeeping |
+| Auth-timeout / idle-eviction guardrails | yes | **yes** | model-free timers over the frame reader |
+| Two-phase drain (soft stop → budget → hard abort) | yes | **yes** | model-free lifecycle |
+| Handshake (version negotiation, database binding, authenticate exchange) | implicitly | **yes** | binds through `IDatabaseEngine`/`IDatabaseAuthenticator` only |
+| **The execute pump** (Execute decode → text seam → result framing) | **no** | **yes** | the second model rides the root's text-execute seam: its command grammar travels the existing Execute message and its results ride the generic ResultHeader/Row/Complete framing — the pump never learns the model |
+
+The prediction expected "KV wants binary command paths, not statement text";
+the KV bring-up took the opposite, cheaper path (the model's `docs/COMMANDS.md`
+grammar decision) — a five-verb text grammar over named tuple-codec parameters,
+zero protocol changes. One evidence-driven adjustment rode along and **is kept
+in both models' copies**: result-set framing writes the set's real
+`AffectedCount` into `ResultComplete` instead of a hardcoded `-1` (KV outcome
+sets carry 1/0; SQL's materialized sets still report `-1`, so SQL wire behavior
+is unchanged).
+
+**The final outcome (2026-07-14, owner review):** the owner reviewed this
+evidence and **chose per-model duplication anyway** — the shared
+`Database.Server` library was removed, and each model package carries its own
+full copy of the machinery. The trade-off was stated and accepted: model
+independence (each server free to evolve pump, framing, and guardrails without
+coordinating a shared base) outweighs the duplication/drift cost; wire-behavior
+parity is maintained by the protocol contract and per-model E2E suites, not by
+shared code. The copies are near-identical today and sanctioned to diverge; no
+linked-source or shared-internals mechanism may be used to fake independence.
+The evidence table above stays the honest record: the machinery *is* common
+today — sharing it was rejected as a policy choice about coupling, not because
+commonality was disproven.
+
+What existed before this scaffold vs. what a real multi-model OLTP engine needs. Backlog references are the L03.02 tree in GitHub Project #13.
+
+| Gap | Existing coverage | Resolution |
+|---|---|---|
+| Transactions / MVCC / lock manager — nothing beyond the `IDatabaseTransaction` surface | only task #164 ("transaction boundaries") | New `Database.Transactions` project + new feature under #31 (Core Engine) |
+| Shared index infrastructure — `IStorageIndexManager` was a name with no design | indexing mentioned only for Documents (#188) | New `Database.Indexing` project + new feature under #31 — **adopted by the SQL engine 2026-07-14** (#912/#913: DDL + write-path maintenance + planner seeks; per-object record chains #911 made the fallback scan O(table)) |
+| Wire protocol + server front-end + client core — `IDatabaseServer` was an empty stub | per-model "client APIs" tasks, no protocol foundation | New `Database.Protocol` project + new feature under #31 (the server machinery's placement history: folded into `Database.Hosting` 2026-07-12 → resurrected as the shared `Database.Server` base 2026-07-13 → folded into `Database.Sql` 2026-07-14 → extracted back into `Database.Server` the same day when the second model server fired the recorded trigger → **settled 2026-07-14 by owner review: per-model duplication** — the shared library removed, each model package carries its own copy; the root contract remains the only area-wide server requirement) |
+| ApplicationModel manifest — no `Database.ApplicationModel`, no typed resource/planner | not in original backlog | Delivered by #853 and realigned by #973: manifest-backed `DatabaseResource : PlannedResource`, Database planner, generated default-control-plane registration, no framework-owned apphost or resource-specific environment bridge |
+| Code-first resource schema had no retained model | schema compile/migrations #857–#859 | #973 added the root declaration vocabulary; #859 lowers it to a validated, dialect-bound `CompiledSchema` with canonical JSON/hash; #857 adds deterministic table/collection diff and the shipped SQL statement/apply path |
+| SDK build tooling — `Migration.targets` and the Tasks project were empty shells | #176 covers migration *workflows* as engine behavior only | #858 adds explicit per-model target loading, static C# schema compilation for SQL/KV, and ordinal SQL migration/baseline generation |
+| Shared type system — `Database.Types` skeletal, no collation/encoding story | #173 covers SQL type coercion only | Fleshed out via new feature under #31; `IndexKey` encoding depends on it |
+| `Sql.Replication` missing (matrix asymmetry) | — | Project added |
+| Structural defects: `KeyValuePair.Cataalog.csproj` filename typo; `KeyValuePair.Security` test project living under `src/`; stray `using Assimalign.Cohesion.Web` in a root abstraction | — | Fixed in the scaffold PR |
+| Graph query standard undecided | #193 (evaluate candidates) | Unchanged — remains the gating decision for Graph language work; ISO GQL recommended |
+| Encryption at rest — no coverage anywhere in the L03.02 tree | #807 covers only the Security area's key documents | New feature #861 under #31: page/WAL/backup encryption consuming the `Security.DataProtection` key ring |
+| Embedded consumption undefined — `Database.Embedded` was a `Class1.cs` placeholder despite the platform-data-layer role | not in backlog | `EmbeddedDatabase` facade scaffolded (implemented + tested); feature #862 enforces engine self-sufficiency + reference adoption |
+
+Everything else in the existing backlog (storage repair #157–#159, journaling/recovery #160–#162, execution pipeline #163–#165, hosting #166–#167, and the per-model trees #169–#216) mapped cleanly onto this architecture and is sequenced in the program plan. Health item #168 and the older Database.Application realignment #906 were superseded by the delivered #973 design-of-record implementation.
+
+## 5. AOT posture
+
+Everything under `resources/Database/` builds with `IsAotCompatible=true` (area `Directory.Build.props`). Concretely: document/values serialization is span-based over UTF-8 with source-generated model binding where consumers bring types; protocol frames are hand-encoded value objects; engine composition is static (the host news up engines — no `EngineModel`-keyed activation); the SDK's build tasks run inside MSBuild (not the app) so they are exempt (same sanctioned exception as `analyzers/`).
+
+## 6. Decision log
+
+| Decision | Why |
+|---|---|
+| Keep the pre-existing project matrix | It matches the backlog 1:1, keeps model semantics out of the kernel, and the owner confirmed the layout intent. Consolidation would churn 50 projects for aesthetic gain. |
+| Transactions as its own kernel project (not inside Storage or Execution) | ACID is the platform's defining requirement (R1); the MVCC/lock/snapshot machinery has consumers in every engine and a different change cadence than page I/O. |
+| One shared wire protocol, model-agnostic server | Five per-model servers would quintuple the security surface. Model semantics live in message payloads (and per-model clients), not in transport framing. |
+| Protocol project split from the server runtime | The client core must speak the protocol without referencing server internals; value-object frames are testable without sockets. |
+| `Database.Server` folded into `Database.Hosting` (2026-07-12, owner decision) | The server runtime exists to put engines on the network — the hosting concern (mirrors the Web-area `Web.Server`→`Web.Hosting` direction). Keeping it separate only existed to satisfy COHRES002 and forced a cross-assembly endpoint-adapter seam (`DatabaseServer.CreateHostService`); the fold replaces that with direct composition plus (at the time) the sanctioned per-project `CohesionHostingIsolationExemptions` for `Database.Protocol` + `Database.Security` (the server's own machinery, not hosted features). The exemption was retired by the child-root inversion below. **Half-unwound 2026-07-13** — see "Servers are per-model" below. |
+| **Engines are data machines; servers are per-model; the context goes plural** (2026-07-13, owner decision — the approved root redesign) | Three coupled reversals with one root cause: "running" belongs to the per-model server, not the engine. (1) **Engine lifecycle members removed** (reverses the #903 decision that added `StartAsync`/`StopAsync` to the root contract): an engine is operational from creation and disposal is its one transition (quiesce workers → durable flush → close). New information: once servers became per-model, the engine's start/stop was revealed as accidental service-shape — what #903 needed (host-aligned durability) is satisfied by "composition root disposes the engine". A "restart" is a fresh engine over the same storage root. `EngineState` shrank to observational `Running`/`Faulted`/`Disposed` (worker-fault reporting kept a minimal `State` — throwing from dispose is hostile). (2) **The worker claim handshake deleted** (supersedes the #902 claim model): engines spawn their loops at creation on engine-owned dedicated threads (the Lane-H guardrail satisfied engine-side) and quiesce them on dispose; `IDatabaseEngineWorker` is observational (name/kind/cadence). One owner, no two-owner protocol. (3) **`IDatabaseApplicationContext` converges with Web**: plural `Servers` + server-less `Engines`; `IDatabaseApplication` = `Context` + start/stop; the builder's deferred server factory receives the context (`Func<IDatabaseApplicationContext, IDatabaseServer>`), and multiple servers are allowed — one per model. |
+| **Servers are per-model; `Database.Server` resurrected as the shared base** (2026-07-13, owner decision — records the partial reversal of the 2026-07-12 fold) | A server fronts exactly one engine (`IDatabaseServerContext.Engine` is singular), so model-specific wire behavior has a home: `SqlDatabaseServer : DatabaseServer`, and each future model ships its own. The new information that changed the fold's calculus: per-model servers must **derive from** the shared machinery, and COHRES001 makes `Database.Hosting` unreferenceable by area libraries — a base class living in the hosting module is underivable by exactly the packages that need it. The generic machinery (session state machine/pump, framing, auth/idle/session guardrails, two-phase drain) therefore moved to the resurrected `Assimalign.Cohesion.Database.Server` (refs: root + `Connections`; Protocol/Security transitively via the root). What the fold got right is retained: `Database.Hosting` still composes servers into the host process — it just no longer owns their implementation, and is now composition-only (root + `Hosting` refs; `Connections` dropped). `DatabaseServerOptions` lost its `Engines` list (the derived server supplies its single engine). **Superseded 2026-07-14** — the per-model direction stands, but the shared base itself was folded into `Database.Sql`; see the next row. |
+| **The server machinery is Sql-internal; the root contract is the only area-wide server requirement** (2026-07-14, owner decision — the third placement of the server machinery: Hosting fold 2026-07-12 → shared `Database.Server` base 2026-07-13 → folded into `Database.Sql` 2026-07-14) | The shared `Database.Server` guided base was premature abstraction from n=1: exactly one model server existed, and the future model servers are expected to diverge from the SQL-shaped execute pump (Blob wants streaming, KV wants binary command paths — not header/row/complete statement framing). The machinery (accept loop, session pump, guardrails, two-phase drain) moved inside `Database.Sql` as the internal implementation behind `SqlDatabaseServer` (options renamed `SqlDatabaseServerOptions`), and the project was deleted. The root contracts (`IDatabaseServer`/`IDatabaseServerContext`/`IDatabaseServerSession`) are untouched and remain the only area-wide requirement — future model servers implement them directly against `Connections` + `Protocol` (via the root), their own way. **Extraction trigger:** when the second model server is built, extract the then-proven common core — predicted: session table + guardrails + two-phase drain, NOT the execute pump — into a shared library, with evidence; model #2's implementer extracts instead of copy-pasting. **The trigger fired 2026-07-14** — see the next row. |
+| **The trigger fired: the proven core is extracted into `Database.Server`** (2026-07-14, the second model server — the fourth and evidence-based placement of the server machinery: Hosting fold → shared base → Sql-internal → extracted shared core) | Building `KeyValueDatabaseServer` (#917) supplied the evidence the trigger demanded, and the evidence **exceeded the prediction**: the predicted core (session table, guardrails, two-phase drain) proved common — and so did the handshake *and the execute pump*, because the second model rides the root's text-execute seam (its command grammar travels the existing Execute message; its results ride the generic result framing — the predicted "KV wants binary command paths" divergence never materialized, by the model's own recorded grammar decision). The extraction scope followed the evidence: `Assimalign.Cohesion.Database.Server` (refs: root + `Connections`) carried the whole machinery as the guided `DatabaseServer` base + `DatabaseServerOptions`; `SqlDatabaseServer` and `KeyValueDatabaseServer` were thin sealed derivations in their model packages; `Database.Hosting` untouched. **Superseded by owner review, 2026-07-14 — see the next row.** |
+| **Per-model duplication: the shared `Database.Server` library is removed; each model carries its own full copy of the server machinery** (2026-07-14, owner decision on review of the extraction evidence — the fifth and settled placement: Hosting fold → shared base → Sql-internal → extracted shared core → per-model copies) | The owner reviewed the fired trigger's evidence (preserved in §3.10) and chose per-model duplication anyway, with the trade-off stated and accepted: **model independence outweighs the duplication/drift cost**. Each model package (`Database.Sql`, `Database.KeyValuePair`) carries its own copy of the session pump, handshake, guardrails, two-phase drain, and framing glue as internals behind its sealed `{Model}DatabaseServer` (options standalone per model; refs: root + `Connections`); **wire-behavior parity is maintained by the protocol contract and per-model E2E suites, not by shared code**. Explicitly rejected: linked-source `<Compile Include>` tricks and shared-internals assemblies (hidden shared libraries — divergence per model is the point). The evidence-driven `AffectedCount` fix from the extraction is kept in both copies. The root contracts (`IDatabaseServer`/`IDatabaseServerContext`/`IDatabaseServerSession`) remain the only area-wide server requirement; `Database.Hosting` still composes any `IDatabaseServer` via the root seam. The shared-core fake-engine suite was redistributed: each model's server suite now covers its own copy's machinery behavior (session lifecycle, guardrails, drain, error taxonomy). |
+| **Child roots roll up under the root** (2026-07-13, owner decision) | Unlike the Web area, the database has a vast base-component surface, broken out as child roots for separation of concerns and testability: `Types`, `Language`, `Storage`, `Transactions`, `Execution`, `Protocol`, `Security`, `Governance`. The root references THEM; no child references the root — so each stays independently consumable and one root reference delivers the whole base surface. Consequences: `ProtocolVersion` moved home to `Protocol` (plain static `Current`), `TransactionId`/`TransactionState` moved down to `Transactions`, `ProtocolException`/`TransactionAbortedException` re-rooted on `Exception` (child roots own independent exception roots — `DatabaseException` covers the root and everything above it), and `Database.Hosting`'s COHRES002 exemption became unnecessary (Protocol/Security arrive transitively via the root). The rejected alternative — children referencing the root for shared vocabulary — made Protocol/Transactions unaggregatable and pushed exemptions into the hosting module. |
+| **The resource instance is the customer's `Sdk.Database` executable; `Database.Application` is retired** (#973, 2026-09-07; supersedes #906) | One concept now has one name and owner: the customer's ordinary project and its `Program.cs` are both the executable and the resource definition. `CohesionApplicationModel=enabled` adds manifest/typed-resource/default-control-plane generation at build time; disabled stays plain. The framework-owned `.Application` project made image ownership and composition ambiguous, so it was deleted. The real-process acceptance fixture is the non-packable `resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost`; `Database.Testing` is the area's one explicit hosting-isolation exemption holder. |
+| **Provision before accept, independent of verb order; retain one C# schema model** (#973, 2026-09-07; compiled/apply delivered by #857–#859) | `builder.AddDatabase(engine, name, schema)` compiles the one retained declaration and registers `DefaultDatabaseProvisioner` with its immutable `CompiledSchema`; `DatabaseApplication` always starts all additional services before every server wrapper. The model database diffs/applies only that compiled contract and records its hash after convergence. A separate administration or build-only schema vocabulary would violate the code-first prime directive and invite drift. |
+| **The `admin` endpoint is the Database default control plane, implemented with private Web hosting** (#973, 2026-09-07; delivers #168) | `Database.Hosting` privately consumes `Web.Hosting`/`Web.Health` and App.Database carries that private runtime closure. This keeps the owner's HTTP-delivered-health principle and one health implementation across resource kinds while preserving the public Database boundary. Rejected: a leaner hand-rolled `/readyz` responder over `Http.Connections`, because it would reimplement health outside the Web area. `DatabaseApplicationContext` implements the `Hosting.Health` `IHealthContributor` contract and derives engine health from `State` and `Workers`; generated code registers the `Hosting.Resources` plane only for enabled executables. Readiness additionally gates on the outer host reaching `Started` (all servers accepting), while liveness remains process-oriented; gateway-scoped namespaced routes require the bootstrap credential and fail closed if none was supplied. |
+| No `.Language` for Blob and KeyValuePair | Blob is stream/metadata API-driven; KV commands are simple protocol verbs. A parser would be ceremony. Cache (#208, post-MVP) may still get one. |
+| SQL migration tooling in the SDK, apply engine in `Sql.Catalog` | Build-time diffing belongs to MSBuild (R7–R9); runtime apply must be transactional inside the engine. Splitting keeps the SDK task a thin orchestrator. |
+| `EngineModel.KeyValueStore` enum name vs `KeyValuePair` project naming | Left as-is for now — renaming the enum member is surface churn with no behavior; revisit before the first public package. |
+| Engines are self-sufficient; `Database.Hosting` is composition-only | The area is the platform's data layer (R10): embedded consumers must get identical durability. If the host owned flush/checkpoint work, embedded mode would silently lose ACID. |
+| Encryption at rest sits under the buffer pool, keyed by `Security.DataProtection` | Engines/models stay encryption-unaware; key material and rotation policy stay in the one platform key-management stack instead of a second bespoke one (the #774 lesson). |
+| `Database.Embedded` elevated from post-MVP to MVP-adjacent | Platform resources (ConfigurationStore, SecretStore, Scheduler) need a data layer before the hosted service matures; embedded-first is how they get it without coupling to server operations. |
+
+## 7. Related documents
+
+- [README.md](../../../resources/Database/README.md) — area overview and project catalog
+- [docs/programs/DATABASE_PROGRAM_PLAN.md](../../programs/DATABASE_PROGRAM_PLAN.md) — stages, lanes, blockers, session protocol (temporary)
+- `Assimalign.Cohesion.Database.Hosting/docs/DESIGN.md` — host execution-model decisions
+- `libraries/ApplicationModel/DESIGN.md` — the two-plane orchestration model `Database.ApplicationModel` plugs into
+- `libraries/Hosting/Assimalign.Cohesion.Hosting/docs/DESIGN.md` — the per-service execution menu the host composition follows
+- `docs/SERVICE_LAYER_DESIGN.md` §Database, `docs/programs/SERVICE_STORY_REQUIREMENTS.md` §Database — the earlier requirement passes this design reconciles
+
+## Phase 29 hosting composition
+
+The owner-approved [hosting design](../../programs/DATABASE_HOSTING_DESIGN.md), with its implementation corrections, is now Add intent → one-shot Build → engine access / Run. All five model verbs are deferred and return the application builder. No Use method is introduced. Each model owns a typed engine-builder interface with options and deferred worker/server factories. `DatabaseName` is the root and concrete engine name parameter for create/open/drop/lookup operations.
+
+Hosting snapshots engine-owned servers for start/stop, disposes factory-owned engines, borrows registered instances, and constructs one Configuration / interpreted DependencyInjection provider per application. Services start before servers; servers drain first. Application disposal closes owned products before infrastructure and aggregates cleanup failures. Existing ApplicationModel integration is preserved without adding manifests, control planes or orchestration work. See the Hosting project DESIGN for ownership, configuration precedence and failure rules.

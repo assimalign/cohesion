@@ -2,7 +2,11 @@ name: Web
 on:
   push:
     paths:
+      # Covers Web.Testing/fixtures/Assimalign.Cohesion.Web.TestHost. The HttpsHost fixture is
+      # listed separately because it belongs to the Gateway's tests, not to this area
+      # (.claude/rules/resource-areas.md) — the Web runtime it composes is still this area's.
       - 'resources/Web/**'
+      - 'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/**'
       - '.github/workflows/resource-web.yml'        # When Pipeline File Changes
 
 permissions:
@@ -16,10 +20,11 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         # Every buildable Web project is listed so the area's dependency-rule guard
         # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
-        # each of them - most importantly Web.Hosting, which nothing else pulls in
-        # transitively. Web.ApplicationModel is excluded (source-less placeholder).
+        # each of them - most importantly Web.Hosting and the NuGet-only
+        # Web.ApplicationModel control-plane package.
         projects: [
             'Assimalign.Cohesion.Web',
+            'Assimalign.Cohesion.Web.ApplicationModel',
             'Assimalign.Cohesion.Web.Api',
             'Assimalign.Cohesion.Web.Authentication',
             'Assimalign.Cohesion.Web.Authentication.Bearer',
@@ -36,6 +41,8 @@ jobs:
             'Assimalign.Cohesion.Web.Health',
             'Assimalign.Cohesion.Web.HostFiltering',
             'Assimalign.Cohesion.Web.Hosting',
+            'Assimalign.Cohesion.Web.Hosting.Health',
+            'Assimalign.Cohesion.Web.Hosting.Resources',
             'Assimalign.Cohesion.Web.HttpsPolicy',
             'Assimalign.Cohesion.Web.ProblemDetails',
             'Assimalign.Cohesion.Web.Query',
@@ -57,3 +64,17 @@ jobs:
           area: 'resources'
           category: 'Web'
           project: ${{ matrix.projects }}
+
+  https-sample:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        projects: ['Assimalign.Cohesion.Web.HttpsHost']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - run: dotnet build build/Tasks -c Release
+      - run: dotnet build libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/${{ matrix.projects }}/${{ matrix.projects }}.csproj -c Release

@@ -1,0 +1,8 @@
+<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<!-- Sdk.Gateway is the NuGet-only orchestration composition root. -->
+	<PropertyGroup>
+		<CohesionAutoIncludeAppFramework>false</CohesionAutoIncludeAppFramework>
+	</PropertyGroup>
+	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.props" />
+	<Import Project="..\Targets\Sdk.Gateway.props" />
+</Project>

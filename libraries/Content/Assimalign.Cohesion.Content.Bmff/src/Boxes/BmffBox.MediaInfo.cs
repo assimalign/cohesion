@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Files.Bmff;
 [DebuggerDisplay("Bmff Box: Media Information (minf)")]
 public sealed class MediaInfoBox : BmffBoxComposite
 {
-    private IList<BmffBox> children = new List<BmffBox>();
+    private IList<BmffBox> _children = new List<BmffBox>();
 
     public MediaInfoBox(long offset)
     {
@@ -29,7 +29,7 @@ public sealed class MediaInfoBox : BmffBoxComposite
     public override long Limit { get; }
     public override long Offset { get; }
     public override BmffBoxType BoxType => BmffBoxType.MediaInfo;
-    public override IEnumerable<BmffBox> Children => this.children;
+    public override IEnumerable<BmffBox> Children => this._children;
 
     public override void Read(BmffStream stream)
     {
@@ -41,7 +41,7 @@ public sealed class MediaInfoBox : BmffBoxComposite
             boxes.Add(reader.Current);
         }
 
-        children = boxes;
+        _children = boxes;
     }
 
     public override void Write(BmffStream stream)

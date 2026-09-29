@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "AssimAlign",
+  "classifications": [
+    "Cohesion",
+    "Cloud"
+  ],
+  "identity": "Assimalign.Cohesion.Templates.configurationstore.CSharp",
+  "name": "Cohesion configurationstore",
+  "shortName": "cohesion-configurationstore",
+  "sourceName": "CohesionProject",
+  "preferNameDirectory": true,
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "symbols": {
+    "Framework": {
+      "type": "parameter",
+      "dataType": "choice",
+      "choices": [
+        {
+          "choice": "net10.0",
+          "description": ".NET 10"
+        }
+      ],
+      "defaultValue": "net10.0",
+      "description": "The SDK target framework."
+    },
+    "nameLower": {
+      "type": "generated",
+      "generator": "casing",
+      "parameters": {
+        "source": "name",
+        "toLower": true
+      }
+    },
+    "firstSegment": {
+      "type": "generated",
+      "generator": "regex",
+      "parameters": {
+        "source": "name",
+        "steps": [
+          {
+            "regex": "\\..*$",
+            "replacement": ""
+          }
+        ]
+      }
+    },
+    "organization": {
+      "type": "generated",
+      "generator": "casing",
+      "parameters": {
+        "source": "firstSegment",
+        "toLower": true
+      },
+      "replaces": "__ORGANIZATION_NAME__"
+    },
+    "applicationName": {
+      "type": "parameter",
+      "dataType": "string",
+      "description": "Application identity; defaults to the lowercased first project-name segment."
+    },
+    "application": {
+      "type": "generated",
+      "generator": "coalesce",
+      "parameters": {
+        "sourceVariableName": "applicationName",
+        "fallbackVariableName": "organization"
+      },
+      "replaces": "__APPLICATION_NAME__"
+    },
+    "resource": {
+      "type": "generated",
+      "generator": "regex",
+      "parameters": {
+        "source": "nameLower",
+        "steps": [
+          {
+            "regex": "[^a-z0-9]+",
+            "replacement": "-"
+          }
+        ]
+      },
+      "replaces": "__RESOURCE_NAME__"
+    }
+  }
+}

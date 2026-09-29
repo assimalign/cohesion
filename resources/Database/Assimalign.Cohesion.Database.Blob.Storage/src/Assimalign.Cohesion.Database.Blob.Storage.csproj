@@ -1,4 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
-
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.Database.Blob.Storage</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>Preview</LangVersion>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Transactions" />
+  </ItemGroup>
 </Project>

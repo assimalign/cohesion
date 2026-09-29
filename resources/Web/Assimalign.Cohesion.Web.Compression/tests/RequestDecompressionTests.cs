@@ -24,13 +24,13 @@ namespace Assimalign.Cohesion.Web.Compression.Tests;
 /// </summary>
 public class RequestDecompressionTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Compression] - Request: a gzip body is decompressed before the handler reads it")]
     public async Task UseRequestDecompression_GzipBody_HandlerReadsDecoded()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         byte[] original = CompressionPayloads.Utf8(CompressionPayloads.LargeJson);
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseRequestDecompression();
@@ -48,7 +48,7 @@ public class RequestDecompressionTests
     public async Task UseRequestDecompression_BrotliBody_HandlerReadsDecoded()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         byte[] original = CompressionPayloads.Utf8(CompressionPayloads.LargeJson);
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseRequestDecompression();
@@ -66,7 +66,7 @@ public class RequestDecompressionTests
     public async Task UseRequestDecompression_DeflateBody_HandlerReadsDecoded()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         byte[] original = CompressionPayloads.Utf8(CompressionPayloads.LargeJson);
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseRequestDecompression();
@@ -84,7 +84,7 @@ public class RequestDecompressionTests
     public async Task UseRequestDecompression_MultipleCodings_DecodesChain()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         byte[] original = CompressionPayloads.Utf8(CompressionPayloads.LargeJson);
         // Content-Encoding: gzip, br  ->  gzip applied first, then br  ->  wire is br(gzip(original)).
         byte[] wire = CompressionPayloads.BrotliCompress(CompressionPayloads.GzipCompress(original));
@@ -104,7 +104,7 @@ public class RequestDecompressionTests
     public async Task UseRequestDecompression_UnsupportedCoding_Returns415()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         bool handlerInvoked = false;
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseRequestDecompression();
@@ -127,7 +127,7 @@ public class RequestDecompressionTests
     public async Task UseRequestDecompression_ExceedsDecompressedLimit_Returns413()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         byte[] bomb = CompressionPayloads.GzipCompress(new byte[100_000]);
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseRequestDecompression(options => options.MaxDecompressedSizeBytes = 1024);
@@ -145,7 +145,7 @@ public class RequestDecompressionTests
     public async Task UseRequestDecompression_MalformedBody_Returns400()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         byte[] notGzip = new byte[64];
         Random.Shared.NextBytes(notGzip);
         await using WebApplicationTestFactory factory = new();
@@ -164,7 +164,7 @@ public class RequestDecompressionTests
     public async Task UseRequestDecompression_NoContentEncoding_PassesThrough()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         byte[] original = CompressionPayloads.Utf8("plain body, not coded");
         await using WebApplicationTestFactory factory = new();
         factory.Application.UseRequestDecompression();

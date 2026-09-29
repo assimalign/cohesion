@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.CodeFixes.Web</RootNamespace>
+	</PropertyGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
 		<CohesionPackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />

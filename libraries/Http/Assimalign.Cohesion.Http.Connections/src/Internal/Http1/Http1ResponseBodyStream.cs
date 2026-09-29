@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http.Connections.Internal;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// HTTP/1.1 raw response body sink. Commits the response head on first write/flush and frames
@@ -24,8 +24,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal.Http1;
 internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
 {
     // RFC 9112 §7.1 — the terminating zero-length chunk plus the (empty) trailer section: "0" CRLF CRLF.
-    private static readonly byte[] LastChunk = Encoding.ASCII.GetBytes("0\r\n\r\n");
-    private static readonly byte[] Crlf = { (byte)'\r', (byte)'\n' };
+    private static readonly byte[] _lastChunk = Encoding.ASCII.GetBytes("0\r\n\r\n");
+    private static readonly byte[] _crlf = { (byte)'\r', (byte)'\n' };
 
     private readonly Stream _stream;
     private readonly Http1Context _context;
@@ -88,7 +88,7 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
                 data.Length.ToString("x", CultureInfo.InvariantCulture) + "\r\n");
             await WriteToStreamAsync(prefix, cancellationToken).ConfigureAwait(false);
             await WriteToStreamAsync(data, cancellationToken).ConfigureAwait(false);
-            await WriteToStreamAsync(Crlf, cancellationToken).ConfigureAwait(false);
+            await WriteToStreamAsync(_crlf, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -103,7 +103,7 @@ internal sealed class Http1ResponseBodyStream : HttpResponseBodyStream
     {
         if (_chunked && !_suppressBody)
         {
-            await WriteToStreamAsync(LastChunk, cancellationToken).ConfigureAwait(false);
+            await WriteToStreamAsync(_lastChunk, cancellationToken).ConfigureAwait(false);
         }
 
         await FlushStreamAsync(cancellationToken).ConfigureAwait(false);

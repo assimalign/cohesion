@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 
 using Shouldly;
 using Xunit;
@@ -10,70 +9,58 @@ namespace Assimalign.Cohesion.Database.ApplicationModel.Tests;
 
 public class DatabaseResourceTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database] - ApplicationModel: Resource declares artifact, endpoint, and data mount")]
-    public void Resource_Defaults_ShouldDeclareArtifactEndpointAndMount()
+    [Fact(DisplayName = "Cohesion Test [Database.ApplicationModel] - Constructor: wraps an immutable manifest snapshot with typed options")]
+    public void Constructor_WithManifestAndOptions_ShouldExposeSnapshotAndTypedOptions()
     {
         // Arrange
-        var resource = new DatabaseResource("orders-db");
-
-        // Assert
-        resource.Artifact.ShouldBe("Assimalign.Cohesion.Database.Application");
-        var endpoint = resource.Endpoints.ShouldHaveSingleItem();
-        endpoint.Name.ShouldBe(DatabaseResource.EndpointName);
-        endpoint.Scheme.ShouldBe(DatabaseResource.EndpointScheme);
-        endpoint.Port.ShouldBe(0);
-        endpoint.IsPublic.ShouldBeFalse();
-        var mount = resource.Mounts.ShouldHaveSingleItem();
-        mount.Kind.ShouldBe(ResourceMountKind.Volume);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Database] - ApplicationModel: AddDatabase composes into the application graph")]
-    public void AddDatabase_OnBuilder_ShouldReturnDescriptorWrappingResource()
-    {
-        // Arrange
-        var builder = Application.CreateBuilder();
+        ResourceManifest manifest = DatabaseManifestFactory.Create();
+        var options = new DatabaseResourceOptions { Replicas = 1 };
+        options.Storage.Size = "20Gi";
 
         // Act
-        var descriptor = builder.AddDatabase("orders-db", options => options.Port = 6543);
+        var resource = new DatabaseResource(manifest, options);
 
         // Assert
-        descriptor.ShouldNotBeNull();
-        var resource = descriptor.Resource.ShouldBeOfType<DatabaseResource>();
-        resource.Endpoints.Single().Port.ShouldBe(6543);
+        resource.Manifest.ShouldNotBeSameAs(manifest);
+        resource.Name.ShouldBe(manifest.Name);
+        resource.Artifact.ShouldBe(manifest.Artifact.Assembly);
+        resource.Endpoints.Count.ShouldBe(manifest.Endpoints.Count);
+        resource.Mounts.Count.ShouldBe(manifest.Mounts.Count);
+        resource.Options.ShouldBeSameAs(options);
+        resource.PlannerName.ShouldBe("Database planner");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database] - ApplicationModel: Empty resource name is rejected")]
-    public void Resource_EmptyName_ShouldThrow()
-    {
-        // Act & Assert
-        Should.Throw<ArgumentException>(() => new DatabaseResource(" "));
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Database] - ApplicationModel: Resource injects the conventional host environment variables")]
-    public void Resource_WithOptions_ShouldInjectConventionalEnvironmentVariables()
+    [Fact(DisplayName = "Cohesion Test [Database.ApplicationModel] - AddDatabase: composes the manifest with replica and storage options")]
+    public void AddDatabase_WithManifestAndOptions_ShouldReturnTypedResourceDescriptor()
     {
         // Arrange
-        var resource = new DatabaseResource("orders-db", new DatabaseResourceOptions
-        {
-            Port = 6543,
-            DataMountPath = "/srv/data",
-            Durability = "full",
-        });
+        IApplicationBuilder builder = Application.CreateBuilder();
+        ResourceManifest manifest = DatabaseManifestFactory.Create();
+        var expectedOptions = new DatabaseResourceOptions { Replicas = 1 };
+        expectedOptions.Storage.Size = "25Gi";
 
-        // Assert: the manifest side sets the same names Database.Hosting binds
-        resource.EnvironmentVariables[DatabaseResource.DataPathVariable].ShouldBe("/srv/data");
-        resource.EnvironmentVariables[DatabaseResource.PortVariable].ShouldBe("6543");
-        resource.EnvironmentVariables[DatabaseResource.DurabilityVariable].ShouldBe("full");
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Database] - ApplicationModel: A platform-allocated port is left for the gateway to inject")]
-    public void Resource_WithDefaultPort_ShouldNotSetThePortVariable()
-    {
-        // Arrange: default port 0 = platform-allocated; the gateway injects the observed port
-        var resource = new DatabaseResource("orders-db");
+        // Act
+        IApplicationResourceDescriptor descriptor = builder.AddDatabase(manifest, expectedOptions);
 
         // Assert
-        resource.EnvironmentVariables.ContainsKey(DatabaseResource.PortVariable).ShouldBeFalse();
-        resource.EnvironmentVariables[DatabaseResource.DataPathVariable].ShouldBe("/data");
+        DatabaseResource resource = descriptor.Resource.ShouldBeOfType<DatabaseResource>();
+        DatabaseResourceOptions options = resource.Options.ShouldBeOfType<DatabaseResourceOptions>();
+        options.ShouldBeSameAs(expectedOptions);
+        options.Replicas.ShouldBe(1);
+        options.Storage.Size.ShouldBe("25Gi");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.ApplicationModel] - AddDatabase: rejects a null manifest")]
+    public void AddDatabase_WithNullManifest_ShouldThrow()
+    {
+        // Arrange
+        IApplicationBuilder builder = Application.CreateBuilder();
+
+        // Act
+        ArgumentNullException error = Should.Throw<ArgumentNullException>(
+            () => builder.AddDatabase(null!));
+
+        // Assert
+        error.ParamName.ShouldBe("manifest");
     }
 }

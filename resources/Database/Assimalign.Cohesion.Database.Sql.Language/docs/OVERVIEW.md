@@ -17,7 +17,9 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
   `SqlQueryStatement`/`SqlQueryExpression`; the raw statement text is stamped on
   the root after parsing.
 - **Dialect contract** — [DIALECT.md](DIALECT.md) is the authoritative supported /
-  recognized / rejected matrix, with the diagnostics table (`SQL0001/0002/0100`).
+  recognized / rejected matrix. `SqlLanguageProfile.Instance` carries its lexical
+  tables and implemented clause set; recognized clauses outside that set report
+  `COHDBL001` rather than an undifferentiated parse failure.
 - **Types and builtins** — `SqlTypeNames` resolves declared type names (with
   length/precision/scale) to `DatabaseType` identities; builtin function names are
   declared in the lexer tables and the dialect doc.

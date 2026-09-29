@@ -13,4 +13,10 @@ public enum SqlQueryCommandType
     Create,
     Alter,
     Drop,
+    /// <summary>Begin a session transaction.</summary>
+    Begin,
+    /// <summary>Commit the session transaction.</summary>
+    Commit,
+    /// <summary>Roll back the session transaction.</summary>
+    Rollback,
 }

@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Accumulates a decoded HTTP/2 field section while enforcing RFC 9113

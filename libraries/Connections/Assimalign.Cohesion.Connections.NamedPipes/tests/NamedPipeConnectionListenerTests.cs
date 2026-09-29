@@ -14,7 +14,61 @@ namespace Assimalign.Cohesion.Connections.NamedPipes.Tests;
 
 public class NamedPipeConnectionListenerTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
+
+    [Fact(DisplayName = "Cohesion Test [Connections.NamedPipes] - BindAsync: Should reserve the pipe before accepting")]
+    public async Task BindAsync_BeforeAccept_ShouldReservePipeAndAcceptConnection()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        NamedPipeEndPoint endPoint = new(NamedPipeTestName.Create());
+        await using NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(
+            options => options.EndPoint = endPoint);
+
+        // Act
+        await listener.BindAsync(cancellation.Token);
+        ValueTask<Connection> acceptTask = listener.AcceptAsync(cancellation.Token);
+
+        NamedPipeConnectionFactory factory = new();
+        await using Connection client = await factory.ConnectAsync(endPoint, cancellation.Token);
+        await using Connection server = await acceptTask;
+
+        // Assert
+        server.ShouldNotBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.NamedPipes] - BindAsync: Dispose should release the pipe for a new listener")]
+    public async Task BindAsync_AfterDisposedListenerOnSameEndPoint_ShouldSucceed()
+    {
+        // Arrange
+        NamedPipeEndPoint endPoint = new(NamedPipeTestName.Create());
+        NamedPipeConnectionListener first = NamedPipeConnectionListener.Create(
+            options => options.EndPoint = endPoint);
+        await first.BindAsync();
+
+        // Act
+        await first.DisposeAsync();
+
+        await using NamedPipeConnectionListener second = NamedPipeConnectionListener.Create(
+            options => options.EndPoint = endPoint);
+        await second.BindAsync();
+
+        // Assert
+        second.EndPoint.ShouldBe(endPoint);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.NamedPipes] - BindAsync: Disposed listener should reject bind and accept")]
+    public async Task BindAsync_AfterDispose_ShouldThrowObjectDisposedException()
+    {
+        // Arrange
+        NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(
+            options => options.EndPoint = new NamedPipeEndPoint(NamedPipeTestName.Create()));
+        await listener.DisposeAsync();
+
+        // Act / Assert
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await listener.BindAsync());
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await listener.AcceptAsync());
+    }
 
     [Fact(DisplayName = "Cohesion Test [Connections.NamedPipes] - Listener: Should reject options without an endpoint")]
     public void Constructor_WithoutEndPoint_ShouldThrowArgumentException()
@@ -89,7 +143,7 @@ public class NamedPipeConnectionListenerTests
     public async Task DisposeAsync_WithPendingAccept_ShouldUnblockAccept()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         NamedPipeConnectionListener listener = NamedPipeConnectionListener.Create(
             options => options.EndPoint = new NamedPipeEndPoint(NamedPipeTestName.Create()));
@@ -132,7 +186,7 @@ public class NamedPipeConnectionListenerTests
         }
 
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         NamedPipeEndPoint endPoint = new(NamedPipeTestName.Create());
 
         PipeSecurity security = new();

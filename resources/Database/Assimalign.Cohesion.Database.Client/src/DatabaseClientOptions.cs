@@ -1,4 +1,5 @@
 using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Database.Protocol;
 
 namespace Assimalign.Cohesion.Database.Client;
 
@@ -21,4 +22,8 @@ public sealed class DatabaseClientOptions
     /// named in a connection string.
     /// </summary>
     public IConnectionFactory? ConnectionFactory { get; set; }
+
+    /// <summary>Gets or sets the model family permanently bound to this pool.
+    /// Use the family instance exported by the selected model package.</summary>
+    public ProtocolMessageFamily? Family { get; set; }
 }

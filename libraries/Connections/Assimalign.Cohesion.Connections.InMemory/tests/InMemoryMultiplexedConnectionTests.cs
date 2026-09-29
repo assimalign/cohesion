@@ -10,13 +10,27 @@ namespace Assimalign.Cohesion.Connections.InMemory.Tests;
 
 public class InMemoryMultiplexedConnectionTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
+
+    [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Multiplexed BindAsync: Logical bind should complete until listener disposal")]
+    public async Task BindAsync_BeforeAndAfterDispose_ShouldRespectTerminalDisposal()
+    {
+        // Arrange
+        InMemoryMultiplexedConnectionListener listener = new();
+
+        // Act
+        await listener.BindAsync();
+        await listener.DisposeAsync();
+
+        // Assert
+        await Should.ThrowAsync<ObjectDisposedException>(async () => await listener.BindAsync());
+    }
 
     [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Multiplexed: Opening a stream should be accepted by the peer and round-trip")]
     public async Task OpenStream_ShouldBeAcceptedByPeerAndRoundTrip()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
 
         // Act
@@ -40,7 +54,7 @@ public class InMemoryMultiplexedConnectionTests
     public async Task OpenStream_MultipleStreams_ShouldBeIndependentlyAccepted()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
 
         // Act
@@ -62,7 +76,7 @@ public class InMemoryMultiplexedConnectionTests
     public async Task OpenStream_WriteOnly_ShouldMirrorAsReadOnlyOnPeer()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (MultiplexedConnection client, MultiplexedConnection server) = InMemoryMultiplexedConnectionPair.Create();
 
         // Act
@@ -116,7 +130,7 @@ public class InMemoryMultiplexedConnectionTests
     public async Task Dial_ThenAccept_ShouldYieldMultiplexedPair()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using InMemoryMultiplexedConnectionListener listener = new();
         InMemoryMultiplexedConnectionFactory factory = listener.CreateFactory();
 

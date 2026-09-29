@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Web.Health;
 /// </remarks>
 public readonly struct HealthCheckResult
 {
-    private static readonly IReadOnlyDictionary<string, object> EmptyData =
+    private static readonly IReadOnlyDictionary<string, object> _emptyData =
         new Dictionary<string, object>(0);
 
     /// <summary>
@@ -35,7 +35,7 @@ public readonly struct HealthCheckResult
         Status = status;
         Description = description;
         Exception = exception;
-        Data = data ?? EmptyData;
+        Data = data ?? _emptyData;
     }
 
     /// <summary>

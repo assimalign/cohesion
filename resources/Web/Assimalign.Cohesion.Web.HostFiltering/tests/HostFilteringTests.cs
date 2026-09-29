@@ -33,13 +33,13 @@ namespace Assimalign.Cohesion.Web.HostFiltering.Tests;
 /// </summary>
 public class HostFilteringTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: Without UseHostFiltering any host should be accepted (opt-in)")]
     public async Task HostFiltering_NotRegistered_ShouldAcceptAnyHost()
     {
         // Arrange — the default: the verb is never called, no middleware is installed.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -58,7 +58,7 @@ public class HostFilteringTests
     public async Task HostFiltering_ExactAllowlist_ShouldPassMatchAndRejectOthers()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -85,7 +85,7 @@ public class HostFilteringTests
     {
         // Arrange — the package's ordering contract: UseHostFiltering goes first, so no later
         // middleware ever observes a request whose host failed validation.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -119,7 +119,7 @@ public class HostFilteringTests
     {
         // Arrange — the Uri class lowercases URI hosts, so the uppercase form is forced
         // through the Host request header instead.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -141,7 +141,7 @@ public class HostFilteringTests
     public async Task HostFiltering_HostWithPort_ShouldMatchPortlessPattern()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -161,7 +161,7 @@ public class HostFilteringTests
     public async Task HostFiltering_WildcardPattern_ShouldMatchSubdomainsOnly()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -187,7 +187,7 @@ public class HostFilteringTests
     public async Task HostFiltering_Ipv6Pattern_ShouldMatchBracketedRequestHost()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -209,7 +209,7 @@ public class HostFilteringTests
     public async Task HostFiltering_MatchAnyPattern_ShouldAcceptEveryHost()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -258,7 +258,7 @@ public class HostFilteringTests
     {
         // Arrange — prior-knowledge HTTP/2 over the in-memory transport: the effective host is
         // the ':authority' pseudo-header, resolved by the transport before dispatch.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions
@@ -286,7 +286,7 @@ public class HostFilteringTests
         // Arrange — RFC 9112 §3.2: the request cannot be validated against the allowlist, and
         // AllowEmptyHost defaults to false. HttpClient always sends Host, so this speaks raw
         // HTTP/1.1 over the in-memory transport.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         (WebApplication application, IWebApplicationServer server, InMemoryConnectionListener listener) =
@@ -313,7 +313,7 @@ public class HostFilteringTests
     public async Task HostFiltering_MissingHostHeader_WithAllowEmptyHost_ShouldPass()
     {
         // Arrange — the explicit opt-out for legacy HTTP/1.0-style clients.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         (WebApplication application, IWebApplicationServer server, InMemoryConnectionListener listener) =
@@ -345,7 +345,7 @@ public class HostFilteringTests
     {
         // Arrange — the middleware validates the transport-resolved effective host, and for an
         // absolute-form request-target that is the target's authority, not the Host header.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         (WebApplication application, IWebApplicationServer server, InMemoryConnectionListener listener) =

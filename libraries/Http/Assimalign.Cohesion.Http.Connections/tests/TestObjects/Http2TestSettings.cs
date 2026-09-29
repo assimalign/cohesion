@@ -5,9 +5,10 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
-using Assimalign.Cohesion.Http.Connections.Internal.Http2;
 
 using Shouldly;
+
+using Assimalign.Cohesion.Http.Connections.Internal;
 
 namespace Assimalign.Cohesion.Http.Connections.Tests.TestObjects;
 

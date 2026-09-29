@@ -1,21 +1,13 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <IsPackable>false</IsPackable>
+    <RootNamespace>Assimalign.Cohesion.Scheduler.Tests</RootNamespace>
   </PropertyGroup>
-
   <ItemGroup>
-    <CohesionPackageReference Include="coverlet.collector" Version="6.0.2" />
-    <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
-    <CohesionPackageReference Include="xunit" Version="2.9.2" />
-    <CohesionPackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <CohesionPackageReference Include="coverlet.collector" />
+    <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+    <CohesionPackageReference Include="Shouldly" />
+    <CohesionPackageReference Include="xunit" />
+    <CohesionPackageReference Include="xunit.runner.visualstudio" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Scheduler" />
   </ItemGroup>
-
-  <ItemGroup>
-    <Using Include="Xunit" />
-  </ItemGroup>
-
 </Project>

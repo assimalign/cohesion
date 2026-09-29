@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Web.Sessions.Tests;
 public class SessionMiddlewareTests
 {
     private const string DefaultCookieName = ".Cohesion.Session";
-    private static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(20);
+    private static readonly TimeSpan _idleTimeout = TimeSpan.FromMinutes(20);
 
     [Fact(DisplayName = "Cohesion Test [Web.Sessions] - Middleware: An untouched session establishes no cookie and persists nothing")]
     public async Task Invoke_SessionNeverAccessed_ShouldNotEstablishCookie()
@@ -174,6 +174,7 @@ public class SessionMiddlewareTests
         {
             IHttpSession session = await c.LoadSessionAsync();
             session.GetString("user").ShouldBe("alice");
+            c.Session = session; // Reassigning the managed instance preserves regeneration.
             await c.RegenerateSessionIdAsync();
             newId = session.Id;
         });
@@ -189,6 +190,34 @@ public class SessionMiddlewareTests
         (await ReadStoredStringAsync(store, newId!, "user")).ShouldBe("alice"); // state under new id
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Sessions] - Middleware: A replacement session cannot regenerate against a different store")]
+    public async Task Invoke_RegenerateReplacementSession_ShouldPreserveBothStores()
+    {
+        // Arrange — the same id has independent state in two stores.
+        InMemoryHttpSessionStore store = new();
+        InMemoryHttpSessionStore replacementStore = new();
+        await SeedAsync(store, "shared-id", ("user", "alice"));
+        await SeedAsync(replacementStore, "shared-id", ("user", "bob"));
+        IHttpStoredSession replacement = replacementStore.CreateSession("shared-id", _idleTimeout);
+        await replacement.LoadAsync();
+        SessionTestContext context = new(HttpScheme.Http, requestCookieHeader: $"{DefaultCookieName}=shared-id");
+
+        // Act
+        await RunAsync(context, store, async c =>
+        {
+            await c.LoadSessionAsync();
+            c.Session = replacement;
+            await Should.ThrowAsync<InvalidOperationException>(async () =>
+                await c.RegenerateSessionIdAsync());
+        });
+
+        // Assert — regeneration rejects the foreign session before deleting or rekeying.
+        replacement.Id.ShouldBe("shared-id");
+        context.Response.Cookies.ShouldBeEmpty();
+        (await ReadStoredStringAsync(store, "shared-id", "user")).ShouldBe("alice");
+        (await ReadStoredStringAsync(replacementStore, "shared-id", "user")).ShouldBe("bob");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Sessions] - Middleware: Cookie establishment is skipped once the response head has started")]
     public async Task Invoke_ResponseHeadStarted_ShouldSkipCookieEstablishment()
     {
@@ -201,6 +230,7 @@ public class SessionMiddlewareTests
         await RunAsync(context, store, async c =>
         {
             IHttpSession session = await c.LoadSessionAsync();
+            c.Session = session; // Keeping the managed instance must retain orphan suppression.
             session.SetString("k", "v");
         });
 
@@ -277,7 +307,7 @@ public class SessionMiddlewareTests
             values[key] = Encoding.UTF8.GetBytes(value);
         }
 
-        await store.SetAsync(id, HttpSessionSerializer.Serialize(values), IdleTimeout);
+        await store.SetAsync(id, HttpSessionSerializer.Serialize(values), _idleTimeout);
     }
 
     private static async Task<string?> ReadStoredStringAsync(IHttpSessionStore store, string id, string key)

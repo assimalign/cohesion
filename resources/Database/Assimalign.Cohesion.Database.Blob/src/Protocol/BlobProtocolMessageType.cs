@@ -1,0 +1,38 @@
+namespace Assimalign.Cohesion.Database.Blob;
+
+/// <summary>Message identifiers scoped to a Blob endpoint after the shared handshake.</summary>
+public enum BlobProtocolMessageType : byte
+{
+    /// <summary>Requests the content of a named object.</summary>
+    Read = 64,
+
+    /// <summary>Requests an upload to a named object.</summary>
+    Write = 65,
+
+    /// <summary>Introduces the content length and content type of a transfer.</summary>
+    TransferStart = 66,
+
+    /// <summary>Carries one bounded, nonempty portion of object content.</summary>
+    Chunk = 67,
+
+    /// <summary>Completes a content transfer or acknowledges a published upload.</summary>
+    TransferComplete = 68,
+
+    /// <summary>Acknowledges the cumulative content count after accepting one chunk.</summary>
+    ChunkAcknowledgement = 69,
+
+    /// <summary>Deletes a named object.</summary>
+    Delete = 70,
+
+    /// <summary>Requests the properties of a named object.</summary>
+    GetProperties = 71,
+
+    /// <summary>Requests properties in ordinal name order with an optional prefix.</summary>
+    List = 72,
+
+    /// <summary>Carries the complete properties of one object.</summary>
+    Properties = 73,
+
+    /// <summary>Completes a metadata operation with its result count.</summary>
+    OperationComplete = 74,
+}

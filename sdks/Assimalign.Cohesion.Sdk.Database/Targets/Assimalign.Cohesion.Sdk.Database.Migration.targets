@@ -1,35 +1,59 @@
 <Project>
-    <!--
-        Model-specific build tooling. The SDK loads the tool set that matches the
-        project's declared model ($(CohesionDatabaseModel), default Sql). Each
-        model targets file declares its schema-source items and any model-specific
-        compile/migration behavior. Adding a model = adding a targets file here.
-    -->
-    <Import
-        Project="$(MSBuildThisFileDirectory)Sdk.Database.$(CohesionDatabaseModel).targets"
-        Condition="'$(CohesionDatabaseModel)' != '' and Exists('$(MSBuildThisFileDirectory)Sdk.Database.$(CohesionDatabaseModel).targets')" />
+	<!--
+		Set artifact defaults after Microsoft.NET.Sdk has finalized the per-target-
+		framework IntermediateOutputPath. Consumer overrides set earlier are kept.
+	-->
+	<PropertyGroup>
+		<CohesionDatabaseSchemaOutputPath Condition="'$(CohesionDatabaseSchemaOutputPath)' == ''">$(IntermediateOutputPath)cohesion/database.schema.json</CohesionDatabaseSchemaOutputPath>
+		<CohesionDatabaseSchemaHashOutputPath Condition="'$(CohesionDatabaseSchemaHashOutputPath)' == ''">$(IntermediateOutputPath)cohesion/database.schema.sha256</CohesionDatabaseSchemaHashOutputPath>
+	</PropertyGroup>
 
-    <!--
-        Compiles the declarative schema sources into the schema model artifact
-        ($(CohesionDatabaseSchemaOutputPath)) as part of Build. Only runs for
-        database projects (CohesionDatabaseProject=true).
-    -->
-    <Target
-        Name="CohesionDatabaseCompileSchema"
-        BeforeTargets="BeforeBuild"
-        Condition="'$(CohesionDatabaseProject)' == 'true'"
-        Inputs="@(CohesionDatabaseSchema)"
-        Outputs="$(CohesionDatabaseSchemaOutputPath)">
+	<!--
+		Allowlisted static imports keep model selection deterministic and prevent a
+		consumer-controlled property from becoming an arbitrary import path. Each
+		model file registers its own compile target.
+	-->
+	<Import
+		Project="$(MSBuildThisFileDirectory)Sdk.Database.Sql.targets"
+		Condition="$([System.String]::Equals('$(CohesionDatabaseModel)', 'Sql', System.StringComparison.Ordinal))" />
+	<Import
+		Project="$(MSBuildThisFileDirectory)Sdk.Database.KeyValuePair.targets"
+		Condition="$([System.String]::Equals('$(CohesionDatabaseModel)', 'KeyValuePair', System.StringComparison.Ordinal))" />
 
-        <CompileDatabaseSchemaTask
-            SchemaFiles="@(CohesionDatabaseSchema)"
-            Model="$(CohesionDatabaseModel)"
-            OutputPath="$(CohesionDatabaseSchemaOutputPath)" />
+	<Target
+		Name="_CohesionDatabaseValidateModel"
+		Condition="'$(CohesionDatabaseProject)' == 'true'">
+		<Error
+			Code="COHDBSDK001"
+			Condition="'$(_CohesionDatabaseModelTargetsLoaded)' != 'true'"
+			Text="Database model '$(CohesionDatabaseModel)' is not supported by Assimalign.Cohesion.Sdk.Database. Supported models are 'Sql' and 'KeyValuePair'; model names are case-sensitive." />
+		<Error
+			Code="COHDBSDK002"
+			Condition="'$(_CohesionDatabaseModelCompileTarget)' == ''"
+			Text="Database model tool set '$(CohesionDatabaseModel)' did not register a schema compile target. Set _CohesionDatabaseModelCompileTarget in Sdk.Database.$(CohesionDatabaseModel).targets." />
+	</Target>
 
-        <ItemGroup>
-            <FileWrites Include="$(CohesionDatabaseSchemaOutputPath)" />
-        </ItemGroup>
-    </Target>
+	<!--
+		The model target statically analyzes the retained C# AddDatabase declarations.
+		It runs after references resolve and before C# compilation, so invalid schemas
+		fail the ordinary Build without executing the consumer entry point.
+	-->
+	<Target
+		Name="CohesionDatabaseCompileSchema"
+		BeforeTargets="CoreCompile"
+		Condition="'$(CohesionDatabaseProject)' == 'true'"
+		DependsOnTargets="ResolveReferences;_CohesionDatabaseValidateModel;$(_CohesionDatabaseModelCompileTarget)">
+		<ReadLinesFromFile File="$(CohesionDatabaseSchemaHashOutputPath)">
+			<Output TaskParameter="Lines" ItemName="_CohesionDatabaseSchemaHashLine" />
+		</ReadLinesFromFile>
+		<PropertyGroup>
+			<CohesionDatabaseSchemaHash>@(_CohesionDatabaseSchemaHashLine)</CohesionDatabaseSchemaHash>
+		</PropertyGroup>
+		<ItemGroup>
+			<FileWrites Include="$(CohesionDatabaseSchemaOutputPath);$(CohesionDatabaseSchemaHashOutputPath)" />
+			<_CohesionDatabaseSchemaHashLine Remove="@(_CohesionDatabaseSchemaHashLine)" />
+		</ItemGroup>
+	</Target>
 
     <!--
         Opt-in migration generation: diffs the compiled schema model against the
@@ -38,15 +62,16 @@
 
             dotnet msbuild -t:CohesionDatabaseCreateMigration -p:CohesionDatabaseMigrationName=<name>
     -->
-    <Target
-        Name="CohesionDatabaseCreateMigration"
-        DependsOnTargets="CohesionDatabaseCompileSchema"
-        Condition="'$(CohesionDatabaseProject)' == 'true'">
+	<Target
+		Name="CohesionDatabaseCreateMigration"
+		DependsOnTargets="CohesionDatabaseCompileSchema"
+		Condition="'$(CohesionDatabaseProject)' == 'true'">
 
         <CreateDatabaseMigrationTask
             SchemaModelPath="$(CohesionDatabaseSchemaOutputPath)"
             MigrationsRoot="$(CohesionDatabaseMigrationsRoot)"
             MigrationName="$(CohesionDatabaseMigrationName)"
-            Model="$(CohesionDatabaseModel)" />
-    </Target>
+			Model="$(CohesionDatabaseModel)"
+			ProjectDirectory="$(MSBuildProjectDirectory)" />
+	</Target>
 </Project>

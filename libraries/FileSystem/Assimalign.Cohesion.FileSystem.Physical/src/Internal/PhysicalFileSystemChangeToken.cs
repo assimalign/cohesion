@@ -8,38 +8,41 @@ using Assimalign.Cohesion.Internal;
 
 internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposable
 {
-    // TODO: Need to create a file system polling object. FileSystemWatcher is only available on Windows.
+    private readonly object _sync = new();
     private readonly Glob _glob;
     private readonly FileSystemWatcher _watcher;
-    private readonly PhysicalFileSystemInfo _fileSystemInfo;
     private readonly List<Subscriber> _subscribers;
+    private bool _disposed;
 
     public PhysicalFileSystemChangeToken(PhysicalFileSystemInfo fileSystemInfo, Glob glob)
     {
-        _fileSystemInfo = fileSystemInfo;
         _glob = glob;
         _subscribers = new List<Subscriber>();
         _watcher = new FileSystemWatcher(fileSystemInfo.Path);
-        _watcher.EnableRaisingEvents = true;
         _watcher.IncludeSubdirectories = true;
         _watcher.Created += (sender, args) => Notify(sender, args, FileSystemEventType.Created);
         _watcher.Deleted += (sender, args) => Notify(sender, args, FileSystemEventType.Deleted);
         _watcher.Changed += (sender, args) => Notify(sender, args, FileSystemEventType.Changed);
         _watcher.Renamed += (sender, args) => Notify(sender, args, FileSystemEventType.Renamed);
-
+        _watcher.EnableRaisingEvents = true;
     }
 
     public void Dispose()
     {
-        _watcher.EnableRaisingEvents = false;
-        _watcher.Dispose();
-
-        foreach (var subscriber in _subscribers)
+        lock (_sync)
         {
-            subscriber.Dispose();
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _subscribers.Clear();
         }
 
-        _subscribers.Clear();
+        // Retire subscriptions before releasing the watcher. Already queued events can
+        // still enter Notify, but they cannot dispatch any further subscriptions.
+        _watcher.Dispose();
     }
 
     public IDisposable OnChange(Action<object?> callback, object? state)
@@ -51,12 +54,10 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
             ChangeType = FileSystemEventType.Changed,
             State = state,
             Callback = args => callback(args.State),
-            OnDispose = subscriber => _subscribers.Remove(subscriber)
+            OnDispose = Unsubscribe
         };
 
-        _subscribers.Add(disposable);
-
-        return disposable;
+        return Subscribe(disposable);
     }
     public IDisposable OnChange<T>(Action<FileSystemEvent<T?>> callback, T? state)
     {
@@ -67,12 +68,10 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
             ChangeType = FileSystemEventType.Changed,
             State = state,
             Callback = callback,
-            OnDispose = subscriber => _subscribers.Remove(subscriber)
+            OnDispose = Unsubscribe
         };
 
-        _subscribers.Add(disposable);
-
-        return disposable;
+        return Subscribe(disposable);
     }
     public IDisposable OnCreate<T>(Action<FileSystemEvent<T?>> callback, T? state)
     {
@@ -83,12 +82,10 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
             ChangeType = FileSystemEventType.Created,
             State = state,
             Callback = callback,
-            OnDispose = Subscriber => _subscribers.Remove(Subscriber)
+            OnDispose = Unsubscribe
         };
 
-        _subscribers.Add(disposable);
-
-        return disposable;
+        return Subscribe(disposable);
     }
     public IDisposable OnDelete<T>(Action<FileSystemEvent<T?>> callback, T? state)
     {
@@ -99,12 +96,10 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
             ChangeType = FileSystemEventType.Deleted,
             State = state,
             Callback = callback,
-            OnDispose = Subscriber => _subscribers.Remove(Subscriber)
+            OnDispose = Unsubscribe
         };
 
-        _subscribers.Add(disposable);
-
-        return disposable;
+        return Subscribe(disposable);
     }
     public IDisposable OnRename<T>(Action<FileSystemRenameEvent<T?>> callback, T? state)
     {
@@ -115,12 +110,28 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
             ChangeType = FileSystemEventType.Renamed,
             State = state!,
             Callback = (Action<FileSystemRenameEvent<T>>)(object)callback,
-            OnDispose = Subscriber => _subscribers.Remove(Subscriber)
+            OnDispose = Unsubscribe
         };
 
-        _subscribers.Add(disposable);
+        return Subscribe(disposable);
+    }
 
-        return disposable;
+    private IDisposable Subscribe(Subscriber subscriber)
+    {
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _subscribers.Add(subscriber);
+            return subscriber;
+        }
+    }
+
+    private void Unsubscribe(Subscriber subscriber)
+    {
+        lock (_sync)
+        {
+            _subscribers.Remove(subscriber);
+        }
     }
 
     private void Notify(object? sender, FileSystemEventArgs args, FileSystemEventType changeType)
@@ -132,12 +143,35 @@ internal class PhysicalFileSystemChangeToken : IFileSystemEventToken, IDisposabl
             return;
         }
 
-        foreach (var subscriber in _subscribers)
+        Subscriber[] subscribers;
+        lock (_sync)
         {
-            if (subscriber.ChangeType == changeType)
+            if (_disposed)
             {
-                subscriber.Invoke(args);
+                return;
             }
+
+            subscribers = _subscribers.ToArray();
+        }
+
+        foreach (var subscriber in subscribers)
+        {
+            lock (_sync)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                if (subscriber.ChangeType != changeType || !_subscribers.Contains(subscriber))
+                {
+                    continue;
+                }
+            }
+
+            // User callbacks run outside the gate so they can dispose this token or
+            // their own registration. A callback already dispatched may finish later.
+            subscriber.Invoke(args);
         }
     }
     abstract partial class Subscriber : IDisposable

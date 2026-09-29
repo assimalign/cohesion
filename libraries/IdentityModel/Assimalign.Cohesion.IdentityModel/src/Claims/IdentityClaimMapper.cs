@@ -33,7 +33,7 @@ namespace Assimalign.Cohesion.IdentityModel;
 /// </remarks>
 public sealed class IdentityClaimMapper
 {
-    private static readonly FrozenSet<string> structuralTargets = new[]
+    private static readonly FrozenSet<string> _structuralTargets = new[]
     {
         IdentityClaimTypes.Subject,
         IdentityClaimTypes.Issuer,
@@ -194,7 +194,7 @@ public sealed class IdentityClaimMapper
                 continue;
             }
 
-            if (structuralTargets.Contains(target))
+            if (_structuralTargets.Contains(target))
             {
                 throw new IdentityModelException(
                     $"The claim mapping '{name}' resolves to the structural claim '{target}'. Subject and envelope " +

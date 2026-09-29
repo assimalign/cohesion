@@ -1,6 +1,8 @@
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Language;
+
 namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public class SqlSelectParserTests
@@ -106,6 +108,41 @@ public class SqlSelectParserTests
         select.Joins[0].Table.TableName.ShouldBe("Orders");
         select.Joins[0].Table.Alias.ShouldBe("o");
         select.Joins[0].Condition.ShouldNotBeNull();
+        statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Language] - JOIN: Preserves schema-qualified owner query references")]
+    public void Parse_SchemaQualifiedInnerJoin_PreservesBothTableBindings()
+    {
+        var statement = (SqlQueryStatement)_parser.Parse(
+            "SELECT usr.Users.FirstName, usr.Users.LastName, usr.UsersProfile.Email " +
+            "FROM usr.Users INNER JOIN usr.UsersProfile ON usr.Users.Id = usr.UsersProfile.UserId");
+
+        statement.Diagnostics.ShouldNotContain(item => item.Severity == DiagnosticSeverity.Error);
+        var select = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>();
+        select.From!.SchemaName.ShouldBe("usr");
+        select.From.TableName.ShouldBe("Users");
+        select.Joins.Count.ShouldBe(1);
+        select.Joins[0].Table.SchemaName.ShouldBe("usr");
+        select.Joins[0].Table.TableName.ShouldBe("UsersProfile");
+        var firstName = select.Columns[0].Expression.ShouldBeOfType<SqlColumnReferenceExpression>();
+        firstName.SchemaName.ShouldBe("usr");
+        firstName.TableAlias.ShouldBe("Users");
+        firstName.ColumnName.ShouldBe("FirstName");
+        var email = select.Columns[2].Expression.ShouldBeOfType<SqlColumnReferenceExpression>();
+        email.SchemaName.ShouldBe("usr");
+        email.TableAlias.ShouldBe("UsersProfile");
+        email.ColumnName.ShouldBe("Email");
+        var predicate = select.Joins[0].Condition.ShouldBeOfType<SqlBinaryExpression>();
+        predicate.Operator.ShouldBe(SqlBinaryOperator.Equal);
+        var left = predicate.Left.ShouldBeOfType<SqlColumnReferenceExpression>();
+        left.SchemaName.ShouldBe("usr");
+        left.TableAlias.ShouldBe("Users");
+        left.ColumnName.ShouldBe("Id");
+        var right = predicate.Right.ShouldBeOfType<SqlColumnReferenceExpression>();
+        right.SchemaName.ShouldBe("usr");
+        right.TableAlias.ShouldBe("UsersProfile");
+        right.ColumnName.ShouldBe("UserId");
     }
 
     [Fact]
@@ -117,6 +154,7 @@ public class SqlSelectParserTests
 
         select.Joins.Count.ShouldBe(1);
         select.Joins[0].JoinType.ShouldBe(SqlJoinType.LeftOuter);
+        statement.Diagnostics.ShouldContain(item => item.Code == "COHDBL001");
     }
 
     [Fact]

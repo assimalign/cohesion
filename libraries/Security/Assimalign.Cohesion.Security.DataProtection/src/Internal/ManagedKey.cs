@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Security.DataProtection;
+namespace Assimalign.Cohesion.Security.DataProtection.Internal;
 
 /// <summary>
 /// A concrete key in the ring: the public <see cref="IKey"/> metadata plus the secret

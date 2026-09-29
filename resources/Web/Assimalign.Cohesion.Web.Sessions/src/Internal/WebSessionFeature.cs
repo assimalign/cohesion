@@ -38,7 +38,7 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
     private readonly HttpSessionOptions _options;
 
     private IHttpSession? _current;
-    private HttpSessionStoreSession? _storeSession;
+    private IHttpStoredSession? _storeSession;
     private bool _orphanedNewSession;
 
     public WebSessionFeature(IHttpContext context, IHttpSessionStore store, HttpSessionOptions options)
@@ -71,11 +71,15 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
         {
             ArgumentNullException.ThrowIfNull(value);
             _current = value;
-            // An externally-supplied session replaces our managed one; regeneration
-            // (which needs the store-backed type) no longer applies to it, and its
-            // commit lifecycle is the caller's — never suppressed as an orphan.
-            _storeSession = value as HttpSessionStoreSession;
-            _orphanedNewSession = false;
+            // Only the session created here is known to use this feature's store.
+            // A replacement can implement IHttpStoredSession over another store;
+            // regenerating it would remove the old id from the wrong store.
+            if (!ReferenceEquals(value, _storeSession))
+            {
+                _storeSession = null;
+                // External replacements are never suppressed as orphaned sessions.
+                _orphanedNewSession = false;
+            }
         }
     }
 
@@ -125,7 +129,7 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
     /// cookie is replaced.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// No store-backed session has been established, or the response head has
+    /// No managed store-backed session is current, or the response head has
     /// already started (the cookie can no longer be replaced).
     /// </exception>
     public async ValueTask RegenerateIdAsync(CancellationToken cancellationToken)
@@ -133,7 +137,7 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
         if (_storeSession is null)
         {
             throw new InvalidOperationException(
-                "No session has been established on this request; access the session before regenerating its id.");
+                "No managed session is current on this request; establish the session and do not replace it before regenerating its id.");
         }
 
         if (ResponseHeadStarted())
@@ -166,7 +170,7 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
             _orphanedNewSession = !EstablishCookie(id);
         }
 
-        HttpSessionStoreSession session = new(id, _store, _options.IdleTimeout);
+        IHttpStoredSession session = _store.CreateSession(id, _options.IdleTimeout);
         _storeSession = session;
         return session;
     }

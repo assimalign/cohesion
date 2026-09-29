@@ -1,6 +1,6 @@
 using System;
 
-namespace Assimalign.Cohesion.Database.Storage;
+namespace Assimalign.Cohesion.Database.Storage.Internal;
 
 /// <summary>
 /// A read-only snapshot of a storage unit (record) with its page location and data.

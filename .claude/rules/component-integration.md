@@ -33,7 +33,7 @@ rationale in `analyzers/Assimalign.Cohesion.SourceGeneration.ComponentModel/docs
 - Delivery needs **no per-integration wiring**: the generator ships inside Core's nupkg
   (`CohesionAnalyzerReference` in Core's csproj → `analyzers/dotnet/cs`, picked up transitively)
   and with the App shared framework (`CohesionFrameworkAnalyzer` in
-  `frameworks/Assimalign.Cohesion.App.props`). In-repo test/consumer projects opt in with one
+  `libraries/App/Assimalign.Cohesion.App.props`). In-repo test/consumer projects opt in with one
   `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.ComponentModel" />`.
 
 ## Adding an integration — the whole recipe

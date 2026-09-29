@@ -212,7 +212,7 @@ public sealed class OpenIdConnectClientMetadata : ProtocolMetadata
 
         foreach (var redirectUri in RedirectUris)
         {
-            if (!ProtocolEndpoint.IsValidLocation(redirectUri))
+            if (!EndpointLocation.IsValid(redirectUri))
             {
                 diagnostics.Add(new ProtocolValidationDiagnostic(
                     ProtocolValidationSeverity.Error,
@@ -321,7 +321,7 @@ public sealed class OpenIdConnectClientMetadata : ProtocolMetadata
         string? location,
         ProtocolBinding binding)
     {
-        if (location is null || !ProtocolEndpoint.IsValidLocation(location))
+        if (location is null || !EndpointLocation.IsValid(location))
         {
             return;
         }

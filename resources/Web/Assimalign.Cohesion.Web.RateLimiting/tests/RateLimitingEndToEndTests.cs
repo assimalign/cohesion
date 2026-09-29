@@ -28,14 +28,14 @@ namespace Assimalign.Cohesion.Web.RateLimiting.Tests;
 /// </summary>
 public class RateLimitingEndToEndTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan LongWindow = TimeSpan.FromHours(1);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _longWindow = TimeSpan.FromHours(1);
 
     [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - E2E: An exhausted global limiter should answer 429 on the wire")]
     public async Task UseRateLimiting_GlobalLimiterExhausted_ShouldAnswer429()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -62,7 +62,7 @@ public class RateLimitingEndToEndTests
     public async Task UseRateLimiting_Rejection_ShouldCarryRetryAfterHeader()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -89,7 +89,7 @@ public class RateLimitingEndToEndTests
     public async Task UseRateLimiting_PerEndpointPolicy_ShouldGateMatchedRoute()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -123,7 +123,7 @@ public class RateLimitingEndToEndTests
     public async Task UseRateLimiting_OnRejected_ShouldShapeWireResponse()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -157,7 +157,7 @@ public class RateLimitingEndToEndTests
     public async Task UseRateLimiting_Unconfigured_ShouldPassThrough()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
@@ -185,7 +185,7 @@ public class RateLimitingEndToEndTests
             _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
             {
                 PermitLimit = 1,
-                Window = LongWindow,
+                Window = _longWindow,
                 QueueLimit = 0,
             }));
 }

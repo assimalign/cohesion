@@ -39,13 +39,13 @@ and disposes it exactly once on tear-down.
 
 ## Accept Model
 
-A `NamedPipeServerStream` instance serves exactly one client, so the listener creates a fresh instance
-per accept. `AcceptAsync` creates a server-stream instance (the first call reserves the pipe name),
-awaits `WaitForConnectionAsync`, and returns a `NamedPipeConnection` wrapping the connected instance;
-the next `AcceptAsync` creates the next instance. A continuously-accepting consumer (the HTTP connection
-listener loops accept) therefore always has one instance waiting, so the pipe name stays live between
-connections. `MaxServerInstances` (default: unlimited) bounds how many instances may share the name; the
-practical bound is the consumer's concurrency, not the transport.
+A `NamedPipeServerStream` instance serves exactly one client. `BindAsync` creates the initial instance
+and reserves the pipe name; it is idempotent while the listener is active. `AcceptAsync` consumes that
+reserved instance, awaits `WaitForConnectionAsync`, and returns a `NamedPipeConnection` wrapping the
+connected instance; the next `AcceptAsync` creates the next instance. A continuously-accepting consumer
+(the HTTP connection listener loops accept) therefore always has one instance waiting, so the pipe name
+stays live between connections. `MaxServerInstances` (default: unlimited) bounds how many instances may
+share the name; the practical bound is the consumer's concurrency, not the transport.
 
 The in-flight listening instance is tracked so `DisposeAsync` can dispose it, which unblocks a pending
 `WaitForConnectionAsync` (it observes `ObjectDisposedException`) and surfaces as
@@ -92,12 +92,35 @@ must be `"."`), because a named-pipe server cannot be created on a remote machin
 - `ConnectionClosed` fires when **this** end is disposed or aborted; a peer close is observed by reading
   `Input` (which completes) or writing `Output` (whose flush faults) — exactly how a byte-stream
   consumer such as an HTTP parser already detects end-of-connection. There is no background watcher.
+- Listener disposal releases the reserved server instance, closes tracked accepted connections, and is
+  terminal. A later bind on the same pipe name uses a new listener instance.
+
+## Diagnostics
+
+The driver reports through its own internal event source, named for the assembly:
+`Assimalign.Cohesion.Connections.NamedPipes` (`Internal/EventSource/NamedPipeConnectionEventSource.cs`),
+per the repository EventSource convention (`.claude/rules/event-source.md`). Tools enable it by name;
+an application forwards it into its logging with `Assimalign.Cohesion.Logging.EventSource`, where the
+source name becomes the log category.
+
+| Id | Event | Level | Payload |
+|---|---|---|---|
+| 1 | `ListenerBound` | Informational | `listenerId`, `endPoint` |
+| 2 | `ListenerClosed` | Informational | `listenerId` |
+| 3 | `ConnectionOpened` | Informational | `connectionId`, `listenerId` (empty when dialed), `localEndPoint`, `remoteEndPoint` |
+| 4 | `ConnectionClosed` | Informational | `connectionId` |
+
+Counters: `current-connections`, `total-connections`, and `connections-per-second`.
+
+The connection, not the listener, reports its own lifecycle, so dialed connections are counted too
+(the listener used to report only accepted ones, and nothing reported a close). `Abort` and
+`DisposeAsync` both end a connection; whichever runs first reports the close, once.
 
 ## AOT Posture
 
 No reflection, no runtime code generation, no serialization. A pure `System.IO.Pipes` +
-`System.IO.Pipelines` composition over BCL types, with `System.Diagnostics.Tracing` counters shared from
-the core Connections library. Fully NativeAOT/trim compatible (`IsAotCompatible=true`). The Windows-only
+`System.IO.Pipelines` composition over BCL types, with the driver's own internal
+`System.Diagnostics.Tracing` event source and counters. Fully NativeAOT/trim compatible (`IsAotCompatible=true`). The Windows-only
 ACL surface is isolated behind `[SupportedOSPlatform("windows")]` guards so no platform-specific code is
 reachable on other operating systems.
 
@@ -117,7 +140,8 @@ reachable on other operating systems.
 
 - **`Assimalign.Cohesion.Connections`** — the `Connection` / `ConnectionListener` / `ConnectionFactory`
   guided bases this driver implements, plus `ConnectionCapabilities`, `ConnectionProtocol.NamedPipe`,
-  `ConnectionAbortedException`, `ListenerId`, and the shared `ConnectionEventSource` diagnostics.
+  `ConnectionAbortedException`, and `ListenerId`. Diagnostics are this driver's own internal event
+  source (see *Diagnostics*), not a seam on the contracts library.
 - **`Assimalign.Cohesion.Connections.Tcp`** — the sibling stream driver whose Unix domain socket path is
   the POSIX counterpart to this Windows-native local IPC transport.
 - **`Assimalign.Cohesion.Http.Connections`** — composes this listener via

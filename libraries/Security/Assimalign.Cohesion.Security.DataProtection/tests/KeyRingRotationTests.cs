@@ -5,12 +5,14 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.Security.DataProtection.Internal;
+
 namespace Assimalign.Cohesion.Security.DataProtection.Tests;
 
 public class KeyRingRotationTests
 {
-    private static readonly byte[] Sample = Encoding.UTF8.GetBytes("rotation-sample");
-    private static readonly DateTimeOffset Origin = new(2026, 7, 3, 0, 0, 0, TimeSpan.Zero);
+    private static readonly byte[] _sample = Encoding.UTF8.GetBytes("rotation-sample");
+    private static readonly DateTimeOffset _origin = new(2026, 7, 3, 0, 0, 0, TimeSpan.Zero);
 
     private static DataProtectionOptions Options() => new()
     {
@@ -23,14 +25,14 @@ public class KeyRingRotationTests
     public void Protect_WithinActiveWindow_ShouldNotCreateAdditionalKeys()
     {
         InMemoryKeyRepository repository = new();
-        MutableTimeProvider time = new(Origin);
+        MutableTimeProvider time = new(_origin);
         IDataProtector protector = DataProtectionProvider
             .Create(Options(), repository, time)
             .CreateProtector("purpose");
 
-        protector.Protect(Sample);
+        protector.Protect(_sample);
         time.Advance(TimeSpan.FromMinutes(5));
-        protector.Protect(Sample);
+        protector.Protect(_sample);
 
         repository.Count.ShouldBe(1);
     }
@@ -39,14 +41,14 @@ public class KeyRingRotationTests
     public void Protect_AfterExpiry_ShouldCreateAndUseANewKey()
     {
         InMemoryKeyRepository repository = new();
-        MutableTimeProvider time = new(Origin);
+        MutableTimeProvider time = new(_origin);
         IDataProtector protector = DataProtectionProvider
             .Create(Options(), repository, time)
             .CreateProtector("purpose");
 
-        byte[] first = protector.Protect(Sample);
+        byte[] first = protector.Protect(_sample);
         time.Advance(TimeSpan.FromMinutes(11)); // past the 10-minute lifetime
-        byte[] second = protector.Protect(Sample);
+        byte[] second = protector.Protect(_sample);
 
         repository.Count.ShouldBe(2);
         // Different producing keys ⇒ different key id in the header.
@@ -59,35 +61,35 @@ public class KeyRingRotationTests
     public void Unprotect_RetiredKeyWithinGrace_ShouldSucceed()
     {
         InMemoryKeyRepository repository = new();
-        MutableTimeProvider time = new(Origin);
+        MutableTimeProvider time = new(_origin);
         IDataProtector protector = DataProtectionProvider
             .Create(Options(), repository, time)
             .CreateProtector("purpose");
 
-        byte[] protectedByKey1 = protector.Protect(Sample);
+        byte[] protectedByKey1 = protector.Protect(_sample);
 
         // Rotate: key1 expires at +10m; the grace window runs to +15m.
         time.Advance(TimeSpan.FromMinutes(11));
-        protector.Protect(Sample); // forces key2 creation
-        time.Set(Origin + TimeSpan.FromMinutes(14)); // still inside key1's grace window
+        protector.Protect(_sample); // forces key2 creation
+        time.Set(_origin + TimeSpan.FromMinutes(14)); // still inside key1's grace window
 
-        protector.Unprotect(protectedByKey1).ShouldBe(Sample);
+        protector.Unprotect(protectedByKey1).ShouldBe(_sample);
     }
 
     [Fact(DisplayName = "Cohesion Test [Security.DataProtection] - KeyRing: Should reject a key aged out of the grace window")]
     public void Unprotect_RetiredKeyBeyondGrace_ShouldThrow()
     {
         InMemoryKeyRepository repository = new();
-        MutableTimeProvider time = new(Origin);
+        MutableTimeProvider time = new(_origin);
         IDataProtector protector = DataProtectionProvider
             .Create(Options(), repository, time)
             .CreateProtector("purpose");
 
-        byte[] protectedByKey1 = protector.Protect(Sample);
+        byte[] protectedByKey1 = protector.Protect(_sample);
 
         time.Advance(TimeSpan.FromMinutes(11));
-        protector.Protect(Sample); // key2
-        time.Set(Origin + TimeSpan.FromMinutes(16)); // past key1 expiry (+10m) + grace (+5m)
+        protector.Protect(_sample); // key2
+        time.Set(_origin + TimeSpan.FromMinutes(16)); // past key1 expiry (+10m) + grace (+5m)
 
         Should.Throw<DataProtectionException>(() => protector.Unprotect(protectedByKey1));
     }

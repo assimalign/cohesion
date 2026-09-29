@@ -15,6 +15,8 @@ namespace Assimalign.Cohesion.Connections.Tcp;
 /// <remarks>
 /// Each call to <see cref="ConnectionFactory.ConnectAsync(EndPoint, CancellationToken)"/> connects a
 /// fresh socket and returns a live <see cref="TcpConnection"/> whose IO loops are already running.
+/// <see cref="DnsEndPoint"/> values use the socket constructor that selects IPv4 or dual-mode IPv6
+/// according to platform support so name resolution is not constrained by an unspecified address family.
 /// </remarks>
 public sealed class TcpConnectionFactory : ConnectionFactory
 {
@@ -60,6 +62,7 @@ public sealed class TcpConnectionFactory : ConnectionFactory
                 endPoint.AddressFamily,
                 SocketType.Stream,
                 ProtocolType.Unspecified),
+            DnsEndPoint => new Socket(SocketType.Stream, ProtocolType.Tcp),
             /*
                 We're passing "ownsHandle: true" here even though we don't necessarily
                 own the handle because Socket.Dispose will clean-up everything safely.

@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion
         /// </summary>
         [Export(typeof(ClassificationTypeDefinition))]
         [Name("EditorClassifier1")]
-        private static ClassificationTypeDefinition typeDefinition;
+        private static ClassificationTypeDefinition _typeDefinition;
 
 #pragma warning restore 169
     }

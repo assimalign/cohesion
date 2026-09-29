@@ -66,6 +66,7 @@ internal sealed class ClientTestHarness : IAsyncDisposable
         {
             Settings = settings,
             ConnectionFactory = listener.CreateFactory(),
+            Family = SqlProtocol.Family,
         });
 
         return new ClientTestHarness(engine, listener, server, client);

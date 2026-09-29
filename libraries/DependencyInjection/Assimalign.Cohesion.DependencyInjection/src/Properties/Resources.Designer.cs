@@ -24,9 +24,9 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
     [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
     internal partial class Resources {
         
-        private static global::System.Resources.ResourceManager resourceMan;
+        private static global::System.Resources.ResourceManager _resourceMan;
         
-        private static global::System.Globalization.CultureInfo resourceCulture;
+        private static global::System.Globalization.CultureInfo _resourceCulture;
         
         [global::System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1811:AvoidUncalledPrivateCode")]
         internal Resources() {
@@ -38,11 +38,11 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         [global::System.ComponentModel.EditorBrowsableAttribute(global::System.ComponentModel.EditorBrowsableState.Advanced)]
         internal static global::System.Resources.ResourceManager ResourceManager {
             get {
-                if (object.ReferenceEquals(resourceMan, null)) {
+                if (object.ReferenceEquals(_resourceMan, null)) {
                     global::System.Resources.ResourceManager temp = new global::System.Resources.ResourceManager("Assimalign.Cohesion.DependencyInjection.Properties.Resources", typeof(Resources).Assembly);
-                    resourceMan = temp;
+                    _resourceMan = temp;
                 }
-                return resourceMan;
+                return _resourceMan;
             }
         }
         
@@ -53,10 +53,10 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         [global::System.ComponentModel.EditorBrowsableAttribute(global::System.ComponentModel.EditorBrowsableState.Advanced)]
         internal static global::System.Globalization.CultureInfo Culture {
             get {
-                return resourceCulture;
+                return _resourceCulture;
             }
             set {
-                resourceCulture = value;
+                _resourceCulture = value;
             }
         }
         
@@ -65,7 +65,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string AmbiguousConstructorException {
             get {
-                return ResourceManager.GetString("AmbiguousConstructorException", resourceCulture);
+                return ResourceManager.GetString("AmbiguousConstructorException", _resourceCulture);
             }
         }
         
@@ -74,7 +74,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string AmbiguousConstructorMatch {
             get {
-                return ResourceManager.GetString("AmbiguousConstructorMatch", resourceCulture);
+                return ResourceManager.GetString("AmbiguousConstructorMatch", _resourceCulture);
             }
         }
         
@@ -83,7 +83,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string ArityOfOpenGenericServiceNotEqualArityOfOpenGenericImplementation {
             get {
-                return ResourceManager.GetString("ArityOfOpenGenericServiceNotEqualArityOfOpenGenericImplementation", resourceCulture);
+                return ResourceManager.GetString("ArityOfOpenGenericServiceNotEqualArityOfOpenGenericImplementation", _resourceCulture);
             }
         }
         
@@ -92,7 +92,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string AsyncDisposableServiceDispose {
             get {
-                return ResourceManager.GetString("AsyncDisposableServiceDispose", resourceCulture);
+                return ResourceManager.GetString("AsyncDisposableServiceDispose", _resourceCulture);
             }
         }
         
@@ -101,7 +101,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string CallSiteTypeNotSupported {
             get {
-                return ResourceManager.GetString("CallSiteTypeNotSupported", resourceCulture);
+                return ResourceManager.GetString("CallSiteTypeNotSupported", _resourceCulture);
             }
         }
         
@@ -110,7 +110,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string CannotCreateAbstractClasses {
             get {
-                return ResourceManager.GetString("CannotCreateAbstractClasses", resourceCulture);
+                return ResourceManager.GetString("CannotCreateAbstractClasses", _resourceCulture);
             }
         }
         
@@ -119,7 +119,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string CannotResolveService {
             get {
-                return ResourceManager.GetString("CannotResolveService", resourceCulture);
+                return ResourceManager.GetString("CannotResolveService", _resourceCulture);
             }
         }
         
@@ -128,7 +128,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string CannotResolveService1 {
             get {
-                return ResourceManager.GetString("CannotResolveService1", resourceCulture);
+                return ResourceManager.GetString("CannotResolveService1", _resourceCulture);
             }
         }
         
@@ -137,7 +137,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string CircularDependencyException {
             get {
-                return ResourceManager.GetString("CircularDependencyException", resourceCulture);
+                return ResourceManager.GetString("CircularDependencyException", _resourceCulture);
             }
         }
         
@@ -146,7 +146,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string ConstantCantBeConvertedToServiceType {
             get {
-                return ResourceManager.GetString("ConstantCantBeConvertedToServiceType", resourceCulture);
+                return ResourceManager.GetString("ConstantCantBeConvertedToServiceType", _resourceCulture);
             }
         }
         
@@ -155,7 +155,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string CtorNotLocated {
             get {
-                return ResourceManager.GetString("CtorNotLocated", resourceCulture);
+                return ResourceManager.GetString("CtorNotLocated", _resourceCulture);
             }
         }
         
@@ -164,7 +164,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string DirectScopedResolvedFromRootException {
             get {
-                return ResourceManager.GetString("DirectScopedResolvedFromRootException", resourceCulture);
+                return ResourceManager.GetString("DirectScopedResolvedFromRootException", _resourceCulture);
             }
         }
         
@@ -173,7 +173,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string GetCaptureDisposableNotSupported {
             get {
-                return ResourceManager.GetString("GetCaptureDisposableNotSupported", resourceCulture);
+                return ResourceManager.GetString("GetCaptureDisposableNotSupported", _resourceCulture);
             }
         }
         
@@ -182,7 +182,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string ImplementationTypeCantBeConvertedToServiceType {
             get {
-                return ResourceManager.GetString("ImplementationTypeCantBeConvertedToServiceType", resourceCulture);
+                return ResourceManager.GetString("ImplementationTypeCantBeConvertedToServiceType", _resourceCulture);
             }
         }
         
@@ -191,7 +191,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string InvalidServiceDescriptor {
             get {
-                return ResourceManager.GetString("InvalidServiceDescriptor", resourceCulture);
+                return ResourceManager.GetString("InvalidServiceDescriptor", _resourceCulture);
             }
         }
         
@@ -200,7 +200,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string MarkedCtorMissingArgumentTypes {
             get {
-                return ResourceManager.GetString("MarkedCtorMissingArgumentTypes", resourceCulture);
+                return ResourceManager.GetString("MarkedCtorMissingArgumentTypes", _resourceCulture);
             }
         }
         
@@ -209,7 +209,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string MultipleCtorsFound {
             get {
-                return ResourceManager.GetString("MultipleCtorsFound", resourceCulture);
+                return ResourceManager.GetString("MultipleCtorsFound", _resourceCulture);
             }
         }
         
@@ -218,7 +218,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string MultipleCtorsFoundWithBestLength {
             get {
-                return ResourceManager.GetString("MultipleCtorsFoundWithBestLength", resourceCulture);
+                return ResourceManager.GetString("MultipleCtorsFoundWithBestLength", _resourceCulture);
             }
         }
         
@@ -227,7 +227,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string MultipleCtorsMarkedWithAttribute {
             get {
-                return ResourceManager.GetString("MultipleCtorsMarkedWithAttribute", resourceCulture);
+                return ResourceManager.GetString("MultipleCtorsMarkedWithAttribute", _resourceCulture);
             }
         }
         
@@ -236,7 +236,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string NoConstructorMatch {
             get {
-                return ResourceManager.GetString("NoConstructorMatch", resourceCulture);
+                return ResourceManager.GetString("NoConstructorMatch", _resourceCulture);
             }
         }
         
@@ -245,7 +245,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string NoConstructorMatch1 {
             get {
-                return ResourceManager.GetString("NoConstructorMatch1", resourceCulture);
+                return ResourceManager.GetString("NoConstructorMatch1", _resourceCulture);
             }
         }
         
@@ -254,7 +254,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string NoServiceRegistered {
             get {
-                return ResourceManager.GetString("NoServiceRegistered", resourceCulture);
+                return ResourceManager.GetString("NoServiceRegistered", _resourceCulture);
             }
         }
         
@@ -263,7 +263,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string OpenGenericServiceRequiresOpenGenericImplementation {
             get {
-                return ResourceManager.GetString("OpenGenericServiceRequiresOpenGenericImplementation", resourceCulture);
+                return ResourceManager.GetString("OpenGenericServiceRequiresOpenGenericImplementation", _resourceCulture);
             }
         }
         
@@ -272,7 +272,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string ScopedInSingletonException {
             get {
-                return ResourceManager.GetString("ScopedInSingletonException", resourceCulture);
+                return ResourceManager.GetString("ScopedInSingletonException", _resourceCulture);
             }
         }
         
@@ -281,7 +281,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string ScopedResolvedFromRootException {
             get {
-                return ResourceManager.GetString("ScopedResolvedFromRootException", resourceCulture);
+                return ResourceManager.GetString("ScopedResolvedFromRootException", _resourceCulture);
             }
         }
         
@@ -290,7 +290,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string ServiceCollectionReadOnly {
             get {
-                return ResourceManager.GetString("ServiceCollectionReadOnly", resourceCulture);
+                return ResourceManager.GetString("ServiceCollectionReadOnly", _resourceCulture);
             }
         }
         
@@ -299,7 +299,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string ServiceDescriptorNotExist {
             get {
-                return ResourceManager.GetString("ServiceDescriptorNotExist", resourceCulture);
+                return ResourceManager.GetString("ServiceDescriptorNotExist", _resourceCulture);
             }
         }
         
@@ -308,7 +308,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string TrimmingAnnotationsDoNotMatch {
             get {
-                return ResourceManager.GetString("TrimmingAnnotationsDoNotMatch", resourceCulture);
+                return ResourceManager.GetString("TrimmingAnnotationsDoNotMatch", _resourceCulture);
             }
         }
         
@@ -317,7 +317,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string TrimmingAnnotationsDoNotMatch_NewConstraint {
             get {
-                return ResourceManager.GetString("TrimmingAnnotationsDoNotMatch_NewConstraint", resourceCulture);
+                return ResourceManager.GetString("TrimmingAnnotationsDoNotMatch_NewConstraint", _resourceCulture);
             }
         }
         
@@ -326,7 +326,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string TryAddIndistinguishableTypeToEnumerable {
             get {
-                return ResourceManager.GetString("TryAddIndistinguishableTypeToEnumerable", resourceCulture);
+                return ResourceManager.GetString("TryAddIndistinguishableTypeToEnumerable", _resourceCulture);
             }
         }
         
@@ -335,7 +335,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string TypeCannotBeActivated {
             get {
-                return ResourceManager.GetString("TypeCannotBeActivated", resourceCulture);
+                return ResourceManager.GetString("TypeCannotBeActivated", _resourceCulture);
             }
         }
         
@@ -344,7 +344,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string UnableToActivateTypeException {
             get {
-                return ResourceManager.GetString("UnableToActivateTypeException", resourceCulture);
+                return ResourceManager.GetString("UnableToActivateTypeException", _resourceCulture);
             }
         }
         
@@ -353,7 +353,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Properties {
         /// </summary>
         internal static string UnableToResolveService {
             get {
-                return ResourceManager.GetString("UnableToResolveService", resourceCulture);
+                return ResourceManager.GetString("UnableToResolveService", _resourceCulture);
             }
         }
     }

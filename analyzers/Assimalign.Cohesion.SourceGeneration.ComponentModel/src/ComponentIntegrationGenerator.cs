@@ -10,6 +10,8 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
 
+using Assimalign.Cohesion.SourceGeneration.ComponentModel.Internal;
+
 namespace Assimalign.Cohesion.SourceGeneration.ComponentModel;
 
 /// <summary>
@@ -29,7 +31,7 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
     /// </summary>
     private const string ParameterNameSeparator = "\u001f";
 
-    private static readonly SymbolDisplayFormat TypeDisplayFormat = SymbolDisplayFormat.FullyQualifiedFormat
+    private static readonly SymbolDisplayFormat _typeDisplayFormat = SymbolDisplayFormat.FullyQualifiedFormat
         .WithGlobalNamespaceStyle(SymbolDisplayGlobalNamespaceStyle.Included)
         .WithMiscellaneousOptions(
             (SymbolDisplayFormat.FullyQualifiedFormat.MiscellaneousOptions
@@ -206,7 +208,7 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                 continue;
             }
 
-            string integrationName = $"{assemblyName}:{factoryType.ToDisplayString(TypeDisplayFormat)}.{factoryMethodName}";
+            string integrationName = $"{assemblyName}:{factoryType.ToDisplayString(_typeDisplayFormat)}.{factoryMethodName}";
 
             if (!SymbolEqualityComparer.Default.Equals(factoryType.ContainingAssembly, assembly))
             {
@@ -308,7 +310,7 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                             ComponentIntegrationDiagnostics.DisposableInstance,
                             Location.None,
                             $"Component integration '{integrationName}' directly returns disposable type "
-                                + $"'{productType.ToDisplayString(TypeDisplayFormat)}'; return a System.Func<...> "
+                                + $"'{productType.ToDisplayString(_typeDisplayFormat)}'; return a System.Func<...> "
                                 + "so the container captures the product for disposal."));
                     }
 
@@ -318,18 +320,18 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                             ? string.Empty
                             : factoryType.ContainingNamespace.ToDisplayString(),
                         targetTypeName,
-                        seam.ToDisplayString(TypeDisplayFormat),
+                        seam.ToDisplayString(_typeDisplayFormat),
                         seam.ContainingNamespace.IsGlobalNamespace
                             ? string.Empty
                             : seam.ContainingNamespace.ToDisplayString(),
                         seam.ContainingAssembly.Identity.Name,
                         renderedTargetMethodName,
-                        factoryType.ToDisplayString(TypeDisplayFormat),
+                        factoryType.ToDisplayString(_typeDisplayFormat),
                         renderedFactoryMethodName,
                         renderedVerb,
                         RenderParameterList(method.Parameters),
                         RenderArgumentList(method.Parameters),
-                        contract?.ToDisplayString(TypeDisplayFormat) ?? string.Empty,
+                        contract?.ToDisplayString(_typeDisplayFormat) ?? string.Empty,
                         contract is not null,
                         false,
                         string.Join(
@@ -421,14 +423,14 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                 continue;
             }
 
-            string factoryTypeName = factoryType.ToDisplayString(TypeDisplayFormat);
+            string factoryTypeName = factoryType.ToDisplayString(_typeDisplayFormat);
             projections.Add(new ProjectionModel(
                 assemblyName,
                 factoryType.ContainingNamespace.IsGlobalNamespace
                     ? string.Empty
                     : factoryType.ContainingNamespace.ToDisplayString(),
                 targetTypeName,
-                seam.ToDisplayString(TypeDisplayFormat),
+                seam.ToDisplayString(_typeDisplayFormat),
                 seam.ContainingNamespace.IsGlobalNamespace
                     ? string.Empty
                     : seam.ContainingNamespace.ToDisplayString(),
@@ -439,7 +441,7 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
                 renderedVerb,
                 $"global::System.Action<{factoryTypeName}> @configure",
                 string.Empty,
-                contract?.ToDisplayString(TypeDisplayFormat) ?? string.Empty,
+                contract?.ToDisplayString(_typeDisplayFormat) ?? string.Empty,
                 contract is not null,
                 true,
                 string.Join(
@@ -795,7 +797,7 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
             builder.Append("params ");
         }
 
-        builder.Append(parameter.Type.ToDisplayString(TypeDisplayFormat));
+        builder.Append(parameter.Type.ToDisplayString(_typeDisplayFormat));
         builder.Append(" @");
         builder.Append(parameter.Name);
 
@@ -823,7 +825,7 @@ public sealed class ComponentIntegrationGenerator : IIncrementalGenerator
             && parameter.Type is INamedTypeSymbol enumType
             && enumType.EnumUnderlyingType is INamedTypeSymbol underlyingType)
         {
-            return $"({parameter.Type.ToDisplayString(TypeDisplayFormat)})("
+            return $"({parameter.Type.ToDisplayString(_typeDisplayFormat)})("
                 + RenderNumericConstant(value, underlyingType.SpecialType)
                 + ")";
         }

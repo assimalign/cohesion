@@ -9,6 +9,8 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
+using Assimalign.Cohesion.SourceGeneration.Web.Internal;
+
 namespace Assimalign.Cohesion.SourceGeneration.Web;
 
 /// <summary>
@@ -26,7 +28,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     private const string WebNamespace = "Assimalign.Cohesion.Web";
     private const string GeneratedNamespace = "Assimalign.Cohesion.Web.Api.Generated";
 
-    private static readonly SymbolDisplayFormat FullyQualified = new(
+    private static readonly SymbolDisplayFormat _fullyQualified = new(
         globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Included,
         typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
         genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
@@ -34,7 +36,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers |
             SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
-    private static readonly HashSet<string> Verbs = new()
+    private static readonly HashSet<string> _verbs = new()
     {
         "Map", "MapGet", "MapPost", "MapPut", "MapPatch", "MapDelete"
     };
@@ -58,7 +60,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             Expression: MemberAccessExpressionSyntax memberAccess,
             ArgumentList.Arguments.Count: >= 2
         }
-        && Verbs.Contains(memberAccess.Name.Identifier.Text);
+        && _verbs.Contains(memberAccess.Name.Identifier.Text);
 
     private static EndpointBinding? Transform(GeneratorSyntaxContext ctx, CancellationToken ct)
     {
@@ -71,7 +73,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             return null;
         }
 
-        if (!Verbs.Contains(method.Name))
+        if (!_verbs.Contains(method.Name))
         {
             return null;
         }
@@ -207,7 +209,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
         return new EndpointBinding(
             location.GetInterceptsLocationAttributeSyntax(),
-            receiverType.ToDisplayString(FullyQualified),
+            receiverType.ToDisplayString(_fullyQualified),
             hasMethodParameter,
             methodExpression,
             delegateType,
@@ -228,7 +230,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     {
         binding = default;
         ITypeSymbol type = parameter.Type;
-        string declaredType = type.ToDisplayString(FullyQualified);
+        string declaredType = type.ToDisplayString(_fullyQualified);
 
         // Direct injections take precedence over any binding source.
         if (contextType is not null && SymbolEqualityComparer.Default.Equals(type, contextType))
@@ -297,7 +299,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         if (type is INamedTypeSymbol named && named.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
         {
             ITypeSymbol inner = named.TypeArguments[0];
-            string innerType = inner.ToDisplayString(FullyQualified);
+            string innerType = inner.ToDisplayString(_fullyQualified);
 
             if (inner.TypeKind == TypeKind.Enum)
             {
@@ -314,12 +316,12 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
         if (type.TypeKind == TypeKind.Enum)
         {
-            return (ConversionKind.Enum, type.ToDisplayString(FullyQualified), true);
+            return (ConversionKind.Enum, type.ToDisplayString(_fullyQualified), true);
         }
 
         if (ImplementsParsable(type, parsableType))
         {
-            return (ConversionKind.Parsable, type.ToDisplayString(FullyQualified), true);
+            return (ConversionKind.Parsable, type.ToDisplayString(_fullyQualified), true);
         }
 
         return (ConversionKind.Complex, "", false);

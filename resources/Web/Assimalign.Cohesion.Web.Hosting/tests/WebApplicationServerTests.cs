@@ -6,6 +6,7 @@ using Shouldly;
 
 using Xunit;
 
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
@@ -14,7 +15,133 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 
 public class WebApplicationServerTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(5);
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: StartAsync should await listener binding before accepting")]
+    public async Task StartAsync_WithPendingBind_ShouldWaitBeforeAccepting()
+    {
+        // Arrange
+        TaskCompletionSource bindEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource releaseBind = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        FakeHttpConnectionListener listener = new()
+        {
+            BindHandler = async cancellationToken =>
+            {
+                bindEntered.TrySetResult();
+                await releaseBind.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+        };
+        WebApplicationServer server = CreateServer(new FakePipeline(), listener);
+
+        // Act
+        Task startTask = server.StartAsync();
+        await bindEntered.Task.WaitAsync(_timeout);
+
+        // Assert
+        startTask.IsCompleted.ShouldBeFalse();
+        listener.AcceptCount.ShouldBe(0);
+
+        releaseBind.TrySetResult();
+        await startTask.WaitAsync(_timeout);
+        await WaitForAsync(() => listener.AcceptCount > 0, _timeout);
+        listener.BindCount.ShouldBe(1);
+
+        await server.StopAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: StartAsync should surface a typed listener bind failure")]
+    public async Task StartAsync_WhenBindFails_ShouldThrowHostStartupExceptionWithoutAccepting()
+    {
+        // Arrange
+        InvalidOperationException failure = new("endpoint unavailable");
+        FakeHttpConnectionListener listener = new()
+        {
+            BindHandler = _ => ValueTask.FromException(failure)
+        };
+        WebApplicationServer server = CreateServer(new FakePipeline(), listener);
+
+        // Act
+        HostStartupException observed = await Should.ThrowAsync<HostStartupException>(
+            () => server.StartAsync());
+
+        // Assert
+        observed.InnerException.ShouldBeSameAs(failure);
+        listener.BindCount.ShouldBe(1);
+        listener.AcceptCount.ShouldBe(0);
+
+        await server.StopAsync();
+        listener.DisposeCount.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: StopAsync during binding should cancel startup and release without accepting")]
+    public async Task StopAsync_WhileBindIsPending_ShouldCancelBindingAndReleaseWithoutAccepting()
+    {
+        // Arrange
+        TaskCompletionSource bindEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource bindCancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        FakeHttpConnectionListener listener = new()
+        {
+            BindHandler = async cancellationToken =>
+            {
+                bindEntered.TrySetResult();
+
+                try
+                {
+                    await Task.Delay(global::System.Threading.Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    bindCancelled.TrySetResult();
+                    throw;
+                }
+            }
+        };
+        WebApplicationServer server = CreateServer(new FakePipeline(), listener);
+
+        Task startTask = server.StartAsync();
+        await bindEntered.Task.WaitAsync(_timeout);
+
+        // Act
+        Task stopTask = server.StopAsync();
+
+        // Assert
+        await Task.WhenAll(startTask, stopTask).WaitAsync(_timeout);
+        await bindCancelled.Task.WaitAsync(_timeout);
+        listener.AcceptCount.ShouldBe(0);
+        listener.DisposeCount.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: Concurrent StopAsync callers should await the same listener release")]
+    public async Task StopAsync_WhenCalledConcurrently_ShouldShareCompletionThroughListenerRelease()
+    {
+        // Arrange
+        TaskCompletionSource disposeEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource releaseDispose = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        FakeHttpConnectionListener listener = new()
+        {
+            DisposeHandler = async () =>
+            {
+                disposeEntered.TrySetResult();
+                await releaseDispose.Task.ConfigureAwait(false);
+            }
+        };
+        WebApplicationServer server = CreateServer(new FakePipeline(), listener);
+        await server.StartAsync();
+        await WaitForAsync(() => listener.AcceptCount > 0, _timeout);
+
+        // Act
+        Task firstStop = server.StopAsync();
+        await disposeEntered.Task.WaitAsync(_timeout);
+        Task secondStop = server.StopAsync();
+
+        // Assert
+        secondStop.ShouldBeSameAs(firstStop);
+        secondStop.IsCompleted.ShouldBeFalse();
+
+        releaseDispose.TrySetResult();
+        await Task.WhenAll(firstStop, secondStop).WaitAsync(_timeout);
+        listener.DisposeCount.ShouldBe(1);
+    }
 
     [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: An idle keep-alive connection does not starve other connections")]
     public async Task StartAsync_WithIdleKeepAliveConnection_ServesOtherConnectionsConcurrently()
@@ -45,7 +172,7 @@ public class WebApplicationServerTests
         await server.StartAsync();
 
         // Assert — B is served within the bound even though A is still parked.
-        await Should.NotThrowAsync(() => exchangeBProcessed.Task.WaitAsync(Timeout));
+        await Should.NotThrowAsync(() => exchangeBProcessed.Task.WaitAsync(_timeout));
         connectionB.Context.SendCount.ShouldBe(1);
 
         await server.StopAsync();
@@ -85,14 +212,14 @@ public class WebApplicationServerTests
         await server.StartAsync();
 
         // Assert — the faulted connection is aborted and disposed; the survivor is served.
-        await Should.NotThrowAsync(() => connectionA.Disposed.Task.WaitAsync(Timeout));
+        await Should.NotThrowAsync(() => connectionA.Disposed.Task.WaitAsync(_timeout));
         connectionA.AbortCount.ShouldBe(1);
         connectionA.AbortReason.ShouldBeSameAs(fault);
         connectionA.Context.DisposeCount.ShouldBe(1);
         exchangeA.DisposeCount.ShouldBe(1);
 
-        await Should.NotThrowAsync(() => exchangeBProcessed.Task.WaitAsync(Timeout));
-        await Should.NotThrowAsync(() => connectionB.Disposed.Task.WaitAsync(Timeout));
+        await Should.NotThrowAsync(() => exchangeBProcessed.Task.WaitAsync(_timeout));
+        await Should.NotThrowAsync(() => connectionB.Disposed.Task.WaitAsync(_timeout));
         connectionB.AbortCount.ShouldBe(0);
         connectionB.Context.SendCount.ShouldBe(1);
 
@@ -111,7 +238,7 @@ public class WebApplicationServerTests
 
         // Act
         await server.StartAsync();
-        await Should.NotThrowAsync(() => connection.Disposed.Task.WaitAsync(Timeout));
+        await Should.NotThrowAsync(() => connection.Disposed.Task.WaitAsync(_timeout));
 
         // Assert
         connection.DisposeCount.ShouldBe(1);
@@ -119,6 +246,55 @@ public class WebApplicationServerTests
         connection.AbortCount.ShouldBe(0);
         exchange.DisposeCount.ShouldBe(1);
         connection.Context.SendCount.ShouldBe(1);
+
+        await server.StopAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: Response completion callbacks run only after the response write completes")]
+    public async Task ServeConnection_WithResponseCompletionCallback_RunsCallbackAfterSendCompletes()
+    {
+        // Arrange
+        TaskCompletionSource sendEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource releaseSend = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource completionInvoked = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        FakeHttpContext exchange = new();
+        FakeHttpConnectionContext connectionContext = new(new[] { exchange })
+        {
+            SendHandler = async (_, cancellationToken) =>
+            {
+                sendEntered.TrySetResult();
+                await releaseSend.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            },
+        };
+        FakeHttpConnection connection = new(connectionContext);
+        FakePipeline pipeline = new((context, _) =>
+        {
+            ResponseCompletionFeature feature =
+                context.Features.Get<ResponseCompletionFeature>().ShouldNotBeNull();
+            feature.Register(() =>
+            {
+                completionInvoked.TrySetResult();
+                return ValueTask.CompletedTask;
+            });
+            return Task.CompletedTask;
+        });
+        WebApplicationServer server = CreateServer(
+            pipeline,
+            new FakeHttpConnectionListener(connection));
+
+        // Act
+        await server.StartAsync();
+        await sendEntered.Task.WaitAsync(_timeout);
+
+        // Assert
+        completionInvoked.Task.IsCompleted.ShouldBeFalse();
+
+        releaseSend.TrySetResult();
+        await completionInvoked.Task.WaitAsync(_timeout);
+        await connection.Disposed.Task.WaitAsync(_timeout);
+
+        connectionContext.SendCount.ShouldBe(1);
+        exchange.DisposeCount.ShouldBe(1);
 
         await server.StopAsync();
     }
@@ -134,7 +310,7 @@ public class WebApplicationServerTests
 
         // Act
         await server.StartAsync();
-        await Should.NotThrowAsync(() => connection.Disposed.Task.WaitAsync(Timeout));
+        await Should.NotThrowAsync(() => connection.Disposed.Task.WaitAsync(_timeout));
 
         // Assert
         connection.DisposeCount.ShouldBe(1);
@@ -161,10 +337,10 @@ public class WebApplicationServerTests
         WebApplicationServer server = CreateServer(pipeline, listener);
 
         await server.StartAsync();
-        await Should.NotThrowAsync(() => exchangeProcessed.Task.WaitAsync(Timeout));
+        await Should.NotThrowAsync(() => exchangeProcessed.Task.WaitAsync(_timeout));
 
         // Act — the parked connection must be drained by the stop, not hang it.
-        await Should.NotThrowAsync(() => server.StopAsync().WaitAsync(Timeout));
+        await Should.NotThrowAsync(() => server.StopAsync().WaitAsync(_timeout));
 
         // Assert — graceful drain: connection disposed, listener disposed, no escaped exception.
         connection.DisposeCount.ShouldBe(1);
@@ -177,7 +353,7 @@ public class WebApplicationServerTests
     {
         WebApplicationServer server = CreateServer(new FakePipeline(), new FakeHttpConnectionListener());
 
-        await Should.NotThrowAsync(() => server.StopAsync().WaitAsync(Timeout));
+        await Should.NotThrowAsync(() => server.StopAsync().WaitAsync(_timeout));
     }
 
     [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: MaxConcurrentConnections holds back connections beyond the cap until a slot frees")]
@@ -207,7 +383,7 @@ public class WebApplicationServerTests
 
         // Act — start and let A take the only slot.
         await server.StartAsync();
-        await Should.NotThrowAsync(() => WaitForAsync(() => connectionA.OpenCount == 1, Timeout));
+        await Should.NotThrowAsync(() => WaitForAsync(() => connectionA.OpenCount == 1, _timeout));
 
         // Assert — B stays in the backlog: not opened while the slot is held.
         await Task.Delay(250);
@@ -218,7 +394,7 @@ public class WebApplicationServerTests
         releaseA.TrySetResult();
 
         // Assert
-        await Should.NotThrowAsync(() => exchangeBProcessed.Task.WaitAsync(Timeout));
+        await Should.NotThrowAsync(() => exchangeBProcessed.Task.WaitAsync(_timeout));
         connectionB.OpenCount.ShouldBe(1);
 
         await server.StopAsync();

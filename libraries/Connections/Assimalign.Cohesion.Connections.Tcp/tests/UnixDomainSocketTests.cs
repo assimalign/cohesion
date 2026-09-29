@@ -18,13 +18,13 @@ namespace Assimalign.Cohesion.Connections.Tcp.Tests;
 /// </summary>
 public class UnixDomainSocketTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - Uds: Should round-trip bytes over a Unix domain socket")]
     public async Task AcceptAsync_OverUnixDomainSocket_ShouldRoundTripBytes()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         string path = UnixSocketPath.Create();
 
         try
@@ -85,7 +85,7 @@ public class UnixDomainSocketTests
     public async Task Connections_OverUnixDomainSocket_ShouldStampUnixDomainSocketProtocol()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         string path = UnixSocketPath.Create();
 
         try
@@ -118,7 +118,7 @@ public class UnixDomainSocketTests
         // socket file) occupies the address; binding to it without cleanup fails with AddressAlreadyInUse.
         // A plain file stands in for the stale socket file so the test is deterministic across platforms
         // (Windows removes AF_UNIX socket files on close; Linux and macOS do not).
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         string path = UnixSocketPath.Create();
 
         try
@@ -153,7 +153,7 @@ public class UnixDomainSocketTests
     public async Task DisposeAsync_OverUnixDomainSocket_ShouldUnlinkSocketFile()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         string path = UnixSocketPath.Create();
 
         try

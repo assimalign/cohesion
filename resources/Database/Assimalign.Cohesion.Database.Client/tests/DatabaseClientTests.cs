@@ -6,6 +6,8 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Client.Tests;
@@ -153,6 +155,7 @@ public class DatabaseClientTests
                 EndPoint = harness.Listener.EndPoint,
             },
             ConnectionFactory = harness.Listener.CreateFactory(),
+            Family = SqlProtocol.Family,
         });
 
         await using (second)

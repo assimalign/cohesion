@@ -1,8 +1,11 @@
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<!-- This marker must precede the base Sdk.props import so its pre-.NET defaults select Exe. -->
+	<PropertyGroup>
+		<_CohesionResourceSdk>true</_CohesionResourceSdk>
+	</PropertyGroup>
 	<!--
-		Chain to the base Cohesion SDK first. That registers KnownFrameworkReferences
-		for all three Cohesion frameworks (App, App.Web, App.Database) and auto-includes
-		<FrameworkReference Include="Assimalign.Cohesion.App" />.
+		Chain to the base Cohesion SDK first. It registers the complete Cohesion
+		framework family but auto-includes no framework itself.
 
 		Note: <Import Sdk> does NOT honor inline version syntax (Sdk="X/version") -
 		only <Project Sdk> does. Consumers of Sdk.Web therefore need to pin both
@@ -19,9 +22,8 @@
 	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.props" />
 
 	<!--
-		Layer the Web-specific framework on top. Now the consumer has both
-		App and App.Web framework references (and via App: Core, Configuration,
-		etc. become available; via App.Web: HTTP/web bits become available).
+		A Web resource receives both App's hosting kernel and App.Web's HTTP/web
+		surface.
 
 		CohesionAutoIncludeAppFramework=false on the consumer turns this off.
 		An explicit <FrameworkReference Include="Assimalign.Cohesion.App.Web" />
@@ -29,6 +31,9 @@
 		registration came from the base SDK.
 	-->
 	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
+		<FrameworkReference Include="Assimalign.Cohesion.App" />
 		<FrameworkReference Include="Assimalign.Cohesion.App.Web" />
 	</ItemGroup>
+
+	<Import Project="..\Targets\Sdk.Web.props" />
 </Project>

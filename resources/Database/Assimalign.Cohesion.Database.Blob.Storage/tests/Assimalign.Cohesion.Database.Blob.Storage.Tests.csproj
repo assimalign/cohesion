@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Blob.Storage.Tests</RootNamespace>
 		<OutputType>Exe</OutputType>
 		<IsPackable>false</IsPackable>
 
@@ -23,9 +24,13 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
 	</ItemGroup>
 	<ItemGroup>
-	  <Compile Include="xunit.runner.json" />
+	  <Content Include="xunit.runner.json" />
+	</ItemGroup>
+	<ItemGroup>
+	  <CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Storage" />
 	</ItemGroup>
 
 </Project>

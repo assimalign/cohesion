@@ -6,7 +6,11 @@ against. It is contracts-first and feature-free by design.
 ## Scope
 
 - **Application/builder contracts** — `IWebApplication`, `IWebApplicationBuilder`,
-  `IWebApplicationContext`, and the server seam `IWebApplicationServer`.
+  `IWebApplicationContext`, the `IHostService` application-lifecycle seam, and the
+  server seam `IWebApplicationServer`.
+- **Response completion** — `IWebResponseCompletionFeature` registers callbacks that run in
+  order after the response is written to the transport. The default server installs it per
+  exchange; custom servers may omit it. Registration after completion throws.
 - **The middleware-first pipeline** — `IWebApplicationPipeline`,
   `IWebApplicationPipelineBuilder`, `IWebApplicationMiddleware`, the
   `WebApplicationMiddleware` delegate, and the inline `Use(...)` adapter sugar in
@@ -20,8 +24,9 @@ hosting-isolation rule that keeps those two directions apart is documented in
 
 ## Dependencies
 
-`Assimalign.Cohesion.Http` only. The root deliberately has no DI, configuration, or
-logging references — composition integration is `Web.Hosting`'s job — and it absorbs no
+`Assimalign.Cohesion.Http`. The root references no `Assimalign.Cohesion.Hosting*`
+library; `AddService` belongs to the concrete `Web.Hosting` builder. The root
+has no DI, configuration, or logging reference, and it absorbs no
 feature models, so referencing it never drags a feature surface along.
 
 ## Usage

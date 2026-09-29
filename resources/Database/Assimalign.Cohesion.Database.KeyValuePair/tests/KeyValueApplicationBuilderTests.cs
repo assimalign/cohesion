@@ -10,51 +10,60 @@ namespace Assimalign.Cohesion.Database.KeyValuePair.Tests;
 using static KeyValueTestHarness;
 
 /// <summary>
-/// The key-value model's application-builder verbs: <c>AddKeyValueDatabase</c>
-/// and <c>AddKeyValueServer</c> compose against the area root's builder seam
-/// alone and return the model's own composition objects.
+/// The key-value model's application-builder verbs: <c>AddKeyValue</c>
+/// and nested server factories compose against the area root's builder seam
+/// alone and defer construction until Build.
 /// </summary>
 public class KeyValueApplicationBuilderTests
 {
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - AddKeyValueDatabase: Registers a configured engine on the root builder seam")]
-    public async Task AddKeyValueDatabase_WithOptions_ShouldRegisterConfiguredEngine()
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - AddKeyValue: Registers a configured engine on the root builder seam")]
+    public async Task AddKeyValue_WithOptions_ShouldRegisterConfiguredEngine()
     {
         // Arrange
         var builder = new RecordingApplicationBuilder();
 
         // Act
-        await using KeyValueDatabaseEngine engine = builder.AddKeyValueDatabase(options => options.EngineName = "kv-verb");
+        builder.AddKeyValue((context, options) => options.EngineName = "kv-verb");
+        builder.Factories.ShouldHaveSingleItem();
+        await using var engine = (KeyValueDatabaseEngine)builder.MaterializeEngine();
 
         // Assert: registered on the seam, configured, and operational (data machine).
-        builder.Engines.ShouldHaveSingleItem().ShouldBeSameAs(engine);
+        builder.Factories.ShouldHaveSingleItem();
         engine.Name.ShouldBe("kv-verb");
         engine.State.ShouldBe(EngineState.Running);
         engine.Model.ShouldBe(EngineModel.KeyValueStore);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - AddKeyValueServer: Registers a per-model server fronting the given engine")]
-    public async Task AddKeyValueServer_WithEngineAndListener_ShouldRegisterServer()
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - NestedServer: Registers a per-model server fronting the given engine")]
+    public async Task NestedServer_WithEngineAndListener_ShouldRegisterServer()
     {
-        // Arrange
         var builder = new RecordingApplicationBuilder();
-        await using KeyValueDatabaseEngine engine = builder.AddKeyValueDatabase(options => options.EngineName = "kv-server-verb");
-        await using var listener = new InMemoryConnectionListener();
-
-        // Act
-        await using KeyValueDatabaseServer server = builder.AddKeyValueServer(engine, options => options.Listener = listener);
-
-        // Assert
-        builder.Servers.ShouldHaveSingleItem().ShouldBeSameAs(server);
+        bool serverCreated = false;
+        builder.AddKeyValue((context, options) =>
+        {
+            options.EngineName = "kv-server-verb";
+            options.AddServer(engine =>
+            {
+                serverCreated = true;
+                return KeyValueDatabaseServer.Create((KeyValueDatabaseEngine)engine,
+                    new KeyValueDatabaseServerOptions { Listener = new InMemoryConnectionListener() });
+            });
+        });
+        serverCreated.ShouldBeFalse();
+        await using var engine = (KeyValueDatabaseEngine)builder.MaterializeEngine();
+        serverCreated.ShouldBeTrue();
+        var server = engine.Servers.ShouldHaveSingleItem().ShouldBeOfType<KeyValueDatabaseServer>();
         server.Engine.ShouldBeSameAs(engine);
         server.Context.Engine.ShouldBeSameAs(engine);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - AddKeyValueDatabase: Defaults register an in-memory engine that serves key-value commands")]
-    public async Task AddKeyValueDatabase_WithDefaults_ShouldServeCommandsEndToEnd()
+    [Fact(DisplayName = "Cohesion Test [Database.KeyValuePair] - AddKeyValue: Defaults register an in-memory engine that serves key-value commands")]
+    public async Task AddKeyValue_WithDefaults_ShouldServeCommandsEndToEnd()
     {
         // Arrange
         var builder = new RecordingApplicationBuilder();
-        await using KeyValueDatabaseEngine engine = builder.AddKeyValueDatabase();
+        builder.AddKeyValue((context, options) => { });
+        await using var engine = (KeyValueDatabaseEngine)builder.MaterializeEngine();
 
         // Act: the registered engine is immediately usable (in-memory default).
         var database = (IKeyValueDatabase)await engine.CreateDatabaseAsync("verbs", TestTimeout.Token());

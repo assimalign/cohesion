@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Example.Platform.LogSpace": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "COHESION_ENVIRONMENT": "Local"
+      }
+    }
+  }
+}

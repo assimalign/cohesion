@@ -4,7 +4,7 @@ using System.Text;
 
 using Assimalign.Cohesion.Content.Text;
 
-namespace Assimalign.Cohesion.Content.Markdown;
+namespace Assimalign.Cohesion.Content.Markdown.Internal;
 
 /// <summary>
 /// The block phase of the parser: consumes the input line by line (via <see cref="TextTokenizer"/>
@@ -591,10 +591,19 @@ internal sealed class MarkdownBlockParser
         ListItem,
     }
 
-    private sealed class Container(ContainerKind kind, IList<MarkdownBlock>? items)
+    private sealed class Container
     {
-        public ContainerKind Kind { get; } = kind;
-        public IList<MarkdownBlock>? Blocks { get; } = items;
+        /// <summary>Initializes a new instance of the <see cref="Container"/> class.</summary>
+        /// <param name="kind">The kind of container.</param>
+        /// <param name="items">The block list child blocks attach to, or <see langword="null"/> for a list container.</param>
+        public Container(ContainerKind kind, IList<MarkdownBlock>? items)
+        {
+            Kind = kind;
+            Blocks = items;
+        }
+
+        public ContainerKind Kind { get; }
+        public IList<MarkdownBlock>? Blocks { get; }
         public MarkdownList? List { get; init; }
         public char ListMarker { get; init; }
         public int ContentColumn { get; init; }
@@ -607,9 +616,16 @@ internal sealed class MarkdownBlockParser
     /// A tab that straddles a requested column budget is consumed whole — the subset's documented
     /// simplification of the spec's partial-tab expansion.
     /// </summary>
-    private ref struct LineCursor(ReadOnlySpan<char> line)
+    private ref struct LineCursor
     {
-        private readonly ReadOnlySpan<char> _line = line;
+        private readonly ReadOnlySpan<char> _line;
+
+        /// <summary>Initializes a new instance of the <see cref="LineCursor"/> structure.</summary>
+        /// <param name="line">The line the cursor scans.</param>
+        public LineCursor(ReadOnlySpan<char> line)
+        {
+            _line = line;
+        }
 
         public int Index { get; private set; }
 

@@ -1,11 +1,11 @@
 using System;
 
-using Assimalign.Cohesion.Http.Connections.Internal.Http3;
-using Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
 
 using Shouldly;
 
 using Xunit;
+
+using Assimalign.Cohesion.Http.Connections.Internal;
 
 namespace Assimalign.Cohesion.Http.Connections.Tests;
 

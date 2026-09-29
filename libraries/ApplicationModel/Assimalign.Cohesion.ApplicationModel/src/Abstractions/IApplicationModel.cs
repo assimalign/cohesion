@@ -28,6 +28,33 @@ public interface IApplicationModel
     IApplicationEnvironment Environment { get; }
 
     /// <summary>
+    /// The operation requested for this invocation.
+    /// </summary>
+    GatewayRunMode RunMode { get; }
+
+    /// <summary>
+    /// The stable identity of the gateway selected to realize this model.
+    /// </summary>
+    ResourceName GatewayIdentity { get; }
+
+    /// <summary>
+    /// The ownership identity written by platform gateways, in the form
+    /// <c>&lt;application&gt;@&lt;gateway-identity&gt;</c>.
+    /// </summary>
+    string Owner { get; }
+
+    /// <summary>
+    /// Gets whether an existing target owned by another gateway may be adopted explicitly.
+    /// </summary>
+    bool Adopt { get; }
+
+    /// <summary>
+    /// Gets whether a local gateway should gracefully replace verified child processes left
+    /// by an earlier gateway instance instead of re-attaching to them.
+    /// </summary>
+    bool RestartOrphans { get; }
+
+    /// <summary>
     /// The dependency descriptors — authoritative. Each descriptor wraps a resource and
     /// the resources it must be realized after.
     /// </summary>
@@ -39,4 +66,37 @@ public interface IApplicationModel
     /// <c>Resources.Count == Descriptors.Count</c> holds with a one-to-one correspondence.
     /// </summary>
     IReadOnlyList<IApplicationResource> Resources { get; }
+
+    /// <summary>
+    /// The generic, platform-neutral manifests for <see cref="Resources"/>, in declaration order.
+    /// </summary>
+    IReadOnlyList<ResourceManifest> Manifests { get; }
+
+    /// <summary>
+    /// The validated realization plans computed for <see cref="Resources"/> during
+    /// <see cref="IApplicationBuilder.Build"/>, in declaration order.
+    /// </summary>
+    IReadOnlyList<ResourcePlan> Plans { get; }
+
+    /// <summary>Gets the immutable commands claimed by this application in declaration order.</summary>
+    IReadOnlyList<IResourceCommand> Commands => System.Array.Empty<IResourceCommand>();
+
+    /// <summary>
+    /// Gets the frozen provider registrations the gateway resolves stores, certificates, trust,
+    /// command inputs, telemetry, credentials, and control-plane callers through.
+    /// </summary>
+    /// <remarks>
+    /// A model built by <see cref="IApplicationBuilder.Build"/> carries a frozen snapshot of the
+    /// builder's <see cref="IApplicationBuilder.Providers"/>. Providers are code and are never
+    /// serialized, so a model imported from a document (an application-set member or an export), and
+    /// any implementation that does not override this member, carries
+    /// <see cref="ApplicationProviders.Empty"/>. An application set attaches a member's registrations
+    /// explicitly: the member added through
+    /// <see cref="IApplicationSet.AddApplication(ApplicationDeclaration, System.Action{IApplicationProviderBuilder})"/>
+    /// carries exactly what that callback registered, validated against the member's own resources.
+    /// Registrations are never inherited from another model, the set, or another member by name.
+    /// A gateway handed a model without the registration a <c>&lt;source&gt;:&lt;key&gt;</c> mount
+    /// needs reports that mount as unresolved, naming the missing registration.
+    /// </remarks>
+    ApplicationProviders Providers => ApplicationProviders.Empty;
 }

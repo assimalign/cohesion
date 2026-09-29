@@ -31,6 +31,33 @@ that has none.
   There is no upgrade machinery because there is no older format — the engine
   writes the marker at creation and rejects unknown newer versions at open.
 
+## Query-time introspection captures (C2)
+
+The engine's `KEYSPACES` command describes the single implicit key space from
+this catalog. `KeyValueCatalog.CaptureSnapshot(IKeyValueCatalog)` returns an
+`IKeyValueCatalogSnapshot` containing the entry-format marker and index
+registrations copied together under the existing metadata lock. The engine alone
+projects those values into client rows; the catalog stores no virtual objects or
+materialized discovery records. An existing capture is unaffected by later
+metadata publications. The capture is a `public static` method on `KeyValueCatalog`
+that downcasts to the internal implementation, not a member of `IKeyValueCatalog`:
+it replaces the shipped-to-shipped friend grant without making every future catalog
+implementation owe the capability. This deliberately mirrors
+`SqlCatalog.CaptureSnapshot`; the two sibling catalogs are the same shape and are
+kept that way. `IKeyValueCatalogSnapshot` is public because it is that method's
+return type; its implementation remains internal, the capture owns no storage and
+requires no disposal, and registrations are exposed through a read-only collection,
+matching their existing catalog vocabulary rather than adding command-result types
+here.
+
+The capture contains one database's metadata because this catalog is opened on
+that database's dedicated file set. The engine omits physical index page ids and
+exposes the command as read-only. Its two mutation verbs reject the `KEYSPACES`
+target with `DatabaseParseException` and the stable message
+`The KEYSPACES catalog surface is read-only.` Catalog mutation APIs continue to
+serve internal persistence; they are not command operations. The model has no
+schema ownership or named key-space records, so introspection invents neither.
+
 ## Error model
 
 `KeyValueCatalogException : DatabaseException` — a malformed persisted record or

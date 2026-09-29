@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Web.Diagnostics.Tests;
 /// </summary>
 public class HttpLoggingEndToEndTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Waits until the recording provider has seen <paramref name="count"/> entries. The
@@ -52,7 +52,7 @@ public class HttpLoggingEndToEndTests
     public async Task Get_DefaultFields_ShouldEmitExchangeEntry()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
@@ -98,7 +98,7 @@ public class HttpLoggingEndToEndTests
     public async Task Headers_OutsideAllowlist_ShouldBeRedacted()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
@@ -151,7 +151,7 @@ public class HttpLoggingEndToEndTests
     public async Task Query_OptIn_ShouldLogSerializedQuery()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
@@ -180,7 +180,7 @@ public class HttpLoggingEndToEndTests
     public async Task Bodies_OptIn_ShouldCaptureBoundedPrefixes()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
@@ -219,7 +219,7 @@ public class HttpLoggingEndToEndTests
     public async Task Bodies_BinaryContentType_ShouldCountWithoutCapturing()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
@@ -256,7 +256,7 @@ public class HttpLoggingEndToEndTests
     {
         // Arrange — a health-style route silenced via the endpoint metadata bag, and a normal
         // route that still logs.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
@@ -301,7 +301,7 @@ public class HttpLoggingEndToEndTests
     public async Task EndpointMetadata_NarrowedFields_ShouldLimitAttributes()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
@@ -341,7 +341,7 @@ public class HttpLoggingEndToEndTests
     public async Task Fault_Downstream_ShouldEscalateToErrorAndRethrow()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
@@ -375,7 +375,7 @@ public class HttpLoggingEndToEndTests
     public async Task TraceContext_InboundTraceparent_ShouldAttachIds()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
@@ -405,7 +405,7 @@ public class HttpLoggingEndToEndTests
     public async Task RequestStart_Enabled_ShouldCorrelateEntries()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
@@ -443,7 +443,7 @@ public class HttpLoggingEndToEndTests
     {
         // Arrange — until the #778 forwarded middleware merges, the resolver is the seam a
         // proxy-aware composition plugs in; the default remains the socket peer.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
@@ -473,7 +473,7 @@ public class HttpLoggingEndToEndTests
     {
         // Arrange — the full composition: middleware emits through a factory that fans out to
         // both the recording provider and the W3C file provider.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         string directory = Path.Combine(Path.GetTempPath(), "cohesion-w3c-tests", Guid.NewGuid().ToString("N"));
 
         try

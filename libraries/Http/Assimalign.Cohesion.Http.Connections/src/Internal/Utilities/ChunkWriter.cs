@@ -5,7 +5,7 @@ using System.IO.Pipelines;
 using System.Linq;
 using System.Runtime.Intrinsics;
 
-namespace Assimalign.Cohesion.Http.Internal;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal static class ChunkWriter
 {

@@ -1,8 +1,0 @@
-<Project>
-    <Import Project="..\Directory.Build.targets" />
-    <Target Name="TargetName" BeforeTargets="DesignTimeResolveAssemblyReferences">
-        <Exec Command="dotnet sln Assimalign.Cohesion.Frameworks.sln add (ls -r '../**/*.csproj')" WorkingDirectory="$(MSBuildThisFileDirectory)">
-            
-        </Exec>
-    </Target>
-</Project>

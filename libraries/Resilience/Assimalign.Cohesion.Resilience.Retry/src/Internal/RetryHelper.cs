@@ -11,7 +11,7 @@ internal static class RetryHelper
     // Upper-bound to prevent overflow beyond TimeSpan.MaxValue. Potential truncation during conversion from double to long
     // (as described at https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/builtin-types/numeric-conversions)
     // is avoided by the arbitrary subtraction of 1,000.
-    private static readonly double MaxTimeSpanTicks = (double)TimeSpan.MaxValue.Ticks - 1_000;
+    private static readonly double _maxTimeSpanTicks = (double)TimeSpan.MaxValue.Ticks - 1_000;
 
     public static bool IsValidDelay(TimeSpan delay) => delay >= TimeSpan.Zero;
 
@@ -116,13 +116,13 @@ internal static class RetryHelper
         if (double.IsInfinity(next))
         {
             prev = next;
-            return TimeSpan.FromTicks((long)MaxTimeSpanTicks);
+            return TimeSpan.FromTicks((long)_maxTimeSpanTicks);
         }
 
         double formulaIntrinsicValue = next - prev;
         prev = next;
 
-        long ticks = (long)Math.Min(formulaIntrinsicValue * RpScalingFactor * targetTicksFirstDelay, MaxTimeSpanTicks);
+        long ticks = (long)Math.Min(formulaIntrinsicValue * RpScalingFactor * targetTicksFirstDelay, _maxTimeSpanTicks);
 
 #pragma warning disable S3236 // Remove this argument from the method call; it hides the caller information.
         Debug.Assert(ticks >= 0, "ticks cannot be negative");

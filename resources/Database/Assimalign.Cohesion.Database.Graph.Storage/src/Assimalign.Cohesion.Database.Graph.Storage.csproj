@@ -1,4 +1,11 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
-
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Assimalign.Cohesion.Database.Graph.Storage</RootNamespace>
+  </PropertyGroup>
+  <PropertyGroup><IsAotCompatible>true</IsAotCompatible></PropertyGroup>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Transactions" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Indexing" />
+  </ItemGroup>
 </Project>

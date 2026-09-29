@@ -4,6 +4,8 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Connections.Udp.Internal;
+
 namespace Assimalign.Cohesion.Connections.Udp;
 
 /// <summary>

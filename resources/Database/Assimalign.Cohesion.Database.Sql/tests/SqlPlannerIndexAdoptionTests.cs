@@ -103,10 +103,10 @@ public sealed class SqlPlannerIndexAdoptionTests
         range.Lower!.Value.Inclusive.ShouldBeTrue();
         range.Upper!.Value.Inclusive.ShouldBeTrue();
 
-        // Strings: equality seeks, ranges do not (Collation.Binary code-point
-        // order diverges from ordinal comparison for astral planes).
+        // Strings use the same code-point comparison and byte encoding for
+        // equality and ranges, including supplementary-plane characters.
         Seek(PlanOf(database, "SELECT id FROM t WHERE name = 'ada'")).Index.Name.ShouldBe("ix_name");
-        Scan(PlanOf(database, "SELECT id FROM t WHERE name > 'ada'"));
+        Seek(PlanOf(database, "SELECT id FROM t WHERE name > 'ada'")).Index.Name.ShouldBe("ix_name");
 
         // Non-sargable shapes fall back: non-indexed column, column-to-column
         // comparison, computed column, null comparand, OR at the top level.

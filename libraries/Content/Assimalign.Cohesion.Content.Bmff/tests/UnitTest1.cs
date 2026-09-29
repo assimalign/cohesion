@@ -1,10 +1,16 @@
+using System.Collections.Generic;
+using System.IO;
+
+using Assimalign.Cohesion.Files.Bmff;
+
 namespace Assimalign.Cohesion.MediaFile.Bmff.Tests
 {
     public class UnitTest1
     {
-        private List<BmffBox> boxes = new();
+        private List<BmffBox> _boxes = new();
 
-        [Fact]
+        [Fact(DisplayName = "Cohesion Test [Content.Bmff] - Read the ISO-BMFF fixture",
+            Skip = "requires a local media fixture: an ISO-BMFF/MP4 file at a developer-local path")]
         public void Test1()
         {
             using var stream = File.OpenRead(@"C:\Users\c.crawford\OneDrive\Videos\TV Series\Anime\Psycho Pass [Finished]\Psycho-Pass Season 02.1 Episode 01.mp4");
@@ -12,7 +18,7 @@ namespace Assimalign.Cohesion.MediaFile.Bmff.Tests
 
             while (reader.Read())
             {
-                boxes.Add(reader.Current);
+                _boxes.Add(reader.Current);
 
                 //if (reader.Current is BmffBoxComposite composite)
                 //{
@@ -21,13 +27,14 @@ namespace Assimalign.Cohesion.MediaFile.Bmff.Tests
             }
         }
 
+#pragma warning disable IDE0011 // Deviates from the repo braces rule: H2 requires the legacy fixture helper body unchanged.
         private void Traverse(BmffBoxComposite composite)
         {
             if (composite.Children is null)
                 return;
             foreach (var child in composite.Children)
             {
-                boxes.Add(child);
+                _boxes.Add(child);
 
                 if (child is BmffBoxComposite composite1)
                 {
@@ -35,5 +42,6 @@ namespace Assimalign.Cohesion.MediaFile.Bmff.Tests
                 }
             }
         }
+#pragma warning restore IDE0011
     }
 }

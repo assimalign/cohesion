@@ -12,11 +12,11 @@ namespace Assimalign.Cohesion.ObjectValidation.Internal;
 
 internal sealed class ValidationItemCollection<T, TValue> : ValidationItemBase<T, IEnumerable<TValue>>
 {
-    private readonly Type paramType;
+    private readonly Type _paramType;
 
     public ValidationItemCollection()
     {
-        this.paramType = typeof(T);
+        this._paramType = typeof(T);
     }
 
     public override void Evaluate(IValidationContext context)
@@ -70,7 +70,7 @@ internal sealed class ValidationItemCollection<T, TValue> : ValidationItemBase<T
                     stopwatch.Stop();
                     context.AddInvocation(new ValidationInvocation(rule.Name, false, stopwatch.ElapsedTicks)
                     {
-                        InvocationErrorMessage = $"The following enumerable expression: '{this.ItemExpression}' returned null for instance '{this.paramType.Name}'."
+                        InvocationErrorMessage = $"The following enumerable expression: '{this.ItemExpression}' returned null for instance '{this._paramType.Name}'."
                     });
                 }
             }

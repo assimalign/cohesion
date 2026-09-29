@@ -9,13 +9,13 @@ namespace Assimalign.Cohesion.Files.Bmff;
 
 public sealed class ProtectionSchemeInfoBox : BmffBoxComposite
 {
-    private IEnumerable<BmffBox> children;
+    private IEnumerable<BmffBox> _children;
     public ProtectionSchemeInfoBox(long offset, long limit)
     {
         this.Offset = offset;
         this.Limit = limit;
     }
-    public override IEnumerable<BmffBox> Children => children;
+    public override IEnumerable<BmffBox> Children => _children;
 
     public override long Limit { get; }
 
@@ -33,7 +33,7 @@ public sealed class ProtectionSchemeInfoBox : BmffBoxComposite
             boxes.Add(reader.Current);
         }
 
-        children = boxes;
+        _children = boxes;
     }
 
     public override void Write(BmffStream stream)

@@ -38,7 +38,7 @@ namespace Assimalign.Cohesion.Web.Caching.Internal;
 /// </remarks>
 internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
 {
-    private static readonly HashSet<string> NonCacheableHeaders = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> _nonCacheableHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
         "Connection", "Keep-Alive", "Transfer-Encoding", "TE", "Trailer", "Upgrade",
         "Proxy-Connection", "Proxy-Authenticate", "Proxy-Authorization", "Age",
@@ -372,7 +372,7 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
         List<OutputCacheHeader> captured = new();
         foreach (KeyValuePair<HttpHeaderKey, HttpHeaderValue> pair in headers)
         {
-            if (NonCacheableHeaders.Contains(pair.Key.Value))
+            if (_nonCacheableHeaders.Contains(pair.Key.Value))
             {
                 continue;
             }

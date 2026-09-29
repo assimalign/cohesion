@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Documents.Storage.Internal;
+
 namespace Assimalign.Cohesion.Database.Documents.Storage;
 
 using Assimalign.Cohesion.Database.Storage;
@@ -36,10 +38,10 @@ using Assimalign.Cohesion.Database.Storage;
 /// storage.FlushChanges();
 /// </code>
 /// </example>
-public sealed class DocumentStorage : Assimalign.Cohesion.Database.Storage.Storage
+public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Storage.Storage
 {
     private DocumentStorage(StorageStream data, StorageStream journal, StorageStream backup)
-        : base(data, journal, backup) { }
+        : base(data, journal, backup) => Records = new DocumentTransactionRecordSpace(this);
 
     /// <inheritdoc />
     public override StorageModel Model => StorageModel.Document;
@@ -53,8 +55,19 @@ public sealed class DocumentStorage : Assimalign.Cohesion.Database.Storage.Stora
     /// <param name="name">A name for this storage instance.</param>
     /// <returns>A new <see cref="DocumentStorage"/> ready for use.</returns>
     public static DocumentStorage Create(StorageStream data, StorageStream journal, StorageStream backup, string name)
+        => Create(data, journal, backup, name, null);
+
+    /// <summary>Creates a document file set with durability resolved before initialization.</summary>
+    /// <param name="data">The data stream.</param>
+    /// <param name="journal">The journal stream.</param>
+    /// <param name="backup">The backup stream.</param>
+    /// <param name="name">The logical database name.</param>
+    /// <param name="durability">The requested durability, or null to derive it from the backing store.</param>
+    /// <returns>The initialized storage.</returns>
+    public static DocumentStorage Create(StorageStream data, StorageStream journal, StorageStream backup, string name, StorageCommitDurability? durability)
     {
         var storage = new DocumentStorage(data, journal, backup);
+        storage.ConfigureCommitDurability(durability, $"{nameof(DocumentStorage)} ({name})");
         storage.InitializeNew((Name)name);
         return storage;
     }
@@ -80,11 +93,7 @@ public sealed class DocumentStorage : Assimalign.Cohesion.Database.Storage.Stora
     /// <param name="backup">The storage stream for the backup file (<c>.bak</c>).</param>
     /// <returns>A <see cref="DocumentStorage"/> loaded from the streams.</returns>
     public static DocumentStorage Open(StorageStream data, StorageStream journal, StorageStream backup)
-    {
-        var storage = new DocumentStorage(data, journal, backup);
-        storage.OpenExisting();
-        return storage;
-    }
+        => Open(data, journal, backup, checkpointOnOpen: true, null);
 
     /// <summary>
     /// Opens an existing document storage file set from arbitrary streams.

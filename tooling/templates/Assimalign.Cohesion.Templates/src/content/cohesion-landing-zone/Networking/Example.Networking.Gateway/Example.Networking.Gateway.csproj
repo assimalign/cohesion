@@ -1,0 +1,10 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <PropertyGroup>
+    <CohesionApplicationName>networking</CohesionApplicationName>
+    <CohesionGateways>Local</CohesionGateways>   <!-- no InProcess: the VPN data plane is composable=false -->
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionResourceReference Include="..\Example.Networking.Rezolvr\Example.Networking.Rezolvr.csproj" />
+    <CohesionResourceReference Include="..\Example.Networking.VpnGateway\Example.Networking.VpnGateway.csproj" />
+  </ItemGroup>
+</Project>

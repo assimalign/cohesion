@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Assimalign.Cohesion.OpenApi.Serialization;
+namespace Assimalign.Cohesion.OpenApi.Serialization.Internal;
 
 /// <summary>
 /// Renders the format-agnostic <see cref="OpenApiNode"/> tree to and from JSON text using

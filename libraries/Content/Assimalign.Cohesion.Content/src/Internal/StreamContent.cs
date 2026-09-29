@@ -3,7 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Content;
+namespace Assimalign.Cohesion.Content.Internal;
 
 /// <summary>
 /// Stream-backed, read-only content. Seekable sources are reopenable (each read rewinds to the start);
@@ -97,22 +97,30 @@ internal sealed class StreamContent : IContent
     /// A caller-owned, read-only pass-through view over the content's backing stream. Disposing the view
     /// does not dispose the backing stream — the content instance controls the source's lifetime.
     /// </summary>
-    private sealed class NonDisposingReadView(Stream inner) : Stream
+    private sealed class NonDisposingReadView : Stream
     {
         private bool _closed;
+        private readonly Stream _inner;
 
-        public override bool CanRead => !_closed && inner.CanRead;
+        /// <summary>Initializes a new instance of the <see cref="NonDisposingReadView"/> class.</summary>
+        /// <param name="inner">The content's backing stream the view reads through to.</param>
+        public NonDisposingReadView(Stream inner)
+        {
+            _inner = inner;
+        }
 
-        public override bool CanSeek => !_closed && inner.CanSeek;
+        public override bool CanRead => !_closed && _inner.CanRead;
+
+        public override bool CanSeek => !_closed && _inner.CanSeek;
 
         public override bool CanWrite => false;
 
-        public override long Length => inner.Length;
+        public override long Length => _inner.Length;
 
         public override long Position
         {
-            get => inner.Position;
-            set => inner.Position = value;
+            get => _inner.Position;
+            set => _inner.Position = value;
         }
 
         public override void Flush()
@@ -122,31 +130,31 @@ internal sealed class StreamContent : IContent
         public override int Read(byte[] buffer, int offset, int count)
         {
             ObjectDisposedException.ThrowIf(_closed, this);
-            return inner.Read(buffer, offset, count);
+            return _inner.Read(buffer, offset, count);
         }
 
         public override int Read(Span<byte> buffer)
         {
             ObjectDisposedException.ThrowIf(_closed, this);
-            return inner.Read(buffer);
+            return _inner.Read(buffer);
         }
 
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
             ObjectDisposedException.ThrowIf(_closed, this);
-            return inner.ReadAsync(buffer, offset, count, cancellationToken);
+            return _inner.ReadAsync(buffer, offset, count, cancellationToken);
         }
 
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             ObjectDisposedException.ThrowIf(_closed, this);
-            return inner.ReadAsync(buffer, cancellationToken);
+            return _inner.ReadAsync(buffer, cancellationToken);
         }
 
         public override long Seek(long offset, SeekOrigin origin)
         {
             ObjectDisposedException.ThrowIf(_closed, this);
-            return inner.Seek(offset, origin);
+            return _inner.Seek(offset, origin);
         }
 
         public override void SetLength(long value) => throw new NotSupportedException();

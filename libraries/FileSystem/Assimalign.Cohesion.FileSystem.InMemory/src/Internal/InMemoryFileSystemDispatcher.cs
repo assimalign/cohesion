@@ -1,71 +1,47 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
+using System;
 using System.IO;
-using System.Text;
+using System.Threading;
 
 namespace Assimalign.Cohesion.FileSystem.Internal;
 
 internal class InMemoryFileSystemDispatcher : IDisposable
 {
-    private FileSystemEventHandler? _onChanged;
-    private FileSystemEventHandler? _onCreated;
-    private FileSystemEventHandler? _onDeleted;
-    private RenamedEventHandler? _onRenamed;
+    private readonly InMemoryFileSystemDispatcher? _parent;
+    private int _disposed;
 
-    public InMemoryFileSystemDispatcher()
-    {
-
-    }
+    public InMemoryFileSystemDispatcher() { }
 
     public InMemoryFileSystemDispatcher(InMemoryFileSystemDispatcher parent)
     {
-        // Propagate events to the parent dispatcher so watchers on parent directories
-        // receive notifications about changes in child entries
-        Changed += parent._onChanged;
-        Created += parent._onCreated;
-        Deleted += parent._onDeleted;
-        Renamed += parent._onRenamed;
+        _parent = parent;
     }
 
-
-    public event FileSystemEventHandler? Changed
-    {
-        add => _onChanged = (FileSystemEventHandler)Delegate.Combine(_onChanged, value)!;
-        remove => _onChanged = (FileSystemEventHandler)Delegate.Remove(_onChanged, value)!;
-    }
-
-    public event FileSystemEventHandler? Created
-    {
-        add => _onCreated = (FileSystemEventHandler)Delegate.Combine(_onCreated, value)!;
-        remove => _onCreated = (FileSystemEventHandler)Delegate.Remove(_onCreated, value)!;
-    }
-
-    public event FileSystemEventHandler? Deleted
-    {
-        add => _onDeleted = (FileSystemEventHandler)Delegate.Combine(_onDeleted, value)!;
-        remove => _onDeleted = (FileSystemEventHandler)Delegate.Remove(_onDeleted, value)!;
-    }
-
-    public event RenamedEventHandler? Renamed
-    {
-        add => _onRenamed = (RenamedEventHandler)Delegate.Combine(_onRenamed, value)!;
-        remove => _onRenamed = (RenamedEventHandler)Delegate.Remove(_onRenamed, value)!;
-    }
+    public event FileSystemEventHandler? Changed;
+    public event FileSystemEventHandler? Created;
+    public event FileSystemEventHandler? Deleted;
+    public event RenamedEventHandler? Renamed;
 
     public void RaiseEvent(FileSystemEventArgs args)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+
+        // Forward to the live parent rather than copying its delegates into every child.
+        // This makes later registration and unsubscription apply throughout the tree.
+        _parent?.RaiseEvent(args);
         if (args.ChangeType == WatcherChangeTypes.Renamed)
         {
-            _onRenamed?.Invoke(this, (RenamedEventArgs)args);
+            Renamed?.Invoke(this, (RenamedEventArgs)args);
         }
         else
         {
             var handler = args.ChangeType switch
             {
-                WatcherChangeTypes.Changed => _onChanged,
-                WatcherChangeTypes.Created => _onCreated,
-                WatcherChangeTypes.Deleted => _onDeleted,
+                WatcherChangeTypes.Changed => Changed,
+                WatcherChangeTypes.Created => Created,
+                WatcherChangeTypes.Deleted => Deleted,
                 _ => throw new InvalidOperationException($"Unsupported change type '{args.ChangeType}'"),
             };
 
@@ -75,9 +51,13 @@ internal class InMemoryFileSystemDispatcher : IDisposable
 
     public void Dispose()
     {
-        _onChanged = null!;
-        _onCreated = null!;
-        _onDeleted = null!;
-        _onRenamed = null!;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+        Changed = null;
+        Created = null;
+        Deleted = null;
+        Renamed = null;
     }
 }

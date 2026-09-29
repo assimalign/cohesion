@@ -1,0 +1,12 @@
+<Project Sdk="Assimalign.Cohesion.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <CohesionAutoIncludeAppFramework>false</CohesionAutoIncludeAppFramework>
+    <AssemblyName>ThirdParty.ApplicationModel</AssemblyName>
+    <RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>
+    <PackageId>ThirdParty.ApplicationModel</PackageId>
+  </PropertyGroup>
+  <ItemGroup>
+    <CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel" Version="$(CohesionVersion)" />
+  </ItemGroup>
+</Project>

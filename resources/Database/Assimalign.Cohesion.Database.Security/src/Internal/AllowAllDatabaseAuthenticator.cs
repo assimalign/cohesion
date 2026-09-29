@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.Database.Security;
+namespace Assimalign.Cohesion.Database.Security.Internal;
 
 /// <summary>
 /// The trust-everything authenticator behind <see cref="DatabaseAuthenticator.AllowAll"/>:

@@ -80,4 +80,19 @@
             </TfmSpecificPackageFile>
         </ItemGroup>
     </Target>
+
+
+
+    <ItemGroup>
+        <!-- Index code projects ONCE. -->
+        <_CohesionAnalyzerProjectForTest Include="$(CohesionRepositoryDirectory)analyzers\**\*.csproj" />
+        <_CohesionAnalyzerProjectForTest Update="@(_CohesionAnalyzerProjectForTest)" ProjectId="%(_CohesionAnalyzerProjectForTest.Filename)" ProjectPath="%(_CohesionAnalyzerProjectForTest.Identity)" />
+
+        <!-- Public refs -->
+        <CohesionAnalyzerAsProjectReference Update="@(_CohesionAnalyzerProjectForTest->'%(ProjectId)')" ProjectPath="%(_CohesionAnalyzerProjectForTest.ProjectPath)" />
+        <ProjectReference Include="@(CohesionAnalyzerAsProjectReference->'%(ProjectPath)')" />
+        <CohesionAnalyzerAsProjectReference Remove="@(CohesionAnalyzerAsProjectReference->HasMetadata('ProjectPath'))" />
+
+        <_CohesionAnalyzerProjectForTest Remove="@(_CohesionAnalyzerProjectForTest)" />
+    </ItemGroup>
 </Project>

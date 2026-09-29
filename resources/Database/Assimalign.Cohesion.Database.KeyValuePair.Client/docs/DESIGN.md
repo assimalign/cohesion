@@ -1,84 +1,79 @@
 # Assimalign.Cohesion.Database.KeyValuePair.Client — Design
 
-The typed key-value client over the shared `Database.Client` core — the
-key-value counterpart of `Sql.Client`, following the same layering: the core
-owns pooling, the handshake, framing, and result materialization; this package
-owns the typed surface, the model's command/result contract, the error taxonomy,
-and telemetry.
+The key-value client owns command construction, parameter encoding, result
+materialization, typed outcomes, error mapping, and telemetry. The shared client
+owns pooling, handshake, framing, and exchange lifetime.
 
-## Design intent
+## Family position
 
-- **The client never references the engine package.** The `Sql.Client` precedent
-  ("the client never parses — the server owns SQL") holds in mirrored form: this
-  client *builds* the model's command grammar (a fixed set of command shapes with
-  parameter references — never key or value bytes in the text) and decodes the
-  model's fixed result shapes. The shared contract between client and engine is
-  the grammar document (`Database.KeyValuePair/docs/COMMANDS.md`) plus the result
-  shapes it specifies — a wire contract, not an assembly reference, which is why
-  the client types (`KeyValueClientEntry`, `KeyValueScanRange`) are deliberately
-  distinct from the engine's model types.
-- **Byte-oriented surface.** Keys and values are `ReadOnlyMemory<byte>` end to
-  end; they travel as `Binary` tuple-codec components (the shared
-  `DatabaseValueCodec` both wire ends speak). Typed value convenience layers
-  (string/JSON adapters) are a consumer concern, not client policy.
+The client references shared mechanism and the key-value wire family:
 
-## The compare-and-swap outcome shape (the recorded decision)
+```mermaid
+flowchart LR
+    KvClient["Database.KeyValuePair.Client"] --> Client["Database.Client"]
+    KvClient --> Kv["Database.KeyValuePair"]
+    Client --> Protocol["Database.Protocol"]
+    Kv --> Protocol
+```
 
-**A conditional miss is a first-class outcome, never an exception.** The
-conditional `PutAsync` overload returns `KeyValueWriteResult`
-(`Applied` + the new-or-current `ETag`); conditional `TryDeleteAsync` returns
-`bool`. Rationale: an etag mismatch means the caller's own view is stale —
-ordinary optimistic-concurrency flow on a hot upsert path, where an exception
-per miss is an allocation storm and an API lie (nothing failed). What *does*
-throw is real contention or failure: the engine's retryable first-updater-wins
-write conflict (a concurrently committed change) surfaces as
-`KeyValueClientException` with `ExecutionFailure` — deliberately distinct so
-retry loops trigger on contention, not on staleness (staleness wants a re-read,
-not a blind retry). The rejected alternatives: exceptions for misses (the storm),
-and folding conflicts into `Applied=false` (hides contention and breaks the
-retry contract).
+| Package | Role |
+| --- | --- |
+| Database.KeyValuePair.Client | Command/result policy and materialization |
+| Database.Client | Pooling, handshake, framed exchange lifetime |
+| Database.KeyValuePair | Family identifiers and payload codecs |
+| Database.Protocol | Shared framing and immutable family binding |
 
-The unconditional `PutAsync` returns the new etag directly (`long`): an
-unconditional upsert always applies, so an outcome wrapper would be ceremony.
+## Wire ownership
 
-## Error surface
+`KeyValueClient.Create` binds its pool to `KeyValueProtocol.Family`.
+`KeyValueExecuteExchange` encodes parameters, writes the command, and materializes
+the complete response before returning its private result to the typed connection.
+The model's [command specification](../../Assimalign.Cohesion.Database.KeyValuePair/docs/COMMANDS.md)
+defines command grammar and operation result shapes. Protocol 1.0 bytes are unchanged.
 
-`KeyValueClientException : DatabaseException` maps every wire
-`ProtocolErrorCode` onto `KeyValueClientErrorKind` (the `SqlClientException`
-pattern), preserving the raw code and exposing `ConnectionUsable` so pools and
-retry policies can distinguish command-level failures (parse, execution,
-malformed result) from broken connections (protocol violation, capacity,
-transport). One kind is client-local: `MalformedResult` — the server's reply did
-not match the model's result contract (a defense-in-depth check on every decode
-path; the connection itself is still healthy because the exchange completed).
+The model assembly reference supplies codecs; this client does not construct an
+engine or parse commands. The transitive closure is an accepted packaging
+consequence. A separate model protocol assembly can be considered later.
 
-## Telemetry
+Keys and values remain byte-oriented and use `DatabaseValueCodec` binary
+components. Typed serialization belongs to consumers; public client entry/range
+types remain independent from engine request types.
 
-`IKeyValueClientObserver` mirrors `ISqlClientObserver`: synchronous primitive
-callbacks around every command (executing / executed / failed), observer
-failures swallowed (telemetry must never fault a command), and only the grammar
-text is reported — key and value bytes never reach the observer, which keeps
-instrumentation allocation-free and leak-safe.
+## Conditional outcomes
 
-## Materialized scans
+An etag mismatch is a first-class outcome: conditional put returns
+`KeyValueWriteResult` with `Applied` and the new-or-current etag; conditional
+delete returns a boolean. Staleness calls for rereading, while a concurrently
+committed write conflict reports `ExecutionFailure` for contention retry.
+Unconditional put returns its new etag directly.
 
-`ScanAsync` returns a materialized `IReadOnlyList<KeyValueClientEntry>`: the
-shared core materializes wire results while draining the exchange anyway (the
-pooling contract — a connection is reusable only once its exchange is fully
-consumed), so a streaming surface here would fake laziness over a buffered list.
-Bound scans with `KeyValueScanRange.Limit`; incremental paging is cursor
-composition on top (scan from the last key), and a genuinely streaming surface
-arrives if/when the shared core grows incremental result streaming (its recorded
-deferral).
+## Errors, lifecycle, and telemetry
 
-## Non-goals
+`KeyValueClientException : DatabaseException` maps wire codes to model error
+kinds and preserves the code. `MalformedResult` identifies a completed response
+that does not match the typed operation's values; no unread frames remain.
+Framing/decoder failure or cancellation during an exchange invalidates the shared
+connection. Disposing a healthy typed connection returns its session to the pool;
+disposing the client disposes that pool.
 
-- Wire transactions — `BEGIN`/`COMMIT` frames are the protocol's documented
-  deferral; the client gains a transaction surface when the wire does.
-- Typed value serialization, caching, and retry policies — consumer concerns.
-- Rent-time liveness pings — the shared core's recorded deferral.
+Observers report grammar text, counts, and elapsed time. Key/value bytes are never
+included. Observer exceptions cannot fault an operation or mask its exception.
 
-## AOT posture
+## Materialized scans, AOT, and non-goals
 
-No reflection, no codegen: fixed command strings, byte parameters, pattern-match
-decoding of boxed scalars.
+Materialized scans are this package's policy. Use a range limit to bound results;
+cursor composition can resume after the last key. An incremental API can be added
+here without changing shared result policy.
+
+Encoding and materialization use no reflection or runtime code generation.
+Wire transactions, typed serialization, caching, retry policy, and rent-time
+liveness pings remain outside this surface.
+
+## Phase 29 composition migration
+
+The TCP end-to-end fixture now registers `AddKeyValue` with a nested deferred
+`AddServer` factory. Build constructs the engine and listener/server, then the
+fixture retrieves the engine from the built context for provisioning. The
+application owns the engine and the engine owns its server/listener; disposing
+the application closes this whole graph before the restart-recovery composition.
+Wire/client behavior and protocol remain unchanged.

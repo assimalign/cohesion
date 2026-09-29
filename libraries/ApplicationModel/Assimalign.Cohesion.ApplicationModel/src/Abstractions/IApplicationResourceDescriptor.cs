@@ -14,6 +14,12 @@ public interface IApplicationResourceDescriptor
     IApplicationResource Resource { get; }
 
     /// <summary>
+    /// The immutable realization plan computed during <see cref="IApplicationBuilder.Build"/>,
+    /// or <see langword="null"/> while this is an authoring descriptor.
+    /// </summary>
+    ResourcePlan? Plan { get; }
+
+    /// <summary>
     /// The resources this resource must be realized after, in declaration order.
     /// </summary>
     IReadOnlyList<IApplicationResourceDescriptor> Dependencies { get; }

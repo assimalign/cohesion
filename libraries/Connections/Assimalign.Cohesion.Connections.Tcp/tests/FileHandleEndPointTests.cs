@@ -17,13 +17,13 @@ namespace Assimalign.Cohesion.Connections.Tcp.Tests;
 /// </summary>
 public class FileHandleEndPointTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - FileHandle: Should adopt an inherited listening socket and accept on it")]
     public async Task AcceptAsync_WithFileHandleEndPoint_ShouldAdoptInheritedSocketAndAccept()
     {
         // Arrange — a "parent" has already bound and started listening; the child inherits the descriptor.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         Socket activated = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         activated.Bind(new IPEndPoint(IPAddress.Loopback, 0));

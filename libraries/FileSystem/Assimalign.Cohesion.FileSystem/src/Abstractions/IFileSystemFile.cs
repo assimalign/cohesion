@@ -58,32 +58,15 @@ public interface IFileSystemFile : IFileSystemInfo
     /// <param name="fileShare"></param>
     /// <returns></returns>
     Stream Open(FileMode fileMode, FileAccess fileAccess, FileShare fileShare);
-    
-    ///// <summary>
-    ///// 
-    ///// </summary>
-    ///// <param name="buffer"></param>
-    ///// <param name="offset"></param>
-    ///// <returns></returns>
-    //int Read(Span<byte> buffer, long offset);
-    ///// <summary>
-    ///// 
-    ///// </summary>
-    ///// <param name="buffer"></param>
-    ///// <param name="offset"></param>
-    ///// <returns></returns>
-    //ValueTask<int> ReadAsync(Span<byte> buffer, long offset);
-    ///// <summary>
-    ///// 
-    ///// </summary>
-    ///// <param name="buffer"></param>
-    ///// <param name="offset"></param>
-    //void Write(Span<byte> buffer, long offset);
-    ///// <summary>
-    ///// 
-    ///// </summary>
-    ///// <param name="buffer"></param>
-    ///// <param name="offset"></param>
-    ///// <returns></returns>
-    //ValueTask WriteAsync(Span<byte> buffer, long offset);
+
+    /// <summary>
+    /// Opens the file for random-access, optionally durable I/O — the shape a storage engine needs:
+    /// positional reads and writes at an offset, and a flush that can be guaranteed to reach the
+    /// durable medium.
+    /// </summary>
+    /// <param name="fileMode">How the file is opened or created.</param>
+    /// <param name="fileAccess">Whether the handle reads, writes, or both.</param>
+    /// <param name="fileShare">How other handles may share the file.</param>
+    /// <returns>A handle the caller owns and must dispose.</returns>
+    IFileSystemFileHandle OpenHandle(FileMode fileMode, FileAccess fileAccess, FileShare fileShare);
 }

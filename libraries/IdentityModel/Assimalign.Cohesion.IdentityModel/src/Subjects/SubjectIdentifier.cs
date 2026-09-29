@@ -29,7 +29,7 @@ namespace Assimalign.Cohesion.IdentityModel;
 /// </remarks>
 public sealed class SubjectIdentifier : IEquatable<SubjectIdentifier>
 {
-    private static readonly IReadOnlyDictionary<string, string> emptyProperties =
+    private static readonly IReadOnlyDictionary<string, string> _emptyProperties =
         ReadOnlyDictionary<string, string>.Empty;
 
     /// <summary>
@@ -59,7 +59,7 @@ public sealed class SubjectIdentifier : IEquatable<SubjectIdentifier>
         Issuer = issuer;
         RelyingPartyQualifier = relyingPartyQualifier;
         Properties = properties is null or { Count: 0 }
-            ? emptyProperties
+            ? _emptyProperties
             : new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(properties, StringComparer.Ordinal));
     }
 

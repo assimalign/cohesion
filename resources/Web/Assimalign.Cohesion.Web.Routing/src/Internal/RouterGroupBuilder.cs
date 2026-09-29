@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Web.Routing.Metadata;
 using Assimalign.Cohesion.Web.Routing.Patterns;
 using Assimalign.Cohesion.Web.Routing.Policies;
 
-namespace Assimalign.Cohesion.Web.Routing;
+namespace Assimalign.Cohesion.Web.Routing.Internal;
 
 /// <summary>
 /// Default <see cref="IRouterGroupBuilder"/>. Composes the group prefix onto child templates as

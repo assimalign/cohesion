@@ -3,13 +3,18 @@
     <PropertyGroup>
         <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);CollectSdkTaskFiles;CollectShippedVersionProps</TargetsForTfmSpecificContentInPackage>
     </PropertyGroup>
-    <ItemGroup>
-        <None Include="$(MSBuildThisProjectDirectory)..\**\*.props" Exclude="**\obj\**" />
-        <None Include="$(MSBuildThisProjectDirectory)..\**\*.targets" Exclude="**\obj\**" />
-		<None Include="$(MSBuildProjectDirectory)\..\Sdk\**\*" Pack="true" PackagePath="Sdk\%(RecursiveDir)%(Filename)%(Extension)">
+    <!--
+        Scoped to the packable Tasks project. These items and the copy targets below exist to
+        assemble the SDK nupkg; a test project under the same family has IsPackable=false and
+        must not drag Sdk/ and Targets/ through its own build.
+    -->
+    <ItemGroup Condition="'$(IsPackable)' == 'true'">
+        <None Include="$(CohesionSdkRootDirectory)**\*.props" Exclude="**\obj\**" />
+        <None Include="$(CohesionSdkRootDirectory)**\*.targets" Exclude="**\obj\**" />
+		<None Include="$(CohesionSdkRootDirectory)Sdk\**\*" Pack="true" PackagePath="Sdk\%(RecursiveDir)%(Filename)%(Extension)">
 			<Visible>false</Visible>
 		</None>
-		<None Include="$(MSBuildProjectDirectory)\..\Targets\**\*" Pack="true" PackagePath="Targets\%(RecursiveDir)%(Filename)%(Extension)">
+		<None Include="$(CohesionSdkRootDirectory)Targets\**\*" Pack="true" PackagePath="Targets\%(RecursiveDir)%(Filename)%(Extension)">
 			<Visible>false</Visible>
 		</None>
         <!--
@@ -27,15 +32,15 @@
     </ItemGroup>
 
     <!-- #region Copies: Sdk/Sdk.{props, targets} and Targets/{targets}.{props, targets}-->
-    <Target Name="CopyRootSdkFiles" AfterTargets="Build">
+    <Target Name="CopyRootSdkFiles" AfterTargets="Build" Condition="'$(IsPackable)' == 'true'">
         <ItemGroup>
-            <MySourceFiles1 Include="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..'))\Sdk\*.*" />
+            <MySourceFiles1 Include="$(CohesionSdkRootDirectory)Sdk\*.*" />
         </ItemGroup>
         <Copy SourceFiles="@(MySourceFiles1)" DestinationFolder="$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Sdk\" />
     </Target>
-    <Target Name="CopyTargetSdkFiles" AfterTargets="Build">
+    <Target Name="CopyTargetSdkFiles" AfterTargets="Build" Condition="'$(IsPackable)' == 'true'">
         <ItemGroup>
-            <MySourceFiles2 Include="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..'))\Targets\*.*" />
+            <MySourceFiles2 Include="$(CohesionSdkRootDirectory)Targets\*.*" />
         </ItemGroup>
         <Copy SourceFiles="@(MySourceFiles2)" DestinationFolder="$(CohesionOutputPathForSdk)\$(NETCoreSdkVersion)\sdks\$(PackageId)\Targets\" />
     </Target>

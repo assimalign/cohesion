@@ -14,27 +14,27 @@ namespace Assimalign.Cohesion.Http.Cookies.Tests;
 /// </summary>
 public class HttpCookieLifetimeTests
 {
-    private static readonly TimeSpan Cap = TimeSpan.FromDays(400);
-    private static readonly DateTimeOffset Now = new(2026, 07, 06, 12, 00, 00, TimeSpan.Zero);
+    private static readonly TimeSpan _cap = TimeSpan.FromDays(400);
+    private static readonly DateTimeOffset _now = new(2026, 07, 06, 12, 00, 00, TimeSpan.Zero);
 
     [Fact(DisplayName = "Cohesion Test [Http] - ClampLifetime: Max-Age exactly 400 days is left unchanged")]
     public void ClampLifetime_MaxAgeExactlyAtCap_ShouldRemainUnchanged()
     {
-        HttpCookie cookie = new("sid", "v", new HttpCookieOptions { MaxAge = Cap });
+        HttpCookie cookie = new("sid", "v", new HttpCookieOptions { MaxAge = _cap });
 
-        HttpCookie clamped = cookie.ClampLifetime(Now, Cap);
+        HttpCookie clamped = cookie.ClampLifetime(_now, _cap);
 
-        clamped.Options.MaxAge.ShouldBe(Cap);
+        clamped.Options.MaxAge.ShouldBe(_cap);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - ClampLifetime: Max-Age 400 days + 1s is clamped to 400 days")]
     public void ClampLifetime_MaxAgeOverCapByOneSecond_ShouldClampToCap()
     {
-        HttpCookie cookie = new("sid", "v", new HttpCookieOptions { MaxAge = Cap + TimeSpan.FromSeconds(1) });
+        HttpCookie cookie = new("sid", "v", new HttpCookieOptions { MaxAge = _cap + TimeSpan.FromSeconds(1) });
 
-        HttpCookie clamped = cookie.ClampLifetime(Now, Cap);
+        HttpCookie clamped = cookie.ClampLifetime(_now, _cap);
 
-        clamped.Options.MaxAge.ShouldBe(Cap);
+        clamped.Options.MaxAge.ShouldBe(_cap);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - ClampLifetime: negative Max-Age round-trips unchanged (deletion)")]
@@ -43,7 +43,7 @@ public class HttpCookieLifetimeTests
         TimeSpan delete = TimeSpan.FromDays(-1);
         HttpCookie cookie = new("sid", "v", new HttpCookieOptions { MaxAge = delete });
 
-        HttpCookie clamped = cookie.ClampLifetime(Now, Cap);
+        HttpCookie clamped = cookie.ClampLifetime(_now, _cap);
 
         clamped.Options.MaxAge.ShouldBe(delete);
     }
@@ -53,7 +53,7 @@ public class HttpCookieLifetimeTests
     {
         HttpCookie cookie = new("sid", "v", new HttpCookieOptions { MaxAge = TimeSpan.Zero });
 
-        HttpCookie clamped = cookie.ClampLifetime(Now, Cap);
+        HttpCookie clamped = cookie.ClampLifetime(_now, _cap);
 
         clamped.Options.MaxAge.ShouldBe(TimeSpan.Zero);
     }
@@ -63,7 +63,7 @@ public class HttpCookieLifetimeTests
     {
         HttpCookie cookie = new("sid", "v");
 
-        HttpCookie clamped = cookie.ClampLifetime(Now, Cap);
+        HttpCookie clamped = cookie.ClampLifetime(_now, _cap);
 
         clamped.ShouldBeSameAs(cookie);
     }
@@ -71,20 +71,20 @@ public class HttpCookieLifetimeTests
     [Fact(DisplayName = "Cohesion Test [Http] - ClampLifetime: Expires beyond the cap is pulled back to reference + cap")]
     public void ClampLifetime_ExpiresBeyondCap_ShouldClampToReferencePlusCap()
     {
-        HttpCookie cookie = new("sid", "v", new HttpCookieOptions { Expires = Now + Cap + TimeSpan.FromDays(1) });
+        HttpCookie cookie = new("sid", "v", new HttpCookieOptions { Expires = _now + _cap + TimeSpan.FromDays(1) });
 
-        HttpCookie clamped = cookie.ClampLifetime(Now, Cap);
+        HttpCookie clamped = cookie.ClampLifetime(_now, _cap);
 
-        clamped.Options.Expires.ShouldBe(Now + Cap);
+        clamped.Options.Expires.ShouldBe(_now + _cap);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - ClampLifetime: Expires exactly at the cap is left unchanged")]
     public void ClampLifetime_ExpiresExactlyAtCap_ShouldRemainUnchanged()
     {
-        DateTimeOffset atCap = Now + Cap;
+        DateTimeOffset atCap = _now + _cap;
         HttpCookie cookie = new("sid", "v", new HttpCookieOptions { Expires = atCap });
 
-        HttpCookie clamped = cookie.ClampLifetime(Now, Cap);
+        HttpCookie clamped = cookie.ClampLifetime(_now, _cap);
 
         clamped.Options.Expires.ShouldBe(atCap);
     }
@@ -92,10 +92,10 @@ public class HttpCookieLifetimeTests
     [Fact(DisplayName = "Cohesion Test [Http] - ClampLifetime: a past Expires is left unchanged")]
     public void ClampLifetime_ExpiresInPast_ShouldRemainUnchanged()
     {
-        DateTimeOffset past = Now - TimeSpan.FromDays(10);
+        DateTimeOffset past = _now - TimeSpan.FromDays(10);
         HttpCookie cookie = new("sid", "v", new HttpCookieOptions { Expires = past });
 
-        HttpCookie clamped = cookie.ClampLifetime(Now, Cap);
+        HttpCookie clamped = cookie.ClampLifetime(_now, _cap);
 
         clamped.Options.Expires.ShouldBe(past);
     }
@@ -105,7 +105,7 @@ public class HttpCookieLifetimeTests
     {
         HttpCookie cookie = new("sid", "v", new HttpCookieOptions { MaxAge = TimeSpan.FromDays(1000) });
 
-        HttpCookie clamped = cookie.ClampLifetime(Now);
+        HttpCookie clamped = cookie.ClampLifetime(_now);
 
         clamped.Options.MaxAge.ShouldBe(TimeSpan.FromDays(400));
     }
@@ -115,23 +115,23 @@ public class HttpCookieLifetimeTests
     {
         HttpCookie cookie = new("sid", "v", new HttpCookieOptions
         {
-            MaxAge = Cap + TimeSpan.FromDays(30),
-            Expires = Now + Cap + TimeSpan.FromDays(30),
+            MaxAge = _cap + TimeSpan.FromDays(30),
+            Expires = _now + _cap + TimeSpan.FromDays(30),
         });
 
-        HttpCookie clamped = cookie.ClampLifetime(Now, Cap);
+        HttpCookie clamped = cookie.ClampLifetime(_now, _cap);
 
-        clamped.Options.MaxAge.ShouldBe(Cap);
-        clamped.Options.Expires.ShouldBe(Now + Cap);
+        clamped.Options.MaxAge.ShouldBe(_cap);
+        clamped.Options.Expires.ShouldBe(_now + _cap);
     }
 
     [Fact(DisplayName = "Cohesion Test [Http] - ClampLifetime: does not mutate the original cookie")]
     public void ClampLifetime_WhenClamping_ShouldNotMutateOriginal()
     {
-        TimeSpan original = Cap + TimeSpan.FromDays(100);
+        TimeSpan original = _cap + TimeSpan.FromDays(100);
         HttpCookie cookie = new("sid", "v", new HttpCookieOptions { MaxAge = original });
 
-        HttpCookie clamped = cookie.ClampLifetime(Now, Cap);
+        HttpCookie clamped = cookie.ClampLifetime(_now, _cap);
 
         clamped.ShouldNotBeSameAs(cookie);
         cookie.Options.MaxAge.ShouldBe(original);
@@ -140,8 +140,8 @@ public class HttpCookieLifetimeTests
     [Fact(DisplayName = "Cohesion Test [Http] - ClampLifetime: negative max lifetime throws")]
     public void ClampLifetime_NegativeMaxLifetime_ShouldThrow()
     {
-        HttpCookie cookie = new("sid", "v", new HttpCookieOptions { MaxAge = Cap });
+        HttpCookie cookie = new("sid", "v", new HttpCookieOptions { MaxAge = _cap });
 
-        Should.Throw<ArgumentOutOfRangeException>(() => cookie.ClampLifetime(Now, TimeSpan.FromDays(-1)));
+        Should.Throw<ArgumentOutOfRangeException>(() => cookie.ClampLifetime(_now, TimeSpan.FromDays(-1)));
     }
 }

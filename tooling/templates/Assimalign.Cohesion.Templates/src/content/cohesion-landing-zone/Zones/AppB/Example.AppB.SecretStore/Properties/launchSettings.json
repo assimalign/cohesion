@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Example.AppB.SecretStore": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "COHESION_ENVIRONMENT": "Local"
+      }
+    }
+  }
+}

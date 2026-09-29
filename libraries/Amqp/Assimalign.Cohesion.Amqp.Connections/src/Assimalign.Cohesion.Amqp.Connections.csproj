@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
+        <RootNamespace>Assimalign.Cohesion.Amqp.Connections</RootNamespace>
         <ImplicitUsings>disable</ImplicitUsings>
     </PropertyGroup>
 

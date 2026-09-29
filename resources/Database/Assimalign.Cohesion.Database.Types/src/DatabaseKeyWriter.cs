@@ -2,6 +2,8 @@ using System;
 using System.Buffers.Binary;
 using System.Text;
 
+using Assimalign.Cohesion.Database.Types.Internal;
+
 namespace Assimalign.Cohesion.Database.Types;
 
 /// <summary>
@@ -21,8 +23,7 @@ namespace Assimalign.Cohesion.Database.Types;
 /// sign-flipped; floating point uses the IEEE-754 total-order fold (negative zero
 /// below zero, NaN canonicalized above positive infinity); decimals use normalized
 /// scientific notation with complemented negatives; strings carry their
-/// <see cref="Collation"/> identifier and, for non-binary collations, an
-/// order-defining sort key followed by the original bytes for round-tripping;
+/// <see cref="Collation"/> identifier and its deterministic byte transform;
 /// variable-length payloads are zero-escaped and terminated. <see cref="DatabaseType.Json"/>
 /// and <see cref="DatabaseType.JsonBinary"/> are not orderable key components.
 /// </para>
@@ -195,34 +196,23 @@ public sealed class DatabaseKeyWriter
     /// <param name="value">The value to append.</param>
     /// <param name="collation">The collation defining the component's order.</param>
     /// <returns>This writer.</returns>
+    /// <remarks>
+    /// Case- and accent-folded keys preserve the canonical comparison value, not
+    /// original spelling. Collation-equal strings encode identically. The original
+    /// value belongs in row storage; appending it here would break unique equality.
+    /// </remarks>
+    /// <exception cref="DatabaseTypeException">The collation is not index-backed.</exception>
     public DatabaseKeyWriter AppendString(string value, Collation collation)
     {
         ArgumentNullException.ThrowIfNull(value);
         ArgumentNullException.ThrowIfNull(collation);
 
+        // Transform before changing writer state, so an unsupported collation or
+        // malformed Unicode leaves a reusable writer intact.
+        byte[] transformed = collation.GetSortKey(value);
         WriteByte((byte)DatabaseType.String);
         WriteByte(collation.Id);
-
-        byte[] utf8 = Encoding.UTF8.GetBytes(value);
-
-        if (ReferenceEquals(collation, Collation.Binary))
-        {
-            // UTF-8 byte order is the collation order — the payload is the sort key.
-            KeyComponentEncoding.WriteEscaped(this, utf8);
-            return this;
-        }
-
-        // Linguistic collations: an order-defining sort key, then the original bytes
-        // (length-prefixed) so decoding round-trips. Sort-key ties (collation-equal
-        // strings) break deterministically on the original bytes.
-        byte[] sortKey = System.Globalization.CultureInfo.InvariantCulture.CompareInfo
-            .GetSortKey(value, System.Globalization.CompareOptions.None).KeyData;
-        KeyComponentEncoding.WriteEscaped(this, sortKey);
-
-        Span<byte> lengthScratch = stackalloc byte[sizeof(int)];
-        BinaryPrimitives.WriteInt32BigEndian(lengthScratch, utf8.Length);
-        WriteBytes(lengthScratch);
-        WriteBytes(utf8);
+        KeyComponentEncoding.WriteEscaped(this, transformed);
         return this;
     }
 

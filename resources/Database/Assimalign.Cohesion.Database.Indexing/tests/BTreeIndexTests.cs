@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
@@ -69,6 +70,34 @@ public class BTreeIndexTests
 
     private static Task<List<(long Key, ulong Reference)>> ScanAsync(ITransactionContext context, IIndex index, IndexKey exact)
         => ScanAsync(index, context, new IndexKeyRange(exact, exact, IsStartInclusive: true, IsEndInclusive: true));
+
+    [Theory(DisplayName = "Cohesion Test [Database.Indexing] - BTree: folded keys seek correctly and enforce unique equality")]
+    [InlineData(2, "Alice", "alice")]
+    [InlineData(3, "Álice", "alice")]
+    public async Task InsertUnique_FoldedString_ShouldSeekAndRejectEquivalentSpelling(byte id, string stored, string equivalent)
+    {
+        // Arrange
+        var (harness, index) = await CreateIndexAsync(unique: true);
+        await using var harnessLifetime = harness;
+        Collation collation = Collation.FromId(id);
+        var first = await harness.BeginAsync();
+        await index.InsertAsync(first, IndexKey.FromString(stored, collation), 100, CancellationToken.None);
+        await harness.CommitAsync(first);
+
+        // Act / Assert: equality lookup uses different spelling and reaches the same bytes.
+        var reader = await harness.BeginAsync();
+        IndexKey key = IndexKey.FromString(equivalent, collation);
+        await using (var cursor = index.OpenCursor(reader, new IndexKeyRange(key, key, true, true)))
+        {
+            (await cursor.MoveNextAsync(CancellationToken.None)).ShouldBeTrue();
+            cursor.CurrentEntryReference.ShouldBe(100UL);
+            (await cursor.MoveNextAsync(CancellationToken.None)).ShouldBeFalse();
+        }
+
+        var second = await harness.BeginAsync();
+        await Should.ThrowAsync<IndexUniqueViolationException>(async () => await index.InsertAsync(second, key, 200, CancellationToken.None));
+        await harness.RollbackAsync(second);
+    }
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - BTree: thousands of inserts split pages and stay ordered")]
     public async Task Insert_ManyEntries_ShouldSplitAndPreserveOrder()

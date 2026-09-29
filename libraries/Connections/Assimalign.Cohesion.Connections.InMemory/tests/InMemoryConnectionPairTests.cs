@@ -11,13 +11,13 @@ namespace Assimalign.Cohesion.Connections.InMemory.Tests;
 
 public class InMemoryConnectionPairTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     [Fact(DisplayName = "Cohesion Test [Connections.InMemory] - Pair: Should round-trip a single payload both directions")]
     public async Task Create_ClientServerEcho_ShouldRoundTripPayload()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         byte[] payload = [1, 2, 3, 4, 5];
@@ -41,7 +41,7 @@ public class InMemoryConnectionPairTests
     public async Task Create_MultipleRoundTrips_ShouldExchangeEachCycle()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         // Act & Assert — three independent request/response cycles over the same live connection,
@@ -69,7 +69,7 @@ public class InMemoryConnectionPairTests
     public async Task Complete_OnClientOutput_ShouldCompleteServerRead()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         byte[] payload = [10, 20, 30];
@@ -106,7 +106,7 @@ public class InMemoryConnectionPairTests
     public async Task Abort_OnClient_ShouldSurfaceReasonOnServerRead()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         InvalidOperationException reason = new("boom");
@@ -127,7 +127,7 @@ public class InMemoryConnectionPairTests
     public async Task Abort_WithoutReason_ShouldSurfaceConnectionAbortedOnPeer()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         // Act
@@ -142,7 +142,7 @@ public class InMemoryConnectionPairTests
     public async Task DisposeAsync_OnClient_ShouldCompletePeerRead()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         (Connection client, Connection server) = InMemoryConnectionPair.Create();
 
         // Act

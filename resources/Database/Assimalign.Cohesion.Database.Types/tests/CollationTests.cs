@@ -14,6 +14,8 @@ public class CollationTests
     {
         Collation.FromId(0).ShouldBeSameAs(Collation.Binary);
         Collation.FromId(1).ShouldBeSameAs(Collation.Invariant);
+        Collation.FromId(2).ShouldBeSameAs(Collation.CaseInsensitive);
+        Collation.FromId(3).ShouldBeSameAs(Collation.CaseAccentInsensitive);
         Should.Throw<DatabaseTypeException>(() => Collation.FromId(200));
     }
 
@@ -34,5 +36,22 @@ public class CollationTests
         Collation.Invariant.Compare("apple", "Apple").ShouldBeLessThan(0);
         Collation.Invariant.Compare("apple", "banana").ShouldBeLessThan(0);
         Collation.Invariant.Compare("same", "same").ShouldBe(0);
+        Collation.Invariant.IsIndexBacked.ShouldBeFalse();
+        Collation.Invariant.GetHashCode("same").ShouldBe(Collation.Invariant.GetHashCode("same"));
     }
+
+    [Theory(DisplayName = "Cohesion Test [Database.Types] - Collation: built-in SQL names resolve without locale tailoring")]
+    [InlineData("binary", 0)]
+    [InlineData("INVARIANT", 1)]
+    [InlineData("CASE_INSENSITIVE", 2)]
+    [InlineData("case_accent_insensitive", 3)]
+    public void FromName_BuiltInNames_ShouldResolve(string name, byte expectedId)
+        => Collation.FromName(name).Id.ShouldBe(expectedId);
+
+    [Theory(DisplayName = "Cohesion Test [Database.Types] - Collation: unknown or culture-aware names are rejected")]
+    [InlineData("tr_TR")]
+    [InlineData("user_defined")]
+    [InlineData("")]
+    public void FromName_UnsupportedNames_ShouldReject(string name)
+        => Should.Throw<DatabaseTypeException>(() => Collation.FromName(name));
 }

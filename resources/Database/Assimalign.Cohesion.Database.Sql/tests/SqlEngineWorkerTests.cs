@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -180,11 +179,11 @@ public sealed class SqlEngineWorkerTests : IDisposable
         engine.State.ShouldBe(EngineState.Running);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Flush worker: Grouped commits complete promptly via the engine's flusher")]
-    public async Task GroupedCommits_WithEngineFlusher_ShouldCompletePromptly()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Grouped durability on memory is rejected at database creation")]
+    public async Task GroupedCommits_OnMemory_ShouldRejectDatabaseCreation()
     {
-        // Arrange: a deliberately long self-help window, so prompt completion is
-        // attributable to the engine's own flush worker alone.
+        // Pre-#1018 this test asserted prompt grouped commits on memory because
+        // durability silently degraded; explicit Grouped must now fail at open.
         await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions
         {
             EngineName = "grouped",
@@ -192,20 +191,9 @@ public sealed class SqlEngineWorkerTests : IDisposable
             GroupCommitWindow = TimeSpan.FromSeconds(10),
         });
 
-        var database = await engine.CreateDatabaseAsync("grouped-db");
-        await using var session = await database.CreateSessionAsync();
-
-        // Act: several grouped commits (DDL self-commits + auto-commit inserts).
-        long start = Stopwatch.GetTimestamp();
-        await session.ExecuteAsync("CREATE TABLE t (id INT NOT NULL)");
-        await session.ExecuteAsync("INSERT INTO t (id) VALUES (1)");
-        await session.ExecuteAsync("INSERT INTO t (id) VALUES (2)");
-        TimeSpan elapsed = Stopwatch.GetElapsedTime(start);
-
-        // Assert: far below one 10-second self-help window (several would have been
-        // needed without a flusher), and the rows are visible.
-        elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
-        (await CountRowsAsync(session)).ShouldBe(2);
+        var failure = await Should.ThrowAsync<NotSupportedException>(async () => await engine.CreateDatabaseAsync("grouped-db"));
+        failure.Message.ShouldContain("SqlStorage (grouped-db)");
+        failure.Message.ShouldContain(nameof(StorageCommitDurability.Grouped));
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Embedded parity: A hostless engine checkpoints and flushes with no composition at all (R10)")]

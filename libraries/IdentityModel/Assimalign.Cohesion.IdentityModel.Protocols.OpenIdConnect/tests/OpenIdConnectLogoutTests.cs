@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect.Tests;
 /// </summary>
 public sealed class OpenIdConnectLogoutTests
 {
-    private static readonly DateTimeOffset now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset _now = new(2026, 7, 4, 12, 0, 0, TimeSpan.Zero);
 
     private static OpenIdConnectLogoutTokenDescriptor CreateConformantLogoutToken()
     {
@@ -25,8 +25,8 @@ public sealed class OpenIdConnectLogoutTests
         {
             Issuer = "https://server.example.com",
             Subject = "24400320",
-            IssuedAt = now.AddSeconds(-5),
-            ExpiresAt = now.AddMinutes(2),
+            IssuedAt = _now.AddSeconds(-5),
+            ExpiresAt = _now.AddMinutes(2),
             JwtId = "bWJq",
             SessionId = "08a5019c-17e1-4977-8f42-65a12843ea02",
             RawToken = "eyJhbGciOiJSUzI1NiJ9.logout.signature",
@@ -38,7 +38,7 @@ public sealed class OpenIdConnectLogoutTests
     }
 
     private static OpenIdConnectLogoutTokenValidationOptions CreateOptions()
-        => new(validateAt: now)
+        => new(validateAt: _now)
         {
             ExpectedIssuer = "https://server.example.com",
             ExpectedAudience = "s6BhdRkqt3",
@@ -144,8 +144,8 @@ public sealed class OpenIdConnectLogoutTests
         {
             Issuer = "https://server.example.com",
             Subject = "24400320",
-            ExpiresAt = now.AddMinutes(10),
-            IssuedAt = now,
+            ExpiresAt = _now.AddMinutes(10),
+            IssuedAt = _now,
             SessionId = "08a5019c-17e1-4977-8f42-65a12843ea02",
         });
 
@@ -156,7 +156,7 @@ public sealed class OpenIdConnectLogoutTests
             SubjectKind = IdentityKind.User,
             Protocol = AuthenticationProtocol.OpenIdConnect,
             Issuer = idToken.Issuer,
-            CreatedAt = now,
+            CreatedAt = _now,
             State = AuthenticationSessionState.Active,
             ProviderSessionIds = { idToken.SessionId! },
         });

@@ -1,0 +1,17 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Database">
+
+  <PropertyGroup>
+    <RootNamespace>EnabledDatabase</RootNamespace>
+    <CohesionApplicationModel>enabled</CohesionApplicationModel>
+    <CohesionApplication>inventory</CohesionApplication>
+    <CohesionResourceName>inventory-database</CohesionResourceName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CohesionEndpoint Update="db" DevPort="15740" />
+    <CohesionSetting Include="Database:PoolSize" Default="20" Type="int" />
+    <CohesionResourceReference Include="..\EnabledDependency\EnabledDependency.csproj" Endpoints="db" />
+    <CohesionResourceProperty Include="database.engine" Value="PostgreSql" />
+  </ItemGroup>
+
+</Project>

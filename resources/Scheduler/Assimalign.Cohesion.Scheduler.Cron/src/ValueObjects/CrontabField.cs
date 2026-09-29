@@ -1,286 +1,235 @@
-﻿using System;
-using System.Linq;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 
-namespace System;
+namespace Assimalign.Cohesion.Scheduler.Cron;
 
 /// <summary>
-/// 
+/// Represents one parsed field of a five-field cron expression.
 /// </summary>
 public readonly struct CrontabField
 {
-	private CrontabField(CrontabFieldKind kind, string expression, int minBoundary, int maxBoundary, int[] occurances)
-	{
-		this.Kind = kind;
-		this.Expression = expression;
-		this.MinBoundary = minBoundary;
-		this.MaxBoundary = maxBoundary;
-		this.Occurrences = occurances;
-	}
+    private readonly int[] _occurrences;
 
-	/// <summary>
-	/// 
-	/// </summary>
-	public bool IsAll => this.Expression == "*";
-	/// <summary>
-	/// An array of all the possible occurrences 
-	/// </summary>
-	public int[] Occurrences { get; }
-	/// <summary>
-	/// 
-	/// </summary>
-	public CrontabFieldKind Kind { get; }
-	/// <summary>
-	/// 
-	/// </summary>
-	public string Expression { get; }
-	/// <summary>
-	/// 
-	/// </summary>
-	public int MaxBoundary { get; }
-	/// <summary>
-	/// 
-	/// </summary>
-	public int MinBoundary { get; }
-
-	public static CrontabField ParseMinute(string expression)
-	{
-		return new CrontabField(
-			CrontabFieldKind.Minute,
-			expression,
-			0,
-			59,
-			GetOccurrences(expression, 0, 59));
-	}
-	public static CrontabField ParseHour(string expression)
-	{
-		return new CrontabField(
-			CrontabFieldKind.Minute,
-			expression,
-			0,
-			23,
-			GetOccurrences(expression, 0, 23));
-	}
-	public static CrontabField ParseDayOfMonth(string expression)
-	{
-		return new CrontabField(
-			CrontabFieldKind.Minute,
-			expression,
-			1,
-			31,
-			GetOccurrences(expression, 1, 31)); ;
-	}
-	public static CrontabField ParseMonth(string expression)
-	{
-		return new CrontabField(
-			CrontabFieldKind.Minute,
-			expression,
-			1,
-			12,
-			GetOccurrences(expression, 1, 12));
-	}
-	public static CrontabField ParseDayOfWeek(string expression)
-	{
-		return new CrontabField(
-			CrontabFieldKind.Minute,
-			expression,
-			0,
-			6,
-			GetOccurrences(expression, 0, 6));
-	}
-	private static int[] GetOccurrences(string expression, int min, int max)
-	{
-		if (expression == "*")
-		{
-			var seed = min;
-			var occurrences = new int[max - min + 1];
-			for (int i = 0; i < occurrences.Length; i++)
-			{
-				occurrences[i] = seed;
-				seed++;
-			}
-			return occurrences;
-		}
-		if (expression.Contains('/'))
-		{
-			var steps = expression.Split('/');
-			var boundariesStep = steps[0];
-			var intervalsStep = steps[1];
-
-			// Check for invalid step format
-			if (steps.Length != 2)
-			{
-				throw new FormatException($"The following expression '{expression}' has either more than one step delimiter -> '/', or is invalid.");
-			}
-			if (boundariesStep.Equals("*"))
-			{
-				var occurrences = new List<int>();
-				// Indicates a list of varied intervals between 0 and 59
-				// Example: */2,5,7
-				//      Occurrence A: 2, 4, 6, 8,...
-				//      Occurrence B: 5, 10, 15,....
-				//      Occurrence C: 7, 14, 21, 28,...
-				// NOTE: Once the occurrence list has been built, select only distinct int.
-				//       The varied interval can sometimes have duplicate values
-				if (intervalsStep.Contains(','))
-				{
-					var intervals = intervalsStep.Split(',');
-
-					for (int i = 0; i < intervals.Length; i++)
-					{
-						occurrences.AddRange(GetOccurrences($"*/{intervals[i]}", min, max));
-					}
-				}
-				else
-				{
-					var interval = int.Parse(intervalsStep);
-					if (interval > max)
-					{
-						throw new ArgumentException($"The step value '{interval}' in expression '{expression}' cannot be greater than '{max}'.");
-					}
-					for (int i = min; i <= max; i = i + interval)
-					{
-						occurrences.Add(i);
-					}
-				}
-
-				occurrences.Sort();
-				return occurrences.Distinct().ToArray();
-			}
-			// Check for a list of boundaries
-			if (boundariesStep.Contains(','))
-			{
-				var occurrences = new List<int>();
-				var boundariesList = boundariesStep.Split(',');
-
-				for (int i = 0; i < boundariesList.Length; i++)
-				{
-					var lower = min;
-					var upper = max;
-
-					// Is the current boundary a range or single value
-					if (boundariesList[i].Contains('-'))
-					{
-						lower = int.Parse(boundariesList[i].Split('-')[0]);
-						upper = int.Parse(boundariesList[i].Split('-')[1]);
-					}
-					else
-					{
-						lower = int.Parse(boundariesList[i]);
-					}
-					// Check if the parse boundaries are greater of less than the default boundaries
-					if (lower < min || upper > max)
-					{
-						throw new ArgumentOutOfRangeException("");
-					}
-					// Now check if the intervals step is also a list
-					if (intervalsStep.Contains(','))
-					{
-						var intervals = intervalsStep.Split(',');
-
-						for (int c = 0; c < intervals.Length; c++)
-						{
-							occurrences.AddRange(GetOccurrences($"*/{intervals[c]}", lower, upper));
-						}
-					}
-					else
-					{
-						occurrences.AddRange(GetOccurrences($"*/{intervalsStep}", lower, upper));
-					}
-				}
-
-				occurrences.Sort();
-				return occurrences.Distinct().ToArray();
-			}
-			// Check if boundaries is a range
-			if (boundariesStep.Contains('-'))
-			{
-				var lower = int.Parse(boundariesStep.Split('-')[0]);
-				var upper = int.Parse(boundariesStep.Split('-')[1]);
-				var occurrences = new List<int>();
-
-				// Check if the parse boundaries are greater of less than the default boundaries
-				if (lower < min || upper > max)
-				{
-					throw new ArgumentOutOfRangeException("");
-				}
-				if (intervalsStep.Contains(','))
-				{
-					var intervals = intervalsStep.Split(',');
-					for (int i = 0; i < intervals.Length; i++)
-					{
-						occurrences.AddRange(GetOccurrences($"{lower}-{upper}/{intervals[i]}", min, max));
-					}
-				}
-				else
-				{
-					var interval = int.Parse(intervalsStep);
-
-					for (int i = lower; i < upper; i = i + interval)
-					{
-						occurrences.Add(i);
-					}
-				}
-
-				occurrences.Sort();
-				return occurrences.Distinct().ToArray();
-			}
-		}
-		if (expression.Contains(','))
-		{
-			var boundaies = expression.Split(',');
-			var occurrences = new List<int>();
-
-			for (int i = 0; i < boundaies.Length; i++)
-			{
-				if (boundaies[i].Contains('-'))
-				{
-					var lower = int.Parse(boundaies[i].Split('-')[0]);
-					var upper = int.Parse(boundaies[i].Split('-')[1]);
-
-					occurrences.AddRange(GetOccurrences($"{lower}-{upper}", min, max));
-				}
-				else
-				{
-					occurrences.AddRange(GetOccurrences(boundaies[i], min, max));
-				}
-			}
-
-			occurrences.Sort();
-			return occurrences.ToArray();
-		}
-		if (expression.Contains('-'))
-		{
-			var lower = int.Parse(expression.Split('-')[0]);
-			var upper = int.Parse(expression.Split('-')[1]);
-			var occurrences = new List<int>();
-
-			if (lower >= upper)
-			{
-				throw new ArgumentException($"The provided range {lower}-{upper} within the given expression is invalid.");
-			}
-			for (int i = lower; i < upper + 1; i++)
-			{
-				occurrences.Add(i);
-			}
-
-			occurrences.Sort();
-			return occurrences.ToArray();
-		}
-		else
-		{
-			var value = int.Parse(expression);
-			if (value > max || value < min)
-			{
-				throw new ArgumentOutOfRangeException("expression", value, $"The value(s) must be between {min} and {max}. The value {value} within the provided expression failed.");
-			}
-			return new int[1] { value };
-		}
-	}
-
-
-    public override string ToString()
+    private CrontabField(
+        CrontabFieldKind kind,
+        string expression,
+        int minBoundary,
+        int maxBoundary,
+        bool isWildcard,
+        int[] occurrences)
     {
-		return this.Expression;
+        Kind = kind;
+        Expression = expression;
+        MinBoundary = minBoundary;
+        MaxBoundary = maxBoundary;
+        IsWildcard = isWildcard;
+        _occurrences = occurrences;
+    }
+
+    /// <summary>
+    /// Gets whether the field begins with the unrestricted wildcard token.
+    /// </summary>
+    public bool IsWildcard { get; }
+
+    /// <summary>
+    /// Gets whether every legal value is selected.
+    /// </summary>
+    public bool IsAll => _occurrences is not null && _occurrences.Length == MaxBoundary - MinBoundary + 1;
+
+    /// <summary>
+    /// Gets the sorted distinct legal values selected by the expression.
+    /// </summary>
+    public IReadOnlyList<int> Occurrences => _occurrences is null
+        ? Array.Empty<int>()
+        : Array.AsReadOnly(_occurrences);
+
+    /// <summary>
+    /// Gets the field kind.
+    /// </summary>
+    public CrontabFieldKind Kind { get; }
+
+    /// <summary>
+    /// Gets the source expression for this field.
+    /// </summary>
+    public string Expression { get; }
+
+    /// <summary>
+    /// Gets the largest legal normalized value.
+    /// </summary>
+    public int MaxBoundary { get; }
+
+    /// <summary>
+    /// Gets the smallest legal normalized value.
+    /// </summary>
+    public int MinBoundary { get; }
+
+    /// <summary>Parses a minute field.</summary>
+    /// <param name="expression">The field expression.</param>
+    /// <returns>The parsed field.</returns>
+    public static CrontabField ParseMinute(string expression) =>
+        Parse(CrontabFieldKind.Minute, expression, 0, 59);
+
+    /// <summary>Parses an hour field.</summary>
+    /// <param name="expression">The field expression.</param>
+    /// <returns>The parsed field.</returns>
+    public static CrontabField ParseHour(string expression) =>
+        Parse(CrontabFieldKind.Hour, expression, 0, 23);
+
+    /// <summary>Parses a day-of-month field.</summary>
+    /// <param name="expression">The field expression.</param>
+    /// <returns>The parsed field.</returns>
+    public static CrontabField ParseDayOfMonth(string expression) =>
+        Parse(CrontabFieldKind.DayOfMonth, expression, 1, 31);
+
+    /// <summary>Parses a month field.</summary>
+    /// <param name="expression">The field expression.</param>
+    /// <returns>The parsed field.</returns>
+    public static CrontabField ParseMonth(string expression) =>
+        Parse(CrontabFieldKind.Month, expression, 1, 12);
+
+    /// <summary>
+    /// Parses a day-of-week field. Both 0 and 7 denote Sunday.
+    /// </summary>
+    /// <param name="expression">The field expression.</param>
+    /// <returns>The parsed field.</returns>
+    public static CrontabField ParseDayOfWeek(string expression) =>
+        Parse(CrontabFieldKind.DayOfWeek, expression, 0, 7, normalizeSunday: true);
+
+    /// <summary>
+    /// Determines whether the normalized field contains a value.
+    /// </summary>
+    /// <param name="value">The value to test.</param>
+    /// <returns><see langword="true"/> when selected.</returns>
+    public bool Contains(int value) => Array.BinarySearch(_occurrences ?? [], value) >= 0;
+
+    /// <inheritdoc />
+    public override string ToString() => Expression ?? string.Empty;
+
+    private static CrontabField Parse(
+        CrontabFieldKind kind,
+        string expression,
+        int min,
+        int max,
+        bool normalizeSunday = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(expression);
+        if (expression.Any(char.IsWhiteSpace))
+        {
+            throw new FormatException($"Cron field '{expression}' cannot contain whitespace.");
+        }
+
+        var values = new SortedSet<int>();
+        string[] items = expression.Split(',', StringSplitOptions.None);
+        for (int index = 0; index < items.Length; index++)
+        {
+            ParseItem(items[index], expression, min, max, values);
+        }
+
+        int[] normalized = normalizeSunday
+            ? values.Select(static value => value == 7 ? 0 : value).Distinct().Order().ToArray()
+            : values.ToArray();
+
+        return new CrontabField(
+            kind,
+            expression,
+            min,
+            normalizeSunday ? 6 : max,
+            expression[0] == '*',
+            normalized);
+    }
+
+    private static void ParseItem(
+        string item,
+        string expression,
+        int min,
+        int max,
+        SortedSet<int> values)
+    {
+        if (item.Length == 0)
+        {
+            throw new FormatException($"Cron field '{expression}' contains an empty list item.");
+        }
+
+        string[] stepParts = item.Split('/', StringSplitOptions.None);
+        if (stepParts.Length > 2 || stepParts[0].Length == 0)
+        {
+            throw new FormatException($"Cron field '{expression}' has an invalid step expression.");
+        }
+
+        int step = 1;
+        if (stepParts.Length == 2)
+        {
+            if (!int.TryParse(stepParts[1], out step) || step <= 0)
+            {
+                throw new FormatException($"Cron field '{expression}' has a non-positive or invalid step.");
+            }
+        }
+
+        string range = stepParts[0];
+        int lower;
+        int upper;
+        if (range == "*")
+        {
+            lower = min;
+            upper = max;
+        }
+        else
+        {
+            string[] bounds = range.Split('-', StringSplitOptions.None);
+            if (bounds.Length == 1)
+            {
+                lower = ParseBound(bounds[0], expression, min, max);
+                upper = stepParts.Length == 2 ? max : lower;
+            }
+            else if (bounds.Length == 2 && bounds[0].Length > 0 && bounds[1].Length > 0)
+            {
+                lower = ParseBound(bounds[0], expression, min, max);
+                upper = ParseBound(bounds[1], expression, min, max);
+                if (lower > upper)
+                {
+                    throw new FormatException(
+                        $"Cron field '{expression}' has a descending range '{range}'.");
+                }
+            }
+            else
+            {
+                throw new FormatException($"Cron field '{expression}' has an invalid range.");
+            }
+        }
+
+        int value = lower;
+        while (true)
+        {
+            values.Add(value);
+
+            // Comparing the remaining bounded distance before addition prevents a legal,
+            // very large step from wrapping Int32 and introducing out-of-range values.
+            if (step > upper - value)
+            {
+                break;
+            }
+
+            value += step;
+        }
+    }
+
+    private static int ParseBound(string text, string expression, int min, int max)
+    {
+        if (!int.TryParse(text, out int value))
+        {
+            throw new FormatException(
+                $"Cron field '{expression}' contains non-numeric value '{text}'.");
+        }
+
+        if (value < min || value > max)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(expression),
+                value,
+                $"Cron field values must be between {min} and {max}.");
+        }
+
+        return value;
     }
 }

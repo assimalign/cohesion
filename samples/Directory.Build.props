@@ -1,0 +1,24 @@
+<Project>
+	<Import Project="..\Directory.Build.props" />
+
+	<!--
+	    What is left here is the package-only SDK consumer smoke tree (SdkSmoke), which
+	    .github/workflows/sdk-smoke.yml drives. It is scheduled to move to the
+	    cohesion-examples repository (.claude/rules/workflow.md, "Companion repositories");
+	    this file and the samples/ folder go with it.
+
+	    Executable acceptance fixtures are NOT here. A fixture lives in a fixtures/ folder
+	    inside the project whose tests drive it, under libraries/ or resources/, where the
+	    surrounding Directory.Build.props already supplies the TFM and the name-only
+	    reference resolver already indexes it. See .claude/rules/resource-areas.md.
+
+	    The root Directory.Build.props sets no TargetFramework, so anything here that is not
+	    driven by a Cohesion SDK needs one; SdkSmoke's projects are SDK-driven and take
+	    net10.0 from Assimalign.Cohesion.Sdk.Defaults.props, which sets it conditionally and
+	    therefore keeps the value below.
+	-->
+	<PropertyGroup>
+		<TargetFramework>$(TargetFrameworkLatest)</TargetFramework>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+</Project>

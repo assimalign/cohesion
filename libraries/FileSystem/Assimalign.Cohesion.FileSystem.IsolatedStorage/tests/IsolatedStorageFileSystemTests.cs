@@ -5,6 +5,8 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Shouldly;
+
 using Assimalign.Cohesion.FileSystem;
 
 namespace Assimalign.Cohesion.FileSystem.IsolatedStorage.Tests;
@@ -94,19 +96,18 @@ public class IsolatedStorageFileSystemTests
         using var fs = IsolatedStorageFileSystemTestFixture.CreateFreshFileSystem(
             watchPollInterval: TimeSpan.FromMilliseconds(50));
 
-        // Tokens are disposed by the file system on its own Dispose (it tracks owned timers).
-        // No explicit token.Dispose() is needed in these tests.
+        // End each watch scope explicitly; provider disposal remains a fallback for owned tokens.
         var token = fs.Watch(null);
+        using var watchScope = (IDisposable)token;
 
         var createdPaths = new System.Collections.Concurrent.ConcurrentBag<string>();
         using var reg = token.OnCreate<object?>(e => createdPaths.Add(e.Path.ToString()), state: null);
 
-        // Give the timer one full tick to capture the empty baseline before mutating.
-        await Task.Delay(150);
+        // The constructor captures the baseline synchronously.
         fs.CreateFile("appeared.txt");
 
-        await WaitFor(() => createdPaths.Contains("/appeared.txt"), TimeSpan.FromSeconds(2));
-        Assert.Contains("/appeared.txt", createdPaths);
+        await WaitFor(() => createdPaths.Contains("/appeared.txt"), TimeSpan.FromSeconds(5));
+        createdPaths.ShouldContain("/appeared.txt");
     }
 
     [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Watch: polling fires OnDelete when file removed")]
@@ -117,15 +118,15 @@ public class IsolatedStorageFileSystemTests
         fs.CreateFile("doomed.txt");
 
         var token = fs.Watch(null);
+        using var watchScope = (IDisposable)token;
 
         var deletedPaths = new System.Collections.Concurrent.ConcurrentBag<string>();
         using var reg = token.OnDelete<object?>(e => deletedPaths.Add(e.Path.ToString()), state: null);
 
-        await Task.Delay(150);
         fs.DeleteFile("doomed.txt");
 
-        await WaitFor(() => deletedPaths.Contains("/doomed.txt"), TimeSpan.FromSeconds(2));
-        Assert.Contains("/doomed.txt", deletedPaths);
+        await WaitFor(() => deletedPaths.Contains("/doomed.txt"), TimeSpan.FromSeconds(5));
+        deletedPaths.ShouldContain("/doomed.txt");
     }
 
     [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Watch: polling fires OnChange when file modified")]
@@ -136,18 +137,18 @@ public class IsolatedStorageFileSystemTests
         var file = fs.CreateFile("mutating.txt");
 
         var token = fs.Watch(null);
+        using var watchScope = (IDisposable)token;
 
         var changedPaths = new System.Collections.Concurrent.ConcurrentBag<string>();
         using var reg = token.OnChange<object?>(e => changedPaths.Add(e.Path.ToString()), state: null);
 
-        await Task.Delay(150);
         using (var stream = file.Open(FileMode.Open, FileAccess.Write))
         {
             stream.Write(Encoding.UTF8.GetBytes("payload"));
         }
 
-        await WaitFor(() => changedPaths.Contains("/mutating.txt"), TimeSpan.FromSeconds(2));
-        Assert.Contains("/mutating.txt", changedPaths);
+        await WaitFor(() => changedPaths.Contains("/mutating.txt"), TimeSpan.FromSeconds(5));
+        changedPaths.ShouldContain("/mutating.txt");
     }
 
     [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Watch: glob filter scopes events")]
@@ -158,17 +159,17 @@ public class IsolatedStorageFileSystemTests
 
         // Only *.log entries should surface through the filtered token.
         var token = fs.Watch(Glob.Parse("**/*.log"));
+        using var watchScope = (IDisposable)token;
 
         var createdPaths = new System.Collections.Concurrent.ConcurrentBag<string>();
         using var reg = token.OnCreate<object?>(e => createdPaths.Add(e.Path.ToString()), state: null);
 
-        await Task.Delay(150);
         fs.CreateFile("audit.log");
         fs.CreateFile("audit.txt");
 
-        await WaitFor(() => createdPaths.Contains("/audit.log"), TimeSpan.FromSeconds(2));
-        Assert.Contains("/audit.log", createdPaths);
-        Assert.DoesNotContain("/audit.txt", createdPaths);
+        await WaitFor(() => createdPaths.Contains("/audit.log"), TimeSpan.FromSeconds(5));
+        createdPaths.ShouldContain("/audit.log");
+        createdPaths.ShouldNotContain("/audit.txt");
     }
 
     [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - File.Watch: polling tracks single file")]
@@ -179,18 +180,18 @@ public class IsolatedStorageFileSystemTests
         var file = fs.CreateFile("note.txt");
 
         var token = file.Watch();
+        using var watchScope = (IDisposable)token;
 
         var changedPaths = new System.Collections.Concurrent.ConcurrentBag<string>();
         using var reg = token.OnChange<object?>(e => changedPaths.Add(e.Path.ToString()), state: null);
 
-        await Task.Delay(150);
         using (var stream = file.Open(FileMode.Open, FileAccess.Write))
         {
             stream.Write(Encoding.UTF8.GetBytes("payload"));
         }
 
-        await WaitFor(() => changedPaths.Contains("/note.txt"), TimeSpan.FromSeconds(2));
-        Assert.Contains("/note.txt", changedPaths);
+        await WaitFor(() => changedPaths.Contains("/note.txt"), TimeSpan.FromSeconds(5));
+        changedPaths.ShouldContain("/note.txt");
     }
 
     [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Watch: dispose stops the timer")]
@@ -200,20 +201,21 @@ public class IsolatedStorageFileSystemTests
             watchPollInterval: TimeSpan.FromMilliseconds(50));
 
         var token = fs.Watch(null);
+        using var watchScope = (IDisposable)token;
         int createdCount = 0;
         var reg = token.OnCreate<object?>(_ => Interlocked.Increment(ref createdCount), state: null);
 
-        await Task.Delay(150);
         ((IDisposable)token).Dispose();
 
-        // Mutation after Dispose must not fire any further callbacks.
+        // A second active watch proves polling and the file system still work after the
+        // first token's lifetime ends. Dedicated manual-timer tests assert timer shutdown.
+        var liveToken = fs.Watch(null);
+        using var liveScope = (IDisposable)liveToken;
+        var observed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var liveRegistration = liveToken.OnCreate<object?>(_ => observed.TrySetResult(), null);
         fs.CreateFile("ignored.txt");
-        await Task.Delay(250);
-
-        // Allow up to a single late callback that may have been in-flight at dispose; the
-        // contract is "no callbacks fire after Dispose returns" but the timer's CAS guard can
-        // race momentarily. The hard invariant is that we don't see a steady stream of events.
-        Assert.True(createdCount <= 1, $"Expected the timer to stop firing; observed {createdCount} callbacks.");
+        await observed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Volatile.Read(ref createdCount).ShouldBe(0);
         reg.Dispose();
     }
 
@@ -225,15 +227,17 @@ public class IsolatedStorageFileSystemTests
         fs.CreateFile("before.txt");
 
         var token = fs.Watch(null);
+        using var watchScope = (IDisposable)token;
 
         bool renameFired = false;
         using var reg = token.OnRename<object?>(_ => renameFired = true, state: null);
 
-        await Task.Delay(150);
+        var deleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var deletion = token.OnDelete<object?>(_ => deleted.TrySetResult(), null);
         fs.Move("before.txt", "after.txt");
-        await Task.Delay(250);
+        await deleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.False(renameFired, "Polling-based watch cannot reliably detect renames; OnRename must remain silent.");
+        renameFired.ShouldBeFalse();
     }
 
     private static async Task WaitFor(System.Func<bool> condition, TimeSpan timeout)
@@ -245,8 +249,9 @@ public class IsolatedStorageFileSystemTests
             {
                 return;
             }
-            await Task.Delay(25);
+            await Task.Delay(25, CancellationToken.None);
         }
+        condition().ShouldBeTrue("The expected watch event did not arrive before the deadline.");
     }
 
     [Fact(DisplayName = "Cohesion Test [IsolatedStorageFileSystem] - Attributes: getter throws NotSupported")]

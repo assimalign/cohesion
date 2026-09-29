@@ -6,9 +6,8 @@ using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Http.Connections.Internal.Http2.HPack;
 
-namespace Assimalign.Cohesion.Http.Internal;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 internal struct IntegerDecoder
 {

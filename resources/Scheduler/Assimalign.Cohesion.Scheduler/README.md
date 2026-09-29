@@ -1,10 +1,5 @@
+# Assimalign.Cohesion.Scheduler
 
-# Design Flow
+The Scheduler root contains contract-only composition APIs plus the shared schedule occurrence base. Declare delegate work with AddJob, then bind the returned IScheduleJob through a trigger feature package.
 
-```mermaid
-classDiagram
-    class IScheduler{
-        Task StartAsync(CancellationToken cancellationToken = default)
-        Task StopAsync(CancellationToken cancellationToken = default)
-    }
-```
+See [design](docs/DESIGN.md) and [overview](docs/OVERVIEW.md).

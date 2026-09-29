@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// Serializer for the HTTP/3 <c>GOAWAY</c> frame (RFC 9114 §7.2.6). The frame

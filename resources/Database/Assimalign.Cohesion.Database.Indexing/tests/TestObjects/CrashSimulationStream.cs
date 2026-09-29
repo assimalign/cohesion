@@ -1,5 +1,8 @@
 using System;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using Assimalign.Cohesion.FileSystem;
 
 namespace Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 
@@ -8,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
 /// storage test harness): writes survive a crash only when flushed, or immediately
 /// in write-through mode (worst-case steal).
 /// </summary>
-public sealed class CrashSimulationStream : Stream
+public sealed class CrashSimulationStream : IFileSystemFileHandle
 {
     private readonly MemoryStream _live = new();
     private readonly bool _writeThrough;
@@ -21,27 +24,27 @@ public sealed class CrashSimulationStream : Stream
 
     public byte[] CaptureDurable() => (byte[])_durable.Clone();
 
-    public override bool CanRead => true;
+    public bool SupportsDurableFlush => true;
 
-    public override bool CanSeek => true;
+    public long Length => _live.Length;
 
-    public override bool CanWrite => true;
+    // Preserve the fixture's prior flush-gated persistence while carrying the
+    // simulated durability contract explicitly.
+    public void Flush(bool durable = false) => _durable = _live.ToArray();
 
-    public override long Length => _live.Length;
-
-    public override long Position
+    public int Read(Span<byte> buffer, long offset)
     {
-        get => _live.Position;
-        set => _live.Position = value;
+        _live.Position = offset;
+        return _live.Read(buffer);
     }
 
-    public override void Flush() => _durable = _live.ToArray();
+    public ValueTask<int> ReadAsync(Memory<byte> buffer, long offset, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ValueTask<int>(Read(buffer.Span, offset));
+    }
 
-    public override int Read(byte[] buffer, int offset, int count) => _live.Read(buffer, offset, count);
-
-    public override long Seek(long offset, SeekOrigin origin) => _live.Seek(offset, origin);
-
-    public override void SetLength(long value)
+    public void SetLength(long value)
     {
         _live.SetLength(value);
 
@@ -51,13 +54,32 @@ public sealed class CrashSimulationStream : Stream
         }
     }
 
-    public override void Write(byte[] buffer, int offset, int count)
+    public void Write(ReadOnlySpan<byte> buffer, long offset)
     {
-        _live.Write(buffer, offset, count);
+        _live.Position = offset;
+        _live.Write(buffer);
 
         if (_writeThrough)
         {
             _durable = _live.ToArray();
         }
     }
+
+    public ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, long offset, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Write(buffer.Span, offset);
+        return default;
+    }
+
+    public ValueTask FlushAsync(bool durable, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Flush(durable);
+        return default;
+    }
+
+    public void Dispose() => _live.Dispose();
+
+    public ValueTask DisposeAsync() => _live.DisposeAsync();
 }

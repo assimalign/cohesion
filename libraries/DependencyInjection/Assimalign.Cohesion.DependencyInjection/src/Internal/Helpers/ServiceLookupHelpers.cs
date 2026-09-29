@@ -11,7 +11,7 @@ internal static class ServiceLookupHelpers
 
     private const BindingFlags LookupFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
 
-    private static readonly MethodInfo? ArrayEmptyMethodInfo = typeof(Array).GetMethod(nameof(Array.Empty));
+    private static readonly MethodInfo? _arrayEmptyMethodInfo = typeof(Array).GetMethod(nameof(Array.Empty));
 
     internal static readonly MethodInfo? InvokeFactoryMethodInfo = typeof(Func<IServiceProvider, object>)
         .GetMethod(nameof(Func<IServiceProvider, object>.Invoke), LookupFlags);
@@ -37,5 +37,5 @@ internal static class ServiceLookupHelpers
     [UnconditionalSuppressMessage("ReflectionAnalysis", "IL2060:MakeGenericMethod",
         Justification = "Calling Array.Empty<T>() is safe since the T doesn't have trimming annotations.")]
     internal static MethodInfo GetArrayEmptyMethodInfo(Type itemType) =>
-        ArrayEmptyMethodInfo.MakeGenericMethod(itemType);
+        _arrayEmptyMethodInfo.MakeGenericMethod(itemType);
 }

@@ -342,7 +342,7 @@ public sealed class OpenIdConnectProviderMetadata : ProtocolMetadata
         string member,
         string? value)
     {
-        if (value is not null && !ProtocolEndpoint.IsValidLocation(value))
+        if (value is not null && !EndpointLocation.IsValid(value))
         {
             diagnostics.Add(new ProtocolValidationDiagnostic(
                 ProtocolValidationSeverity.Error,
@@ -430,7 +430,7 @@ public sealed class OpenIdConnectProviderMetadata : ProtocolMetadata
         ProtocolBinding binding)
     {
         // Malformed wire values stay on the typed member only; Validate() reports them.
-        if (location is null || !ProtocolEndpoint.IsValidLocation(location))
+        if (location is null || !EndpointLocation.IsValid(location))
         {
             return;
         }

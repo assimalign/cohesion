@@ -12,13 +12,13 @@ namespace Assimalign.Cohesion.Files.Bmff;
 [DebuggerDisplay("Bmff Box: Movie Fragment Random Access (mfra)")]
 public sealed class MovieFragmentRandomAccessBox : BmffBoxComposite
 {
-    private IEnumerable<BmffBox> children;
+    private IEnumerable<BmffBox> _children;
     public MovieFragmentRandomAccessBox(long offset, long limit)
     {
         this.Offset = offset;
         this.Limit = limit;
     }
-    public override IEnumerable<BmffBox> Children => children;
+    public override IEnumerable<BmffBox> Children => _children;
 
     public override long Limit { get; }
 
@@ -36,7 +36,7 @@ public sealed class MovieFragmentRandomAccessBox : BmffBoxComposite
             boxes.Add(reader.Current);
         }
 
-        children = boxes;
+        _children = boxes;
     }
 
     public override void Write(BmffStream stream)

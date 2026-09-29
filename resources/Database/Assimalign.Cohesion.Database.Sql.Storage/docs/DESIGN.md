@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.Database.Sql.Storage — Design
 
 The SQL model's *storage layout* project (area architecture:
-[resources/Database/DESIGN.md](../../DESIGN.md) §3.3 — every model brings a layout,
+[resources/Database/DESIGN.md](../../../../docs/resources/Database/DESIGN.md) §3.3 — every model brings a layout,
 never its own paging/WAL). This library is deliberately thin: `SqlStorage` derives
 from the kernel's `Storage` base and re-exposes the protected record operations as a
 public row-oriented surface. All hard invariants (write-ahead ordering, recovery
@@ -23,12 +23,16 @@ by — `Assimalign.Cohesion.Database.Storage`.
   only that table's pages, and `DROP TABLE` releases the chain. The ownerless
   overloads write the shared (owner-zero) space — the catalog file set's layout,
   where kind-discriminated metadata records are few and scanned as a whole.
-- **The journal is surfaced, narrowly.** `WriteAheadJournal` (internal) hands the
+- **The journal is a public composition seam.** `WriteAheadJournal` returns the
+  existing `IStorageJournal` contract, matching Documents, Graph, and Blob storage.
+  It replaces the shipped-to-shipped friend grant and hands the
   engine's transaction coordinator the same journal the storage brackets write page
   images to, for the manager's journal-bound transaction log and open-time recovery
   analysis. `Open(..., checkpointOnOpen: false)` exists for the same reason — the
   engine analyzes the recovered journal before the truncating checkpoint destroys
-  the records classification reads (see `ISqlStorageStrategy`).
+  the records classification reads (see `ISqlStorageStrategy`). Storage retains
+  ownership of the journal; composers coordinate journal writes and checkpoints
+  through their transaction coordinator and must not dispose it independently.
 
 ## Error model
 

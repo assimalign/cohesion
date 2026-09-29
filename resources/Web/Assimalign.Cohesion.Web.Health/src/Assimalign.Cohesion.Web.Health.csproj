@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Web.Health</RootNamespace>
-		<Description>Cohesion health checks, delivered over HTTP. Owns the health model (IHealthCheck, Healthy/Degraded/Unhealthy report), a builder-time registry, readiness/liveness tag filtering, and the /healthz|/livez|/readyz pipeline endpoint with a pluggable AOT-safe (Utf8JsonWriter) response writer. Resources consume this as a private implementation detail (CohesionPrivateProjectReference + CohesionFrameworkPrivateAssembly) and expose health only through their own options (EnableHealthCheck, path); the app developer never sees these types.</Description>
+		<Description>Public Web health checks for Cohesion applications, including builder-time registration, readiness/liveness filtering, HTTP endpoints, and an AOT-safe JSON response writer. App.Web exposes the API publicly; App.Database carries it privately as part of its Web runtime closure.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />

@@ -1,39 +1,54 @@
 using System;
 
 using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel.Internal;
 
-namespace Assimalign.Cohesion.Database.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// Composition extensions for adding a database resource to an application model.
+/// Composition extensions for adding database manifests to an application model.
 /// </summary>
 public static class DatabaseResourceExtensions
 {
     extension(IApplicationBuilder builder)
     {
         /// <summary>
-        /// Adds a Cohesion database resource to the application.
+        /// Adds a manifest-backed Cohesion database resource to the application.
         /// </summary>
-        /// <param name="name">The resource name, unique within the application.</param>
+        /// <param name="manifest">The build-produced database resource manifest.</param>
+        /// <param name="options">
+        /// Optional deployer-owned replica and storage overrides.
+        /// </param>
         /// <returns>The resource descriptor, for chaining dependency edges.</returns>
-        public IApplicationResourceDescriptor AddDatabase(string name)
+        /// <exception cref="ArgumentNullException">
+        /// <paramref name="manifest"/> is <see langword="null"/>.
+        /// </exception>
+        public IDatabaseResourceDescriptor AddDatabase(
+            ResourceManifest manifest,
+            DatabaseResourceOptions? options = null)
         {
-            return builder.AddResource(new DatabaseResource(name));
+            ArgumentNullException.ThrowIfNull(manifest);
+
+            return new DatabaseResourceDescriptor(builder.AddResource(new DatabaseResource(manifest, options)));
         }
 
-        /// <summary>
-        /// Adds a Cohesion database resource to the application with configured options.
-        /// </summary>
-        /// <param name="name">The resource name, unique within the application.</param>
-        /// <param name="configure">Configures the resource's declared endpoint, mounts, and environment.</param>
-        /// <returns>The resource descriptor, for chaining dependency edges.</returns>
-        /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is null.</exception>
-        public IApplicationResourceDescriptor AddDatabase(string name, Action<DatabaseResourceOptions> configure)
+        /// <summary>Binds a manifest-backed remote Database resource with its typed command surface.</summary>
+        /// <param name="declaration">The build-produced external declaration.</param>
+        /// <param name="configure">The peer gateway, file, endpoint, or contributed binding.</param>
+        /// <returns>The typed external graph descriptor.</returns>
+        /// <exception cref="ArgumentNullException">The builder, declaration, or configuration callback is null.</exception>
+        /// <exception cref="ArgumentException">The declaration has no Database manifest.</exception>
+        /// <exception cref="InvalidOperationException">The external conflicts with an existing declaration.</exception>
+        public IDatabaseResourceDescriptor RemoteReferenceDatabase(
+            ExternalResourceDeclaration declaration,
+            Action<RemoteReferenceOptions> configure)
         {
-            ArgumentNullException.ThrowIfNull(configure);
-            var options = new DatabaseResourceOptions();
-            configure(options);
-            return builder.AddResource(new DatabaseResource(name, options));
+            ArgumentNullException.ThrowIfNull(declaration);
+            if (!string.Equals(declaration.Manifest?.Kind, "Database", StringComparison.Ordinal))
+            {
+                throw new ArgumentException("A typed Database reference requires an Database manifest.", nameof(declaration));
+            }
+            return new DatabaseResourceDescriptor(builder.RemoteReference(declaration, configure));
         }
     }
 }

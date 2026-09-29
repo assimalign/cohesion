@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
+        <RootNamespace>Assimalign.Cohesion.Connections.NamedPipes</RootNamespace>
         <Description>Reliable, ordered, single-stream named-pipe driver implementing the Cohesion connection contracts, for local (same-host) inter-process communication with filesystem/ACL access control.</Description>
     </PropertyGroup>
     <ItemGroup>

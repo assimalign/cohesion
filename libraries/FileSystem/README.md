@@ -5,6 +5,34 @@ directories, change notifications, and enumeration across multiple backing
 storage strategies. Pick the provider that matches the storage you actually
 have; the public surface is identical.
 
+## Project map
+
+An arrow means "references": `FileSystem.Physical --> FileSystem` reads
+`Assimalign.Cohesion.FileSystem.Physical` references `Assimalign.Cohesion.FileSystem`.
+
+```mermaid
+flowchart LR
+    P0["FileSystem — area root"]
+    P1["FileSystem.Aggregate"]
+    P2["FileSystem.Globbing"]
+    P3["FileSystem.InMemory"]
+    P4["FileSystem.IsolatedStorage"]
+    P5["FileSystem.Physical"]
+    CORE["Assimalign.Cohesion.Core — L1"]
+    P0 --> CORE
+    P1 --> P0
+    P2 --> P0
+    P3 --> P0
+    P4 --> P0
+    P5 --> P0
+```
+
+Solid edges are the references this area permits; the dependency arrow always points from the
+consumer to what it consumes.
+
+The full reference graph for every Cohesion assembly, including the exact external dependencies
+collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
+
 ## Packages
 
 | Package | Backing storage | When to pick it |

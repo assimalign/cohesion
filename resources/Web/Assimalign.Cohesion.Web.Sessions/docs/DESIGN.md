@@ -13,6 +13,17 @@ hardened cookie, and drives the store's `Load`/`Commit` lifecycle around the pip
 the HTTP session model usable without the Web runtime, and keeps this package a thin, dependency-free
 feature library composed against the Web root.
 
+Store-backed sessions are created through `IHttpSessionStore.CreateSession` and
+held through the public `IHttpStoredSession` contract. Identifier regeneration
+uses that contract's `ReassignId` operation after removing the old store entry.
+The HTTP package owns buffering and framing; this package owns cookies and the
+request lifecycle. No shipped-library friend access is required.
+
+Managed identifier regeneration is available only for the session created by this
+feature. Replacing `context.Session` disables managed regeneration even when the
+replacement implements `IHttpStoredSession`: its backing store may differ from
+the middleware's store. Assigning the same managed instance preserves ownership.
+
 Out-of-process session state is the motivating goal: Cohesion is a multi-service framework with a load
 balancer, so multi-instance web serving needs sticky-session-free affinity. Because the middleware runs
 entirely against the `IHttpSessionStore` seam, swapping the in-memory default for a distributed adapter

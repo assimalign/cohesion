@@ -3,6 +3,9 @@ on:
   push:
     paths:
       - "libraries/Core/**"
+      - "libraries/Hosting/**/src/**/*.cs"
+      - "libraries/ApplicationModel/**/src/**/*.cs"
+      - "docs/RUNTIME_CONTRACT.md"
       - ".github/workflows/library-core.yml" # When Pipeline File Changes
 permissions:
   contents: read

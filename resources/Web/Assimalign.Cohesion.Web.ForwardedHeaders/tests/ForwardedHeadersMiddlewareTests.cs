@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.Web.ForwardedHeaders.Tests;
 /// </summary>
 public class ForwardedHeadersMiddlewareTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Registers the forwarded-headers middleware first and a terminal that echoes the
@@ -73,7 +73,7 @@ public class ForwardedHeadersMiddlewareTests
     public async Task Pipeline_TrustedChain_ShouldResolveEffectiveClient()
     {
         // Arrange — first hop vouched by the local transport, second by KnownNetworks.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
 
         ComposeEchoApplication(factory, options =>
@@ -100,7 +100,7 @@ public class ForwardedHeadersMiddlewareTests
     {
         // Arrange — hardened trust model: the (non-IP) in-memory peer is not trusted, so
         // this models a client connecting directly and asserting a forwarded chain.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
 
         ComposeEchoApplication(factory, options =>
@@ -127,7 +127,7 @@ public class ForwardedHeadersMiddlewareTests
     public async Task Pipeline_ForwardLimit_ShouldTruncateWalk()
     {
         // Arrange — the default ForwardLimit of 1 accepts only the proxy-appended entry.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
 
         ComposeEchoApplication(factory, options =>
@@ -150,7 +150,7 @@ public class ForwardedHeadersMiddlewareTests
     public async Task Pipeline_ForwardedElement_ShouldResolveAllValues()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
 
         ComposeEchoApplication(factory, options => options.Headers = ForwardedHeaderNames.Forwarded);
@@ -170,7 +170,7 @@ public class ForwardedHeadersMiddlewareTests
     {
         // Arrange — both families honored; the RFC header is present but malformed, so
         // resolution is poisoned rather than falling back to X-Forwarded-For.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
 
         ComposeEchoApplication(factory, options => options.Headers = ForwardedHeaderNames.All);
@@ -191,7 +191,7 @@ public class ForwardedHeadersMiddlewareTests
     {
         // Arrange — the middleware surfaces identity via the feature only; downstream
         // middleware must still see the original wire headers.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
 
         WebApplication app = factory.Application;
@@ -223,7 +223,7 @@ public class ForwardedHeadersMiddlewareTests
     public async Task Pipeline_WithoutMiddleware_EffectiveMembersShouldFallBackToWireValues()
     {
         // Arrange — no forwarded-headers middleware registered at all.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
 
         WebApplication app = factory.Application;

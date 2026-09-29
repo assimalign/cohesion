@@ -55,6 +55,17 @@ public sealed class SqlEngineLifecycleTests : IDisposable
         found.ShouldBeSameAs(database);
     }
 
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Open: A missing database throws the exact not-found contract")]
+    public async Task OpenDatabaseAsync_WhenDatabaseDoesNotExist_ShouldThrowDatabaseNotFoundException()
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+
+        // Act + Assert
+        await Should.ThrowAsync<DatabaseNotFoundException>(async () =>
+            await engine.OpenDatabaseAsync("missing"));
+    }
+
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Dispose: Disposal closes open databases and is terminal")]
     public async Task DisposeAsync_WithOpenDatabases_ShouldCloseThemAndRejectFurtherUse()
     {

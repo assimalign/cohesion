@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Client;
 
-namespace Assimalign.Cohesion.Database.Sql.Client;
+namespace Assimalign.Cohesion.Database.Sql.Client.Internal;
 
 /// <summary>
 /// The default typed SQL connection: wraps one pooled <see cref="IDatabaseConnection"/>,
@@ -29,6 +29,9 @@ internal sealed class SqlConnection : ISqlConnection
 
     /// <inheritdoc />
     public bool IsOpen => _connection.IsOpen;
+
+    /// <inheritdoc />
+    public ValueTask AbortAsync() => _connection.AbortAsync();
 
     /// <inheritdoc />
     public async ValueTask<SqlResultSet> QueryAsync(SqlCommand command, CancellationToken cancellationToken = default)

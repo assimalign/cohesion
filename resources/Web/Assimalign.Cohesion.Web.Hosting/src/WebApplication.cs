@@ -2,17 +2,19 @@
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Linq;
+using System.Reflection;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-
-namespace Assimalign.Cohesion.Web.Hosting;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Web.Hosting.Internal;
+
+namespace Assimalign.Cohesion.Web.Hosting;
 
 public sealed class WebApplication : Host<WebApplicationContext>, IWebApplication, IWebApplicationPipelineBuilder
 {
@@ -22,7 +24,9 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
 
     private bool _isBuilt;
 
-    internal WebApplication(WebApplicationContext context, WebApplicationOptions options) : base(options)
+    internal WebApplication(
+        WebApplicationContext context,
+        WebApplicationOptions options) : base(options)
     {
         _context = context;
         _options = options;
@@ -30,6 +34,20 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     }
 
     public override WebApplicationContext Context => _context;
+
+    /// <inheritdoc />
+    protected override async ValueTask DisposeAsync(bool disposing)
+    {
+        await base.DisposeAsync(disposing).ConfigureAwait(false);
+        if (disposing)
+        {
+            foreach (X509Certificate2 certificate in _context.EndpointCertificates)
+            {
+                certificate.Dispose();
+            }
+            _context.EndpointCertificates.Clear();
+        }
+    }
 
     public WebApplication Use(Func<IHttpContext, WebApplicationMiddleware, Task> middleware)
     {
@@ -75,6 +93,7 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
             });
         }
 
+        _isBuilt = true;
         return new WebApplicationPipeline(middleware);
     }
 
@@ -141,6 +160,28 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
 
         });
     }
+
+    /// <summary>
+    /// Creates a Web application builder that honors an enabled resource's generated
+    /// control-plane registration and ambient invocation context.
+    /// </summary>
+    /// <param name="args">The application command-line arguments.</param>
+    /// <returns>A new Web application builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is null.</exception>
+    public static WebApplicationBuilder CreateBuilder(string[] args)
+    {
+        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(WebApplication).Assembly;
+        return CreateBuilder(args, resourceAssembly);
+    }
+
+    internal static WebApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(resourceAssembly);
+
+        return new WebApplicationBuilder(new WebApplicationOptions(), resourceAssembly, args);
+    }
+
     public static WebApplicationBuilder CreateBuilder(WebApplicationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);

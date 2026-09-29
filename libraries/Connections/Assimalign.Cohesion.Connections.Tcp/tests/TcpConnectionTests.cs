@@ -13,13 +13,13 @@ namespace Assimalign.Cohesion.Connections.Tcp.Tests;
 
 public class TcpConnectionTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(5);
 
     [Fact]
     public async Task WriteAsync_ClientToServerEcho_ShouldRoundTripPayload()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(cancellation.Token);
 
@@ -43,7 +43,7 @@ public class TcpConnectionTests
     public async Task Complete_OnClientOutput_ShouldCompleteServerRead()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(cancellation.Token);
 
@@ -72,7 +72,7 @@ public class TcpConnectionTests
     public async Task Abort_OnLiveConnection_ShouldSignalConnectionClosedAndAbortedState()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(cancellation.Token);
 
@@ -94,7 +94,7 @@ public class TcpConnectionTests
     public async Task Direction_OnLoopbackPair_ShouldBeBidirectional()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         // Act
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(cancellation.Token);
@@ -108,7 +108,7 @@ public class TcpConnectionTests
     public async Task Id_AcrossTwoConnections_ShouldBeUnique()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         // Act
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(cancellation.Token);
@@ -123,7 +123,7 @@ public class TcpConnectionTests
     public async Task EndPoints_OnLoopbackPair_ShouldBePopulatedAndConsistent()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         // Act
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(cancellation.Token);
@@ -142,7 +142,7 @@ public class TcpConnectionTests
     public async Task DisposeAsync_CalledTwice_ShouldBeIdempotent()
     {
         // Arrange
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
 
         await using LoopbackPair pair = await LoopbackPair.CreateAsync(cancellation.Token);
 

@@ -3,10 +3,8 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Http.Connections.Internal.Http3.Frames;
-using Assimalign.Cohesion.Http.Connections.Internal.Http3.QPack;
 
-namespace Assimalign.Cohesion.Http.Connections.Internal.Http3;
+namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
 /// The decoder-side QPACK state shared across all request streams of one HTTP/3

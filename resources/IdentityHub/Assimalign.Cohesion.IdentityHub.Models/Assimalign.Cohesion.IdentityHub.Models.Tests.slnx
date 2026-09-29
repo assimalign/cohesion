@@ -7,6 +7,6 @@
 	<Folder Name="/Assimalign.Cohesion.IdentityHub.Models/" />
 	<Folder Name="/Assimalign.Cohesion.IdentityHub.Models/src/" />
 	<Folder Name="/Assimalign.Cohesion.IdentityHub.Models/tests/">
-		<Project Path="tests/Assimalign.Cohesion.IdentityHub.Models.csproj" />
+		<Project Path="tests/Assimalign.Cohesion.IdentityHub.Models.Tests.csproj" />
 	</Folder>
 </Solution>

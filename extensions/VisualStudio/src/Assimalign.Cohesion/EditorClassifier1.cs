@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion
         /// <summary>
         /// Classification type.
         /// </summary>
-        private readonly IClassificationType classificationType;
+        private readonly IClassificationType _classificationType;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="EditorClassifier1"/> class.
@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion
         /// <param name="registry">Classification registry.</param>
         internal EditorClassifier1(IClassificationTypeRegistryService registry)
         {
-            this.classificationType = registry.GetClassificationType("EditorClassifier1");
+            this._classificationType = registry.GetClassificationType("EditorClassifier1");
         }
 
         #region IClassifier
@@ -53,7 +53,7 @@ namespace Assimalign.Cohesion
         {
             var result = new List<ClassificationSpan>()
             {
-                new ClassificationSpan(new SnapshotSpan(span.Snapshot, new Span(span.Start, span.Length)), this.classificationType)
+                new ClassificationSpan(new SnapshotSpan(span.Snapshot, new Span(span.Start, span.Length)), this._classificationType)
             };
 
             return result;

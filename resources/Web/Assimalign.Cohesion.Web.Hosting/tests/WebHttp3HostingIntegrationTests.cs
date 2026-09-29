@@ -52,7 +52,7 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 [SupportedOSPlatform("macos")]
 public class WebHttp3HostingIntegrationTests
 {
-    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - UseHttp3: Should complete a full HTTP/3 response round-trip and dispatch reporting the https scheme")]
     public async Task UseHttp3_OverQuic_ShouldCompleteResponseRoundTripAndDispatchWithHttps()
@@ -64,7 +64,7 @@ public class WebHttp3HostingIntegrationTests
 
         // Arrange — the full composition-root path: the QUIC listener is registered inside
         // builder.Server.UseServer(...), materialized when the server resolves, then serves the request.
-        using CancellationTokenSource cancellation = new(TestTimeout);
+        using CancellationTokenSource cancellation = new(_testTimeout);
         CancellationToken cancellationToken = cancellation.Token;
         int port = GetAvailableUdpPort();
         using X509Certificate2 certificate = SelfSignedCertificateFactory.Create("localhost");
@@ -96,8 +96,8 @@ public class WebHttp3HostingIntegrationTests
             return Task.CompletedTask;
         });
 
-        // Resolving the server materializes the QUIC listener (the deferred factory blocks once on the
-        // async bind here); StartAsync then launches the accept loop.
+        // Resolving the server materializes an unbound QUIC listener. StartAsync awaits its
+        // asynchronous bind and only then launches the accept loop.
         IWebApplicationServer server = app.Context.ServiceProvider.GetRequiredService<IWebApplicationServer>();
         await server.StartAsync(cancellationToken);
 

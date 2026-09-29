@@ -1,5 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.DevScripts</RootNamespace>
 		<Version>0.0.1</Version>
 		<AssemblyName>Assimalign.Cohesion.DevScripts</AssemblyName>
 		<LangVersion>latest</LangVersion>

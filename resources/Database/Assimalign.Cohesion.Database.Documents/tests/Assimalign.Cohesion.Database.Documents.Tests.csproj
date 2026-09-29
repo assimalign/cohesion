@@ -1,5 +1,26 @@
 <Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Database.Documents.Tests</RootNamespace>
+		<OutputType>Exe</OutputType>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
 	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="coverlet.collector" />
+		<CohesionPackageReference Include="Shouldly" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Documents.RecoveryFixture" ReferenceOutputAssembly="false" />
 	</ItemGroup>
+	<Target Name="CopyDocumentRecoveryFixture" AfterTargets="Build">
+		<ItemGroup>
+			<DocumentRecoveryFixtureOutput Include="$(MSBuildThisFileDirectory)..\fixtures\Assimalign.Cohesion.Database.Documents.RecoveryFixture\bin\$(Configuration)\$(TargetFramework)\**\*" />
+		</ItemGroup>
+		<Copy SourceFiles="@(DocumentRecoveryFixtureOutput)"
+		      DestinationFiles="@(DocumentRecoveryFixtureOutput->'$(OutDir)DocumentRecoveryFixture\%(RecursiveDir)%(Filename)%(Extension)')"
+		      SkipUnchangedFiles="true" />
+	</Target>
 </Project>

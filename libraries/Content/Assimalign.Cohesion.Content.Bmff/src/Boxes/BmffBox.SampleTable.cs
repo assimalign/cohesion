@@ -12,7 +12,7 @@ using Assimalign.Cohesion.Files.Bmff.Internal;
 [DebuggerDisplay("Bmff Box: Sample Table (stbl)")]
 public sealed class SampleTableBox : BmffBoxComposite
 {
-    private IList<BmffBox> children = new List<BmffBox>();
+    private IList<BmffBox> _children = new List<BmffBox>();
 
     public SampleTableBox(long offset)
     {
@@ -27,7 +27,7 @@ public sealed class SampleTableBox : BmffBoxComposite
     public override long Limit { get; }
     public override long Offset { get; }
     public override BmffBoxType BoxType => BmffBoxType.SampleTable;
-    public override IEnumerable<BmffBox> Children => this.children;
+    public override IEnumerable<BmffBox> Children => this._children;
 
     public override void Read(BmffStream stream)
     {
@@ -39,7 +39,7 @@ public sealed class SampleTableBox : BmffBoxComposite
             bmffBoxes.Add(bmffReader.Current);
         }
 
-        children = bmffBoxes;
+        _children = bmffBoxes;
     }
 
     public override void Write(BmffStream stream)

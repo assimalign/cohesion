@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.DependencyInjection</RootNamespace>
 		<IsPackable>true</IsPackable>
 		<EnableAOTAnalyzer>true</EnableAOTAnalyzer>
 		<ILEmitBackend>true</ILEmitBackend>

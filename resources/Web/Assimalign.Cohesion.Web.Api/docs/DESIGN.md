@@ -45,8 +45,9 @@ non-AOT build component) intercepts each typed `Map*` call site with a C# interc
 Interceptors are emitted into `Assimalign.Cohesion.Web.Api.Generated`; consumers allow-list that
 namespace with `<InterceptorsNamespaces>`. The generator is delivered two ways: in-repo/test projects
 via `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration.Web" />`, and to Sdk.Web
-consumers via the `CohesionFrameworkAnalyzer` entry in `App.props` (bundled under `analyzers/dotnet/cs/`
-in `App.Web.Ref`). See the generator's own `docs/DESIGN.md` for emission internals.
+consumers via the `CohesionFrameworkAnalyzer` entry in the `App.Web` member list,
+`resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props` (bundled under
+`analyzers/dotnet/cs/` in `App.Web.Ref`). See the generator's own `docs/DESIGN.md` for emission internals.
 
 ## Binding Sources and Inference
 

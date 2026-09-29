@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Example.Networking.VpnGateway": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "COHESION_ENVIRONMENT": "Local"
+      }
+    }
+  }
+}

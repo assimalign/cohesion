@@ -169,8 +169,9 @@ public interface IStorage : IAsyncDisposable, IDisposable
     IStoragePageHandle AllocatePageForWrite(IStorageTransaction transaction, PageType type);
 
     /// <summary>
-    /// Checkpoints the storage: durably flushes all page state to the data stream and
-    /// truncates the journal, so the next open recovers instantly.
+    /// Checkpoints the storage: flushes all page state to the data stream using the
+    /// storage's durability policy and truncates the journal, so the next open
+    /// recovers instantly. Non-durable storage does not promise crash persistence.
     /// </summary>
     /// <exception cref="StorageTransactionException">A transaction is still active.</exception>
     void Checkpoint();
@@ -196,11 +197,26 @@ public interface IStorage : IAsyncDisposable, IDisposable
     bool FlushPendingCommits();
 
     /// <summary>
+    /// Applies this storage's commit durability policy to an already appended
+    /// journal record. Durable modes wait until the record is durable; the
+    /// non-durable mode makes no durable request or promise. Used by an outer
+    /// logical transaction whose commit record follows its physical bracket.
+    /// </summary>
+    /// <param name="lsn">The appended commit record's log sequence number.</param>
+    /// <param name="journal">The owning storage's journal containing the record.</param>
+    /// <remarks>
+    /// The default implementation preserves synchronous durability for custom
+    /// storage implementations. The shared <see cref="Storage"/> implementation
+    /// applies its configured policy, including grouped and non-durable modes.
+    /// </remarks>
+    void EnsureCommitDurable(long lsn, IStorageJournal journal) => journal.EnsureDurable(lsn);
+
+    /// <summary>
     /// Writes back up to <paramref name="maxPages"/> dirty buffered pages to the data
     /// stream — the paced write-back a page-writer worker performs between
     /// checkpoints so a checkpoint's flush does not spike. Honors the write-ahead
-    /// rule: the journal is made durable past each page's LSN before the page is
-    /// written.
+    /// rule: durable storage makes the journal durable past each page's LSN before
+    /// the page is written; non-durable storage flushes it ordinarily first.
     /// </summary>
     /// <param name="maxPages">The maximum number of dirty pages to write in this pass.</param>
     /// <returns>The number of pages written.</returns>

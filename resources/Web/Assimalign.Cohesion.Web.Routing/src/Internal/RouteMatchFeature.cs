@@ -2,7 +2,7 @@ using System;
 
 using Assimalign.Cohesion.Web.Routing.Metadata;
 
-namespace Assimalign.Cohesion.Web.Routing;
+namespace Assimalign.Cohesion.Web.Routing.Internal;
 
 /// <summary>
 /// Default <see cref="IRouteMatchFeature"/> implementation installed on the HTTP

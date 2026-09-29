@@ -17,30 +17,35 @@ separate package) avoids duplicating the entire socket data path. A third endpoi
 ## Data Path
 
 Each connection owns two pump loops moving bytes between the socket and the consumer-facing duplex pipe
-(`DuplexPipePair`, from the core library's internal toolbox):
+(`DuplexPipePair`, compiled in from the contracts library's `shared/` folder):
 
 - **Receive loop** reads from the socket into the transport-output pipe writer, applying back-pressure
   when the consumer is slow (the flush pauses the loop).
 - **Send loop** reads from the transport-input pipe reader and writes to the socket via a pooled sender.
 
 `connection.Input` is what the peer sent; `connection.Output` is what you send. The mirrored pump ends
-live in the internal `DuplexPipePair` and never surface on the contract. Socket tuning (adaptive memory
+live in the compiled-in `DuplexPipePair` and never surface on the connection contract. Socket tuning (adaptive memory
 pool block size, IO-queue schedulers, read/write buffer thresholds) comes from
 `SocketPipeOptionsFactory` and is shared per listener across its connections.
 
 ## Endpoint Handling (the bind switch)
 
-`TcpConnectionListener` binds lazily on the first `AcceptAsync`, and the endpoint form selects the bind
-strategy:
+`TcpConnectionListener.BindAsync` acquires the endpoint explicitly and is idempotent while the listener
+is active. `AcceptAsync` invokes it when necessary for backward compatibility, but hosts bind before
+starting accept loops so startup does not complete until the endpoint is owned. The endpoint form
+selects the bind strategy:
 
 | Endpoint | Socket | Bind behavior |
 |---|---|---|
 | `IPEndPoint` | `Stream`/`Tcp`, `DualMode` when `IPv6Any` | `Bind` + `Listen` |
+| `DnsEndPoint` | `Stream`/`Tcp`, IPv4 or dual-mode IPv6 selected by the platform | Factory-only: resolve and connect |
 | `UnixDomainSocketEndPoint` | `Stream`/`Unspecified` | delete stale socket file → `Bind` + `Listen` |
 | `FileHandleEndPoint` | adopt the inherited descriptor | **no** `Bind`/`Listen` — already listening |
 
 The factory (`TcpConnectionFactory`) uses the same switch to construct the outbound socket, then
-`ConnectAsync`.
+`ConnectAsync`. A `DnsEndPoint` has `AddressFamily.Unspecified`; its factory branch therefore uses the
+address-family-selecting socket constructor so DNS names and socket-facing URI hosts can resolve to
+IPv4 or IPv6 without attempting to construct an unspecified-family socket.
 
 ### Unix domain socket file lifecycle
 
@@ -78,10 +83,10 @@ identity), but it must still be *honest*. The driver derives the protocol from t
 family — `AddressFamily.Unix → ConnectionProtocol.UnixDomainSocket`, otherwise
 `ConnectionProtocol.Tcp` (`SocketConnectionProtocol.FromAddressFamily`) — and stamps it on:
 
-- the **listener's** `Capabilities` (from the configured endpoint) and its `ListenerInitialized`
-  diagnostic (from the bound socket, which also resolves a `FileHandleEndPoint`'s real family);
-- every **connection's** `Capabilities` and all of its `ConnectionEventSource` events (from the
-  connected socket's family).
+- the **listener's** `Capabilities` (from the configured endpoint) and the `protocol` payload of its
+  `ListenerBound` event (from the bound socket, which also resolves a `FileHandleEndPoint`'s real family);
+- every **connection's** `Capabilities` and the `protocol` payload of its `ConnectionOpened` event (from
+  the connected socket's family).
 
 So a connection over a Unix domain socket reports `UnixDomainSocket` in its capabilities and event
 stream, not `Tcp`. The delivery guarantees (reliable, ordered byte stream, no multiplexing, no
@@ -96,7 +101,44 @@ transport security) are identical for both families — only the protocol identi
 - Socket reset/abort conditions are classified by `SocketHelper` and surfaced through the
   `ConnectionException` family (`ConnectionResetException` for resets) so consumers catch one hierarchy.
 - The listener tracks live accepted connections and disposes them on `DisposeAsync`, then disposes its
-  per-IO-queue pipe options.
+  per-IO-queue pipe options. Disposal also releases the listening endpoint and is terminal; restart uses
+  a newly constructed listener.
+
+## Diagnostics
+
+The driver reports through its own internal event source, named for the assembly:
+`Assimalign.Cohesion.Connections.Tcp` (`Internal/EventSource/TcpConnectionEventSource.cs`), per the
+repository EventSource convention (`.claude/rules/event-source.md`). Nothing about it is public: tools
+enable it by name (`dotnet-trace collect --providers Assimalign.Cohesion.Connections.Tcp`,
+`dotnet-counters monitor --counters Assimalign.Cohesion.Connections.Tcp`), and an application forwards
+it into its logging with `Assimalign.Cohesion.Logging.EventSource`
+(`AddEventSourceForwarding()` on the logger factory builder), where the source name becomes the log
+category.
+
+| Id | Event | Level | Payload |
+|---|---|---|---|
+| 1 | `ListenerBound` | Informational | `listenerId`, `protocol`, `endPoint` |
+| 2 | `ListenerClosed` | Informational | `listenerId` |
+| 3 | `ConnectionOpened` | Informational | `connectionId`, `listenerId` (empty when dialed), `protocol`, `localEndPoint`, `remoteEndPoint` |
+| 4 | `ConnectionClosed` | Informational | `connectionId` |
+| 5 | `ConnectionFinished` | Verbose | `connectionId` — the peer finished sending (end of stream) |
+| 6 | `ConnectionPaused` | Verbose | `connectionId` — receiving paused under application back-pressure |
+| 7 | `ConnectionResumed` | Verbose | `connectionId` |
+| 8 | `ConnectionReset` | Verbose | `connectionId` |
+| 9 | `ConnectionError` | Error | `connectionId`, `operation` (`receiving`/`sending`), `exceptionType`, `exceptionMessage` |
+
+Counters: `current-connections`, `total-connections`, and `connections-per-second`.
+
+Ordering and pairing are guaranteed, which is what keeps `current-connections` exact:
+
+- `ConnectionOpened` is raised in the constructor **before** the pump loops start, so no loop event can
+  precede it.
+- `ConnectionClosed` is raised exactly once, from the receive loop's close path (the one place the
+  connection-closed signal is scheduled), and **before** that signal completes — so `DisposeAsync` never
+  returns ahead of it. The driver previously raised no close event at all.
+- Lifetimes use `Bound`/`Opened`/`Closed` names, not `Start`/`Stop`: a connection opens on the accept
+  loop's flow and closes on the receive loop's, and EventSource's activity tracking would otherwise
+  nest every connection under the previous one.
 
 ## AOT Posture
 
@@ -118,9 +160,12 @@ async socket-event args, and `System.Diagnostics.Tracing` counters — all from 
 ## Relationships
 
 - **`Assimalign.Cohesion.Connections`** — the guided bases (`Connection`, `ConnectionListener`,
-  `ConnectionFactory`), `ConnectionCapabilities` / `ConnectionProtocol`, the exception family, and the
-  internal toolbox (`DuplexPipePair`, pipe options, `ConnectionEventSource`, `ListenerId`) shared via
-  `InternalsVisibleTo`.
+  `ConnectionFactory`), `ConnectionCapabilities` / `ConnectionProtocol`, the exception family, and
+  `ListenerId`. Diagnostics are not taken from it: this driver owns its event source (see
+  *Diagnostics*). Its pipe plumbing (`DuplexPipePair`,
+  `PipeOptionsContext`, `PipeOptionsFactory`) is compiled into this driver from that
+  library's `shared/` folder via `CohesionSharedSource` - internal here, and never part of
+  the contracts assembly's public surface.
 - **`Assimalign.Cohesion.Connections.NamedPipes`** — the sibling local-IPC driver; its named pipe is the
   Windows-native counterpart to this driver's Unix domain socket.
 - **`Assimalign.Cohesion.Security`** — TLS as a connection layer composed over this driver.
