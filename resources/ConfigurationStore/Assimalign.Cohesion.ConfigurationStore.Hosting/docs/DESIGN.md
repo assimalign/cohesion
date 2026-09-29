@@ -50,9 +50,9 @@ credentials, so the owner rule is unchanged for them.
 
 ## Boundaries
 
-The module references only the ConfigurationStore area root among resource packages. Hosting,
-Hosting.Resources, Hosting.Health, IdentityModel JWT primitives, and the private Web transport are
-infrastructure dependencies; no Gateway or other ConfigurationStore feature package is referenced.
+The module references only the ConfigurationStore area root among resource packages. DependencyInjection,
+Hosting, Hosting.Resources, Hosting.Health, IdentityModel JWT primitives, and the private Web transport
+are infrastructure dependencies; no Gateway or other ConfigurationStore feature package is referenced.
 JSON is parsed and written explicitly, with no reflection-based serialization.
 
 The SDK default declares HTTPS with the `tls` Secret mount. The enabled host binds that endpoint
@@ -111,3 +111,12 @@ Background-work registration belongs to the concrete `ConfigurationStoreApplicat
 The base host owns the already-cancelled run semantic: one complete start and graceful stop
 with fresh lifecycle tokens, normal run-observer notifications, and a final Stopped state.
 The concrete application and IHost route share it. Startup failures still roll back and propagate.
+
+## Dependency injection composition
+
+`ConfigurationStoreApplicationBuilder.Services` is the application's one composition registry, created with `EnableDynamicCode = false`, `ValidateOnBuild = true`, and `ValidateScopes = true`. The module registers only factories and instances, so the provider stays reflection-free. Every lifecycle service is an `IHostService` registration: `AddService(IHostService)` registers the caller's instance, `AddService(Func<ConfigurationStoreApplicationContext, IHostService>)` registers a factory closed over the context, and a direct `Services.AddSingleton<IHostService>(...)` joins the lifecycle the same way. Order is registration order: telemetry registers in the builder constructor, so it starts first and stops last; `ConfigurationEndpointService` registers in `Build`, so it starts last and stops first.
+
+`Build` closes registration (the container becomes read-only, and a second `Build` throws), creates the provider once, and resolves `IEnumerable<IHostService>` once into the snapshot the host reuses for every start, stop, and rollback pass. The application owns the provider: disposal stops the host, then disposes the provider, which disposes every factory-created service in reverse creation order while instance registrations stay with their callers. A failed `Build` disposes the provider before rethrowing. The concrete context exposes the provider as `ServiceProvider` to hosting-layer factories; the area root and its features never see it.
+
+Each `AddNamespace` declaration is a registration, and `ConfigurationStoreRepository` is a singleton seeded from the resolved declarations. `AddNamespace` is an explicit `IConfigurationStoreApplicationBuilder` shim over the public concrete verb, which returns the builder for chaining and still rejects a repeated namespace name at registration. `ConfigurationEndpointService` is disposable; the application now disposes it through the provider.
+

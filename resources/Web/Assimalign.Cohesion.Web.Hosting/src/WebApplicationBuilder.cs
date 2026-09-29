@@ -28,14 +28,26 @@ using Assimalign.Cohesion.Web.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 
+/// <summary>
+/// Composes a Web application. Every dependency the application runs with is a registration in
+/// <see cref="Services"/>: lifecycle services (<see cref="IHostService"/>), servers
+/// (<see cref="IWebApplicationServer"/>), request features (<see cref="IHttpFeature"/>), and
+/// health contributions (<see cref="IHealthContributor"/>).
+/// </summary>
+/// <remarks>
+/// The root <see cref="IWebApplicationBuilder"/> verbs are implemented explicitly as shims over
+/// those registrations, so feature libraries compose against the dependency-free root contract
+/// while this module owns the container. <see cref="Build"/> closes registration, creates the
+/// service provider once, and resolves the lifecycle services; servers and features are resolved
+/// once at their own composition boundary (host start and pipeline build). Nothing is resolved
+/// per request.
+/// </remarks>
 public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 {
     private readonly WebApplicationOptions _options;
     private readonly WebApplicationContext _context;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
-    private readonly List<IHealthContributor> _healthContributors = new();
-    private readonly List<Func<WebApplicationContext, IHostService>> _serviceRegistrations = new();
 
     private IWebApplicationPipeline? _pipeline;
 
@@ -85,16 +97,22 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         }
 
         Logging = new LoggerFactoryBuilder();
-        Services = new ServiceProviderBuilder();
+        Services = new ServiceProviderBuilder(new ServiceProviderOptions
+        {
+            EnableDynamicCode = false,
+            ValidateOnBuild = true,
+            ValidateScopes = true,
+        });
         Server = new WebApplicationServerBuilder(this);
 
-        _context = new WebApplicationContext(Services);
+        _context = new WebApplicationContext();
 
         if (_controlPlane is not null && resourceContext is not null)
         {
             if (ResourceTelemetry.Configure(resourceContext, Logging, out IHostService? telemetry))
             {
-                _serviceRegistrations.Insert(0, _ => telemetry!);
+                // Registered ahead of every AddService call, so telemetry starts first and stops last.
+                Services.AddSingleton<IHostService>(telemetry!);
             }
             ResourceRuntime.RegisterConnectionFactoryResolver(CreateConnectionFactory);
             Services.AddSingleton(_controlPlane);
@@ -113,8 +131,14 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     public WebApplicationServerBuilder Server { get; } 
 
     /// <summary>
-    /// 
+    /// Gets the application's service registrations.
     /// </summary>
+    /// <remarks>
+    /// Registration closes when <see cref="Build"/> runs; a later registration throws
+    /// <see cref="InvalidOperationException"/>. Register factory or instance services: the
+    /// provider is created without dynamic code. A factory-created service is owned by the
+    /// application and disposed with it; an instance stays owned by its caller.
+    /// </remarks>
     public ServiceProviderBuilder Services { get; }
 
     /// <summary>
@@ -144,7 +168,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(check);
 
-        _healthContributors.Add(new DelegateHealthContributor(name, check));
+        Services.AddSingleton<IHealthContributor>(new DelegateHealthContributor(name, check));
         return this;
     }
 
@@ -153,7 +177,8 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     /// </summary>
     /// <remarks>
     /// Lifecycle services start in registration order before every Web server and stop in
-    /// reverse order after every Web server has stopped.
+    /// reverse order after every Web server has stopped. The service is registered in
+    /// <see cref="Services"/> as an <see cref="IHostService"/> and stays owned by the caller.
     /// </remarks>
     /// <param name="service">The lifecycle service to add.</param>
     /// <returns>The same builder for chaining.</returns>
@@ -162,7 +187,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     {
         ArgumentNullException.ThrowIfNull(service);
 
-        _serviceRegistrations.Add(_ => service);
+        Services.AddSingleton<IHostService>(service);
         return this;
     }
 
@@ -170,9 +195,9 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     /// Adds a lifecycle service created from the final concrete application context.
     /// </summary>
     /// <remarks>
-    /// The factory is invoked once when the application is built. Lifecycle services start in
-    /// registration order before every Web server and stop in reverse order after every Web
-    /// server has stopped.
+    /// The factory is invoked once when the application is built, and the application owns and
+    /// disposes the service it returns. Lifecycle services start in registration order before
+    /// every Web server and stop in reverse order after every Web server has stopped.
     /// </remarks>
     /// <param name="factory">The factory that creates the lifecycle service.</param>
     /// <returns>The same builder for chaining.</returns>
@@ -184,7 +209,8 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     {
         ArgumentNullException.ThrowIfNull(factory);
 
-        _serviceRegistrations.Add(factory);
+        Services.AddSingleton<IHostService>(_ => factory.Invoke(_context)
+            ?? throw new InvalidOperationException("The web application service factory returned null."));
         return this;
     }
 
@@ -220,8 +246,9 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         Services.AddSingleton<IWebApplicationPipelineBuilder>(app);
         Services.AddSingleton<IWebApplicationPipeline>(serviceProvider =>
         {
-            IWebApplicationPipeline pipeline = _pipeline ??
-                serviceProvider.GetRequiredService<IWebApplicationPipelineBuilder>().Build();
+            IWebApplicationPipeline pipeline = _pipeline is null
+                ? serviceProvider.GetRequiredService<IWebApplicationPipelineBuilder>().Build()
+                : new BorrowedWebApplicationPipeline(_pipeline);
 
             if (_controlPlane is null)
             {
@@ -232,34 +259,47 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             return new EnabledResourcePipeline(_controlPlane, _resourceContext!, _context, port, pipeline);
         });
 
-        var applicationServices = new IHostService[_serviceRegistrations.Count];
-        for (int index = 0; index < _serviceRegistrations.Count; index++)
-        {
-            applicationServices[index] = _serviceRegistrations[index].Invoke(_context)
-                ?? throw new InvalidOperationException(
-                    "The web application service factory returned null.");
-        }
-
-        _context.SetApplicationServices(applicationServices);
-
-        if (_controlPlane is not null)
-        {
-            foreach (IHealthContributor contributor in _healthContributors)
-            {
-                _controlPlane.AddHealthContributor(contributor);
-            }
-
-            foreach (IHealthContributor contributor in
-                _context.ServiceProvider.GetRequiredService<IEnumerable<IHealthContributor>>())
-            {
-                _controlPlane.AddHealthContributor(contributor);
-            }
-
-            ResourceRuntime.HostBuilt(app, _controlPlane);
-        }
-
-
         _isBuilt = true;
+
+        // Registration closes here. The provider copies the registrations, so one added after
+        // Build would silently never reach it; the read-only container turns that into an error.
+        if (Services.Container is ServiceContainer container)
+        {
+            container.MakeReadOnly();
+        }
+
+        _context.SetServiceProvider(((IServiceProviderBuilder)Services).Build());
+        try
+        {
+            // Materializes the lifecycle services once, in registration order, against the final
+            // context. Servers resolve later, at host start, after the pipeline is composed.
+            _context.ResolveApplicationServices();
+
+            if (_controlPlane is not null)
+            {
+                foreach (IHealthContributor contributor in
+                    _context.ServiceProvider.GetRequiredService<IEnumerable<IHealthContributor>>())
+                {
+                    _controlPlane.AddHealthContributor(contributor);
+                }
+
+                ResourceRuntime.HostBuilt(app, _controlPlane);
+            }
+        }
+        catch (Exception exception)
+        {
+            // The provider owns every service a factory created before the failure.
+            try
+            {
+                Task.Run(() => _context.DisposeServiceProviderAsync().AsTask()).GetAwaiter().GetResult();
+            }
+            catch (Exception disposalException)
+            {
+                throw new AggregateException(exception, disposalException);
+            }
+
+            throw;
+        }
 
         return app;
     }
@@ -381,25 +421,8 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     IWebApplicationBuilder IWebApplicationBuilder.AddServer(IWebApplicationServer server)
     {
         ArgumentNullException.ThrowIfNull(server);
-        Services.AddSingleton<IHostService>(new WebApplicationServerLifecycleAdapter(server));
-        return this;
-    }
 
-    IWebApplicationBuilder IWebApplicationBuilder.AddPipeline(IWebApplicationPipeline pipeline)
-    {
-        ArgumentNullException.ThrowIfNull(pipeline);
-        _pipeline = pipeline;
-        return this;
-    }
-
-    IWebApplicationBuilder IWebApplicationBuilder.AddFeature(IHttpFeature feature)
-    {
-        return ((IWebApplicationBuilder)this).AddFeature(_ => feature);
-    }
-
-    IWebApplicationBuilder IWebApplicationBuilder.AddFeature(Func<IWebApplicationContext, IHttpFeature> configure)
-    {
-        Services.AddSingleton<IHttpFeature>(configure.Invoke(_context));
+        Services.AddSingleton<IWebApplicationServer>(server);
         return this;
     }
 
@@ -407,15 +430,35 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     {
         ArgumentNullException.ThrowIfNull(server);
 
-        Services.AddSingleton<IHostService>(_ =>
-        {
-            IWebApplicationServer applicationServer = server.Invoke(_context)
-                ?? throw new InvalidOperationException(
-                    "The web application server factory returned null.");
+        Services.AddSingleton<IWebApplicationServer>(_ => server.Invoke(_context)
+            ?? throw new InvalidOperationException("The web application server factory returned null."));
+        return this;
+    }
 
-            return new WebApplicationServerLifecycleAdapter(applicationServer);
-        });
+    IWebApplicationBuilder IWebApplicationBuilder.AddPipeline(IWebApplicationPipeline pipeline)
+    {
+        ArgumentNullException.ThrowIfNull(pipeline);
 
+        // A single replacement for the default pipeline, not a registration: the hosted
+        // IWebApplicationPipeline registered at Build wraps it with the resource terminals.
+        _pipeline = pipeline;
+        return this;
+    }
+
+    IWebApplicationBuilder IWebApplicationBuilder.AddFeature(IHttpFeature feature)
+    {
+        ArgumentNullException.ThrowIfNull(feature);
+
+        Services.AddSingleton<IHttpFeature>(feature);
+        return this;
+    }
+
+    IWebApplicationBuilder IWebApplicationBuilder.AddFeature(Func<IWebApplicationContext, IHttpFeature> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        Services.AddSingleton<IHttpFeature>(_ => configure.Invoke(_context)
+            ?? throw new InvalidOperationException("The web application feature factory returned null."));
         return this;
     }
 }

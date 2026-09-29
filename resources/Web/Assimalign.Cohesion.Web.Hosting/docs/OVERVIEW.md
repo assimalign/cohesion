@@ -7,10 +7,14 @@ the enabled resource's control plane at builder time.
 
 ## Composition and lifecycle
 
-Feature verbs extend the root `IWebApplicationBuilder`. Background work is registered
-through the concrete `WebApplicationBuilder.AddService` instance or context-factory
-overload. Factories run once at `Build()`; services start in registration order before
-servers and stop in reverse order after every server drains.
+Feature verbs extend the root `IWebApplicationBuilder`, whose members this module
+implements as explicit shims over `WebApplicationBuilder.Services` registrations
+(`IHttpFeature`, `IWebApplicationServer`). Background work is registered through the
+concrete `WebApplicationBuilder.AddService` instance or context-factory overload, which
+registers an `IHostService`. `Build()` closes registration and runs each service factory
+once; services start in registration order before servers and stop in reverse order after
+every server drains. Disposing the application disposes the service provider and every
+factory-created service.
 
 ## Dependencies and hosting family
 

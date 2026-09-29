@@ -41,6 +41,11 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         await base.DisposeAsync(disposing).ConfigureAwait(false);
         if (disposing)
         {
+            // The application owns its service provider: disposing it releases every service a
+            // registered factory created, after the host has stopped them. Instance registrations
+            // stay with their callers.
+            await _context.DisposeServiceProviderAsync().ConfigureAwait(false);
+
             foreach (X509Certificate2 certificate in _context.EndpointCertificates)
             {
                 certificate.Dispose();

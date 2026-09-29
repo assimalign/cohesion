@@ -140,8 +140,8 @@ SANs remain authoritative.
 
 ## Boundaries and AOT posture
 
-The host references the SecretStore root plus cross-area hosting, HTTP, identity-token,
-data-protection, and Web runtime infrastructure. Those cross-area runtime dependencies are private
+The host references the SecretStore root plus cross-area dependency-injection, hosting, HTTP,
+identity-token, data-protection, and Web runtime infrastructure. Those cross-area runtime dependencies are private
 implementation details. It does not reference SecretStore.ApplicationModel; the generated enabled
 resource registers that package's control plane through Hosting.Resources. JSON used by the
 endpoint is written explicitly, persistence uses fixed internal formats, and construction uses no
@@ -220,3 +220,12 @@ Background-work registration belongs to the concrete `SecretStoreApplicationBuil
 The base host owns the already-cancelled run semantic: one complete start and graceful stop
 with fresh lifecycle tokens, normal run-observer notifications, and a final Stopped state.
 The concrete application and IHost route share it. Startup failures still roll back and propagate.
+
+## Dependency injection composition
+
+`SecretStoreApplicationBuilder.Services` is the application's one composition registry, created with `EnableDynamicCode = false`, `ValidateOnBuild = true`, and `ValidateScopes = true`. The module registers only factories and instances, so the provider stays reflection-free. Every lifecycle service is an `IHostService` registration: `AddService(IHostService)` registers the caller's instance, `AddService(Func<SecretStoreApplicationContext, IHostService>)` registers a factory closed over the context, and a direct `Services.AddSingleton<IHostService>(...)` joins the lifecycle the same way. Order is registration order: telemetry registers in the builder constructor, so it starts first and stops last; `SecretsEndpointService` registers in `Build`, so it starts last and stops first.
+
+`Build` closes registration (the container becomes read-only, and a second `Build` throws), creates the provider once, and resolves `IEnumerable<IHostService>` once into the snapshot the host reuses for every start, stop, and rollback pass. The application owns the provider: disposal stops the host, then disposes the provider, which disposes every factory-created service in reverse creation order while instance registrations stay with their callers. A failed `Build` disposes the provider before rethrowing. The concrete context exposes the provider as `ServiceProvider` to hosting-layer factories; the area root and its features never see it.
+
+Each `AddSecret` declaration and the `AddCertificateAuthority` options snapshot are registrations. The data-protection provider, `SecretStoreRepository`, `TrustedIssuerStore`, and `CertificateAuthorityManager` are singletons the endpoint factory resolves, so the provider owns them and disposes them after the endpoint. `SecretsEndpointService` no longer disposes the certificate authority it is given, and `SecretStoreApplication` no longer holds the endpoint to dispose it. Both root verbs are explicit `ISecretStoreApplicationBuilder` shims over public concrete counterparts that return the builder for chaining.
+

@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
@@ -8,7 +9,6 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
-using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Web.Testing.Internal;
 
@@ -211,10 +211,11 @@ public sealed class WebApplicationTestFactory : IWebApplicationTestFactory
 
             _application ??= Builder.Build();
 
-            // Resolving the server materializes the pipeline snapshot; the resolved instance
-            // is the default server the constructor wired onto the in-memory listener. The
-            // server's own start is idempotent, so a concurrent double-start is safe.
-            _server ??= _application.Context.ServiceProvider.GetRequiredService<IWebApplicationServer>();
+            // Resolving the servers materializes the pipeline snapshot. The default server is the
+            // first server registration (made when the builder is constructed), and the
+            // constructor wired it onto the in-memory listener. The server's own start is
+            // idempotent, so a concurrent double-start is safe.
+            _server ??= _application.Context.Servers.First();
             _isStarted = true;
 
             server = _server;

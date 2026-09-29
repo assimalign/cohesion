@@ -61,3 +61,7 @@ Background-work registration belongs to the concrete `ConfigurationStoreApplicat
 The base host owns the already-cancelled run semantic: one complete start and graceful stop
 with fresh lifecycle tokens, normal run-observer notifications, and a final Stopped state.
 The concrete application and IHost route share it. Startup failures still roll back and propagate.
+
+## Dependency injection composition
+
+`ConfigurationStoreApplicationBuilder.Services` holds every registration the application runs with. `AddService` registers an `IHostService`, and a direct `IHostService` registration joins the lifecycle in the same order. `Build` closes registration and resolves the services once. Disposing the application disposes every factory-created service. See [DESIGN.md](DESIGN.md#dependency-injection-composition).

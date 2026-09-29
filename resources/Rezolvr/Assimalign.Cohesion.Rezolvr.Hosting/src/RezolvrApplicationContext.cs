@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
@@ -15,8 +17,10 @@ namespace Assimalign.Cohesion.Rezolvr.Hosting;
 /// </summary>
 public sealed class RezolvrApplicationContext : HostContext, IRezolvrApplicationContext, IHealthContributor
 {
+    private IServiceProvider? _serviceProvider;
     private IReadOnlyList<IHostService> _hostedServices = Array.Empty<IHostService>();
     private readonly IHostEnvironment _environment;
+    private int _isServiceProviderDisposed;
 
     internal RezolvrApplicationContext(ResourceContext? resourceContext = null)
     {
@@ -58,12 +62,40 @@ public sealed class RezolvrApplicationContext : HostContext, IRezolvrApplication
     /// <summary>
     /// Gets the hosted services in registration and startup order.
     /// </summary>
+    /// <remarks>
+    /// The <see cref="IHostService"/> registrations, resolved once when the application is built.
+    /// </remarks>
     public override IEnumerable<IHostService> HostedServices => _hostedServices;
 
-    internal void SetHostedServices(IHostService[] hostedServices)
-    {
-        ArgumentNullException.ThrowIfNull(hostedServices);
+    /// <summary>
+    /// Gets the application's service provider.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The application has not been built.</exception>
+    public IServiceProvider ServiceProvider => _serviceProvider
+        ?? throw new InvalidOperationException("The service provider is created when the Rezolvr application is built.");
 
-        _hostedServices = Array.AsReadOnly(hostedServices);
+    internal void SetServiceProvider(IServiceProvider serviceProvider)
+    {
+        ArgumentNullException.ThrowIfNull(serviceProvider);
+        _serviceProvider = serviceProvider;
+    }
+
+    internal void ResolveHostedServices()
+    {
+        _hostedServices = ServiceProvider.GetRequiredService<IEnumerable<IHostService>>().ToArray();
+    }
+
+    /// <summary>
+    /// Disposes the service provider, which disposes every service a registered factory created.
+    /// </summary>
+    internal ValueTask DisposeServiceProviderAsync()
+    {
+        if (_serviceProvider is IAsyncDisposable serviceProvider &&
+            Interlocked.Exchange(ref _isServiceProviderDisposed, 1) == 0)
+        {
+            return serviceProvider.DisposeAsync();
+        }
+
+        return ValueTask.CompletedTask;
     }
 }

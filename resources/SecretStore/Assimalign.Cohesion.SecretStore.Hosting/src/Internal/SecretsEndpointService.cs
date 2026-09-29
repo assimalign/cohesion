@@ -216,7 +216,9 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         _serverCertificate?.Dispose();
         _serverCertificate = null;
         _serverCertificateContext = null;
-        _certificateAuthority.Dispose();
+
+        // The certificate authority is injected: the application's service provider created it and
+        // disposes it after this service.
     }
 
     private async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)

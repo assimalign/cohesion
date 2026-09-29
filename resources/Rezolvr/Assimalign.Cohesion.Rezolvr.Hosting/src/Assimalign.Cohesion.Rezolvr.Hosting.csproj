@@ -4,6 +4,7 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Rezolvr" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />

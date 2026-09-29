@@ -29,6 +29,19 @@ public sealed class VpnGatewayApplication : Host<VpnGatewayApplicationContext>, 
     /// </summary>
     public override VpnGatewayApplicationContext Context => _context;
 
+    /// <inheritdoc />
+    protected override async ValueTask DisposeAsync(bool disposing)
+    {
+        await base.DisposeAsync(disposing).ConfigureAwait(false);
+        if (disposing)
+        {
+            // The application owns its service provider: disposing it releases every service a
+            // registered factory created, after the host has stopped them. Instance registrations
+            // stay with their callers.
+            await _context.DisposeServiceProviderAsync().ConfigureAwait(false);
+        }
+    }
+
     IVpnGatewayApplicationContext IVpnGatewayApplication.Context => _context;
 
     Task IVpnGatewayApplication.StartAsync(CancellationToken cancellationToken) =>

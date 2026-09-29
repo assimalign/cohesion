@@ -13,8 +13,10 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.ApiManager.Hosting.Tests;
 
@@ -40,7 +42,7 @@ public sealed class ResourceControlPlaneTests
             applicationTrustKey: managed ? identity.PublicKey : ReadOnlyMemory<byte>.Empty);
         using IDisposable scope = ResourceRuntime.CreateScope(resource);
         ApiManagerApplicationBuilder builder = CreateBuilder(typeof(ResourceControlPlaneTests).Assembly);
-        typeof(ApiManagerApplicationBuilder).GetField("_loggerFactory", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(builder).ShouldBeNull();
+        builder.Services.Container.ShouldNotContain(descriptor => descriptor.ServiceType == typeof(ILoggerFactory));
         await using ApiManagerApplication application = builder.Build();
         System.Linq.Enumerable.Count(application.Context.HostedServices).ShouldBe(1);
         Task run = application.RunAsync(timeout.Token);
@@ -85,7 +87,7 @@ public sealed class ResourceControlPlaneTests
         using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
             endpoints: new Dictionary<string, Uri> { ["http"] = Uri.CreateEndpoint("http", "127.0.0.1", ReservePort()) }));
         ApiManagerApplicationBuilder builder = CreateBuilder(typeof(ApiManagerApplication).Assembly);
-        typeof(ApiManagerApplicationBuilder).GetField("_loggerFactory", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(builder).ShouldBeNull();
+        builder.Services.Container.ShouldNotContain(descriptor => descriptor.ServiceType == typeof(ILoggerFactory));
         await using ApiManagerApplication application = builder.Build();
         application.Context.HostedServices.ShouldBeEmpty();
         ResourceRuntime.TryGetControlPlane(application, out _).ShouldBeFalse();

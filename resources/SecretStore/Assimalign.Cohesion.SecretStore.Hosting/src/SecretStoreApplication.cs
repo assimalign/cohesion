@@ -15,17 +15,13 @@ namespace Assimalign.Cohesion.SecretStore.Hosting;
 public sealed class SecretStoreApplication : Host<SecretStoreApplicationContext>, ISecretStoreApplication
 {
     private readonly SecretStoreApplicationContext _context;
-    private readonly SecretsEndpointService _endpointService;
-    private bool _endpointServiceDisposed;
 
     internal SecretStoreApplication(
         SecretStoreApplicationOptions options,
-        SecretStoreApplicationContext context,
-        SecretsEndpointService endpointService)
+        SecretStoreApplicationContext context)
         : base(options)
     {
         _context = context;
-        _endpointService = endpointService;
     }
 
     /// <summary>
@@ -34,7 +30,8 @@ public sealed class SecretStoreApplication : Host<SecretStoreApplicationContext>
     public override SecretStoreApplicationContext Context => _context;
 
     /// <summary>
-    /// Disposes the host and its owned endpoint service.
+    /// Disposes the host and its service provider, which releases the endpoint service and every
+    /// collaborator a registered factory created.
     /// </summary>
     /// <param name="disposing">Whether to release managed resources.</param>
     /// <returns>A task representing asynchronous disposal.</returns>
@@ -46,10 +43,10 @@ public sealed class SecretStoreApplication : Host<SecretStoreApplicationContext>
         }
         finally
         {
-            if (disposing && !_endpointServiceDisposed)
+            if (disposing)
             {
-                _endpointServiceDisposed = true;
-                _endpointService.Dispose();
+                // Instance registrations stay with their callers.
+                await _context.DisposeServiceProviderAsync().ConfigureAwait(false);
             }
         }
     }
