@@ -228,13 +228,19 @@ Describe 'Cohesion release policy wiring' {
     }
 
     It 'generates the Database SDK consumer pin only after successful package creation' {
-        $templatePath = Join-Path $repositoryDirectory 'resources/Database/global.template.json'
-        $template = Get-Content -LiteralPath $templatePath -Raw | ConvertFrom-Json
-        @($template.'msbuild-sdks'.PSObject.Properties.Value) |
-            Should -Be @('', '')
+        # The consumer pin derives from the root global.json, which must name both SDKs the Database
+        # sample imports and never a .local build: that identity exists only in the generated pin.
+        $globalJsonPath = Join-Path $repositoryDirectory 'global.json'
+        $globalJson = (Get-Content -LiteralPath $globalJsonPath -Raw) -replace '(?m)^\s*//.*$', '' |
+            ConvertFrom-Json
+        $sdkPins = $globalJson.'msbuild-sdks'
+        $sdkPins.'Assimalign.Cohesion.Sdk' | Should -Not -BeNullOrEmpty
+        $sdkPins.'Assimalign.Cohesion.Sdk.Database' | Should -Not -BeNullOrEmpty
+        @($sdkPins.PSObject.Properties.Value | Where-Object { $_ -like '*.local' }).Count |
+            Should -Be 0
 
         $lastPack = $installLocal.LastIndexOf('& dotnet pack ', [StringComparison]::Ordinal)
-        $generation = $installLocal.IndexOf('$consumerTemplatePath =', [StringComparison]::Ordinal)
+        $generation = $installLocal.IndexOf('$consumerSourcePath =', [StringComparison]::Ordinal)
         $generation | Should -BeGreaterThan $lastPack
         $installLocal | Should -Match "Consumer SDK '.+?' was not produced"
         $installLocal | Should -Match 'Move-Item -LiteralPath \$temporaryGlobalJsonPath'

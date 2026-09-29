@@ -391,46 +391,58 @@ else {
 }
 #endregion
 
-# The package-backed Database E2E sample must pin the exact SDK identity produced above. Keep the
-# versionless template in source and generate global.json only after every requested pack has
+# The package-backed Database E2E sample must pin the exact SDK identity produced above. Its pins
+# derive from the repository global.json (the .NET SDK block plus the two Cohesion SDKs the sample
+# imports), and resources\Database\global.json is generated only after every requested pack has
 # succeeded, so a failed pack never leaves a pin that names artifacts which do not exist.
 if (-not $SkipSdks) {
-    $consumerTemplatePath = Join-Path $repoRoot `
-        'resources\Database\global.template.json'
-    if (Test-Path -LiteralPath $consumerTemplatePath) {
-        $consumerGlobalJsonPath = Join-Path (Split-Path -Parent $consumerTemplatePath) 'global.json'
-        $consumerGlobalJson = Get-Content -LiteralPath $consumerTemplatePath -Raw | ConvertFrom-Json
-        $sdkVersions = $consumerGlobalJson.PSObject.Properties['msbuild-sdks'].Value
-        if ($null -eq $sdkVersions) {
-            throw "Consumer SDK template '$consumerTemplatePath' has no msbuild-sdks object."
-        }
+    $consumerSourcePath = Join-Path $repoRoot 'global.json'
+    $consumerGlobalJsonPath = Join-Path $repoRoot 'resources\Database\global.json'
+    $consumerSdkNames = @('Assimalign.Cohesion.Sdk', 'Assimalign.Cohesion.Sdk.Database')
 
-        foreach ($sdk in $sdkVersions.PSObject.Properties) {
-            $packagePath = Join-Path $feedDir "$($sdk.Name).$cohesionVersion.nupkg"
-            if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) {
-                throw "Consumer SDK '$($sdk.Name)' was not produced at '$packagePath'."
-            }
-
-            $sdk.Value = $cohesionVersion
-        }
-
-        $temporaryGlobalJsonPath = "$consumerGlobalJsonPath.$([Guid]::NewGuid().ToString('N')).tmp"
-        try {
-            $json = $consumerGlobalJson | ConvertTo-Json -Depth 20
-            [System.IO.File]::WriteAllText(
-                $temporaryGlobalJsonPath,
-                $json + [Environment]::NewLine,
-                [System.Text.UTF8Encoding]::new($false))
-            Move-Item -LiteralPath $temporaryGlobalJsonPath -Destination $consumerGlobalJsonPath -Force
-        }
-        finally {
-            if (Test-Path -LiteralPath $temporaryGlobalJsonPath) {
-                Remove-Item -LiteralPath $temporaryGlobalJsonPath -Force
-            }
-        }
-
-        Write-Host "  generated $consumerGlobalJsonPath ($cohesionVersion)" -ForegroundColor DarkGray
+    # global.json may carry // comment lines, which Windows PowerShell's ConvertFrom-Json rejects.
+    $sourceGlobalJson = (Get-Content -LiteralPath $consumerSourcePath -Raw) -replace '(?m)^\s*//.*$', '' |
+        ConvertFrom-Json
+    $sourceSdkVersions = $sourceGlobalJson.PSObject.Properties['msbuild-sdks'].Value
+    if ($null -eq $sourceSdkVersions) {
+        throw "Repository global.json '$consumerSourcePath' has no msbuild-sdks object."
     }
+
+    $consumerSdkVersions = [ordered]@{}
+    foreach ($sdkName in $consumerSdkNames) {
+        if ($null -eq $sourceSdkVersions.PSObject.Properties[$sdkName]) {
+            throw "Repository global.json '$consumerSourcePath' does not pin consumer SDK '$sdkName'."
+        }
+
+        $packagePath = Join-Path $feedDir "$sdkName.$cohesionVersion.nupkg"
+        if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) {
+            throw "Consumer SDK '$sdkName' was not produced at '$packagePath'."
+        }
+
+        $consumerSdkVersions[$sdkName] = $cohesionVersion
+    }
+
+    $consumerGlobalJson = [ordered]@{
+        'sdk'          = $sourceGlobalJson.sdk
+        'msbuild-sdks' = $consumerSdkVersions
+    }
+
+    $temporaryGlobalJsonPath = "$consumerGlobalJsonPath.$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        $json = $consumerGlobalJson | ConvertTo-Json -Depth 20
+        [System.IO.File]::WriteAllText(
+            $temporaryGlobalJsonPath,
+            $json + [Environment]::NewLine,
+            [System.Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temporaryGlobalJsonPath -Destination $consumerGlobalJsonPath -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryGlobalJsonPath) {
+            Remove-Item -LiteralPath $temporaryGlobalJsonPath -Force
+        }
+    }
+
+    Write-Host "  generated $consumerGlobalJsonPath ($cohesionVersion)" -ForegroundColor DarkGray
 }
 
 Write-Host ""
