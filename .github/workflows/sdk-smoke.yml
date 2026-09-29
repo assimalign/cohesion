@@ -12,6 +12,7 @@ on:
       - "libraries/ApplicationModel/**"
       - "libraries/Connections/**"
       - "libraries/Core/**"
+      - "libraries/FileSystem/**"
       - "libraries/Hosting/**"
       - "libraries/Http/**"
       - "libraries/ObjectMapping/**"
@@ -29,6 +30,7 @@ on:
       - "resources/Database/Assimalign.Cohesion.Database.Language/**"
       - "resources/Database/Assimalign.Cohesion.Database.Protocol/**"
       - "resources/Database/Assimalign.Cohesion.Database.Security/**"
+      - "resources/Database/Assimalign.Cohesion.Database.Sql*/**"
       - "resources/Database/Assimalign.Cohesion.Database.Storage/**"
       - "resources/Database/Assimalign.Cohesion.Database.Transactions/**"
       - "resources/Database/Assimalign.Cohesion.Database.Types/**"
@@ -59,6 +61,7 @@ on:
       - "libraries/ApplicationModel/**"
       - "libraries/Connections/**"
       - "libraries/Core/**"
+      - "libraries/FileSystem/**"
       - "libraries/Hosting/**"
       - "libraries/Http/**"
       - "libraries/ObjectMapping/**"
@@ -76,6 +79,7 @@ on:
       - "resources/Database/Assimalign.Cohesion.Database.Language/**"
       - "resources/Database/Assimalign.Cohesion.Database.Protocol/**"
       - "resources/Database/Assimalign.Cohesion.Database.Security/**"
+      - "resources/Database/Assimalign.Cohesion.Database.Sql*/**"
       - "resources/Database/Assimalign.Cohesion.Database.Storage/**"
       - "resources/Database/Assimalign.Cohesion.Database.Transactions/**"
       - "resources/Database/Assimalign.Cohesion.Database.Types/**"
@@ -162,11 +166,15 @@ jobs:
               -RuntimeIdentifier $env:COHESION_HOST_RID `
               -SkipLibraries
 
+          # PackageOutputPath must be absolute: MSBuild resolves a relative one against each
+          # project's own directory, which packed these two under their src/ folders instead.
+          $packageDirectory = Join-Path (Get-Location).Path '_out/release/packages'
+
           dotnet pack `
               ./libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj `
               --configuration Release `
               --nologo `
-              -p:PackageOutputPath=./_out/release/packages
+              "-p:PackageOutputPath=$packageDirectory"
           if ($LASTEXITCODE -ne 0) {
             throw "Packing Assimalign.Cohesion.Core failed with exit code $LASTEXITCODE."
           }
@@ -175,7 +183,7 @@ jobs:
               ./libraries/ObjectMapping/Assimalign.Cohesion.ObjectMapping/src/Assimalign.Cohesion.ObjectMapping.csproj `
               --configuration Release `
               --nologo `
-              -p:PackageOutputPath=./_out/release/packages
+              "-p:PackageOutputPath=$packageDirectory"
           if ($LASTEXITCODE -ne 0) {
             throw "Packing Assimalign.Cohesion.ObjectMapping failed with exit code $LASTEXITCODE."
           }
@@ -287,7 +295,9 @@ jobs:
           $repository = (Get-Location).Path
           $packageDirectory = Join-Path $repository "_out/release/packages"
           # No area client package is a gateway dependency. Database.Client and Database.Sql.Client
-          # stay because the base/ApplicationModel SDK harness's EnabledWeb consumer references them.
+          # stay because the base/ApplicationModel SDK harness's EnabledWeb consumer references them;
+          # Database.Sql.Client's public closure brings the Database.Sql engine family and
+          # FileSystem/FileSystem.Physical, so those are packed too (NU1101 otherwise).
           # Web and Web.Routing are absent: Gateway.ControlPlane routes its own endpoints, and every
           # other Web consumer here receives them through the App.Web framework, not as packages.
           $packageIds = @(
@@ -303,6 +313,11 @@ jobs:
             "Assimalign.Cohesion.Database.ApplicationModel"
             "Assimalign.Cohesion.Database.Client"
             "Assimalign.Cohesion.Database.Sql.Client"
+            "Assimalign.Cohesion.Database.Sql"
+            "Assimalign.Cohesion.Database.Sql.Catalog"
+            "Assimalign.Cohesion.Database.Sql.Language"
+            "Assimalign.Cohesion.Database.Sql.Schema"
+            "Assimalign.Cohesion.Database.Sql.Storage"
             "Assimalign.Cohesion.Database.Execution"
             "Assimalign.Cohesion.Database.Governance"
             "Assimalign.Cohesion.Database.Indexing"
@@ -312,6 +327,8 @@ jobs:
             "Assimalign.Cohesion.Database.Storage"
             "Assimalign.Cohesion.Database.Transactions"
             "Assimalign.Cohesion.Database.Types"
+            "Assimalign.Cohesion.FileSystem"
+            "Assimalign.Cohesion.FileSystem.Physical"
             "Assimalign.Cohesion.Hosting"
             "Assimalign.Cohesion.Hosting.Health"
             "Assimalign.Cohesion.Hosting.Resources"
@@ -366,6 +383,11 @@ jobs:
             "Assimalign.Cohesion.Database.ApplicationModel"
             "Assimalign.Cohesion.Database.Client"
             "Assimalign.Cohesion.Database.Sql.Client"
+            "Assimalign.Cohesion.Database.Sql"
+            "Assimalign.Cohesion.Database.Sql.Catalog"
+            "Assimalign.Cohesion.Database.Sql.Language"
+            "Assimalign.Cohesion.Database.Sql.Schema"
+            "Assimalign.Cohesion.Database.Sql.Storage"
             "Assimalign.Cohesion.Database.Execution"
             "Assimalign.Cohesion.Database.Governance"
             "Assimalign.Cohesion.Database.Indexing"
@@ -375,6 +397,8 @@ jobs:
             "Assimalign.Cohesion.Database.Storage"
             "Assimalign.Cohesion.Database.Transactions"
             "Assimalign.Cohesion.Database.Types"
+            "Assimalign.Cohesion.FileSystem"
+            "Assimalign.Cohesion.FileSystem.Physical"
             "Assimalign.Cohesion.Hosting"
             "Assimalign.Cohesion.Hosting.Health"
             "Assimalign.Cohesion.Hosting.Resources"
