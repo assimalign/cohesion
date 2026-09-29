@@ -492,6 +492,26 @@ internal static class Program
         }
 
         EnsureParentDirectory(path);
+
+        // On Unix, FileShare.None is an advisory flock taken after the file is opened, so a test
+        // polling this file with File.ReadAllText can hold its shared lock at that instant and the
+        // exclusive lock fails with a sharing violation. Exiting there leaves the count unwritten
+        // and the test times out, so retry briefly instead.
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return IncrementLaunchCountOnce(path);
+            }
+            catch (IOException) when (attempt < 100)
+            {
+                Thread.Sleep(20);
+            }
+        }
+    }
+
+    private static int IncrementLaunchCountOnce(string path)
+    {
         using var stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
         string text = reader.ReadToEnd();
