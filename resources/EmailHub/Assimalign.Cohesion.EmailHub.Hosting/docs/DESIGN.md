@@ -12,7 +12,7 @@ Without a generated control-plane registration, the built host exposes the order
 
 ## Boundaries
 
-The module references the area root and Hosting, Hosting.Health, and Hosting.Resources publicly. Its Web, Web.Hosting, Web.Hosting.Resources, HTTP, and transport implementation dependencies are private, with their resolved closure supplied by the area runtime framework. Hosting never references its own ApplicationModel package. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
+The module references the area root, DependencyInjection, Hosting, Hosting.Health, and Hosting.Resources publicly. Its Web, Web.Hosting, Web.Hosting.Resources, HTTP, and transport implementation dependencies are private, with their resolved closure supplied by the area runtime framework. Hosting never references its own ApplicationModel package. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
 
 ## Enabled resource lifecycle
 
@@ -31,3 +31,10 @@ The registered resource constructor calls ResourceTelemetry.Configure using the 
 ## Concrete composition (T10 / O34)
 
 Background-work registration belongs to the concrete `EmailHubApplicationBuilder`: `AddService(IHostService)` and `AddService(Func<EmailHubApplicationContext, IHostService>)`. The factory receives the same concrete context as Web's and Database's AddService, so hosting consumers can use environment, state, and hosted-service members beyond the small root contract. Database's root-level AddServer keeps the interface context. Factories run once per build against the same context retained by the application; the hosted-service snapshot is installed after factory evaluation. Services start in registration order and stop in reverse. No area-owned service abstraction is introduced.
+
+## Dependency injection composition
+
+`EmailHubApplicationBuilder.Services` is the application's one composition registry, created with `EnableDynamicCode = false`, `ValidateOnBuild = true`, and `ValidateScopes = true`. The module registers only factories and instances, so the provider stays reflection-free. Every lifecycle service is an `IHostService` registration: `AddService(IHostService)` registers the caller's instance, `AddService(Func<EmailHubApplicationContext, IHostService>)` registers a factory closed over the context, and a direct `Services.AddSingleton<IHostService>(...)` joins the lifecycle the same way. Order is registration order: telemetry registers in the builder constructor, so it starts first and stops last; the private control-plane endpoint registers in `Build`, so it starts last and stops first.
+
+`Build` closes registration (the container becomes read-only, and a second `Build` throws), creates the provider once, and resolves `IEnumerable<IHostService>` once into the snapshot the host reuses for every start, stop, and rollback pass. The application owns the provider: disposal stops the host, then disposes the provider, which disposes every factory-created service in reverse creation order while instance registrations stay with their callers. A failed `Build` disposes the provider before rethrowing. The concrete context exposes the provider as `ServiceProvider` to hosting-layer factories; the area root and its features never see it.
+

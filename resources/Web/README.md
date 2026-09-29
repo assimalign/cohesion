@@ -129,8 +129,12 @@ Layering: L3 platform. Everything here builds on the L1 protocol stack (`librari
 no `Assimalign.Cohesion.Hosting*` library. Background work uses the concrete
 `WebApplicationBuilder.AddService` verb in `Web.Hosting`. The broader L2 runtime/composition libraries
 (`libraries/DependencyInjection`, `libraries/Configuration`, `libraries/Logging`) are consumed
-by the hosting module and by the `Web.Testing` harness (which drives the runtime and resolves the
-server from its service provider) — never by feature libraries. `Web.ApplicationModel` references
+by the hosting module and by the `Web.Testing` harness (which drives the runtime and starts the
+default server from its context) — never by feature libraries. Inside the hosting module the
+container is the only composition registry: the root `IWebApplicationBuilder` verbs a feature calls
+(`AddFeature`, `AddServer`) are explicit-interface shims over `Services.AddSingleton<IHttpFeature>`
+and `Services.AddSingleton<IWebApplicationServer>`, resolved once at pipeline build and host start
+(`resource-areas.md`, "Hosting composition — DI is the dependency control"). `Web.ApplicationModel` references
 only the shared ApplicationModel and
 `Hosting.Resources` contracts; that resource-runtime package brings the plain Hosting lifecycle,
 the `Hosting.Health` contribution contracts, and the Windows-only ProtectedData BCL facade into

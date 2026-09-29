@@ -81,3 +81,12 @@ Background-work registration belongs to the concrete `IdentityHubApplicationBuil
 The base host owns the already-cancelled run semantic: one complete start and graceful stop
 with fresh lifecycle tokens, normal run-observer notifications, and a final Stopped state.
 The concrete application and IHost route share it. Startup failures still roll back and propagate.
+
+## Dependency injection composition
+
+`IdentityHubApplicationBuilder.Services` is the application's one composition registry, created with `EnableDynamicCode = false`, `ValidateOnBuild = true`, and `ValidateScopes = true`. The module registers only factories and instances, so the provider stays reflection-free. Every lifecycle service is an `IHostService` registration: `AddService(IHostService)` registers the caller's instance, `AddService(Func<IdentityHubApplicationContext, IHostService>)` registers a factory closed over the context, and a direct `Services.AddSingleton<IHostService>(...)` joins the lifecycle the same way. Order is registration order: telemetry registers in the builder constructor, so it starts first and stops last; `IdentityEndpointService` registers in `Build`, so it starts last and stops first.
+
+`Build` closes registration (the container becomes read-only, and a second `Build` throws), creates the provider once, and resolves `IEnumerable<IHostService>` once into the snapshot the host reuses for every start, stop, and rollback pass. The application owns the provider: disposal stops the host, then disposes the provider, which disposes every factory-created service in reverse creation order while instance registrations stay with their callers. A failed `Build` disposes the provider before rethrowing. The concrete context exposes the provider as `ServiceProvider` to hosting-layer factories; the area root and its features never see it.
+
+Each `AddAudience` and `AddClient` declaration is a registration. `IdentityHubRegistrations` resolves and validates them once, before any lifecycle service is created, so an undeclared client audience fails `Build` without running a service factory. Both verbs are explicit `IIdentityHubApplicationBuilder` shims over public concrete counterparts that return the builder for chaining. `IdentityEndpointService` is disposable; the application now disposes it through the provider.
+
