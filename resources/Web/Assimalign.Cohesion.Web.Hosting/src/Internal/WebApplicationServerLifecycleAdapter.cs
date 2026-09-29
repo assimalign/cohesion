@@ -10,24 +10,28 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 /// Adapts the Web root's server lifecycle contract to the host lifecycle without requiring
 /// the contracts-only Web assembly to reference Hosting.
 /// </summary>
+/// <remarks>
+/// <see cref="WebApplicationContext"/> creates one adapter per registered server that is not
+/// itself an <see cref="IHostService"/>, once, when it snapshots the server phase.
+/// </remarks>
 internal sealed class WebApplicationServerLifecycleAdapter : IHostService
 {
+    private readonly IWebApplicationServer _server;
+
     internal WebApplicationServerLifecycleAdapter(IWebApplicationServer server)
     {
-        Server = server ?? throw new ArgumentNullException(nameof(server));
+        _server = server ?? throw new ArgumentNullException(nameof(server));
     }
 
     public ServiceId Id { get; } = ServiceId.New();
 
-    internal IWebApplicationServer Server { get; }
-
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
-        return Server.StartAsync(cancellationToken);
+        return _server.StartAsync(cancellationToken);
     }
 
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
-        return Server.StopAsync(cancellationToken);
+        return _server.StopAsync(cancellationToken);
     }
 }

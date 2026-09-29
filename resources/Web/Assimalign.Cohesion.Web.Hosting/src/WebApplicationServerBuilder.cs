@@ -28,8 +28,18 @@ public sealed class WebApplicationServerBuilder
     internal WebApplicationServerBuilder(WebApplicationBuilder builder)
     {
         _builder = builder;
+
+        // The default server is the first IWebApplicationServer registration, made when the
+        // application builder is constructed, so it precedes every AddServer/UseServer server in
+        // lifecycle order. It is inert when no listener was configured through this builder: a
+        // custom-only composition must not also start an empty default listener.
         _builder.Services.AddSingleton<IWebApplicationServer>(serviceProvider =>
         {
+            if (_configurations.Count == 0)
+            {
+                return new InactiveWebApplicationServer();
+            }
+
             IHttpConnectionListener listener = HttpConnectionListener.Create(options =>
             {
                 ApplyDefaultInterceptors(options);
@@ -48,16 +58,6 @@ public sealed class WebApplicationServerBuilder
                 Listener = listener,
                 MaxConcurrentConnections = _maxConcurrentConnections
             });
-        });
-        _builder.Services.AddSingleton<IHostService>(serviceProvider =>
-        {
-            // The default server participates in host startup only when at least one listener was
-            // configured through this builder. A custom-only server composition must not also try
-            // to start an empty default listener, but keeping this descriptor in its original
-            // position preserves host-service ordering when the default is configured.
-            return _configurations.Count == 0
-                ? new InactiveDefaultServerService()
-                : (IHostService)serviceProvider.GetRequiredService<IWebApplicationServer>();
         });
     }
 
@@ -99,13 +99,18 @@ public sealed class WebApplicationServerBuilder
         where TServer : IWebApplicationServer, IHostService
     {
         ArgumentNullException.ThrowIfNull(server);
-        _builder.Services.AddSingleton<IHostService>(server);
+
+        _builder.Services.AddSingleton<IWebApplicationServer>(server);
         return this;
     }
 
     /// <summary>
     /// Adds a custom server created from the application's service provider.
     /// </summary>
+    /// <remarks>
+    /// The factory is invoked once, at host start, and the application owns and disposes the
+    /// server it returns.
+    /// </remarks>
     /// <typeparam name="TServer">The custom server type.</typeparam>
     /// <param name="factory">The factory that creates the server.</param>
     /// <returns>The same builder instance for chaining.</returns>
@@ -115,11 +120,13 @@ public sealed class WebApplicationServerBuilder
     {
         ArgumentNullException.ThrowIfNull(factory);
 
-        _builder.Services.AddSingleton<IHostService>(serviceProvider =>
+        _builder.Services.AddSingleton<IWebApplicationServer>(serviceProvider =>
         {
-            IHostService service = factory.Invoke(serviceProvider);
+            TServer server = factory.Invoke(serviceProvider);
 
-            return service;
+            return server is null
+                ? throw new InvalidOperationException("The web application server factory returned null.")
+                : server;
         });
 
         return this;
@@ -166,21 +173,5 @@ public sealed class WebApplicationServerBuilder
     internal static void ApplyDefaultInterceptors(HttpConnectionListenerOptions options)
     {
         options.Interceptors.Add(HttpRequestLimits.CreateMaxRequestBodySizeInterceptor());
-    }
-
-    private sealed class InactiveDefaultServerService : IHostService
-    {
-        public ServiceId Id { get; } = ServiceId.New();
-
-        public Task StartAsync(CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.CompletedTask;
-        }
-
-        public Task StopAsync(CancellationToken cancellationToken = default)
-        {
-            return Task.CompletedTask;
-        }
     }
 }
