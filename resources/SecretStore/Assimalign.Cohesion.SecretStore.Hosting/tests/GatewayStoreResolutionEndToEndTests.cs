@@ -53,6 +53,9 @@ public sealed class GatewayStoreResolutionEndToEndTests
             certificateMount: "tls",
             referenceResources: ["secrets"]));
         dependent.DependsOn(store);
+        // The gateway resolves stores only through registered providers; this is what a
+        // gateway's Program.cs does after referencing the SecretStore orchestration package.
+        builder.UseSecretStore(store);
         IApplicationModel model = builder.Build().Model;
         using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 

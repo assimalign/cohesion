@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Text;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -235,30 +236,24 @@ public sealed class GatewayTrustTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - TrustedIssuers: Loads peer keys from the application's own SecretStore")]
-    public async Task StartAsync_WithOwnSecretStore_ShouldLoadApplicationTrustedIssuers()
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - TrustedIssuers: Loads peer keys from the registered trust store")]
+    public async Task StartAsync_WithBoundTrustStore_ShouldLoadApplicationTrustedIssuers()
     {
         // Arrange
         string root = CreateTestDirectory();
         using var cancellation = new CancellationTokenSource(_testTimeout);
         using var peerKey = new GatewayTrustKey(ECDsa.Create(ECCurve.NamedCurves.nistP256));
-        byte[] document = TrustedIssuerDocument.Write(
-            [new TrustedIssuer("peer", peerKey.PublicJwk)]);
-        var client = new TrustedIssuerStoreClient(document);
-        var options = new ApplicationGatewayOptions
-        {
-            ExportDirectory = root,
-            StoreClient = client,
-        };
+        var store = new RecordingTrustedIssuerStore([new TrustedIssuer("peer", peerKey.PublicJwk)], "KeyStore");
         var gateway = new TestGateway(
             new InMemoryResourceStateManager(),
             [new TrustStoreController()],
-            options: options,
+            options: new ApplicationGatewayOptions { ExportDirectory = root },
             name: "test-gateway");
         IApplicationBuilder builder = Application
             .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", AppEnvironment.Keys.Production])
             .UseGateway(gateway);
-        builder.AddResource(CreateSecretStoreManifest());
+        builder.AddResource(CreateTrustStoreManifest());
+        builder.Providers.TrustStore = new ResourceProviderBinding<ITrustedIssuerStore>("secrets", store);
         IApplicationModel model = builder.Build().Model;
         IApplicationGateway control = gateway;
         bool started = false;
@@ -274,12 +269,15 @@ public sealed class GatewayTrustTests
             issuers.Count.ShouldBe(2);
             issuers[0].Issuer.ShouldBe("appa");
             issuers[1].Issuer.ShouldBe("peer");
-            client.Path.ShouldBe("trusted-issuers.json");
-            JsonWebToken.Parse(client.Credential.ShouldNotBeNull()).Audiences.ShouldBe(["secrets"]);
+            store.Reads.ShouldNotBeEmpty();
+            ResourceProviderConnection connection = store.Reads[^1].ShouldNotBeNull();
+            connection.Caller.ShouldBe(ApplicationName.Parse("appa"));
+            connection.Resource.ShouldBe((ResourceName)"secrets");
+            connection.ControlPlaneAddress.ShouldBe(new Uri("https://127.0.0.1:8443/cohesion/v1"));
+            JsonWebToken.Parse(connection.BearerCredential).Audiences.ShouldBe(["secrets"]);
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(document);
             if (started)
             {
                 await control.StopAsync(CancellationToken.None);
@@ -289,24 +287,18 @@ public sealed class GatewayTrustTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - TrustedIssuers: Own SecretStore precedes an independent remote on the first production pass")]
-    public async Task StartAsync_WhenRemoteIsDeclaredBeforeOwnSecretStore_ShouldLoadTrustFirst()
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - TrustedIssuers: The trust store precedes an independent remote on the first production pass")]
+    public async Task StartAsync_WhenRemoteIsDeclaredBeforeTrustStore_ShouldLoadTrustFirst()
     {
         // Arrange
         string root = CreateTestDirectory();
         using var cancellation = new CancellationTokenSource(_testTimeout);
         using var peerKey = new GatewayTrustKey(ECDsa.Create(ECCurve.NamedCurves.nistP256));
-        byte[] document = TrustedIssuerDocument.Write(
-            [new TrustedIssuer("peer", peerKey.PublicJwk)]);
-        var storeClient = new TrustedIssuerStoreClient(document);
+        var store = new RecordingTrustedIssuerStore([new TrustedIssuer("peer", peerKey.PublicJwk)], "KeyStore");
         var gateway = new TestGateway(
             new InMemoryResourceStateManager(),
             [new TrustStoreController()],
-            options: new ApplicationGatewayOptions
-            {
-                ExportDirectory = root,
-                StoreClient = storeClient,
-            },
+            options: new ApplicationGatewayOptions { ExportDirectory = root },
             name: "test-gateway");
         var resolver = new TrustAwareExternalResolver(gateway);
         IApplicationBuilder builder = Application
@@ -315,7 +307,8 @@ public sealed class GatewayTrustTests
         builder.RemoteReference(
             CreateExternalDeclaration(),
             options => options.Bind(resolver));
-        builder.AddResource(CreateSecretStoreManifest());
+        builder.AddResource(CreateTrustStoreManifest());
+        builder.Providers.TrustStore = new ResourceProviderBinding<ITrustedIssuerStore>("secrets", store);
         IApplicationModel model = builder.Build().Model;
         IApplicationGateway control = gateway;
         bool started = false;
@@ -331,12 +324,62 @@ public sealed class GatewayTrustTests
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(document);
             if (started)
             {
                 await control.StopAsync(CancellationToken.None);
             }
 
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - TrustedIssuers: An unavailable trust store is fatal only outside Local")]
+    [InlineData(AppEnvironment.Keys.Local, false)]
+    [InlineData(AppEnvironment.Keys.Production, true)]
+    public async Task StartAsync_TrustStoreReadFailure_ShouldFailOnlyOutsideLocal(string environment, bool expectFailure)
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        using var cancellation = new CancellationTokenSource(_testTimeout);
+        var store = new RecordingTrustedIssuerStore(resourceKind: "KeyStore")
+        {
+            ReadFailure = new System.Net.Http.HttpRequestException("store offline"),
+        };
+        var gateway = new TestGateway(
+            new InMemoryResourceStateManager(),
+            [new TrustStoreController()],
+            options: new ApplicationGatewayOptions { ExportDirectory = root },
+            name: "test-gateway");
+        IApplicationBuilder builder = Application
+            .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", environment])
+            .UseGateway(gateway);
+        builder.AddResource(CreateTrustStoreManifest());
+        builder.Providers.TrustStore = new ResourceProviderBinding<ITrustedIssuerStore>("secrets", store);
+        IApplicationModel model = builder.Build().Model;
+        IApplicationGateway control = gateway;
+
+        try
+        {
+            // Act
+            Exception? failure = await Record.ExceptionAsync(() => control.StartAsync(model, cancellation.Token));
+
+            // Assert
+            if (expectFailure)
+            {
+                failure.ShouldBeOfType<InvalidOperationException>()
+                    .Message.ShouldContain("could not load TrustedIssuers from its trust store 'secrets'", Case.Sensitive);
+            }
+            else
+            {
+                failure.ShouldBeNull();
+                gateway.GetTrustedIssuers(model.Name).ShouldHaveSingleItem().Issuer.ShouldBe("appa");
+            }
+
+            store.Reads.ShouldNotBeEmpty();
+        }
+        finally
+        {
+            await control.StopAsync(CancellationToken.None);
             DeleteTestDirectory(root);
         }
     }
@@ -357,20 +400,18 @@ public sealed class GatewayTrustTests
             Path.Combine(root, "appa", "trust", "trusted-issuers.json"),
             [fallback],
             cancellation.Token);
-        var client = new TrustedIssuerStoreClient(Array.Empty<byte>()) { ReturnNotFound = true };
+        // A trust store that has persisted nothing yet answers null.
+        var store = new RecordingTrustedIssuerStore(issuers: null, resourceKind: "KeyStore");
         var gateway = new TestGateway(
             new InMemoryResourceStateManager(),
             [new TrustStoreController()],
-            options: new ApplicationGatewayOptions
-            {
-                ExportDirectory = root,
-                StoreClient = client,
-            },
+            options: new ApplicationGatewayOptions { ExportDirectory = root },
             name: "test-gateway");
         IApplicationBuilder builder = Application
             .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", environment])
             .UseGateway(gateway);
-        builder.AddResource(CreateSecretStoreManifest());
+        builder.AddResource(CreateTrustStoreManifest());
+        builder.Providers.TrustStore = new ResourceProviderBinding<ITrustedIssuerStore>("secrets", store);
         IApplicationModel model = builder.Build().Model;
         IApplicationGateway control = gateway;
         bool started = false;
@@ -404,23 +445,19 @@ public sealed class GatewayTrustTests
         // Arrange
         string root = CreateTestDirectory();
         using var cancellation = new CancellationTokenSource(_testTimeout);
-        var client = new TrustedIssuerStoreClient(Array.Empty<byte>());
-        var options = new ApplicationGatewayOptions
-        {
-            ExportDirectory = root,
-            StoreClient = client,
-        };
+        var store = new RecordingTrustedIssuerStore(resourceKind: "KeyStore");
         Uri storeEndpoint = new("https://secrets.appa.test:8443/");
         var gateway = new TestGateway(
             new InMemoryResourceStateManager(),
             [new InputHistoryController()],
-            options: options,
+            options: new ApplicationGatewayOptions { ExportDirectory = root },
             name: "test-gateway",
-            ownSecretStoreEndpointResolver: (_, _) => storeEndpoint);
+            trustStoreEndpointResolver: (_, _) => storeEndpoint);
         IApplicationBuilder builder = Application
             .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", AppEnvironment.Keys.Production])
             .UseGateway(gateway);
-        builder.AddResource(CreateSecretStoreManifest());
+        builder.AddResource(CreateTrustStoreManifest());
+        builder.Providers.TrustStore = new ResourceProviderBinding<ITrustedIssuerStore>("secrets", store);
         IApplicationModel model = builder.Build().Model;
 
         var peerGateway = new TestGateway(
@@ -440,9 +477,96 @@ public sealed class GatewayTrustTests
             await gateway.AddTrustedIssuerAsync(model, "peer", export, cancellation.Token);
 
             // Assert
-            client.StoredEndpoint.ShouldBe(storeEndpoint);
-            client.StoredIssuer.ShouldBe("peer");
-            JsonWebToken.Parse(client.StoredCredential.ShouldNotBeNull()).Audiences.ShouldBe(["secrets"]);
+            (ResourceProviderConnection? connection, string owner, TrustedIssuer issuer) = store.Adds.ShouldHaveSingleItem();
+            connection.ShouldNotBeNull().ControlPlaneAddress.ShouldBe(new Uri("https://secrets.appa.test:8443/cohesion/v1"));
+            JsonWebToken.Parse(connection.BearerCredential).Audiences.ShouldBe(["secrets"]);
+            owner.ShouldBe(model.Owner);
+            issuer.Issuer.ShouldBe("peer");
+            issuer.AllowedCommandKinds.ShouldBeEmpty();
+            gateway.GetTrustedIssuers(model.Name).Count.ShouldBe(2);
+            File.Exists(Path.Combine(root, "appa", "trust", "trusted-issuers.json")).ShouldBeFalse();
+        }
+        finally
+        {
+            await ((IApplicationGateway)gateway).StopAsync(CancellationToken.None);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Trust add: A restricted grant reaches the trust store with its allowed command kinds")]
+    public async Task AddTrustedIssuerAsync_RestrictedGrant_ShouldHandTheStoreItsAllowedKinds()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        using var cancellation = new CancellationTokenSource(_testTimeout);
+        var store = new RecordingTrustedIssuerStore();
+        var gateway = new TestGateway(
+            new InMemoryResourceStateManager(),
+            [new InputHistoryController()],
+            options: new ApplicationGatewayOptions { ExportDirectory = root },
+            name: "test-gateway");
+        IApplicationBuilder builder = Application
+            .CreateBuilder(ApplicationName.Parse("appa"), ["--environment", AppEnvironment.Keys.Production])
+            .UseGateway(gateway);
+        builder.AddResource(new TestResource("api"));
+        // A trust store outside the model authenticates itself and receives no connection.
+        builder.Providers.TrustStore = new ResourceProviderBinding<ITrustedIssuerStore>(null, store);
+        IApplicationModel model = builder.Build().Model;
+        IApplicationModel peerModel = BuildModel(gateway, "peer", "api");
+        using var peerKey = new GatewayTrustKey(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+        ApplicationExportDocument export = ApplicationExportDocument.Create(peerModel, "1", trustKey: peerKey.PublicJwk);
+
+        try
+        {
+            // Act
+            await gateway.AddTrustedIssuerAsync(
+                model,
+                "peer",
+                export,
+                ["rezolvr.add-a-record", "identityhub.add-client"],
+                cancellation.Token);
+
+            // Assert
+            (ResourceProviderConnection? connection, string owner, TrustedIssuer issuer) = store.Adds.ShouldHaveSingleItem();
+            connection.ShouldBeNull();
+            owner.ShouldBe(model.Owner);
+            issuer.AllowedCommandKinds.ShouldBe(["identityhub.add-client", "rezolvr.add-a-record"]);
+            gateway.GetTrustedIssuers(model.Name).Single(candidate => candidate.Issuer == "peer")
+                .AllowedCommandKinds.ShouldBe(["identityhub.add-client", "rezolvr.add-a-record"]);
+        }
+        finally
+        {
+            await ((IApplicationGateway)gateway).StopAsync(CancellationToken.None);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Trust add: Local without a trust store writes the local trusted-issuers file")]
+    public async Task AddTrustedIssuerAsync_WithoutTrustStoreInLocal_ShouldWriteLocalFile()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        using var cancellation = new CancellationTokenSource(_testTimeout);
+        var gateway = new TestGateway(
+            new InMemoryResourceStateManager(),
+            [new InputHistoryController()],
+            options: new ApplicationGatewayOptions { ExportDirectory = root },
+            name: "test-gateway");
+        IApplicationModel model = BuildModel(gateway, "appa", "api");
+        IApplicationModel peerModel = BuildModel(gateway, "peer", "api");
+        using var peerKey = new GatewayTrustKey(ECDsa.Create(ECCurve.NamedCurves.nistP256));
+        ApplicationExportDocument export = ApplicationExportDocument.Create(peerModel, "1", trustKey: peerKey.PublicJwk);
+
+        try
+        {
+            // Act
+            await gateway.AddTrustedIssuerAsync(model, "peer", export, cancellation.Token);
+
+            // Assert
+            string path = Path.Combine(root, "appa", "trust", "trusted-issuers.json");
+            File.Exists(path).ShouldBeTrue();
+            TrustedIssuerDocument.Parse(await File.ReadAllBytesAsync(path, cancellation.Token))
+                .Select(issuer => issuer.Issuer).ShouldBe(["appa", "peer"]);
             gateway.GetTrustedIssuers(model.Name).Count.ShouldBe(2);
         }
         finally
@@ -467,10 +591,19 @@ public sealed class GatewayTrustTests
             [new InputHistoryController()],
             options: new ApplicationGatewayOptions { ExportDirectory = root },
             name: "test-gateway",
-            ownSecretStoreEndpointResolver: (_, _) => loopback ? new Uri("http://localhost:8443/") : null);
+            trustStoreEndpointResolver: (_, _) => loopback ? new Uri("http://localhost:8443/") : null);
         IApplicationBuilder builder = Application.CreateBuilder("appa", ["--environment", environment]).UseGateway(gateway);
-        if (loopback) { builder.AddResource(CreateSecretStoreManifest()); }
-        else { builder.AddResource(new TestResource("api")); }
+        if (loopback)
+        {
+            builder.AddResource(CreateTrustStoreManifest());
+            builder.Providers.TrustStore = new ResourceProviderBinding<ITrustedIssuerStore>(
+                "secrets",
+                new RecordingTrustedIssuerStore(resourceKind: "KeyStore"));
+        }
+        else
+        {
+            builder.AddResource(new TestResource("api"));
+        }
         IApplicationModel model = builder.Build().Model;
         IApplicationBuilder peerBuilder = Application.CreateBuilder("peer", ["--environment=Local"]).UseGateway(gateway);
         peerBuilder.AddResource(new TestResource("api"));
@@ -535,11 +668,12 @@ public sealed class GatewayTrustTests
         return builder.Build().Model;
     }
 
-    private static ResourceManifest CreateSecretStoreManifest() => new()
+    // A neutral store kind: the gateway reaches a trust store only through its registration.
+    private static ResourceManifest CreateTrustStoreManifest() => new()
     {
         Name = "secrets",
         Application = "appa",
-        Kind = "SecretStore",
+        Kind = "KeyStore",
         ApplicationModel = "Assimalign.Cohesion.Test.ApplicationModel",
         Artifact = new ResourceManifestArtifact
         {
@@ -755,83 +889,6 @@ public sealed class GatewayTrustTests
         public Task DeleteAsync(
             IResourceControlContext context,
             CancellationToken cancellationToken = default) => StopAsync(context, cancellationToken);
-    }
-
-    private sealed class TrustedIssuerStoreClient : IGatewayStoreClient
-    {
-        private readonly byte[] _document;
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="TrustedIssuerStoreClient"/> class.
-        /// </summary>
-        /// <param name="document">The trusted-issuer document returned for secret reads.</param>
-        public TrustedIssuerStoreClient(byte[] document)
-        {
-            _document = document;
-        }
-
-        public bool ReturnNotFound { get; init; }
-
-        public string? Credential { get; private set; }
-
-        public string? Path { get; private set; }
-
-        public Uri? StoredEndpoint { get; private set; }
-
-        public string? StoredCredential { get; private set; }
-
-        public string? StoredIssuer { get; private set; }
-
-        public ValueTask<ReadOnlyMemory<byte>> ReadSecretAsync(
-            Uri endpoint,
-            string credential,
-            string path,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            endpoint.ShouldBe(new Uri("https://127.0.0.1:8443/"));
-            Credential = credential;
-            Path = path;
-            if (ReturnNotFound)
-            {
-                return ValueTask.FromException<ReadOnlyMemory<byte>>(
-                    new System.Net.Http.HttpRequestException(
-                        "TrustedIssuers is absent.",
-                        inner: null,
-                        System.Net.HttpStatusCode.NotFound));
-            }
-
-            return ValueTask.FromResult<ReadOnlyMemory<byte>>(_document);
-        }
-
-        public ValueTask<string> ReadCertificateAsync(
-            Uri endpoint,
-            string credential,
-            string name,
-            CancellationToken cancellationToken = default) =>
-            ValueTask.FromException<string>(new NotSupportedException());
-
-        public ValueTask<IReadOnlyDictionary<string, string?>> ReadConfigurationAsync(
-            Uri endpoint,
-            string credential,
-            string name,
-            CancellationToken cancellationToken = default) =>
-            ValueTask.FromException<IReadOnlyDictionary<string, string?>>(new NotSupportedException());
-
-        public ValueTask StoreTrustedIssuerAsync(
-            Uri endpoint,
-            string credential,
-            string owner,
-            string issuer,
-            ReadOnlyMemory<byte> publicKey,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            StoredEndpoint = endpoint;
-            StoredCredential = credential;
-            StoredIssuer = issuer;
-            return ValueTask.CompletedTask;
-        }
     }
 
     private sealed class TrustAwareExternalResolver : IExternalResourceResolver

@@ -18,6 +18,15 @@ takes the neutral token base (`…Token`) to OIDC-grade JWT document fidelity:
   curve binding, and IEEE P1363 signatures produced by `ECDsa.SignData`.
 - **Signature verification** — `JsonWebTokenSignatureVerifier.CreateEcdsa/CreateRsa`: reusable,
   key-bound ECDSA (`ES*`) and RSA (`RS*`/`PS*`) verification over the exact compact signing input.
+- **Public keys** — `JsonWebKey` (`TryParse` from UTF-8 JSON, RFC 7638 `ComputeThumbprint`,
+  `CreateECDsa`, the lenient `TryValidateEcdsaVerificationKey` rule, and the strict
+  `TryValidateEs256SigningKey` profile) and `JsonWebKeySet`
+  (`Keys`, `Find(kid)`).
+- **Verify-and-validate** — `JsonWebTokenValidator.CreateEs256(JsonWebTokenValidationProfile)`:
+  one ES256 call that resolves the issuer's key set, selects the key by `kid`, verifies the
+  signature, and applies the required-claim, temporal, lifetime, and subject rules the Cohesion
+  resource and gateway credential verifiers share; `HasAudience` leaves the 401/403 audience
+  decision to the caller.
 - **Validation** — `JsonWebToken.Validate(JsonWebTokenValidationOptions)`: algorithm presence /
   `none` rejection (RFC 8725) / allowed-set membership, required-claim presence, `b64`/`crit`
   constraints, and the **keyless** `at_hash`/`c_hash` value comparison (OIDC Core §3.1.3.6 /
@@ -40,10 +49,11 @@ ES256 writing and reusable asymmetric signature verification were delivered by d
 
 ## Scope
 
-Compact JWT/JWS document fidelity, ES256 writing, reusable asymmetric signature primitives, and
-document-level validation. `Validate` deliberately does **not** invoke a signature verifier;
-callers verify `SigningInput` + `Parts.Signature` separately before trusting claims. The package
-does not manage keys/trust, enforce OpenID Connect protocol rules (nonce/azp/`max_age` — the OIDC
+Compact JWT/JWS document fidelity, ES256 writing, reusable asymmetric signature primitives, public
+JWK parsing, and document-level validation. `Validate` deliberately does **not** invoke a signature
+verifier; callers verify `SigningInput` + `Parts.Signature` separately before trusting claims, or use
+the ES256 `IJsonWebTokenValidator`, which does both against caller-resolved issuer keys. The package
+does not store keys or trust grants, enforce OpenID Connect protocol rules (nonce/azp/`max_age` — the OIDC
 branch's concern), or handle JWE. A successful `Validate` means "data and hash rules passed",
 never "signature verified". See the family
 [DESIGN.md](../../Assimalign.Cohesion.IdentityModel/docs/DESIGN.md) — "Token normalization

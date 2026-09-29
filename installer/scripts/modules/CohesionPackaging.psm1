@@ -187,6 +187,7 @@ $script:CohesionReleaseLibrary = @(
     # resources/ConfigurationStore
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore'
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel'
+    'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration'
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client'
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting'
 
@@ -244,7 +245,6 @@ $script:CohesionReleaseLibrary = @(
     # resources/IdentityHub
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel'
-    'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models'
 
@@ -286,7 +286,6 @@ $script:CohesionReleaseLibrary = @(
     # resources/Rezolvr
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr'
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel'
-    'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Client'
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting'
 
     # resources/Scheduler
@@ -299,6 +298,7 @@ $script:CohesionReleaseLibrary = @(
     # resources/SecretStore
     'resources/SecretStore/Assimalign.Cohesion.SecretStore'
     'resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel'
+    'resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration'
     'resources/SecretStore/Assimalign.Cohesion.SecretStore.Client'
     'resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting'
 

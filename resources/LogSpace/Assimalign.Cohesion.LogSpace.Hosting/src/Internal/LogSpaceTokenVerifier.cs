@@ -1,9 +1,4 @@
 using System;
-using System.Buffers.Text;
-using System.Collections.Generic;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.IdentityModel;
@@ -11,13 +6,15 @@ using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
 namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
-internal sealed class LogSpaceTokenVerifier : IDisposable
+/// <summary>
+/// Verifies the default application-key credentials a LogSpace accepts: gateway management tokens and
+/// <c>scope=telemetry</c> emitter tokens whose subject names the emitting resource.
+/// </summary>
+internal sealed class LogSpaceTokenVerifier
 {
-    private static readonly TimeSpan _maximumLifetime = TimeSpan.FromHours(24);
     private readonly string _application;
     private readonly string _gateway;
-    private readonly ECDsa _key;
-    private readonly string _keyId;
+    private readonly IJsonWebTokenValidator _validator;
 
     internal LogSpaceTokenVerifier(ResourceContext context)
     {
@@ -32,153 +29,65 @@ internal sealed class LogSpaceTokenVerifier : IDisposable
                 "A gateway-managed resource requires a public application trust key.");
         }
 
-        try
+        // The subject rule depends on the credential's scope, so it is applied below rather than by
+        // the profile: management tokens name the gateway, telemetry tokens name the emitter.
+        _validator = JsonWebTokenValidator.CreateEs256(new JsonWebTokenValidationProfile(
+            _application,
+            new JsonWebKeySet(ReadApplicationTrustKey(context.ApplicationTrustKey.Span)),
+            ResourceCredentialProfile.BootstrapMaximumLifetime)
         {
-            using JsonDocument document = JsonDocument.Parse(context.ApplicationTrustKey);
-            JsonElement jwk = document.RootElement;
-            if (jwk.GetProperty("kty").GetString() != "EC" ||
-                jwk.GetProperty("crv").GetString() != "P-256")
-            {
-                throw new InvalidOperationException("The application trust key must be an EC P-256 JWK.");
-            }
-
-            _keyId = jwk.GetProperty("kid").GetString()
-                ?? throw new InvalidOperationException("The application trust key requires a kid.");
-            byte[] x = Base64Url.DecodeFromChars(jwk.GetProperty("x").GetString()!);
-            byte[] y = Base64Url.DecodeFromChars(jwk.GetProperty("y").GetString()!);
-            try
-            {
-                _key = ECDsa.Create(new ECParameters
-                {
-                    Curve = ECCurve.NamedCurves.nistP256,
-                    Q = new ECPoint { X = x, Y = y },
-                });
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(x);
-                CryptographicOperations.ZeroMemory(y);
-            }
-        }
-        catch (Exception exception) when (
-            exception is JsonException or KeyNotFoundException or FormatException or CryptographicException)
-        {
-            throw new InvalidOperationException(
-                "The application trust key is not a valid EC P-256 JWK.",
-                exception);
-        }
+            ClockSkew = ResourceCredentialProfile.ClockSkew,
+            RequireSubject = false,
+        });
     }
 
-    internal LogSpaceTokenStatus Validate(
+    internal ResourceCredentialVerification Validate(
         string compactToken,
         string expectedAudience,
-        DateTimeOffset now, bool telemetry, out string? emittingResource)
+        DateTimeOffset now,
+        bool telemetry)
     {
-        emittingResource = null;
-        if (!JsonWebToken.TryParse(compactToken, out JsonWebToken? token) ||
-            token is null ||
-            token.SigningInput is null ||
-            token.Parts is null ||
-            !string.Equals(token.Issuer, _application, StringComparison.Ordinal) ||
-
-            !VerifySignature(token))
+        if (!_validator.TryValidate(compactToken, now, out JsonWebToken? token))
         {
-            return LogSpaceTokenStatus.Unauthorized;
+            return new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null);
         }
 
-        var options = new JsonWebTokenValidationOptions(now)
-        {
-            ExpectedIssuer = _application,
-            AllowUnsecured = false,
-        };
-        options.AllowedAlgorithms.Add("ES256");
-        options.RequiredClaims.Add("iss");
-        options.RequiredClaims.Add("sub");
-        options.RequiredClaims.Add("aud");
-        options.RequiredClaims.Add("exp");
-        options.RequiredClaims.Add("nbf");
-        options.RequiredClaims.Add("iat");
-        options.RequiredClaims.Add("jti");
-        bool valid = token.Validate(options).Succeeded &&
-            token.IssuedAt is { } issuedAt &&
-            token.NotBefore is { } notBefore &&
-            token.ExpiresAt is { } expiresAt &&
-            issuedAt <= now + options.ClockSkew &&
-            expiresAt > issuedAt &&
-            expiresAt > notBefore &&
-            expiresAt - issuedAt <= _maximumLifetime &&
-            !string.IsNullOrWhiteSpace(token.Id);
-        if (!valid)
-        {
-            return LogSpaceTokenStatus.Unauthorized;
-        }
-
-        string? scope = token.Claims.GetString("scope");
+        string? scope = token.Claims.GetString(ResourceCredentialProfile.ScopeClaim);
+        ResourceCaller caller;
         if (telemetry)
         {
-            if (scope != "telemetry" || string.IsNullOrWhiteSpace(token.Subject?.Value))
+            if (scope != ResourceCredentialProfile.TelemetryScope || string.IsNullOrWhiteSpace(token.Subject?.Value))
             {
-                return LogSpaceTokenStatus.Forbidden;
+                return new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, null, null);
             }
-            emittingResource = token.Subject.Value;
+
+            caller = new ResourceCaller(_application, token.Subject.Value, ResourceCallerKind.TelemetryEmitter, []);
         }
-        else if (scope == "telemetry")
+        else if (scope == ResourceCredentialProfile.TelemetryScope)
         {
-            return LogSpaceTokenStatus.Forbidden;
+            return new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, null, null);
         }
         else if (!string.Equals(token.Subject?.Value, _gateway, StringComparison.Ordinal))
         {
-            return LogSpaceTokenStatus.Unauthorized;
+            return new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null);
         }
-        for (int index = 0; index < token.Audiences.Count; index++)
+        else
         {
-            if (string.Equals(token.Audiences[index], expectedAudience, StringComparison.Ordinal))
-            {
-                return LogSpaceTokenStatus.Authorized;
-            }
+            caller = new ResourceCaller(_application, _gateway, ResourceCallerKind.Gateway, []);
         }
 
-        return LogSpaceTokenStatus.Forbidden;
+        return JsonWebTokenValidator.HasAudience(token, expectedAudience)
+            ? new ResourceCredentialVerification(ResourceCredentialStatus.Authorized, caller, null)
+            : new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, caller, null);
     }
 
-    public void Dispose() => _key.Dispose();
-
-    private bool VerifySignature(JsonWebToken token)
+    private static JsonWebKey ReadApplicationTrustKey(ReadOnlySpan<byte> applicationTrustKey)
     {
-        if (!string.Equals(token.Algorithm, "ES256", StringComparison.Ordinal) ||
-            !string.Equals(token.Header.KeyId, _keyId, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        byte[] signature;
-        try
-        {
-            signature = Base64Url.DecodeFromChars(token.Parts!.Signature);
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
-
-        byte[] signingInput = Encoding.ASCII.GetBytes(token.SigningInput!);
-        try
-        {
-            IJsonWebTokenSignatureVerifier verifier = JsonWebTokenSignatureVerifier.CreateEcdsa(_key, _keyId);
-            return verifier.CanVerify(token.Algorithm!, token.Header.KeyId) &&
-                verifier.Verify(token.Algorithm!, signingInput, signature);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(signingInput);
-            CryptographicOperations.ZeroMemory(signature);
-        }
+        string? failure = null;
+        return JsonWebKey.TryParse(applicationTrustKey, out JsonWebKey? key) &&
+            key.TryValidateEcdsaVerificationKey("P-256", out failure)
+                ? key
+                : throw new InvalidOperationException(
+                    $"The application trust key is not a valid EC P-256 JWK. {failure}".TrimEnd());
     }
-}
-
-internal enum LogSpaceTokenStatus
-{
-    Unauthorized,
-    Forbidden,
-    Authorized,
 }

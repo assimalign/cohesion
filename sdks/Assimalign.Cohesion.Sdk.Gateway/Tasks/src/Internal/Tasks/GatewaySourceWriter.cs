@@ -17,7 +17,6 @@ internal static class GatewaySourceWriter
         IReadOnlyList<GatewayManifest> resources,
         IReadOnlyList<GatewayExternal> externals,
         IReadOnlyList<GatewayManifest> applications,
-        IReadOnlyList<GatewayResourceKind> resourceKinds,
         IReadOnlyList<GatewayProvider> providers)
     {
         var source = new StringBuilder(32768);
@@ -38,7 +37,6 @@ internal static class GatewaySourceWriter
         WriteExternals(source, externals);
         WriteApplications(source, applications);
         WriteReferences(source, applications);
-        WriteResourceExtensions(source, resources, resourceKinds);
         WriteProviderCatalog(source, providers);
         WriteGatewayExtensions(source, providers);
         WriteIfChanged(outputPath, source.ToString());
@@ -99,9 +97,10 @@ internal static class GatewaySourceWriter
         source.AppendLine("    /// <exception cref=\"global::System.ArgumentNullException\"><paramref name=\"args\" /> is null.</exception>");
         if (bound.Count > 0)
         {
-            // The manifest bindings make every enabled, composable project resource colocatable
-            // whichever verb adds it (the generated verb, the area verb over Manifests.<Name>, or a
-            // third-party application model's verb), so the entry points are rooted here as well.
+            // The manifest bindings are the only in-process registration: they make every enabled,
+            // composable project resource colocatable whichever verb adds it (the area's
+            // hand-written verb over Manifests.<Name>, AddResource, or a third-party application
+            // model's verb), so the entry points are rooted here.
             source.AppendLine("    /// <remarks>Registers the in-process entry binding of every enabled, composable project resource by manifest identity.</remarks>");
             foreach (GatewayManifest manifest in bound)
             {
@@ -274,81 +273,6 @@ internal static class GatewaySourceWriter
         }
         source.AppendLine("}");
         source.AppendLine();
-    }
-
-    private static void WriteResourceExtensions(
-        StringBuilder source,
-        IReadOnlyList<GatewayManifest> resources,
-        IReadOnlyList<GatewayResourceKind> resourceKinds)
-    {
-        // One verb per same-application resource and nothing broader: the gateway's Program.cs
-        // names what it composes. Boundary externals need no verb; the builder declares the
-        // externals a composed manifest references when the model is built.
-        source.AppendLine("/// <summary>Build-generated resource composition verbs.</summary>");
-        source.AppendLine("public static class CohesionGatewayResourceExtensions");
-        source.AppendLine("{");
-        source.AppendLine("    extension(global::Assimalign.Cohesion.ApplicationModel.IApplicationBuilder builder)");
-        source.AppendLine("    {");
-        for (int index = 0; index < resources.Count; index++)
-        {
-            GatewayManifest manifest = resources[index];
-            if (index > 0)
-            {
-                source.AppendLine();
-            }
-
-            GatewayResourceKind? kind = resourceKinds.FirstOrDefault(
-                candidate => string.Equals(candidate.ApplicationModel, manifest.ApplicationModel, StringComparison.OrdinalIgnoreCase));
-            string optionsType = kind?.OptionsType ?? "global::Assimalign.Cohesion.ApplicationModel.ResourceOptions";
-            string descriptorType = kind?.DescriptorType ?? "global::Assimalign.Cohesion.ApplicationModel.IApplicationResourceDescriptor";
-            source.Append("        /// <summary>Adds ").Append(Xml(manifest.Application)).Append('/')
-                .Append(Xml(manifest.Name)).AppendLine(" to the application model.</summary>");
-            source.AppendLine("        /// <param name=\"configure\">Optional platform-neutral planning overrides.</param>");
-            source.AppendLine("        /// <returns>The resource descriptor, for adding dependency edges and resource commands.</returns>");
-            if (manifest.InProcessBinding is GatewayInProcessBinding binding)
-            {
-                WriteTrimmingRoot(source, binding, "        ");
-                WriteTrimmingSuppression(source, "        ");
-            }
-            source.Append("        public ").Append(descriptorType).Append(" Add")
-                .Append(manifest.MemberName).Append("(global::System.Action<").Append(optionsType)
-                .AppendLine(">? configure = null)");
-            source.AppendLine("        {");
-            source.Append("            var options = new ").Append(optionsType).AppendLine("();");
-            source.AppendLine("            configure?.Invoke(options);");
-            if (kind is null || string.IsNullOrWhiteSpace(kind.AddMethod))
-            {
-                source.Append("            var descriptor = builder.AddResource(Manifests.").Append(manifest.MemberName)
-                    .Append(", options)");
-            }
-            else
-            {
-                source.Append("            var descriptor = ").Append(kind.AddMethod).Append("(builder, Manifests.")
-                    .Append(manifest.MemberName).Append(", options)");
-            }
-            source.AppendLine(";");
-            WriteInProcessBinding(source, manifest.InProcessBinding);
-            source.AppendLine("            return descriptor;");
-            source.AppendLine("        }");
-        }
-
-        source.AppendLine("    }");
-        source.AppendLine("}");
-        source.AppendLine();
-    }
-
-    private static void WriteInProcessBinding(
-        StringBuilder source,
-        GatewayInProcessBinding? binding)
-    {
-        if (binding is null)
-        {
-            return;
-        }
-
-        source.AppendLine();
-        source.Append("            descriptor.InProcess(");
-        WriteBindingArguments(source, binding, "                    ");
     }
 
     private static void WriteProviderCatalog(StringBuilder source, IReadOnlyList<GatewayProvider> providers)

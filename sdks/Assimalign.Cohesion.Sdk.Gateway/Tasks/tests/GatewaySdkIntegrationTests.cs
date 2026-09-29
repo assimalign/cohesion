@@ -92,14 +92,12 @@ public sealed class GatewaySdkIntegrationTests
             "public static readonly global::Assimalign.Cohesion.ApplicationModel.ResourceManifest GatewaySmokeDatabase");
         source.ShouldContain(
             "public static readonly global::Assimalign.Cohesion.ApplicationModel.ResourceManifest GatewaySmokeWeb");
-        source.ShouldContain("AddGatewaySmokeDatabase(");
-        source.ShouldContain("DatabaseResourceOptions");
-        source.ShouldContain("public global::Assimalign.Cohesion.ApplicationModel.IDatabaseResourceDescriptor AddGatewaySmokeDatabase(", Case.Sensitive);
-        source.ShouldContain("DatabaseResourceExtensions.AddDatabase(builder, Manifests.GatewaySmokeDatabase");
-        source.ShouldContain("AddGatewaySmokeWeb(");
-        source.ShouldContain("WebResourceOptions");
-        source.ShouldContain("public global::Assimalign.Cohesion.ApplicationModel.IWebResourceDescriptor AddGatewaySmokeWeb(", Case.Sensitive);
-        source.ShouldContain("WebResourceExtensions.AddWeb(builder, Manifests.GatewaySmokeWeb");
+        // The gateway's Program.cs calls the area verbs (AddDatabase/AddWeb over Manifests.*);
+        // the generated surface carries no per-resource verb of its own.
+        source.ShouldNotContain("CohesionGatewayResourceExtensions", Case.Sensitive);
+        source.ShouldNotContain("AddGatewaySmokeDatabase(", Case.Sensitive);
+        source.ShouldNotContain("AddGatewaySmokeWeb(", Case.Sensitive);
+        source.ShouldNotContain("ResourceExtensions.Add", Case.Sensitive);
         source.ShouldNotContain("AddAllResources");
         source.ShouldContain("UseGateway(string[] args)");
         source.ShouldContain("global::System.Action<CohesionGatewayProviders> configure");
@@ -175,6 +173,10 @@ public sealed class GatewaySdkIntegrationTests
         ContainsOrdinalIgnoreCase(
             referencePaths,
             "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane").ShouldBeTrue();
+        // The hand-written area verbs compile against the ApplicationModel packages the SDK
+        // injects for the referenced Web and Database projects.
+        ContainsOrdinalIgnoreCase(referencePaths, "Assimalign.Cohesion.Web.ApplicationModel").ShouldBeTrue();
+        ContainsOrdinalIgnoreCase(referencePaths, "Assimalign.Cohesion.Database.ApplicationModel").ShouldBeTrue();
 
         string gatewayOutput = workspace.BuildOutputDirectory("GatewaySmoke");
         Directory.EnumerateFiles(gatewayOutput, "GatewaySmokeWeb.dll", SearchOption.AllDirectories)
@@ -321,10 +323,11 @@ public sealed class GatewaySdkIntegrationTests
             "using Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;");
         source.ShouldContain(
             "new global::Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.InProcessGateway(options)");
-        source.ShouldContain("AddGatewaySmokeWeb(");
-        source.ShouldContain("AddGatewaySmokeDatabase(");
-        source.ShouldContain("AddInprocessNamedEntry(");
-        source.ShouldContain("AddInprocessNoncomposable(");
+        source.ShouldNotContain("CohesionGatewayResourceExtensions", Case.Sensitive);
+        source.ShouldContain("ResourceManifest GatewaySmokeWeb", Case.Sensitive);
+        source.ShouldContain("ResourceManifest GatewaySmokeDatabase", Case.Sensitive);
+        source.ShouldContain("ResourceManifest InprocessNamedEntry", Case.Sensitive);
+        source.ShouldContain("ResourceManifest InprocessNoncomposable", Case.Sensitive);
         source.ShouldContain(
             "global::System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicMethods |");
         source.ShouldContain(
@@ -344,17 +347,19 @@ public sealed class GatewaySdkIntegrationTests
         source.ShouldContain("\"gateway-smoke-database\"));");
         source.ShouldContain("\"inprocess-named-entry\"));");
         source.ShouldNotContain(EntryAnchor("InProcessNonComposable", "InProcessNonComposable"));
-        // Three descriptor bindings on the generated verbs plus three manifest bindings that
-        // Gateway.CreateBuilder registers, each rooted by its own DynamicDependency.
+        // Gateway.CreateBuilder registers the three manifest bindings, each rooted by its own
+        // DynamicDependency; they are the only bindings, so the hand-written area verbs in
+        // Program.cs are colocated by manifest identity.
         source.ShouldContain("Manifests.GatewaySmokeWeb.InProcess(");
         source.ShouldContain("Manifests.GatewaySmokeDatabase.InProcess(");
         source.ShouldContain("Manifests.InprocessNamedEntry.InProcess(");
         source.ShouldNotContain("Manifests.InprocessNoncomposable.InProcess(");
-        source.Split(".InProcess(", StringSplitOptions.None).Length.ShouldBe(7);
+        source.ShouldNotContain("descriptor.InProcess(", Case.Sensitive);
+        source.Split(".InProcess(", StringSplitOptions.None).Length.ShouldBe(4);
         source.Split("[global::System.Diagnostics.CodeAnalysis.DynamicDependency(", StringSplitOptions.None)
-            .Length.ShouldBe(7);
+            .Length.ShouldBe(4);
         source.Split("[global::System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage(", StringSplitOptions.None)
-            .Length.ShouldBe(5);
+            .Length.ShouldBe(2);
         source.ShouldContain(
             "Justification = \"The generated DynamicDependency roots the resource entry point used by the in-process binding.\"");
 
@@ -446,11 +451,12 @@ public sealed class GatewaySdkIntegrationTests
         regeneratedSource.ShouldNotContain("\"InProcessNamedEntry.CustomEntry\",");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - InProcess binds a resource added through the area verb over its generated manifest")]
-    public async Task Describe_InProcessGateway_WithAreaVerbOverManifest_ShouldValidateBinding()
+    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - InProcess binds resources added through hand-written verbs over their generated manifests")]
+    public async Task Describe_InProcessGateway_WithHandWrittenVerbsOverManifests_ShouldValidateBindings()
     {
-        // Arrange: the apphost adds gateway-smoke-web with AddWeb(Manifests.GatewaySmokeWeb),
-        // never calling the generated AddGatewaySmokeWeb() verb that carries the descriptor binding.
+        // Arrange: the apphost adds gateway-smoke-web with the Web area's AddWeb and the
+        // transitive gateway-smoke-database with the untyped AddResource, both over the generated
+        // manifests. Gateway.CreateBuilder's manifest registration is the only binding path.
         using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         using ConsumerWorkspace workspace = ConsumerWorkspace.Create(
             "GatewaySmokeDatabase",
@@ -563,17 +569,16 @@ public sealed class GatewaySdkIntegrationTests
             workspace.ProjectDirectory("InProcessTransitiveGateway"),
             "Gateway.g.cs",
             runtimeIdentifier));
-        source.ShouldContain("AddGatewaySmokeWeb(");
-        source.ShouldContain("AddGatewaySmokeDatabase(");
+        source.ShouldNotContain("CohesionGatewayResourceExtensions", Case.Sensitive);
         source.ShouldContain(EntryAnchor("GatewaySmokeWeb", "GatewaySmokeWeb"));
         source.ShouldContain(EntryAnchor("GatewaySmokeDatabase", "GatewaySmokeDatabase"));
-        // Two descriptor bindings on the generated verbs plus the two manifest bindings that
-        // Gateway.CreateBuilder registers for the direct and transitive members.
+        // Gateway.CreateBuilder registers one manifest binding each for the direct and the
+        // transitive member; no verb carries a second binding.
         source.ShouldContain("Manifests.GatewaySmokeWeb.InProcess(");
         source.ShouldContain("Manifests.GatewaySmokeDatabase.InProcess(");
-        source.Split(".InProcess(", StringSplitOptions.None).Length.ShouldBe(5);
+        source.Split(".InProcess(", StringSplitOptions.None).Length.ShouldBe(3);
         source.Split("[global::System.Diagnostics.CodeAnalysis.DynamicDependency(", StringSplitOptions.None)
-            .Length.ShouldBe(5);
+            .Length.ShouldBe(3);
 
         string publishDirectory = workspace.PublishOutputDirectory(
             "InProcessTransitiveGateway",

@@ -2,9 +2,15 @@
 
 ## Design intent
 
-The client is the narrow O13 exception that lets an orchestration gateway resolve SecretStore
-mount sources without learning the store's protocol or referencing a runtime module. The public
-contract is interface-first and the HTTP implementation remains internal.
+The client is the SecretStore protocol boundary consumed by
+`Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration`, whose source provider,
+certificate authority, and trusted-issuer store read secrets and certificates and send the
+`cohesion.trust.add` grant through it without referencing a runtime module. The arrow points
+Orchestration → Client, never back: this package takes no ApplicationModel reference. A gateway
+references no client; it reaches the store only through the Orchestration package it registers
+(`UseSecretStore(store)`). O13's allowance that gateways may reference `<Area>.Client` is
+superseded by the owner decisions of 2026-09-25 (R8). The public contract is interface-first and
+the HTTP implementation remains internal.
 
 ## Dependency boundary
 
@@ -39,8 +45,9 @@ mutations alongside the existing `cohesion.trust.add` bootstrap command.
 `ClientCredential` is intentionally package-local: it is an opaque token holder, not a JWT model or
 token provider. Its formatted representation is redacted. `ResourceCommand` is likewise a minimal,
 package-local transport envelope whose payload bytes are base64-encoded by JSON so this package
-does not depend on the shared Hosting seam. Gateway adapters translate between the separate
-client-side and orchestration command contracts.
+does not depend on the shared Hosting seam. The Orchestration trusted-issuer store builds the one
+envelope it sends (`cohesion.trust.add`). Declared SecretStore commands do not pass through this
+client: the gateway delivers them through its generic `ResourceControlPlaneCommandClient`.
 
 ## Transport lifecycle
 

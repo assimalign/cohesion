@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
@@ -185,15 +183,15 @@ public static class ResourcePlanValidator
     {
         RequireEnvironmentValue(
             plan,
-            ResourceEnvironment.Application,
+            AppEnvironment.Variables.Application,
             context.Manifest.Application.ToString());
         RequireEnvironmentValue(
             plan,
-            ResourceEnvironment.Resource,
+            AppEnvironment.Variables.Resource,
             context.Manifest.Name.ToString());
         RequireEnvironmentValue(
             plan,
-            ResourceEnvironment.Environment,
+            AppEnvironment.Variables.Environment,
             context.Environment.Name.ToString());
 
         foreach ((string name, string value) in context.Manifest.EnvironmentVariables)
@@ -216,9 +214,9 @@ public static class ResourcePlanValidator
     }
 
     private static bool IsFrozenIdentityVariable(string name) =>
-        string.Equals(name, ResourceEnvironment.Application, StringComparison.Ordinal) ||
-        string.Equals(name, ResourceEnvironment.Resource, StringComparison.Ordinal) ||
-        string.Equals(name, ResourceEnvironment.Environment, StringComparison.Ordinal);
+        string.Equals(name, AppEnvironment.Variables.Application, StringComparison.Ordinal) ||
+        string.Equals(name, AppEnvironment.Variables.Resource, StringComparison.Ordinal) ||
+        string.Equals(name, AppEnvironment.Variables.Environment, StringComparison.Ordinal);
 
     private static void ValidateEndpointBindings(ResourcePlan plan, ResourceManifest manifest)
     {

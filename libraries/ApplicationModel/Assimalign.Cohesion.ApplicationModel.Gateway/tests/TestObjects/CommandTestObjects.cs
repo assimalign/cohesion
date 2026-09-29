@@ -29,7 +29,7 @@ internal sealed class RecordingCommandClient : IGatewayResourceCommandClient
 
     public RemoteCertificateValidationCallback? Validator { get; private set; }
 
-    public string ResourceKind => "Database";
+    public string ResourceKind { get; init; } = "Database";
     public ResourceCommandResult Result { get; set; } = new(ResourceCommandStatus.Applied, "database created");
     public int ApplyCount { get; private set; }
     public Uri? Address { get; private set; }

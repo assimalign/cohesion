@@ -1,7 +1,9 @@
 # Assimalign.Cohesion.SecretStore.Client
 
-Thin, NativeAOT-safe protocol client used by gateways to resolve secret and certificate mounts
-without referencing the SecretStore runtime.
+Thin, NativeAOT-safe protocol client for the SecretStore control plane. Gateways reach it only
+through `Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration` (`UseSecretStore(...)`),
+which resolves secret and certificate mounts with it; a gateway never references the client
+directly, and the client never references the SecretStore runtime.
 
 The package exposes `ISecretStoreClient`, the `SecretStoreClient.Create(Uri,
 ClientCredential)` factory, and `CreateForControlPlane` for a full control-plane address.

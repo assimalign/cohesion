@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
@@ -122,9 +120,9 @@ public static class GenericPlanner
             environment[name] = value;
         }
 
-        environment[ResourceEnvironment.Application] = manifest.Application.ToString();
-        environment[ResourceEnvironment.Resource] = manifest.Name.ToString();
-        environment[ResourceEnvironment.Environment] = context.Environment.Name.ToString();
+        environment[AppEnvironment.Variables.Application] = manifest.Application.ToString();
+        environment[AppEnvironment.Variables.Resource] = manifest.Name.ToString();
+        environment[AppEnvironment.Variables.Environment] = context.Environment.Name.ToString();
 
         var container = new ContainerSpec(
             manifest.Name.ToString(),

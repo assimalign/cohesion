@@ -173,8 +173,8 @@ editing that section, never as a standalone sweep. Don't add new box art for gra
 [`docs/DEPENDENCIES.md`](../../docs/DEPENDENCIES.md) is the repository-wide reference graph: every
 project, every declared reference, an area roll-up, and a fan-in ranking. It is **generated** by
 reading the csprojs statically — no restore, no MSBuild evaluation — so it runs in seconds and
-reports exactly what the project files declare, which is the thing `COHRES001`–`COHRES004` and
-`COHAM001` are written against.
+reports exactly what the project files declare, which is the thing `COHRES001`–`COHRES004`,
+`COHAM001`, and `COHLIB001` are written against.
 
 > **When a dependency is added or removed, rerun the generator in the same commit.**
 

@@ -203,7 +203,7 @@ patterns, so they stay.
 ```
 libraries/{Category}/Assimalign.Cohesion.{Library}/
 ├── src/
-│   ├── Abstractions/      # Public interfaces and abstract classes — flat
+│   ├── Abstractions/      # Public interfaces only — flat
 │   ├── Exceptions/        # Public exceptions and their {Name}ErrorCode enums — flat
 │   ├── Extensions/        # Public extension containers — flat
 │   ├── Internal/          # Every internal type; subfolders allowed
@@ -211,7 +211,7 @@ libraries/{Category}/Assimalign.Cohesion.{Library}/
 │   │   └── Exceptions/    # Internal exceptions
 │   ├── ValueObjects/      # Value objects, generated and hand-written — flat
 │   ├── Properties/        # AssemblyInfo.cs (and resx designers)
-│   └── [Feature folders]  # Other public types
+│   └── [Feature folders]  # Other public types, abstract classes included (or the src/ root)
 ├── shared/                # Source compiled into sibling assemblies — see "Shared source"
 ├── docs/
 │   ├── OVERVIEW.md
@@ -228,7 +228,7 @@ These folder rules apply to every shipped `src/` project (`libraries/`, `resourc
 
 | Folder | Holds | Nesting | Namespace |
 |---|---|---|---|
-| `Abstractions/` | Public interfaces and public `abstract` classes/records | Flat — no subfolders | `RootNamespace` |
+| `Abstractions/` | Public interfaces — and nothing else | Flat — no subfolders | `RootNamespace` |
 | `Exceptions/` | Public exception types; the `{Name}ErrorCode` enum that pairs with an exception root | Flat | `RootNamespace` |
 | `Extensions/` | Public `static` classes that declare `extension(...)` members | Flat | `RootNamespace` |
 | `ValueObjects/` | Public value objects: structs / record structs with value equality (`IEquatable<Self>`), including every `CohesionValueType` (its `Include` path is `ValueObjects\<Name>.cs`) | Flat | `RootNamespace` |
@@ -237,9 +237,17 @@ These folder rules apply to every shipped `src/` project (`libraries/`, `resourc
 | `System/` | BCL-namespace extensions (`namespace System.*`) | Mirrors the BCL namespace | `System.*` — **only** in `Assimalign.Cohesion.Core` |
 
 Precedence when a type matches more than one row: `internal` wins (an internal exception goes to
-`Internal/Exceptions/`), then exceptions, then abstractions. One file, one category: a secondary
-type with a category of its own gets its own file in its own folder; a related enum or delegate
-without one stays beside its primary type.
+`Internal/Exceptions/`), then exceptions. One file, one category: a secondary type with a category
+of its own gets its own file in its own folder; a related enum or delegate without one stays beside
+its primary type.
+
+**Public abstract classes and records are not `Abstractions/` types.** They sit with the other
+public types, in the `src/` root or the feature folder they belong to, and declare the same
+namespace as the types beside them (normally the `RootNamespace`; a feature folder with a namespace
+of its own, such as Web.Routing's `Patterns/` and `Policies/`, keeps it). That includes the guided abstract base of an interface (see
+"Interface-first with a guided abstract base"): the interface goes in `Abstractions/`, the base
+does not. An abstract exception root still goes to `Exceptions/`, and an internal abstract class to
+`Internal/`.
 
 **Error codes over exception sprawl.** Prefer one `abstract` exception root per library plus a
 `{Name}ErrorCode` enum in `Exceptions/` over a separate exception type per failure; consumers can
@@ -271,7 +279,7 @@ using System.Threading.Tasks;
 
 using NUlid;
 
-using Assimalign.Cohesion.Core;
+using Assimalign.Cohesion.Caching;
 using Assimalign.Cohesion.Configuration;
 
 namespace Assimalign.Cohesion.Database;
@@ -337,9 +345,10 @@ grep -rn "InternalsVisibleTo" --include=*.cs --include=*.csproj . \
   | grep -vE "[/\\\\](obj|bin)[/\\\\]" | grep -vE '\.Tests"|\.Tests" />|\.Tests,'
 ```
 
-A **fourth** pattern exists and is deliberately not counted above: four hosting projects grant to
-*another project's* test assembly (`IdentityHub.Hosting` → `IdentityHub.Client.Tests`, and the
-same in `Rezolvr.Hosting`, `SecretStore.Hosting`, `ApplicationModel.Gateway`). Those are test-only
+A **fourth** pattern exists and is deliberately not counted above: two projects grant to
+*another project's* test assembly (`SecretStore.Hosting` → `SecretStore.Client.Tests` and
+`ApplicationModel.Gateway` → `ApplicationModel.Gateway.InProcess.Tests`; the `IdentityHub.Hosting`
+and `Rezolvr.Hosting` grants left with their retired client packages). Those are test-only
 and do not widen a shipped boundary, but they do reach past a project's own tests. Prefer a
 project's own test assembly; if a sibling's tests genuinely need the internals, that is worth
 questioning on the same terms as the rest of this section.

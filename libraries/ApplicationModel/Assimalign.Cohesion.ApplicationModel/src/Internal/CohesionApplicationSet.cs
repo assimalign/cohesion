@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Internal;
 internal sealed class CohesionApplicationSet : IApplicationSet
 {
     private readonly IMultiModelApplicationGateway _gateway;
-    private readonly List<ApplicationDeclaration> _applications = new();
+    private readonly List<Member> _applications = new();
     private readonly IReadOnlyList<string> _externalBindings;
     private readonly IReadOnlyList<ResourceName> _realize;
 
@@ -30,19 +30,33 @@ internal sealed class CohesionApplicationSet : IApplicationSet
 
     public GatewayRunMode RunMode { get; }
 
-    public IApplicationSet AddApplication(ApplicationDeclaration application)
+    public IApplicationSet AddApplication(ApplicationDeclaration application) =>
+        Add(application, configure: null);
+
+    public IApplicationSet AddApplication(
+        ApplicationDeclaration application,
+        Action<IApplicationProviderBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(application);
+        ArgumentNullException.ThrowIfNull(configure);
+        return Add(application, configure);
+    }
+
+    private CohesionApplicationSet Add(
+        ApplicationDeclaration application,
+        Action<IApplicationProviderBuilder>? configure)
     {
         ArgumentNullException.ThrowIfNull(application);
         for (int index = 0; index < _applications.Count; index++)
         {
-            if (_applications[index].Name == application.Name)
+            if (_applications[index].Declaration.Name == application.Name)
             {
                 throw new InvalidOperationException(
                     $"Application '{application.Name}' is already present in this application set.");
             }
         }
 
-        _applications.Add(application);
+        _applications.Add(new Member(application, configure));
         return this;
     }
 
@@ -62,15 +76,18 @@ internal sealed class CohesionApplicationSet : IApplicationSet
         var models = new IApplicationModel[_applications.Count];
         for (int index = 0; index < models.Length; index++)
         {
-            models[index] = await _applications[index].Resolver.ResolveAsync(
+            ApplicationDeclaration declaration = _applications[index].Declaration;
+            IApplicationModel resolved = await declaration.Resolver.ResolveAsync(
                 context,
                 cancellationToken).ConfigureAwait(false);
-            if (models[index].Name != _applications[index].Name)
+            if (resolved.Name != declaration.Name)
             {
                 throw new InvalidOperationException(
-                    $"Application declaration '{_applications[index].Name}' resolved model " +
-                    $"'{models[index].Name}'. The control plane returned the wrong application.");
+                    $"Application declaration '{declaration.Name}' resolved model " +
+                    $"'{resolved.Name}'. The control plane returned the wrong application.");
             }
+
+            models[index] = BindProviders(resolved, _applications[index].Configure);
         }
 
         BindExternalResources(models);
@@ -121,6 +138,57 @@ internal sealed class CohesionApplicationSet : IApplicationSet
                 throw new NotSupportedException(
                     $"Application-set run mode '{RunMode}' is not supported by this control-plane composition seam.");
         }
+    }
+
+    // Providers are code, so a member model imported from a describe output or an export carries
+    // none. A member gets exactly the registrations its own AddApplication callback made - never
+    // another member's, and never anything by source or resource name - and is validated with the
+    // rules Build() applies to a builder, so a store-backed member fails here, naming the member
+    // and the registration to add, before the gateway realizes anything.
+    private static IApplicationModel BindProviders(
+        IApplicationModel model,
+        Action<IApplicationProviderBuilder>? configure)
+    {
+        IApplicationModel bound = model;
+        if (configure is not null)
+        {
+            if ((model.Providers ?? ApplicationProviders.Empty).HasRegistrations)
+            {
+                throw new InvalidOperationException(
+                    $"Application-set member '{model.Name}' resolved a model that already carries provider " +
+                    "registrations, and the set registers providers for it as well. Register the member's " +
+                    "providers in one place: either where its model is built, or in its AddApplication " +
+                    "callback.");
+            }
+
+            var registration = new ApplicationSetMemberProviderBuilder(model);
+            try
+            {
+                configure(registration);
+            }
+            catch (Exception exception) when (
+                exception is ArgumentException or InvalidOperationException or NotSupportedException)
+            {
+                throw new InvalidOperationException(
+                    $"Application-set member '{model.Name}' could not register its providers: {exception.Message}",
+                    exception);
+            }
+
+            bound = new ProviderBoundApplicationModel(model, registration.Complete());
+        }
+
+        try
+        {
+            ApplicationProviderValidation.Validate(bound, applicationSetMember: true);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new InvalidOperationException(
+                $"Application-set member '{model.Name}' has invalid provider registrations. {exception.Message}",
+                exception);
+        }
+
+        return bound;
     }
 
     private void ValidateRequestedRealizations(IReadOnlyList<IApplicationModel> models)
@@ -245,4 +313,14 @@ internal sealed class CohesionApplicationSet : IApplicationSet
         await stopped.Task.ConfigureAwait(false);
         await _gateway.StopAsync(CancellationToken.None).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// One declared member: its declaration and, when the set registers providers for it, the
+    /// registration callback.
+    /// </summary>
+    /// <param name="Declaration">The generated member application declaration.</param>
+    /// <param name="Configure">The member's provider registration callback, or <see langword="null"/>.</param>
+    private readonly record struct Member(
+        ApplicationDeclaration Declaration,
+        Action<IApplicationProviderBuilder>? Configure);
 }

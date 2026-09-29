@@ -80,4 +80,23 @@ public interface IApplicationModel
 
     /// <summary>Gets the immutable commands claimed by this application in declaration order.</summary>
     IReadOnlyList<IResourceCommand> Commands => System.Array.Empty<IResourceCommand>();
+
+    /// <summary>
+    /// Gets the frozen provider registrations the gateway resolves stores, certificates, trust,
+    /// command inputs, telemetry, credentials, and control-plane callers through.
+    /// </summary>
+    /// <remarks>
+    /// A model built by <see cref="IApplicationBuilder.Build"/> carries a frozen snapshot of the
+    /// builder's <see cref="IApplicationBuilder.Providers"/>. Providers are code and are never
+    /// serialized, so a model imported from a document (an application-set member or an export), and
+    /// any implementation that does not override this member, carries
+    /// <see cref="ApplicationProviders.Empty"/>. An application set attaches a member's registrations
+    /// explicitly: the member added through
+    /// <see cref="IApplicationSet.AddApplication(ApplicationDeclaration, System.Action{IApplicationProviderBuilder})"/>
+    /// carries exactly what that callback registered, validated against the member's own resources.
+    /// Registrations are never inherited from another model, the set, or another member by name.
+    /// A gateway handed a model without the registration a <c>&lt;source&gt;:&lt;key&gt;</c> mount
+    /// needs reports that mount as unresolved, naming the missing registration.
+    /// </remarks>
+    ApplicationProviders Providers => ApplicationProviders.Empty;
 }

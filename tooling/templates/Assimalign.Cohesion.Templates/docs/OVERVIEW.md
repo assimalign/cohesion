@@ -20,7 +20,12 @@ defaults to the lowercased first name segment and can be supplied with `--applic
 
 Applications and landing zones enable orchestration on each referenced resource. Standalone
 resources explicitly disable it and explain the one-line opt-in in their project files.
-Gateways inherit their always-enabled behavior from `Sdk.Gateway`.
+Gateways inherit their always-enabled behavior from `Sdk.Gateway`. Gateway programs compose resources
+with the area verbs over the generated `Manifests` members (`builder.AddWeb(Manifests.AcmeApi)`), and
+the landing zone's Platform gateway and root application set reference the SecretStore and
+ConfigurationStore `ApplicationModel.Orchestration` packages and register their providers explicitly.
+Cross-application store sources are a documented follow-up, so Identity and Networking secrets are
+gateway parameters. The [design](DESIGN.md) records the details.
 
 Generated root files include `Directory.Build.props`, `global.json`, `nuget.config`, `.gitignore`
 and a credential guard workflow. Replace the organization feed placeholder and registry before

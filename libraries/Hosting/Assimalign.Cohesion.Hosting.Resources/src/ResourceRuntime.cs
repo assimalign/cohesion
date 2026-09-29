@@ -8,20 +8,20 @@ using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources.Internal;
 
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
-/// Provides the ambient context and assembly-keyed default control-plane registrations for
-/// Cohesion resource invocations.
+/// Provides the ambient context and the assembly-keyed default control-plane and credential-verifier
+/// registrations for Cohesion resource invocations.
 /// </summary>
 public static class ResourceRuntime
 {
     private static readonly AsyncLocal<ResourceContextFrame?> _ambientContext = new();
     private static readonly ConcurrentDictionary<Assembly, ControlPlaneRegistration> _controlPlanes = new();
+    private static readonly ConcurrentDictionary<Assembly, Func<ResourceContext, IResourceCredentialVerifier>> _credentialVerifiers = new();
     private static readonly ConcurrentDictionary<Assembly, byte> _entries = new();
     private static readonly ConcurrentDictionary<Assembly, IReadOnlyDictionary<string, string>> _endpointCertificates = new();
     private static readonly ConditionalWeakTable<IHost, IResourceControlPlane> _hostControlPlanes = new();
@@ -282,16 +282,31 @@ public static class ResourceRuntime
         // An in-process member executes beneath the gateway's process entry assembly. The
         // invocation frame is the logical resource caller and must win over that process-wide
         // identity so concurrent members resolve only their own registered control plane.
-        Assembly registrationAssembly = _ambientContext.Value?.EntryAssembly ?? assembly;
+        ResourceContextFrame? frame = _ambientContext.Value;
+        Assembly registrationAssembly = frame?.EntryAssembly ?? assembly;
+        bool hasCertificates = _endpointCertificates.TryGetValue(
+            registrationAssembly,
+            out IReadOnlyDictionary<string, string>? certificates);
+        bool hasControlPlane = _controlPlanes.TryGetValue(
+            registrationAssembly,
+            out ControlPlaneRegistration? registration);
 
-        if (_endpointCertificates.TryGetValue(registrationAssembly, out IReadOnlyDictionary<string, string>? certificates))
+        // The invocation context remembers which executable's registrations it resolved, so
+        // request-time code that holds only the context can find that executable's credential
+        // verifier (TryGetCredentialVerifier) without knowing the assembly. A plain application
+        // with no ambient frame and no registration never materializes Current here, so its
+        // builder still does not snapshot (or fail on) a stale process environment.
+        if (frame is not null || hasCertificates || hasControlPlane)
         {
-            Current.SetEndpointCertificates(certificates);
+            ResourceContext current = Current;
+            current.SetResourceAssembly(registrationAssembly);
+            if (hasCertificates)
+            {
+                current.SetEndpointCertificates(certificates!);
+            }
         }
 
-        if (!_controlPlanes.TryGetValue(
-            registrationAssembly,
-            out ControlPlaneRegistration? registration))
+        if (!hasControlPlane || registration is null)
         {
             controlPlane = null;
             return false;
@@ -301,6 +316,109 @@ public static class ResourceRuntime
             ?? throw new InvalidOperationException(
                 $"Resource assembly '{registrationAssembly.GetName().Name}' returned a null default control plane.");
         controlPlane = new RegisteredResourceControlPlane(inner, registration.StopGraceSeconds);
+        return true;
+    }
+
+    /// <summary>
+    /// Registers a resource assembly's credential verifier factory, consulted before the default
+    /// application-key verification.
+    /// </summary>
+    /// <param name="assembly">The resource executable assembly.</param>
+    /// <param name="factory">
+    /// A factory that creates the verifier for one invocation from that invocation's context.
+    /// </param>
+    /// <exception cref="ArgumentNullException"><paramref name="assembly"/> or <paramref name="factory"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The assembly already has a credential-verifier registration.</exception>
+    /// <remarks>
+    /// Registration is keyed by assembly exactly like
+    /// <see cref="RegisterControlPlane(Assembly, Func{IResourceControlPlane}, int)"/>, so in-process members
+    /// of one gateway each resolve only their own verifier. An application whose gateway registers a
+    /// credential issuer other than the default ES256 application key registers the matching verifier here,
+    /// before building its area application.
+    /// </remarks>
+    public static void RegisterCredentialVerifier(
+        Assembly assembly,
+        Func<ResourceContext, IResourceCredentialVerifier> factory)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+        ArgumentNullException.ThrowIfNull(factory);
+
+        if (!_credentialVerifiers.TryAdd(assembly, factory))
+        {
+            throw new InvalidOperationException(
+                $"Resource assembly '{assembly.GetName().Name}' already registered a credential verifier.");
+        }
+    }
+
+    /// <summary>
+    /// Attempts to create the credential verifier registered by a resource assembly for the current
+    /// invocation.
+    /// </summary>
+    /// <param name="assembly">
+    /// The process entry assembly used for standalone execution. An active entry invocation's logical
+    /// resource assembly takes precedence.
+    /// </param>
+    /// <param name="verifier">A new verifier created with <see cref="Current"/> when registered.</param>
+    /// <returns>True when the assembly registered a credential verifier; otherwise, false.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="assembly"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The registered factory returned null.</exception>
+    public static bool TryCreateCredentialVerifier(
+        Assembly assembly,
+        [NotNullWhen(true)] out IResourceCredentialVerifier? verifier)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+
+        Assembly registrationAssembly = _ambientContext.Value?.EntryAssembly ?? assembly;
+        if (!_credentialVerifiers.TryGetValue(
+            registrationAssembly,
+            out Func<ResourceContext, IResourceCredentialVerifier>? factory))
+        {
+            verifier = null;
+            return false;
+        }
+
+        verifier = factory.Invoke(Current)
+            ?? throw new InvalidOperationException(
+                $"Resource assembly '{registrationAssembly.GetName().Name}' returned a null credential verifier.");
+        return true;
+    }
+
+    /// <summary>
+    /// Gets the credential verifier bound to one invocation context, creating it on first use.
+    /// </summary>
+    /// <param name="context">
+    /// The invocation context a hosting module captured while its area builder resolved the control plane.
+    /// </param>
+    /// <param name="verifier">The invocation's verifier when its resource assembly registered one.</param>
+    /// <returns>
+    /// True when the context's resource assembly registered a credential verifier; otherwise, false.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The registered factory returned null.</exception>
+    /// <remarks>
+    /// <see cref="TryCreateControlPlane(Assembly, out IResourceControlPlane?)"/> records the resolved
+    /// resource assembly on the current context whenever an ambient frame exists or the assembly registered
+    /// a control plane or endpoint certificates. Request-time authorization code that holds only that
+    /// context uses this method; the verifier is created once per context, so every request of one
+    /// invocation shares it, and a verifier registered after the builder was created is still found on the
+    /// next request.
+    /// </remarks>
+    public static bool TryGetCredentialVerifier(
+        ResourceContext context,
+        [NotNullWhen(true)] out IResourceCredentialVerifier? verifier)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (context.ResourceAssembly is not Assembly assembly ||
+            !_credentialVerifiers.TryGetValue(
+                assembly,
+                out Func<ResourceContext, IResourceCredentialVerifier>? factory))
+        {
+            verifier = null;
+            return false;
+        }
+
+        verifier = context.GetOrCreateCredentialVerifier(factory);
         return true;
     }
 
@@ -343,7 +461,7 @@ public static class ResourceRuntime
         hostContext.Runner = new ResourceHostRunner(new ResourceHostOptions(
             stopGraceSeconds,
             contentRootPath: context.ContentRootPath,
-            stopEventName: context.GetEnvironmentValue(ResourceEnvironment.StopEvent),
+            stopEventName: context.GetEnvironmentValue(AppEnvironment.Variables.StopEvent),
             runMode: isEntryInvocationHost
                 ? ResourceHostRunMode.InProcess
                 : ResourceHostRunMode.Process,

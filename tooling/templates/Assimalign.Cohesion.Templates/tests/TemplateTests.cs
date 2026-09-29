@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
@@ -12,8 +13,16 @@ using Xunit;
 namespace Assimalign.Cohesion.Templates.Tests;
 
 /// <summary>Verifies the package as a dotnet new consumer, including both landing-zone topologies.</summary>
-public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
+public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture>
 {
+    // Each opt-in store verb and the one package that supplies it: a gateway references the package
+    // exactly when its Program.cs registers the provider, since nothing is registered by convention.
+    private static readonly (string Verb, string Package)[] _orchestrationVerbs =
+    [
+        ("UseSecretStore", "Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration"),
+        ("UseConfigurationStore", "Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration")
+    ];
+
     private readonly TemplateWorkspace _workspace;
 
     /// <summary>Uses the test collection's private template installation.</summary>
@@ -152,6 +161,8 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
                 {
                     document.Descendants("CohesionGatewayInProcess").Single().Value.ShouldBe("true");
                 }
+
+                AssertGatewayComposition(project, document);
             }
             else
             {
@@ -178,6 +189,8 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
             document.Descendants("ProjectReference").ShouldBeEmpty();
             document.Descendants("PackageReference").ShouldBeEmpty();
         }
+
+        AssertStoreSourcesStayInApplication(output);
 
         string app = multi ? name.ToLowerInvariant() : applicationName ?? name.Split('.')[0].ToLowerInvariant();
         XDocument.Load(Path.Combine(output, "Directory.Build.props")).Descendants("CohesionApplication").Single().Value.ShouldBe(app);
@@ -222,6 +235,79 @@ public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
     }
 
     private static string[] SourceProjects(string output) => Directory.GetFiles(output, "*.csproj", SearchOption.AllDirectories);
+
+    // Sdk.Gateway generates Manifests members, not Add<Member>() verbs: Program.cs composes with the
+    // hand-written area verbs, and each provider it registers comes from an explicit package reference
+    // pinned to the SDK's own version.
+    private static void AssertGatewayComposition(string project, XDocument document)
+    {
+        string program = string.Join('\n', File.ReadAllLines(Path.Combine(Path.GetDirectoryName(project)!, "Program.cs"))
+            .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+        RetiredGeneratedVerb().IsMatch(program).ShouldBeFalse($"{project} calls a retired generated Add<Member>() verb.");
+        string[] packages = document.Descendants("CohesionPackageReference")
+            .Select(reference => reference.Attribute("Include")!.Value).ToArray();
+        foreach (XElement reference in document.Descendants("CohesionPackageReference"))
+        {
+            string? version = reference.Attribute("Version")?.Value;
+            version.ShouldBe("$(CohesionVersion)", $"{project} must pin its package to the SDK version.");
+        }
+
+        foreach ((string verb, string package) in _orchestrationVerbs)
+        {
+            bool registers = program.Contains(verb + "(", StringComparison.Ordinal);
+            (packages.Contains(package, StringComparer.Ordinal) == registers).ShouldBeTrue(
+                $"{project} calls {verb} exactly when it references {package}.");
+        }
+    }
+
+    // Owner decision 4: a '<store>:<key>' mount source names a store of the consuming resource's own
+    // application. Cross-application store sources are a documented follow-up; until then such a
+    // secret is a parameter: source.
+    private static void AssertStoreSourcesStayInApplication(string output)
+    {
+        (XDocument Document, string Name, string Application)[] resources = SourceProjects(output)
+            .Select(project => (Project: project, Document: XDocument.Load(project)))
+            .Where(entry => entry.Document.Descendants("CohesionResourceName").Any())
+            .Select(entry => (entry.Document, entry.Document.Descendants("CohesionResourceName").Single().Value,
+                ApplicationOf(output, entry.Project)))
+            .ToArray();
+        foreach ((XDocument document, string name, string application) in resources)
+        {
+            foreach (string source in document.Descendants("CohesionMount")
+                .Select(mount => mount.Attribute("Source")?.Value)
+                .OfType<string>()
+                .Where(source => !source.StartsWith("parameter:", StringComparison.Ordinal)
+                    && !source.StartsWith("literal:", StringComparison.Ordinal)))
+            {
+                string store = source[..source.IndexOf(':', StringComparison.Ordinal)];
+                string[] owners = resources.Where(resource => resource.Name == store)
+                    .Select(resource => resource.Application).ToArray();
+                (owners.Length == 1 && owners[0] == application).ShouldBeTrue(
+                    $"{name} ({application}) mounts '{source}', whose store belongs to [{string.Join(", ", owners)}].");
+            }
+        }
+    }
+
+    // The nearest Directory.Build.props that writes CohesionApplication decides a project's application.
+    private static string ApplicationOf(string output, string project)
+    {
+        string root = Path.GetFullPath(output);
+        for (DirectoryInfo? directory = new FileInfo(project).Directory;
+            directory is not null && directory.FullName.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+            directory = directory.Parent)
+        {
+            string props = Path.Combine(directory.FullName, "Directory.Build.props");
+            if (File.Exists(props) && XDocument.Load(props).Descendants("CohesionApplication").SingleOrDefault() is XElement application)
+            {
+                return application.Value;
+            }
+        }
+
+        throw new InvalidOperationException($"{project} has no CohesionApplication in its Directory.Build.props chain.");
+    }
+
+    [GeneratedRegex(@"\bAdd[A-Z][A-Za-z0-9]*\(\s*\)")]
+    private static partial Regex RetiredGeneratedVerb();
 
     private static void AssertLocalLaunchProfile(string project)
     {

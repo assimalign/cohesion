@@ -122,13 +122,38 @@ and [design](./Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/docs/DESIGN.md).
 
 `Assimalign.Cohesion.Sdk.Gateway` always enables `CohesionApplicationModel` and
 builds an executable Composite resource. Its MSBuild task reads referenced
-`resource.json` documents and generates `Gateway.CreateBuilder(args)`, manifest
-constants, same-application `Add*` verbs, boundary-crossing `Externals`, referenced
-gateway `Applications`, and provider-driven `UseGateway(args)`. There is no
-`AddAllResources()`: a gateway names what it composes, one verb per resource. The SDK
-injects an area's ApplicationModel package (and, in process, its `App.<Area>` framework)
-only for the areas of the resource projects the gateway references; any other area
-package is the gateway's own explicit reference.
+`resource.json` documents and generates `Gateway.CreateBuilder(args)`, one
+`Manifests.<Name>` member per captured manifest, boundary-crossing `Externals`,
+referenced gateway `Applications` and their `References`, and provider-driven
+`UseGateway(args)`. It generates no resource verbs. The gateway's `Program.cs` names
+what it composes, one hand-written call per resource: the verb of the area's
+ApplicationModel package over the generated manifest, with the area's options as an
+instance, or `AddResource` for a kind that has no ApplicationModel in reach.
+
+```csharp
+using Assimalign.Cohesion.ApplicationModel;
+
+IApplicationBuilder builder = Gateway.CreateBuilder(args);
+builder.AddWeb(Manifests.OrdersApi, new WebResourceOptions { Replicas = 2 });
+builder.AddResource(Manifests.OrdersWorker);
+builder.UseGateway(args);
+await builder.Build().RunAsync();
+```
+
+A third-party ApplicationModel package extends composition the same way, with its own
+`extension(IApplicationBuilder)` verb over `ResourceManifest`; Gateway keeps no
+resource-kind table for it to join. In-process bindings are registered by manifest
+identity in `Gateway.CreateBuilder(args)`, so they apply whichever verb adds the
+resource.
+
+The SDK injects an area's ApplicationModel package (and, in process, its
+`App.<Area>` framework) only for the areas of the resource projects the gateway
+references; any other area package is the gateway's own explicit reference. No area
+client or provider package is injected by convention: resource commands travel
+through the gateway's generic control-plane command client, and store,
+certificate-authority, and trust providers come from opt-in
+`<Area>.ApplicationModel.Orchestration` packages that the gateway references and
+registers explicitly in `Program.cs`.
 
 Providers are not discovered by reflection. Packages contribute
 `CohesionGatewayProvider` items through `buildTransitive` props; the
@@ -136,21 +161,14 @@ semicolon-delimited `<CohesionGateways>` property selects which provider package
 are restored. Each item names its provider, gateway type, options type, and whether
 the package requires JIT. Cohesion source therefore never names a platform type.
 
-Typed resource kinds are also extensible. Gateway keeps first-party
-`CohesionGatewayResourceKind` rows in `Sdk.Gateway.props` and unions them with rows
-from referenced packages' `build` or `buildTransitive` props. A third-party
-ApplicationModel package can therefore provide its options type, descriptor type,
-and static add method without changing Gateway.
-
 The orchestration plane is delivered through PackageReferences, never an
 `App.Gateway` framework. In-process composition is the narrow exception that adds
 the explicit resource-area frameworks needed by nested project references.
 
 The current implementation remains guarded while external Docker/Kubernetes provider
-contributions and a first-restore manifest dependency channel are incomplete. Web,
-Database, and ConfigurationStore are the typed ApplicationModel mappings today.
-The transitional SDK dependency set
-must not be expanded to every area merely to hide the restore-order gap; see
+contributions and a first-restore manifest dependency channel are incomplete. The
+SDK's derived dependency set must not be expanded to every area merely to hide the
+restore-order gap; see
 [`Sdk.Gateway` design](./Assimalign.Cohesion.Sdk.Gateway/Tasks/docs/DESIGN.md) for the
 required restore-visible producer contract and release gates.
 

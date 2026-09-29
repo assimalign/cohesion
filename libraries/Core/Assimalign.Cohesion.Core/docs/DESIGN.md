@@ -16,18 +16,41 @@ Examples below document the intended public shape; some members still throw NotI
 
 ## Frozen runtime contract
 
-`ResourceEnvironment` is the canonical .NET expression of the version 1 gateway-to-resource
-contract documented in `docs/RUNTIME_CONTRACT.md`. Its fixed names and parameterized patterns are
+`AppEnvironment.Variables` is the only .NET home of the version 1 gateway-to-resource contract
+documented in `docs/RUNTIME_CONTRACT.md`. Its fixed names and parameterized patterns are
 `public const string` values. Constants are inlined into consuming assemblies, so changing any
-value is a breaking wire-contract change rather than an ordinary implementation change.
+value is a breaking wire-contract change rather than an ordinary implementation change. The Core
+runtime-contract guard tests pin `AppEnvironment.Variables.cs`: its public string constants must
+equal the document's variable table exactly, in order, and no line containing `COHESION_` (code,
+string literal, or comment) may appear in the `src/` C# files of `libraries/Core`,
+`libraries/Hosting`, or `libraries/ApplicationModel` outside that file; XML docs name a
+variable with `<see cref="AppEnvironment.Variables.X"/>` instead.
+Future `AppEnvironment` work must leave `Variables` where it is and as it is.
 
-Endpoint, resource, and mount components use one ordinal ASCII normalization rule: lowercase
-ASCII is uppercased, ASCII letters and digits are retained, and each other character becomes one
-underscore. Typed endpoint readers return `System.Uri`: the BCL type already owns scheme, host,
+The contract lives on `AppEnvironment` because that type was always meant to hold it: it has been
+Cohesion's process-environment reader since the initial push, `ResourceEnvironment` was created
+beside it in `a60c3c4a` (runtime-contract item L01.01.10.03), and owner decision R9 (2026-09-26)
+folded it back, moving its readers onto `AppEnvironment` and its constants and builders onto
+`AppEnvironment.Variables`. `AppEnvironment.Keys.EnvironmentKey` is `Variables.Environment`, so
+the environment-name rule and the contract share one literal.
+
+The `Variables` name builders (`Endpoint`, `Dependency`, `Mount`) apply one ordinal ASCII
+normalization rule to endpoint, resource, and mount components: lowercase ASCII is uppercased,
+ASCII letters and digits are retained, and each other character becomes one underscore.
+`Configuration` inserts its section and key verbatim. `AppEnvironment`'s readers
+(`TryGetEndpoint`, `TryGetDependency`, `TryGetMount`) compose every name they read through those
+builders, and the gateways write names with the same builders, so the two sides cannot normalize
+differently. Typed endpoint readers return `System.Uri`: the BCL type already owns scheme, host,
 port, path, parsing, and equality, so Core does not duplicate that state in a framework-specific
 address type. A declared endpoint's HOST/PORT/SCHEME values describe its bind address; its
 separately advertised PUBLIC_URL remains available through the URI reader. Dependency URLs may
 carry an optional path.
+
+The default application-key credential profile constants are not in Core. They are
+`Assimalign.Cohesion.Hosting.Resources.ResourceCredentialProfile`, beside the resource credential
+verifier seam, because every gateway and hosting module that mints or verifies the default
+credential already references Hosting.Resources; the base ApplicationModel and the platform
+gateways never use them.
 
 `UriExtensions` is a single C# 14 extension block in the `System` namespace for the endpoint
 behavior the BCL does not supply directly: `CreateEndpoint`, `TryCreateEndpoint`,
@@ -40,9 +63,10 @@ literals are unbracketed and internationalized hosts use their ASCII-compatible 
 
 `AppEnvironment` owns the single environment-name rule:
 `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"`. ApplicationModel delegates to this
-Core rule rather than parsing process variables itself. Both process-environment and dictionary
-readers live in Core so the ambient `Assimalign.Cohesion.Hosting.Resources.ResourceContext` can
-carry the same keys without duplicating their parsing rules.
+Core rule rather than parsing process variables itself. Every `AppEnvironment` reader has a
+process-environment and a dictionary overload so the ambient
+`Assimalign.Cohesion.Hosting.Resources.ResourceContext` can carry the same keys without duplicating
+their parsing rules.
 
 `ResourceContext` and `ResourceRuntime` live in `Assimalign.Cohesion.Hosting.Resources`, not
 Core; they are the in-process carrier delivered by runtime-contract item 12.
@@ -88,4 +112,4 @@ bool isMatch = pattern.IsMatch("settings/appsettings.json");
 string environmentName = AppEnvironment.GetEnvironmentName();
 ```
 
-`ResourceEnvironment.TrustBundlePath` is the additive transport trust-anchor path immediately after the bootstrap path. Its contents are certificates only; Hosting.Resources owns protected-file reading and TLS chain validation. The constant, runtime table, and golden variable list remain in identical order.
+`AppEnvironment.Variables.TrustBundlePath` is the additive transport trust-anchor path immediately after the bootstrap path. Its contents are certificates only; Hosting.Resources owns protected-file reading and TLS chain validation. The constant, runtime table, and golden variable list remain in identical order.

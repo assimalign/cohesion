@@ -1,10 +1,12 @@
 # IResourceCommandDispatcher
 
 The protocol-client boundary between a serving gateway and an area resource control plane.
-Implementations identify one manifest resource kind and apply or delete the neutral
+Implementations identify one manifest resource kind, or `IGatewayResourceCommandClient.AnyKind`
+to serve every kind that has no exact-kind dispatcher. They apply or delete the neutral
 `ResourceCommand` envelope at the resource's observed default control-plane `System.Uri`. Each
-dispatch receives the target resource's current bootstrap bearer credential from the serving
-gateway.
+dispatch receives the serving gateway's current `ResourceAccess` bearer credential for the target
+resource — minted through the application's registered credential issuer, or the default ES256
+application-key token, which is the resource's bootstrap credential for the pass.
 
 `ApplyAsync` and `DeleteAsync` require a
 `RemoteCertificateValidationCallback? serverCertificateValidator` parameter immediately before

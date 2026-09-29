@@ -5,8 +5,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
-
 using Shouldly;
 using Xunit;
 
@@ -22,16 +20,16 @@ public class ResourceContextTests
         // Arrange
         var environment = new Dictionary<string, string?>
         {
-            [ResourceEnvironment.Application] = "example",
-            [ResourceEnvironment.Resource] = "api",
-            [ResourceEnvironment.Environment] = "Development",
-            [ResourceEnvironment.Endpoint("http", "HOST")] = "127.0.0.1",
-            [ResourceEnvironment.Endpoint("http", "PORT")] = "5080",
-            [ResourceEnvironment.Endpoint("http", "SCHEME")] = "http",
-            [ResourceEnvironment.Mount("settings")] = Path.GetFullPath("settings.json"),
-            [ResourceEnvironment.Configuration("Orders", "PageSize")] = "50",
-            [ResourceEnvironment.Dependency("database", "db", "URL")] = "tcp://database.internal:5432",
-            [ResourceEnvironment.ApplicationTrustKey] = "{\"kty\":\"EC\"}",
+            [AppEnvironment.Variables.Application] = "example",
+            [AppEnvironment.Variables.Resource] = "api",
+            [AppEnvironment.Variables.Environment] = "Development",
+            [AppEnvironment.Variables.Endpoint("http", "HOST")] = "127.0.0.1",
+            [AppEnvironment.Variables.Endpoint("http", "PORT")] = "5080",
+            [AppEnvironment.Variables.Endpoint("http", "SCHEME")] = "http",
+            [AppEnvironment.Variables.Mount("settings")] = Path.GetFullPath("settings.json"),
+            [AppEnvironment.Variables.Configuration("Orders", "PageSize")] = "50",
+            [AppEnvironment.Variables.Dependency("database", "db", "URL")] = "tcp://database.internal:5432",
+            [AppEnvironment.Variables.ApplicationTrustKey] = "{\"kty\":\"EC\"}",
         };
 
         // Act
@@ -200,7 +198,7 @@ public class ResourceContextTests
             ResourceContext context = ResourceContext.FromEnvironment(
                 new Dictionary<string, string?>
                 {
-                    [ResourceEnvironment.BootstrapTokenPath] = path,
+                    [AppEnvironment.Variables.BootstrapTokenPath] = path,
                 });
 
             // Act

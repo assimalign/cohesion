@@ -44,6 +44,10 @@ Path.GetFullPath(Path.Combine(ContentRootPath, "data")))`. Without a data mount,
 lives in the content-root-derived data directory. No CohesionMount or CohesionWorkloadKind change
 is made: GenericPlanner requires StatefulSet for a Volume while RezolvrPlanner requires Deployment.
 The command registry survives restart and restores ownership before the listener starts.
+`RezolvrCommandProtocolTests` drives both kinds over the `commands` route of a real managed host:
+apply, replay under a new id, ownership restored after a restart, the foreign-owner refusal, and
+deletion. The gateway delivers the same envelope through its generic
+`ResourceControlPlaneCommandClient`; the area ships no client package.
 
 Records are stored, not served as DNS answers. ResolverEndpointService remains parked. DNS serving
 and reconciling a durable Volume with the Deployment contract are deferred area work.

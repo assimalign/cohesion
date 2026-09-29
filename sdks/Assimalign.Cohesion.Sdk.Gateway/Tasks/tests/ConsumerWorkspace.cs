@@ -48,32 +48,19 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.Http",
         "Assimalign.Cohesion.Http.Connections",
         "Assimalign.Cohesion.Security.DataProtection",
-        "Assimalign.Cohesion.Web",
-        "Assimalign.Cohesion.Web.Routing",
+        // No Web or Web.Routing package: Gateway.ControlPlane routes its endpoints itself, so
+        // nothing in the gateway closure references the Web area outside its ApplicationModel.
         "Assimalign.Cohesion.Web.ApplicationModel",
         "Assimalign.Cohesion.Database.ApplicationModel",
         "Assimalign.Cohesion.ConfigurationStore.ApplicationModel",
         "Assimalign.Cohesion.SecretStore.ApplicationModel",
         "Assimalign.Cohesion.IdentityHub.ApplicationModel",
         "Assimalign.Cohesion.Rezolvr.ApplicationModel",
-        "Assimalign.Cohesion.LogSpace.ApplicationModel",
-        "Assimalign.Cohesion.Database",
-        "Assimalign.Cohesion.Database.Client",
-        "Assimalign.Cohesion.Database.Execution",
-        "Assimalign.Cohesion.Database.Governance",
-        "Assimalign.Cohesion.Database.Indexing",
-        "Assimalign.Cohesion.Database.Language",
-        "Assimalign.Cohesion.Database.Protocol",
-        "Assimalign.Cohesion.Database.Security",
-        "Assimalign.Cohesion.Database.Storage",
-        "Assimalign.Cohesion.Database.Transactions",
-        "Assimalign.Cohesion.Database.Types",
-        // Database.Storage routes its data and WAL files through IFileSystem, so both
-        // FileSystem packages are real dependencies of every gateway consumer's restore.
-        "Assimalign.Cohesion.FileSystem",
-        "Assimalign.Cohesion.FileSystem.Physical",
-        "Assimalign.Cohesion.SecretStore.Client",
-        "Assimalign.Cohesion.ConfigurationStore.Client"
+        "Assimalign.Cohesion.LogSpace.ApplicationModel"
+        // No area client package: Sdk.Gateway injects none and the gateway libraries reference
+        // none (commands use the generic control-plane client; stores come from the opt-in
+        // Orchestration packages), so no client closure, such as Database.Client's Database roots
+        // and FileSystem, reaches a gateway consumer's restore.
     ];
 
     private static readonly string _repositoryRoot = FindRepositoryRoot();

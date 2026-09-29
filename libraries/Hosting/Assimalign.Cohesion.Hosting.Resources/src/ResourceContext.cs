@@ -7,8 +7,6 @@ using System.IO;
 using System.Text;
 using System.Threading;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 /// <summary>
@@ -17,7 +15,7 @@ namespace Assimalign.Cohesion.Hosting.Resources;
 /// </summary>
 /// <remarks>
 /// Out-of-process resources create this context from the frozen
-/// <see cref="ResourceEnvironment"/> contract. In-process gateways supply the same values
+/// <see cref="AppEnvironment.Variables"/> contract. In-process gateways supply the same values
 /// directly and install the context with
 /// <see cref="ResourceRuntime.CreateScope(ResourceContext)"/>.
 /// </remarks>
@@ -28,19 +26,19 @@ public sealed partial class ResourceContext
     private const string ConfigurationToken = "<Section>";
 
     private static readonly string _endpointPrefix = PatternPrefix(
-        ResourceEnvironment.EndpointHostPattern,
+        AppEnvironment.Variables.EndpointHostPattern,
         EndpointToken);
     private static readonly string _endpointHostSuffix = PatternSuffix(
-        ResourceEnvironment.EndpointHostPattern,
+        AppEnvironment.Variables.EndpointHostPattern,
         EndpointToken);
     private static readonly string _mountPrefix = PatternPrefix(
-        ResourceEnvironment.MountPathPattern,
+        AppEnvironment.Variables.MountPathPattern,
         MountToken);
     private static readonly string _mountSuffix = PatternSuffix(
-        ResourceEnvironment.MountPathPattern,
+        AppEnvironment.Variables.MountPathPattern,
         MountToken);
     private static readonly string _configurationPrefix = PatternPrefix(
-        ResourceEnvironment.ConfigurationPattern,
+        AppEnvironment.Variables.ConfigurationPattern,
         ConfigurationToken);
 
     private readonly Dictionary<string, string?> _environmentVariables;
@@ -321,11 +319,11 @@ public sealed partial class ResourceContext
         ReadOnlyMemory<byte> applicationTrustKey = ReadApplicationTrustKey(snapshot);
 
         return new ResourceContext(
-            ResourceEnvironment.GetValue(snapshot, ResourceEnvironment.Application),
-            ResourceEnvironment.GetValue(snapshot, ResourceEnvironment.Resource),
+            AppEnvironment.GetValue(snapshot, AppEnvironment.Variables.Application),
+            AppEnvironment.GetValue(snapshot, AppEnvironment.Variables.Resource),
             Assimalign.Cohesion.AppEnvironment.GetEnvironmentName(snapshot),
-            ResourceEnvironment.GetValue(snapshot, ResourceEnvironment.Gateway),
-            ResourceEnvironment.GetValue(snapshot, ResourceEnvironment.ContentRoot),
+            AppEnvironment.GetValue(snapshot, AppEnvironment.Variables.Gateway),
+            AppEnvironment.GetValue(snapshot, AppEnvironment.Variables.ContentRoot),
             endpoints,
             mounts,
             settings,
@@ -391,7 +389,7 @@ public sealed partial class ResourceContext
         ArgumentException.ThrowIfNullOrWhiteSpace(scheme);
 
         if (_endpoints.TryGetValue(name, out address)
-            || ResourceEnvironment.TryGetEndpoint(_environmentVariables, name, out address))
+            || AppEnvironment.TryGetEndpoint(_environmentVariables, name, out address))
         {
             return true;
         }
@@ -426,7 +424,7 @@ public sealed partial class ResourceContext
             return mount;
         }
 
-        if (ResourceEnvironment.TryGetMount(_environmentVariables, name, out string? path))
+        if (AppEnvironment.TryGetMount(_environmentVariables, name, out string? path))
         {
             return new ResourceMount(path);
         }
@@ -453,9 +451,9 @@ public sealed partial class ResourceContext
         string setting = separator < 0
             ? key
             : key[(separator + 1)..].Replace(":", "__", StringComparison.Ordinal);
-        string variable = ResourceEnvironment.Configuration(section, setting);
+        string variable = AppEnvironment.Variables.Configuration(section, setting);
 
-        return ResourceEnvironment.GetValue(_environmentVariables, variable)
+        return AppEnvironment.GetValue(_environmentVariables, variable)
             ?? fallback
             ?? throw new InvalidOperationException($"Required Cohesion setting '{key}' is not configured.");
     }
@@ -499,7 +497,7 @@ public sealed partial class ResourceContext
         ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
 
         return _references.TryGetValue(ReferenceKey(resource, endpoint), out address)
-            || ResourceEnvironment.TryGetDependency(_environmentVariables, resource, endpoint, out address);
+            || AppEnvironment.TryGetDependency(_environmentVariables, resource, endpoint, out address);
     }
 
     /// <summary>Creates a connection factory for an observed reference's declared protocol.</summary>
@@ -537,7 +535,7 @@ public sealed partial class ResourceContext
     }
 
     /// <summary>Reads a value from this invocation's frozen environment snapshot.</summary>
-    /// <param name="name">The environment variable name, normally a <see cref="ResourceEnvironment"/> constant.</param>
+    /// <param name="name">The environment variable name, normally a <see cref="AppEnvironment.Variables"/> constant.</param>
     /// <param name="value">The nonblank value when present; otherwise null.</param>
     /// <returns>Whether the invocation supplies a nonblank value.</returns>
     /// <exception cref="ArgumentException"><paramref name="name"/> is null or blank.</exception>
@@ -554,7 +552,7 @@ public sealed partial class ResourceContext
     }
 
     internal string? GetEnvironmentValue(string name)
-        => ResourceEnvironment.GetValue(_environmentVariables, name);
+        => AppEnvironment.GetValue(_environmentVariables, name);
 
     internal void SetConnectionFactoryResolver(Func<string, object?> resolver)
     {
@@ -575,7 +573,7 @@ public sealed partial class ResourceContext
             }
 
             string name = variable[_endpointPrefix.Length..^_endpointHostSuffix.Length];
-            if (ResourceEnvironment.TryGetEndpoint(environment, name, out Uri? endpoint))
+            if (AppEnvironment.TryGetEndpoint(environment, name, out Uri? endpoint))
             {
                 endpoints[name] = endpoint;
             }
@@ -623,7 +621,7 @@ public sealed partial class ResourceContext
 
     private static ReadOnlyMemory<byte> ReadBootstrapCredential(IDictionary<string, string?> environment)
     {
-        string? path = ResourceEnvironment.GetValue(environment, ResourceEnvironment.BootstrapTokenPath);
+        string? path = AppEnvironment.GetValue(environment, AppEnvironment.Variables.BootstrapTokenPath);
         return string.IsNullOrWhiteSpace(path)
             ? ReadOnlyMemory<byte>.Empty
             : new ResourceMount(path).ReadAllBytes();
@@ -632,9 +630,9 @@ public sealed partial class ResourceContext
     private static ReadOnlyMemory<byte> ReadApplicationTrustKey(
         IDictionary<string, string?> environment)
     {
-        string? value = ResourceEnvironment.GetValue(
+        string? value = AppEnvironment.GetValue(
             environment,
-            ResourceEnvironment.ApplicationTrustKey);
+            AppEnvironment.Variables.ApplicationTrustKey);
         return string.IsNullOrWhiteSpace(value)
             ? ReadOnlyMemory<byte>.Empty
             : Encoding.UTF8.GetBytes(value);

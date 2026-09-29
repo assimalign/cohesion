@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Core;
 
 namespace Assimalign.Cohesion.ApplicationModel.Tests;
 
@@ -17,7 +16,7 @@ internal sealed class InvalidEnvironmentPlannedResource : PlannedResource
         ResourcePlan plan = base.CreatePlan(context);
         var environment = new Dictionary<string, string>(plan.Container.Environment, System.StringComparer.Ordinal)
         {
-            [ResourceEnvironment.Application] = "foreign",
+            [AppEnvironment.Variables.Application] = "foreign",
         };
         var container = new ContainerSpec(
             plan.Container.Name,

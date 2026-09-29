@@ -14,18 +14,28 @@ delivery use the portable contracts; platform compilers remain platform-owned.
 - Kubernetes and Docker gateways live in cohesion-platforms and consume `ResourcePlan`.
 - `Gateway.InProcess` owns composite member invocation and ambient resource scopes.
 - `Gateway.ControlPlane` owns the authenticated application control-plane endpoints.
-- Thin store clients resolve protected mounts; this package does not reference resource
-  hosting runtimes. Telemetry injection uses observed LogSpace endpoints and scoped tokens.
+- This package references nothing under `resources/`. Store-backed mounts, source-free endpoint
+  certificates, trusted issuers, command inputs, and the telemetry sink come only from the
+  providers the application registers in `builder.Providers` (for example through
+  `Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration`'s `builder.UseSecretStore(store)`),
+  or, for an application-set member, in the member's own registration callback
+  (`set.AddApplication(Applications.Platform, platform => platform.UseSecretStore("platform-secrets"))`).
+  Without them the development certificate authority and local trust file are Local-only, and no
+  telemetry is injected. Credentials go through `builder.Providers.CredentialIssuer` first and fall
+  back to the default ES256 application-key issuer.
 
 ## Consumer entry point
 
-An `Sdk.Gateway` consumer keeps its real `Program.cs`:
+An `Sdk.Gateway` consumer keeps its real `Program.cs` and names what it composes, one
+hand-written call per resource: the generated `Manifests.<Name>` member goes to the verb of the
+area's ApplicationModel package, or to `AddResource` for a kind that has none.
 
 ```csharp
 using Assimalign.Cohesion.ApplicationModel;
 
 IApplicationBuilder builder = Gateway.CreateBuilder(args);
-builder.AddApi();       // one generated verb per referenced resource; the gateway names what it composes
+builder.AddWeb(Manifests.Api, new WebResourceOptions { Replicas = 2 }); // the Web area's verb
+builder.AddResource(Manifests.Worker);                                   // no ApplicationModel in reach
 builder.UseGateway(args);
 await builder.Build().RunAsync();
 ```

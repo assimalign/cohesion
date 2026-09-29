@@ -10,7 +10,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
@@ -87,8 +86,8 @@ internal sealed class LocalProbeRunner
                 "Bearer " + Encoding.UTF8.GetString(controlPlaneProbe.BootstrapCredential.Span));
         }
 
-        configuration.Environment.TryGetValue(ResourceEnvironment.TrustBundlePath, out string? trustPath);
-        ResourceContext context = ResourceContext.FromEnvironment(new Dictionary<string, string?> { [ResourceEnvironment.TrustBundlePath] = trustPath });
+        configuration.Environment.TryGetValue(AppEnvironment.Variables.TrustBundlePath, out string? trustPath);
+        ResourceContext context = ResourceContext.FromEnvironment(new Dictionary<string, string?> { [AppEnvironment.Variables.TrustBundlePath] = trustPath });
         using var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false };
         handler.SslOptions.RemoteCertificateValidationCallback = context.CreateOutboundTrustValidator();
         using var client = new HttpClient(handler);

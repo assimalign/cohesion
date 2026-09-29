@@ -45,22 +45,42 @@
 	          The explicit CohesionApplicationModelGuard=true rollout gate is
 	          required because Web.ApplicationModel is not clean yet.
 
-	        * COHAM002 - A resources/ assembly whose name ends in .ApplicationModel
-	          declares the shared Assimalign.Cohesion.ApplicationModel namespace
-	          (RootNamespace is the checked proxy; the type names carry the area
-	          prefix instead). An apphost composes every area with one using.
+	        * COHAM002 - A resources/ assembly whose name ends in .ApplicationModel,
+	          or in .ApplicationModel.Orchestration (the opt-in gateway provider
+	          packages), declares the shared Assimalign.Cohesion.ApplicationModel
+	          namespace (RootNamespace is the checked proxy; the type names carry
+	          the area prefix instead). An apphost or gateway composes every area
+	          with one using.
 
 	    Repo-wide (every project, not only resources/):
 
 	        * COHNS001 - A project declares <RootNamespace> in its own project file.
 	          dotnet new template content (tooling/templates/**/content/) is exempt.
 
-	    Scope of the resource rules above: shipped projects under resources/<Area>/ only. Test, example, and
-	    sample projects are exempt - the rule constrains shipped artifacts, not
+	    Library and SDK boundary (projects under libraries/ and sdks/):
+
+	        * COHLIB001 - Libraries and SDKs never depend on resources. A project
+	          under libraries/ or sdks/ may not reference a project under
+	          resources/, and may not resolve an assembly whose name is a
+	          resources/ project. Sole exception, the same-area SDK: a project
+	          under sdks/Assimalign.Cohesion.Sdk.<Area>/ may reference
+	          resources/<Area>/ (Sdk.Database.Tasks -> Database.Sql.Schema).
+	          There is no opt-out property. Harness folders - tests, examples,
+	          samples, fixtures, as complete path segments below the repository
+	          root - are exempt. Layer 1 checks the full path of every
+	          @(ProjectReference), whatever its ReferenceOutputAssembly, because a
+	          build-order-only reference is still a dependency. Layer 2 checks
+	          @(ReferencePath) against the resources/ half of the name-only index
+	          in Build.References.Projects.targets, re-globbed here with the same
+	          expression because that file removes its index after use.
+
+	    Scope of the resource rules above: shipped projects under resources/<Area>/ only. Test, example,
+	    sample, and fixture projects are exempt - the rule constrains shipped artifacts, not
 	    harnesses. The gate deliberately keys on those harness folders rather than
 	    on a 'src' folder name, so a project scaffolded with a nonstandard layout
 	    is guarded rather than silently exempt. Projects outside resources/
-	    (libraries/, sdks/, build/) are untouched.
+	    (libraries/, sdks/, build/) are untouched by them; COHLIB001 is the
+	    guard for libraries/ and sdks/.
 
 	    Framework producers are inside an area but are not libraries.
 	    resources/<Area>/Assimalign.Cohesion.<Area>.Refs and .Runtime are the
@@ -120,7 +140,7 @@
 	    project-reference graph before ResolveAssemblyReferences, then the resolved
 	    @(ReferencePath) closure after ResolveAssemblyReferences. The second layer
 	    catches package and HintPath assemblies in addition to direct/transitive
-	    project references. Tests, examples, and samples are harnesses and exempt.
+	    project references. Tests, examples, samples, and fixtures are harnesses and exempt.
 	-->
 
 	<PropertyGroup>
@@ -189,6 +209,33 @@
 		                                             AND !$([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel'))">true</_CohesionHostingLibraryRuleApplies>
 	</PropertyGroup>
 
+	<!-- COHLIB001 scope. A project is placed by its path RELATIVE to the repository root, so a
+	     checkout under a folder that happens to be named 'libraries', 'sdks', or 'tests' is not
+	     misread. The root comes from this file's own location with forward slashes and the
+	     single-argument Path.GetFullPath, and the remaining steps are plain string operations,
+	     so the result is identical under Core MSBuild, Visual Studio's .NET Framework MSBuild,
+	     and on Unix (see .claude/rules/build-system.md). Harness names are complete path
+	     segments, matched case-insensitively, as for the resource boundary rules above. -->
+	<PropertyGroup>
+		<_CohesionRepositoryRootNormalized>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../').Replace('\', '/'))</_CohesionRepositoryRootNormalized>
+		<_CohesionProjectDirectoryNormalized>$(MSBuildProjectDirectory.Replace('\', '/'))/</_CohesionProjectDirectoryNormalized>
+		<_CohesionRepositoryRelativeDirectory></_CohesionRepositoryRelativeDirectory>
+		<_CohesionRepositoryRelativeDirectory Condition="$(_CohesionProjectDirectoryNormalized.ToLowerInvariant().StartsWith('$(_CohesionRepositoryRootNormalized.ToLowerInvariant())'))">$(_CohesionProjectDirectoryNormalized.Substring($(_CohesionRepositoryRootNormalized.Length)))</_CohesionRepositoryRelativeDirectory>
+		<_CohesionResourcesDirectoryNormalized>$(_CohesionRepositoryRootNormalized)resources/</_CohesionResourcesDirectoryNormalized>
+
+		<_CohesionLibraryRuleApplies>false</_CohesionLibraryRuleApplies>
+		<_CohesionLibraryRuleApplies Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('$(_CohesionRepositoryRelativeDirectory)', '(?i)^(libraries|sdks)/'))
+		                                        AND !$([System.Text.RegularExpressions.Regex]::IsMatch('$(_CohesionRepositoryRelativeDirectory)', '(?i)(^|/)(tests|examples|samples|fixtures)(/|$)'))">true</_CohesionLibraryRuleApplies>
+
+		<!-- The same-area SDK exception: a project under sdks/Assimalign.Cohesion.Sdk.<Area>/ may
+		     reference resources/<Area>/. Empty for the base SDK and for every libraries/ project. -->
+		<_CohesionLibrarySdkArea></_CohesionLibrarySdkArea>
+		<_CohesionLibrarySdkArea Condition="'$(_CohesionLibraryRuleApplies)' == 'true'
+		                                    AND $([System.Text.RegularExpressions.Regex]::IsMatch('$(_CohesionRepositoryRelativeDirectory)', '(?i)^sdks/Assimalign\.Cohesion\.Sdk\.[^/]+/'))">$([System.Text.RegularExpressions.Regex]::Replace('$(_CohesionRepositoryRelativeDirectory)', '(?i)^sdks/Assimalign\.Cohesion\.Sdk\.([^/]+)/.*$', '$1'))</_CohesionLibrarySdkArea>
+		<_CohesionLibrarySdkAreaDirectory></_CohesionLibrarySdkAreaDirectory>
+		<_CohesionLibrarySdkAreaDirectory Condition="'$(_CohesionLibrarySdkArea)' != ''">$(_CohesionResourcesDirectoryNormalized.ToLowerInvariant())$(_CohesionLibrarySdkArea.ToLowerInvariant())/</_CohesionLibrarySdkAreaDirectory>
+	</PropertyGroup>
+
 	<!-- The opt-out list as items, for filtering the per-assembly COHRES001/002 candidates. -->
 	<ItemGroup Condition="'$(_CohesionHostingRuleApplies)' == 'true' AND '$(CohesionHostingIsolationExemptions)' != ''">
 		<_CohesionHostingIsolationExemption Include="$(CohesionHostingIsolationExemptions)" />
@@ -206,16 +253,20 @@
 		<_CohesionDirectProjectReference Include="@(ProjectReference)" />
 	</ItemGroup>
 
-	<!-- COHAM002: the shared ApplicationModel namespace, checked through RootNamespace. -->
+	<!-- COHAM002: the shared ApplicationModel namespace, checked through RootNamespace. It covers
+	     the area ApplicationModel packages and their opt-in .ApplicationModel.Orchestration
+	     companions alike: a gateway's Program.cs composes AddWeb(...) and UseSecretStore(...)
+	     under the same single using. -->
 	<Target Name="ValidateCohesionApplicationModelNamespace"
 	        BeforeTargets="CoreCompile"
 	        Condition="'$(_CohesionResourceBoundaryRulesApply)' == 'true'
 	                   AND '$(AssemblyName)' != ''
-	                   AND $([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel'))">
+	                   AND ($([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel'))
+	                   OR $([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel.orchestration')))">
 		<Error Condition="'$(RootNamespace)' != 'Assimalign.Cohesion.ApplicationModel'"
 		       Code="COHAM002"
 		       File="$(MSBuildProjectFullPath)"
-		       Text="$(MSBuildProjectName) is a resource ApplicationModel package whose RootNamespace is '$(RootNamespace)'. Every ApplicationModel package declares the shared Assimalign.Cohesion.ApplicationModel namespace with area-prefixed type names (.claude/rules/resource-areas.md)." />
+		       Text="$(MSBuildProjectName) is a resource ApplicationModel or ApplicationModel.Orchestration package whose RootNamespace is '$(RootNamespace)'. Every such package declares the shared Assimalign.Cohesion.ApplicationModel namespace with area-prefixed type names (.claude/rules/resource-areas.md)." />
 	</Target>
 
 	<!-- COHNS001: every project pins <RootNamespace> in its own project file, so the namespace the
@@ -381,6 +432,64 @@
 		<Error Condition="'@(_CohesionHostingLibraryResolvedReferenceViolation)' != ''"
 		       Code="COHRES004"
 		       Text="Resource hosting-library rule: '$(MSBuildProjectName)' resolves '@(_CohesionHostingLibraryResolvedReferenceViolation->'%(Filename)', ', ')'. Only the hosting family ('$(_CohesionAreaHostingProject)', '$(_CohesionAreaHostingProject).&lt;Suffix&gt;'), '$(_CohesionAreaRootProject).Testing' and '$(_CohesionAreaRootProject).ApplicationModel' may depend on Assimalign.Cohesion.Hosting or Assimalign.Cohesion.Hosting.*." />
+	</Target>
+
+	<!-- Project-reference graph layer for COHLIB001. Build.References.Projects.targets has
+	     already turned CohesionProjectReference / CohesionPrivateProjectReference into
+	     ProjectReference at evaluation, and ResolveProjectReferences has added the
+	     restore-discovered transitive references by the time ResolveAssemblyReferences
+	     begins, so a raw, name-only, private, or transitive route is judged the same way:
+	     by the referenced project's full path. -->
+	<Target Name="ValidateCohesionLibraryResourceProjectReferences"
+	        BeforeTargets="ResolveAssemblyReferences;CoreCompile"
+	        Condition="'$(_CohesionLibraryRuleApplies)' == 'true'">
+
+		<ItemGroup>
+			<_CohesionLibraryResourceProjectReferenceViolation
+				Include="@(ProjectReference)"
+				Condition="$([System.String]::Copy('%(FullPath)').Replace('\', '/').ToLowerInvariant().StartsWith('$(_CohesionResourcesDirectoryNormalized.ToLowerInvariant())'))
+				           AND ('$(_CohesionLibrarySdkAreaDirectory)' == ''
+				           OR !$([System.String]::Copy('%(FullPath)').Replace('\', '/').ToLowerInvariant().StartsWith('$(_CohesionLibrarySdkAreaDirectory)')))" />
+		</ItemGroup>
+
+		<Error Condition="'@(_CohesionLibraryResourceProjectReferenceViolation)' != ''"
+		       Code="COHLIB001"
+		       Text="Library resource-isolation rule: '$(MSBuildProjectName)' references resources/** project(s) '@(_CohesionLibraryResourceProjectReferenceViolation->'%(Filename)', ', ')'. Projects under libraries/ and sdks/ never depend on resources/**: move the contract they need into libraries/ and let the resource package reference it. The only exception is the same-area SDK - sdks/Assimalign.Cohesion.Sdk.&lt;Area&gt;/ may reference resources/&lt;Area&gt;/ - and there is no opt-out property. See .claude/rules/build-system.md." />
+	</Target>
+
+	<!-- Resolved-assembly closure layer for COHLIB001: catches the routes that never surface
+	     as a ProjectReference - a package-delivered copy of a resource assembly, or a raw
+	     <Reference> with a HintPath at one. The name set is the resources\ half of the
+	     name-only index in Build.References.Projects.targets, globbed with the same
+	     expression because that file removes its index once references are converted.
+	     Same-area names drop out of the set for an Sdk.<Area> project by full path. Names
+	     compare case-insensitively, like the resource rules above. -->
+	<Target Name="ValidateCohesionLibraryResourceResolvedReferences"
+	        AfterTargets="ResolveAssemblyReferences"
+	        Condition="'$(_CohesionLibraryRuleApplies)' == 'true'">
+
+		<ItemGroup>
+			<_CohesionResourceProjectIndex Include="$(CohesionRepositoryDirectory)resources\**\*.csproj" />
+			<_CohesionResourceAssemblyName
+				Include="@(_CohesionResourceProjectIndex->'%(Filename)')"
+				Condition="'$(_CohesionLibrarySdkAreaDirectory)' == ''
+				           OR !$([System.String]::Copy('%(FullPath)').Replace('\', '/').ToLowerInvariant().StartsWith('$(_CohesionLibrarySdkAreaDirectory)'))" />
+		</ItemGroup>
+
+		<PropertyGroup>
+			<_CohesionResourceAssemblyNames>;@(_CohesionResourceAssemblyName, ';');</_CohesionResourceAssemblyNames>
+			<_CohesionResourceAssemblyNames>$(_CohesionResourceAssemblyNames.ToLowerInvariant())</_CohesionResourceAssemblyNames>
+		</PropertyGroup>
+
+		<ItemGroup>
+			<_CohesionLibraryResourceResolvedReferenceViolation
+				Include="@(ReferencePath->'%(Filename)')"
+				Condition="$(_CohesionResourceAssemblyNames.Contains(';$([System.String]::Copy('%(Filename)').ToLowerInvariant());'))" />
+		</ItemGroup>
+
+		<Error Condition="'@(_CohesionLibraryResourceResolvedReferenceViolation)' != ''"
+		       Code="COHLIB001"
+		       Text="Library resource-isolation rule: '$(MSBuildProjectName)' resolves resources/** assembly/assemblies '@(_CohesionLibraryResourceResolvedReferenceViolation, ', ')' through its direct/transitive/package/HintPath closure. Projects under libraries/ and sdks/ never depend on resources/**: move the contract they need into libraries/ and let the resource package reference it. The only exception is the same-area SDK - sdks/Assimalign.Cohesion.Sdk.&lt;Area&gt;/ may reference resources/&lt;Area&gt;/ - and there is no opt-out property. See .claude/rules/build-system.md." />
 	</Target>
 
 </Project>

@@ -1,157 +1,73 @@
 using System;
-using System.Buffers.Text;
-using System.Collections.Generic;
-using System.Security.Cryptography;
-using System.Text;
 
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
+/// <summary>
+/// Verifies the default application-key credential against the store's trusted issuers: the ambient
+/// application's gateway and every peer issuer granted through <c>cohesion.trust.add</c>.
+/// </summary>
 internal sealed class BootstrapTokenVerifier
 {
-    private static readonly TimeSpan _maximumLifetime = TimeSpan.FromHours(24);
     private readonly TrustedIssuerStore _trustedIssuers;
+    private readonly string? _application;
+    private readonly IJsonWebTokenValidator _validator;
 
-    internal BootstrapTokenVerifier(TrustedIssuerStore trustedIssuers)
+    internal BootstrapTokenVerifier(TrustedIssuerStore trustedIssuers, string? application)
     {
         _trustedIssuers = trustedIssuers ?? throw new ArgumentNullException(nameof(trustedIssuers));
+        _application = application;
+        _validator = JsonWebTokenValidator.CreateEs256(new JsonWebTokenValidationProfile(
+            issuer => _trustedIssuers.Find(issuer)?.Keys,
+            ResourceCredentialProfile.BootstrapMaximumLifetime)
+        {
+            ClockSkew = ResourceCredentialProfile.ClockSkew,
+        });
     }
 
-    internal BootstrapTokenValidation Validate(
+    internal ResourceCredentialVerification Validate(
         string compactToken,
         string expectedAudience,
         DateTimeOffset now)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedAudience);
 
-        if (!JsonWebToken.TryParse(compactToken, out JsonWebToken? token) ||
-            token is null ||
-            string.IsNullOrWhiteSpace(token.Issuer) ||
-            string.IsNullOrWhiteSpace(token.Algorithm) ||
-            token.SigningInput is null ||
-            token.Parts is null)
+        if (!_validator.TryValidate(compactToken, now, out JsonWebToken? token))
         {
-            return BootstrapTokenValidation.Unauthorized;
+            return new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null);
         }
 
-        TrustedIssuer? issuer = _trustedIssuers.Find(token.Issuer);
-        if (issuer is null || !VerifySignature(token, issuer))
+        // The store's own application is its gateway and every other trusted issuer is a peer
+        // application. Issuers are only ever added or re-keyed, never removed, so a validated
+        // token's issuer still resolves here; a re-key between validation and this lookup is caught by
+        // re-selecting the verifying key (kid is the key's RFC 7638 thumbprint), so the caller is always
+        // mapped from the entry whose key verified the signature.
+        if (_trustedIssuers.Find(token.Issuer!) is not TrustedIssuer issuer ||
+            issuer.Keys.Find(token.Header.KeyId) is null)
         {
-            return BootstrapTokenValidation.Unauthorized;
+            return new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null);
         }
 
-        var options = new JsonWebTokenValidationOptions(now)
+        // A telemetry-emitter credential authorizes ingestion at a sink and nothing else. The store
+        // is never an ingestion endpoint, so the scope is refused on every route even when an
+        // application registers the store as its telemetry sink.
+        if (token.Claims.GetString(ResourceCredentialProfile.ScopeClaim) == ResourceCredentialProfile.TelemetryScope)
         {
-            ExpectedIssuer = issuer.Issuer,
-            AllowUnsecured = false,
-        };
-        options.AllowedAlgorithms.Add(JoseAlgorithms.ES256);
-        options.RequiredClaims.Add("iss");
-        options.RequiredClaims.Add("sub");
-        options.RequiredClaims.Add("aud");
-        options.RequiredClaims.Add("exp");
-        options.RequiredClaims.Add("nbf");
-        options.RequiredClaims.Add("iat");
-        options.RequiredClaims.Add("jti");
-
-        bool valid = token.Validate(options).Succeeded &&
-            token.Subject is { Value.Length: > 0 } &&
-            !string.IsNullOrWhiteSpace(token.Id) &&
-            token.IssuedAt is { } issuedAt &&
-            token.NotBefore is { } notBefore &&
-            token.ExpiresAt is { } expiresAt &&
-            issuedAt <= now + options.ClockSkew &&
-            expiresAt > issuedAt &&
-            expiresAt > notBefore &&
-            expiresAt - issuedAt <= _maximumLifetime;
-        if (!valid)
-        {
-            return BootstrapTokenValidation.Unauthorized;
+            return new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, null, null);
         }
 
-        for (int index = 0; index < token.Audiences.Count; index++)
-        {
-            if (string.Equals(token.Audiences[index], expectedAudience, StringComparison.Ordinal))
-            {
-                return new BootstrapTokenValidation(
-                    BootstrapTokenValidationStatus.Authorized,
-                    issuer.Issuer,
-                    token.Subject!.Value);
-            }
-        }
-
-        return new BootstrapTokenValidation(
-            BootstrapTokenValidationStatus.Forbidden,
+        var caller = new ResourceCaller(
             issuer.Issuer,
-            token.Subject!.Value);
+            token.Subject!.Value,
+            string.Equals(issuer.Issuer, _application, StringComparison.Ordinal)
+                ? ResourceCallerKind.Gateway
+                : ResourceCallerKind.Peer,
+            issuer.AllowedCommandKinds);
+        return JsonWebTokenValidator.HasAudience(token, expectedAudience)
+            ? new ResourceCredentialVerification(ResourceCredentialStatus.Authorized, caller, null)
+            : new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, caller, null);
     }
-
-    private static bool VerifySignature(JsonWebToken token, TrustedIssuer issuer)
-    {
-        byte[] x;
-        byte[] y;
-        byte[] signature;
-        try
-        {
-            x = Base64Url.DecodeFromChars(issuer.PublicKey.GetProperty("x").GetString()!);
-            y = Base64Url.DecodeFromChars(issuer.PublicKey.GetProperty("y").GetString()!);
-            signature = Base64Url.DecodeFromChars(token.Parts!.Signature);
-        }
-        catch (Exception exception) when (
-            exception is FormatException or InvalidOperationException or KeyNotFoundException)
-        {
-            return false;
-        }
-
-        try
-        {
-            using ECDsa key = ECDsa.Create();
-            key.ImportParameters(new ECParameters
-            {
-                Curve = ECCurve.NamedCurves.nistP256,
-                Q = new ECPoint { X = x, Y = y },
-            });
-            IJsonWebTokenSignatureVerifier verifier = JsonWebTokenSignatureVerifier.CreateEcdsa(
-                key,
-                issuer.KeyId);
-            byte[] signingInput = Encoding.ASCII.GetBytes(token.SigningInput!);
-            try
-            {
-                return verifier.CanVerify(token.Algorithm!, token.Header.KeyId) &&
-                    verifier.Verify(token.Algorithm!, signingInput, signature);
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(signingInput);
-            }
-        }
-        catch (Exception exception) when (exception is ArgumentException or CryptographicException)
-        {
-            return false;
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(x);
-            CryptographicOperations.ZeroMemory(y);
-            CryptographicOperations.ZeroMemory(signature);
-        }
-    }
-}
-
-internal readonly record struct BootstrapTokenValidation(
-    BootstrapTokenValidationStatus Status,
-    string? Issuer,
-    string? Subject)
-{
-    internal static BootstrapTokenValidation Unauthorized =>
-        new(BootstrapTokenValidationStatus.Unauthorized, null, null);
-}
-
-internal enum BootstrapTokenValidationStatus
-{
-    Unauthorized,
-    Forbidden,
-    Authorized,
 }

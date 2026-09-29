@@ -22,7 +22,9 @@ flowchart TD
     Resource["Resource project (area SDK + Sdk.ApplicationModel) with CohesionApplicationModel=enabled"] --> Manifest["resource.json — kind, endpoints, probes, control plane, mounts, references, properties"]
     Resource --> ResourceCode["Resource.g.cs + ResourceControlPlane.g.cs — typed accessors over the ambient ResourceContext, default control plane"]
     Gateway["Gateway project (Sdk.Gateway) with CohesionResourceReference items"] --> Manifest
-    Gateway --> GatewayCode["Gateway.g.cs — Manifests members, typed Add verbs, in-process bindings, UseGateway(args) selector"]
+    Gateway --> GatewayCode["Gateway.g.cs — Manifests, Externals, Applications, in-process bindings, UseGateway(args) selector"]
+    Gateway -->|"injected by Sdk.Gateway, one per referenced area"| AreaModel["area ApplicationModel package — hand-written AddWeb / AddDatabase verbs"]
+    Gateway -->|"explicit PackageReference, never injected"| Orchestration["Orchestration package — UseSecretStore / UseConfigurationStore provider verbs"]
     Gateway --> Staged["bin/cohesion/resources/… — staged content root per in-process member"]
     Package["Manifest package (dotnet pack of a resource)"] --> Manifest
     Providers["Platform packages named in CohesionGateways (buildTransitive props)"] --> GatewayCode
@@ -32,25 +34,42 @@ flowchart TD
   classes through `Assimalign.Cohesion.Sdk.ApplicationModel`. `artifact.image` stays empty: image
   identity is gateway-owned (O37).
 - The gateway build reads every referenced manifest and emits `Gateway.g.cs`: the `Manifests`
-  members, one typed `Add<Name>()` verb per resource, the in-process entry bindings (registered by
-  both the verb and `Gateway.CreateBuilder`, B38), and the `UseGateway(args)` selector over the
+  members, `Externals`, `Applications`, `References`, the in-process entry bindings (registered by
+  manifest identity in `Gateway.CreateBuilder`, B38), and the `UseGateway(args)` selector over the
   providers that the platform packages contribute. Cohesion source never names a platform type.
-- Referenced packages may contribute `CohesionGatewayResourceKind` rows through restore-visible
-  props. Those rows join Gateway's first-party table and allow third-party ApplicationModel
-  packages to produce typed resource verbs without a Gateway SDK change.
+- The gateway build generates **no per-resource verb**. `Program.cs` adds each resource with its
+  area's hand-written verb over the generated manifest —
+  `builder.AddWeb(Manifests.AppAApi, new WebResourceOptions { Replicas = 2 })` — or with
+  `builder.AddResource(Manifests.<Name>)` for a kind that has no ApplicationModel package.
+  `Sdk.Gateway` injects the `<Area>.ApplicationModel` package of every area whose resource project
+  the gateway references, so the area verb is in scope. The generated `Add<Name>()` verbs, the
+  `CohesionGatewayResourceKind` table, and the `COHGW003` fallback were withdrawn by the owner
+  decisions of 2026-09-25 (R8 in the [developer-experience design](DEVELOPER_EXPERIENCE_DESIGN.md)).
+- No provider package is injected. Store, certificate-authority, and trust-store providers come
+  from the opt-in `<Area>.ApplicationModel.Orchestration` packages, which the gateway project
+  references itself and registers in `Program.cs` (`builder.UseSecretStore(secrets).AsCertificateAuthority().AsTrustStore()`,
+  `builder.UseConfigurationStore(config)`). A telemetry sink, a credential issuer, and extra
+  control-plane caller authenticators are assigned on `builder.Providers`. No `<Area>.Client`
+  package is injected either: a store's client reaches the gateway only transitively, through the
+  Orchestration package it references, and resource commands travel through the gateway's generic
+  control-plane command client.
 - With `CohesionGatewayInProcess=true`, the referenced resources become real runtime references and
   their declared content is staged under `bin/cohesion/resources/<name>/`.
 
 ## 2. Run plane: one selector, three realizations
 
-`Program.cs` composes the model once. The environment and gateway are run-time selections; an
-unset environment is `Local`, and in `Local` an unset gateway is the first `CohesionGateways`
-entry (O36). `Build()` plans and validates every resource for the selected gateway before anything
-is realized.
+`Program.cs` composes the model once: it adds each resource through its area's hand-written verb,
+registers the providers the application uses, and selects the gateway. The environment and gateway
+are run-time selections; an unset environment is `Local`, and in `Local` an unset gateway is the
+first `CohesionGateways` entry (O36). `Build()` plans and validates every resource, then checks the
+provider registrations against the built graph — every `<source>:<key>` mount of the application's
+own resources has a registered provider, every bound store is a resource of the application with the
+provider's kind, and no source reaches another application — and finally asks the selected gateway
+whether it can realize every plan. All of it happens before anything is realized.
 
 ```mermaid
 flowchart LR
-    Program["Program.cs: Gateway.CreateBuilder(args); Add…; UseGateway(args)"] --> Build["Build(): plan (area planner) → validate (ResourcePlanValidator, gateway CanRealize)"]
+    Program["Program.cs: Gateway.CreateBuilder(args); AddWeb(Manifests.X); UseSecretStore(store); UseGateway(args)"] --> Build["Build(): plan and validate (area planner, ResourcePlanValidator) → provider registrations → gateway CanRealize"]
     Build --> Select{"selected gateway"}
     Select -->|"inprocess (Local default)"| InProcess["InProcess: members hosted in this process"]
     Select -->|"local"| Local["Local: members as supervised child processes"]
@@ -81,6 +100,16 @@ The member code is identical in both: the area builder honors the ambient `Resou
 (endpoints, mounts, settings, references, bootstrap credential) whichever gateway supplied it.
 See [RUNTIME_CONTRACT.md](RUNTIME_CONTRACT.md) for the `COHESION_*` variables the Local gateway
 sets and the in-process gateway projects.
+
+Two fallbacks exist only in the `Local` environment. They are keyed on the environment, not on the
+selected gateway, so both local gateways have them. An endpoint certificate mount without a source
+gets its leaf from the gateway's development certificate authority when the application registers
+no certificate authority, or while the registered one is not yet Running and able to issue. `cohesion trust add` writes to `.cohesion/<app>/trust/trusted-issuers.json` when
+the application registers no trust store. In every other environment an unbound certificate
+authority fails the endpoint loudly and `cohesion trust add` refuses the grant; there is no silent
+downgrade to the development authority. The certificate-authority resource's own TLS leaf is the one
+exception: it always comes from the gateway's authority, because that resource cannot issue its own
+first certificate.
 
 ## 4. Live cluster: publish, push, apply, reconcile
 

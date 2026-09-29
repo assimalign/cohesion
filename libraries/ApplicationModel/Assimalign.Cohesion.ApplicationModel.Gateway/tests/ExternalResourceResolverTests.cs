@@ -9,7 +9,6 @@ using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
-using Assimalign.Cohesion.Core;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
@@ -39,9 +38,9 @@ public class ExternalResourceResolverTests
         await ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
 
         // Assert
-        string url = ResourceEnvironment.Dependency("external-api", "https", "URL");
-        string host = ResourceEnvironment.Dependency("external-api", "https", "HOST");
-        string port = ResourceEnvironment.Dependency("external-api", "https", "PORT");
+        string url = AppEnvironment.Variables.Dependency("external-api", "https", "URL");
+        string host = AppEnvironment.Variables.Dependency("external-api", "https", "HOST");
+        string port = AppEnvironment.Variables.Dependency("external-api", "https", "PORT");
         controller.Environment[url].ShouldBe("https://peer.example.test:7443");
         controller.Environment[host].ShouldBe("peer.example.test");
         controller.Environment[port].ShouldBe("7443");
@@ -104,7 +103,7 @@ public class ExternalResourceResolverTests
                     true,
                     "peer.example.test"));
             controller.Environment[
-                ResourceEnvironment.Dependency("external-api", "https", "URL")]
+                AppEnvironment.Variables.Dependency("external-api", "https", "URL")]
                 .ShouldBe("https://peer.example.test:7443");
 
             await ((IApplicationGateway)gateway).StopAsync(cancellation.Token);

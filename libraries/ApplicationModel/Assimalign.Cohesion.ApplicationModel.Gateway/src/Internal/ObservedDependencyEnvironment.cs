@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal static class ObservedDependencyEnvironment
@@ -27,7 +25,7 @@ internal static class ObservedDependencyEnvironment
                         ? null
                         : FindObservedEndpoint(observation, endpointName);
                 string dependency = observation.Resource.ToString();
-                string urlVariable = ResourceEnvironment.Dependency(dependency, endpointName, "URL");
+                string urlVariable = AppEnvironment.Variables.Dependency(dependency, endpointName, "URL");
                 var projection = new Projection(
                     observation.Application,
                     observation.Resource,
@@ -88,16 +86,16 @@ internal static class ObservedDependencyEnvironment
     {
         GatewayEnvironmentVariables.Remove(
             environment,
-            ResourceEnvironment.Dependency(dependency, endpoint, "URL"));
+            AppEnvironment.Variables.Dependency(dependency, endpoint, "URL"));
         GatewayEnvironmentVariables.Remove(
             environment,
-            ResourceEnvironment.Dependency(dependency, endpoint, "HOST"));
+            AppEnvironment.Variables.Dependency(dependency, endpoint, "HOST"));
         GatewayEnvironmentVariables.Remove(
             environment,
-            ResourceEnvironment.Dependency(dependency, endpoint, "PORT"));
+            AppEnvironment.Variables.Dependency(dependency, endpoint, "PORT"));
         GatewayEnvironmentVariables.Remove(
             environment,
-            ResourceEnvironment.Dependency(dependency, endpoint, "SCHEME"));
+            AppEnvironment.Variables.Dependency(dependency, endpoint, "SCHEME"));
     }
 
     private static void ApplyEndpoint(
@@ -117,19 +115,19 @@ internal static class ObservedDependencyEnvironment
         Uri address = Uri.CreateEndpoint(endpoint.Scheme, endpoint.Host, endpoint.Port);
         GatewayEnvironmentVariables.Set(
             environment,
-            ResourceEnvironment.Dependency(dependency, endpoint.Name, "URL"),
+            AppEnvironment.Variables.Dependency(dependency, endpoint.Name, "URL"),
             address.ToEndpointString());
         GatewayEnvironmentVariables.Set(
             environment,
-            ResourceEnvironment.Dependency(dependency, endpoint.Name, "HOST"),
+            AppEnvironment.Variables.Dependency(dependency, endpoint.Name, "HOST"),
             address.IdnHost);
         GatewayEnvironmentVariables.Set(
             environment,
-            ResourceEnvironment.Dependency(dependency, endpoint.Name, "PORT"),
+            AppEnvironment.Variables.Dependency(dependency, endpoint.Name, "PORT"),
             address.Port.ToString(CultureInfo.InvariantCulture));
         GatewayEnvironmentVariables.Set(
             environment,
-            ResourceEnvironment.Dependency(dependency, endpoint.Name, "SCHEME"),
+            AppEnvironment.Variables.Dependency(dependency, endpoint.Name, "SCHEME"),
             address.Scheme);
     }
 

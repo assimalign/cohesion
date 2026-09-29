@@ -27,58 +27,12 @@
 		<CohesionProbe Include="readiness" Endpoint="admin" Http="/readyz" />
 		<CohesionProbe Include="liveness" Endpoint="admin" Http="/livez" />
 
-		<!-- Typed planners: Web, Database, ConfigurationStore, SecretStore, IdentityHub, Rezolvr, and LogSpace. -->
-		<CohesionGatewayResourceKind Include="Web">
-			<ApplicationModel>Assimalign.Cohesion.Web.ApplicationModel</ApplicationModel>
-			<OptionsType>global::Assimalign.Cohesion.ApplicationModel.WebResourceOptions</OptionsType>
-			<DescriptorType>global::Assimalign.Cohesion.ApplicationModel.IWebResourceDescriptor</DescriptorType>
-			<AddMethod>global::Assimalign.Cohesion.ApplicationModel.WebResourceExtensions.AddWeb</AddMethod>
-		</CohesionGatewayResourceKind>
-		<CohesionGatewayResourceKind Include="Database">
-			<ApplicationModel>Assimalign.Cohesion.Database.ApplicationModel</ApplicationModel>
-			<OptionsType>global::Assimalign.Cohesion.ApplicationModel.DatabaseResourceOptions</OptionsType>
-			<DescriptorType>global::Assimalign.Cohesion.ApplicationModel.IDatabaseResourceDescriptor</DescriptorType>
-			<AddMethod>global::Assimalign.Cohesion.ApplicationModel.DatabaseResourceExtensions.AddDatabase</AddMethod>
-		</CohesionGatewayResourceKind>
-
-		<CohesionGatewayResourceKind Include="ConfigurationStore">
-			<ApplicationModel>Assimalign.Cohesion.ConfigurationStore.ApplicationModel</ApplicationModel>
-			<OptionsType>global::Assimalign.Cohesion.ApplicationModel.ConfigurationStoreResourceOptions</OptionsType>
-			<DescriptorType>global::Assimalign.Cohesion.ApplicationModel.IConfigurationStoreResourceDescriptor</DescriptorType>
-			<AddMethod>global::Assimalign.Cohesion.ApplicationModel.ConfigurationStoreResourceExtensions.AddConfigurationStore</AddMethod>
-		</CohesionGatewayResourceKind>
-
-		<CohesionGatewayResourceKind Include="SecretStore">
-			<ApplicationModel>Assimalign.Cohesion.SecretStore.ApplicationModel</ApplicationModel>
-			<OptionsType>global::Assimalign.Cohesion.ApplicationModel.SecretStoreResourceOptions</OptionsType>
-			<DescriptorType>global::Assimalign.Cohesion.ApplicationModel.ISecretStoreResourceDescriptor</DescriptorType>
-			<AddMethod>global::Assimalign.Cohesion.ApplicationModel.SecretStoreResourceExtensions.AddSecretStore</AddMethod>
-		</CohesionGatewayResourceKind>
-		<CohesionGatewayResourceKind Include="IdentityHub">
-			<ApplicationModel>Assimalign.Cohesion.IdentityHub.ApplicationModel</ApplicationModel>
-			<OptionsType>global::Assimalign.Cohesion.ApplicationModel.IdentityHubResourceOptions</OptionsType>
-			<DescriptorType>global::Assimalign.Cohesion.ApplicationModel.IIdentityHubResourceDescriptor</DescriptorType>
-			<AddMethod>global::Assimalign.Cohesion.ApplicationModel.IdentityHubResourceExtensions.AddIdentityHub</AddMethod>
-		</CohesionGatewayResourceKind>
-		<CohesionGatewayResourceKind Include="Rezolvr">
-			<ApplicationModel>Assimalign.Cohesion.Rezolvr.ApplicationModel</ApplicationModel>
-			<OptionsType>global::Assimalign.Cohesion.ApplicationModel.RezolvrResourceOptions</OptionsType>
-			<DescriptorType>global::Assimalign.Cohesion.ApplicationModel.IRezolvrResourceDescriptor</DescriptorType>
-			<AddMethod>global::Assimalign.Cohesion.ApplicationModel.RezolvrResourceExtensions.AddRezolvr</AddMethod>
-		</CohesionGatewayResourceKind>
-		<CohesionGatewayResourceKind Include="LogSpace">
-			<ApplicationModel>Assimalign.Cohesion.LogSpace.ApplicationModel</ApplicationModel>
-			<OptionsType>global::Assimalign.Cohesion.ApplicationModel.LogSpaceResourceOptions</OptionsType>
-			<DescriptorType>global::Assimalign.Cohesion.ApplicationModel.ILogSpaceResourceDescriptor</DescriptorType>
-			<AddMethod>global::Assimalign.Cohesion.ApplicationModel.LogSpaceResourceExtensions.AddLogSpace</AddMethod>
-		</CohesionGatewayResourceKind>
-
-		<!-- Mount-source and command target kind to gateway-side client package map. -->
-		<CohesionGatewayClientKind Include="ConfigurationStore" PackageId="Assimalign.Cohesion.ConfigurationStore.Client" />
-		<CohesionGatewayClientKind Include="Database" PackageId="Assimalign.Cohesion.Database.Client" />
-		<CohesionGatewayClientKind Include="IdentityHub" PackageId="Assimalign.Cohesion.IdentityHub.Client" />
-		<CohesionGatewayClientKind Include="Rezolvr" PackageId="Assimalign.Cohesion.Rezolvr.Client" />
-		<CohesionGatewayClientKind Include="SecretStore" PackageId="Assimalign.Cohesion.SecretStore.Client" />
+		<!--
+			No resource-kind or client-package table: the gateway's Program.cs composes each
+			resource with the hand-written verb of the area's ApplicationModel package over the
+			generated Manifests member (builder.AddWeb(Manifests.X, options)), or with
+			builder.AddResource(Manifests.X) for a kind that has none.
+		-->
 
 		<!-- Provider-name to package-id map. Only the selected names are restored. -->
 		<CohesionGatewayPackage Include="Local" PackageId="Assimalign.Cohesion.ApplicationModel.Gateway" Version="$(CohesionVersion)" />

@@ -7,7 +7,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Core;
 
 namespace Assimalign.Cohesion.ApplicationModel.Tests;
 
@@ -48,9 +47,9 @@ public class GenericPlannerTests
         plan.Exposures[0].Protocol.ShouldBe("tcp");
         plan.Hints.ShouldBeEmpty();
         plan.Container.Environment["CUSTOM_VALUE"].ShouldBe("preserved");
-        plan.Container.Environment[ResourceEnvironment.Application].ShouldBe("appa");
-        plan.Container.Environment[ResourceEnvironment.Resource].ShouldBe("appa-api");
-        plan.Container.Environment[ResourceEnvironment.Environment].ShouldBe("Development");
+        plan.Container.Environment[AppEnvironment.Variables.Application].ShouldBe("appa");
+        plan.Container.Environment[AppEnvironment.Variables.Resource].ShouldBe("appa-api");
+        plan.Container.Environment[AppEnvironment.Variables.Environment].ShouldBe("Development");
         Should.NotThrow(() => ResourcePlanValidator.Validate(plan, context));
     }
 
@@ -531,7 +530,7 @@ public class GenericPlannerTests
         EnvironmentVariables = new Dictionary<string, string>
         {
             ["CUSTOM_VALUE"] = "preserved",
-            [ResourceEnvironment.Application] = "must-be-overridden"
+            [AppEnvironment.Variables.Application] = "must-be-overridden"
         },
         Lifecycle = new ResourceManifestLifecycle
         {

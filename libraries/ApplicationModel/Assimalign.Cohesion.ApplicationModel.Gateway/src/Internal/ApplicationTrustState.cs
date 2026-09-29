@@ -4,15 +4,19 @@ using System.Collections.ObjectModel;
 using System.Text;
 using System.Text.Json;
 
+using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.IdentityModel;
 using Assimalign.Cohesion.IdentityModel.Token.JsonWebToken;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
+/// <summary>
+/// One application's trust state: its ES256 signing key, its trusted-issuer snapshot, and the
+/// gateway's default application-key credential issuer.
+/// </summary>
 internal sealed class ApplicationTrustState : IDisposable
 {
-    private const string TokenUseClaim = "cohesion_token_use";
-    private const string GatewayTokenUse = "gateway";
+    private const string bearerScheme = "Bearer";
 
     private readonly object _gate = new();
     private readonly Dictionary<string, TrustedIssuer> _issuers = new(StringComparer.Ordinal);
@@ -52,13 +56,47 @@ internal sealed class ApplicationTrustState : IDisposable
         }
     }
 
-    public string Issue(
+    /// <summary>
+    /// The gateway's default ES256 application-key issuer. Every purpose keeps the claim set the
+    /// gateway minted before credential issuers existed: gateway-to-gateway purposes
+    /// (<see cref="ApplicationCredentialPurpose.RemoteCommand"/> and
+    /// <see cref="ApplicationCredentialPurpose.PeerControlPlane"/>) add the gateway token-use claim,
+    /// <see cref="ApplicationCredentialPurpose.Telemetry"/> adds the telemetry scope, and the rest carry
+    /// only the registered claims.
+    /// </summary>
+    /// <param name="request">The credential to mint; its application must be this state's application.</param>
+    /// <param name="now">The issue instant.</param>
+    /// <returns>A <c>Bearer</c> credential that expires <see cref="ApplicationCredentialRequest.Lifetime"/> after <paramref name="now"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="request"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The request names another application, or its audience or subject is blank.</exception>
+    public ApplicationCredential Issue(ApplicationCredentialRequest request, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Application != Application)
+        {
+            throw new ArgumentException(
+                $"Application '{Application}' cannot issue a credential for application '{request.Application}'.",
+                nameof(request));
+        }
+
+        string token = Issue(
+            request.Audience,
+            request.Subject,
+            request.Lifetime,
+            now,
+            allowControlPlaneCommands: request.Purpose is
+                ApplicationCredentialPurpose.RemoteCommand or ApplicationCredentialPurpose.PeerControlPlane,
+            telemetry: request.Purpose == ApplicationCredentialPurpose.Telemetry);
+        return new ApplicationCredential(bearerScheme, token, now.Add(request.Lifetime));
+    }
+
+    private string Issue(
         string audience,
         string subject,
         TimeSpan lifetime,
         DateTimeOffset now,
-        bool allowControlPlaneCommands = false,
-        bool telemetry = false)
+        bool allowControlPlaneCommands,
+        bool telemetry)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(audience);
         ArgumentException.ThrowIfNullOrWhiteSpace(subject);
@@ -78,11 +116,15 @@ internal sealed class ApplicationTrustState : IDisposable
             descriptor.Audiences.Add(audience);
             if (telemetry)
             {
-                descriptor.Claims.Add(new IdentityClaim("scope", "telemetry"));
+                descriptor.Claims.Add(new IdentityClaim(
+                    ResourceCredentialProfile.ScopeClaim,
+                    ResourceCredentialProfile.TelemetryScope));
             }
             if (allowControlPlaneCommands)
             {
-                descriptor.Claims.Add(new IdentityClaim(TokenUseClaim, GatewayTokenUse));
+                descriptor.Claims.Add(new IdentityClaim(
+                    ResourceCredentialProfile.TokenUseClaim,
+                    ResourceCredentialProfile.GatewayTokenUse));
             }
 
             return JsonWebTokenWriter.CreateEs256(_key.PrivateKey, _key.KeyId).Write(descriptor);

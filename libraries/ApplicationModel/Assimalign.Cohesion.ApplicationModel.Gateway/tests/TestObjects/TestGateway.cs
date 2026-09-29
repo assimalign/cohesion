@@ -18,7 +18,7 @@ internal sealed class TestGateway : ApplicationGateway
     private readonly IApplicationResourceStateManager _state;
     private readonly IReadOnlyList<IApplicationResourceController> _controllers;
     private readonly Func<IApplicationResourceDescriptor, IResourceControlContext, CancellationToken, ValueTask<ResourceInputs>>? _inputResolver;
-    private readonly Func<IApplicationModel, ResourceManifest, Uri?>? _ownSecretStoreEndpointResolver;
+    private readonly Func<IApplicationModel, ResourceManifest, Uri?>? _trustStoreEndpointResolver;
     private readonly ResourceName _name;
 
     public List<string> Gathered { get; } = new();
@@ -48,14 +48,14 @@ internal sealed class TestGateway : ApplicationGateway
         ApplicationGatewayOptions? options = null,
         Func<IApplicationResourceDescriptor, IResourceControlContext, CancellationToken, ValueTask<ResourceInputs>>? inputResolver = null,
         ResourceName? name = null,
-        Func<IApplicationModel, ResourceManifest, Uri?>? ownSecretStoreEndpointResolver = null)
+        Func<IApplicationModel, ResourceManifest, Uri?>? trustStoreEndpointResolver = null)
         : base(Configure(options, readinessBudget))
     {
         _state = state;
         _controllers = controllers;
         _inputResolver = inputResolver;
         _name = name ?? (ResourceName)"test";
-        _ownSecretStoreEndpointResolver = ownSecretStoreEndpointResolver;
+        _trustStoreEndpointResolver = trustStoreEndpointResolver;
     }
 
     public override ResourceName Name => _name;
@@ -79,12 +79,12 @@ internal sealed class TestGateway : ApplicationGateway
             ? base.ResolveInputsAsync(descriptor, context, cancellationToken)
             : _inputResolver(descriptor, context, cancellationToken);
 
-    protected override bool TryResolveOwnSecretStoreEndpoint(
+    protected override bool TryResolveTrustStoreEndpoint(
         IApplicationModel model,
         ResourceManifest store,
         out Uri? endpoint)
     {
-        endpoint = _ownSecretStoreEndpointResolver?.Invoke(model, store);
+        endpoint = _trustStoreEndpointResolver?.Invoke(model, store);
         return endpoint is not null;
     }
 

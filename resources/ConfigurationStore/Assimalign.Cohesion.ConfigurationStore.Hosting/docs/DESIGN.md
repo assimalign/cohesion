@@ -40,6 +40,14 @@ maximum 24-hour lifetime. Missing or invalid credentials return 401; a valid cre
 audience or a command whose owner differs from its issuer returns 403. Plain applications do not
 require authentication.
 
+Issuer keys are parsed and checked with the shared `JsonWebKey.TryValidateEs256SigningKey`, and the
+verifier is a thin configuration of the shared ES256 `JsonWebTokenValidator` with
+`ResourceCredentialProfile` constants, not a local copy of the JWK, thumbprint, and claim rules. A
+credential verifier registered for the executable (`ResourceRuntime.TryGetCredentialVerifier`) is
+consulted first; `NoResult` falls through to the trusted-issuer verification. Command ownership
+compares the mapped `ResourceCaller.Application`, which is the token's `iss` for application-key
+credentials, so the owner rule is unchanged for them.
+
 ## Boundaries
 
 The module references only the ConfigurationStore area root among resource packages. Hosting,

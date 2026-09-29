@@ -25,18 +25,6 @@
 	</PropertyGroup>
 
 	<ItemDefinitionGroup>
-		<!--
-			Restore-visible ApplicationModel packages may contribute typed gateway mappings
-			through build/buildTransitive props. The item identity is the resource kind;
-			ApplicationModel, OptionsType, and AddMethod are required, while DescriptorType
-			defaults in the Gateway task to IApplicationResourceDescriptor.
-		-->
-		<CohesionGatewayResourceKind>
-			<ApplicationModel></ApplicationModel>
-			<OptionsType></OptionsType>
-			<DescriptorType></DescriptorType>
-			<AddMethod></AddMethod>
-		</CohesionGatewayResourceKind>
 		<CohesionEndpoint>
 			<Scheme></Scheme>
 			<ContainerPort></ContainerPort>

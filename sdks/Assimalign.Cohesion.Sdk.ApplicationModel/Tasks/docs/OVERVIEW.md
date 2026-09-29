@@ -77,22 +77,31 @@ The public MSBuild surface keeps its existing names, including
 `CohesionPublishImage`, `CohesionPublishImages`, and
 `CohesionBuildResourceContainersDependsOn`.
 
-## Gateway typed-kind contributions
+## Gateway composition
 
-Packages can contribute a `CohesionGatewayResourceKind` item from
-`build` or `buildTransitive` props. Gateway unions those rows with its
-first-party rows and uses the matching ApplicationModel identity to emit a typed
-`Add<Name>()` verb instead of the generic `AddResource` fallback.
+`Assimalign.Cohesion.Sdk.Gateway` reads the `resource.json` documents this package
+writes and generates one `Manifests.<Name>` member per captured manifest. It
+generates no per-resource verbs, and this package defines no resource-kind item
+for other packages to contribute to. The gateway's `Program.cs` composes each
+resource by hand: it passes the manifest to the verb of the area's
+ApplicationModel package, with the area's options as an instance, or to
+`AddResource` for a kind that has no ApplicationModel in reach.
 
-| Field | Meaning |
-| --- | --- |
-| Item identity | Stable resource-kind name. |
-| `ApplicationModel` | Required manifest `applicationModel` package identity used for matching. |
-| `OptionsType` | Required fully qualified generated options type. |
-| `DescriptorType` | Optional fully qualified return type; defaults to `IApplicationResourceDescriptor`. |
-| `AddMethod` | Required fully qualified static factory method called with builder, manifest, and options. |
+```csharp
+using Assimalign.Cohesion.ApplicationModel;
 
-See [DESIGN.md](./DESIGN.md) for the complete item contract and build ordering.
+IApplicationBuilder builder = Gateway.CreateBuilder(args);
+builder.AddWeb(Manifests.OrdersApi, new WebResourceOptions { Replicas = 2 });
+builder.AddResource(Manifests.OrdersWorker);
+```
+
+A third-party area supplies its verb the same way: an `extension(IApplicationBuilder)`
+member in its ApplicationModel package that takes a `ResourceManifest` and the
+area's options. It needs no build props contribution, and calling a verb whose
+ApplicationModel package the gateway does not reference is an ordinary compile
+error rather than a gateway diagnostic. See the
+[Gateway SDK overview](../../../Assimalign.Cohesion.Sdk.Gateway/Tasks/docs/OVERVIEW.md)
+for the generated surface.
 
 ## Image targets
 

@@ -13,7 +13,6 @@ using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests.TestObjects;
@@ -38,17 +37,17 @@ public sealed class InProcessGatewayTests
             var compilation = InProcessPlanController.Compile(control.Plan, artifact, control.Inputs, control.ObservedDependencies, injection);
             var contexts = new InProcessContextFactory(root);
             var configuration = await contexts.CreateAsync(control, compilation, new ResourceContext(contentRootPath: root), CancellationToken.None);
-            configuration.ResourceContext.TryGetEnvironmentValue(ResourceEnvironment.TelemetryEndpoint, out string? endpoint).ShouldBeTrue();
+            configuration.ResourceContext.TryGetEnvironmentValue(AppEnvironment.Variables.TelemetryEndpoint, out string? endpoint).ShouldBeTrue();
             endpoint.ShouldBe("https://localhost:4318");
-            configuration.ResourceContext.TryGetEnvironmentValue(ResourceEnvironment.TelemetryProtocol, out string? protocol).ShouldBeTrue();
+            configuration.ResourceContext.TryGetEnvironmentValue(AppEnvironment.Variables.TelemetryProtocol, out string? protocol).ShouldBeTrue();
             protocol.ShouldBe("otlp-http");
-            configuration.ResourceContext.TryGetEnvironmentValue(ResourceEnvironment.TelemetryHeadersPath, out string? path).ShouldBeTrue();
+            configuration.ResourceContext.TryGetEnvironmentValue(AppEnvironment.Variables.TelemetryHeadersPath, out string? path).ShouldBeTrue();
             new HostingResourceMount(path!).ReadAllBytes().ShouldBe("Authorization: Bearer test\n"u8.ToArray());
             var absent = InProcessPlanController.Compile(control.Plan, artifact, control.Inputs, control.ObservedDependencies);
             var next = await contexts.CreateAsync(control, absent, new ResourceContext(contentRootPath: root), CancellationToken.None);
-            next.ResourceContext.TryGetEnvironmentValue(ResourceEnvironment.TelemetryEndpoint, out _).ShouldBeFalse();
-            next.ResourceContext.TryGetEnvironmentValue(ResourceEnvironment.TelemetryProtocol, out _).ShouldBeFalse();
-            next.ResourceContext.TryGetEnvironmentValue(ResourceEnvironment.TelemetryHeadersPath, out _).ShouldBeFalse();
+            next.ResourceContext.TryGetEnvironmentValue(AppEnvironment.Variables.TelemetryEndpoint, out _).ShouldBeFalse();
+            next.ResourceContext.TryGetEnvironmentValue(AppEnvironment.Variables.TelemetryProtocol, out _).ShouldBeFalse();
+            next.ResourceContext.TryGetEnvironmentValue(AppEnvironment.Variables.TelemetryHeadersPath, out _).ShouldBeFalse();
             File.Exists(path).ShouldBeFalse();
         }
         finally { Directory.Delete(root, recursive: true); }
@@ -569,9 +568,9 @@ public sealed class InProcessGatewayTests
             const int overriddenPort = 43124;
             var environment = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                [ResourceEnvironment.Endpoint("http", "HOST")] = "127.0.0.1",
-                [ResourceEnvironment.Endpoint("http", "PORT")] = "43124",
-                [ResourceEnvironment.Endpoint("http", "SCHEME")] = "http",
+                [AppEnvironment.Variables.Endpoint("http", "HOST")] = "127.0.0.1",
+                [AppEnvironment.Variables.Endpoint("http", "PORT")] = "43124",
+                [AppEnvironment.Variables.Endpoint("http", "SCHEME")] = "http",
             };
             TestControlContext control = TestControlContext.Create(
                 stateDirectory,
@@ -611,8 +610,8 @@ public sealed class InProcessGatewayTests
         {
             var environment = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                [ResourceEnvironment.Endpoint("http", "HOST")] = "192.0.2.2",
-                [ResourceEnvironment.Endpoint("http", "PORT")] = "43125",
+                [AppEnvironment.Variables.Endpoint("http", "HOST")] = "192.0.2.2",
+                [AppEnvironment.Variables.Endpoint("http", "PORT")] = "43125",
             };
             TestControlContext control = TestControlContext.Create(
                 stateDirectory,

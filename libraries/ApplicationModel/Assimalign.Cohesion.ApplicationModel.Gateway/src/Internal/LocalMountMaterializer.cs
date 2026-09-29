@@ -5,8 +5,6 @@ using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal sealed class LocalMountMaterializer
@@ -43,7 +41,7 @@ internal sealed class LocalMountMaterializer
             string environmentMountName = isComposite
                 ? $"{resource.Name}-{mount.Mount}"
                 : mount.Mount;
-            string mountVariable = ResourceEnvironment.Mount(environmentMountName);
+            string mountVariable = AppEnvironment.Variables.Mount(environmentMountName);
             if (!uniqueMountVariables.Add(mountVariable))
             {
                 throw new InvalidDataException(
@@ -133,7 +131,7 @@ internal sealed class LocalMountMaterializer
             {
                 GatewayEnvironmentVariables.Remove(
                     environment,
-                    ResourceEnvironment.Mount(mount.Mount));
+                    AppEnvironment.Variables.Mount(mount.Mount));
             }
 
             GatewayEnvironmentVariables.Set(environment, mountVariables[index], mountPath);
@@ -165,7 +163,7 @@ internal sealed class LocalMountMaterializer
             ? new WindowsLocalFileProtector(Path.Combine(applicationDirectory, ".state"), application)
             : null;
         await MaterializeBootstrapCredentialAsync(resourceDirectory, resource, trustBundle, protector, environment,
-            cancellationToken, "trust.pem", ResourceEnvironment.TrustBundlePath).ConfigureAwait(false);
+            cancellationToken, "trust.pem", AppEnvironment.Variables.TrustBundlePath).ConfigureAwait(false);
     }
 
     internal async Task MaterializeTelemetryHeadersAsync(ApplicationName application, ResourceName resource,
@@ -177,7 +175,7 @@ internal sealed class LocalMountMaterializer
             ? new WindowsLocalFileProtector(Path.Combine(applicationDirectory, ".state"), application)
             : null;
         await MaterializeBootstrapCredentialAsync(resourceDirectory, resource, headers, protector, environment,
-            cancellationToken, "telemetry.headers", ResourceEnvironment.TelemetryHeadersPath).ConfigureAwait(false);
+            cancellationToken, "telemetry.headers", AppEnvironment.Variables.TelemetryHeadersPath).ConfigureAwait(false);
     }
 
     private static string SafeChild(string parent, string name, string kind)
@@ -252,7 +250,7 @@ internal sealed class LocalMountMaterializer
         IDictionary<string, string> environment,
         CancellationToken cancellationToken,
         string fileName = "bootstrap.token",
-        string variable = ResourceEnvironment.BootstrapTokenPath)
+        string variable = AppEnvironment.Variables.BootstrapTokenPath)
     {
         string stateDirectory = SafeChild(resourceDirectory, ".state", "resource state");
         string credentialPath = SafeChild(

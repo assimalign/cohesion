@@ -125,7 +125,7 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
                 _requireAuthentication,
                 cancellationToken)
             .ConfigureAwait(false);
-        _tokenVerifier = new BootstrapTokenVerifier(_trustedIssuers);
+        _tokenVerifier = new BootstrapTokenVerifier(_trustedIssuers, _resourceContext.ApplicationName);
         await _certificateAuthority.InitializeAsync(cancellationToken).ConfigureAwait(false);
         ProtectedFileStore.HardenKeyDirectory(_repository.DataPath);
         ProtectedFileStore.HardenKeyDirectory(Path.Combine(_repository.DataPath, "key-ring"));
@@ -225,14 +225,14 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         bool isNamespaced = path == Route("/cohesion/v1") ||
             path.StartsWith(Route("/cohesion/v1/"), StringComparison.Ordinal);
 
-        BootstrapTokenValidation authorization = new(
-            BootstrapTokenValidationStatus.Authorized,
+        ResourceCredentialVerification authorization = new(
+            ResourceCredentialStatus.Authorized,
             null,
             null);
         if (isNamespaced)
         {
-            authorization = Authorize(context);
-            if (authorization.Status is not BootstrapTokenValidationStatus.Authorized)
+            authorization = await AuthorizeAsync(context).ConfigureAwait(false);
+            if (authorization.Status is not ResourceCredentialStatus.Authorized)
             {
                 SetAuthorizationFailure(context, authorization.Status);
                 return;
@@ -242,11 +242,11 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
             if (_requireAuthentication &&
                 !acceptsPeerIssuer &&
                 !string.Equals(
-                    authorization.Issuer,
+                    authorization.Caller?.Application,
                     _resourceContext.ApplicationName,
                     StringComparison.Ordinal))
             {
-                SetAuthorizationFailure(context, BootstrapTokenValidationStatus.Forbidden);
+                SetAuthorizationFailure(context, ResourceCredentialStatus.Forbidden);
                 return;
             }
         }
@@ -399,7 +399,7 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
 
     private async Task HandleCommandsAsync(
         IHttpContext context,
-        BootstrapTokenValidation authorization)
+        ResourceCredentialVerification authorization)
     {
         if (IsRead(context))
         {
@@ -446,10 +446,11 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         }
 
         bool trustGrant = string.Equals(command.Kind, TrustAddCommand, StringComparison.Ordinal);
-        string? authenticatedOwner = !trustGrant ? authorization.Issuer :
-            authorization.Issuer is null || authorization.Subject is null
+        ResourceCaller? caller = authorization.Caller;
+        string? authenticatedOwner = !trustGrant ? caller?.Application :
+            caller is null
             ? null
-            : authorization.Issuer + "@" + authorization.Subject;
+            : caller.Application + "@" + caller.Subject;
         if (_requireAuthentication &&
             !string.Equals(command.Owner, authenticatedOwner, StringComparison.Ordinal))
         {
@@ -457,7 +458,7 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
             if (!trustGrant)
             {
                 await WriteCommandRefusalAsync(context,
-                    $"Command owner '{command.Owner}' must match authenticated issuer '{authorization.Issuer}'.").ConfigureAwait(false);
+                    $"Command owner '{command.Owner}' must match authenticated issuer '{caller?.Application}'.").ConfigureAwait(false);
             }
             return;
         }
@@ -546,7 +547,7 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
 
     private async Task HandleEnrollmentAsync(
         IHttpContext context,
-        BootstrapTokenValidation authorization)
+        ResourceCredentialVerification authorization)
     {
         if (context.Request.Method != HttpMethod.Post)
         {
@@ -562,7 +563,7 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
             string resource = GetRequiredString(root, "resource");
             string csr = GetRequiredString(root, "certificateSigningRequest");
             if (_requireAuthentication &&
-                !string.Equals(application, authorization.Issuer, StringComparison.Ordinal))
+                !string.Equals(application, authorization.Caller?.Application, StringComparison.Ordinal))
             {
                 context.Response.StatusCode = HttpStatusCode.Forbidden;
                 return;
@@ -599,7 +600,7 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
 
     private async Task HandleEnrollmentCompletionAsync(
         IHttpContext context,
-        BootstrapTokenValidation authorization)
+        ResourceCredentialVerification authorization)
     {
         if (context.Request.Method != HttpMethod.Post)
         {
@@ -608,7 +609,7 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         }
 
         if (_requireAuthentication &&
-            !string.Equals(_resourceContext.ApplicationName, authorization.Issuer, StringComparison.Ordinal))
+            !string.Equals(_resourceContext.ApplicationName, authorization.Caller?.Application, StringComparison.Ordinal))
         {
             context.Response.StatusCode = HttpStatusCode.Forbidden;
             return;
@@ -749,27 +750,39 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         }, "application/health+json; charset=utf-8").ConfigureAwait(false);
     }
 
-    private BootstrapTokenValidation Authorize(IHttpContext context)
+    private async ValueTask<ResourceCredentialVerification> AuthorizeAsync(IHttpContext context)
     {
         if (!_requireAuthentication)
         {
-            return new BootstrapTokenValidation(
-                BootstrapTokenValidationStatus.Authorized,
-                null,
-                null);
+            return new ResourceCredentialVerification(ResourceCredentialStatus.Authorized, null, null);
         }
 
-        if (!context.Request.Headers.TryGetValue(
-                HttpHeaderKey.Authorization,
-                out HttpHeaderValue authorization) ||
-            !authorization.Value.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        ResourceCredentialPresentation presentation = ResourceCredentialPresentation.FromAuthorizationValue(
+            context.Request.Headers.TryGetValue(HttpHeaderKey.Authorization, out HttpHeaderValue authorization)
+                ? authorization.Value
+                : null,
+            _audience,
+            DateTimeOffset.UtcNow);
+        if (ResourceRuntime.TryGetCredentialVerifier(_resourceContext, out IResourceCredentialVerifier? registered))
         {
-            return BootstrapTokenValidation.Unauthorized;
+            ResourceCredentialVerification verification = await registered
+                .VerifyAsync(presentation, context.RequestCancelled)
+                .ConfigureAwait(false);
+            if (verification.Status is not ResourceCredentialStatus.NoResult)
+            {
+                // An authorized credential must name its caller; the routes authorize by it.
+                return verification.Status is ResourceCredentialStatus.Authorized && verification.Caller is null
+                    ? new ResourceCredentialVerification(ResourceCredentialStatus.Forbidden, null, verification.Failure)
+                    : verification;
+            }
         }
 
-        string token = authorization.Value["Bearer ".Length..];
-        return _tokenVerifier?.Validate(token, _audience, DateTimeOffset.UtcNow) ??
-            BootstrapTokenValidation.Unauthorized;
+        if (!presentation.Scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase) || _tokenVerifier is null)
+        {
+            return new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null);
+        }
+
+        return _tokenVerifier.Validate(presentation.Credential, presentation.ExpectedAudience, presentation.Now);
     }
 
     private string Route(string path) => _basePath + path;
@@ -792,12 +805,12 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
 
     private static void SetAuthorizationFailure(
         IHttpContext context,
-        BootstrapTokenValidationStatus status)
+        ResourceCredentialStatus status)
     {
-        context.Response.StatusCode = status is BootstrapTokenValidationStatus.Forbidden
+        context.Response.StatusCode = status is ResourceCredentialStatus.Forbidden
             ? HttpStatusCode.Forbidden
             : HttpStatusCode.Unauthorized;
-        if (status is BootstrapTokenValidationStatus.Unauthorized)
+        if (status is ResourceCredentialStatus.Unauthorized)
         {
             context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer";
         }

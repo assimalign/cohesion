@@ -14,7 +14,7 @@ internal sealed class RecordingGatewayCommandClient : IGatewayResourceCommandCli
 {
     public RemoteCertificateValidationCallback? Validator { get; private set; }
 
-    public string ResourceKind => "test";
+    public string ResourceKind { get; init; } = "test";
 
     public int Applied { get; private set; }
 

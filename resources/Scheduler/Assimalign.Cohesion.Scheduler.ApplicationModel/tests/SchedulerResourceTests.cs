@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Resources;
 
 using Shouldly;

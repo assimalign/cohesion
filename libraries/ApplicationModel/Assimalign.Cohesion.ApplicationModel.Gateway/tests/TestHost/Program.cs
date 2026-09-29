@@ -11,8 +11,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.TestHost;
 
 internal static class Program
@@ -115,8 +113,8 @@ internal static class Program
     private static async Task RunServerAsync(CancellationToken cancellationToken)
     {
         string endpointName = Environment.GetEnvironmentVariable("TEST_ENDPOINT_NAME") ?? "http";
-        string host = RequiredEnvironment(ResourceEnvironment.Endpoint(endpointName, "HOST"));
-        int port = ParsePort(RequiredEnvironment(ResourceEnvironment.Endpoint(endpointName, "PORT")));
+        string host = RequiredEnvironment(AppEnvironment.Variables.Endpoint(endpointName, "HOST"));
+        int port = ParsePort(RequiredEnvironment(AppEnvironment.Variables.Endpoint(endpointName, "PORT")));
         IPAddress address = await ResolveAddressAsync(host, cancellationToken).ConfigureAwait(false);
 
         var listener = new TcpListener(address, port);
@@ -385,15 +383,15 @@ internal static class Program
         string endpointName = Environment.GetEnvironmentVariable("TEST_ENDPOINT_NAME") ?? "http";
         string[] knownNames =
         {
-            ResourceEnvironment.Application,
-            ResourceEnvironment.Resource,
-            ResourceEnvironment.Gateway,
-            ResourceEnvironment.Environment,
-            ResourceEnvironment.ContentRoot,
-            ResourceEnvironment.Endpoint(endpointName, "HOST"),
-            ResourceEnvironment.Endpoint(endpointName, "PORT"),
-            ResourceEnvironment.Endpoint(endpointName, "SCHEME"),
-            ResourceEnvironment.Endpoint(endpointName, "PUBLIC_URL"),
+            AppEnvironment.Variables.Application,
+            AppEnvironment.Variables.Resource,
+            AppEnvironment.Variables.Gateway,
+            AppEnvironment.Variables.Environment,
+            AppEnvironment.Variables.ContentRoot,
+            AppEnvironment.Variables.Endpoint(endpointName, "HOST"),
+            AppEnvironment.Variables.Endpoint(endpointName, "PORT"),
+            AppEnvironment.Variables.Endpoint(endpointName, "SCHEME"),
+            AppEnvironment.Variables.Endpoint(endpointName, "PUBLIC_URL"),
         };
         foreach (string name in knownNames)
         {
@@ -444,7 +442,7 @@ internal static class Program
                          ';',
                          StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                string variable = ResourceEnvironment.Mount(mount);
+                string variable = AppEnvironment.Variables.Mount(mount);
                 string? value = Environment.GetEnvironmentVariable(variable);
                 if (value is not null)
                 {
@@ -715,7 +713,7 @@ internal static class Program
                 StringComparison.OrdinalIgnoreCase);
             _observedPath = Environment.GetEnvironmentVariable("TEST_STOP_OBSERVED_PATH");
 
-            string? stopEventName = Environment.GetEnvironmentVariable(ResourceEnvironment.StopEvent);
+            string? stopEventName = Environment.GetEnvironmentVariable(AppEnvironment.Variables.StopEvent);
             if (OperatingSystem.IsWindows() && !string.IsNullOrWhiteSpace(stopEventName))
             {
                 _stopEvent = EventWaitHandle.OpenExisting(stopEventName);

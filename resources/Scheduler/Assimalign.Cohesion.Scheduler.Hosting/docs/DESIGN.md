@@ -6,6 +6,8 @@ The execution service snapshots schedules from every registered IScheduleProvide
 
 The private http listener serves public /healthz, /readyz, and /livez probes and their authenticated /cohesion/v1 equivalents. It also serves authenticated endpoint and command discovery and accepts /cohesion/v1/stop. Readiness stays unavailable until the outer Scheduler host reaches Started.
 
+Namespaced requests consult the resource's registered credential verifier first (`ResourceRuntime.TryGetCredentialVerifier`); `NoResult` falls through to the default application-key verifier, a thin configuration of the shared ES256 `JsonWebTokenValidator` with `ResourceCredentialProfile` constants (issuer = application, subject = gateway, audience = resource, 24-hour ceiling). The mapped caller must be a `Gateway` of the ambient application whose `Subject` is the ambient gateway; failures are 401 with a Bearer challenge, and an authentic caller for another audience or role is 403.
+
 `SchedulerApplication.CreateBuilder(args)` returns the public concrete `SchedulerApplicationBuilder`; its `Build()` returns the public `SchedulerApplication : Host<SchedulerApplicationContext>`. The public `SchedulerApplicationContext` implements `ISchedulerApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
 
 ## HTTPS endpoint certificate contract (31t)

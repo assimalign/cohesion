@@ -11,15 +11,16 @@ Composite obtains those runtimes through enabled project references when
 `CohesionGatewayInProcess=true`.
 
 Select the provider with `--gateway inprocess`. The generated `Gateway.CreateBuilder(args)` binds
-the same-application closure of enabled, composable project resources by manifest identity, and
-each generated `Add<Name>()` verb binds the descriptor it returns, so a resource is colocatable
-whether it was added through the generated verb, the area verb over `Manifests.<Name>`, or a
-third-party application model's verb. Each member receives a resource-specific content root,
-persisted loopback endpoints, resolved mounts and credentials, and observed dependency addresses
-through its ambient `ResourceContext`.
+the same-application closure of enabled, composable project resources by manifest identity, so a
+resource is colocatable whichever verb adds it over `Manifests.<Name>`: the area's hand-written
+verb (`builder.AddWeb(Manifests.AppAApi, new WebResourceOptions { ... })`), a third-party
+application model's verb, or `builder.AddResource(Manifests.<Name>)`. `Sdk.Gateway` generates no
+per-resource `Add<Name>()` verb (owner decision of 2026-09-25). Each member receives a
+resource-specific content root, persisted loopback endpoints, resolved mounts and credentials, and
+observed dependency addresses through its ambient `ResourceContext`.
 
 `--mode render` emits the same versioned local plan-set envelope as the Local gateway, with each
-resource compiled to an `inProcessHost` unit. It is offline: generated entry points are not invoked,
+resource compiled to an `inProcessHost` unit. It is offline: member entry points are not invoked,
 runtime inputs are not resolved, and the state directory is not created.
 
 See [DESIGN.md](DESIGN.md) for lifecycle, restart, remapping, and NativeAOT decisions and

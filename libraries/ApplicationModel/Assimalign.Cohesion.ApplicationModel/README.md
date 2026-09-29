@@ -125,9 +125,34 @@ IApplicationSet set = Application.CreateSet(sharedGateway, args)
 await set.RunAsync();
 ```
 
+A member's model comes from its describe output or export, which carries no provider registrations.
+A member whose resources read stores (or that needs a certificate authority, trust store, or
+telemetry sink) registers them for itself where the set adds it:
+
+```csharp
+IApplicationSet set = Application.CreateSet(sharedGateway, args)
+    .AddApplication(Applications.Identity, identity => identity
+        .UseSecretStore("identity-secrets")
+        .AsCertificateAuthority()
+        .AsTrustStore())
+    .AddApplication(Applications.AppA, appa => appa.UseConfigurationStore("appa-configuration"));
+```
+
+The `Use<Area>("<store>")` verbs come from the opt-in
+`Assimalign.Cohesion.<Area>.ApplicationModel.Orchestration` packages the set gateway references; the
+callback receives an `IApplicationProviderBuilder`, the member surface those verbs extend. It is a
+separate interface from `IApplicationBuilder`, whose verbs take the descriptors it created instead;
+both forms write the same `ApplicationProviders`. The callback runs after the member resolves, and its registrations are frozen onto that member's
+model alone: a member never inherits another member's registrations, even for a store of the same
+name. The set validates every member with the `Build()` rules before it contacts the gateway, and a
+store-backed member without a registration — or one declaring a command that its target requires an
+input resolver for, without that resolver — fails with a message that names the member and the verb
+to call.
+
 An application set resolves every member at run start in declaration order, verifies that each
-resolver returned the declared application, applies command-line/environment external overrides,
-then sends the ordered models to one `IMultiModelApplicationGateway`. `ControlPlane(...)` invokes
+resolver returned the declared application, binds and validates each member's provider
+registrations, applies command-line/environment external overrides, then sends the ordered models to
+one `IMultiModelApplicationGateway`. `ControlPlane(...)` invokes
 the member executable with `--mode describe` in Local and reads its exported model in other
 environments. `Executable`, `File`, and `Gateway` resolvers are also available directly.
 
@@ -149,5 +174,23 @@ the target platform. The shared gateway owns one lifecycle session and must isol
 This package defines that composition seam; SDK-generated
 `Applications.<Name>` and HTTP control-plane composition are supplied by the Gateway SDK and
 `...Gateway.ControlPlane`; Kubernetes export/import remains a platform integration.
+
+## Register providers
+
+Stores, certificate issuance, trust persistence, command-input rewriting, telemetry, credential
+issuance, and control-plane caller authentication reach the gateway only through an application's
+`ApplicationProviders`: `IApplicationBuilder.Providers` for an application built in code, or, for an
+application-set member, the `Providers` of the `IApplicationProviderBuilder` its
+`AddApplication(..., configure)` callback receives. The two interfaces are separate, and the default
+builder implements both. This package defines those seams; opt-in
+`Assimalign.Cohesion.<Area>.ApplicationModel.Orchestration` packages implement them, and a gateway
+registers each one explicitly (for example `builder.UseSecretStore(secrets)` with the descriptor on a
+builder, or `member.UseSecretStore("secrets")` by name on a set member). `Build()`,
+or the set for a member, hands the model a frozen snapshot in `IApplicationModel.Providers`. A
+command kind the target's manifest marks `requiresInputResolver` — SecretStore's
+`secretstore.add-secret`, declared by `AddSecret` — needs a command-input resolver in the declaring
+application (`UseSecretStore(...)` registers it); without one, `Build()` or the set fails naming the
+package and verb. Unflagged kinds are delivered as declared. See
+[docs/DESIGN.md](docs/DESIGN.md#provider-seams-explicit-registration).
 
 See [docs/DESIGN.md](docs/DESIGN.md) for lifecycle rationale and package boundaries.

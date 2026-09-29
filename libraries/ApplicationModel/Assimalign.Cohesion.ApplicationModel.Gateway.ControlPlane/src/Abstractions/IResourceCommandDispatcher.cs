@@ -12,12 +12,16 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane;
 /// </summary>
 public interface IResourceCommandDispatcher
 {
-    /// <summary>Gets the exact resource manifest kind handled by this dispatcher.</summary>
+    /// <summary>
+    /// Gets the exact resource manifest kind handled by this dispatcher, or
+    /// <see cref="IGatewayResourceCommandClient.AnyKind"/> when it handles every kind that has no
+    /// exact-kind dispatcher.
+    /// </summary>
     string ResourceKind { get; }
 
     /// <summary>Applies a desired command to a resource's default control plane.</summary>
     /// <param name="address">The resource's observed default control-plane endpoint.</param>
-    /// <param name="bearerToken">The resource-scoped bootstrap credential.</param>
+    /// <param name="bearerToken">The serving gateway's resource-scoped <see cref="ApplicationCredentialPurpose.ResourceAccess"/> bearer credential.</param>
     /// <param name="command">The command envelope to apply.</param>
     /// <param name="serverCertificateValidator">Validates the target's TLS certificate against the application's transport anchors — the same validator the gateway's probes and store reads use; <see langword="null"/> keeps the platform's default trust (an http target, or an application that has issued no certificate yet).</param>
     /// <param name="cancellationToken">Cancels dispatch.</param>
@@ -31,7 +35,7 @@ public interface IResourceCommandDispatcher
 
     /// <summary>Deletes a previously applied command from a resource's default control plane.</summary>
     /// <param name="address">The resource's observed default control-plane endpoint.</param>
-    /// <param name="bearerToken">The resource-scoped bootstrap credential.</param>
+    /// <param name="bearerToken">The serving gateway's resource-scoped <see cref="ApplicationCredentialPurpose.ResourceAccess"/> bearer credential.</param>
     /// <param name="command">The previously accepted command envelope.</param>
     /// <param name="serverCertificateValidator">Validates the target's TLS certificate against the application's transport anchors — the same validator the gateway's probes and store reads use; <see langword="null"/> keeps the platform's default trust (an http target, or an application that has issued no certificate yet).</param>
     /// <param name="cancellationToken">Cancels dispatch.</param>

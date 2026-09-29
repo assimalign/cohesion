@@ -6,7 +6,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Resources;
 
 using HostingResourceMount = Assimalign.Cohesion.Hosting.Resources.ResourceMount;
@@ -59,8 +58,8 @@ internal sealed class InProcessContextFactory
             compilation.AmbientValues,
             StringComparer.Ordinal)
         {
-            [ResourceEnvironment.Gateway] = "inprocess",
-            [ResourceEnvironment.ContentRoot] = compilation.Artifact.ContentRootPath,
+            [AppEnvironment.Variables.Gateway] = "inprocess",
+            [AppEnvironment.Variables.ContentRoot] = compilation.Artifact.ContentRootPath,
         };
         IReadOnlyList<ResourceEndpoint> allocated = await _localState
             .ResolveEndpointsAsync(
@@ -550,13 +549,13 @@ internal sealed class InProcessContextFactory
 
     private static string GetConfigurationPrefix()
     {
-        int tokenIndex = ResourceEnvironment.ConfigurationPattern.IndexOf(
+        int tokenIndex = AppEnvironment.Variables.ConfigurationPattern.IndexOf(
             ConfigurationSectionToken,
             StringComparison.Ordinal);
         return tokenIndex < 0
             ? throw new InvalidOperationException(
-                $"Resource environment pattern '{ResourceEnvironment.ConfigurationPattern}' has no "
+                $"Resource environment pattern '{AppEnvironment.Variables.ConfigurationPattern}' has no "
                 + $"'{ConfigurationSectionToken}' token.")
-            : ResourceEnvironment.ConfigurationPattern[..tokenIndex];
+            : AppEnvironment.Variables.ConfigurationPattern[..tokenIndex];
     }
 }

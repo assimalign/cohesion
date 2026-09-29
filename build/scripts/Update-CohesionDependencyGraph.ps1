@@ -65,6 +65,9 @@ function Get-ProjectKind {
     if ($segments -contains 'tests') { return 'tests' }
     if ($segments -contains 'samples') { return 'samples' }
     if ($segments -contains 'examples') { return 'examples' }
+    # Executable acceptance fixtures are harnesses too: the dependency guards exempt them by path,
+    # exactly as they do tests, samples, and examples (Build.Rules.targets).
+    if ($segments -contains 'fixtures') { return 'fixtures' }
     if ($segments -contains 'src') { return 'src' }
     return 'other'
 }
@@ -358,27 +361,26 @@ foreach ($area in $graphAreas) {
     $label = $area -replace '^libraries/', ''
     Add-Line "    $($libIds[$area])[`"$label`"]"
 }
-$needsResourceNode = @($layeredAreas | Where-Object { @(Get-AreaTargets $_) -like 'resources/*' }).Count -gt 0
-if ($needsResourceNode) { Add-Line '    RES["resources/* — client packages"]' }
+# Harnesses sit outside the shipped graph, so a library area with an edge into resources/** here
+# is a shipped library referencing a resource: the direction COHLIB001 fails the build for. The
+# document would otherwise assert a boundary its own data contradicts.
+$resourceDependents = @($layeredAreas | Where-Object { @(Get-AreaTargets $_) -like 'resources/*' })
+if ($resourceDependents.Count -gt 0) {
+    throw "Shipped library areas reference resources/**, which COHLIB001 forbids: $($resourceDependents -join ', '). Define the seam in libraries/ and let the resource implement it."
+}
 foreach ($area in $layeredAreas) {
-    $drewResourceEdge = $false
     foreach ($target in @(Get-AreaTargets $area)) {
         if ($libIds.ContainsKey($target)) { Add-Line "    $($libIds[$area]) --> $($libIds[$target])" }
-        elseif ($target -like 'resources/*' -and -not $drewResourceEdge) {
-            Add-Line "    $($libIds[$area]) --> RES"
-            $drewResourceEdge = $true
-        }
     }
 }
 Add-Line '```'
 Add-Line ''
-if ($needsResourceNode) {
-    Add-Line 'The edge into `resources/*` is the gateway consuming resource **client** packages to'
-    Add-Line 'orchestrate them; it is not an L2-on-L3 layering inversion. `COHRES003` enforces the'
-    Add-Line 'direction that matters — no shipped project under `resources/**` may reference an'
-    Add-Line '`ApplicationModel.Gateway*` assembly.'
-    Add-Line ''
-}
+Add-Line 'No shipped library references `resources/**`: resources consume libraries, never the reverse.'
+Add-Line 'Test projects and the fixtures that drive real resource runtimes may, and are listed under'
+Add-Line '*Harnesses*. `COHLIB001` enforces that direction for `libraries/**` and `sdks/**` (a same-area'
+Add-Line '`sdks/Assimalign.Cohesion.Sdk.<Area>` project is the only exception), and `COHRES003` keeps'
+Add-Line 'every shipped `resources/**` project off the `ApplicationModel.Gateway*` assemblies.'
+Add-Line ''
 Add-Line '| Area | References |'
 Add-Line '| --- | --- |'
 foreach ($area in $areaNames) {
@@ -462,10 +464,10 @@ foreach ($entry in ($fanInRanked | Select-Object -First 25)) {
 Add-Line ''
 
 # --- Harnesses ------------------------------------------------------------
-$harnesses = @($projects.Values | Where-Object { $_.Kind -in @('tests', 'samples', 'examples') } | Sort-Object Name)
+$harnesses = @($projects.Values | Where-Object { $_.Kind -in @('tests', 'samples', 'examples', 'fixtures') } | Sort-Object Name)
 Add-Line '## Harnesses'
 Add-Line ''
-Add-Line "$($harnesses.Count) test, sample, and example projects are indexed for fan-in but excluded from the"
+Add-Line "$($harnesses.Count) test, sample, example, and fixture projects are indexed for fan-in but excluded from the"
 Add-Line 'area graphs above: they consume the shipped assemblies rather than forming part of the product'
 Add-Line 'graph, and the dependency guards exempt them by path.'
 Add-Line ''

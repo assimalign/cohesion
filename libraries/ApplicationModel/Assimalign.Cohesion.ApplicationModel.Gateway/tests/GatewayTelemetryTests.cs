@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -16,7 +17,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Resources;
 using HostingMount = Assimalign.Cohesion.Hosting.Resources.ResourceMount;
 
@@ -25,23 +25,146 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 [Collection(LocalGatewayConsoleCollection.Name)]
 public sealed class GatewayTelemetryTests
 {
-    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Telemetry discovery waits for a running sink without adding dependencies")]
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Telemetry resolution waits for a running registered sink without adding dependencies")]
     [InlineData(false)]
     [InlineData(true)]
-    public void Discovery_BeforeSinkIsRunning_ShouldInjectNothing(bool includeSink)
+    public void ResolveTelemetry_BeforeSinkIsRunning_ShouldInjectNothing(bool registerSink)
     {
+        // Arrange
         var gateway = new LocalGateway();
         IApplicationBuilder builder = Application.CreateBuilder("telemetry-tests", ["--environment", AppEnvironment.Keys.Local]).UseGateway(gateway);
-        if (includeSink) { builder.AddResource(Manifest("logs", "LogSpace", "query", "Assimalign.Cohesion.LogSpace.SinkHost") with { Endpoints = [Endpoint("query", 8443), Endpoint("otlp", 4318)] }); }
+        IApplicationResourceDescriptor sink = builder.AddResource(Manifest("logs", "LogSpace", "query", "Assimalign.Cohesion.LogSpace.SinkHost") with { Endpoints = [Endpoint("query", 8443), Endpoint("otlp", 4318)] });
         builder.AddResource(Manifest("web", "Web", "https", "Assimalign.Cohesion.Web.HttpsHost"));
+        if (registerSink) { builder.Providers.Telemetry = ResourceTelemetrySink.FromResource(sink); }
         IApplicationModel model = builder.Build().Model;
         model.Descriptors.Single(descriptor => descriptor.Resource.Name.ToString() == "web").Dependencies.ShouldBeEmpty();
-        typeof(ApplicationGateway).GetMethod("InitializeSession", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .Invoke(gateway, [new IApplicationModel[] { model }]);
-        var method = typeof(ApplicationGateway).GetMethod("TryGetOwnLogSpaceEndpoint", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
-        object?[] arguments = [model, null, null];
-        method.Invoke(gateway, arguments).ShouldBe(false);
-        arguments[1].ShouldBeNull(); arguments[2].ShouldBeNull();
+        InitializeSession(gateway, model);
+
+        // Act
+        object? injection = ResolveTelemetry(gateway, model, "web");
+
+        // Assert
+        injection.ShouldBeNull();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Telemetry: A running sink is used only when registered, never discovered by kind")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ResolveTelemetry_RunningSink_ShouldRequireRegistration(bool registerSink)
+    {
+        // Arrange
+        string root = Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "tr-" + Guid.NewGuid().ToString("N"))).FullName;
+        var gateway = new LocalGateway(new LocalGatewayOptions { StateDirectory = root });
+        IApplicationBuilder builder = Application.CreateBuilder("telemetry-tests", ["--environment", AppEnvironment.Keys.Local]).UseGateway(gateway);
+        IApplicationResourceDescriptor sink = builder.AddResource(Manifest("logs", "LogSpace", "query", "Assimalign.Cohesion.LogSpace.SinkHost") with { Endpoints = [Endpoint("query", 8443), Endpoint("otlp", 4318)] });
+        builder.AddResource(Manifest("web", "Web", "https", "Assimalign.Cohesion.Web.HttpsHost"));
+        if (registerSink) { builder.Providers.Telemetry = ResourceTelemetrySink.FromResource(sink); }
+        IApplicationModel model = builder.Build().Model;
+        InitializeSession(gateway, model);
+        IApplicationResource logs = model.Resources.Single(resource => resource.Name.ToString() == "logs");
+        gateway.ResourceStates.SetState(logs.Id, ResourceLifecycle.Running,
+            observedEndpoints: [new ResourceEndpoint("otlp", "https", 4318, Host: "127.0.0.1")]);
+
+        try
+        {
+            InitializeTrust(gateway, model);
+
+            // Act
+            var injection = (ResourceTelemetryInjection?)ResolveTelemetry(gateway, model, "web");
+
+            // Assert
+            if (!registerSink)
+            {
+                injection.ShouldBeNull();
+                return;
+            }
+
+            injection.ShouldNotBeNull().Endpoint.ShouldBe(new Uri("https://127.0.0.1:4318"));
+            string header = Encoding.UTF8.GetString(injection.HeadersDocument.Span);
+            header.StartsWith("Authorization: Bearer ", StringComparison.Ordinal).ShouldBeTrue();
+            using JsonDocument claims = JsonDocument.Parse(Base64Url.DecodeFromChars(header["Authorization: Bearer ".Length..].Trim().Split('.')[1]));
+            claims.RootElement.GetProperty("aud").ToString().ShouldContain("logs", Case.Sensitive);
+            claims.RootElement.GetProperty("sub").GetString().ShouldBe("web");
+            claims.RootElement.GetProperty("scope").GetString().ShouldBe("telemetry");
+            ((ResourceTelemetryInjection?)ResolveTelemetry(gateway, model, "logs")).ShouldBeNull();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Telemetry: A registered sink reachable only over plaintext HTTP receives no emitter credential, even in Local")]
+    public void ResolveTelemetry_RunningSinkOverPlaintextLoopback_ShouldInjectNothing()
+    {
+        // Arrange
+        string root = Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "tr-" + Guid.NewGuid().ToString("N"))).FullName;
+        var gateway = new LocalGateway(new LocalGatewayOptions { StateDirectory = root });
+        IApplicationBuilder builder = Application.CreateBuilder("telemetry-tests", ["--environment", AppEnvironment.Keys.Local]).UseGateway(gateway);
+        IApplicationResourceDescriptor sink = builder.AddResource(Manifest("logs", "LogSpace", "query", "Assimalign.Cohesion.LogSpace.SinkHost") with { Endpoints = [Endpoint("query", 8443), Endpoint("otlp", 4318)] });
+        builder.AddResource(Manifest("web", "Web", "https", "Assimalign.Cohesion.Web.HttpsHost"));
+        builder.Providers.Telemetry = ResourceTelemetrySink.FromResource(sink);
+        IApplicationModel model = builder.Build().Model;
+        InitializeSession(gateway, model);
+        IApplicationResource logs = model.Resources.Single(resource => resource.Name.ToString() == "logs");
+        gateway.ResourceStates.SetState(logs.Id, ResourceLifecycle.Running,
+            observedEndpoints: [new ResourceEndpoint("otlp", "http", 4318, Host: "127.0.0.1")]);
+
+        try
+        {
+            InitializeTrust(gateway, model);
+
+            // Act
+            var injection = (ResourceTelemetryInjection?)ResolveTelemetry(gateway, model, "web");
+
+            // Assert: the emitter credential never travels in plaintext, as with kind discovery.
+            injection.ShouldBeNull();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Telemetry: An external sink injects its address and the named headers parameter")]
+    public void ResolveTelemetry_ExternalSink_ShouldInjectAddressAndHeadersParameter()
+    {
+        // Arrange
+        var options = new LocalGatewayOptions();
+        options.Parameters["otlp-headers"] = "Authorization: Basic dGVzdA==\n";
+        var gateway = new LocalGateway(options);
+        IApplicationBuilder builder = Application.CreateBuilder("telemetry-tests", ["--environment", AppEnvironment.Keys.Production]).UseGateway(gateway);
+        builder.AddResource(Manifest("web", "Web", "https", "Assimalign.Cohesion.Web.HttpsHost"));
+        builder.Providers.Telemetry = ResourceTelemetrySink.External(new Uri("https://collector.example.test:4318"), "otlp-headers");
+        IApplicationModel model = builder.Build().Model;
+
+        // Act
+        var injection = (ResourceTelemetryInjection?)ResolveTelemetry(gateway, model, "web");
+
+        // Assert
+        injection.ShouldNotBeNull().Endpoint.ShouldBe(new Uri("https://collector.example.test:4318"));
+        Encoding.UTF8.GetString(injection.HeadersDocument.Span).ShouldBe("Authorization: Basic dGVzdA==\n");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Telemetry: An external sink refuses an unbound headers parameter or a plaintext address")]
+    [InlineData("https://collector.example.test:4318", false, "is not bound")]
+    [InlineData("http://collector.example.test:4318", true, "non-TLS")]
+    public void ResolveTelemetry_ExternalSinkMisconfigured_ShouldFailLoudly(string address, bool bindParameter, string expected)
+    {
+        // Arrange
+        var options = new LocalGatewayOptions();
+        if (bindParameter) { options.Parameters["otlp-headers"] = "Authorization: Basic dGVzdA==\n"; }
+        var gateway = new LocalGateway(options);
+        IApplicationBuilder builder = Application.CreateBuilder("telemetry-tests", ["--environment", AppEnvironment.Keys.Production]).UseGateway(gateway);
+        builder.AddResource(Manifest("web", "Web", "https", "Assimalign.Cohesion.Web.HttpsHost"));
+        builder.Providers.Telemetry = ResourceTelemetrySink.External(new Uri(address), "otlp-headers");
+        IApplicationModel model = builder.Build().Model;
+
+        // Act
+        InvalidOperationException failure = Should.Throw<InvalidOperationException>(() => ResolveTelemetry(gateway, model, "web"));
+
+        // Assert
+        failure.Message.ShouldContain(expected, Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Telemetry: Real Web exports through trusted HTTPS to mounted LogSpace")]
@@ -62,6 +185,7 @@ public sealed class GatewayTelemetryTests
         });
         IApplicationResourceDescriptor web = builder.AddResource(Manifest("web", "Web", "https", "Assimalign.Cohesion.Web.HttpsHost"));
         web.DependsOn(sink);
+        builder.Providers.Telemetry = ResourceTelemetrySink.FromResource(sink);
         IApplication application = builder.Build();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(70));
         Task run = application.RunAsync(timeout.Token);
@@ -87,7 +211,7 @@ public sealed class GatewayTelemetryTests
             var context = new ResourceContext(applicationName: "telemetry-tests", resourceName: "web", environmentName: AppEnvironment.Keys.Local, gatewayName: "local",
                 contentRootPath: null, endpoints: null, mounts: null, settings: null, references: null,
                 bootstrapCredential: ReadOnlyMemory<byte>.Empty, applicationTrustKey: ReadOnlyMemory<byte>.Empty,
-                ambientValues: new Dictionary<string, string?> { [ResourceEnvironment.TrustBundlePath] = Path.Combine(directory, "web", ".state", "trust.pem") });
+                ambientValues: new Dictionary<string, string?> { [AppEnvironment.Variables.TrustBundlePath] = Path.Combine(directory, "web", ".state", "trust.pem") });
             using var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false };
             handler.SslOptions.RemoteCertificateValidationCallback = context.CreateOutboundTrustValidator();
             using var client = new HttpClient(handler);
@@ -164,17 +288,36 @@ public sealed class GatewayTelemetryTests
             var environment = new Dictionary<string, string>();
             var injection = new ResourceTelemetryInjection(new Uri("https://localhost:4318"), Encoding.UTF8.GetBytes("Authorization: Bearer test\n"));
             ResourceTelemetryInjection.Apply(injection, environment);
-            environment[ResourceEnvironment.TelemetryEndpoint].ShouldBe("https://localhost:4318");
-            environment[ResourceEnvironment.TelemetryProtocol].ShouldBe("otlp-http");
+            environment[AppEnvironment.Variables.TelemetryEndpoint].ShouldBe("https://localhost:4318");
+            environment[AppEnvironment.Variables.TelemetryProtocol].ShouldBe("otlp-http");
             var mounts = new LocalMountMaterializer(root);
             await mounts.MaterializeTelemetryHeadersAsync("app", "web", injection.HeadersDocument, environment, CancellationToken.None);
-            string path = environment[ResourceEnvironment.TelemetryHeadersPath];
+            string path = environment[AppEnvironment.Variables.TelemetryHeadersPath];
             Read(path).ShouldBe("Authorization: Bearer test\n");
             ResourceTelemetryInjection.Apply(null, environment);
             await mounts.MaterializeTelemetryHeadersAsync("app", "web", ReadOnlyMemory<byte>.Empty, environment, CancellationToken.None);
             environment.ShouldBeEmpty(); File.Exists(path).ShouldBeFalse();
         }
         finally { Directory.Delete(root, recursive: true); }
+    }
+
+    private static void InitializeSession(ApplicationGateway gateway, IApplicationModel model) =>
+        typeof(ApplicationGateway).GetMethod("InitializeSession", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(gateway, [new IApplicationModel[] { model }]);
+
+    // The resource sink mints each emitter's credential from the application's trust state.
+    private static void InitializeTrust(ApplicationGateway gateway, IApplicationModel model) =>
+        ((Task)typeof(ApplicationGateway).GetMethod("EnsureTrustStateAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(gateway, [model, CancellationToken.None])!).GetAwaiter().GetResult();
+
+    // Resolution is asynchronous because a resource sink's emitter credential goes through the
+    // application's credential issuer; the helper completes it so failures surface directly.
+    private static object? ResolveTelemetry(ApplicationGateway gateway, IApplicationModel model, string emitter)
+    {
+        var pending = (ValueTask<ResourceTelemetryInjection?>)typeof(ApplicationGateway)
+            .GetMethod("ResolveTelemetryAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(gateway, [model, model.Resources.Single(resource => resource.Name.ToString() == emitter), CancellationToken.None])!;
+        return pending.AsTask().GetAwaiter().GetResult();
     }
 
     private static StringContent Json(string body) => new(body, Encoding.UTF8, "application/json");

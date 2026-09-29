@@ -13,13 +13,15 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.SecretStore.Client;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
-/// <summary>Checks the actual process controller and registered area command clients together.</summary>
+/// <summary>
+/// Checks the actual process controller and the default generic control-plane command client
+/// (<see cref="ResourceControlPlaneCommandClient"/>) against real IdentityHub, Rezolvr and SecretStore hosts.
+/// </summary>
 [Collection(LocalGatewayConsoleCollection.Name)]
 public sealed class AreaCommandLocalTests
 {
@@ -40,6 +42,8 @@ public sealed class AreaCommandLocalTests
             StopGrace = TimeSpan.FromSeconds(5),
         };
         options.Parameters.Add("credential", "local-command-secret");
+        // Every area below is delivered through the single generic client; no area client is registered.
+        options.CommandClients.ShouldHaveSingleItem().ShouldBeOfType<ResourceControlPlaneCommandClient>();
         var gateway = new LocalGateway(options);
         IApplicationBuilder builder = Application.CreateBuilder((ApplicationName)"appa", ["--environment", AppEnvironment.Keys.Local]).UseGateway(gateway);
         // These transport fixtures use generic Local HTTP manifests, as the existing
@@ -55,6 +59,11 @@ public sealed class AreaCommandLocalTests
         AddCommand(builder, resolver, "rezolvr.add-a-record", "api.example", """{"name":"api.example","address":"192.0.2.7","ttlSeconds":300}""");
         AddCommand(builder, secrets, "secretstore.add-secret", "key", """{"path":"key","source":"parameter:credential"}""");
         AddCommand(builder, copy, "secretstore.add-secret", "copied", """{"path":"copied","source":"secrets:key"}""");
+        // The gateway knows no store protocol. These test doubles stand in for what a gateway's
+        // Program.cs registers through the SecretStore orchestration package: the store as a
+        // source, and the add-secret payload resolver that resolves 'secrets:key' through it.
+        builder.Providers.Sources["secrets"] = new SecretStoreClientSourceProvider();
+        builder.Providers.CommandInputs.Add(new AddSecretInputResolver());
         IApplicationModel model = builder.Build().Model;
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         try
@@ -69,7 +78,8 @@ public sealed class AreaCommandLocalTests
             gateway.GetTrustedIssuers(model.Name).Single(issuer => issuer.Issuer == "peer").AllowedCommandKinds
                 .ShouldBe(["rezolvr.add-a-record"]);
             ResourceEndpoint copiedEndpoint = gateway.ResourceStates.GetObservedEndpoints(copy.Resource.Id).Single(endpoint => endpoint.Name == "api");
-            string copiedToken = ((IResourceCommandCredentialProvider)gateway).GetResourceCommandCredential(model.Name, copy.Resource.Name);
+            string copiedToken = await ((IResourceCommandCredentialProvider)gateway)
+                .GetResourceCommandCredentialAsync(model.Name, copy.Resource.Name, cancellation.Token);
             Assimalign.Cohesion.SecretStore.Client.ISecretStoreClient copiedClient = Assimalign.Cohesion.SecretStore.Client.SecretStoreClient.Create(
                 new UriBuilder(copiedEndpoint.Scheme, copiedEndpoint.Host!, copiedEndpoint.Port).Uri,
                 new Assimalign.Cohesion.SecretStore.Client.ClientCredential(copiedToken));
@@ -124,6 +134,7 @@ public sealed class AreaCommandLocalTests
             StopGrace = TimeSpan.FromSeconds(5),
         };
         options.Parameters.Add("credential", "local-command-secret");
+        options.CommandClients.ShouldHaveSingleItem().ShouldBeOfType<ResourceControlPlaneCommandClient>();
         var gateway = new LocalGateway(options);
         IApplicationBuilder builder = Application.CreateBuilder((ApplicationName)"appa", ["--environment", AppEnvironment.Keys.Local]).UseGateway(gateway);
         IApplicationResourceDescriptor secrets = builder.AddResource(Manifest(root, "secrets", "SecretStore", "api", ["secretstore.add-secret"]) with
@@ -132,6 +143,7 @@ public sealed class AreaCommandLocalTests
             Mounts = [new ResourceManifestMount { Name = "tls", Kind = ResourceMountKind.Secret, ContainerPath = "/cohesion/mounts/tls" }],
         });
         AddCommand(builder, secrets, "secretstore.add-secret", "key", """{"path":"key","source":"parameter:credential"}""");
+        builder.Providers.CommandInputs.Add(new AddSecretInputResolver());
         IApplicationModel model = builder.Build().Model;
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         try
@@ -146,12 +158,13 @@ public sealed class AreaCommandLocalTests
             gateway.ResourceStates.GetCommandObservations(secrets.Resource.Id).Single().Status.ShouldBe(ResourceCommandStatus.Applied);
             string trustPath = Path.Combine(root, "state", "appa", ".state", "certs", "trust.protected");
             File.Exists(trustPath).ShouldBeTrue();
-            ResourceContext context = ResourceContext.FromEnvironment(new Dictionary<string, string?> { [ResourceEnvironment.TrustBundlePath] = trustPath });
+            ResourceContext context = ResourceContext.FromEnvironment(new Dictionary<string, string?> { [AppEnvironment.Variables.TrustBundlePath] = trustPath });
             using var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false };
             handler.SslOptions.RemoteCertificateValidationCallback = context.CreateOutboundTrustValidator();
             handler.SslOptions.RemoteCertificateValidationCallback.ShouldNotBeNull();
             using var transport = new HttpMessageInvoker(handler, disposeHandler: false);
-            string token = ((IResourceCommandCredentialProvider)gateway).GetResourceCommandCredential(model.Name, secrets.Resource.Name);
+            string token = await ((IResourceCommandCredentialProvider)gateway)
+                .GetResourceCommandCredentialAsync(model.Name, secrets.Resource.Name, cancellation.Token);
             ISecretStoreClient client = SecretStoreClient.Create(new UriBuilder(endpoint.Scheme, endpoint.Host!, endpoint.Port).Uri, new ClientCredential(token), transport);
             Encoding.UTF8.GetString((await client.GetSecretAsync("key", cancellation.Token)).Span).ShouldBe("local-command-secret");
 

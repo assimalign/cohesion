@@ -8,8 +8,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal sealed class LocalPortStore
@@ -58,9 +56,9 @@ internal sealed class LocalPortStore
             for (int index = 0; index < endpoints.Count; index++)
             {
                 ResourceEndpoint endpoint = endpoints[index];
-                string hostVariable = ResourceEnvironment.Endpoint(endpoint.Name, "HOST");
-                string portVariable = ResourceEnvironment.Endpoint(endpoint.Name, "PORT");
-                string schemeVariable = ResourceEnvironment.Endpoint(endpoint.Name, "SCHEME");
+                string hostVariable = AppEnvironment.Variables.Endpoint(endpoint.Name, "HOST");
+                string portVariable = AppEnvironment.Variables.Endpoint(endpoint.Name, "PORT");
+                string schemeVariable = AppEnvironment.Variables.Endpoint(endpoint.Name, "SCHEME");
 
                 if (!endpointVariables.Add(hostVariable))
                 {
@@ -114,7 +112,7 @@ internal sealed class LocalPortStore
                 if (endpoint.IsPublic)
                 {
                     environment.TryAdd(
-                        ResourceEnvironment.Endpoint(endpoint.Name, "PUBLIC_URL"),
+                        AppEnvironment.Variables.Endpoint(endpoint.Name, "PUBLIC_URL"),
                         address.ToEndpointString());
                 }
 

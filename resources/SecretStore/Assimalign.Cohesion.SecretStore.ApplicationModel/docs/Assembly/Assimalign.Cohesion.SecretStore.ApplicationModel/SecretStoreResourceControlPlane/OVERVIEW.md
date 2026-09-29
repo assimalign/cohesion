@@ -26,8 +26,10 @@ control-plane and store-protocol routes under `/cohesion/v1` on `api`.
 
 The factory does not host HTTP, persist secrets, verify credentials, or issue
 certificates. Those are runtime responsibilities. SecretStoreResourceCommandExtensions declares
-the two desired-state kinds. The manifest omits cohesion.trust.add because it is a gateway-owned
-trust channel, not an application declaration. Enroll remains deferred to item 31t.
+the two desired-state kinds. The manifest omits cohesion.trust.add because it is the gateway's
+trust-store channel, sent only by the `SecretStoreTrustedIssuerStore` provider a gateway registers
+with `builder.UseSecretStore(store).AsTrustStore()` (`SecretStore.ApplicationModel.Orchestration`),
+not an application declaration. Enroll remains deferred to item 31t.
 
 ## Links
 

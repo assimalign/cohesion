@@ -143,9 +143,20 @@ internal static class ResourceManifestWriter
         writer.WriteEndArray();
 
         writer.WriteStartArray("commands");
-        foreach (string command in manifest.Commands)
+        foreach (ResourceCommandModel command in manifest.Commands)
         {
-            writer.WriteStringValue(command);
+            // A command is its kind as a string unless the resource requires the gateway to resolve
+            // its inputs; only then is it the object form, so other manifests stay byte-identical.
+            if (!command.RequiresInputResolver)
+            {
+                writer.WriteStringValue(command.Kind);
+                continue;
+            }
+
+            writer.WriteStartObject();
+            writer.WriteString("kind", command.Kind);
+            writer.WriteBoolean("requiresInputResolver", true);
+            writer.WriteEndObject();
         }
         writer.WriteEndArray();
 

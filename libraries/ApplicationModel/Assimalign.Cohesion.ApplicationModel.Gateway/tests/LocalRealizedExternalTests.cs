@@ -9,7 +9,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Core;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
@@ -96,11 +95,11 @@ public class LocalRealizedExternalTests
                        await File.ReadAllBytesAsync(environmentCapture, cancellation.Token)))
             {
                 environment.RootElement
-                    .GetProperty(ResourceEnvironment.Application)
+                    .GetProperty(AppEnvironment.Variables.Application)
                     .GetString()
                     .ShouldBe(RetainedApplication);
                 environment.RootElement
-                    .GetProperty(ResourceEnvironment.Resource)
+                    .GetProperty(AppEnvironment.Variables.Resource)
                     .GetString()
                     .ShouldBe(Resource);
             }
@@ -190,6 +189,78 @@ public class LocalRealizedExternalTests
             exception.Message.ShouldContain("peer-token", Case.Sensitive);
             exception.Message.ShouldContain("credentials", Case.Sensitive);
             exception.Message.ShouldContain(Resource, Case.Sensitive);
+        }
+        finally
+        {
+            DeleteDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local --realize: A closure's source mount never inherits the composing application's registration")]
+    public async Task StartAsync_RealizedExternalHasSourceMount_ShouldNameCrossApplicationLimit()
+    {
+        // Arrange
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            $"cohesion-local-realize-source-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var gateway = new LocalGateway(
+            new LocalGatewayOptions
+            {
+                BaseDirectory = AppContext.BaseDirectory,
+                StateDirectory = Path.Combine(root, ".cohesion"),
+                ExportDirectory = Path.Combine(root, "exports"),
+                ReadinessBudget = TimeSpan.FromSeconds(2),
+            });
+        ExternalResourceDeclaration original = CreateDeclaration(
+            Path.Combine(root, "environment.json"),
+            Path.Combine(root, "bound.txt"),
+            Path.Combine(root, "stop-observed.txt"));
+        ResourceManifest manifest = original.Manifest! with
+        {
+            Mounts =
+            [
+                new ResourceManifestMount
+                {
+                    Name = "credentials",
+                    ContainerPath = "/inputs/credentials",
+                    Kind = ResourceMountKind.Secret,
+                    Source = "vault:peer-token",
+                },
+            ],
+        };
+        var declaration = new ExternalResourceDeclaration(
+            original.Name,
+            original.Application,
+            original.ReferencedEndpoints,
+            original.Optional,
+            manifest,
+            [manifest]);
+        IApplicationBuilder builder = Application.CreateBuilder(
+                ApplicationName.Parse(ConsumerApplication),
+                ["--environment", AppEnvironment.Keys.Local, "--realize", Resource])
+            .UseGateway(gateway);
+        builder.RemoteReference(
+            declaration,
+            options => options.Endpoint("http", "http://peer.invalid:8080"));
+        // The composing application registers a provider under the same source name; it serves the
+        // composing application's own resources only and is never applied to the closure.
+        var vault = new RecordingSourceProvider();
+        builder.Providers.Sources["vault"] = vault;
+        IApplicationModel model = builder.Build().Model;
+
+        try
+        {
+            // Act
+            InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+                () => ((IApplicationGateway)gateway).StartAsync(model));
+
+            // Assert
+            exception.Message.ShouldContain("'vault:peer-token'", Case.Sensitive);
+            exception.Message.ShouldContain($"belongs to application '{RetainedApplication}'", Case.Sensitive);
+            exception.Message.ShouldContain("never inherited by source name", Case.Sensitive);
+            exception.Message.ShouldContain("cross-application store sources are not supported yet", Case.Sensitive);
+            vault.Requests.ShouldBeEmpty();
         }
         finally
         {

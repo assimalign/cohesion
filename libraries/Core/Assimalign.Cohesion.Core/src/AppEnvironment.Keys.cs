@@ -10,7 +10,7 @@ public static partial class AppEnvironment
         /// <summary>
         /// Gets the Cohesion-specific environment-name variable.
         /// </summary>
-        public const string EnvironmentKey = Core.ResourceEnvironment.Environment;
+        public const string EnvironmentKey = Variables.Environment;
 
         /// <summary>
         /// Gets the .NET environment-name fallback variable.

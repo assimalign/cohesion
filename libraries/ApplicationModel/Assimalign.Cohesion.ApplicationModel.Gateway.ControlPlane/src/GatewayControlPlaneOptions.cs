@@ -18,7 +18,11 @@ public sealed class GatewayControlPlaneOptions
     public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
 
     /// <summary>
-    /// Gets the area command dispatchers, resolved by exact resource kind in registration order.
+    /// Gets the command dispatchers. A command uses the dispatcher whose
+    /// <see cref="IResourceCommandDispatcher.ResourceKind"/> equals the target's manifest kind,
+    /// otherwise the dispatcher registered with <see cref="IGatewayResourceCommandClient.AnyKind"/>;
+    /// with neither, the command is rejected. Each kind, including the catch-all, may be
+    /// registered once.
     /// </summary>
     public IList<IResourceCommandDispatcher> CommandDispatchers { get; } =
         new List<IResourceCommandDispatcher>();

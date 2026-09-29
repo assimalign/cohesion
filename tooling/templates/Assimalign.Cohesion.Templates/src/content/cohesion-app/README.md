@@ -3,7 +3,8 @@
 The two-person-company story is an API and a database using the implemented Local and InProcess gateways. Select Local to
 run the resources as supervised processes, or InProcess to run both inside the gateway process. Both resources are
 ordinary executables with a `Program.cs`, and each opts in to orchestration with one csproj line so `Acme.Gateway` can
-reference it.
+reference it. The gateway's `Program.cs` composes each one with its area's verb over the generated manifest:
+`builder.AddWeb(Manifests.AcmeApi)` and `builder.AddDatabase(Manifests.AcmeDatabase)`.
 
 Each project's `Properties/launchSettings.json` selects environment `Local` for developer-machine
 runs. Development uses strict deployed security. Use `dotnet run --no-launch-profile` when

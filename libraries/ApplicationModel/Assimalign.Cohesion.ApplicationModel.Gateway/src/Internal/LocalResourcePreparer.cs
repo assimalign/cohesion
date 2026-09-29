@@ -5,8 +5,6 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal sealed class LocalResourcePreparer
@@ -45,7 +43,7 @@ internal sealed class LocalResourcePreparer
         {
             GatewayEnvironmentVariables.Set(
                 environment,
-                ResourceEnvironment.ApplicationTrustKey,
+                AppEnvironment.Variables.ApplicationTrustKey,
                 Encoding.UTF8.GetString(compilation.Inputs.ApplicationTrustKey.Span));
         }
 

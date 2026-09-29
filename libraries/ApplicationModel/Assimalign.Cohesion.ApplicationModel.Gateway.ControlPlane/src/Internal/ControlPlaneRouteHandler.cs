@@ -1,23 +1,20 @@
-using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
-using Assimalign.Cohesion.Web.Routing;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
 
-internal sealed class ControlPlaneRouteHandler : IRouterRouteHandler
-{
-    private readonly Func<IHttpContext, CancellationToken, Task> _handler;
-
-    public ControlPlaneRouteHandler(Func<IHttpContext, CancellationToken, Task> handler)
-    {
-        _handler = handler ?? throw new ArgumentNullException(nameof(handler));
-    }
-
-    public Task InvokeAsync(
-        IHttpContext context,
-        CancellationToken cancellationToken = default) =>
-        _handler(context, cancellationToken);
-}
+/// <summary>Handles one matched control-plane route.</summary>
+/// <param name="context">The request being served.</param>
+/// <param name="routeValues">
+/// The template parameter values captured from the request path, keyed case-insensitively by
+/// parameter name; empty for a template without parameters.
+/// </param>
+/// <param name="cancellationToken">Cancels request handling.</param>
+/// <returns>A task that completes when the response is prepared.</returns>
+internal delegate Task ControlPlaneRouteHandler(
+    IHttpContext context,
+    IReadOnlyDictionary<string, string> routeValues,
+    CancellationToken cancellationToken);

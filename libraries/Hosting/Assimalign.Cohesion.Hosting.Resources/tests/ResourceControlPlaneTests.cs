@@ -5,7 +5,6 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources.Internal;
 
@@ -179,12 +178,12 @@ public class ResourceControlPlaneTests
         ResourceContext context = ResourceContext.FromEnvironment(
             new Dictionary<string, string?>
             {
-                [ResourceEnvironment.ContentRoot] = contentRoot,
-                [ResourceEnvironment.StopEvent] = "cohesion-stop-test",
-                [ResourceEnvironment.Endpoint("http", "HOST")] = endpoint.Host,
-                [ResourceEnvironment.Endpoint("http", "PORT")] = endpoint.Port.ToString(
+                [AppEnvironment.Variables.ContentRoot] = contentRoot,
+                [AppEnvironment.Variables.StopEvent] = "cohesion-stop-test",
+                [AppEnvironment.Variables.Endpoint("http", "HOST")] = endpoint.Host,
+                [AppEnvironment.Variables.Endpoint("http", "PORT")] = endpoint.Port.ToString(
                     System.Globalization.CultureInfo.InvariantCulture),
-                [ResourceEnvironment.Endpoint("http", "SCHEME")] = endpoint.Scheme,
+                [AppEnvironment.Variables.Endpoint("http", "SCHEME")] = endpoint.Scheme,
             });
         using IDisposable scope = ResourceRuntime.CreateScope(context);
         IResourceControlPlane controlPlane = ResourceControlPlane.Create();

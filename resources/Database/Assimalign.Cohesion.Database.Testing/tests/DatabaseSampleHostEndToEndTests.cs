@@ -14,7 +14,6 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Gateway;
 using Assimalign.Cohesion.Connections.Tcp;
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Sql.Client;
@@ -321,7 +320,7 @@ public sealed class DatabaseSampleHostEndToEndTests : IDisposable
             manifest.EnvironmentVariables,
             StringComparer.Ordinal)
         {
-            [ResourceEnvironment.BootstrapTokenPath] = credentialPath,
+            [AppEnvironment.Variables.BootstrapTokenPath] = credentialPath,
         };
 
         return manifest with

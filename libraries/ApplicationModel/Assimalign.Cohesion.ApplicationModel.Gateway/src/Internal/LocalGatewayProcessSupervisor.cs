@@ -6,8 +6,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal sealed class LocalGatewayProcessSupervisor
@@ -706,7 +704,7 @@ internal sealed class LocalGatewayProcessSupervisor
                 EventResetMode.ManualReset,
                 stopEventName,
                 out _);
-            startInfo.Environment[ResourceEnvironment.StopEvent] = stopEventName;
+            startInfo.Environment[AppEnvironment.Variables.StopEvent] = stopEventName;
         }
 
         var process = new Process { StartInfo = startInfo };

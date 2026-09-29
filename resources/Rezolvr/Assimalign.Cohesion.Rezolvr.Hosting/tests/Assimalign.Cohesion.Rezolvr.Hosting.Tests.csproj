@@ -13,6 +13,8 @@
 	</ItemGroup>
   <ItemGroup>
     <CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+    <!-- The command protocol tests register the ApplicationModel's default control plane, as an enabled executable does. -->
+    <CohesionProjectReference Include="Assimalign.Cohesion.Rezolvr.ApplicationModel" />
     <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
   </ItemGroup>
 </Project>

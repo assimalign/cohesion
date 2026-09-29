@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -140,6 +141,88 @@ public class ResourceCommandTests
         observation.Status.ShouldBe(ResourceCommandStatus.Rejected);
         observation.Detail.ShouldBe(client.Result.Detail);
         state.GetState(dependent.Resource.Id).ShouldBe(optional ? ResourceLifecycle.Running : ResourceLifecycle.Blocked);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Commands: An exact-kind client wins over a catch-all client registered before it")]
+    public async Task StartAsync_ExactAndCatchAllClients_ShouldPreferExactKind()
+    {
+        // Arrange
+        var events = new List<string>();
+        var state = new InMemoryResourceStateManager();
+        var catchAll = new RecordingCommandClient(events) { ResourceKind = IGatewayResourceCommandClient.AnyKind };
+        var exact = new RecordingCommandClient(events) { ResourceKind = "Database" };
+        var options = new ApplicationGatewayOptions();
+        options.CommandClients.Clear();
+        options.CommandClients.Add(catchAll);
+        options.CommandClients.Add(exact);
+        var gateway = new TestGateway(state, [new CommandController(events)], options: options);
+        IApplicationBuilder builder = CreateBuilder(gateway);
+        IApplicationResourceDescriptor target = AddCommandTarget(builder);
+        IApplicationModel model = builder.Build().Model;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        // Act
+        await ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
+
+        // Assert
+        exact.ApplyCount.ShouldBe(1);
+        catchAll.ApplyCount.ShouldBe(0);
+        state.GetCommandObservations(target.Resource.Id).Single().Status.ShouldBe(ResourceCommandStatus.Applied);
+        await ((IApplicationGateway)gateway).StopAsync(cancellation.Token);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Commands: A catch-all client serves kinds without an exact registration")]
+    public async Task StartAsync_OnlyCatchAllMatches_ShouldDeliverThroughCatchAll()
+    {
+        // Arrange
+        var events = new List<string>();
+        var state = new InMemoryResourceStateManager();
+        var otherKind = new RecordingCommandClient(events) { ResourceKind = "Web" };
+        var catchAll = new RecordingCommandClient(events) { ResourceKind = IGatewayResourceCommandClient.AnyKind };
+        var options = new ApplicationGatewayOptions();
+        options.CommandClients.Clear();
+        options.CommandClients.Add(otherKind);
+        options.CommandClients.Add(catchAll);
+        var gateway = new TestGateway(state, [new CommandController(events)], options: options);
+        IApplicationBuilder builder = CreateBuilder(gateway);
+        IApplicationResourceDescriptor target = AddCommandTarget(builder);
+        IApplicationModel model = builder.Build().Model;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        // Act
+        await ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
+
+        // Assert
+        catchAll.ApplyCount.ShouldBe(1);
+        otherKind.ApplyCount.ShouldBe(0);
+        catchAll.Address!.AbsolutePath.ShouldBe("/custom/control");
+        state.GetCommandObservations(target.Resource.Id).Single().Status.ShouldBe(ResourceCommandStatus.Applied);
+        await ((IApplicationGateway)gateway).StopAsync(cancellation.Token);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Commands: No matching client rejects the command with the kind named")]
+    public async Task StartAsync_NoMatchingClient_ShouldRejectNamingKind()
+    {
+        // Arrange
+        var events = new List<string>();
+        var state = new InMemoryResourceStateManager();
+        var options = new ApplicationGatewayOptions();
+        options.CommandClients.Clear();
+        options.CommandClients.Add(new RecordingCommandClient(events) { ResourceKind = "Web" });
+        var gateway = new TestGateway(state, [new CommandController(events)], options: options);
+        IApplicationBuilder builder = CreateBuilder(gateway);
+        IApplicationResourceDescriptor target = AddCommandTarget(builder, optional: true);
+        IApplicationModel model = builder.Build().Model;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        // Act
+        await ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
+
+        // Assert
+        ResourceCommandObservation observation = state.GetCommandObservations(target.Resource.Id).Single();
+        observation.Status.ShouldBe(ResourceCommandStatus.Rejected);
+        observation.Detail.ShouldBe("No command client is registered for resource kind 'Database'.");
+        await ((IApplicationGateway)gateway).StopAsync(cancellation.Token);
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Commands: Direct delivery uses registered control plane without a client")]
@@ -319,6 +402,127 @@ public class ResourceCommandTests
 
         events.ShouldBe(["remove:orders", "reconcile:db", "apply:renamed"]);
         gateway.LastExport!.Commands.Single().Key.ShouldBe("renamed");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Command inputs: A registered resolver rewrites only the delivered payload through the Sources registrations")]
+    public async Task StartAsync_RegisteredCommandInputResolver_ShouldDeliverResolvedPayloadAndKeepDeclaration()
+    {
+        // Arrange
+        var events = new List<string>();
+        var state = new InMemoryResourceStateManager();
+        var client = new RecordingCommandClient(events);
+        var options = new ApplicationGatewayOptions();
+        options.Parameters["db-owner"] = "owner-from-parameter";
+        options.CommandClients.Clear();
+        options.CommandClients.Add(client);
+        var gateway = new TestGateway(state, [new CommandController(events)], options: options);
+        IApplicationBuilder builder = CreateBuilder(gateway);
+        IApplicationResourceDescriptor target = AddCommandTarget(builder);
+        var vault = new RecordingSourceProvider { Secret = Encoding.UTF8.GetBytes("vault-value") };
+        builder.Providers.Sources["vault"] = vault;
+        var resolver = new RecordingCommandInputResolver("database.add-database", ["parameter:db-owner", "vault:orders-key"]);
+        builder.Providers.CommandInputs.Add(resolver);
+        IApplicationModel model = builder.Build().Model;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        try
+        {
+            // Act
+            await ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
+            await ((IApplicationGateway)gateway).ReconcileAsync(model, cancellation.Token);
+
+            // Assert
+            ResourceCommandInput declared = resolver.Declared.ShouldHaveSingleItem();
+            declared.Id.ShouldBe(model.Commands.Single().Id);
+            declared.Kind.ShouldBe("database.add-database");
+            declared.Owner.ShouldBe("appa");
+            declared.Key.ShouldBe("orders");
+            Encoding.UTF8.GetString(declared.Payload.Span).ShouldBe("{\"name\":\"orders\"}");
+            Encoding.UTF8.GetString(client.Command!.Payload.Span).ShouldBe("owner-from-parameter|vault-value");
+            ResourceSourceRequest request = vault.Requests.ShouldHaveSingleItem();
+            request.Store.ShouldBeNull();
+            request.Key.ShouldBe("orders-key");
+            request.Kind.ShouldBe(ResourceMountKind.Secret);
+            request.Consumer.ShouldBe((ResourceName)"db");
+            // The model and the applied-declaration ledger keep the declaration: the second pass
+            // matches it as the identical, already-applied declaration instead of re-delivering.
+            Encoding.UTF8.GetString(model.Commands.Single().Payload.Span).ShouldBe("{\"name\":\"orders\"}");
+            client.ApplyCount.ShouldBe(1);
+            state.GetCommandObservations(target.Resource.Id).Single().Status.ShouldBe(ResourceCommandStatus.Applied);
+        }
+        finally
+        {
+            await ((IApplicationGateway)gateway).StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Command inputs: A resolver refusal rejects the command with its detail and nothing is delivered")]
+    public async Task StartAsync_CommandInputResolverRefusal_ShouldRejectWithDetail()
+    {
+        // Arrange
+        var events = new List<string>();
+        var state = new InMemoryResourceStateManager();
+        var client = new RecordingCommandClient(events);
+        var options = new ApplicationGatewayOptions();
+        options.CommandClients.Clear();
+        options.CommandClients.Add(client);
+        var gateway = new TestGateway(state, [new CommandController(events)], options: options);
+        IApplicationBuilder builder = CreateBuilder(gateway);
+        IApplicationResourceDescriptor target = AddCommandTarget(builder, optional: true);
+        builder.Providers.CommandInputs.Add(new RecordingCommandInputResolver("database.add-database")
+        {
+            Failure = new InvalidOperationException("database.add-database source 'vault:x' is unresolved."),
+        });
+        IApplicationModel model = builder.Build().Model;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        try
+        {
+            // Act
+            await ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
+
+            // Assert
+            ResourceCommandObservation observation = state.GetCommandObservations(target.Resource.Id).Single();
+            observation.Status.ShouldBe(ResourceCommandStatus.Rejected);
+            observation.Detail.ShouldBe("database.add-database source 'vault:x' is unresolved.");
+            client.ApplyCount.ShouldBe(0);
+        }
+        finally
+        {
+            await ((IApplicationGateway)gateway).StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Command inputs: A resolver for another kind leaves the payload as declared")]
+    public async Task StartAsync_ResolverForAnotherKind_ShouldDeliverDeclaredPayload()
+    {
+        // Arrange
+        var events = new List<string>();
+        var client = new RecordingCommandClient(events);
+        var options = new ApplicationGatewayOptions();
+        options.CommandClients.Clear();
+        options.CommandClients.Add(client);
+        var gateway = new TestGateway(new InMemoryResourceStateManager(), [new CommandController(events)], options: options);
+        IApplicationBuilder builder = CreateBuilder(gateway);
+        AddCommandTarget(builder);
+        var resolver = new RecordingCommandInputResolver("other.rewrite");
+        builder.Providers.CommandInputs.Add(resolver);
+        IApplicationModel model = builder.Build().Model;
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        try
+        {
+            // Act
+            await ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
+
+            // Assert
+            resolver.Declared.ShouldBeEmpty();
+            Encoding.UTF8.GetString(client.Command!.Payload.Span).ShouldBe("{\"name\":\"orders\"}");
+        }
+        finally
+        {
+            await ((IApplicationGateway)gateway).StopAsync(CancellationToken.None);
+        }
     }
 
     private static IApplicationResourceDescriptor AddCommandTarget(IApplicationBuilder builder, bool optional = false, string key = "orders")

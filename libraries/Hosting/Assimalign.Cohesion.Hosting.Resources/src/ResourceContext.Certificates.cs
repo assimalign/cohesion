@@ -8,8 +8,6 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.Hosting.Resources;
 
 public sealed partial class ResourceContext
@@ -73,7 +71,7 @@ public sealed partial class ResourceContext
         }
         if (!_mounts.TryGetValue(name, out ResourceMount? mount))
         {
-            if (!ResourceEnvironment.TryGetMount(_environmentVariables, name, out string? path))
+            if (!AppEnvironment.TryGetMount(_environmentVariables, name, out string? path))
             {
                 return false;
             }
@@ -152,7 +150,7 @@ public sealed partial class ResourceContext
     public bool TryGetTrustBundle(out X509Certificate2Collection anchors)
     {
         anchors = new X509Certificate2Collection();
-        string? path = GetEnvironmentValue(ResourceEnvironment.TrustBundlePath);
+        string? path = GetEnvironmentValue(AppEnvironment.Variables.TrustBundlePath);
         if (string.IsNullOrWhiteSpace(path))
         {
             return false;

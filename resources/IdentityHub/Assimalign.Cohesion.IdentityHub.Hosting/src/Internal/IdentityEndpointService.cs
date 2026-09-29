@@ -178,7 +178,6 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
             ((IDisposable)_host).Dispose();
         }
 
-        _bootstrapVerifier?.Dispose();
         _signingKey?.Dispose();
         _serverCertificate?.Dispose();
         for (int index = 0; index < _serverCertificateChain.Length; index++)
@@ -194,8 +193,8 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
             path.StartsWith(Route("/cohesion/v1/"), StringComparison.Ordinal);
         if (namespaced)
         {
-            BootstrapTokenStatus authorization = Authorize(context);
-            if (authorization is not BootstrapTokenStatus.Authorized)
+            ResourceCredentialStatus authorization = await AuthorizeAsync(context).ConfigureAwait(false);
+            if (authorization is not ResourceCredentialStatus.Authorized)
             {
                 SetAuthorizationFailure(context, authorization);
                 return;
@@ -777,23 +776,44 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         context.Response.StatusCode = HttpStatusCode.Accepted;
     }
 
-    private BootstrapTokenStatus Authorize(IHttpContext context)
+    private async ValueTask<ResourceCredentialStatus> AuthorizeAsync(IHttpContext context)
     {
         if (!_requireAuthentication)
         {
-            return BootstrapTokenStatus.Authorized;
+            return ResourceCredentialStatus.Authorized;
         }
 
-        if (!context.Request.Headers.TryGetValue(HttpHeaderKey.Authorization, out HttpHeaderValue authorization) ||
-            !authorization.Value.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-        {
-            return BootstrapTokenStatus.Unauthorized;
-        }
-
-        return _bootstrapVerifier!.Validate(
-            authorization.Value["Bearer ".Length..],
+        ResourceCredentialPresentation presentation = ResourceCredentialPresentation.FromAuthorizationValue(
+            context.Request.Headers.TryGetValue(HttpHeaderKey.Authorization, out HttpHeaderValue authorization)
+                ? authorization.Value
+                : null,
             _resourceAudience,
             DateTimeOffset.UtcNow);
+        ResourceCredentialVerification verification = default;
+        if (ResourceRuntime.TryGetCredentialVerifier(_resourceContext, out IResourceCredentialVerifier? registered))
+        {
+            verification = await registered.VerifyAsync(presentation, context.RequestCancelled).ConfigureAwait(false);
+        }
+
+        if (verification.Status is ResourceCredentialStatus.NoResult)
+        {
+            verification = presentation.Scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase)
+                ? _bootstrapVerifier!.Validate(presentation.Credential, presentation.ExpectedAudience, presentation.Now)
+                : new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null);
+        }
+
+        if (verification.Status is not ResourceCredentialStatus.Authorized)
+        {
+            return verification.Status;
+        }
+
+        // The management plane serves only this application's gateway: the mapped form of the
+        // default verifier's iss and sub rules.
+        return verification.Caller is { Kind: ResourceCallerKind.Gateway } caller &&
+            string.Equals(caller.Application, _applicationIssuer, StringComparison.Ordinal) &&
+            string.Equals(caller.Subject, _resourceContext.GatewayName, StringComparison.Ordinal)
+                ? ResourceCredentialStatus.Authorized
+                : ResourceCredentialStatus.Forbidden;
     }
 
     private ClientAuthenticationStatus AuthenticateClient(
@@ -988,12 +1008,12 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         return false;
     }
 
-    private static void SetAuthorizationFailure(IHttpContext context, BootstrapTokenStatus status)
+    private static void SetAuthorizationFailure(IHttpContext context, ResourceCredentialStatus status)
     {
-        context.Response.StatusCode = status is BootstrapTokenStatus.Forbidden
+        context.Response.StatusCode = status is ResourceCredentialStatus.Forbidden
             ? HttpStatusCode.Forbidden
             : HttpStatusCode.Unauthorized;
-        if (status is BootstrapTokenStatus.Unauthorized)
+        if (status is ResourceCredentialStatus.Unauthorized)
         {
             context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer";
         }

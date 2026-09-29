@@ -7,8 +7,28 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// Fluently assembles an <see cref="IApplicationModel"/> and selects the gateway that
 /// will realize it, then produces a runnable <see cref="IApplication"/>.
 /// </summary>
+/// <remarks>
+/// Orchestration packages' <c>Use&lt;Area&gt;(...)</c> verbs write <see cref="Providers"/>, and
+/// <see cref="Build"/> copies those registrations into the built model as a frozen snapshot
+/// (<see cref="IApplicationModel.Providers"/>) and validates it against the built graph. Later
+/// registrations never reach an already-built model. This interface deliberately does not extend
+/// <see cref="IApplicationProviderBuilder"/>: that surface belongs to application-set members, whose
+/// verbs bind stores by <see cref="ResourceName"/>, while a builder's verbs bind the resource
+/// descriptors it created. The default builder implements both interfaces.
+/// </remarks>
 public interface IApplicationBuilder
 {
+    /// <summary>
+    /// Gets the application's mutable provider registrations: mount-source providers, the
+    /// certificate authority, the trusted-issuer store, command-input resolvers, the telemetry
+    /// sink, the credential issuer, and control-plane caller authenticators.
+    /// </summary>
+    /// <remarks>
+    /// Orchestration packages' <c>Use&lt;Area&gt;(...)</c> verbs write this instance;
+    /// <see cref="Build"/> snapshots and validates it.
+    /// </remarks>
+    ApplicationProviders Providers { get; }
+
     /// <summary>
     /// Gets the environment selected from <c>--environment</c> or the process environment.
     /// </summary>
@@ -116,13 +136,19 @@ public interface IApplicationBuilder
 
     /// <summary>
     /// Validates the graph, application identity, resource manifests, typed overrides,
-    /// planner diagnostics, realization plans, and resource commands, then returns the runnable application.
+    /// planner diagnostics, realization plans, resource commands, and provider registrations,
+    /// then returns the runnable application.
     /// </summary>
     /// <returns>The built application.</returns>
     /// <exception cref="InvalidOperationException">
     /// No gateway was selected; no resources are realized; or the application name, resource
     /// graph, manifest, typed override, planner diagnostic, realization plan, or command is invalid.
     /// Commands must have unique identities and one declaration per target ownership key.
+    /// Provider registrations are invalid when a <c>&lt;source&gt;:&lt;key&gt;</c> mount source of
+    /// the application's own manifests has no <see cref="ApplicationProviders.Sources"/> entry, when
+    /// a mount source or provider binding names a resource of another application (cross-application
+    /// store sources are not supported yet), or when a bound resource is missing or has a kind other
+    /// than the provider's <c>ResourceKind</c>.
     /// </exception>
     /// <remarks>
     /// After each resource plan validates, this method writes one informational

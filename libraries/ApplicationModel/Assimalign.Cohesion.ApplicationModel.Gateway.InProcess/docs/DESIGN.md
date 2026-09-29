@@ -34,18 +34,25 @@ Composite. Malformed exposure mappings and unsupported transports are refused wi
 resource named. Admission is a build-time fact; the runtime does not scan or dynamically load
 assemblies to discover candidates.
 
-The entry binding itself is registered twice by generated code, in two registries with one
-lookup. The generated `Add<Name>()` verb binds the descriptor it returns
-(`InProcessResourceDescriptorExtensions.InProcess`, keyed by the built resource instance), and the
-generated `Gateway.CreateBuilder(args)` binds every enabled, composable project manifest
-(`InProcessResourceManifestExtensions.InProcess`, keyed by the manifest's application and resource
-names). The planned resource snapshots its manifest, so the manifest registry cannot key on the
-instance; identity is the only stable key. The second registry is what makes a resource added
-through the area verb (`builder.AddWeb(Manifests.DocsWeb)`) or a third-party application model's
-verb over the same manifest (`builder.AddViuWeb(Manifests.DocsWeb)`) colocatable: the generated
-verb is one caller of the binding, not its owner. Both registrations carry the same
-`DynamicDependency` root, so trimming keeps the entry point whichever path the apphost uses.
-Rebinding either key to a different assembly or content root is refused.
+The entry binding lives in two registries with one lookup: a descriptor registry
+(`InProcessResourceDescriptorExtensions.InProcess`, keyed by the built resource instance) and a
+manifest registry (`InProcessResourceManifestExtensions.InProcess`, keyed by the manifest's
+application and resource names). The gateway consults the descriptor registry first and the
+manifest registry whenever a resource has no descriptor binding. Generated code writes only the
+manifest registry: the generated `Gateway.CreateBuilder(args)` binds every enabled, composable
+project manifest, with a `DynamicDependency` root for each entry point. The planned resource
+snapshots its manifest, so the manifest registry cannot key on the instance; identity is the only
+stable key. Keying by identity is what makes a resource colocatable whichever verb adds it: the
+area's hand-written verb (`builder.AddWeb(Manifests.DocsWeb)`), a third-party application model's
+verb over the same manifest (`builder.AddViuWeb(Manifests.DocsWeb)`), or
+`builder.AddResource(Manifests.DocsWeb)`. The descriptor registry remains for builders that are not
+created through `Gateway.CreateBuilder`; a hand-written caller must supply an equivalent trimming
+root. Rebinding either key to a different assembly or content root is refused.
+
+*Superseded (owner decision of 2026-09-25, recorded as R8 in the
+[developer-experience design](../../../../docs/DEVELOPER_EXPERIENCE_DESIGN.md)):* `Sdk.Gateway`
+used to generate an `Add<Name>()` verb per resource that also bound the descriptor it returned.
+Verb generation is dropped, so no generated code calls the descriptor binding any more.
 
 ## Entry invocation and host adoption
 
@@ -203,7 +210,7 @@ HTTPS mounts retain the existing FromBytes handover. The context constructor rec
 
 ## Telemetry invocation values (31b)
 
-InProcessPlanController.Compile copies the plan environment and applies the gateway's public IResourceTelemetry view through ApplyEnvironment. InProcessContextFactory then materializes `.state/telemetry.headers` through ILocalResourceState.MaterializeRuntimeFilesAsync immediately after the trust bundle, including empty-content removal. CreateAmbientValues carries endpoint, protocol and that protected path into ResourceContext; Hosting.Telemetry reads them through the additive TryGetEnvironmentValue member, with no process-environment fallback. The headers use the same ResourceMount.ReadAllBytes path as local hosts. Member stop invokes the registered telemetry IHostService for bounded final-batch flush. Discovery ordering, scoped emitter credentials and the absence of an inferred dependency follow the gateway design.
+InProcessPlanController.Compile copies the plan environment and applies the gateway's public IResourceTelemetry view through ApplyEnvironment. InProcessContextFactory then materializes `.state/telemetry.headers` through ILocalResourceState.MaterializeRuntimeFilesAsync immediately after the trust bundle, including empty-content removal. CreateAmbientValues carries endpoint, protocol and that protected path into ResourceContext; Hosting.Telemetry reads them through the additive TryGetEnvironmentValue member, with no process-environment fallback. The headers use the same ResourceMount.ReadAllBytes path as local hosts. Member stop invokes the registered telemetry IHostService for bounded final-batch flush. Sink selection (only the sink registered in `ApplicationProviders.Telemetry`, never one discovered by kind), scoped emitter credentials and the absence of an inferred dependency follow the gateway design.
 
 ## Gateway boundary (Phase 19)
 

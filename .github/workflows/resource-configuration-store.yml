@@ -2,7 +2,12 @@ name: Configuration Store
 on:
   push:
     paths:
+      # The area glob covers ConfigurationStore.ApplicationModel.Orchestration. Its tests run an application set
+      # through a real ApplicationModel.Gateway (StoreGateway : ApplicationGateway), so a change to
+      # the provider seams, the gateway that resolves through them, or Core reruns them.
       - 'resources/ConfigurationStore/**'
+      - 'libraries/ApplicationModel/**'
+      - 'libraries/Core/**'
       - '.github/workflows/resource-configuration-store.yml'        # When Pipeline File Changes
 
 permissions:
@@ -17,6 +22,7 @@ jobs:
         projects: [
             'Assimalign.Cohesion.ConfigurationStore',
             'Assimalign.Cohesion.ConfigurationStore.ApplicationModel',
+            'Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration',
             'Assimalign.Cohesion.ConfigurationStore.Client',
             'Assimalign.Cohesion.ConfigurationStore.Hosting'
         ]

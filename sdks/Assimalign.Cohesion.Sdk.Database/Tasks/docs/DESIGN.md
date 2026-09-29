@@ -20,11 +20,13 @@ engine, its storage implementation, or `Connections.Tcp` into MSBuild.
 
 ## Orchestration commands
 
-When `CohesionApplicationModel=enabled`, the base manifest task writes this SDK's
-`CohesionCommand` defaults, `database.add-database` and `database.add-principal`, as
-bare strings in `commands`. These advertise the Database default control plane's
-bounded command set. Typed declarations ship in Database.ApplicationModel and are
-delivered through Database.Client; the SDK never executes them or places payloads in
+When `CohesionApplicationModel=enabled`, the `Assimalign.Cohesion.Sdk.ApplicationModel`
+manifest task writes this SDK's `CohesionCommand` defaults, `database.add-database` and
+`database.add-principal`, as bare strings in `commands`; neither sets `RequiresInputResolver`,
+the metadata that switches an entry to the object form. These advertise the Database
+default control plane's bounded command set. Typed declarations ship in
+Database.ApplicationModel, and the gateway delivers them through its generic
+`ResourceControlPlaneCommandClient`; the SDK never executes them or places payloads in
 the manifest. The schema compiler and migration path remain independent.
 
 ## Model selection

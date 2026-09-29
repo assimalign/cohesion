@@ -12,8 +12,9 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 /// <remarks>
 /// A manifest binding is keyed by the manifest's application and resource names, so a resource
 /// added through any verb that accepts the generated <c>Manifests.&lt;Name&gt;</c> member — the
-/// generated <c>Add&lt;Name&gt;()</c> verb, the area's own <c>Add&lt;Area&gt;(manifest)</c>, or a
-/// third-party application model's verb over it — is colocatable by the in-process gateway.
+/// area application model's hand-written <c>Add&lt;Area&gt;(manifest, options)</c>, a
+/// third-party application model's verb over it, or <c>AddResource(manifest)</c> — is
+/// colocatable by the in-process gateway.
 /// </remarks>
 public static class InProcessResourceManifestExtensions
 {

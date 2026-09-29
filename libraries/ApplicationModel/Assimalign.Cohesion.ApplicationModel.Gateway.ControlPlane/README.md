@@ -2,8 +2,9 @@
 
 This package is the hosting-free HTTP control plane shared by Cohesion gateways. It serves the
 gateway's canonical `ApplicationExportDocument`, live resource observations, and desired resource
-commands over `Http.Connections` + TCP + `Web.Routing`; it does not reference a Web or platform
-Hosting package.
+commands over `Http.Connections` + TCP, with an internal matcher for its five fixed routes. It
+references nothing under `resources/**`, so it uses no Web package (not even `Web.Routing`) and no
+platform Hosting package.
 
 `GatewayControlPlane.Configure(options, runMode)` installs the resolver client for every gateway
 mode and installs the server factory for `Run` and `Apply`. The Gateway SDK emits that call before
@@ -33,8 +34,12 @@ resolver use. Gateway-owned external resolution uses the parameterless client an
 short-lived application credential plus the caller's trusted peer snapshot for export-key
 verification.
 
-Area packages register `IResourceCommandDispatcher` implementations when their protocol clients
-land. The serving gateway passes the target's current resource-scoped bootstrap credential to the
-dispatcher. Identical PUT retries are idempotent, and a command key already applied for another
-owner is rejected. Until a dispatcher lands, commands for that resource kind remain queryable as
-`Rejected` with a named reason; they are never silently discarded.
+`Configure` turns the gateway's `CommandClients` into `IResourceCommandDispatcher` registrations.
+By default that is the generic `ResourceControlPlaneCommandClient` (`AnyKind`). A command uses the
+dispatcher for its exact manifest kind, and otherwise the catch-all. The serving gateway passes
+the target's current resource-scoped `ResourceAccess` credential to the dispatcher. Callers are
+authenticated by the built-in ES256 trusted-issuer check and then by the application's registered
+`IApplicationCallerAuthenticator`s; authorization applies to the mapped caller. Identical PUT retries
+are idempotent, and a command key already applied for another owner is rejected. A factory with
+neither a matching nor a catch-all dispatcher still records commands for that kind as `Rejected`
+with a named reason; they are never silently discarded.

@@ -1,13 +1,19 @@
 using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>
 /// Common options for plan-driven application gateways.
 /// </summary>
+/// <remarks>
+/// Stores, the certificate authority, the trusted-issuer store, command-input resolvers, and the
+/// telemetry sink are not gateway options: each application registers them in
+/// <see cref="IApplicationBuilder.Providers"/> for an application built in code, or in
+/// <see cref="IApplicationProviderBuilder.Providers"/> for an application-set member through its
+/// <c>AddApplication(..., configure)</c> callback — and the gateway resolves
+/// them from <see cref="IApplicationModel.Providers"/>.
+/// </remarks>
 public class ApplicationGatewayOptions
 {
     /// <summary>
@@ -29,23 +35,22 @@ public class ApplicationGatewayOptions
     public string? ParameterFile { get; set; }
 
     /// <summary>
-    /// Gets or sets the Hosting-free client seam used for SecretStore and ConfigurationStore
-    /// source resolution. Defaults to the thin protocol-client implementation.
+    /// Gets the command clients that deliver declarative commands to realized resources.
     /// </summary>
-    public IGatewayStoreClient StoreClient { get; set; } = new GatewayStoreClient();
-
-    /// <summary>
-    /// Gets per-kind command clients. Shipped resource kinds use their area clients
-    /// by default; replace a registration to customize delivery without referencing Hosting.
-    /// </summary>
+    /// <remarks>
+    /// Defaults to a single <see cref="ResourceControlPlaneCommandClient"/>, which serves every
+    /// resource kind through the standard control-plane <c>commands</c> route. For each delivery the
+    /// gateway uses the first client whose <see cref="IGatewayResourceCommandClient.ResourceKind"/>
+    /// equals the target's manifest kind and, only when none matches, the first client declaring
+    /// <see cref="IGatewayResourceCommandClient.AnyKind"/>. Add an exact-kind client to customize one
+    /// kind's delivery without referencing its Hosting package. Clients are not consulted for a
+    /// target reached through a registered in-process control plane or a peer gateway; with no
+    /// matching client, any other delivery is rejected.
+    /// </remarks>
     public IList<IGatewayResourceCommandClient> CommandClients { get; } =
         new List<IGatewayResourceCommandClient>
         {
-            new DatabaseGatewayCommandClient(),
-            new ConfigurationStoreGatewayCommandClient(),
-            new IdentityHubGatewayCommandClient(),
-            new RezolvrGatewayCommandClient(),
-            new SecretStoreGatewayCommandClient(),
+            new ResourceControlPlaneCommandClient(),
         };
 
     /// <summary>Gets or sets the time source used to issue credentials.</summary>
@@ -106,7 +111,7 @@ public class ApplicationGatewayOptions
 
     /// <summary>Validates the common gateway settings before a derived options type validates its platform settings.</summary>
     /// <exception cref="ArgumentNullException">
-    /// <see cref="ApplicationVersion"/>, <see cref="StoreClient"/>, or <see cref="TimeProvider"/> is null.
+    /// <see cref="ApplicationVersion"/> or <see cref="TimeProvider"/> is null.
     /// </exception>
     /// <exception cref="ArgumentException">
     /// A configured directory or parameter path is empty, the application version is empty,
@@ -133,7 +138,6 @@ public class ApplicationGatewayOptions
                 nameof(ParameterFile));
         }
 
-        ArgumentNullException.ThrowIfNull(StoreClient);
         ArgumentNullException.ThrowIfNull(TimeProvider);
 
         ValidateLifetime(

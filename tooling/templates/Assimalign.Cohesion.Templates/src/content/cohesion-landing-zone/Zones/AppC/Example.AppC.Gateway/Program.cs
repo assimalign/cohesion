@@ -7,10 +7,10 @@ builder.RemoteReference(
     remote => remote.Endpoint("api", "https://localhost:18443"));
 builder.RemoteReference(Externals.IdentityHub, remote => { });
 
-builder.AddAppCDatabase();
-builder.AddAppCApi();
-builder.AddAppCSpa();
-// AppCSecretStore stays referenced and generated; this sample realizes the Database/API/SPA subset.
+builder.AddDatabase(Manifests.AppCDatabase);
+builder.AddWeb(Manifests.AppCApi);
+builder.AddWeb(Manifests.AppCSpa);
+// Manifests.AppCSecretStore stays referenced and generated; this sample realizes the Database/API/SPA subset.
 builder.UseGateway(args);
 
 await builder.Build().RunAsync();

@@ -26,8 +26,9 @@ internal static class Help
         parameter list prints names only; --stdin preserves the full input, including newlines.
         status reports declared endpoints, allocated ports and local process liveness.
         --live needs this application's trust issue --developer token, or COHESION_TOKEN.
-        trust add stores the grant in the application's own SecretStore first;
-        trusted-issuers.json is a Local-only fallback when that store is unreachable.
+        trust add stores the grant in the application's registered trust store
+        (for example UseSecretStore(store).AsTrustStore()); without one, Local keeps
+        trusted-issuers.json and other environments refuse the grant.
         login uses IdentityHub device flow (Local + loopback at HEAD).
         Login tokens are stored for a later IdentityHub bridge; gateways do not accept them yet.
         --print emits only the login token to stdout; approval instructions go to stderr.

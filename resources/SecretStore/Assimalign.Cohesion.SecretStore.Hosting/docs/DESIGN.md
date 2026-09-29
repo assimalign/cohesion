@@ -74,9 +74,20 @@ Secret, certificate, trust-command, lifecycle, and child-enrollment operations a
 require the ambient application's issuer. Only the Platform intermediate-signing route accepts a
 trusted peer issuer, and its request application must equal that authenticated issuer.
 
+The verifier is a thin configuration of the shared ES256 `JsonWebTokenValidator`
+(IdentityModel.Token.JsonWebToken) whose issuer resolver reads the protected trust store, with
+`ResourceCredentialProfile` constants (Hosting.Resources) for the ceiling and skew. Trusted-issuer keys are parsed
+and checked with `JsonWebKey.TryValidateEs256SigningKey` (exact member set, P-256 point, RFC 7638
+`kid`) instead of a local copy. A resource credential verifier registered for the executable
+(`ResourceRuntime.TryGetCredentialVerifier`) is consulted first on every request and for the startup
+bootstrap-credential check; `NoResult` falls through to the trusted-issuer verification. Either path
+yields a `ResourceCaller`, and every rule below compares its `Application` (the token's `iss` for
+application-key credentials; `Kind` is `Gateway` for the ambient application and `Peer` otherwise)
+and `Subject` instead of raw claims.
+
 Missing, malformed, expired, untrusted, or incorrectly signed credentials return `401` and a
 `WWW-Authenticate: Bearer` challenge. A valid token for the wrong audience returns `403`.
-Trust commands must set `owner` to `<iss>@<sub>`; declared secret and certificate commands use `<iss>`. Standalone hosts (no gateway name) do
+Trust commands must set `owner` to `<application>@<subject>` (`<iss>@<sub>`); declared secret and certificate commands use `<application>` (`<iss>`). Standalone hosts (no gateway name) do
 not require bearer authentication and therefore may bind only to loopback. Plaintext HTTP is
 allowed only on loopback in `Local`, regardless of hosting mode. This is bootstrap
 credential authentication, not a general user authorization or secret-policy engine.
@@ -145,27 +156,44 @@ dynamic activation. The implementation remains trimming- and NativeAOT-oriented.
 
 Kinds use verb-noun kebab under the area prefix. The examples `rezolvr.record` and
 `identityhub.audience` in developer-experience design section 7 are illustrative; item 27's design
-rewrite should reflect the landed convention. Manifest commands remain bare JSON strings.
+rewrite should reflect the landed convention. A manifest command is a bare JSON string unless its
+kind requires an input resolver: since 2026-09-28 `Sdk.SecretStore` sets `RequiresInputResolver="true"`
+on the `secretstore.add-secret` `CohesionCommand` item, so that entry is written as
+`{ "kind": "secretstore.add-secret", "requiresInputResolver": true }`, while
+`secretstore.issue-certificate` stays a string.
 Typed verbs validate argument shape and use source-generated JSON metadata. Build validates the
 advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
 The default control plane handles id replay and owner isolation; each area handler also accepts
 an identical reapplication with a different id. Conflicts return named Rejected details.
 
-AddSecret declarations carry only a source reference. `parameter:<name>` resolves through the
-gateway's existing parameter provider before delivery. `<resource>:<key>` uses the existing store
-resolver and requires a declared dependency and an available source endpoint. `literal:<value>`
+AddSecret declarations carry only a source reference. The gateway resolves it before delivery only
+through a registered `secretstore.add-secret` input resolver, normally the one `UseSecretStore(...)`
+registers (`SecretStore.ApplicationModel.Orchestration`): `parameter:<name>` from the application's
+parameter bindings, `<resource>:<key>` through the source provider registered for that store, which
+requires a declared dependency and an available source endpoint. `literal:<value>`
 is rejected during declaration construction: literal secret material never enters the desired
 model, deterministic id or manifest. Only the transient delivery envelope contains resolved bytes;
 the protected repository stores the value and source together. An unresolved source is a named
 Rejected result. Original source-only commands remain the gateway's declaration ledger.
+
+Because the manifest marks `secretstore.add-secret` as requiring an input resolver, an application
+that declares `AddSecret` without registering one fails `IApplicationBuilder.Build()` (an
+application-set member fails at set start), naming the
+`Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration` package and the
+`builder.UseSecretStore(...)` call to add, so such a command is never delivered. The store keeps
+its own check as defense in depth: `SecretStoreResourceCommandHandler` rejects an add-secret whose
+payload has no string `resolvedValue`, with a detail naming the same package and verb, for any
+sender that bypasses that validation. `secretstore.issue-certificate` is not flagged and is still
+delivered as declared when no resolver is registered.
 
 IssueCertificate honors the supplied subject and SAN set. An existing certificate with different
 identity is rejected until deleted; renewal preserves its identity. Private key and leaf storage
 reuse the existing protected CA repository.
 
 The control plane also accepts `cohesion.trust.add`, which the SDK manifest deliberately does not
-advertise. It is the gateway-owned trust channel through IGatewayStoreClient, never a Build-declared
-application command. Trust keeps owner `issuer@subject`, POST-only behavior, empty 204 success,
+advertise. It is the gateway's trust-store channel, sent only by the `SecretStoreTrustedIssuerStore`
+provider a gateway registers with `builder.UseSecretStore(store).AsTrustStore()`
+(`SecretStore.ApplicationModel.Orchestration`), never a Build-declared application command. Trust keeps owner `issuer@subject`, POST-only behavior, empty 204 success,
 empty 409 conflict and existing 403 authorization refusals. New commands use owner `issuer`, accept
 POST and DELETE, return 200 application/octet-stream on success, and JSON `{status,detail}` refusals.
 Malformed command envelopes return 400 with that JSON refusal shape, including invalid base64 payloads.

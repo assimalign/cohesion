@@ -12,7 +12,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 	</ItemGroup>
 	<ItemGroup>
 		<None

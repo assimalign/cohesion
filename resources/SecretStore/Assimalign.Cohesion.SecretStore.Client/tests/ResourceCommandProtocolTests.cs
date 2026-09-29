@@ -86,6 +86,16 @@ public sealed class ResourceCommandProtocolTests
                 conflict.Detail.ShouldContain("appa", Case.Sensitive);
                 conflict.Detail.ShouldContain(existing.Key, Case.Sensitive);
             }
+
+            // Defense in depth: an add-secret whose source the gateway never resolved is refused by the store itself.
+            var unresolved = new Assimalign.Cohesion.Hosting.Resources.ResourceCommand(
+                "command-unresolved", "secretstore.add-secret", "appa", "orders/unresolved",
+                Encoding.UTF8.GetBytes("{\"path\":\"orders/unresolved\",\"source\":\"parameter:key\"}"));
+            ResourceCommandRejectedException unresolvedRejection = await Should.ThrowAsync<ResourceCommandRejectedException>(
+                () => plane.ExecuteCommandAsync(unresolved, timeout.Token).AsTask());
+            unresolvedRejection.Detail.ShouldContain("is unresolved for path 'orders/unresolved'", Case.Sensitive);
+            unresolvedRejection.Detail.ShouldContain("Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration", Case.Sensitive);
+            unresolvedRejection.Detail.ShouldContain("builder.UseSecretStore(...)", Case.Sensitive);
             ResourceCommand owned = commands[^1];
             ResourceCommandObservation refused = await client.ObserveCommandAsync(
                 new ResourceCommand("foreign", owned.Kind, "other", owned.Key, owned.Payload), timeout.Token);

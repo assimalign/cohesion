@@ -6,8 +6,6 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel.Tests;
 
 public class RemoteReferenceTests
@@ -159,8 +157,8 @@ public class RemoteReferenceTests
         identityPlan.Hints.ContainsKey("cohesion.external").ShouldBeFalse();
         cachePlan.Hints.ContainsKey("cohesion.external").ShouldBeFalse();
         platformPlan.Hints["cohesion.external"].ShouldBe("true");
-        identityPlan.Container.Environment[ResourceEnvironment.Application].ShouldBe("identity");
-        cachePlan.Container.Environment[ResourceEnvironment.Application].ShouldBe("identity");
+        identityPlan.Container.Environment[AppEnvironment.Variables.Application].ShouldBe("identity");
+        cachePlan.Container.Environment[AppEnvironment.Variables.Application].ShouldBe("identity");
     }
 
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Realize replaces an inferred child external with its embedded manifest")]

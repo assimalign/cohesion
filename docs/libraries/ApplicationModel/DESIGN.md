@@ -1,6 +1,8 @@
 # ApplicationModel — Design v3
 
-> **Status: implemented library-family design, 2026-09-14.** This file is the
+> **Status: implemented library-family design, 2026-09-14; amended 2026-09-25 for the owner's
+> bring-your-own identity, clients, and stores decisions (R8 in the signed design; §2, §4.4,
+> §4.7, §4.8, §6, §8.3, §9.5, §10, B44).** This file is the
 > ApplicationModel library's design. The signed [developer-experience design](../../DEVELOPER_EXPERIENCE_DESIGN.md)
 > is the direction of record and wins on every conflict. This v3 replaces v2.1;
 > it does not establish a competing authority. Detailed contracts belong to the
@@ -33,14 +35,23 @@ the supported in-process subset, as defined by the
 
 | Package | Responsibility and owning design |
 |---|---|
-| `Assimalign.Cohesion.ApplicationModel` | Portable graph, manifest, planning, application-set, external-reference and control-plane contracts; [package design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md). |
-| `Assimalign.Cohesion.ApplicationModel.Gateway` | Shared plan-driven lifecycle, Local realization, observed state, input resolution and telemetry injection; [package design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md). |
+| `Assimalign.Cohesion.ApplicationModel` | Portable graph, manifest, planning, application-set, external-reference and control-plane contracts, plus the gateway provider seams (`ApplicationProviders`: mount sources, certificate authority, trust store, command inputs, telemetry sink, credential issuer, caller authenticators) and their `Build()` validation; [package design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md). |
+| `Assimalign.Cohesion.ApplicationModel.Gateway` | Shared plan-driven lifecycle, Local realization, observed state, input resolution through `model.Providers`, credential minting, generic control-plane command delivery and telemetry injection; [package design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md). |
 | `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` | Real entry-point invocation under isolated ambient contexts, explicit admission and member lifecycle; [package design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md) (item 24, `a03cfcf8`). |
 | `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` | Authenticated discovery, observed views, commands and federation endpoints; [package design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/DESIGN.md) (item 23a, `1a5cce67`). |
 
 Kubernetes and Docker gateway packages live in **cohesion-platforms**. Their compiler
 implementations and platform dependencies are owned there. There is no Kubernetes
 package, `KubernetesClient` dependency, or platform AOT carve-out in this repository's family.
+
+No package in this family references a `resources/**` project (COHLIB001, owner decisions of
+2026-09-25, recorded as R8 in the signed design). The family defines the provider seams; the
+shipped implementations are opt-in packages under `resources/<Area>/` that a gateway references
+and registers explicitly — today
+`Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration` (`builder.UseSecretStore(store)`,
+then `.AsCertificateAuthority()` / `.AsTrustStore()`) and
+`Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration`
+(`builder.UseConfigurationStore(store)`). Nothing is registered by convention.
 
 ## 3. Contract ownership and reading order
 
@@ -81,6 +92,25 @@ returning `IRezolvrResourceDescriptor`, in `RezolvrResourceExtensions.cs:19`.
 Descriptor-specific command verbs extend their typed descriptor. They do not move
 feature contracts into the gateway or the area's hosting module.
 
+These hand-written verbs are what a gateway's `Program.cs` calls, over the manifests
+`Sdk.Gateway` generates: `builder.AddWeb(Manifests.AppAApi, new WebResourceOptions { Replicas = 2 })`,
+and `builder.AddResource(Manifests.<Name>)` for a kind with no ApplicationModel package. The SDK
+generates no per-resource verb (§8.3).
+
+Provider registration verbs follow the same shape in the opt-in
+`<Area>.ApplicationModel.Orchestration` packages: `extension(IApplicationBuilder)` members that take
+the store's descriptor, for an application built in code, and `extension(IApplicationProviderBuilder)`
+members that take its `ResourceName`, for an application-set member (§4.7). The two are separate
+interfaces — `IApplicationBuilder` does not extend `IApplicationProviderBuilder`, and the default
+builder implements both (owner decision of 2026-09-27, R10 in the signed design) — and both forms
+write the same `ApplicationProviders` through each interface's `Providers`. For a builder,
+`Build()` freezes the registrations into `IApplicationModel.Providers` and validates them — every
+`<source>:<key>` mount of the application's own resources has a provider, every bound resource is
+a resource of the application with the provider's kind, no source or binding reaches another
+application, and every declared command whose target's manifest marks its kind
+`requiresInputResolver` has an `IResourceCommandInputResolver` for that kind in
+`ApplicationProviders.CommandInputs` (§4.8).
+
 ### 4.5 Executable artifacts **[R]**
 
 The compatibility capability `IExecutableResource.Artifact` identifies the customer's
@@ -96,13 +126,50 @@ assemblies. The [base package design](../../../libraries/ApplicationModel/Assima
 owns those contracts (items 23/38c, `45e36dba`, `63975fcc`), and the ControlPlane design
 owns authenticated remote discovery.
 
+A member model imported from its gateway's describe output or export carries no providers
+(`ApplicationProviders.Empty`): providers are code. The set registers them per member with
+`set.AddApplication(Applications.Platform, platform => platform.UseSecretStore("platform-secretstore").AsCertificateAuthority())`;
+the callback runs once per run after the member's model is resolved, and the set then freezes the
+registrations, attaches them to that member's model alone, and validates them with the `Build()`
+rules. A member never inherits another member's registrations, or the set's, by source or resource
+name. Cross-application store sources — a mount that reads a store of another application, or a
+provider bound to one — are rejected (owner decision 4) and remain a follow-up.
+
 ### 4.8 Commands
 
 Commands are declared on descriptors, scheduled by the gateway and authorized by the
 provider control plane; the [base package](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md)
 and [ControlPlane package](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/docs/DESIGN.md)
 own the contracts (items 23b/31c, `529d600b`, `81570328`). Landed wire kinds use
-`<area>.<verb-noun-kebab>` and manifest `commands` remains a string array (B1–B5).
+`<area>.<verb-noun-kebab>` (B1–B5). Manifest `commands` lists each accepted kind as a string, or,
+for a kind whose payload the gateway must resolve before delivery, as the object
+`{ "kind": "…", "requiresInputResolver": true }` (`ResourceManifestCommand.RequiresInputResolver`,
+written from the area SDK's `CohesionCommand` `RequiresInputResolver="true"` metadata); a manifest
+with no marked kind is byte-identical to the string-array form (B2, amended by the owner decision
+of 2026-09-28, R11 in the signed design).
+
+Delivery is area-neutral. `ApplicationGatewayOptions.CommandClients` defaults to the public
+`ResourceControlPlaneCommandClient`, which POSTs and DELETEs the command envelope at the target's
+`<controlPlane>/commands` for a target of any resource kind (`IGatewayResourceCommandClient.AnyKind`);
+dispatch uses a client registered for the target's exact resource kind first, then the any-kind
+client. The five per-area gateway command adapters are deleted under R8 of 2026-09-25: command
+delivery is a library abstraction (B44). The `IdentityHub.Client` and `Rezolvr.Client` packages
+behind two of them are retired by owner decision 7 of 2026-09-25. A command whose payload must be resolved before delivery is
+rewritten by an `IResourceCommandInputResolver` registered for its kind in
+`ApplicationProviders.CommandInputs` (`secretstore.add-secret` by `UseSecretStore`). The gateway
+uses the resolvers of the application that declares the command, whether the target is its own
+resource or another application's, and `Build()` — or an application set, when it starts the
+member — checks the same pairing: a declared command whose target's manifest marks its kind
+`requiresInputResolver` fails unless the declaring application registers a resolver for that kind.
+The SecretStore SDK marks `secretstore.add-secret`, whose payload names a `parameter:<name>` or
+`<store>:<key>` source. The error names the command, its key and the target; for the application's
+own target it names `Assimalign.Cohesion.<Kind>.ApplicationModel.Orchestration` and
+`builder.Use<Kind>(...)` (a set member:
+`set.AddApplication(Applications.<Member>, application => application.Use<Kind>("<target>"))`), and
+for another application's target it asks for an `IResourceCommandInputResolver` in
+`Providers.CommandInputs`, since `Use<Kind>(...)` would bind a store of another application. An
+unmarked kind with no registered resolver is still delivered as declared, and the store's own
+rejection of an unresolved `add-secret` payload remains as defense in depth.
 
 ## 5. Gateway lifecycle
 
@@ -150,23 +217,41 @@ cohesion-platforms rule 9 and the platform's realization contract.
 
 ## 6. Inputs, discovery and runtime capabilities
 
-Protected Secret/Configuration inputs resolve gateway-side through the thin store clients
-before mounting; the [Gateway design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md)
-owns that boundary (`656f6325`, `280cc8c5`). Cross-resource discovery injects the observed
-view (`c61e2059`), while federation uses the ControlPlane or export documents.
+Protected Secret/Configuration inputs resolve gateway-side before mounting; the
+[Gateway design](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md)
+owns that boundary (`656f6325`, `280cc8c5`). `parameter:` and `literal:` sources stay built in;
+every other `<source>:<key>` source resolves only through the `IResourceSourceProvider` the
+application registered under that source name in `ApplicationProviders.Sources`. The gateway
+references no store client (R8 supersedes the former "over the thin store clients" wording; the
+clients now sit behind the opt-in Orchestration packages). Cross-resource discovery injects the
+observed view (`c61e2059`), while federation uses the ControlPlane or export documents.
 
 The certificate contract is already recorded in the signed design §5/O32 (`be26ff46`):
 readers accept key-second/key-last bundles and self-signed roots, newly issued bundles
 put the PKCS#8 key last, and validation is per endpoint with **no all-or-nothing certificate
-invariant**. The [runtime contract](../../RUNTIME_CONTRACT.md) owns its carriers.
-Enrollment at the two named client seams remains deferred (B8).
+invariant**. The [runtime contract](../../RUNTIME_CONTRACT.md) owns its carriers. An endpoint
+certificate mount without a source gets its leaf from the certificate authority the application
+registers (`ApplicationProviders.CertificateAuthority`) once that resource is Running. With none
+registered, only `Local` falls back to the gateway's development authority; any other environment
+fails loudly. The authority resource's own leaf always comes from the gateway's authority (owner
+decision 3). Intermediate-CA enrollment remains deferred (B8, whose second seam R8 deleted).
+
+The trusted-issuer store is opt-in the same way: `ApplicationProviders.TrustStore` when registered;
+otherwise `Local` uses `.cohesion/<app>/trust/trusted-issuers.json` and every other environment
+refuses `cohesion trust add`. Credentials go through `ApplicationProviders.CredentialIssuer` first,
+with the gateway's default ES256 application-key issuer for a missing issuer or a `null` result;
+gateway control-plane callers are authenticated by the built-in trusted-issuer authenticator first,
+then by `ApplicationProviders.Callers`.
 
 Telemetry (`acc951aa`) is owned by the
 [Hosting.Telemetry design](../../../libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md),
 [OpenTelemetry design](../../../libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/DESIGN.md),
 the Gateway and InProcess designs, and the runtime contract: they define scoped log-export
 credentials, injection eligibility, protocol support, and shutdown. B18–B29 record the
-delivered limitations without replacing those contracts.
+delivered limitations without replacing those contracts. The sink is explicit since R8:
+`builder.Providers.Telemetry = ResourceTelemetrySink.FromResource(logs)` or
+`ResourceTelemetrySink.External(uri, headersParameter)`; with none registered the gateway injects
+no `COHESION_TELEMETRY_*` value and never discovers a sink by resource kind.
 
 ## 7. Platform realization and images
 
@@ -222,12 +307,22 @@ It consumes the `image.json`/`archive` contract in §7.2. There is no
 `build/Targets/Build.ApplicationModel.Containers.targets`, `application.images.json`,
 or `CohesionBuildResourceContainers` gather in the landed design.
 
-### 8.3 Generated gateway verbs
+### 8.3 Generated gateway surface
 
-`Sdk.Gateway` generates `Gateway.CreateBuilder(args)`, resource verbs, `Externals`,
-and `Applications` (`294977f7`). Build-visible resource references establish the graph;
-C# composition adds explicit relationships. The generated application-set and external
-surfaces use the contracts owned by the base package design.
+`Sdk.Gateway` generates `Gateway.CreateBuilder(args)`, `Manifests`, `Externals`,
+`Applications`, `References`, the provider catalog, and `UseGateway(args)` into `Gateway.g.cs`
+(`294977f7`). Build-visible resource references establish the graph; C# composition adds each
+resource through its area's hand-written verb over `Manifests.<Name>` (§4.4) and explicit
+relationships. `Gateway.CreateBuilder(args)` registers every enabled, composable project resource's
+in-process binding by manifest identity, so colocation does not depend on which verb adds the
+resource. The generated application-set and external surfaces use the contracts owned by the base
+package design. The SDK injects the orchestration core, the selected platform packages, and one
+`<Area>.ApplicationModel` per referenced area — never a client or an Orchestration package.
+
+*Superseded by the owner decisions of 2026-09-25 (R8 in the signed design):* the generated
+per-resource `Add<Name>()` verbs, the `CohesionGatewayResourceKind` table that typed them, the
+`COHGW003` fallback warning, and the injection of the SecretStore/ConfigurationStore client
+packages are withdrawn.
 
 ## 9. Resource-area boundary
 
@@ -259,34 +354,56 @@ platform-neutral planner, `Add<Area>(…)` graph verbs, and the **area's default
 contract/factory**. Its direct Cohesion references are `ApplicationModel` and
 `Hosting.Resources` only. It never references the area's hosting runtime.
 
-These packages and `<Area>.Client` packages are **NuGet-only**, injected by
-`Sdk.<Area>` (its own area) and `Sdk.Gateway` (the areas of the resource projects a gateway
-names in `CohesionResourceReference`), never members of `App.<Area>`. Every ApplicationModel
-package declares the shared `Assimalign.Cohesion.ApplicationModel` namespace with area-prefixed
-type names, so an apphost composes every area with one `using`. Generated consumer code
-registers the default control plane through `ResourceRuntime` when orchestration is
-enabled. The [resource-area rule](../../../.claude/rules/resource-areas.md) owns enforcement.
+These packages are **NuGet-only**, injected by `Sdk.<Area>` (its own area) and `Sdk.Gateway`
+(the areas of the resource projects a gateway names in `CohesionResourceReference`), never
+members of `App.<Area>`. Every ApplicationModel package declares the shared
+`Assimalign.Cohesion.ApplicationModel` namespace with area-prefixed type names, so an apphost
+composes every area with one `using`. Generated consumer code registers the default control
+plane through `ResourceRuntime` when orchestration is enabled. The
+[resource-area rule](../../../.claude/rules/resource-areas.md) owns enforcement.
+
+### 9.5 `<Area>.ApplicationModel.Orchestration`: opt-in gateway providers
+
+Owner decision 1 of 2026-09-25 adds a second, optional package kind beside the declarative
+plane. An Orchestration package implements the provider seams of `Assimalign.Cohesion.ApplicationModel`
+(`IResourceSourceProvider`, `IResourceCertificateAuthority`, `ITrustedIssuerStore`,
+`IResourceCommandInputResolver`) over its area's `<Area>.Client`, and ships the `Use<Area>(...)`
+registration verbs. An area whose command payloads carry source expressions marks those kinds
+`RequiresInputResolver="true"` on its `CohesionCommand` items in `Sdk.<Area>`, so a gateway that
+omits the `Use<Area>(...)` call registering the resolver fails at `Build()` rather than at delivery
+(§4.8). An Orchestration package references `Assimalign.Cohesion.ApplicationModel` and the area
+client only — never Hosting, the Gateway family, or its area's declarative
+`<Area>.ApplicationModel` — and it is NuGet-only and injected by no SDK: the gateway project
+references it and registers it in `Program.cs`. It holds no planner and no control plane and is
+not a platform package, so the one-declarative-package rule of O27 and the no-per-platform-package
+rule of C35 are unchanged.
+`<Area>.Client` packages are injected by no SDK either, and a gateway references none directly
+(O13 is superseded).
 
 ## 10. Consumer Program.cs: the Composite
 
-This is the shipped composite template's real `Program.cs`, in an `Sdk.Gateway`
-consumer configured for InProcess realization of its referenced members:
+This is the shape of the shipped `cohesion-app` template's gateway `Program.cs`, an `Sdk.Gateway`
+consumer that realizes its referenced members in process by default:
 
 ```csharp
 using Assimalign.Cohesion.ApplicationModel;
 
 IApplicationBuilder builder = Gateway.CreateBuilder(args);
-builder.AddApi();
+builder.AddDatabase(Manifests.AcmeDatabase);
+builder.AddWeb(Manifests.AcmeApi);
 builder.UseGateway(args);
 
 await builder.Build().RunAsync();
 ```
 
 The project's SDK selects Composite and the default `Gateway.ControlPlane`; the
-generated verbs and application/external declarations come from the referenced manifests.
-A gateway names what it composes, one generated verb per resource; there is no
-`AddAllResources()`, and the externals a composed manifest references are declared by the
-builder when the model is built.
+`Manifests` members and application/external declarations come from the referenced manifests,
+and the verbs are the areas' hand-written `AddDatabase`/`AddWeb` over them. A gateway names what
+it composes, one area verb per resource; there is no generated per-resource verb (withdrawn by
+the owner decisions of 2026-09-25, which replaced this section's former `builder.AddApi()` sample),
+no `AddAllResources()`, and the externals a composed manifest references are declared by the
+builder when the model is built. A gateway whose resources read stores also references the store's
+Orchestration package and registers it here (§9.5).
 Each member retains its own `Program.cs` over `<Area>Application.CreateBuilder(args)`.
 `AddRezolvr` is the typed area verb described in §4.4, not `AddDns` or `AddWebApp`.
 No `Resource.cs`, `Compose`, `CreateHost`, `Gateway.cs`, or `Program.g.cs` entry-point
@@ -322,7 +439,7 @@ declarative plane NuGet-only and deliver the per-kind default control plane thro
 | Former question | Landed answer |
 |---|---|
 | Registry host late-binding | Platform compilers bind image references after the SDK's digest/archive gather; the platform-neutral image facts stay in the plan (platforms items 34/35/36). |
-| Mount provenance | Gateway-side resolution over `SecretStore.Client` and `ConfigurationStore.Client`, before materialization (`656f6325`, `280cc8c5`); Gateway design owns the input contract. |
+| Mount provenance | Gateway-side resolution over `SecretStore.Client` and `ConfigurationStore.Client`, before materialization (`656f6325`, `280cc8c5`); Gateway design owns the input contract. **(superseded in part by R8, 2026-09-25:** the gateway references neither client; it calls the `IResourceSourceProvider` the application registered for the source, and the opt-in Orchestration packages implement those providers over the clients**)** |
 | Controller discovery | Explicit `ApplicationGatewayOptions.Controllers` and `LocalPlanController`, with plan-derived admission (`1391b8ba`). |
 | Cross-resource discovery | Observed-view injection, using realized endpoints (`c61e2059`); external application discovery uses the ControlPlane contract. |
 
@@ -337,13 +454,13 @@ platform work is not a landed contract. B16 describes the committed item-34 beha
 | # | Decision | Landed in | Where it is written |
 |---|---|---|---|
 | B1 | wire-kind naming = `<area>.<verb-noun-kebab>`, not design §7/§4's illustrative `<area>.<noun>` | Item 23b / 31c: `529d600b`, `81570328` | `sdks/Assimalign.Cohesion.Sdk.Rezolvr/Targets/Sdk.Rezolvr.props:18` |
-| B2 | manifest `commands` stays a bare string array | Item 23b / 31c: `529d600b` | `assets/schemas/cohesion.resource.schema.json:120-126`; `ResourceManifestWriter.cs:145` |
+| B2 | manifest `commands` stays a bare string array **(amended by the signed design's R11, 2026-09-28:** a kind stays a string unless its area's SDK sets `RequiresInputResolver="true"` on the `CohesionCommand`; that kind is written as `{ "kind": "…", "requiresInputResolver": true }`, the readers accept both forms, and a manifest with no marked kind is byte-identical to before**)** | Item 23b / 31c: `529d600b` | `assets/schemas/cohesion.resource.schema.json:120-126`; `ResourceManifestWriter.cs:145` — now `cohesion.resource.schema.json:120-147` (`oneOf` string / object); `ResourceManifestWriter.cs:145-161`; `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Manifests/ResourceManifestCommand.cs` |
 | B3 | `cohesion.trust.add` accepted by SecretStore's control plane but deliberately absent from its SDK manifest | Item 31c / 31s: `81570328`, `c49ee153` | `resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/src/SecretStoreResourceControlPlane.cs:14`; `Sdk.SecretStore.props:19` |
 | B4 | SecretStore owner = issuer for new kinds, `issuer@subject` for trust-add | Item 31c: `81570328` | `resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/src/Internal/SecretsEndpointService.cs:448-460` |
 | B5 | `--allow` enforced on apply **and** delete | Item 31c: `81570328` | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane/src/Internal/GatewayControlPlaneServer.cs:596-601,678-683` |
 | B6 | Rezolvr records under `ResourceContext.GetMount("data", …)` — no Volume mount, because `GenericPlanner` requires StatefulSet for Volume mounts while `RezolvrPlanner` requires Deployment | Item 31c: `81570328` | `resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/src/RezolvrApplicationBuilder.cs:69`; `RezolvrPlanner.cs`; `GenericPlanner.cs` |
 | B7 | certificate contract O32 — already written by 31t; **verify and cross-link**, incl. the R-B reading-order correction and **no all-or-nothing `certificate` invariant** | Item 31t: `be26ff46` | `docs/DEVELOPER_EXPERIENCE_DESIGN.md` §5/O32; `docs/RUNTIME_CONTRACT.md` certificate rows (unchanged) |
-| B8 | `Enroll` deferred at the client seams `ISecretStoreClient.EnrollIntermediateAsync` / `IGatewayStoreClient.EnrollIntermediateAsync` | Item 31t: `be26ff46` | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/src/Abstractions/IGatewayStoreClient.cs`; no `EnrollIntermediate` C# implementation |
+| B8 | `Enroll` deferred at the client seams `ISecretStoreClient.EnrollIntermediateAsync` / `IGatewayStoreClient.EnrollIntermediateAsync` **(evidence superseded by B44:** `IGatewayStoreClient` is deleted; the deferral now sits at `ISecretStoreClient` and at the `IResourceCertificateAuthority` provider seam, and still no `EnrollIntermediate` member exists**)** | Item 31t: `be26ff46` | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/src/Abstractions/IGatewayStoreClient.cs` (deleted by R8); no `EnrollIntermediate` C# implementation; now `resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/src/Abstractions/ISecretStoreClient.cs`, `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Abstractions/IResourceCertificateAuthority.cs` |
 | B9 | ConfigurationStore planner: "exactly one Volume named `data`; Secret/Configuration mounts beside it" | Item 31t follow-up: `5bfa8f71` | `resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/src/Internal/ConfigurationStorePlanner.cs:46-66` |
 | B10 | design item 6's deletion of `NameOnly.ProjectReference.targets` is **stale** — the load-bearing converter is kept | Item 6: `5412480c` | `5412480c` commit body; `sdks/Assimalign.Cohesion.Sdk/Sdk/Sdk.targets:22` |
 | B11 | **telemetry contract (umbrella) — expanded into B18–B29** | Item 31b: `acc951aa` | `libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md`; B18–B29 below |
@@ -357,11 +474,12 @@ platform work is not a landed contract. B16 describes the committed item-34 beha
 | B19 | `otlp-grpc` is **reserved but refused** at bootstrap with a named message; `otlp-http` is the only served value | Item 31b: `acc951aa` | `libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/src/ResourceTelemetry.cs:135-142`; `tests/ResourceTelemetryTests.cs:65-74` |
 | B20 | **protobuf deferred; traces and metrics deferred** because `libraries/Logging` exposes no span or instrument primitive | Item 31b: `acc951aa` | `libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/src/OtlpSignal.cs:4-12`; package `docs/DESIGN.md` |
 | B21 | LogSpace's private `otlp` endpoint moved from **grpc/4317 → https/4318 with `Certificate="tls"`**, with the planner, SDK assertion, manifest fixture and template changed to match | Item 31b: `acc951aa` (+ fixture `67bbcf4b`) | `sdks/Assimalign.Cohesion.Sdk.LogSpace/Targets/Sdk.LogSpace.props:18`; `LogSpacePlanner.cs:27`; `LogSpaceResourceTests.cs:120` |
-| B22 | telemetry tokens carry `aud` = LogSpace resource name, `sub` = emitting resource name, **`scope=telemetry`**, cached under a **distinct key `(application, sink, emitter)`**, separate from LogSpace's own bootstrap credential; ingest requires the scope, query/management routes reject it | Item 31b: `acc951aa` | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/src/Abstractions/ApplicationGateway.Telemetry.cs:9-25`; `src/Internal/ApplicationTrustState.cs:81`; `LogSpaceTokenVerifier.cs:75,116-125` |
+| B22 | telemetry tokens carry `aud` = LogSpace resource name, `sub` = emitting resource name, **`scope=telemetry`**, cached under a **distinct key `(application, sink, emitter)`**, separate from LogSpace's own bootstrap credential; ingest requires the scope, query/management routes reject it **(evidence superseded by B44:** the claims and cache key are unchanged, but the sink is now the one registered in `ApplicationProviders.Telemetry` rather than the resource of kind LogSpace, the token is minted through the credential issuer with purpose `Telemetry`, and the line references moved**)** | Item 31b: `acc951aa` | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/src/ApplicationGateway.Telemetry.cs:9-25`; `src/Internal/ApplicationTrustState.cs:81`; `LogSpaceTokenVerifier.cs:75,116-125` — now `ApplicationGateway.Telemetry.cs:14,63-128`; `ApplicationTrustState.cs:71-89,117-122`; `LogSpaceTokenVerifier.cs:56-69`; claim names in `libraries/Hosting/Assimalign.Cohesion.Hosting.Resources/src/Credentials/ResourceCredentialProfile.cs` |
 | B23 | every host registers `TelemetryHostService` **first so it stops last**; its `StopAsync` flushes within **5 seconds** and the host cancellation budget, then tears the exporter down | Item 31b: `acc951aa` | `libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/src/Internal/TelemetryHostService.cs:21-44`; all 18 resource application builders |
-| B24 | **`RemoteReference` telemetry injection skipped** — `IControlPlaneExternalResourceResolver` exposes no authenticated named-OTLP-endpoint contract | Item 31b: `acc951aa` | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Abstractions/IControlPlaneExternalResourceResolver.cs`; Hosting.Telemetry `docs/DESIGN.md` |
+| B24 | **`RemoteReference` telemetry injection skipped** — `IControlPlaneExternalResourceResolver` exposes no authenticated named-OTLP-endpoint contract **(amended by B44:** still skipped — a sink bound to another application's resource is rejected at `Build()` as cross-application — but a sink outside the model is now explicit: `ResourceTelemetrySink.External(uri, headersParameter)`**)** | Item 31b: `acc951aa` | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Abstractions/IControlPlaneExternalResourceResolver.cs`; Hosting.Telemetry `docs/DESIGN.md`; `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Providers/ResourceTelemetrySink.cs` |
 | B25 | **no inferred `DependsOn`** — a producer prepared before LogSpace is `Running` gets no telemetry injection, and an already-running process needs a restart to observe changed environment | Item 31b: `acc951aa` | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md` telemetry; Gateway.InProcess `docs/DESIGN.md` |
 | B26 | **no live protected-header refresh** — running exporters capture headers at bootstrap and need a restart before credential expiry; the gateway credential default is **24 h** | Item 31b: `acc951aa` | `libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md`; Gateway `ApplicationGatewayOptions.cs` |
 | B27 | `resources/LogSpace/Assimalign.Cohesion.LogSpace.Telemetry` stays an **empty placeholder** whose name collides with `Assimalign.Cohesion.Hosting.Telemetry` — **record as open** | Item 31b: `acc951aa` | `resources/LogSpace/README.md:12`; `Assimalign.Cohesion.LogSpace.Telemetry/src/` has no C# source |
 | B28 | `docs/RUNTIME_CONTRACT.md` keeps `otlp-grpc` **contract-valid**, now qualified in-row with the refusal; the design document's own protocol lists are untouched | Item 31b: `acc951aa` | `docs/RUNTIME_CONTRACT.md:38-40` (unchanged) |
 | B29 | the OTLP full-acceptance response returns an **empty `partialSuccess`** where upstream OTLP omits the field on full success — a documented, deliberate difference | Item 31b: `acc951aa` | `libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/DESIGN.md:36`; `resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/src/Internal/LogSpaceHttp.cs:73` |
+| B44 | **Bring your own identity, clients, and stores.** The gateway resolves mount sources, endpoint certificates, trust, command inputs, telemetry, and credentials only from `model.Providers` (`ApplicationProviders`, frozen and validated at `Build()`); `libraries/ApplicationModel/**` names no store route, command kind, trust document, or resource kind, and references no `resources/**` project (COHLIB001). `IGatewayStoreClient`, `GatewayStoreClient`, `ApplicationGatewayOptions.StoreClient`, and the five per-area gateway command adapters are deleted; the public `ResourceControlPlaneCommandClient` (any kind) is the default command client. The SecretStore and ConfigurationStore wire knowledge lives in the opt-in `<Area>.ApplicationModel.Orchestration` packages. `Sdk.Gateway` generates no per-resource verb, keeps no `CohesionGatewayResourceKind` table or COHGW003, and injects no client package; `Gateway.CreateBuilder` keeps the in-process bindings by manifest identity. `IdentityHub.Client` and `Rezolvr.Client` are deleted. This supersedes the evidence of B8 (`IGatewayStoreClient`) and B22's line references, amends B24, and — in the signed design, which records B30–B43 — supersedes B38's generated-verb descriptor binding, B39's `COHGW003` fallback and restore-visible store clients, and B40's `CohesionGatewayResourceKind` contract. | Owner decisions of 2026-09-25 (signed design R8) — this commit | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Providers/ApplicationProviders.cs`; `src/Internal/Providers/ApplicationProviderValidation.cs`; `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/src/ResourceControlPlaneCommandClient.cs`; `src/ApplicationGateway.Sources.cs`; `resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration`; `resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration`; `sdks/Assimalign.Cohesion.Sdk.Gateway/Tasks/src/Internal/Tasks/GatewaySourceWriter.cs`; `build/Targets/Build.Rules.targets` (COHLIB001) |

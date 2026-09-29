@@ -9,7 +9,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Hosting.Resources;
@@ -46,7 +45,10 @@ public static class ResourceControlPlaneMiddleware
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <remarks>
     /// Call <see cref="Validate"/> during composition. A non-null port gates every protocol path,
-    /// including bare probes. Stop is deferred until response completion when the server supplies
+    /// including bare probes. Namespaced paths of a gateway-managed resource consult the credential
+    /// verifier registered for the resource (<see cref="ResourceRuntime.TryGetCredentialVerifier"/>)
+    /// before the default application-key verification, and admit only this application's gateway.
+    /// Stop is deferred until response completion when the server supplies
     /// <see cref="IWebResponseCompletionFeature"/>; custom servers without it use direct stop.
     /// </remarks>
     public static async Task InvokeAsync(
@@ -73,13 +75,13 @@ public static class ResourceControlPlaneMiddleware
         bool isNamespacedControlPlanePath = IsNamespacedControlPlanePath(path);
         if (isNamespacedControlPlanePath && resourceContext.GatewayName is not null)
         {
-            BootstrapTokenStatus status = Authorize(context, resourceContext);
-            if (status is not BootstrapTokenStatus.Authorized)
+            ResourceCredentialStatus status = await AuthorizeAsync(context, resourceContext).ConfigureAwait(false);
+            if (status is not ResourceCredentialStatus.Authorized)
             {
-                context.Response.StatusCode = status is BootstrapTokenStatus.Forbidden
+                context.Response.StatusCode = status is ResourceCredentialStatus.Forbidden
                     ? HttpStatusCode.Forbidden
                     : HttpStatusCode.Unauthorized;
-                if (status is BootstrapTokenStatus.Unauthorized)
+                if (status is ResourceCredentialStatus.Unauthorized)
                 {
                     context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer";
                 }
@@ -243,7 +245,7 @@ public static class ResourceControlPlaneMiddleware
             {
                 throw new InvalidOperationException("A gateway-managed resource requires an ambient resource name.");
             }
-            using var verifier = new BootstrapTokenVerifier(resourceContext);
+            _ = new BootstrapTokenVerifier(resourceContext);
         }
     }
 
@@ -449,20 +451,47 @@ public static class ResourceControlPlaneMiddleware
             path.StartsWith(namespacePath + "/", StringComparison.Ordinal);
     }
 
-    private static BootstrapTokenStatus Authorize(IHttpContext context, ResourceContext resource)
+    private static async ValueTask<ResourceCredentialStatus> AuthorizeAsync(IHttpContext context, ResourceContext resource)
     {
-        if (!context.Request.Headers.TryGetValue(HttpHeaderKey.Authorization, out HttpHeaderValue header))
+        ResourceCredentialVerification verification = await VerifyAsync(context, resource).ConfigureAwait(false);
+        if (verification.Status is not ResourceCredentialStatus.Authorized)
         {
-            return BootstrapTokenStatus.Unauthorized;
+            return verification.Status is ResourceCredentialStatus.Forbidden
+                ? ResourceCredentialStatus.Forbidden
+                : ResourceCredentialStatus.Unauthorized;
         }
 
-        const string prefix = "Bearer ";
-        if (!header.Value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        // The management plane serves only this application's gateway. The default verifier already
+        // pins iss to the application and sub to the gateway, so this is the mapped form of that rule
+        // and only narrows what a registered verifier may admit.
+        return verification.Caller is { Kind: ResourceCallerKind.Gateway } caller &&
+            string.Equals(caller.Application, resource.ApplicationName, StringComparison.Ordinal) &&
+            string.Equals(caller.Subject, resource.GatewayName, StringComparison.Ordinal)
+                ? ResourceCredentialStatus.Authorized
+                : ResourceCredentialStatus.Forbidden;
+    }
+
+    private static async ValueTask<ResourceCredentialVerification> VerifyAsync(IHttpContext context, ResourceContext resource)
+    {
+        ResourceCredentialPresentation presentation = ResourceCredentialPresentation.FromAuthorizationValue(
+            context.Request.Headers.TryGetValue(HttpHeaderKey.Authorization, out HttpHeaderValue header)
+                ? header.Value
+                : null,
+            resource.ResourceName!,
+            DateTimeOffset.UtcNow);
+        if (ResourceRuntime.TryGetCredentialVerifier(resource, out IResourceCredentialVerifier? registered))
         {
-            return BootstrapTokenStatus.Unauthorized;
+            ResourceCredentialVerification result = await registered
+                .VerifyAsync(presentation, context.RequestCancelled)
+                .ConfigureAwait(false);
+            if (result.Status is not ResourceCredentialStatus.NoResult)
+            {
+                return result;
+            }
         }
 
-        using var verifier = new BootstrapTokenVerifier(resource);
-        return verifier.Validate(header.Value[prefix.Length..], resource.ResourceName!, DateTimeOffset.UtcNow);
+        return presentation.Scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase)
+            ? new BootstrapTokenVerifier(resource).Validate(presentation.Credential, presentation.ExpectedAudience, presentation.Now)
+            : new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null);
     }
 }

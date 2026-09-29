@@ -8,7 +8,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Tcp;
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Connections.Security;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Health;
@@ -86,6 +85,7 @@ internal sealed class SchedulerControlPlaneEndpointService : IHostService, IDisp
         IWebApplicationPipelineBuilder pipeline = _application;
         pipeline.Use(next => context => InvokeAsync(
             controlPlane,
+            resourceContext,
             _bootstrapVerifier,
             _resourceAudience,
             applicationContext,
@@ -109,11 +109,11 @@ internal sealed class SchedulerControlPlaneEndpointService : IHostService, IDisp
         {
             certificate.Dispose();
         }
-        _bootstrapVerifier.Dispose();
     }
 
     private static async Task InvokeAsync(
         IResourceControlPlane controlPlane,
+        ResourceContext resourceContext,
         BootstrapTokenVerifier bootstrapVerifier,
         string resourceAudience,
         SchedulerApplicationContext applicationContext,
@@ -123,21 +123,26 @@ internal sealed class SchedulerControlPlaneEndpointService : IHostService, IDisp
         string path = context.Request.Path.Value;
         bool namespaced = path == "/cohesion/v1" ||
             path.StartsWith("/cohesion/v1/", StringComparison.Ordinal);
-        BootstrapTokenStatus authorization = Authorize(
-            context,
-            bootstrapVerifier,
-            resourceAudience);
-        if (namespaced && authorization is not BootstrapTokenStatus.Authorized)
+        if (namespaced)
         {
-            context.Response.StatusCode = authorization is BootstrapTokenStatus.Forbidden
-                ? CohesionHttpStatusCode.Forbidden
-                : CohesionHttpStatusCode.Unauthorized;
-            if (authorization is BootstrapTokenStatus.Unauthorized)
+            ResourceCredentialStatus authorization = await AuthorizeAsync(
+                    context,
+                    resourceContext,
+                    bootstrapVerifier,
+                    resourceAudience)
+                .ConfigureAwait(false);
+            if (authorization is not ResourceCredentialStatus.Authorized)
             {
-                context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer";
-            }
+                context.Response.StatusCode = authorization is ResourceCredentialStatus.Forbidden
+                    ? CohesionHttpStatusCode.Forbidden
+                    : CohesionHttpStatusCode.Unauthorized;
+                if (authorization is ResourceCredentialStatus.Unauthorized)
+                {
+                    context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer";
+                }
 
-            return;
+                return;
+            }
         }
 
         if (path is "/healthz" or "/cohesion/v1/healthz")
@@ -266,21 +271,43 @@ internal sealed class SchedulerControlPlaneEndpointService : IHostService, IDisp
         context.Response.Headers[HttpHeaderKey.Allow] = allow;
     }
 
-    private static BootstrapTokenStatus Authorize(
+    private static async ValueTask<ResourceCredentialStatus> AuthorizeAsync(
         IHttpContext context,
+        ResourceContext resourceContext,
         BootstrapTokenVerifier bootstrapVerifier,
         string resourceAudience)
     {
-        if (!context.Request.Headers.TryGetValue(HttpHeaderKey.Authorization, out HttpHeaderValue authorization) ||
-            !authorization.Value.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-        {
-            return BootstrapTokenStatus.Unauthorized;
-        }
-
-        return bootstrapVerifier.Validate(
-            authorization.Value["Bearer ".Length..],
+        ResourceCredentialPresentation presentation = ResourceCredentialPresentation.FromAuthorizationValue(
+            context.Request.Headers.TryGetValue(HttpHeaderKey.Authorization, out HttpHeaderValue authorization)
+                ? authorization.Value
+                : null,
             resourceAudience,
             DateTimeOffset.UtcNow);
+        ResourceCredentialVerification verification = default;
+        if (ResourceRuntime.TryGetCredentialVerifier(resourceContext, out IResourceCredentialVerifier? registered))
+        {
+            verification = await registered.VerifyAsync(presentation, context.RequestCancelled).ConfigureAwait(false);
+        }
+
+        if (verification.Status is ResourceCredentialStatus.NoResult)
+        {
+            verification = presentation.Scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase)
+                ? bootstrapVerifier.Validate(presentation.Credential, presentation.ExpectedAudience, presentation.Now)
+                : new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null);
+        }
+
+        if (verification.Status is not ResourceCredentialStatus.Authorized)
+        {
+            return verification.Status;
+        }
+
+        // The management plane serves only this application's gateway: the mapped form of the
+        // default verifier's iss and sub rules.
+        return verification.Caller is { Kind: ResourceCallerKind.Gateway } caller &&
+            string.Equals(caller.Application, resourceContext.ApplicationName, StringComparison.Ordinal) &&
+            string.Equals(caller.Subject, resourceContext.GatewayName, StringComparison.Ordinal)
+                ? ResourceCredentialStatus.Authorized
+                : ResourceCredentialStatus.Forbidden;
     }
 
     private static async Task WriteJsonAsync(

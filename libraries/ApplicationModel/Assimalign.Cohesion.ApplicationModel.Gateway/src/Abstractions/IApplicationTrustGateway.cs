@@ -13,9 +13,17 @@ public interface IApplicationTrustGateway : ITrustedIssuerProvider
     /// <param name="model">The application issuing the token.</param>
     /// <param name="developerName">The developer principal name.</param>
     /// <param name="cancellationToken">Cancels issuance.</param>
-    /// <returns>An ES256 compact JSON Web Token with audience <c>cohesion-export</c>.</returns>
+    /// <returns>
+    /// The <see cref="ApplicationCredentialPurpose.Developer"/> bearer credential for audience
+    /// <c>cohesion-export</c>: from the model's registered <see cref="IApplicationCredentialIssuer"/>,
+    /// or, when none is registered or it defers, an ES256 compact JSON Web Token signed by the
+    /// application trust key.
+    /// </returns>
     /// <exception cref="System.ArgumentNullException"><paramref name="model"/> is <see langword="null"/>.</exception>
     /// <exception cref="System.ArgumentException"><paramref name="developerName"/> is empty.</exception>
+    /// <exception cref="System.InvalidOperationException">
+    /// The registered credential issuer returned a credential that cannot be presented as a bearer token.
+    /// </exception>
     /// <exception cref="System.OperationCanceledException"><paramref name="cancellationToken"/> is canceled.</exception>
     Task<string> IssueDeveloperTokenAsync(
         IApplicationModel model,
@@ -37,7 +45,9 @@ public interface IApplicationTrustGateway : ITrustedIssuerProvider
     /// or contains an invalid public trust key.
     /// </exception>
     /// <exception cref="System.InvalidOperationException">
-    /// The application's own SecretStore cannot durably accept the grant.
+    /// Outside Local, the application registers no trust store
+    /// (<see cref="ApplicationProviders.TrustStore"/>), or its registered trust store cannot durably
+    /// accept the grant.
     /// </exception>
     /// <exception cref="System.OperationCanceledException"><paramref name="cancellationToken"/> is canceled.</exception>
     Task AddTrustedIssuerAsync(
@@ -56,7 +66,10 @@ public interface IApplicationTrustGateway : ITrustedIssuerProvider
     /// <exception cref="System.ArgumentException">An identity or allowed kind is invalid.</exception>
     /// <exception cref="System.ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="System.IO.InvalidDataException">The export or public key is invalid.</exception>
-    /// <exception cref="System.InvalidOperationException">The application's store cannot persist the grant.</exception>
+    /// <exception cref="System.InvalidOperationException">
+    /// Outside Local, the application registers no trust store, or its registered trust store cannot
+    /// persist the grant.
+    /// </exception>
     Task AddTrustedIssuerAsync(IApplicationModel model, string peerName, ApplicationExportDocument export,
         IReadOnlyList<string>? allowedCommandKinds, CancellationToken cancellationToken = default);
 

@@ -27,8 +27,9 @@ protocol yet.
 
 `SecretStoreResourceControlPlane.Create()` returns a fresh isolated
 `IResourceControlPlane` that advertises `secretstore.add-secret`,
-`secretstore.issue-certificate`, and the gateway-owned `cohesion.trust.add` trust-grant
-upsert. The manifest advertises only the two declarative SecretStore kinds.
+`secretstore.issue-certificate`, and the `cohesion.trust.add` trust-grant upsert that only the
+gateway's registered trust store (`SecretStoreTrustedIssuerStore`, through
+`builder.UseSecretStore(store).AsTrustStore()`) sends. The manifest advertises only the two declarative SecretStore kinds.
 The enabled resource's generated `ResourceControlPlane.g.cs` registers that
 factory and seeds it with observed endpoints. `SecretStore.Hosting` consumes the
 registration through `Hosting.Resources` and serves health, readiness, liveness,

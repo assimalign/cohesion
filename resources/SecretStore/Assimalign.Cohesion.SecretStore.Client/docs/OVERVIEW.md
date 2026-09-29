@@ -2,9 +2,11 @@
 
 ## Summary
 
-This package is the gateway-side protocol boundary for reading secret bytes and PEM certificates
-from a realized SecretStore resource. It keeps mount-source resolution out of runtime libraries
-and hides its BCL HTTP implementation behind `ISecretStoreClient`.
+This package is the protocol boundary for reading secret bytes and PEM certificates from a
+realized SecretStore resource. Its gateway-side consumer is
+`Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration`; a gateway references that
+package, never this client. It keeps mount-source resolution out of runtime libraries and hides its
+BCL HTTP implementation behind `ISecretStoreClient`.
 
 ## Public surface
 

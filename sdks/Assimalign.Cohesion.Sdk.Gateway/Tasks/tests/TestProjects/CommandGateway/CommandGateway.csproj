@@ -10,9 +10,9 @@
     <CohesionResourceReference Include="..\CommandConfigurationStore\CommandConfigurationStore.csproj" />
     <CohesionResourceReference Include="..\CommandSecretStore\CommandSecretStore.csproj" />
   </ItemGroup>
-  <Target Name="CaptureCommandClients" AfterTargets="Build">
-    <WriteLinesToFile File="$(BaseIntermediateOutputPath)command-clients.txt"
-      Lines="@(_CohesionGatewayRequiredClientPackage)" Overwrite="true" />
+  <Target Name="CaptureCommandReferences" AfterTargets="Build">
+    <WriteLinesToFile File="$(BaseIntermediateOutputPath)command-package-references.txt"
+      Lines="@(PackageReference->'%(Identity)')" Overwrite="true" />
     <WriteLinesToFile File="$(BaseIntermediateOutputPath)command-reference-paths.txt"
       Lines="@(ReferencePath->'%(Filename)')" Overwrite="true" />
   </Target>

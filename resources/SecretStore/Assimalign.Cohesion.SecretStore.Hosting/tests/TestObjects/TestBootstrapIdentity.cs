@@ -27,7 +27,7 @@ internal sealed class TestBootstrapIdentity : IDisposable
 
     internal ReadOnlyMemory<byte> PublicKey { get; }
 
-    internal string Issue(string audience)
+    internal string Issue(string audience, bool telemetry = false)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         var descriptor = new JsonWebTokenDescriptor
@@ -41,6 +41,10 @@ internal sealed class TestBootstrapIdentity : IDisposable
             ExpiresAt = now.AddHours(1),
         };
         descriptor.Audiences.Add(audience);
+        if (telemetry)
+        {
+            descriptor.Claims.Add(new IdentityClaim("scope", "telemetry"));
+        }
 
         return JsonWebTokenWriter.CreateEs256(_key, _keyId).Write(descriptor);
     }

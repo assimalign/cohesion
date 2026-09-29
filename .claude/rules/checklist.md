@@ -30,7 +30,7 @@ Mark each applicable item ✅ or ❌. If anything is ❌, fix it before reportin
 
 - [ ] All new files use file-scoped namespaces
 - [ ] The csproj declares `<RootNamespace>` (COHNS001); namespaces match it — `{RootNamespace}.Internal` for internal types, never `.Abstractions`/`.Exceptions`/`.Extensions`/`.ValueObjects`
-- [ ] Types sit in the right folder (`general-rules.md`, "Library folder structure"): interfaces/abstract classes in `Abstractions/`, exceptions and `{Name}ErrorCode` enums in `Exceptions/`, extension containers in `Extensions/`, value objects in `ValueObjects/`, every internal type under `Internal/`; the first four stay flat
+- [ ] Types sit in the right folder (`general-rules.md`, "Library folder structure"): only public interfaces in `Abstractions/` (public abstract classes sit with the other public types, in the `src/` root or a feature folder), exceptions and `{Name}ErrorCode` enums in `Exceptions/`, extension containers in `Extensions/`, value objects in `ValueObjects/`, every internal type under `Internal/`; `Abstractions/`, `Exceptions/`, `Extensions/`, and `ValueObjects/` stay flat
 - [ ] No primary constructors on classes or structs (positional records are fine)
 - [ ] Every private field — instance or static — is `_camelCase`
 - [ ] Assembly attributes, `InternalsVisibleTo` included, live in `Properties/AssemblyInfo.cs`, not the csproj

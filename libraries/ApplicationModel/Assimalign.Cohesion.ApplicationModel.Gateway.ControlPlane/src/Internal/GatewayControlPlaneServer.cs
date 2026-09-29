@@ -10,11 +10,9 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Tcp;
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
-using Assimalign.Cohesion.Web.Routing;
 
 using CohesionHttpMethod = Assimalign.Cohesion.Http.HttpMethod;
 using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
@@ -39,12 +37,13 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
     private readonly Dictionary<(ResourceName Resource, string Id), (string Kind, string Key, string Owner)>
         _commandOwnership = new();
     private readonly HashSet<Task> _connections = new();
-    private readonly Router _router;
+    private readonly ControlPlaneRouter _router;
 
     private ApplicationExportDocument? _document;
     private IApplicationModel? _model;
     private IApplicationResourceStateManager? _state;
     private ITrustedIssuerProvider? _trustedIssuers;
+    private IReadOnlyList<IApplicationCallerAuthenticator> _callers = Array.Empty<IApplicationCallerAuthenticator>();
     private IResourceCommandCredentialProvider? _commandCredentials;
     private IResourceTransportTrustProvider? _transportTrust;
     private TcpConnectionListener? _tcpListener;
@@ -66,29 +65,30 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
             : GetMetadataPath(metadataDirectory, application);
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _dispatchers = dispatchers ?? throw new ArgumentNullException(nameof(dispatchers));
-        _router = new Router(new IRouterRoute[]
-        {
-            new Route(
+        // Tried in this order, which is the order Web.Routing's inbound-precedence sort gave these
+        // templates before the dependency was removed: each template has a distinct segment count,
+        // and PUT precedes DELETE on the shared command template, so a 405 lists "PUT, DELETE".
+        _router = new ControlPlaneRouter(
+            new ControlPlaneRoute(
                 CohesionHttpMethod.Get,
                 "/cohesion/v1/application",
-                new ControlPlaneRouteHandler(HandleApplicationAsync)),
-            new Route(
+                HandleApplicationAsync),
+            new ControlPlaneRoute(
                 CohesionHttpMethod.Get,
                 "/cohesion/v1/resources/{name}",
-                new ControlPlaneRouteHandler(HandleResourceAsync)),
-            new Route(
+                HandleResourceAsync),
+            new ControlPlaneRoute(
                 CohesionHttpMethod.Get,
                 "/cohesion/v1/resources/{name}/commands",
-                new ControlPlaneRouteHandler(HandleGetCommandsAsync)),
-            new Route(
+                HandleGetCommandsAsync),
+            new ControlPlaneRoute(
                 CohesionHttpMethod.Put,
                 "/cohesion/v1/resources/{name}/commands/{id}",
-                new ControlPlaneRouteHandler(HandlePutCommandAsync)),
-            new Route(
+                HandlePutCommandAsync),
+            new ControlPlaneRoute(
                 CohesionHttpMethod.Delete,
                 "/cohesion/v1/resources/{name}/commands/{id}",
-                new ControlPlaneRouteHandler(HandleDeleteCommandAsync)),
-        });
+                HandleDeleteCommandAsync));
     }
 
     public Uri Address => _address ?? throw new InvalidOperationException(
@@ -137,6 +137,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                 _model = model;
                 _state = state;
                 _trustedIssuers = trustedIssuers;
+                _callers = SnapshotCallers(model);
                 _commandCredentials = trustedIssuers as IResourceCommandCredentialProvider;
                 _transportTrust = trustedIssuers as IResourceTransportTrustProvider;
                 _tcpListener = tcpListener;
@@ -256,6 +257,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                 _model = null;
                 _state = null;
                 _trustedIssuers = null;
+                _callers = Array.Empty<IApplicationCallerAuthenticator>();
                 _commandCredentials = null;
                 lock (_documentGate)
                 {
@@ -331,15 +333,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                     {
                         try
                         {
-                            RouteMatch match = _router.Match(context);
-                            if (match.Status == RouteMatchStatus.NoMatch)
-                            {
-                                context.Response.StatusCode = HttpStatusCode.NotFound;
-                            }
-                            else
-                            {
-                                await _router.RouteAsync(context, cancellationToken).ConfigureAwait(false);
-                            }
+                            await _router.RouteAsync(context, cancellationToken).ConfigureAwait(false);
                         }
                         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                         {
@@ -400,9 +394,10 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
 
     private async Task HandleApplicationAsync(
         IHttpContext context,
+        IReadOnlyDictionary<string, string> routeValues,
         CancellationToken cancellationToken)
     {
-        if (!Authorize(context, requireCommandAccess: false, out _))
+        if (await AuthorizeAsync(context, requireCommandAccess: false, cancellationToken).ConfigureAwait(false) is null)
         {
             return;
         }
@@ -430,14 +425,15 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
 
     private async Task HandleResourceAsync(
         IHttpContext context,
+        IReadOnlyDictionary<string, string> routeValues,
         CancellationToken cancellationToken)
     {
-        if (!Authorize(context, requireCommandAccess: false, out _))
+        if (await AuthorizeAsync(context, requireCommandAccess: false, cancellationToken).ConfigureAwait(false) is null)
         {
             return;
         }
 
-        if (!TryGetRouteValue(context, "name", out string? name) ||
+        if (!TryGetRouteValue(routeValues, "name", out string? name) ||
             !TryFindResource(name!, out IApplicationResourceDescriptor? descriptor, out ResourceManifest? manifest))
         {
             await WriteErrorAsync(
@@ -490,14 +486,17 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
 
     private async Task HandleGetCommandsAsync(
         IHttpContext context,
+        IReadOnlyDictionary<string, string> routeValues,
         CancellationToken cancellationToken)
     {
-        if (!Authorize(context, requireCommandAccess: true, out ControlPlanePrincipal principal))
+        ApplicationCaller? caller = await AuthorizeAsync(context, requireCommandAccess: true, cancellationToken)
+            .ConfigureAwait(false);
+        if (caller is null)
         {
             return;
         }
 
-        if (!TryGetResourceRoute(context, out IApplicationResourceDescriptor? descriptor, out _))
+        if (!TryGetResourceRoute(routeValues, out IApplicationResourceDescriptor? descriptor, out _))
         {
             await WriteErrorAsync(
                     context,
@@ -510,7 +509,7 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
 
         ControlPlaneCommandObservation[] commands = SnapshotCommands(
             descriptor!.Resource.Name,
-            principal.Issuer);
+            GetCommandOwner(caller));
         PrepareJsonResponse(context, HttpStatusCode.Ok);
         await JsonSerializer.SerializeAsync(
                 context.Response.Body,
@@ -522,18 +521,23 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
 
     private async Task HandlePutCommandAsync(
         IHttpContext context,
+        IReadOnlyDictionary<string, string> routeValues,
         CancellationToken cancellationToken)
     {
-        if (!Authorize(context, requireCommandAccess: true, out ControlPlanePrincipal principal))
+        ApplicationCaller? caller = await AuthorizeAsync(context, requireCommandAccess: true, cancellationToken)
+            .ConfigureAwait(false);
+        if (caller is null)
         {
             return;
         }
 
+        string owner = GetCommandOwner(caller);
+
         if (!TryGetResourceRoute(
-                context,
+                routeValues,
                 out IApplicationResourceDescriptor? descriptor,
                 out ResourceManifest? manifest) ||
-            !TryGetRouteValue(context, "id", out string? id))
+            !TryGetRouteValue(routeValues, "id", out string? id))
         {
             await WriteErrorAsync(
                     context,
@@ -579,12 +583,12 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
             return;
         }
 
-        if (!string.Equals(request.Owner, principal.Issuer, StringComparison.Ordinal))
+        if (!string.Equals(request.Owner, owner, StringComparison.Ordinal))
         {
             await WriteErrorAsync(
                     context,
                     HttpStatusCode.Forbidden,
-                    $"Command owner '{request.Owner}' does not match authenticated issuer '{principal.Issuer}'.",
+                    $"Command owner '{request.Owner}' does not match authenticated issuer '{owner}'.",
                     cancellationToken)
                 .ConfigureAwait(false);
             return;
@@ -596,11 +600,10 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
             request.Owner,
             request.Key,
             request.Payload ?? Array.Empty<byte>());
-        if (principal.AllowedCommandKinds.Count > 0 &&
-            !principal.AllowedCommandKinds.Contains(command.Kind, StringComparer.Ordinal))
+        if (!IsCommandKindAllowed(caller, command.Kind))
         {
             ControlPlaneCommandObservation rejected = CreateObservation(command, "Rejected",
-                $"Trusted issuer '{principal.Issuer}' may not send command kind '{command.Kind}'.", result: null);
+                $"Trusted issuer '{owner}' may not send command kind '{command.Kind}'.", result: null);
             PrepareJsonResponse(context, HttpStatusCode.Conflict);
             await JsonSerializer.SerializeAsync(context.Response.Body, rejected,
                 ControlPlaneJsonContext.Default.ControlPlaneCommandObservation, cancellationToken).ConfigureAwait(false);
@@ -627,18 +630,23 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
 
     private async Task HandleDeleteCommandAsync(
         IHttpContext context,
+        IReadOnlyDictionary<string, string> routeValues,
         CancellationToken cancellationToken)
     {
-        if (!Authorize(context, requireCommandAccess: true, out ControlPlanePrincipal principal))
+        ApplicationCaller? caller = await AuthorizeAsync(context, requireCommandAccess: true, cancellationToken)
+            .ConfigureAwait(false);
+        if (caller is null)
         {
             return;
         }
 
+        string owner = GetCommandOwner(caller);
+
         if (!TryGetResourceRoute(
-                context,
+                routeValues,
                 out IApplicationResourceDescriptor? descriptor,
                 out ResourceManifest? manifest) ||
-            !TryGetRouteValue(context, "id", out string? id))
+            !TryGetRouteValue(routeValues, "id", out string? id))
         {
             await WriteErrorAsync(
                     context,
@@ -667,22 +675,21 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                 return;
             }
 
-            if (!string.Equals(observed!.Owner, principal.Issuer, StringComparison.Ordinal))
+            if (!string.Equals(observed!.Owner, owner, StringComparison.Ordinal))
             {
                 await WriteErrorAsync(
                         context,
                         HttpStatusCode.Forbidden,
-                        $"Command owner '{observed.Owner}' does not match authenticated issuer '{principal.Issuer}'.",
+                        $"Command owner '{observed.Owner}' does not match authenticated issuer '{owner}'.",
                         cancellationToken)
                     .ConfigureAwait(false);
                 return;
             }
 
-            if (principal.AllowedCommandKinds.Count > 0 &&
-                !principal.AllowedCommandKinds.Contains(observed.Kind, StringComparer.Ordinal))
+            if (!IsCommandKindAllowed(caller, observed.Kind))
             {
                 ControlPlaneCommandObservation rejected = Reject(observed,
-                    $"Trusted issuer '{principal.Issuer}' may not send command kind '{observed.Kind}'.");
+                    $"Trusted issuer '{owner}' may not send command kind '{observed.Kind}'.");
                 PrepareJsonResponse(context, HttpStatusCode.Conflict);
                 await JsonSerializer.SerializeAsync(context.Response.Body, rejected,
                     ControlPlaneJsonContext.Default.ControlPlaneCommandObservation, cancellationToken).ConfigureAwait(false);
@@ -730,9 +737,9 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                     "The serving gateway does not provide resource bootstrap credentials.");
             }
 
-            string bearerToken = _commandCredentials.GetResourceCommandCredential(
-                _application,
-                descriptor.Resource.Name);
+            string bearerToken = await _commandCredentials
+                .GetResourceCommandCredentialAsync(_application, descriptor.Resource.Name, cancellationToken)
+                .ConfigureAwait(false);
             RemoteCertificateValidationCallback? validator = _transportTrust is not null &&
                 string.Equals(address!.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
                 ? _transportTrust.CreateOutboundTrustValidator(_application) : null;
@@ -858,9 +865,9 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                     result: null);
             }
 
-            string bearerToken = _commandCredentials.GetResourceCommandCredential(
-                _application,
-                descriptor.Resource.Name);
+            string bearerToken = await _commandCredentials
+                .GetResourceCommandCredentialAsync(_application, descriptor.Resource.Name, cancellationToken)
+                .ConfigureAwait(false);
             RemoteCertificateValidationCallback? validator = _transportTrust is not null &&
                 string.Equals(address!.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
                 ? _transportTrust.CreateOutboundTrustValidator(_application) : null;
@@ -891,51 +898,137 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
         }
     }
 
-    private bool Authorize(
+    // Authenticates the caller through the built-in ES256 trusted-issuer authenticator and then the
+    // application's registered caller authenticators (ControlPlaneCallerAuthentication), and applies
+    // the route's access rule to the mapped caller. Returns null after writing the refusal. With no
+    // registered authenticator every response is the one this server gave before they existed:
+    // 401 without a credential, 403 invalid_token for one it cannot verify, 403 insufficient_scope
+    // for a verified developer on a command route.
+    private async ValueTask<ApplicationCaller?> AuthorizeAsync(
         IHttpContext context,
         bool requireCommandAccess,
-        out ControlPlanePrincipal principal)
+        CancellationToken cancellationToken)
     {
-        principal = default;
         string? authorization = context.Request.Headers.GetValue(HttpHeaderKey.Authorization);
         if (string.IsNullOrWhiteSpace(authorization))
         {
             context.Response.StatusCode = HttpStatusCode.Unauthorized;
             context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer";
-            return false;
+            return null;
         }
 
-        const string prefix = "Bearer ";
-        if (!authorization.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
-            authorization.Length == prefix.Length ||
-            !ControlPlaneTokenVerifier.TryVerify(
-                authorization[prefix.Length..].Trim(),
-                _trustedIssuers!.GetTrustedIssuers(_application),
-                _timeProvider.GetUtcNow(),
-                out principal))
+        ApplicationCallerResult result = TryParseAuthorization(authorization, out string? scheme, out string? credential)
+            ? await ControlPlaneCallerAuthentication
+                .AuthenticateAsync(
+                    _application,
+                    scheme!,
+                    credential!,
+                    _trustedIssuers!.GetTrustedIssuers(_application),
+                    _callers,
+                    _timeProvider.GetUtcNow(),
+                    cancellationToken)
+                .ConfigureAwait(false)
+            : default;
+
+        switch (result.Status)
         {
-            context.Response.StatusCode = HttpStatusCode.Forbidden;
-            context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer error=\"invalid_token\"";
-            return false;
+            case ApplicationCallerStatus.Authenticated:
+                break;
+            case ApplicationCallerStatus.Unauthorized:
+                await WriteCallerRefusalAsync(
+                        context, HttpStatusCode.Unauthorized, $"{scheme} error=\"invalid_token\"", result.Failure, cancellationToken)
+                    .ConfigureAwait(false);
+                return null;
+            case ApplicationCallerStatus.Forbidden:
+                await WriteCallerRefusalAsync(
+                        context, HttpStatusCode.Forbidden, $"{scheme} error=\"insufficient_scope\"", result.Failure, cancellationToken)
+                    .ConfigureAwait(false);
+                return null;
+            default:
+                context.Response.StatusCode = HttpStatusCode.Forbidden;
+                context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer error=\"invalid_token\"";
+                return null;
         }
 
-        if (requireCommandAccess && !principal.CanDispatchCommands)
+        ApplicationCaller caller = result.Caller!;
+        if (requireCommandAccess && !ControlPlaneCallerAuthentication.CanDispatchCommands(caller))
         {
             context.Response.StatusCode = HttpStatusCode.Forbidden;
             context.Response.Headers[HttpHeaderKey.WWWAuthenticate] =
                 "Bearer error=\"insufficient_scope\"";
-            return false;
+            return null;
         }
 
-        return true;
+        return caller;
+    }
+
+    // '<scheme> <credential>': the scheme is the first token and the credential the trimmed rest.
+    private static bool TryParseAuthorization(string authorization, out string? scheme, out string? credential)
+    {
+        int separator = authorization.IndexOf(' ');
+        if (separator > 0)
+        {
+            string presented = authorization[(separator + 1)..].Trim();
+            if (presented.Length > 0)
+            {
+                scheme = authorization[..separator];
+                credential = presented;
+                return true;
+            }
+        }
+
+        scheme = null;
+        credential = null;
+        return false;
+    }
+
+    private static async Task WriteCallerRefusalAsync(
+        IHttpContext context,
+        HttpStatusCode statusCode,
+        string challenge,
+        string? failure,
+        CancellationToken cancellationToken)
+    {
+        // The challenge is set before any body is written, so it never depends on the response
+        // being buffered until the handler returns.
+        context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = challenge;
+        if (failure is null)
+        {
+            context.Response.StatusCode = statusCode;
+        }
+        else
+        {
+            await WriteErrorAsync(context, statusCode, failure, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    // Commands are owned by the caller's application; CanDispatchCommands guarantees one.
+    private static string GetCommandOwner(ApplicationCaller caller) => caller.Application!.Value.ToString();
+
+    // An empty list permits every kind, the TrustedIssuer.AllowedCommandKinds rule.
+    private static bool IsCommandKindAllowed(ApplicationCaller caller, string kind) =>
+        caller.AllowedCommandKinds.Count == 0 ||
+        caller.AllowedCommandKinds.Contains(kind, StringComparer.Ordinal);
+
+    private static IReadOnlyList<IApplicationCallerAuthenticator> SnapshotCallers(IApplicationModel model)
+    {
+        IList<IApplicationCallerAuthenticator> registered = (model.Providers ?? ApplicationProviders.Empty).Callers;
+        if (registered.Count == 0)
+        {
+            return Array.Empty<IApplicationCallerAuthenticator>();
+        }
+
+        var callers = new IApplicationCallerAuthenticator[registered.Count];
+        registered.CopyTo(callers, 0);
+        return callers;
     }
 
     private bool TryGetResourceRoute(
-        IHttpContext context,
+        IReadOnlyDictionary<string, string> routeValues,
         out IApplicationResourceDescriptor? descriptor,
         out ResourceManifest? manifest)
     {
-        if (!TryGetRouteValue(context, "name", out string? name))
+        if (!TryGetRouteValue(routeValues, "name", out string? name))
         {
             descriptor = null;
             manifest = null;
@@ -996,14 +1089,11 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
     }
 
     private static bool TryGetRouteValue(
-        IHttpContext context,
+        IReadOnlyDictionary<string, string> routeValues,
         string key,
         out string? value)
     {
-        if (context.TryGetRouteValues(out RouteValueDictionary? values) &&
-            values is not null &&
-            values.TryGetValue(key, out object? raw) &&
-            raw is string text &&
+        if (routeValues.TryGetValue(key, out string? text) &&
             !string.IsNullOrWhiteSpace(text))
         {
             value = text;
@@ -1041,8 +1131,23 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
                     manifest.ControlPlane.Path,
                     out address))
             {
-                reason = null;
-                return true;
+                // The served path mints the same ResourceAccess credential the gateway's own delivery
+                // does, so it applies the same transport rule before that credential is issued:
+                // HTTPS, or loopback HTTP in Local.
+                IApplicationModel model = _model!;
+                if (string.Equals(address.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+                    (model.Environment.IsLocal &&
+                     string.Equals(address.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+                     address.IsLoopback))
+                {
+                    reason = null;
+                    return true;
+                }
+
+                reason = $"Application '{model.Name}' refuses to send a bearer credential to " +
+                    $"non-TLS endpoint '{address}'. Use HTTPS, or loopback HTTP in Local.";
+                address = null;
+                return false;
             }
         }
 
@@ -1052,17 +1157,28 @@ internal sealed class GatewayControlPlaneServer : IApplicationGatewayControlPlan
         return false;
     }
 
+    // Exact manifest kind first, then the first catch-all dispatcher, mirroring the gateway's own
+    // command-client selection (ApplicationGateway.Commands.cs) so an area-specific registration
+    // always overrides the default generic control-plane client.
     private IResourceCommandDispatcher? FindDispatcher(string resourceKind)
     {
+        IResourceCommandDispatcher? fallback = null;
         for (int index = 0; index < _dispatchers.Count; index++)
         {
-            if (string.Equals(_dispatchers[index].ResourceKind, resourceKind, StringComparison.Ordinal))
+            IResourceCommandDispatcher candidate = _dispatchers[index];
+            if (string.Equals(candidate.ResourceKind, resourceKind, StringComparison.Ordinal))
             {
-                return _dispatchers[index];
+                return candidate;
+            }
+
+            if (fallback is null &&
+                string.Equals(candidate.ResourceKind, IGatewayResourceCommandClient.AnyKind, StringComparison.Ordinal))
+            {
+                fallback = candidate;
             }
         }
 
-        return null;
+        return fallback;
     }
 
     private static bool AcceptsCommand(ResourceManifest manifest, string kind)

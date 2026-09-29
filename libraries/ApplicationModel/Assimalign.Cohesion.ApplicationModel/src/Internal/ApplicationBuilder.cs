@@ -1,16 +1,18 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Reflection;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
 /// <summary>
-/// The default <see cref="IApplicationBuilder"/>. Maintains the working resource collection
-/// and descriptor graph, the selected gateway, and validates the graph at <see cref="Build"/>.
+/// The default <see cref="IApplicationBuilder"/>, which is also its application's
+/// <see cref="IApplicationProviderBuilder"/>. Maintains the working resource collection and descriptor
+/// graph, the selected gateway, and validates the graph at <see cref="Build"/>.
 /// </summary>
-internal sealed class ApplicationBuilder : IApplicationBuilder
+internal sealed class ApplicationBuilder : IApplicationBuilder, IApplicationProviderBuilder
 {
     private readonly GatewayCommandLineOptions _options;
     private ApplicationEnvironment _environment;
@@ -22,6 +24,7 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
         IExternalResourceResolver? CodeResolver)>
         _externals = new();
     private readonly List<IResourceCommand> _commands = new();
+    private readonly ApplicationProviders _providers = new();
     private ApplicationName? _name;
     private IApplicationGateway? _gateway;
 
@@ -51,6 +54,28 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
     public ResourceName? RequestedGateway => _options.Gateway is null
         ? default(ResourceName?)
         : (ResourceName)_options.Gateway;
+
+    public ApplicationProviders Providers => _providers;
+
+    public ApplicationName? Application => _name;
+
+    public bool TryGetResourceManifest(ResourceName resource, [NotNullWhen(true)] out ResourceManifest? manifest)
+    {
+        for (int index = 0; index < _resources.Count; index++)
+        {
+            // Only manifest-backed resources know their kind before Build(); any other resource
+            // gets its manifest at Build(), where provider validation checks the binding.
+            if (_resources[index].Name == resource &&
+                _resources[index] is IManifestResource { Manifest: ResourceManifest declared })
+            {
+                manifest = declared;
+                return true;
+            }
+        }
+
+        manifest = null;
+        return false;
+    }
 
     public IApplicationBuilder UseName(ApplicationName name)
     {
@@ -181,6 +206,10 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
         }
 
         IApplicationModel model = BuildModel(validate: true);
+        // Provider registrations are checked against the built graph before the gateway sees
+        // the model, so a missing store provider or a cross-application source fails here with
+        // the package and verb to reference rather than as an unresolved mount at run time.
+        ApplicationProviderValidation.Validate(model);
         _gateway.Validate(model);
         return new CohesionApplication(model, _gateway, command: _options.Command);
     }
@@ -522,7 +551,8 @@ internal sealed class ApplicationBuilder : IApplicationBuilder
             gatewayIdentity,
             _options.Adopt,
             _options.RestartOrphans,
-            _commands);
+            _commands,
+            _providers);
     }
 
     private static void ValidateManifests(

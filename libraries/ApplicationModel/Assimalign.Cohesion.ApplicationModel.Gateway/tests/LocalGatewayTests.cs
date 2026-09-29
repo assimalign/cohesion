@@ -14,7 +14,6 @@ using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
-using Assimalign.Cohesion.Core;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
@@ -751,14 +750,14 @@ public class LocalGatewayTests
             File.Exists(Path.Combine(root, ".cohesion", ApplicationNameValue, ".state", "ports.json")).ShouldBeTrue();
 
             IReadOnlyDictionary<string, string> environment = ReadStringMap(secondCapture);
-            environment[ResourceEnvironment.Application].ShouldBe(ApplicationNameValue);
-            environment[ResourceEnvironment.Resource].ShouldBe("svc");
-            environment[ResourceEnvironment.Gateway].ShouldBe("local");
-            environment[ResourceEnvironment.Endpoint("http", "HOST")].ShouldBe("127.0.0.1");
-            environment[ResourceEnvironment.Endpoint("http", "PORT")]
+            environment[AppEnvironment.Variables.Application].ShouldBe(ApplicationNameValue);
+            environment[AppEnvironment.Variables.Resource].ShouldBe("svc");
+            environment[AppEnvironment.Variables.Gateway].ShouldBe("local");
+            environment[AppEnvironment.Variables.Endpoint("http", "HOST")].ShouldBe("127.0.0.1");
+            environment[AppEnvironment.Variables.Endpoint("http", "PORT")]
                 .ShouldBe(firstPort.ToString(CultureInfo.InvariantCulture));
-            environment[ResourceEnvironment.Endpoint("http", "SCHEME")].ShouldBe("http");
-            environment[ResourceEnvironment.Endpoint("http", "PUBLIC_URL")]
+            environment[AppEnvironment.Variables.Endpoint("http", "SCHEME")].ShouldBe("http");
+            environment[AppEnvironment.Variables.Endpoint("http", "PUBLIC_URL")]
                 .ShouldBe($"http://127.0.0.1:{firstPort}");
         }
         finally
@@ -1109,7 +1108,7 @@ public class LocalGatewayTests
             await WaitForFileAsync(capture);
 
             using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(capture));
-            JsonElement mount = document.RootElement.GetProperty(ResourceEnvironment.Mount("settings"));
+            JsonElement mount = document.RootElement.GetProperty(AppEnvironment.Variables.Mount("settings"));
             string path = mount.GetProperty("path").GetString()!;
             byte[] content = mount.GetProperty("content").GetBytesFromBase64();
             path.ShouldBe(Path.Combine(root, ".cohesion", ApplicationNameValue, "svc", "settings"));
@@ -1128,6 +1127,61 @@ public class LocalGatewayTests
                 Encoding.UTF8.GetString(content).ShouldBe("mount-value");
                 File.GetUnixFileMode(path).ShouldBe(UnixFileMode.UserRead | UnixFileMode.UserWrite);
             }
+        }
+        finally
+        {
+            await StopApplicationAsync(cancellation, run);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local gateway: a registered issuer's bootstrap credential reaches the resource")]
+    public async Task RunAsync_RegisteredCredentialIssuer_DeliversItsBootstrapCredential()
+    {
+        // Arrange: the issuer mints only bootstrap credentials and defers every other purpose.
+        string root = CreateTestDirectory();
+        string capture = Path.Combine(root, "environment.json");
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["TEST_ENV_CAPTURE_PATH"] = capture,
+            ["TEST_CAPTURE_ENV_NAMES"] = AppEnvironment.Variables.BootstrapTokenPath,
+        };
+        ResourceManifest manifest = CreateManifest(
+            "svc",
+            environment,
+            readiness: TcpProbe(),
+            startup: NoneProbe(),
+            liveness: NoneProbe());
+        var issuer = new RecordingCredentialIssuer(request =>
+            request.Purpose == ApplicationCredentialPurpose.ResourceBootstrap
+                ? new ApplicationCredential("Bearer", "idp-bootstrap-" + request.Audience, DateTimeOffset.UtcNow.AddHours(1))
+                : null);
+        LocalGateway gateway = CreateGateway(root);
+        IApplicationBuilder builder = Assimalign.Cohesion.ApplicationModel.Application
+            .CreateBuilder(ApplicationName.Parse(ApplicationNameValue), [])
+            .UseGateway(gateway);
+        builder.AddResource(manifest);
+        builder.Providers.CredentialIssuer = issuer;
+        IApplication application = builder.Build();
+        using var cancellation = new CancellationTokenSource();
+        Task run = application.RunAsync(cancellation.Token);
+
+        try
+        {
+            // Act
+            await WaitForStateAsync(gateway, ResourceIdOf(manifest.Name), ResourceLifecycle.Running);
+            await WaitForFileAsync(capture);
+
+            // Assert: the resource reads the issuer's credential through COHESION_BOOTSTRAP_TOKEN_PATH.
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(capture));
+            string path = document.RootElement.GetProperty(AppEnvironment.Variables.BootstrapTokenPath).GetString()!;
+            path.ShouldBe(Path.Combine(root, ".cohesion", ApplicationNameValue, "svc", ".state", "bootstrap.token"));
+            Encoding.UTF8.GetString(new Assimalign.Cohesion.Hosting.Resources.ResourceMount(path).ReadAllBytes())
+                .ShouldBe("idp-bootstrap-svc");
+            issuer.Requests.ShouldContain(request =>
+                request.Purpose == ApplicationCredentialPurpose.ResourceBootstrap &&
+                request.Audience == "svc" &&
+                request.Subject == "local");
         }
         finally
         {
@@ -1406,8 +1460,8 @@ public class LocalGatewayTests
         const string mountName = "database-data";
         string[] dependencyVariables = DependencyVariables(compositeName, endpointName);
         string outerMountName = $"{compositeName}-{mountName}";
-        string outerMountVariable = ResourceEnvironment.Mount(outerMountName);
-        string unqualifiedMountVariable = ResourceEnvironment.Mount(mountName);
+        string outerMountVariable = AppEnvironment.Variables.Mount(outerMountName);
+        string unqualifiedMountVariable = AppEnvironment.Variables.Mount(mountName);
         ResourceManifest composite = CreateManifest(
             compositeName,
             new Dictionary<string, string>(StringComparer.Ordinal)
@@ -1518,7 +1572,7 @@ public class LocalGatewayTests
             {
                 ["TEST_MOUNT_CAPTURE_PATH"] = capture,
                 ["TEST_MOUNT_NAMES"] = $"{volumeName};{secretName}",
-                [ResourceEnvironment.Mount(volumeName)] = Path.Combine(root, "spoofed-cache"),
+                [AppEnvironment.Variables.Mount(volumeName)] = Path.Combine(root, "spoofed-cache"),
             },
             readiness: TcpProbe(),
             startup: NoneProbe(),
@@ -1713,10 +1767,10 @@ public class LocalGatewayTests
 
     private static string[] DependencyVariables(string resource, string endpoint) =>
     [
-        ResourceEnvironment.Dependency(resource, endpoint, "URL"),
-        ResourceEnvironment.Dependency(resource, endpoint, "HOST"),
-        ResourceEnvironment.Dependency(resource, endpoint, "PORT"),
-        ResourceEnvironment.Dependency(resource, endpoint, "SCHEME"),
+        AppEnvironment.Variables.Dependency(resource, endpoint, "URL"),
+        AppEnvironment.Variables.Dependency(resource, endpoint, "HOST"),
+        AppEnvironment.Variables.Dependency(resource, endpoint, "PORT"),
+        AppEnvironment.Variables.Dependency(resource, endpoint, "SCHEME"),
     ];
 
     private static void AssertCapturedMount(
@@ -1726,7 +1780,7 @@ public class LocalGatewayTests
         string mount,
         string expectedKind)
     {
-        string variable = ResourceEnvironment.Mount(mount);
+        string variable = AppEnvironment.Variables.Mount(mount);
         JsonElement captured = document.RootElement.GetProperty(variable);
         captured.GetProperty("exists").GetBoolean().ShouldBeTrue();
         captured.GetProperty("kind").GetString().ShouldBe(expectedKind);
@@ -1865,10 +1919,10 @@ public class LocalGatewayTests
             manifest.EnvironmentVariables,
             StringComparer.Ordinal)
         {
-            [ResourceEnvironment.Application] = ApplicationNameValue,
-            [ResourceEnvironment.Resource] = manifest.Name.ToString(),
-            [ResourceEnvironment.Gateway] = "local",
-            [ResourceEnvironment.ContentRoot] = Path.GetDirectoryName(TestHostPath)!,
+            [AppEnvironment.Variables.Application] = ApplicationNameValue,
+            [AppEnvironment.Variables.Resource] = manifest.Name.ToString(),
+            [AppEnvironment.Variables.Gateway] = "local",
+            [AppEnvironment.Variables.ContentRoot] = Path.GetDirectoryName(TestHostPath)!,
         };
         var ports = new LocalPortStore(stateDirectory);
         var endpoints = new ResourceEndpoint[manifest.Endpoints.Count];
@@ -1899,7 +1953,7 @@ public class LocalGatewayTests
                 EventResetMode.ManualReset,
                 stopEventName,
                 out _);
-            environment[ResourceEnvironment.StopEvent] = stopEventName;
+            environment[AppEnvironment.Variables.StopEvent] = stopEventName;
         }
 
         var process = new Process

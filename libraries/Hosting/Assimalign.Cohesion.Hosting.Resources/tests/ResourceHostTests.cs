@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Resources.Internal;
 
 namespace Assimalign.Cohesion.Hosting.Resources.Tests;
@@ -507,7 +506,7 @@ public class ResourceHostTests
     {
         // Arrange
         string? originalContentRoot = System.Environment.GetEnvironmentVariable(
-            ResourceEnvironment.ContentRoot,
+            AppEnvironment.Variables.ContentRoot,
             EnvironmentVariableTarget.Process);
         string configuredContentRoot = Path.GetFullPath("configured-resource-content");
 
@@ -515,13 +514,13 @@ public class ResourceHostTests
         {
             // Act
             System.Environment.SetEnvironmentVariable(
-                ResourceEnvironment.ContentRoot,
+                AppEnvironment.Variables.ContentRoot,
                 configuredContentRoot,
                 EnvironmentVariableTarget.Process);
             FileSystemPath configured = ResourceHostOptions.ResolveContentRootPath();
 
             System.Environment.SetEnvironmentVariable(
-                ResourceEnvironment.ContentRoot,
+                AppEnvironment.Variables.ContentRoot,
                 value: null,
                 EnvironmentVariableTarget.Process);
             FileSystemPath fallback = ResourceHostOptions.ResolveContentRootPath();
@@ -533,7 +532,7 @@ public class ResourceHostTests
         finally
         {
             System.Environment.SetEnvironmentVariable(
-                ResourceEnvironment.ContentRoot,
+                AppEnvironment.Variables.ContentRoot,
                 originalContentRoot,
                 EnvironmentVariableTarget.Process);
         }

@@ -13,7 +13,6 @@ An arrow means "references": `IdentityHub.Hosting --> IdentityHub` reads
 flowchart LR
     P0["IdentityHub — area root"]
     P1["IdentityHub.ApplicationModel"]
-    P2["IdentityHub.Client"]
     P3["IdentityHub.Hosting — runtime module"]
     P4["IdentityHub.Models"]
     CORE["Assimalign.Cohesion.Core — L1"]
@@ -23,7 +22,6 @@ flowchart LR
     P0 --> CORE
     P1 --> APPMODEL
     P1 --> HOSTFAM
-    P2 --> CORE
     P3 --> HOSTFAM
     P3 --> P0
     P3 -->|"private"| PRIV
@@ -73,9 +71,10 @@ The IdentityHub SDK's orchestration defaults describe one private `https` endpoi
 | `identityhub.add-client` | `AddClient` | client id |
 
 The [ApplicationModel](Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/OVERVIEW.md) declares
-commands; [Hosting](Assimalign.Cohesion.IdentityHub.Hosting/docs/DESIGN.md) applies them; the Core-only
-[Client](Assimalign.Cohesion.IdentityHub.Client/docs/OVERVIEW.md) delivers them for the gateway.
-ApplicationModel and Client are standalone NuGet packages.
+commands; [Hosting](Assimalign.Cohesion.IdentityHub.Hosting/docs/DESIGN.md) applies them; the gateway's
+generic `ResourceControlPlaneCommandClient` (`Assimalign.Cohesion.ApplicationModel.Gateway`) delivers them
+to the resource control plane, so the area ships no client package. ApplicationModel is a standalone
+NuGet package.
 
 ## Application composition (O34)
 

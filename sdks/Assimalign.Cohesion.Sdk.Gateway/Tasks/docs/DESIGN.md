@@ -32,7 +32,12 @@ imports `Assimalign.Cohesion.Sdk`, but it does not create or reference an
 `Assimalign.Cohesion.ApplicationModel`,
 `Assimalign.Cohesion.ApplicationModel.Gateway`,
 `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane`, optional provider packages, and the
-narrow client packages required to resolve protected mount sources and deliver commands.
+`<Area>.ApplicationModel` package of each referenced resource project's area. No area client
+package is part of it: the gateway delivers commands through its generic control-plane command
+client. Store, certificate-authority, and trust providers come from opt-in
+`<Area>.ApplicationModel.Orchestration` packages the consumer references and registers itself,
+and a credential issuer or caller authenticator is the consumer's own `builder.Providers`
+assignment.
 
 The Gateway props retain `CohesionAutoIncludeAppFramework=false` before importing the
 base SDK, matching the switch understood by resource-area SDKs. The base SDK itself
@@ -56,8 +61,8 @@ dependencies such as `GatewaySmokeSupport` therefore need no explicit output typ
 
 That ordering is load-bearing:
 
-1. Gateway props register the task, defaults, resource-kind metadata, known typed area
-   mappings, and fixed orchestration dependencies.
+1. Gateway props register the task, defaults, the Composite resource metadata, the provider
+   package map, and fixed orchestration dependencies.
 2. The consumer declares `CohesionApplicationName`, `CohesionGateways`, and
    `CohesionResourceReference` items.
 3. Gateway `Sdk.targets` unconditionally restores `OutputType=Exe`,
@@ -80,13 +85,13 @@ That ordering is load-bearing:
 ## Generated source
 
 The task consumes JSON manifests, not referenced compilations. It validates identifiers,
-application boundaries, duplicate providers, provider metadata, and protected
-mount-source mappings before emitting source.
+application boundaries, duplicate providers, and provider metadata before emitting source.
+It keeps its historical name, `CohesionCreateResourceVerbs`, although it no longer emits verbs.
 
 Gateway members use the ApplicationModel SDK's shared generated-identifier contract: non-alphanumeric
 separators delimit Pascal-cased segments, `appa` becomes `AppA`, and
 `platform-configuration-store` becomes `PlatformConfigurationStore`. The rule applies uniformly to
-`Applications`, `Externals`, `References`, manifest members, resource verbs, and provider members.
+`Applications`, `Externals`, `References`, manifest members, and provider members.
 
 The generated application name is used in two ways:
 
@@ -96,36 +101,35 @@ The generated application name is used in two ways:
   `Application.CreateBuilder(ApplicationName.Parse("appa"), args)`. Runtime code never
   reads the attribute to discover identity.
 
-Same-application manifests produce `Add*` methods. A typed area mapping supplies its
-area-owned options type, `DescriptorType`, and `Add<Area>` method; an unmapped area uses
-`ResourceOptions` and `IApplicationBuilder.AddResource`. Boundary-crossing manifests
-produce `ExternalResourceDeclaration` values instead of realization verbs. A referenced
-Composite gateway additionally produces an `Applications.<Name>` declaration resolved
-through that gateway's control plane.
+Every captured manifest produces a `Manifests.<Name>` member, and nothing else is generated
+per resource. Composition is explicit and hand-written: the gateway's `Program.cs` passes
+`Manifests.<Name>` to the verb of the area's ApplicationModel package
+(`builder.AddWeb(Manifests.OrdersApi, new WebResourceOptions { Replicas = 2 })`), to a
+third-party ApplicationModel package's verb, or to `builder.AddResource(Manifests.<Name>)`
+for a kind with no ApplicationModel in reach. The area verbs take their options as an
+instance and return the area's `I<Area>ResourceDescriptor`, which carries the area's typed
+command verbs (Database, ConfigurationStore, SecretStore, IdentityHub, and Rezolvr). The
+generator therefore keeps no resource-kind table, emits no `CohesionGatewayResourceExtensions`
+class, and has no untyped-fallback diagnostic: calling an area verb whose ApplicationModel the
+gateway does not reference is an ordinary compile error. Boundary-crossing manifests produce
+`ExternalResourceDeclaration` values. A referenced Composite gateway additionally produces an
+`Applications.<Name>` declaration resolved through that gateway's control plane.
 
-Web, Database, ConfigurationStore, SecretStore, IdentityHub, Rezolvr, and LogSpace
-mappings return their area's `I<Area>ResourceDescriptor` and accept its
-`<Area>ResourceOptions`. Database, ConfigurationStore, SecretStore, IdentityHub, and
-Rezolvr retain typed command verbs on generated `Add*` results. Web preserves its
-existing typed planner; LogSpace provides typed options and a named telemetry-sink
-descriptor without command verbs. Custom mappings that omit `DescriptorType` keep
-`IApplicationResourceDescriptor`. In-process binding is applied after constructing
-the descriptor, and the original typed descriptor is returned.
+In-process bindings do not depend on the verb. When the in-process pass binds enabled,
+composable project resources, `Gateway.CreateBuilder(args)` registers each binding by manifest
+identity (`Manifests.<Name>.InProcess(...)`, keyed by application and resource name) and roots
+each entry point with `DynamicDependency`. The in-process gateway looks the binding up from the
+built resource's manifest, so a resource added through any verb over `Manifests.<Name>` is
+colocated.
 
-`CohesionGatewayResourceKind` is defined by the ApplicationModel SDK rather than
-closed inside Gateway. `Sdk.Gateway.props` contributes the first-party rows. Normal
-NuGet evaluation unions those rows with contributions from referenced packages'
-`build` and `buildTransitive` props before `CohesionCreateResourceVerbs` snapshots the
-items. The item identity is the resource kind; `ApplicationModel`, `OptionsType`, and
-`AddMethod` are required, while `DescriptorType` defaults to
-`IApplicationResourceDescriptor`. The generator matches on ApplicationModel identity
-because the manifest carries that identity across the package boundary.
-
-`CohesionGatewayClientKind` maps both mount sources and command targets to narrow
-client packages. A manifest with a non-empty `commands` array requires its kind's
-client even when no mount uses it: Database maps to Database.Client and
-ConfigurationStore maps to ConfigurationStore.Client. The manifest reader accepts
-only non-empty command-kind strings; payloads remain in runtime model declarations.
+The manifest reader still validates the `mounts` and `commands` arrays (each command is a
+non-empty kind string, or an object with a non-empty string `kind` and an optional boolean
+`requiresInputResolver`; any other property or value type fails), but the SDK derives no package
+from them. The gateway SDK does not act on `requiresInputResolver`: ApplicationModel's provider
+validation enforces it at `Build()`, requiring a resolver in the declaring application's
+`Providers.CommandInputs`. Commands reach resources through
+the gateway's generic control-plane command client, and mount sources resolve through the
+providers the gateway registers explicitly; payloads remain in runtime model declarations.
 
 Provider dispatch is generated only from `@(CohesionGatewayProvider)`. The item contract
 is:
@@ -159,7 +163,7 @@ Fixed dependencies and platform selection are known during project evaluation an
 added to the NuGet restore graph normally. Manifest-derived dependencies are different:
 the referenced package manifest becomes available only after restore, and a project
 manifest becomes available only after `ResolveProjectReferences`. A task that discovers
-an ApplicationModel or client at either point cannot add a `PackageReference` to the
+an ApplicationModel at either point cannot add a `PackageReference` to the
 already-created `project.assets.json`.
 
 The minimal honest implementation is therefore:
@@ -173,27 +177,21 @@ The minimal honest implementation is therefore:
    injected, pinned at `$(CohesionVersion)` (repository projects inside cohesion). Nothing is
    injected for a manifest package, a missing project, a base-SDK project, or a referenced
    gateway. The same set drives the in-process framework references (`App` plus one
-   `App.<Area>` per referenced area). The three SecretStore, Database, and ConfigurationStore
-   client packages stay restore-visible for every gateway: mount sources and command targets
-   can name a store that no referenced project introduces.
-3. Validate the manifest-derived requirement set after resolution: a typed kind whose
-   ApplicationModel is not among the gateway's `PackageReference`/`ProjectReference` items
-   (derived or consumer-added) is generated on the untyped `AddResource` path with the
-   actionable `COHGW003` warning naming the package to reference.
-4. Preserve the existing Web mapping and the rows for areas whose ApplicationModel ships a
-   typed descriptor with command verbs, plus LogSpace for typed options on the telemetry
-   sink. Every other area stays on the generic `ResourceOptions`/`AddResource` path. Deriving
-   the injected set from project references keeps every gateway's restore graph as small as
-   its composition without a second restore; T11's restore-visible producer descriptor remains
-   the documented future shape for manifest packages and for the clients.
+   `App.<Area>` per referenced area).
+3. Inject nothing else by convention. No area client package is restored, and no package is
+   inferred from a manifest's mounts or commands. A gateway that composes an area it does not
+   reference as a project adds that area's ApplicationModel package itself to call the typed
+   verb, or composes the manifest with `AddResource`; a gateway that resolves mount sources
+   from a store references that store's Orchestration package and registers it in
+   `Program.cs`. Deriving the injected set from project references keeps every gateway's
+   restore graph as small as its composition without a second restore.
 
 The recommended complete fix is a producer-authored, restore-visible dependency
-descriptor. A manifest package should place only its orchestration ApplicationModel and
-required mount clients into the NuGet dependency graph; it must never acquire an area
-runtime or `*.Hosting` dependency. A project reference must expose the equivalent edges
+descriptor. A manifest package should place only its orchestration ApplicationModel into the
+NuGet dependency graph; it must never acquire an area runtime, an area client, or a
+`*.Hosting` dependency. A project reference must expose the equivalent edges
 through the project restore graph. After manifests resolve, `Sdk.Gateway` validates that
-the restore-time declaration matches `applicationModel`, resource kind, and mount-source
-facts in the JSON. This preserves one restore/build invocation and keeps the manifest
+the restore-time declaration matches the `applicationModel` and resource kind in the JSON. This preserves one restore/build invocation and keeps the manifest
 itself portable. If that producer contract is not accepted, require explicit dependency
 metadata or PackageReferences from the gateway project and diagnose omissions; do not
 attempt an implicit second restore from a build target.
@@ -236,7 +234,7 @@ Generated sources are build outputs. `Gateway.g.cs` is added to `Compile` by the
 writes it, never as an evaluation-time item under the intermediate directory, so Visual
 Studio shows no obj folder for it and the design-time build compiles it. `Clean` deletes it
 with the other file writes and then regenerates it (without the in-process pass, whose member
-assemblies are gone until the next build) so IntelliSense keeps the generated verbs. A
+assemblies are gone until the next build) so IntelliSense keeps the generated surface. A
 design-time build (`DesignTimeBuild=true`) never builds the members, so it keeps an existing
 `Gateway.g.cs` untouched and, when none exists, generates the surface without the in-process
 pass; the real build regenerates it with the bindings.
@@ -263,9 +261,13 @@ stubs:
 - `CohesionPlatformsVersion` has no repository-wide version source beyond the SDK's
   temporary Cohesion-version default.
 - Web, Database, ConfigurationStore, SecretStore, IdentityHub, Rezolvr, and LogSpace
-  provide typed area ApplicationModel mappings; other areas use the generic path.
+  ship typed area verbs in their ApplicationModel packages; other areas compose through
+  `AddResource`.
 - First-restore manifest dependency metadata has not landed; the finite dependency
   bootstrap described above is transitional.
+- Cross-application store sources (a mount `<source>:<key>` whose source is a resource of
+  another application or a remote reference) are rejected at `Build()` for now. Supporting
+  them is a follow-up for when the store resources mature.
 - The Gateway SDK suppresses the base SDK's implicit `Assimalign.Cohesion.App` reference
   before the base props import; no Gateway shared framework exists.
 - Three-OS package-boundary smoke CI is wired, but release `validate-consumer` coverage

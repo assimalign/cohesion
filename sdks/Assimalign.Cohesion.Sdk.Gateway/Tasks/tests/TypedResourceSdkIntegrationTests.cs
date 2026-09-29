@@ -9,13 +9,19 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Sdk.Gateway.Tests;
 
-/// <summary>Verifies typed resource mappings through the packed Gateway SDK.</summary>
+/// <summary>
+/// Verifies, through the packed Gateway SDK, that gateways compose resources with the
+/// hand-written verbs of ApplicationModel packages over the generated manifests.
+/// </summary>
 public sealed class TypedResourceSdkIntegrationTests
 {
-    /// <summary>Verifies a referenced package can contribute a typed resource-kind row.</summary>
+    /// <summary>
+    /// Verifies a third-party ApplicationModel package's own verb composes a generated manifest
+    /// without any SDK-side mapping.
+    /// </summary>
     /// <returns>The asynchronous package-boundary verification.</returns>
-    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - third-party ApplicationModel package contributes a typed verb")]
-    public async Task Build_ThirdPartyApplicationModelPackage_ShouldGenerateTypedVerb()
+    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - third-party ApplicationModel package verb composes a generated manifest")]
+    public async Task Build_ThirdPartyApplicationModelPackage_ShouldComposeThroughPackageVerb()
     {
         // Arrange
         using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(3));
@@ -28,39 +34,36 @@ public sealed class TypedResourceSdkIntegrationTests
             cancellationSource.Token);
         pack.ExitCode.ShouldBe(0, pack.Output);
 
-        // Act
+        // Act: Program.cs calls builder.AddThirdParty(Manifests.ThirdPartyResource).
         DotNetBuildResult build = await workspace.BuildAsync(
             "ThirdPartyGateway",
             cancellationSource.Token);
 
         // Assert
         build.ExitCode.ShouldBe(0, build.Output);
-        build.Output.ShouldNotContain("COHGW003", Case.Sensitive);
-        string sourcePath = Directory.EnumerateFiles(
-            Path.Combine(workspace.ProjectDirectory("ThirdPartyGateway"), "obj"),
-            "Gateway.g.cs",
-            SearchOption.AllDirectories).Single();
-        string source = File.ReadAllText(sourcePath);
+        string source = ReadGeneratedSource(workspace, "ThirdPartyGateway");
         source.ShouldContain(
-            "public global::Assimalign.Cohesion.ApplicationModel.IApplicationResourceDescriptor AddThirdPartyResource(global::System.Action<global::Assimalign.Cohesion.ApplicationModel.ThirdPartyResourceOptions>? configure = null)",
+            "public static readonly global::Assimalign.Cohesion.ApplicationModel.ResourceManifest ThirdPartyResource",
             Case.Sensitive);
-        source.ShouldContain(
-            "global::Assimalign.Cohesion.ApplicationModel.ThirdPartyResourceExtensions.AddThirdParty(builder, Manifests.ThirdPartyResource, options)",
-            Case.Sensitive);
-        source.ShouldNotContain("builder.AddResource(Manifests.ThirdPartyResource", Case.Sensitive);
+        source.ShouldNotContain("CohesionGatewayResourceExtensions", Case.Sensitive);
+        source.ShouldNotContain("AddThirdPartyResource(", Case.Sensitive);
+        source.ShouldNotContain("ThirdPartyResourceExtensions", Case.Sensitive);
     }
 
-    /// <summary>Builds each area fixture and checks its generated typed composition method.</summary>
-    /// <param name="area">The mapped resource area.</param>
+    /// <summary>
+    /// Builds each area fixture whose gateway calls the area's hand-written verb, which compiles
+    /// only when the SDK injected that area's ApplicationModel for the referenced project.
+    /// </summary>
+    /// <param name="area">The resource area named by the referenced project's SDK.</param>
     /// <param name="resourceFixture">The resource project that produces the manifest.</param>
     /// <param name="gatewayFixture">The gateway project consuming that manifest.</param>
     /// <param name="member">The expected manifest member derived from the resource name.</param>
     /// <returns>The asynchronous package-boundary verification.</returns>
-    [Theory(DisplayName = "Cohesion Test [Sdk.Gateway] - Build: Should preserve typed area options descriptors and Add methods")]
+    [Theory(DisplayName = "Cohesion Test [Sdk.Gateway] - Build: Should inject the referenced area's ApplicationModel for its hand-written verb")]
     [InlineData("IdentityHub", "TypedIdentityHub", "IdentityHubGateway", "TypedIdentity")]
     [InlineData("Rezolvr", "TypedRezolvr", "RezolvrGateway", "TypedRezolvr")]
     [InlineData("LogSpace", "TypedLogSpace", "LogSpaceGateway", "TypedLogs")]
-    public async Task Build_TypedArea_ShouldGenerateTypedDescriptorAndAddMethod(
+    public async Task Build_TypedArea_ShouldInjectApplicationModelForHandWrittenVerb(
         string area,
         string resourceFixture,
         string gatewayFixture,
@@ -70,24 +73,26 @@ public sealed class TypedResourceSdkIntegrationTests
         using var cancellationSource = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         using ConsumerWorkspace workspace = ConsumerWorkspace.Create(resourceFixture, gatewayFixture);
 
-        // Act
+        // Act: Program.cs calls builder.Add<Area>(Manifests.<Member>) and keeps the typed descriptor.
         DotNetBuildResult build = await workspace.BuildAsync(gatewayFixture, cancellationSource.Token);
 
         // Assert
         build.ExitCode.ShouldBe(0, build.Output);
+        string source = ReadGeneratedSource(workspace, gatewayFixture);
+        source.ShouldContain(
+            $"public static readonly global::Assimalign.Cohesion.ApplicationModel.ResourceManifest {member}",
+            Case.Sensitive);
+        source.ShouldNotContain("CohesionGatewayResourceExtensions", Case.Sensitive);
+        source.ShouldNotContain($"Add{member}(", Case.Sensitive);
+        source.ShouldNotContain($"{area}ResourceExtensions", Case.Sensitive);
+    }
+
+    private static string ReadGeneratedSource(ConsumerWorkspace workspace, string fixtureName)
+    {
         string sourcePath = Directory.EnumerateFiles(
-            Path.Combine(workspace.ProjectDirectory(gatewayFixture), "obj"),
+            Path.Combine(workspace.ProjectDirectory(fixtureName), "obj"),
             "Gateway.g.cs",
             SearchOption.AllDirectories).Single();
-        string source = File.ReadAllText(sourcePath);
-        // Every area ApplicationModel package declares the shared namespace; the type names carry the area.
-        string areaNamespace = "global::Assimalign.Cohesion.ApplicationModel";
-        source.ShouldContain(
-            $"public {areaNamespace}.I{area}ResourceDescriptor Add{member}(global::System.Action<{areaNamespace}.{area}ResourceOptions>? configure = null)",
-            Case.Sensitive);
-        source.ShouldContain(
-            $"{areaNamespace}.{area}ResourceExtensions.Add{area}(builder, Manifests.{member}, options)",
-            Case.Sensitive);
-        source.ShouldNotContain("builder.AddResource(", Case.Sensitive);
+        return File.ReadAllText(sourcePath);
     }
 }

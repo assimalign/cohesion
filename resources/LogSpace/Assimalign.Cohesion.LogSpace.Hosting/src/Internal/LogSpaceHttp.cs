@@ -23,7 +23,8 @@ internal static class LogSpaceHttp
         { context.Response.StatusCode = HttpStatusCode.NotFound; return; }
         if (context.Request.Method != HttpMethod.Post)
         { context.Response.StatusCode = HttpStatusCode.MethodNotAllowed; context.Response.Headers[HttpHeaderKey.Allow] = "POST"; return; }
-        if (!Authorize(context, resource, telemetry: true, out string? emitter)) { return; }
+        (bool authorized, string? emitter) = await AuthorizeAsync(context, resource, telemetry: true).ConfigureAwait(false);
+        if (!authorized) { return; }
         string contentType = context.Request.Headers[HttpHeaderKey.ContentType].ToString().Split(';')[0].Trim();
         if (!string.Equals(contentType, "application/json", StringComparison.OrdinalIgnoreCase))
         {
@@ -91,7 +92,7 @@ internal static class LogSpaceHttp
         if (path == "/cohesion/v1" || path.StartsWith("/cohesion/v1/", StringComparison.Ordinal))
         {
             // Reject scoped emitter credentials on EVERY management route before the shared control plane.
-            if (!Authorize(context, resource, telemetry: false, out _)) { return; }
+            if (!(await AuthorizeAsync(context, resource, telemetry: false).ConfigureAwait(false)).Authorized) { return; }
         }
         if (path != "/cohesion/v1/logs") { await next(context).ConfigureAwait(false); return; }
         if (context.Request.Method != HttpMethod.Get)
@@ -124,21 +125,82 @@ internal static class LogSpaceHttp
         { context.Response.StatusCode = HttpStatusCode.ServiceUnavailable; }
     }
 
-    private static bool Authorize(IHttpContext context, ResourceContext resource, bool telemetry, out string? emitter)
+    private static async ValueTask<(bool Authorized, string? Emitter)> AuthorizeAsync(
+        IHttpContext context,
+        ResourceContext resource,
+        bool telemetry)
+    {
+        if (resource.GatewayName is null) { return (true, null); }
+        string header = context.Request.Headers[HttpHeaderKey.Authorization].ToString();
+        ResourceCredentialVerification verification = default;
+        if (header.Length < 16384)
+        {
+            ResourceCredentialPresentation presentation = ResourceCredentialPresentation.FromAuthorizationValue(
+                header,
+                resource.ResourceName!,
+                DateTimeOffset.UtcNow);
+            if (ResourceRuntime.TryGetCredentialVerifier(resource, out IResourceCredentialVerifier? registered))
+            {
+                verification = await registered.VerifyAsync(presentation, context.RequestCancelled).ConfigureAwait(false);
+            }
+
+            if (verification.Status is ResourceCredentialStatus.NoResult &&
+                presentation.Scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase))
+            {
+                verification = new LogSpaceTokenVerifier(resource).Validate(
+                    presentation.Credential.Trim(),
+                    presentation.ExpectedAudience,
+                    presentation.Now,
+                    telemetry);
+            }
+        }
+
+        ResourceCredentialStatus status = AuthorizeCaller(verification, resource, telemetry, out string? emitter);
+        if (status is ResourceCredentialStatus.Authorized) { return (true, emitter); }
+        context.Response.StatusCode = status is ResourceCredentialStatus.Forbidden ? HttpStatusCode.Forbidden : HttpStatusCode.Unauthorized;
+        if (status is ResourceCredentialStatus.Unauthorized) { context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer"; }
+        return (false, null);
+    }
+
+    // Applies the sink's caller rules to a verified credential: ingestion accepts only this application's
+    // telemetry emitters (the subject names the emitting resource), and management routes accept only
+    // this application's gateway. The default verifier already enforces both, so this is the mapped form
+    // of its iss, sub, and scope rules and only narrows what a registered verifier may admit.
+    internal static ResourceCredentialStatus AuthorizeCaller(
+        ResourceCredentialVerification verification,
+        ResourceContext resource,
+        bool telemetry,
+        out string? emitter)
     {
         emitter = null;
-        if (resource.GatewayName is null) { return true; }
-        string header = context.Request.Headers[HttpHeaderKey.Authorization].ToString();
-        LogSpaceTokenStatus status = LogSpaceTokenStatus.Unauthorized;
-        if (header.Length < 16384 && header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        if (verification.Status is not ResourceCredentialStatus.Authorized)
         {
-            using var verifier = new LogSpaceTokenVerifier(resource);
-            status = verifier.Validate(header[7..].Trim(), resource.ResourceName!, DateTimeOffset.UtcNow, telemetry, out emitter);
+            return verification.Status is ResourceCredentialStatus.Forbidden
+                ? ResourceCredentialStatus.Forbidden
+                : ResourceCredentialStatus.Unauthorized;
         }
-        if (status == LogSpaceTokenStatus.Authorized) { return true; }
-        context.Response.StatusCode = status == LogSpaceTokenStatus.Forbidden ? HttpStatusCode.Forbidden : HttpStatusCode.Unauthorized;
-        if (status == LogSpaceTokenStatus.Unauthorized) { context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer"; }
-        return false;
+
+        if (verification.Caller is not { } caller ||
+            !string.Equals(caller.Application, resource.ApplicationName, StringComparison.Ordinal))
+        {
+            return ResourceCredentialStatus.Forbidden;
+        }
+
+        if (telemetry)
+        {
+            if (caller.Kind is not ResourceCallerKind.TelemetryEmitter || string.IsNullOrWhiteSpace(caller.Subject))
+            {
+                return ResourceCredentialStatus.Forbidden;
+            }
+
+            emitter = caller.Subject;
+            return ResourceCredentialStatus.Authorized;
+        }
+
+        return caller.Kind is ResourceCallerKind.Gateway &&
+            string.Equals(caller.Subject, resource.GatewayName, StringComparison.Ordinal)
+                ? ResourceCredentialStatus.Authorized
+                : ResourceCredentialStatus.Forbidden;
     }
 
     private static Task DetailAsync(IHttpContext context, string detail) => JsonAsync(context, writer =>

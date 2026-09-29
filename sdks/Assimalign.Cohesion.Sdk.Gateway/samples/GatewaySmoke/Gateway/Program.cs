@@ -5,8 +5,8 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.ApplicationModel;
 
 IApplicationBuilder builder = Gateway.CreateBuilder(args);
-builder.AddGatewaySmokeWeb();
-builder.AddGatewaySmokeDatabase();
+builder.AddWeb(Manifests.GatewaySmokeWeb);
+builder.AddDatabase(Manifests.GatewaySmokeDatabase);
 builder.UseGateway(args, gateways =>
     gateways.InProcess(options =>
     {

@@ -21,6 +21,12 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.HttpsHost" />
     <CohesionProjectReference Include="Assimalign.Cohesion.LogSpace.SinkHost" />
     <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
+    <!--
+      The gateway references no store client. The real-host tests (AreaCommandLocalTests and the
+      Local HTTPS certificate test) drive a SecretStore test host through test-double providers
+      that speak its protocol with this client. Test projects are exempt from the dependency guards.
+    -->
+    <CohesionProjectReference Include="Assimalign.Cohesion.SecretStore.Client" />
   </ItemGroup>
 
   <ItemGroup>

@@ -55,6 +55,13 @@ internal static partial class TemplateRepository
             XDocument document = XDocument.Load(project);
             string sdk = document.Root!.Attribute("Sdk")!.Value;
             required.Add(sdk);
+            // A package the content references explicitly, such as an opt-in store Orchestration
+            // package, restores together with its own dependency closure.
+            foreach (XElement reference in document.Descendants("CohesionPackageReference"))
+            {
+                AddPackageClosure(reference.Attribute("Include")!.Value, required);
+            }
+
             string area = sdk["Assimalign.Cohesion.Sdk.".Length..];
             if (area == "Gateway")
             {
@@ -140,6 +147,39 @@ internal static partial class TemplateRepository
     internal static JsonDocument ReadJson(string file) => JsonDocument.Parse(File.ReadAllText(file),
         new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip });
 
+    // A library package's dependencies are its project's public CohesionProjectReference items.
+    // An id with no repository project stays required on its own, so the feed check reports it.
+    private static void AddPackageClosure(string id, ISet<string> required)
+    {
+        if (!required.Add(id) || FindLibraryProject(id) is not string project)
+        {
+            return;
+        }
+
+        foreach (XElement reference in XDocument.Load(project).Descendants("CohesionProjectReference"))
+        {
+            AddPackageClosure(reference.Attribute("Include")!.Value, required);
+        }
+    }
+
+    // Shipped libraries sit at <libraries|resources>/<Area>/<Id>/src/<Id>.csproj.
+    private static string? FindLibraryProject(string id)
+    {
+        foreach (string tree in new[] { "libraries", "resources" })
+        {
+            foreach (string area in Directory.EnumerateDirectories(Path.Combine(Root, tree)))
+            {
+                string project = Path.Combine(area, id, "src", id + ".csproj");
+                if (File.Exists(project))
+                {
+                    return project;
+                }
+            }
+        }
+
+        return null;
+    }
+
     private static string FindRoot()
     {
         for (DirectoryInfo? directory = new(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
@@ -167,7 +207,8 @@ internal static partial class TemplateRepository
     [GeneratedRegex("'([^']+)'")]
     private static partial Regex QuotedId();
 
-    [GeneratedRegex(@"RequiredPackageIds\s*=\s*\[([\s\S]*?)\];")]
+    // ConsumerWorkspace's library closure field; its SDK ids live in a separate field.
+    [GeneratedRegex(@"_requiredPackageIds\s*=\s*\[([\s\S]*?)\];")]
     private static partial Regex GatewayClosure();
 
     [GeneratedRegex("\"(Assimalign.Cohesion.[^\"]+)\"")]

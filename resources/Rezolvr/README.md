@@ -15,7 +15,6 @@ An arrow means "references": `Rezolvr.Hosting --> Rezolvr` reads
 flowchart LR
     P0["Rezolvr — area root"]
     P1["Rezolvr.ApplicationModel"]
-    P2["Rezolvr.Client"]
     P3["Rezolvr.Hosting — runtime module"]
     CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
@@ -24,7 +23,6 @@ flowchart LR
     P0 --> CORE
     P1 --> APPMODEL
     P1 --> HOSTFAM
-    P2 --> CORE
     P3 --> HOSTFAM
     P3 --> P0
     P3 -->|"private"| PRIV
@@ -45,7 +43,6 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 - `Assimalign.Cohesion.Rezolvr` defines the public area-root application and builder contracts for the standalone server product.
 - `Assimalign.Cohesion.Rezolvr.Hosting` provides the concrete creation entry point and the caller-configurable host-service lifecycle.
-
 - `Assimalign.Cohesion.Rezolvr.ApplicationModel` supplies the typed manifest, planner, descriptor, and default control-plane factory as a NuGet-only package.
 
 ## Layering and dependencies
@@ -67,9 +64,10 @@ As an L3 service platform, Rezolvr composes the L2 `Assimalign.Cohesion.Hosting`
 | `rezolvr.add-cname-record` | `AddCnameRecord` | record name |
 
 The [ApplicationModel](Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/OVERVIEW.md) declares
-commands; [Hosting](Assimalign.Cohesion.Rezolvr.Hosting/docs/DESIGN.md) applies them; the Core-only
-[Client](Assimalign.Cohesion.Rezolvr.Client/docs/OVERVIEW.md) delivers them for the gateway.
-ApplicationModel and Client are standalone NuGet packages.
+commands; [Hosting](Assimalign.Cohesion.Rezolvr.Hosting/docs/DESIGN.md) applies them; the gateway's
+generic `ResourceControlPlaneCommandClient` (`Assimalign.Cohesion.ApplicationModel.Gateway`) delivers them
+to the resource control plane, so the area ships no client package. ApplicationModel is a standalone
+NuGet package.
 
 ## Application composition (O34)
 

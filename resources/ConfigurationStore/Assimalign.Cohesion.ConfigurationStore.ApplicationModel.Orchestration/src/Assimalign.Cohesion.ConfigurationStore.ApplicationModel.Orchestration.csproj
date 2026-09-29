@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!--
+		Opt-in orchestration package: resolves '<store>:<namespace>' Configuration mount sources for
+		a gateway through a ConfigurationStore resource's control plane. It references only the
+		ApplicationModel seams and the Core-only ConfigurationStore client, never Hosting*,
+		ApplicationModel.Gateway*, or ConfigurationStore.ApplicationModel (COHRES001/003/004).
+		NuGet-only: never a member of the App.ConfigurationStore shared framework.
+	-->
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>
+		<Description>Opt-in gateway provider that resolves ConfigurationStore-backed Configuration mount sources through builder.UseConfigurationStore(store).</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore.Client" />
+	</ItemGroup>
+</Project>

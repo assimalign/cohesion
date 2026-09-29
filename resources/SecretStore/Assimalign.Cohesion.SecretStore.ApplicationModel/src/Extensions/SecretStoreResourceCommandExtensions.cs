@@ -12,6 +12,19 @@ public static partial class SecretStoreResourceCommandExtensions
     extension(ISecretStoreResourceDescriptor descriptor)
     {
         /// <summary>Declares a secret whose value is resolved from a named source during delivery.</summary>
+        /// <remarks>
+        /// The SecretStore manifest marks <c>secretstore.add-secret</c> as requiring an input resolver: the
+        /// gateway replaces <paramref name="source"/> with the resolved value, before delivery, through an
+        /// <see cref="IResourceCommandInputResolver"/> registered for that kind in the declaring application's
+        /// <c>Providers.CommandInputs</c>. For the application's own store, <c>builder.UseSecretStore(...)</c>
+        /// (package <c>Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration</c>) registers
+        /// <c>SecretStoreAddSecretInputResolver</c>. A store of another application cannot be bound with
+        /// <c>UseSecretStore</c>, so add that resolver to <c>Providers.CommandInputs</c> directly. Without a
+        /// resolver for the kind, <see cref="IApplicationBuilder.Build"/> fails before anything is delivered,
+        /// and so does an application set when it starts the member (register it in that member's
+        /// <c>AddApplication</c> callback). The error names the package and verb for the application's own
+        /// store, and <c>Providers.CommandInputs</c> for another application's store.
+        /// </remarks>
         /// <param name="path">The secret path and ownership key.</param>
         /// <param name="source">A parameter:name or resource:key reference; literal values are forbidden.</param>
         /// <param name="optional">Whether rejection may allow dependents to start.</param>

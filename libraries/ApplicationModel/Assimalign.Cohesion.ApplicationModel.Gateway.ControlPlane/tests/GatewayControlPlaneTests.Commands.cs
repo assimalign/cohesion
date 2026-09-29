@@ -285,6 +285,216 @@ public sealed partial class GatewayControlPlaneTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway.ControlPlane] - Command dispatch: A catch-all client serves kinds without an exact client")]
+    public async Task Configure_AnyKindCommandClient_ShouldServeKindsWithoutAnExactClient()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        using var cancellation = new CancellationTokenSource(_testTimeout);
+        var fallback = new RecordingGatewayCommandClient { ResourceKind = IGatewayResourceCommandClient.AnyKind };
+        var options = new ApplicationGatewayOptions { ExportDirectory = root };
+        options.CommandClients.Clear();
+        options.CommandClients.Add(fallback);
+
+        try
+        {
+            // Act
+            ResourceCommandResult applied = await ApplyThroughServedControlPlaneAsync(
+                root, options, cancellation.Token);
+
+            // Assert
+            applied.Status.ShouldBe(ResourceCommandStatus.Applied);
+            fallback.Applied.ShouldBe(1);
+        }
+        finally
+        {
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway.ControlPlane] - Command dispatch: An exact-kind client wins over an earlier catch-all client")]
+    public async Task Configure_ExactAndAnyKindClients_ShouldPreferTheExactKind()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        using var cancellation = new CancellationTokenSource(_testTimeout);
+        var fallback = new RecordingGatewayCommandClient { ResourceKind = IGatewayResourceCommandClient.AnyKind };
+        var exact = new RecordingGatewayCommandClient();
+        var options = new ApplicationGatewayOptions { ExportDirectory = root };
+        options.CommandClients.Clear();
+        options.CommandClients.Add(fallback);
+        options.CommandClients.Add(exact);
+
+        try
+        {
+            // Act
+            ResourceCommandResult applied = await ApplyThroughServedControlPlaneAsync(
+                root, options, cancellation.Token);
+
+            // Assert
+            applied.Status.ShouldBe(ResourceCommandStatus.Applied);
+            exact.Applied.ShouldBe(1);
+            fallback.Applied.ShouldBe(0);
+        }
+        finally
+        {
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway.ControlPlane] - Command dispatch: Duplicate kinds adapt only the first client, as the gateway selects it")]
+    public async Task Configure_DuplicateKindClients_ShouldAdaptTheFirstRegistration()
+    {
+        // Arrange
+        string root = CreateTestDirectory();
+        using var cancellation = new CancellationTokenSource(_testTimeout);
+        var first = new RecordingGatewayCommandClient();
+        var second = new RecordingGatewayCommandClient();
+        var options = new ApplicationGatewayOptions { ExportDirectory = root };
+        options.CommandClients.Add(first);
+        options.CommandClients.Add(second);
+        options.CommandClients.Add(new RecordingGatewayCommandClient { ResourceKind = IGatewayResourceCommandClient.AnyKind });
+
+        try
+        {
+            // Act
+            ResourceCommandResult applied = await ApplyThroughServedControlPlaneAsync(
+                root, options, cancellation.Token);
+
+            // Assert
+            applied.Status.ShouldBe(ResourceCommandStatus.Applied);
+            first.Applied.ShouldBe(1);
+            second.Applied.ShouldBe(0);
+        }
+        finally
+        {
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway.ControlPlane] - Command dispatch: Local delivery and the served control plane hand one client the same URL")]
+    public async Task Commands_LocalAndServedDelivery_ShouldBuildIdenticalControlPlaneAddresses()
+    {
+        // Arrange: an unusable observation precedes an IPv6 loopback one, and the manifest path
+        // has neither a leading slash nor a trimmed trailing slash.
+        string root = CreateTestDirectory();
+        using var cancellation = new CancellationTokenSource(_testTimeout);
+        var client = new AddressRecordingCommandClient();
+        var options = new ApplicationGatewayOptions { ExportDirectory = root };
+        options.CommandClients.Clear();
+        options.CommandClients.Add(client);
+        options.Controllers.Add(new ObservedEndpointsController(
+            new ResourceEndpoint("http", "http", 0),
+            new ResourceEndpoint("http", "http", 43110, Host: "::1")));
+        GatewayControlPlane.Configure(options, GatewayRunMode.Run);
+        var gateway = new TestGateway(options);
+        IApplicationBuilder builder = Application
+            .CreateBuilder((ApplicationName)"appa", ["--environment", AppEnvironment.Keys.Local])
+            .UseGateway(gateway);
+        IApplicationResourceDescriptor api = builder.AddResource(CreateManifest("appa", "api", "test", 43110) with
+        {
+            ControlPlane = new ResourceManifestControlPlane { Endpoint = "http", Path = "cohesion/v1/" },
+        });
+        using JsonDocument payload = JsonDocument.Parse("{\"value\":\"local\"}");
+        builder.AddCommand(ResourceCommands.Create("test.apply", "local-setting", api.Resource, "appa",
+            payload.RootElement, CommandPayloadJsonContext.Default.JsonElement));
+        IApplicationModel model = builder.Build().Model;
+        IApplicationGateway control = gateway;
+        var served = new ResourceCommand("served-command", "test.apply", "caller", "served-setting", "value"u8.ToArray());
+
+        try
+        {
+            // Act: the declared command is delivered locally; the second arrives through the served plane.
+            await control.StartAsync(model, cancellation.Token);
+            (Uri address, _) = ReadMetadata(root, "appa");
+            string callerToken = await GrantCommandCallerAsync(gateway, model, "caller", cancellation.Token);
+            ResourceCommandResult applied = await GatewayControlPlane.CreateClient().ApplyCommandAsync(
+                address, "api", callerToken, served, cancellation.Token);
+
+            // Assert
+            applied.Status.ShouldBe(ResourceCommandStatus.Applied);
+            (string Key, Uri Address)[] deliveries = client.Addresses.ToArray();
+            deliveries.Select(delivery => delivery.Key).ShouldBe(["local-setting", "served-setting"]);
+            deliveries[0].Address.AbsoluteUri.ShouldBe("http://[::1]:43110/cohesion/v1/");
+            deliveries[1].Address.AbsoluteUri.ShouldBe(deliveries[0].Address.AbsoluteUri);
+        }
+        finally
+        {
+            await control.StopAsync(CancellationToken.None);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway.ControlPlane] - Command dispatch: The served control plane refuses to send a credential to a non-loopback HTTP resource")]
+    public async Task ApplyCommand_NonLoopbackHttpResource_ShouldRejectBeforeDispatch()
+    {
+        // Arrange: the only observed control-plane endpoint is plaintext HTTP on a routable address.
+        string root = CreateTestDirectory();
+        using var cancellation = new CancellationTokenSource(_testTimeout);
+        var client = new AddressRecordingCommandClient();
+        var options = new ApplicationGatewayOptions { ExportDirectory = root };
+        options.CommandClients.Clear();
+        options.CommandClients.Add(client);
+        options.Controllers.Add(new ObservedEndpointsController(
+            new ResourceEndpoint("http", "http", 43111, Host: "10.20.30.40")));
+        GatewayControlPlane.Configure(options, GatewayRunMode.Run);
+        var gateway = new TestGateway(options);
+        IApplicationBuilder builder = Application
+            .CreateBuilder((ApplicationName)"appa", ["--environment", AppEnvironment.Keys.Local])
+            .UseGateway(gateway);
+        builder.AddResource(CreateManifest("appa", "api", "test", 43111) with
+        {
+            ControlPlane = new ResourceManifestControlPlane { Endpoint = "http", Path = "cohesion/v1/" },
+        });
+        IApplicationModel model = builder.Build().Model;
+        IApplicationGateway control = gateway;
+        var served = new ResourceCommand("served-command", "test.apply", "caller", "served-setting", "value"u8.ToArray());
+
+        try
+        {
+            // Act
+            await control.StartAsync(model, cancellation.Token);
+            (Uri address, _) = ReadMetadata(root, "appa");
+            string callerToken = await GrantCommandCallerAsync(gateway, model, "caller", cancellation.Token);
+            ResourceCommandResult applied = await GatewayControlPlane.CreateClient().ApplyCommandAsync(
+                address, "api", callerToken, served, cancellation.Token);
+
+            // Assert
+            applied.Status.ShouldBe(ResourceCommandStatus.Rejected);
+            applied.Detail.ShouldContain("refuses to send a bearer credential", Case.Sensitive);
+            client.Addresses.ShouldBeEmpty();
+        }
+        finally
+        {
+            await control.StopAsync(CancellationToken.None);
+            DeleteTestDirectory(root);
+        }
+    }
+
+    private static async Task<ResourceCommandResult> ApplyThroughServedControlPlaneAsync(
+        string root,
+        ApplicationGatewayOptions options,
+        CancellationToken cancellationToken)
+    {
+        GatewayControlPlane.Configure(options, GatewayRunMode.Run);
+        var gateway = new TestGateway(options);
+        IApplicationModel model = BuildModel(gateway, "appa", includeUnsupportedResource: false);
+        IApplicationGateway control = gateway;
+        var command = new ResourceCommand("routed-command", "test.apply", "caller", "setting", "value"u8.ToArray());
+        try
+        {
+            await control.StartAsync(model, cancellationToken);
+            (Uri address, _) = ReadMetadata(root, "appa");
+            string callerToken = await GrantCommandCallerAsync(gateway, model, "caller", cancellationToken);
+            return await GatewayControlPlane.CreateClient().ApplyCommandAsync(
+                address, "api", callerToken, command, cancellationToken);
+        }
+        finally
+        {
+            await control.StopAsync(CancellationToken.None);
+        }
+    }
+
     private static async Task<string> GrantCommandCallerAsync(
         TestGateway gateway,
         IApplicationModel model,

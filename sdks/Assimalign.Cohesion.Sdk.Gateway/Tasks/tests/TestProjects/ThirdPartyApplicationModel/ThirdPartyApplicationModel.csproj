@@ -8,6 +8,5 @@
   </PropertyGroup>
   <ItemGroup>
     <CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel" Version="$(CohesionVersion)" />
-    <None Include="buildTransitive\ThirdParty.ApplicationModel.props" Pack="true" PackagePath="buildTransitive\ThirdParty.ApplicationModel.props" />
   </ItemGroup>
 </Project>

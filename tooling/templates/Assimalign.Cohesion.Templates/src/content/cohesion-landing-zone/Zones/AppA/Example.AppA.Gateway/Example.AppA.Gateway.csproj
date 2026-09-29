@@ -2,9 +2,10 @@
   <!--
     One Sdk.Gateway project = one application = one deployment unit = one namespace (appa). A gateway always has
     CohesionApplicationModel enabled (it is itself a resource with a manifest and a control plane). Sdk.Gateway injects the
-    orchestration packages, walks the referenced manifests transitively (stopping at application boundaries), and generates
-    Resources.g.cs: Gateway.CreateBuilder(args), AddAppAApi/Spa/Database/SecretStore, AddAllResources, and
-    Externals.IdentityHub / Externals.PlatformConfigurationStore for the crossings the Api declares.
+    orchestration core and each referenced area's ApplicationModel package (never an opt-in ApplicationModel.Orchestration
+    provider package), walks the referenced manifests transitively (stopping at application boundaries), and generates
+    Gateway.g.cs: Gateway.CreateBuilder(args), Manifests.AppAApi/Spa/Database/SecretStore for the area verbs Program.cs
+    calls, and Externals.IdentityHub / Externals.PlatformConfigurationStore for the crossings the Api declares.
   -->
   <PropertyGroup>
     <CohesionApplicationName>appa</CohesionApplicationName>

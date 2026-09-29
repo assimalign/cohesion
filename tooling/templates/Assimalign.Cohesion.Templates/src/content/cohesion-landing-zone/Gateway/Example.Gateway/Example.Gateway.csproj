@@ -19,4 +19,10 @@
     <CohesionResourceReference Include="..\..\Zones\AppB\Example.AppB.Gateway\Example.AppB.Gateway.csproj" />
     <CohesionResourceReference Include="..\..\Zones\AppC\Example.AppC.Gateway\Example.AppC.Gateway.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Opt-in gateway providers: a member's describe output carries none, so Program.cs registers the Platform member's
+         stores, certificate authority and trust store in its AddApplication callback. -->
+    <CohesionPackageReference Include="Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration" Version="$(CohesionVersion)" />
+    <CohesionPackageReference Include="Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration" Version="$(CohesionVersion)" />
+  </ItemGroup>
 </Project>

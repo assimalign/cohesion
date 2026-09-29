@@ -12,7 +12,6 @@ using Xunit;
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Gateway;
 using Assimalign.Cohesion.ConfigurationStore;
-using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 
@@ -53,6 +52,9 @@ public sealed class ConfigurationStoreGatewayIntegrationTests
             CreateConfigurationManifest());
         IApplicationResourceDescriptor consumer = builder.AddResource(CreateConsumerManifest());
         consumer.DependsOn(configuration);
+        // The gateway resolves stores only through registered providers; this is what a
+        // gateway's Program.cs does after referencing the ConfigurationStore orchestration package.
+        builder.UseConfigurationStore(configuration);
         IApplicationModel model = builder.Build().Model;
 
         try

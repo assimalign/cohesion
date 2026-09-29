@@ -1,6 +1,6 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.VpnGateway">
   <!-- Site-to-site connectivity into the cluster network (a configured transport; inter-application traffic still uses
-       public endpoints over TLS by default). Peers and policy are C# in Program.cs; keys come from the Platform SecretStore.
+       public endpoints over TLS by default). Peers and policy are C# in Program.cs; keys are a gateway parameter.
        Sdk.VpnGateway defaults: endpoint `wireguard` (udp 51820), endpoint `admin` (http 8081, private; the control plane),
        composable=false (a thread-per-core data plane never colocates). -->
   <PropertyGroup>
@@ -13,7 +13,9 @@
   </PropertyGroup>
   <ItemGroup>
     <CohesionEndpoint Update="wireguard" Public="true" />
-    <CohesionMount Include="keys" Kind="Secret" Source="platform-secretstore:networking/vpn-keys" />
+    <!-- Cross-application store sources (a `platform-secretstore:<key>` mount read by the networking application) are not
+         supported yet; they are a documented follow-up. Until then the keys are a parameter of the networking gateway. -->
+    <CohesionMount Include="keys" Kind="Secret" Source="parameter:networking-vpn-keys" />
     <CohesionResourceReference Include="..\..\Platform\Example.Platform.SecretStore\Example.Platform.SecretStore.csproj" />
   </ItemGroup>
 </Project>

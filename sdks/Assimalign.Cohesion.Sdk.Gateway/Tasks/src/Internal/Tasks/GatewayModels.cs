@@ -43,10 +43,6 @@ internal sealed class GatewayManifest
 
     public List<GatewayManifestEndpoint> Endpoints { get; } = [];
 
-    public List<GatewayManifestMount> Mounts { get; } = [];
-
-    public List<string> Commands { get; } = [];
-
     public List<GatewayManifestReference> References { get; } = [];
 
     public string MemberName { get; set; } = string.Empty;
@@ -62,20 +58,11 @@ internal sealed record GatewayInProcessBinding(
 
 internal sealed record GatewayManifestEndpoint(string Name);
 
-internal sealed record GatewayManifestMount(string Name, string Kind, string? Source);
-
 internal sealed record GatewayManifestReference(
     string Resource,
     string Application,
     IReadOnlyList<string> Endpoints,
     bool Optional);
-
-internal sealed record GatewayResourceKind(
-    string Kind,
-    string ApplicationModel,
-    string OptionsType,
-    string DescriptorType,
-    string AddMethod);
 
 internal sealed record GatewayProvider(
     string MemberName,
@@ -84,8 +71,6 @@ internal sealed record GatewayProvider(
     string OptionsType,
     string? CommandLineApplyMethod,
     bool RequiresJit);
-
-internal sealed record GatewayClientKind(string Kind, string PackageId);
 
 internal sealed class GatewayExternal
 {

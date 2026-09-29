@@ -38,8 +38,8 @@ public class RuntimeContractTests
         "COHESION_LOG_FORMAT"
     ];
 
-    [Fact(DisplayName = DisplayPrefix + "Document and ResourceEnvironment constants stay in lockstep")]
-    public void VariableTable_WithResourceEnvironmentConstants_ShouldMatchExactly()
+    [Fact(DisplayName = DisplayPrefix + "Document and AppEnvironment.Variables constants stay in lockstep")]
+    public void VariableTable_WithAppEnvironmentVariablesConstants_ShouldMatchExactly()
     {
         // Arrange
         string repositoryRoot = GetRepositoryRoot();
@@ -49,7 +49,7 @@ public class RuntimeContractTests
             "Core",
             "Assimalign.Cohesion.Core",
             "src",
-            "ResourceEnvironment.cs");
+            "AppEnvironment.Variables.cs");
         string contractPath = Path.Combine(repositoryRoot, "docs", "RUNTIME_CONTRACT.md");
 
         // Act
@@ -64,17 +64,17 @@ public class RuntimeContractTests
     }
 
     [Fact(DisplayName = DisplayPrefix + "Cohesion variable literals have one source of truth")]
-    public void SourceTrees_WithCohesionVariableLiteralOutsideResourceEnvironment_ShouldFail()
+    public void SourceTrees_WithCohesionVariableLiteralOutsideAppEnvironmentVariables_ShouldFail()
     {
         // Arrange
         string repositoryRoot = GetRepositoryRoot();
-        string resourceEnvironmentPath = Path.GetFullPath(Path.Combine(
+        string variablesPath = Path.GetFullPath(Path.Combine(
             repositoryRoot,
             "libraries",
             "Core",
             "Assimalign.Cohesion.Core",
             "src",
-            "ResourceEnvironment.cs"));
+            "AppEnvironment.Variables.cs"));
         string[] areaRoots =
         [
             Path.Combine(repositoryRoot, "libraries", "Core"),
@@ -97,7 +97,7 @@ public class RuntimeContractTests
                 foreach (string sourcePath in Directory.EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories))
                 {
                     string fullPath = Path.GetFullPath(sourcePath);
-                    if (string.Equals(fullPath, resourceEnvironmentPath, StringComparison.OrdinalIgnoreCase)
+                    if (string.Equals(fullPath, variablesPath, StringComparison.OrdinalIgnoreCase)
                         || IsBuildOutput(fullPath))
                     {
                         continue;
@@ -117,7 +117,7 @@ public class RuntimeContractTests
 
         // Assert
         violations.ShouldBeEmpty(
-            "all runtime-contract variable names must be declared in ResourceEnvironment");
+            "all runtime-contract variable names must be declared in AppEnvironment.Variables");
     }
 
     private static IReadOnlyList<string> ReadSourceConstants(string sourcePath)
@@ -148,7 +148,7 @@ public class RuntimeContractTests
                 || closingQuote < 0
                 || closingQuote > terminator)
             {
-                throw new InvalidDataException("ResourceEnvironment contains an unreadable public string constant.");
+                throw new InvalidDataException("AppEnvironment.Variables contains an unreadable public string constant.");
             }
 
             variables.Add(source[(openingQuote + 1)..closingQuote]);

@@ -40,6 +40,25 @@ dotnet run --project Zones/AppA/Example.AppA.Gateway -- --gateway inprocess --mo
 Cross-domain references become generated externals. Configure their endpoint bindings in the
 domain gateway before running a complete environment. Local examples use developer-machine endpoints;
 production placement, remote trust and domain-specific configuration require your environment's values.
+
+Gateways compose their resources with the area verbs over the generated `Manifests` members, such as
+`builder.AddWeb(Manifests.AppAApi)`, and nothing is registered by convention. `Example.Platform.Gateway`
+references the `Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration` and
+`Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration` packages and registers its
+SecretStore (the `platform-secretstore:<key>` mount source, certificate authority and trust store), its
+ConfigurationStore, and its LogSpace telemetry sink in `Program.cs`. The root application set registers
+the same providers for its Platform member, because a member's describe output carries none.
+
+Cross-application store sources are a documented follow-up: a resource cannot yet mount another
+application's store. Identity and Networking therefore read their secrets from gateway parameters:
+`identity-hub-tls` (a PEM bundle with the IdentityHub `https` certificate, its private key and chain)
+and `identity-signing-keys` for the `identity` application, `networking-vpn-keys` for the `networking`
+application. Set each with `cohesion parameter set <name> --stdin --project <gateway>`, which writes the
+encrypted `.cohesion/<application>/parameters.json` that `cohesion run --project <gateway>` reads; add
+`--app identity` or `--app networking` when the gateway is the root application set. Alternatively pass
+`--parameter name=value` to the gateway. An unset parameter leaves its resource unrealized with an error
+naming it.
+
 Set the organization feed owner in nuget.config and the image registry in Directory.Build.props.
 
 Choose `--topology federated` when each domain should have its own gateway without a root application set.

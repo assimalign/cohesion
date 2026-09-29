@@ -50,7 +50,7 @@ internal sealed class SecretStoreResourceCommandHandler : IResourceCommandHandle
             }
             if (!payload.TryGetProperty("resolvedValue", out JsonElement value) || value.ValueKind != JsonValueKind.String)
             {
-                throw new ResourceCommandRejectedException($"secretstore.add-secret source '{source}' is unresolved for path '{key}'; the delivering gateway must resolve the source before dispatch.");
+                throw new ResourceCommandRejectedException($"secretstore.add-secret source '{source}' is unresolved for path '{key}'; the delivering gateway must resolve the source before dispatch: reference Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration in the gateway and call builder.UseSecretStore(...) for this store.");
             }
             byte[] bytes = value.GetBytesFromBase64();
             try

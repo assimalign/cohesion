@@ -7,7 +7,6 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Resources;
 
 using HostingMount = Assimalign.Cohesion.Hosting.Resources.ResourceMount;

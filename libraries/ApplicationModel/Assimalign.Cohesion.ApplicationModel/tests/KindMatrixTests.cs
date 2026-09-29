@@ -7,7 +7,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Core;
 
 namespace Assimalign.Cohesion.ApplicationModel.Tests;
 
@@ -167,7 +166,7 @@ public class KindMatrixTests
         EnvironmentVariables = new Dictionary<string, string>
         {
             ["CUSTOM_VALUE"] = "preserved",
-            [ResourceEnvironment.Application] = "must-be-overridden"
+            [AppEnvironment.Variables.Application] = "must-be-overridden"
         },
         Lifecycle = new ResourceManifestLifecycle
         {

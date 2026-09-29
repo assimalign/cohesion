@@ -1,7 +1,8 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.ConfigurationStore">
   <!-- Versioned configuration namespaces with promotion and watch: an ordinary executable whose Program.cs composes the
-       store, the shared namespaces and the promotion policy in C#. Consumers reach it through the gateway's mount resolution
-       (`platform-configurationstore:<key>`) or the ConfigurationStore.Client at run time. Zone namespaces are not declared
+       store, the shared namespaces and the promotion policy in C#. Platform resources reach it through the gateway's mount
+       resolution (`platform-configurationstore:<key>`, registered by the Platform gateway's UseConfigurationStore), and
+       other applications through the ConfigurationStore.Client at run time. Zone namespaces are not declared
        here: each zone claims its own with a `config.AddNamespace(...)` command from its gateway.
        Default control plane commands: configurationstore.namespace, configurationstore.value.
        Sdk.ConfigurationStore defaults: endpoint `api` (https 8443, private), mount `data` (Volume, 10Gi), StatefulSet, replicas 1. -->

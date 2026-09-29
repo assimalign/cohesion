@@ -9,8 +9,6 @@ using System.Text;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.Hosting.Resources.Tests;
 
 public sealed class EndpointCertificateTests
@@ -156,7 +154,7 @@ public sealed class EndpointCertificateTests
         try
         {
             var context = new ResourceContext("app", "api", AppEnvironment.Keys.Development, "local", null, null, null, null, null,
-                default, default, new Dictionary<string, string?> { [ResourceEnvironment.Mount("api-tls.pem")] = path },
+                default, default, new Dictionary<string, string?> { [AppEnvironment.Variables.Mount("api-tls.pem")] = path },
                 new Dictionary<string, string> { ["https"] = "api-tls.pem" });
             context.TryGetEndpointCertificate("https", out X509Certificate2? certificate).ShouldBeTrue();
             using (certificate)
@@ -182,7 +180,7 @@ public sealed class EndpointCertificateTests
         File.WriteAllBytes(path, OperatingSystem.IsWindows() ? ProtectedData.Protect(pem, null, DataProtectionScope.CurrentUser) : pem);
         try
         {
-            ResourceContext context = ResourceContext.FromEnvironment(new Dictionary<string, string?> { [ResourceEnvironment.TrustBundlePath] = path });
+            ResourceContext context = ResourceContext.FromEnvironment(new Dictionary<string, string?> { [AppEnvironment.Variables.TrustBundlePath] = path });
             context.TryGetTrustBundle(out X509Certificate2Collection anchors).ShouldBeTrue();
             anchors.Count.ShouldBe(1);
             anchors[0].HasPrivateKey.ShouldBeFalse();

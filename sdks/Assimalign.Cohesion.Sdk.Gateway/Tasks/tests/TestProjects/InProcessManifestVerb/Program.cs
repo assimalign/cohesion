@@ -1,11 +1,12 @@
 using Assimalign.Cohesion.ApplicationModel;
 
 IApplicationBuilder builder = Gateway.CreateBuilder(args);
-// The area verb over the generated manifest instead of the generated AddGatewaySmokeWeb() verb:
-// the in-process binding for gateway-smoke-web must come from Gateway.CreateBuilder's manifest
-// registration, which is what a third-party application model's verb relies on too.
+// Hand-written verbs over the generated manifests: the in-process bindings come only from
+// Gateway.CreateBuilder's registration by manifest identity. gateway-smoke-web goes through the
+// Web area verb; gateway-smoke-database reaches this gateway only through the Web project's
+// closure, so its ApplicationModel is not injected and it is added on the untyped path.
 _ = builder.AddWeb(Manifests.GatewaySmokeWeb);
-_ = builder.AddGatewaySmokeDatabase();
+_ = builder.AddResource(Manifests.GatewaySmokeDatabase);
 builder.UseGateway(args);
 IApplication application = builder.Build();
 await application.RunAsync();

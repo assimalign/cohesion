@@ -11,7 +11,7 @@ using Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 
-/// <summary>Associates generated, composable resource entries with in-process descriptors.</summary>
+/// <summary>Associates a built, composable resource descriptor with an in-process binding.</summary>
 public static partial class InProcessResourceDescriptorExtensions
 {
     extension(IApplicationResourceDescriptor descriptor)
@@ -33,13 +33,16 @@ public static partial class InProcessResourceDescriptorExtensions
         /// The descriptor already has a different in-process binding.
         /// </exception>
         /// <remarks>
-        /// This is SDK infrastructure. Generated callers root the executable entry point with
-        /// <see cref="DynamicDependencyAttribute"/>; hand-written callers must provide equivalent
-        /// trimming metadata.
+        /// This is SDK infrastructure that binds one built descriptor. The generated
+        /// <c>Gateway.CreateBuilder(args)</c> does not call it: it binds by manifest identity
+        /// through <see cref="InProcessResourceManifestExtensions"/>, so the binding applies
+        /// whichever verb adds the resource, and roots each executable entry point with
+        /// <see cref="DynamicDependencyAttribute"/>. Hand-written callers must provide
+        /// equivalent trimming metadata.
         /// </remarks>
         [EditorBrowsable(EditorBrowsableState.Never)]
         [RequiresUnreferencedCode(
-            "Manual in-process bindings must preserve the executable entry point. Use the Sdk.Gateway-generated resource verb.")]
+            "Manual in-process bindings must preserve the executable entry point. Use the manifest bindings registered by the Sdk.Gateway-generated Gateway.CreateBuilder.")]
         public IApplicationResourceDescriptor InProcess(
             Assembly entryAssembly,
             string contentRootPath)

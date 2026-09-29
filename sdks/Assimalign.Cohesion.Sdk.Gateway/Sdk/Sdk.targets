@@ -28,8 +28,10 @@
 		the area itself with Area metadata, which wins over the attribute; a project on the
 		base SDK, a referenced gateway, a missing project, and a manifest package name no
 		area. Those areas drive exactly two injections below: the area's ApplicationModel
-		package, and, when the gateway hosts its members in process, the area's shared
-		framework. Every other area package is the consumer's own explicit reference.
+		package, whose hand-written Add<Area> verb the gateway's Program.cs calls over the
+		generated Manifests member, and, when the gateway hosts its members in process, the
+		area's shared framework. Every other area package is the consumer's own explicit
+		reference.
 	-->
 	<ItemGroup>
 		<_CohesionGatewayReferencedProject Include="@(CohesionResourceReference->WithMetadataValue('Extension', '.csproj'))">
@@ -62,11 +64,12 @@
 	</PropertyGroup>
 
 	<!--
-		The three store clients stay restore-visible for every gateway: mount sources and
-		command targets can name a protected store from another application that no
-		referenced project introduces, and CohesionCreateResourceVerbs reports the exact
-		manifest-derived client set for validation. T11's restore-visible producer
-		descriptor remains the future contract for them.
+		Nothing else is injected by convention. Store, certificate-authority, and trust providers
+		come from opt-in <Area>.ApplicationModel.Orchestration packages that the gateway
+		references and registers explicitly in its Program.cs, and credential issuers and caller
+		authenticators are assigned on builder.Providers there as well. Resource commands travel
+		through the generic control-plane command client, so no area client package is restored
+		here.
 	-->
 	<ItemGroup>
 		<!-- Refresh metadata whose consumer-facing properties are set after Sdk.props. -->
@@ -86,17 +89,6 @@
 		<CohesionPackageReference
 			Include="@(_CohesionGatewayReferencedAreaModel->WithMetadataValue('ProjectExists', 'False')->'%(PackageId)')"
 			Version="$(CohesionVersion)" />
-
-		<_CohesionGatewaySecretStoreClientProject Include="$(CohesionRepositoryDirectory)resources\SecretStore\Assimalign.Cohesion.SecretStore.Client\src\Assimalign.Cohesion.SecretStore.Client.csproj" Condition="Exists('$(CohesionRepositoryDirectory)resources\SecretStore\Assimalign.Cohesion.SecretStore.Client\src\Assimalign.Cohesion.SecretStore.Client.csproj')" />
-		<_CohesionGatewayConfigurationStoreClientProject Include="$(CohesionRepositoryDirectory)resources\ConfigurationStore\Assimalign.Cohesion.ConfigurationStore.Client\src\Assimalign.Cohesion.ConfigurationStore.Client.csproj" Condition="Exists('$(CohesionRepositoryDirectory)resources\ConfigurationStore\Assimalign.Cohesion.ConfigurationStore.Client\src\Assimalign.Cohesion.ConfigurationStore.Client.csproj')" />
-		<_CohesionGatewayDatabaseClientProject Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Client\src\Assimalign.Cohesion.Database.Client.csproj" Condition="Exists('$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Client\src\Assimalign.Cohesion.Database.Client.csproj')" />
-
-		<CohesionProjectReference Include="Assimalign.Cohesion.SecretStore.Client" ProjectPath="@(_CohesionGatewaySecretStoreClientProject)" Condition="'@(_CohesionGatewaySecretStoreClientProject)' != ''" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore.Client" ProjectPath="@(_CohesionGatewayConfigurationStoreClientProject)" Condition="'@(_CohesionGatewayConfigurationStoreClientProject)' != ''" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" ProjectPath="@(_CohesionGatewayDatabaseClientProject)" Condition="'@(_CohesionGatewayDatabaseClientProject)' != ''" />
-		<CohesionPackageReference Include="Assimalign.Cohesion.SecretStore.Client" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewaySecretStoreClientProject)' == ''" />
-		<CohesionPackageReference Include="Assimalign.Cohesion.ConfigurationStore.Client" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayConfigurationStoreClientProject)' == ''" />
-		<CohesionPackageReference Include="Assimalign.Cohesion.Database.Client" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayDatabaseClientProject)' == ''" />
 
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane" ProjectPath="$(_CohesionGatewayControlPlaneProject)" Condition="'$(CohesionRepositoryDirectory)' != ''" />
 		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane" Version="$(CohesionVersion)" Condition="'$(CohesionRepositoryDirectory)' == ''" />

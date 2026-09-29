@@ -15,8 +15,18 @@ using Assimalign.Cohesion.Sdk.Gateway.Tasks.Internal;
 namespace Assimalign.Cohesion.Sdk.Gateway.Tasks;
 
 /// <summary>
-/// Reads resolved resource manifests and generates a gateway's build-time composition surface.
+/// Reads resolved resource manifests and generates a gateway's build-time composition surface:
+/// <c>Gateway.CreateBuilder</c>, <c>Manifests</c>, <c>Externals</c>, <c>Applications</c>,
+/// <c>References</c>, and provider selection.
 /// </summary>
+/// <remarks>
+/// The task keeps its historical name, but it generates no per-resource verbs. A gateway
+/// composes each resource with the hand-written verb of the area's ApplicationModel package
+/// over the generated manifest (for example <c>builder.AddWeb(Manifests.AppAWeb, options)</c>),
+/// or with <c>builder.AddResource(Manifests.X)</c> for a kind that has none. In-process
+/// bindings are registered by manifest identity in the generated <c>Gateway.CreateBuilder</c>,
+/// so they apply whichever verb adds the resource.
+/// </remarks>
 public sealed class CohesionCreateResourceVerbs : Task
 {
     /// <summary>Gets or sets the generated C# output path.</summary>
@@ -37,16 +47,6 @@ public sealed class CohesionCreateResourceVerbs : Task
     /// <summary>Gets or sets project and package manifests in the boundary-aware closure.</summary>
     public ITaskItem[] ReferencedManifests { get; set; } = [];
 
-    /// <summary>Gets or sets area-specific typed resource verb metadata.</summary>
-    public ITaskItem[] ResourceKinds { get; set; } = [];
-
-    /// <summary>
-    /// Gets or sets the ApplicationModel assemblies the gateway project references. A typed
-    /// verb is generated only for a kind whose ApplicationModel is among them; every other
-    /// resource receives the untyped verb.
-    /// </summary>
-    public ITaskItem[] AvailableApplicationModels { get; set; } = [];
-
     /// <summary>Gets or sets gateway providers contributed by platform packages.</summary>
     public ITaskItem[] GatewayProviders { get; set; } = [];
 
@@ -57,16 +57,9 @@ public sealed class CohesionCreateResourceVerbs : Task
     /// <summary>Gets or sets whether project-referenced composable resources run in process.</summary>
     public bool InProcessEnabled { get; set; }
 
-    /// <summary>Gets or sets mount-source and command target-kind to client-package mappings.</summary>
-    public ITaskItem[] ClientKinds { get; set; } = [];
-
     /// <summary>Gets the application-model packages named by referenced manifests.</summary>
     [Output]
     public ITaskItem[] RequiredApplicationModels { get; private set; } = [];
-
-    /// <summary>Gets the client packages required by protected mount sources and command targets.</summary>
-    [Output]
-    public ITaskItem[] RequiredClientPackages { get; private set; } = [];
 
     /// <summary>
     /// Gets the enabled, composable project resources whose content is required by generated
@@ -91,9 +84,7 @@ public sealed class CohesionCreateResourceVerbs : Task
             MarkDirectReferences(manifests);
             AssignMemberNames(manifests, application);
 
-            List<GatewayResourceKind> resourceKinds = ReadResourceKinds();
             List<GatewayProvider> providers = ReadProviders();
-            List<GatewayClientKind> clientKinds = ReadClientKinds();
             if (Log.HasLoggedErrors)
             {
                 return false;
@@ -104,7 +95,6 @@ public sealed class CohesionCreateResourceVerbs : Task
                     manifest.Application,
                     application,
                     StringComparison.OrdinalIgnoreCase)).ToList());
-            resourceKinds = SelectAvailableResourceKinds(resourceKinds, resources);
             ResolveInProcessBindings(resources);
             List<GatewayExternal> externals = CreateExternals(manifests, resources, application);
             List<GatewayManifest> applications = manifests
@@ -130,9 +120,6 @@ public sealed class CohesionCreateResourceVerbs : Task
                 .OrderBy(value => value, StringComparer.Ordinal)
                 .Select(value => (ITaskItem)new TaskItem(value))
                 .ToArray();
-            RequiredClientPackages = ResolveClientPackages(manifests, clientKinds)
-                .Select(value => (ITaskItem)new TaskItem(value))
-                .ToArray();
             InProcessProjectReferences = resources
                 .Where(manifest => manifest.InProcessBinding is not null)
                 .Select(CreateInProcessProjectReference)
@@ -145,7 +132,6 @@ public sealed class CohesionCreateResourceVerbs : Task
                 resources,
                 externals,
                 applications,
-                resourceKinds,
                 providers);
             Log.LogMessage(MessageImportance.Normal, $"Generated Cohesion gateway source '{SourceOutputPath}'.");
             return !Log.HasLoggedErrors;
@@ -264,13 +250,14 @@ public sealed class CohesionCreateResourceVerbs : Task
             throw new InvalidDataException(
                 $"Cohesion resource manifest '{path}' has an invalid controlPlane endpoint or path.");
         }
+        // Mounts and commands are validated for shape only: the generated surface embeds the raw
+        // manifest, and no package or member is derived from either array.
         foreach (JsonElement mount in RequiredArray(root, "mounts", path).EnumerateArray())
         {
             RequireObject(mount, "mounts[]", path);
-            manifest.Mounts.Add(new GatewayManifestMount(
-                RequiredString(mount, "name", path),
-                RequiredString(mount, "kind", path),
-                OptionalString(mount, "source", path)));
+            RequiredString(mount, "name", path);
+            RequiredString(mount, "kind", path);
+            OptionalString(mount, "source", path);
         }
         foreach (JsonElement reference in RequiredArray(root, "references", path).EnumerateArray())
         {
@@ -289,17 +276,46 @@ public sealed class CohesionCreateResourceVerbs : Task
                 OptionalBoolean(reference, "optional", path)));
         }
 
+        // A command is its kind as a string, or { "kind": "...", "requiresInputResolver": true } when
+        // the resource requires the gateway to resolve its inputs (ResourceManifestCommand).
         foreach (JsonElement command in RequiredArray(root, "commands", path).EnumerateArray())
         {
-            if (command.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(command.GetString()))
+            bool valid = command.ValueKind switch
+            {
+                JsonValueKind.String => !string.IsNullOrWhiteSpace(command.GetString()),
+                JsonValueKind.Object => IsCommandObject(command),
+                _ => false,
+            };
+            if (!valid)
             {
                 throw new InvalidDataException(
-                    $"Cohesion resource manifest '{path}' commands must be non-empty strings.");
+                    $"Cohesion resource manifest '{path}' commands must be non-empty strings or objects with a " +
+                    "non-empty string 'kind' and an optional boolean 'requiresInputResolver'.");
             }
-            manifest.Commands.Add(command.GetString()!);
         }
 
         return manifest;
+    }
+
+    private static bool IsCommandObject(JsonElement command)
+    {
+        bool hasKind = false;
+        foreach (JsonProperty property in command.EnumerateObject())
+        {
+            switch (property.Name)
+            {
+                case "kind" when property.Value.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrWhiteSpace(property.Value.GetString()):
+                    hasKind = true;
+                    break;
+                case "requiresInputResolver" when property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                    break;
+                default:
+                    return false;
+            }
+        }
+
+        return hasKind;
     }
 
     private void MarkDirectReferences(IReadOnlyList<GatewayManifest> manifests)
@@ -456,73 +472,6 @@ public sealed class CohesionCreateResourceVerbs : Task
         }
     }
 
-    /// <summary>
-    /// Keeps the typed kinds whose ApplicationModel this gateway references and warns once per
-    /// same-application resource that loses its typed verb because the assembly is absent.
-    /// </summary>
-    private List<GatewayResourceKind> SelectAvailableResourceKinds(
-        IReadOnlyList<GatewayResourceKind> resourceKinds,
-        IReadOnlyList<GatewayManifest> resources)
-    {
-        var available = new HashSet<string>(
-            AvailableApplicationModels.Select(item => item.ItemSpec.Trim()),
-            StringComparer.OrdinalIgnoreCase);
-        var selected = new List<GatewayResourceKind>(resourceKinds.Count);
-        var missing = new List<GatewayResourceKind>();
-        foreach (GatewayResourceKind kind in resourceKinds)
-        {
-            (available.Contains(kind.ApplicationModel) ? selected : missing).Add(kind);
-        }
-
-        foreach (GatewayManifest manifest in resources)
-        {
-            GatewayResourceKind? kind = missing.FirstOrDefault(candidate => string.Equals(
-                candidate.ApplicationModel,
-                manifest.ApplicationModel,
-                StringComparison.OrdinalIgnoreCase));
-            if (kind is null)
-            {
-                continue;
-            }
-
-            Log.LogWarning(
-                subcategory: null,
-                warningCode: "COHGW003",
-                helpKeyword: null,
-                file: ProjectFullPath,
-                lineNumber: 0,
-                columnNumber: 0,
-                endLineNumber: 0,
-                endColumnNumber: 0,
-                message: $"Resource '{manifest.Application}/{manifest.Name}' is a {kind.Kind} resource, but this gateway does not " +
-                    $"reference '{kind.ApplicationModel}', so Add{manifest.MemberName}() is generated over the untyped " +
-                    "AddResource path. Reference the area's resource project or add a PackageReference to " +
-                    $"'{kind.ApplicationModel}' for the typed verb.");
-        }
-
-        return selected;
-    }
-
-    private List<GatewayResourceKind> ReadResourceKinds()
-    {
-        var result = new List<GatewayResourceKind>(ResourceKinds.Length);
-        foreach (ITaskItem item in ResourceKinds)
-        {
-            string applicationModel = item.GetMetadata("ApplicationModel").Trim();
-            string optionsType = item.GetMetadata("OptionsType").Trim();
-            string descriptorType = Value(item.GetMetadata("DescriptorType"))
-                ?? "global::Assimalign.Cohesion.ApplicationModel.IApplicationResourceDescriptor";
-            string addMethod = item.GetMetadata("AddMethod").Trim();
-            if (applicationModel.Length == 0 || optionsType.Length == 0 || addMethod.Length == 0)
-            {
-                Log.LogError($"CohesionGatewayResourceKind '{item.ItemSpec}' requires ApplicationModel, OptionsType, and AddMethod metadata.");
-                continue;
-            }
-            result.Add(new GatewayResourceKind(item.ItemSpec, applicationModel, optionsType, descriptorType, addMethod));
-        }
-        return result;
-    }
-
     private List<GatewayProvider> ReadProviders()
     {
         string[] declarationOrder = Gateways.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -602,22 +551,6 @@ public sealed class CohesionCreateResourceVerbs : Task
             }
         }
         return ordered;
-    }
-
-    private List<GatewayClientKind> ReadClientKinds()
-    {
-        var result = new List<GatewayClientKind>(ClientKinds.Length);
-        foreach (ITaskItem item in ClientKinds)
-        {
-            string packageId = item.GetMetadata("PackageId").Trim();
-            if (packageId.Length == 0)
-            {
-                Log.LogError($"CohesionGatewayClientKind '{item.ItemSpec}' requires PackageId metadata.");
-                continue;
-            }
-            result.Add(new GatewayClientKind(item.ItemSpec, packageId));
-        }
-        return result;
     }
 
     private static List<GatewayManifest> SortResources(List<GatewayManifest> resources)
@@ -735,43 +668,6 @@ public sealed class CohesionCreateResourceVerbs : Task
         }
 
         return externals.Values.OrderBy(value => value.MemberName, StringComparer.Ordinal).ToList();
-    }
-
-    private static IEnumerable<string> ResolveClientPackages(
-        IReadOnlyList<GatewayManifest> manifests,
-        IReadOnlyList<GatewayClientKind> clientKinds)
-    {
-        var kinds = clientKinds.ToDictionary(value => value.Kind, value => value.PackageId, StringComparer.OrdinalIgnoreCase);
-        var resources = manifests
-            .GroupBy(manifest => manifest.Name, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-        var packages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (GatewayManifest manifest in manifests)
-        {
-            if (manifest.Commands.Count > 0 && kinds.TryGetValue(manifest.Kind, out string? commandClient))
-            {
-                packages.Add(commandClient);
-            }
-            foreach (GatewayManifestMount mount in manifest.Mounts)
-            {
-                if (mount.Source is null)
-                {
-                    continue;
-                }
-                int separator = mount.Source.IndexOf(':');
-                if (separator <= 0)
-                {
-                    continue;
-                }
-                string targetName = mount.Source[..separator];
-                if (resources.TryGetValue(targetName, out GatewayManifest? target) &&
-                    kinds.TryGetValue(target.Kind, out string? packageId))
-                {
-                    packages.Add(packageId);
-                }
-            }
-        }
-        return packages.OrderBy(value => value, StringComparer.Ordinal);
     }
 
     private void ValidateGeneratedMemberNames(

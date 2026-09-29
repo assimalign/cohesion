@@ -8,7 +8,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Core;
 
 namespace Assimalign.Cohesion.Database.ApplicationModel.Tests;
 

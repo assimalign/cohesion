@@ -50,34 +50,20 @@
 	</Target>
 
 	<!--
-		The typed area verbs compile only against ApplicationModel assemblies this project
-		references: the ones the Gateway SDK derived from its resource references, plus any
-		the consumer added itself.
-	-->
-	<Target Name="_CohesionCollectAvailableApplicationModels">
-		<ItemGroup>
-			<_CohesionGatewayAvailableApplicationModel
-				Include="@(PackageReference)"
-				Condition="$([System.String]::Copy('%(Identity)').EndsWith('.ApplicationModel', System.StringComparison.OrdinalIgnoreCase))" />
-			<_CohesionGatewayAvailableApplicationModel
-				Include="@(ProjectReference->'%(Filename)')"
-				Condition="$([System.String]::Copy('%(Filename)').EndsWith('.ApplicationModel', System.StringComparison.OrdinalIgnoreCase))" />
-		</ItemGroup>
-	</Target>
-
-	<!--
 		Runs before BeforeCompile so Gateway.g.cs is part of the compile dependency cache, and
 		in design-time builds so Visual Studio compiles it. A design-time build never builds the
 		members (BuildProjectReferences=false), so their assemblies may be absent: it keeps an
 		existing Gateway.g.cs untouched and, when none exists, generates the surface without
 		the in-process pass. The real build regenerates with the bindings; the composition
-		surface IntelliSense sees is identical either way.
+		surface IntelliSense sees is identical either way. The target and task keep their
+		historical name: the generated surface no longer contains per-resource verbs, and the
+		gateway composes each resource with its area's hand-written verb.
 	-->
 	<Target
 		Name="CohesionCreateResourceVerbs"
 		AfterTargets="ResolveProjectReferences"
 		BeforeTargets="BeforeCompile;CoreCompile"
-		DependsOnTargets="CohesionResolveResourceReferences;_CohesionCollectAvailableApplicationModels">
+		DependsOnTargets="CohesionResolveResourceReferences">
 		<PropertyGroup>
 			<_CohesionGatewayDesignTime Condition="'$(DesignTimeBuild)' == 'true'">true</_CohesionGatewayDesignTime>
 			<_CohesionGatewayInProcessPass>$(_CohesionGatewayInProcessActive)</_CohesionGatewayInProcessPass>
@@ -92,12 +78,8 @@
 			InProcessEnabled="$(_CohesionGatewayInProcessPass)"
 			ResourceReferences="@(CohesionResourceReference)"
 			ReferencedManifests="@(_CohesionReferencedManifest);@(CohesionResourceManifest->WithMetadataValue('IsSelf', 'false'))"
-			ResourceKinds="@(CohesionGatewayResourceKind)"
-			AvailableApplicationModels="@(_CohesionGatewayAvailableApplicationModel)"
-			GatewayProviders="@(CohesionGatewayProvider)"
-			ClientKinds="@(CohesionGatewayClientKind)">
+			GatewayProviders="@(CohesionGatewayProvider)">
 			<Output TaskParameter="RequiredApplicationModels" ItemName="_CohesionGatewayRequiredApplicationModel" />
-			<Output TaskParameter="RequiredClientPackages" ItemName="_CohesionGatewayRequiredClientPackage" />
 			<Output TaskParameter="InProcessProjectReferences" ItemName="_CohesionGatewayInProcessProjectReference" />
 		</CohesionCreateResourceVerbs>
 		<ItemGroup>
@@ -124,7 +106,6 @@
 			<Output TaskParameter="TargetOutputs" ItemName="_CohesionGatewayInProcessRuntimeAsset" />
 		</MSBuild>
 		<Message Importance="Low" Text="Sdk.Gateway manifest application models: @(_CohesionGatewayRequiredApplicationModel)." />
-		<Message Importance="Low" Text="Sdk.Gateway manifest mount and command clients: @(_CohesionGatewayRequiredClientPackage)." />
 		<ItemGroup>
 			<_CohesionGatewayInProcessRuntimeAsset
 				Update="@(_CohesionGatewayInProcessRuntimeAsset)"
@@ -204,7 +185,7 @@
 
 	<!--
 		CoreClean deletes Gateway.g.cs with the other file writes; Clean then regenerates it
-		so IntelliSense keeps the generated verbs between a clean and the next build. This is
+		so IntelliSense keeps the generated surface between a clean and the next build. This is
 		a separate target with its own task invocation rather than a dependency on
 		CohesionCreateResourceVerbs: a target runs once per build, so a Rebuild's Build phase
 		must still run the real target with its in-process pass, whose member assemblies do
@@ -216,7 +197,7 @@
 	<Target
 		Name="CohesionRegenerateGatewaySourceAfterClean"
 		AfterTargets="Clean"
-		DependsOnTargets="CohesionResolveResourceReferences;_CohesionCollectAvailableApplicationModels"
+		DependsOnTargets="CohesionResolveResourceReferences"
 		Condition="Exists('$(ProjectAssetsFile)') and '@(CohesionGatewayProvider)' != ''">
 		<CohesionCreateResourceVerbs
 			SourceOutputPath="$(CohesionGatewaySourcePath)"
@@ -226,10 +207,7 @@
 			InProcessEnabled="false"
 			ResourceReferences="@(CohesionResourceReference)"
 			ReferencedManifests="@(_CohesionReferencedManifest);@(CohesionResourceManifest->WithMetadataValue('IsSelf', 'false'))"
-			ResourceKinds="@(CohesionGatewayResourceKind)"
-			AvailableApplicationModels="@(_CohesionGatewayAvailableApplicationModel)"
-			GatewayProviders="@(CohesionGatewayProvider)"
-			ClientKinds="@(CohesionGatewayClientKind)" />
+			GatewayProviders="@(CohesionGatewayProvider)" />
 	</Target>
 	<Import Project="Sdk.Gateway.Images.targets" />
 </Project>

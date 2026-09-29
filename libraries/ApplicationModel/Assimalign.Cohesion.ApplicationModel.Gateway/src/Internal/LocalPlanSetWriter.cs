@@ -7,8 +7,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 internal static class LocalPlanSetWriter
@@ -234,11 +232,11 @@ internal static class LocalPlanSetWriter
     {
         var environment = new Dictionary<string, string>(declared, StringComparer.Ordinal)
         {
-            [ResourceEnvironment.Gateway] = gateway.ToString(),
+            [AppEnvironment.Variables.Gateway] = gateway.ToString(),
         };
         if (contentRoot is not null)
         {
-            environment[ResourceEnvironment.ContentRoot] = contentRoot;
+            environment[AppEnvironment.Variables.ContentRoot] = contentRoot;
         }
 
         string[] names = new string[environment.Count];

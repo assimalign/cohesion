@@ -24,6 +24,16 @@ This assembly is the concrete JOSE/JWT document layer of the IdentityModel token
 | `IJsonWebTokenSignatureVerifier` | Raw asymmetric signature seam: algorithm/key-id selection plus verification over decoded octets. |
 | `JsonWebTokenSignatureVerifier` | Creates internal RSA (`RS*`/`PS*`) and named-curve ECDSA (`ES*`) verifiers. |
 
+### Public keys and verify-and-validate
+
+| Type | Role |
+| --- | --- |
+| `JsonWebKey` | Structural public JWK (`kty`, `crv`, `x`, `y`, `n`, `e`, `kid`, `alg`, `use`): `TryParse` from UTF-8 JSON or a `JsonElement`, RFC 7638 `ComputeThumbprint` (EC and RSA), caller-owned `CreateECDsa`, the lenient `TryValidateEcdsaVerificationKey` verification-key rule, and the strict `TryValidateEs256SigningKey` trusted-issuer profile. |
+| `JsonWebKeySet` | An issuer's keys in lookup order; `Find(kid)` selects by exact `kid` and never matches a missing one. |
+| `IJsonWebTokenValidator` | Verifies a compact token's signature against its issuer's trusted keys and applies the profile rules; every failure is the same `false`. |
+| `JsonWebTokenValidator` | Creates the ES256 validator and evaluates `HasAudience`, the audience rule profiles leave to callers. |
+| `JsonWebTokenValidationProfile` | Issuer-to-key-set resolver (or one issuer and set), lifetime ceiling, clock skew, and subject rule. |
+
 ### JOSE header
 
 | Type | Role |
@@ -107,6 +117,26 @@ if (JsonWebToken.TryParse(compact, out var token) && token?.Parts is { } parts)
     byte[] signature = Base64Url.DecodeFromChars(parts.Signature);
     bool authentic = verifier.CanVerify(token.Algorithm!, token.Header.KeyId) &&
         verifier.Verify(token.Algorithm!, signingInput, signature);
+}
+```
+
+Verify and validate in one call against an issuer's published key:
+
+```csharp
+if (!JsonWebKey.TryParse(publicJwkUtf8, out JsonWebKey? key))
+{
+    throw new InvalidOperationException("The issuer key is not a JWK object.");
+}
+
+IJsonWebTokenValidator validator = JsonWebTokenValidator.CreateEs256(
+    new JsonWebTokenValidationProfile("https://gateway.example", new JsonWebKeySet(key), TimeSpan.FromHours(24))
+    {
+        ExpectedSubject = "gateway",
+    });
+
+if (validator.TryValidate(compact, DateTimeOffset.UtcNow, out JsonWebToken? verified))
+{
+    bool forThisResource = JsonWebTokenValidator.HasAudience(verified, "secret-store");
 }
 ```
 

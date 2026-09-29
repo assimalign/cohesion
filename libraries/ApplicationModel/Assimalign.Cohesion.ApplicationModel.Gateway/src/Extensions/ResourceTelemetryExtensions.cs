@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 
 using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
-using Assimalign.Cohesion.Core;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
@@ -37,15 +36,15 @@ public static class ResourceTelemetryExtensions
             ArgumentNullException.ThrowIfNull(environment);
             if (telemetry is null)
             {
-                GatewayEnvironmentVariables.Remove(environment, ResourceEnvironment.TelemetryEndpoint);
-                GatewayEnvironmentVariables.Remove(environment, ResourceEnvironment.TelemetryProtocol);
-                GatewayEnvironmentVariables.Remove(environment, ResourceEnvironment.TelemetryHeadersPath);
+                GatewayEnvironmentVariables.Remove(environment, AppEnvironment.Variables.TelemetryEndpoint);
+                GatewayEnvironmentVariables.Remove(environment, AppEnvironment.Variables.TelemetryProtocol);
+                GatewayEnvironmentVariables.Remove(environment, AppEnvironment.Variables.TelemetryHeadersPath);
                 return;
             }
 
-            GatewayEnvironmentVariables.Set(environment, ResourceEnvironment.TelemetryEndpoint, telemetry.Endpoint.ToEndpointString());
-            GatewayEnvironmentVariables.Set(environment, ResourceEnvironment.TelemetryProtocol, "otlp-http");
-            GatewayEnvironmentVariables.Remove(environment, ResourceEnvironment.TelemetryHeadersPath);
+            GatewayEnvironmentVariables.Set(environment, AppEnvironment.Variables.TelemetryEndpoint, telemetry.Endpoint.ToEndpointString());
+            GatewayEnvironmentVariables.Set(environment, AppEnvironment.Variables.TelemetryProtocol, "otlp-http");
+            GatewayEnvironmentVariables.Remove(environment, AppEnvironment.Variables.TelemetryHeadersPath);
         }
     }
 }

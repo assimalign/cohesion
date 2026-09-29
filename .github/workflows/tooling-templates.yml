@@ -5,6 +5,10 @@ on:
       - "tooling/templates/**"
       - "sdks/**"
       - "libraries/App/**"
+      # Template gateway programs call the ApplicationModel, area-verb and Orchestration APIs directly.
+      - "libraries/ApplicationModel/**"
+      - "resources/*/Assimalign.Cohesion.*.ApplicationModel/**"
+      - "resources/*/Assimalign.Cohesion.*.ApplicationModel.Orchestration/**"
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
       - "build/**"
@@ -15,6 +19,9 @@ on:
       - "tooling/templates/**"
       - "sdks/**"
       - "libraries/App/**"
+      - "libraries/ApplicationModel/**"
+      - "resources/*/Assimalign.Cohesion.*.ApplicationModel/**"
+      - "resources/*/Assimalign.Cohesion.*.ApplicationModel.Orchestration/**"
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
       - "build/**"
@@ -75,30 +82,17 @@ jobs:
             'Assimalign.Cohesion.Hosting.Resources'
             'Assimalign.Cohesion.Http'
             'Assimalign.Cohesion.Http.Connections'
-            'Assimalign.Cohesion.Web'
-            'Assimalign.Cohesion.Web.Routing'
+            # Sdk.Gateway injects no area client and Gateway.ControlPlane no longer references
+            # Web.Routing, so neither Web nor the Database.Client closure reaches a template restore.
             'Assimalign.Cohesion.Web.ApplicationModel'
             'Assimalign.Cohesion.Database.ApplicationModel'
             'Assimalign.Cohesion.ConfigurationStore.ApplicationModel'
-            'Assimalign.Cohesion.Database'
-            'Assimalign.Cohesion.Database.Client'
-            'Assimalign.Cohesion.Database.Execution'
-            'Assimalign.Cohesion.Database.Governance'
-            'Assimalign.Cohesion.Database.Indexing'
-            'Assimalign.Cohesion.Database.Language'
-            'Assimalign.Cohesion.Database.Protocol'
-            'Assimalign.Cohesion.Database.Security'
-            'Assimalign.Cohesion.Database.Storage'
-            'Assimalign.Cohesion.Database.Transactions'
-            'Assimalign.Cohesion.Database.Types'
-            # Database.Storage routes its data and WAL files through IFileSystem, so both
-            # FileSystem packages are in the gateway consumer's restore closure.
-            'Assimalign.Cohesion.FileSystem'
-            'Assimalign.Cohesion.FileSystem.Physical'
+            # The landing-zone Platform and root set gateways reference the opt-in store providers
+            # explicitly; each Orchestration package depends on ApplicationModel and its area client.
             'Assimalign.Cohesion.SecretStore.Client'
             'Assimalign.Cohesion.ConfigurationStore.Client'
-            'Assimalign.Cohesion.IdentityHub.Client'
-            'Assimalign.Cohesion.Rezolvr.Client'
+            'Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration'
+            'Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration'
             'Assimalign.Cohesion.IdentityHub.ApplicationModel'
             'Assimalign.Cohesion.SecretStore.ApplicationModel'
             'Assimalign.Cohesion.Rezolvr.ApplicationModel'

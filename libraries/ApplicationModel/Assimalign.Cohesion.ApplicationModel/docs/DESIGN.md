@@ -31,6 +31,10 @@ Two planes share one vocabulary here:
   `IResourceControlContext`, `IApplicationResourceStateManager`,
   `IApplicationResourcePackager`, `IControlPlaneClient`,
   `IMultiModelApplicationGateway`, and the `IResourceArtifact` family.
+- **Provider seams** (contracts only; the gateway calls them, opt-in resource-area packages
+  implement them) — `ApplicationProviders` plus the store, certificate, trust, command-input,
+  telemetry, credential, and caller seams described in
+  [Provider seams](#provider-seams-explicit-registration).
 
 The guided implementation surface is `PlannedResource`; resource-area types derive
 from it and override `CreatePlan(PlanContext)` only when the generic trait mapping
@@ -219,6 +223,295 @@ In Local, executable resolution applies `--realize` only after the first descrip
 that the member declares the requested external. An imported export must already record a matching
 external as realized, and the set rejects any requested name that no member realized.
 
+A member's describe output carries no provider registrations. `AddApplication(declaration,
+configure)` registers them for that member alone; the set invokes the callback after the member
+resolves, attaches the frozen registrations to its model, and validates every member — registered or
+not — before any gateway call. See *Provider seams*, "Two registration surfaces, one registration
+container".
+
+## Provider seams (explicit registration)
+
+Libraries never depend on resources. Everything a gateway needs from a resource area at run time
+— reading a `<source>:<key>` mount source, issuing a TLS leaf, persisting a trusted issuer,
+rewriting a command payload, exporting telemetry, minting a credential, authenticating a
+control-plane caller — is a seam defined here and implemented elsewhere. This package defines the
+seams; `…ApplicationModel.Gateway` calls them; the shipped implementations live in opt-in
+`Assimalign.Cohesion.<Area>.ApplicationModel.Orchestration` packages under `resources/<Area>/`,
+which reference this package and their area's `<Area>.Client` and nothing in the Hosting or
+Gateway families.
+
+The diagram shows reference direction between the seams (defined in `libraries/**`) and their
+implementers (in `resources/**`): the gateway references the seams to call them, every
+orchestration package references the seams to implement them (and its area's client to reach
+the resource), the SDK consumer's gateway `Program.cs` references the packages it registers, and
+the seams reference only Core. The dotted edge is the one `COHLIB001` rejects — no project under
+`libraries/**` may reference `resources/**`, so a seam never knows its implementers.
+
+```mermaid
+flowchart LR
+    subgraph Libs["libraries/** — define and call the seams"]
+        Seams["Assimalign.Cohesion.ApplicationModel — seams"]
+        Core["Assimalign.Cohesion.Core"]
+        Gateway["ApplicationModel.Gateway"]
+    end
+    subgraph Res["resources/** — implement the seams"]
+        SecretOrch["SecretStore.ApplicationModel.Orchestration"]
+        SecretClient["SecretStore.Client"]
+        ConfigOrch["ConfigurationStore.ApplicationModel.Orchestration"]
+        ConfigClient["ConfigurationStore.Client"]
+    end
+    Program["gateway Program.cs — SDK consumer"]
+    Seams --> Core
+    Gateway -->|"calls"| Seams
+    SecretOrch -->|"implements"| Seams
+    SecretOrch --> SecretClient
+    ConfigOrch -->|"implements"| Seams
+    ConfigOrch --> ConfigClient
+    Program --> Gateway
+    Program -->|"registers"| SecretOrch
+    Program -->|"registers"| ConfigOrch
+    Seams -.->|"COHLIB001 ✗"| SecretOrch
+```
+
+| Seam | Registered through | Called by the gateway to |
+| --- | --- | --- |
+| `IResourceSourceProvider` | `Providers.Sources["<source>"]` | read a Secret, certificate, or Configuration mount whose source is `<source>:<key>` |
+| `IResourceCertificateAuthority` | `Providers.CertificateAuthority` | issue the TLS leaf of an endpoint whose certificate mount has no source |
+| `ITrustedIssuerStore` | `Providers.TrustStore` | read and add the application's trusted peer issuers |
+| `IResourceCommandInputResolver` | `Providers.CommandInputs` | rewrite a declared command payload (by command kind) before delivery |
+| `ResourceTelemetrySink` | `Providers.Telemetry` | point every resource's OTLP export at a sink resource or an external address |
+| `IApplicationCredentialIssuer` | `Providers.CredentialIssuer` | mint credentials before falling back to the default ES256 application key |
+| `IApplicationCallerAuthenticator` | `Providers.Callers` | authenticate control-plane callers after the built-in trusted-issuer check |
+
+`IResourceSourceResolver` runs the other way: the gateway implements it over the same `Sources`
+registrations and hands it to each command-input resolver, so a resolver can turn a declared
+`parameter:`/`<source>:<key>` expression into bytes without knowing how sources are resolved.
+
+**Explicit registration only.** Nothing is injected by convention. A gateway `Program.cs`
+references an orchestration package and calls its verb, which fills `builder.Providers`:
+
+```csharp
+IApplicationResourceDescriptor secrets = builder.AddResource(Manifests.Secrets);
+IApplicationResourceDescriptor logs = builder.AddResource(Manifests.Logs);
+builder.UseSecretStore(secrets).AsCertificateAuthority().AsTrustStore();
+builder.Providers.Telemetry = ResourceTelemetrySink.FromResource(logs);
+```
+
+Anything the shipped packages do not cover is a hand-written provider assigned to the same
+members. `parameter:` and `literal:` stay built into the gateway and can never be registered.
+
+**Why an open provider bag and not a gateway option or a convention.** The previous design gave
+the gateway a single store client and discovered stores by manifest kind, which put area wire
+knowledge (paths, command kinds, file names) in a library and made every area a hidden dependency
+of the gateway. Registrations on the model keep the library area-neutral, keep the dependency on
+the consumer's side of the line, and let a developer bring an implementation without forking the
+gateway. The cost is that an unregistered provider is now an error the developer must fix rather
+than something that silently works; `Build()`-time validation makes that error immediate and
+names the package to reference.
+
+**Why `ApplicationProviders` is a class and not an interface.** It is a registration container,
+not a behaviour: consumers never substitute it, and a frozen snapshot has to be copied by this
+package. The behaviours are the seams, and those are interfaces.
+
+**Resource-backed or outside the model.** A provider that declares a non-null `ResourceKind`
+must be bound to a resource of the declaring application with that manifest kind; the gateway
+waits for that resource to be Running and hands the provider a `ResourceProviderConnection` —
+the observed control-plane address, the resource's audience-bound `ResourceAccess` bearer
+credential for the reconcile pass (minted through the credential issuer; see *Identity*), and the
+application's transport validator. A provider with a null
+`ResourceKind` does not require a model resource: registered under a name that is no model
+resource (for example `vault`), it lives outside the model, authenticates itself, and receives a
+`null` connection. `ResourceProviderBinding<T>` carries the same choice for the certificate
+authority and trust store (`Resource = null` means outside the model).
+
+**Defaults when nothing is registered.** Unbound certificate authority: the gateway's
+development CA in Local only, a loud failure elsewhere — never a silent downgrade. The authority
+resource's own leaf always comes from the gateway CA, because it cannot issue its first leaf.
+Unbound trust store: the Local-only `trusted-issuers.json` file under the application's state
+directory; trust grants fail elsewhere. No telemetry sink: no telemetry variables are injected. No
+credential issuer (or an issuer returning `null`): the default ES256 application-key issuer. No
+command-input resolver for a kind: the payload is delivered as declared — unless the target's
+manifest marks that kind `RequiresInputResolver`, in which case `Build()` (or the set, for a member)
+fails first (rule 5 below).
+
+**Freeze semantics.** `IApplicationBuilder.Providers` is mutable while authoring. `Build()` copies
+it into the model as a frozen snapshot (`IApplicationModel.Providers`): `Sources`,
+`CommandInputs`, and `Callers` become read-only collections (`NotSupportedException` on
+mutation) and every setter throws `InvalidOperationException`. Later builder registrations never
+reach an already-built model. `ApplicationProviders.Empty` is frozen and is the default-interface
+value of `IApplicationModel.Providers`. Providers are code, so `ApplicationModelDocument` never
+carries them: an imported model — every application-set member resolved from a describe output
+and every export — has `Empty`.
+
+**Two registration surfaces, one registration container.** An application built in code registers
+on `IApplicationBuilder.Providers`. `IApplicationProviderBuilder` is the provider-registration
+surface of one application-set member: `Application` (its name), `Providers` (the mutable
+registrations), and `TryGetResourceManifest(name, out manifest)` (a lookup of the application's
+resources so a verb can check a store's kind before binding it). They are separate interfaces
+(owner decision O45, 2026-09-27): `IApplicationBuilder` does not extend `IApplicationProviderBuilder`
+and has no `Application` or `TryGetResourceManifest`, because a builder's verbs bind the resource
+descriptors it created, while a member has no descriptors and binds stores by `ResourceName`. The
+internal default builder implements both (its `Application` is `null` until it is named), so code
+holding it can still cast it to `IApplicationProviderBuilder`. An application set hands a member its
+surface through `IApplicationSet.AddApplication(declaration, configure)`:
+
+```csharp
+IApplicationSet set = Application.CreateSet(new LocalGateway(options), args)
+    .AddApplication(Applications.Platform, platform => platform
+        .UseSecretStore("platform-secrets")
+        .AsCertificateAuthority()
+        .AsTrustStore())
+    .AddApplication(Applications.AppA, appa =>
+    {
+        appa.UseConfigurationStore("appa-configuration");
+        appa.Providers.Telemetry = ResourceTelemetrySink.FromResource("appa-logs");
+    })
+    .AddApplication(Applications.AppB);
+```
+
+`RunAsync` resolves each member in declaration order and, right after the member's model resolves,
+invokes that member's callback with a fresh surface over the resolved model, so `TryGetResourceManifest`
+sees the member's resources. When the callback returns, the set freezes the registrations (a
+registration made later through a kept reference throws), attaches them to that member's model
+alone (an internal wrapper that forwards every other member of `IApplicationModel`, so descriptors,
+resources, manifests, and plans keep their identity), and runs the same
+`ApplicationProviderValidation` `Build()` runs. Orchestration verbs take a resource name for this
+surface (`UseSecretStore("secrets")`, `UseConfigurationStore("settings")`), and
+`ResourceTelemetrySink.FromResource(ResourceName, endpoint)` names a sink the same way, because a
+member has no descriptors. An application built in code uses the descriptor forms instead
+(`builder.UseSecretStore(secrets)`, `builder.UseConfigurationStore(settings)`,
+`ResourceTelemetrySink.FromResource(descriptor, endpoint)`). Both forms write the same
+`ApplicationProviders`, and the handle `UseSecretStore` returns, `SecretStoreProviderBuilder`,
+exposes that instance as `Providers`, so `.AsCertificateAuthority()` and `.AsTrustStore()` chain the
+same way on either surface.
+
+**Never inherited by name.** A member gets exactly what its own callback registered — never the
+registrations of another member, of the set, or of the member's own gateway (lost with its describe
+output) — even when two members declare a store of the same name. The set validates every member
+at start, in every run mode, whether or not it registers anything, as `Build()` validates a builder
+whatever mode it runs in: a store-backed member without a registration fails before the gateway is
+contacted, with a message that starts `Application-set member '<name>' has invalid provider
+registrations.` and names the package and the `set.AddApplication(Applications.<Member>, application
+=> application.Use<Area>("<store>"))` registration. A callback failure is wrapped the same way
+(`Application-set member '<name>' could not register its providers: ...`). A member whose resolver
+returns a model that already carries registrations (a custom in-memory resolver over a built model)
+keeps them when added without a callback; adding it with a callback as well is rejected, so
+registrations for one application live in one place. The cross-application rule is unchanged: a
+member may not bind another application's resource — including a Local `--realize` closure's — and
+the gateway still refuses a closure resource's `<source>:<key>` mounts at resolution (see the
+gateway design, *Imported models and provider registrations*).
+
+**Build-time validation.** `ApplicationProviderValidation.Validate(model)` (internal) enforces:
+
+1. every `<source>:<key>` mount source of the application's own manifests (manifest
+   `Application` equals the model name) has a `Sources` registration; `parameter:` and `literal:`
+   are exempt, and a mount with no source needs no provider (an endpoint certificate mount
+   without a source is issued by the certificate authority or the Local dev CA). A missing
+   registration names the source and, when the source is a model resource of kind `K`, says to
+   reference `Assimalign.Cohesion.K.ApplicationModel.Orchestration` and call `builder.UseK(...)`;
+2. a provider with a non-null `ResourceKind` names an existing resource of the application whose
+   manifest kind matches (ordinal, case-insensitive — the gateway's existing kind comparison);
+3. no mount source or binding names a resource of another application — a manifest reference
+   into another application, a remote reference, or an external. Cross-application store sources
+   are rejected for now (owner decision 4) and return as a follow-up once the store resources
+   support cross-application callers;
+4. a resource telemetry sink belongs to the application and declares the named endpoint;
+5. every declared command whose **target's** manifest marks its kind
+   `ResourceManifestCommand.RequiresInputResolver` has an `IResourceCommandInputResolver` for that
+   kind in the **declaring** application's `CommandInputs` — the resolvers the gateway uses at
+   delivery whether the target is the application's own resource or another application's. For an
+   own target of kind `K` the error names the command, its key, and the target, and says to reference
+   `Assimalign.Cohesion.K.ApplicationModel.Orchestration` and call `builder.UseK(...)`; for another
+   application's target, where `UseK` would be a cross-application binding (rule 3), it asks for an
+   `IResourceCommandInputResolver` in `Providers.CommandInputs` instead. A kind the target does not
+   flag needs no resolver and is still delivered as declared (see *Declarative resource commands*).
+
+Every failure is an `InvalidOperationException`. `Build()` runs the validation after the graph,
+manifests, commands, and plans validate and before it asks the selected gateway to validate the
+model, so a gateway never receives a model whose registrations are inconsistent, and the error names
+the package and verb to reference. An application set runs the same validation for each member at
+`RunAsync` start, after it attaches that member's registrations, with the same rules; the message is
+prefixed with the member name and its hint names the member's `AddApplication(..., configure)`
+callback instead of `builder.Use<Area>(...)`. The resources of a Local `--realize` closure belong to
+another application, whose manifests rule 1 does not check; the gateway fails their
+`<source>:<key>` mounts at resolution, naming the realized application and the cross-application
+limit, and fails the mounts of any model that reaches it without the needed registration (one handed
+to it directly rather than through `Build()` or a set), naming the missing registration. A flagged
+command in such a model is delivered as declared and the target refuses the unresolved payload;
+SecretStore keeps that rejection of an unresolved `secretstore.add-secret` as defense in depth. A
+model's registrations apply only to resources of its own application.
+
+**Identity.** `IApplicationCredentialIssuer` covers every credential the gateway mints, tagged by
+`ApplicationCredentialPurpose` (`ResourceBootstrap`, `ResourceAccess`, `Telemetry`,
+`RemoteCommand`, `PeerControlPlane`, `Developer`). An issuer that returns `null` defers that
+request to the default ES256 application-key issuer, so an IdP can take over one purpose at a
+time. Resources verify what it issues, so an application that registers an issuer must register a
+matching credential verifier on its resources (`Hosting.Resources`, resource side). Callers of the
+gateway control plane go through the built-in trusted-issuer authenticator first and then each
+`IApplicationCallerAuthenticator` in order; `ApplicationCallerStatus.NoResult` falls through,
+the other statuses are final, and area/command checks apply to the mapped `ApplicationCaller`.
+The shipped gateway consults both: every credential it mints goes through
+`Providers.CredentialIssuer` (gateway design, *Identity seams*), and its served control plane runs
+`Providers.Callers` after the built-in authenticator (ControlPlane design, *Caller
+authentication*). With neither registered, every credential and every control-plane response is
+what it was before the seams existed.
+
+Using them from a gateway `Program.cs` — an identity provider that takes over the credentials the
+application's resources receive (bootstrap and access), and whose tokens peers and developers may
+present to this gateway's control plane:
+
+```csharp
+builder.Providers.CredentialIssuer = new IdpCredentialIssuer(idp);   // null for purposes it leaves to the default
+builder.Providers.Callers.Add(new IdpCallerAuthenticator(idp));     // NoResult for tokens it does not recognize
+```
+
+```csharp
+sealed class IdpCredentialIssuer : IApplicationCredentialIssuer
+{
+    private readonly IdentityProviderClient _idp;
+
+    public IdpCredentialIssuer(IdentityProviderClient idp)
+    {
+        _idp = idp;
+    }
+
+    public async ValueTask<ApplicationCredential?> IssueAsync(
+        ApplicationCredentialRequest request,
+        CancellationToken cancellationToken = default) =>
+        request.Purpose is ApplicationCredentialPurpose.ResourceBootstrap or ApplicationCredentialPurpose.ResourceAccess
+            ? await _idp.IssueBearerAsync(request.Audience, request.Subject, request.Lifetime, cancellationToken)
+            : null;
+}
+```
+
+The request carries the audience, subject, and lifetime the default issuer would use for that
+purpose (the table on `IApplicationCredentialIssuer`). Every carrier except the telemetry headers
+document presents the credential as `Authorization: Bearer`, so the gateway refuses another scheme
+for those purposes. An authenticator maps a credential it recognizes to an `ApplicationCaller`
+(`Peer` with an `Application` to use command routes, `Developer` for read-only discovery) and
+returns `NoResult` for anything else. **Resources verify what the issuer mints:** a resource that
+receives an IdP-issued bootstrap, access, or telemetry credential registers a matching
+`IResourceCredentialVerifier` with `ResourceRuntime.RegisterCredentialVerifier(Assembly, factory)`
+before building its area application
+([Hosting.Resources DESIGN.md](../../../Hosting/Assimalign.Cohesion.Hosting.Resources/docs/DESIGN.md#resource-credential-verification);
+[RUNTIME_CONTRACT.md, Resource credentials](../../../../docs/RUNTIME_CONTRACT.md#resource-credentials)).
+The area hosting modules consult it first and fall back to application-key verification on
+`NoResult`, so both kinds of credential can coexist while an identity provider takes over.
+An `Authenticated` `ApplicationCallerResult` cannot be constructed without its caller (it throws
+`ArgumentException`); a `with` expression can still produce one, and the gateway control plane
+treats that as a defect (`500`), so no authenticator can pass the gateway an authenticated result
+with no identity to check. `ApplicationCaller.AllowedCommandKinds` follows `TrustedIssuer`: an empty list
+permits every command kind, so an authenticator that means "no commands" must forbid the caller
+rather than return an empty list.
+
+`TrustedIssuer` lives here (moved from `…ApplicationModel.Gateway`) because `ITrustedIssuerStore`
+and `IApplicationCallerAuthenticator` name it; it is BCL-only (ES256 JWK validation over
+`System.Text.Json` and `System.Security.Cryptography`), so the Core-only boundary is unchanged.
+
+**Secrets in values.** `ResourceProviderConnection`, `ApplicationCredential`,
+`ApplicationCallerRequest`, and `ResourceCertificate` (whose bundle carries a private key) redact
+those members from their record `ToString()`, so logging a request never logs the credential.
+
 ## Lifecycle and error model
 
 - `Application.CreateBuilder(ApplicationName, args)` → fluent
@@ -240,8 +533,9 @@ external as realized, and the set rejects any requested name that no member real
 - `Build()` validates: unique resource names (enforced eagerly on `AddResource`),
   at least one realized resource, all explicit dependencies and required manifest references
   present, no dependency cycles
-  (DFS), a selected gateway, an RFC 1123 application name, each typed override, and
-  every computed plan, then asks the selected gateway to validate realizability. Planning
+  (DFS), a selected gateway, an RFC 1123 application name, each typed override,
+  every computed plan, and the provider registrations (above), then asks the selected gateway to
+  validate realizability. Planning
   deliberately happens here rather than in MSBuild or
   when the resource is added.
   Every failure is an `InvalidOperationException` with an actionable message; there
@@ -282,6 +576,10 @@ Docker or Kubernetes integrations.
   provide a typed `PlannedResource`, `Add{Resource}(manifest, options)`, the area's
   planner when it differs from `GenericPlanner`, and the resource-side default
   control-plane contract served by `{Resource}.Hosting`.
+- `{Resource}.ApplicationModel.Orchestration` — opt-in, NuGet-only packages that implement the
+  [provider seams](#provider-seams-explicit-registration) over their area's `{Resource}.Client`
+  and register them through an explicit `Use{Resource}(...)` verb. They reference this package
+  and the client only — never Hosting, the gateway family, or `{Resource}.ApplicationModel`.
 
 ## Non-goals
 
@@ -293,6 +591,11 @@ Docker or Kubernetes integrations.
 - Platform object formats, Kubernetes types, and process supervision — those live
   in gateway/compiler packages. The platform-neutral resource manifest, realization
   plan, and describe-mode model document are contracts of this package.
+- Area wire knowledge — store paths, command kinds, trust file formats, or any resource kind
+  name. Those belong to the orchestration package that implements a provider seam.
+- Cross-application store sources and providers, for now. A mount source or provider binding
+  that names another application's resource is rejected; supporting it waits on the store
+  resources accepting cross-application callers.
 
 ## Declarative resource commands (T7a)
 
@@ -313,6 +616,23 @@ kinds, nonblank keys, duplicate ids, and conflicting declarations for the same t
 regardless of command kind. One desired graph declares one operation per provider ownership
 key; a subsequent model can replace or withdraw that operation. The model and each built command descriptor expose
 read-only command snapshots; built descriptors reject subsequent mutation.
+
+**Commands resolved before delivery (owner decision, 2026-09-28).** A resource that accepts a
+command only in its resolved form says so in its own manifest:
+`ResourceManifestCommand.RequiresInputResolver`. In `resource.json` a command is still a string
+holding its kind; only a flagged command is the object `{ "kind": "...", "requiresInputResolver": true }`,
+so a manifest without the flag serializes byte-identically to before. The reader accepts both forms
+and rejects unknown properties, a missing, empty, or non-string `kind`, and a non-boolean flag;
+`assets/schemas/cohesion.resource.schema.json` declares the same two forms as a `oneOf`. The SDK
+writes the flag from `RequiresInputResolver` metadata on a `CohesionCommand` item:
+`Assimalign.Cohesion.Sdk.SecretStore` sets it on `secretstore.add-secret`, whose payload names a
+`parameter:<name>` or `<store>:<key>` source, and leaves `secretstore.issue-certificate` unflagged.
+Provider validation rule 5 (*Provider seams*) turns a flagged command whose declaring application
+registered no resolver for its kind into a `Build()` or set-start error that names the package and
+verb, where it used to surface only as a Rejected observation at delivery. The requirement is the
+accepting resource's fact, so the check reads only the target's manifest and this package names no
+area command kind. An unflagged kind with no resolver is still delivered as declared, and a
+resource's own rejection of an unresolved payload stays as defense in depth.
 
 Dependency normalization accepts an older wrapper that exposes the exact registered `Resource`
 instance. This preserves unchanged SecretStore-style wrappers without requiring them to implement

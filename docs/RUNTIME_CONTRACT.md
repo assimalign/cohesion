@@ -2,10 +2,15 @@
 
 This document is the language-neutral contract between a Cohesion gateway and a resource.
 The contract is frozen at version 1: changing a variable name or its meaning is a breaking
-wire change. .NET consumers use `Assimalign.Cohesion.Core.ResourceEnvironment`; non-.NET
-workloads use this table directly. The typed .NET endpoint readers return `System.Uri`, and
+wire change. .NET consumers take the names from `AppEnvironment.Variables` in Core (namespace
+`Assimalign.Cohesion`), the contract's only .NET home for every variable below and the name
+builders, and read values through `AppEnvironment`'s readers (`GetValue`, `TryGetPort`,
+`TryGetUri`, `TryGetEndpoint`, `TryGetDependency`, `TryGetMount`); non-.NET workloads use this
+table directly. The typed .NET endpoint readers return `System.Uri`, and
 Core's `System.UriExtensions` supplies endpoint validation, construction, parsing, and canonical
-formatting without introducing a Cohesion-specific address type.
+formatting without introducing a Cohesion-specific address type. That .NET binding was amended in
+place on 2026-09-26 (R9 in the [developer-experience design](DEVELOPER_EXPERIENCE_DESIGN.md)); no
+variable name, value, or wire behavior changed.
 
 Out-of-process resources receive values through process environment variables. In-process
 resources receive the same keys through the ambient resource context introduced by runtime
@@ -32,7 +37,7 @@ its environment name as `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Producti
 | `COHESION_DEPENDENCY_<RES>_<EP>_SCHEME` | URI scheme | With the matching observed dependency URL | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
 | `COHESION_MOUNT_<M>_PATH` | Absolute mounted path | For every declared mount after its source is resolved by the gateway | Local: environment pointing under `.cohesion/<app>/<res>/<mount>`; In-process: ambient handle/value; Docker: environment pointing into a volume or tmpfs; Kubernetes: ConfigMap value pointing into a PVC, ConfigMap, or Secret volume |
 | `COHESION_CONFIG__<Section>__<Key>` | Configuration value; `__` maps to `:` | For every setting bridged into the resource | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
-| `COHESION_BOOTSTRAP_TOKEN_PATH` | Path to a file containing an ES256 JWT | When the gateway has minted the resource bootstrap credential; rotated on every reconcile | Local: protected file; In-process: credential value in ambient context; Docker: tmpfs file; Kubernetes: Secret volume |
+| `COHESION_BOOTSTRAP_TOKEN_PATH` | Path to a file containing the resource's bootstrap bearer credential; by default an ES256 JWT signed by the application trust key (see [Resource credentials](#resource-credentials)) | When the gateway has minted the resource bootstrap credential; rotated on every reconcile | Local: protected file; In-process: credential value in ambient context; Docker: tmpfs file; Kubernetes: Secret volume |
 | `COHESION_TRUST_BUNDLE_PATH` | Path to a PEM bundle of trust-anchor certificates (no private keys) | When the gateway has issued or is brokering transport trust anchors for the application | Local: protected file; In-process: ambient context value; Docker: tmpfs file; Kubernetes: ConfigMap or Secret volume |
 | `COHESION_STOP_EVENT` | Windows named-event identifier | Only for a Windows local out-of-process resource launched with the named-event stop channel | Local Windows: environment; In-process: outer host signal; Docker/Kubernetes: not set |
 | `COHESION_TELEMETRY_ENDPOINT` | Absolute OTLP collector URI | Optional and reserved in v1; Hosting uses it when configured | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
@@ -82,11 +87,67 @@ internationalized domain name to its ASCII-compatible form.
   Headers use the bootstrap-credential carrier: a protected file locally and in-process, tmpfs in Docker,
   and a Secret volume in Kubernetes. With no telemetry endpoint, existing logging behavior is unchanged.
   This build exports logs as OTLP/HTTP JSON; protobuf, gRPC, traces and metrics remain deferred.
-  Gateway telemetry tokens carry aud=LogSpace, sub=emitter and scope=telemetry; they cannot authorize sink management or query.
+  The gateway injects these values only for the sink the application registers
+  (`ResourceTelemetrySink.FromResource(...)` or `ResourceTelemetrySink.External(...)`); it never
+  discovers a sink by resource kind. Gateway telemetry tokens for a resource sink carry aud=the sink
+  resource (LogSpace, for example), sub=emitter and scope=telemetry; they cannot authorize sink
+  management or query.
+
+## Resource credentials
+
+`COHESION_BOOTSTRAP_TOKEN_PATH` names a file holding the resource's bootstrap **bearer credential**:
+an opaque value the resource presents as `Authorization: Bearer <credential>` and receives on its own
+control plane. The contract fixes the carrier, not the credential format.
+
+By default the credential is the **application-key credential**: a compact ES256 JWT signed by the
+application trust key whose public JWK is `COHESION_APPLICATION_TRUST_KEY`. Its JOSE header names
+`alg=ES256` and the key's `kid` (the RFC 7638 thumbprint); its payload carries `iss` = the application,
+`sub` = the calling identity (the gateway for bootstrap, management, and store-access credentials; the
+emitting resource for telemetry credentials), `aud` = the receiving resource, and `exp`, `nbf`, `iat`,
+and `jti`. A resource accepts it only when the signature verifies with that key, the issuer is trusted,
+`jti` is present, `iat` is no later than now plus a five-minute skew, `exp` follows both `iat` and `nbf`,
+and `exp - iat` is at most 24 hours; an authentic credential for another audience is refused with 403.
+Credentials presented to a gateway control plane use `aud=cohesion-export` and an 8-hour ceiling, and a
+`cohesion_token_use=gateway` claim grants command dispatch. Telemetry credentials add `scope=telemetry`
+and authorize only ingestion: every resource refuses the scope with 403 on any route that is not a
+telemetry ingestion endpoint, whichever resource the application registered as its sink, and a
+registered verifier must do the same. The claim names and ceilings are `Assimalign.Cohesion.Hosting.Resources.ResourceCredentialProfile`;
+the verification mechanics are the shared ES256 validator in `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`.
+
+An application whose gateway registers a **different credential issuer** (an identity provider, for
+example, assigned to `ApplicationProviders.CredentialIssuer`) must register a matching verifier on its
+resources. The issuer may return no credential for a purpose, and the gateway then mints the default
+application-key credential for that purpose. A resource executable registers its verifier with
+`ResourceRuntime.RegisterCredentialVerifier(Assembly, Func<ResourceContext, IResourceCredentialVerifier>)`
+before building its area application; the area hosting module consults it first for every presented
+credential. A `NoResult` verdict falls through to the default application-key verification, so the two
+can coexist; any other verdict is final. The verifier maps the credential to a `ResourceCaller`
+(application, subject, kind), and the resource authorizes that caller exactly as it authorizes an
+application-key caller. The gateway's readiness and health probes present the resource's
+**bootstrap** credential (purpose `ResourceBootstrap`), not the `ResourceAccess` credential it
+delivers commands with, so the verifier must map the bootstrap credential to the gateway caller as
+well. `COHESION_APPLICATION_TRUST_KEY` remains set as specified either way.
+
+This is an amendment to v1 made in place on 2026-09-25 (owner decision 2, recorded as R8 in the
+[developer-experience design](DEVELOPER_EXPERIENCE_DESIGN.md)), not a v2: the variable name, its
+carrier, and the default credential are unchanged, and an application that registers no issuer sees
+exactly the behavior above. A verifier
+registration is keyed by the resource's entry assembly and can be made once per process: a second
+registration for the same assembly throws. An in-process restart that re-runs the entry point
+currently hits that limit, which the [developer-experience design](DEVELOPER_EXPERIENCE_DESIGN.md)
+records as open follow-up O42.
 
 ## Declarative resource commands
 
-An enabled manifest's `commands` remains a bare string array. The proving kinds are
+An enabled manifest's `commands` lists each accepted kind as a string or, for a kind whose declared
+payload the delivering gateway must resolve before delivery, as the object
+`{ "kind": "…", "requiresInputResolver": true }`. A manifest that marks no kind is the same string
+array as before (`assets/schemas/cohesion.resource.schema.json`). When the target's manifest marks
+a kind, the declaring application's `Build()`, or an application set starting that member, fails
+unless that application registers an `IResourceCommandInputResolver` for the kind.
+`secretstore.add-secret` is marked, and the store still rejects an unresolved payload. This is an
+amendment to v1 made in place on 2026-09-28 (R11 in the
+[developer-experience design](DEVELOPER_EXPERIENCE_DESIGN.md)), not a v2. The proving kinds are
 `database.add-database`, `database.add-principal`, `configurationstore.set-value`, and
 `configurationstore.remove-value`. Wire kinds use an area prefix and a verb-noun kebab name;
 the C# verbs are `AddDatabase`, `AddPrincipal`, `SetValue`, and `RemoveValue`.
@@ -109,8 +170,9 @@ ledger cannot be adopted or deleted by an add-database declaration.
 
 The claiming gateway applies commands after the target is Running and before dependents
 reconcile. Required rejection blocks dependents; optional rejection is observed without blocking.
-Local delivery uses the area's Client package; an in-process host uses its registered control
-plane directly. A remote reference uses PUT and DELETE on
+Local delivery uses the gateway's generic `ResourceControlPlaneCommandClient`, which POSTs and
+DELETEs this envelope at `<controlPlane>/commands` for every kind; an in-process host uses its
+registered control plane directly. A remote reference uses PUT and DELETE on
 `/cohesion/v1/resources/{name}/commands/{id}` at the peer gateway. Application-scoped observations
 and exports carry `Applied`/`Rejected` and detail. Command observations omit payload and result
 bytes; the embedded desired-state model carries command payloads for application-set round trips,
@@ -119,6 +181,10 @@ so declarations in this version must not contain secret material.
 Ownership is retained until confirmed deletion; refusal never transfers a key to another owner.
 Runtime ledgers are invocation-local and do not establish durable ownership after host restart.
 The existing federation path retains its authorization boundary: ConfigurationStore requires
-`owner` to equal the authenticated issuer. A peer forwarding its provider-issued bootstrap token
-with a foreign owner's envelope receives 403; an owner-preserving delegated credential contract
-is still required for that remote mutation path.
+`owner` to equal the authenticated caller's application (the issuer, for an application-key
+credential). A peer forwarding its provider-issued bootstrap token with a foreign owner's envelope
+receives 403; an owner-preserving delegated credential contract is still required for that remote
+mutation path. The commands route of `Web.Hosting.Resources`, the shared control-plane terminal
+that Web, Database, and most other area hosts serve, admits only the resource's own gateway but does
+not yet require `owner` to equal the caller's application; the
+[developer-experience design](DEVELOPER_EXPERIENCE_DESIGN.md) records it as open follow-up O43.

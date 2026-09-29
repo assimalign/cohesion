@@ -48,6 +48,22 @@ only; Hosting.Resources references Core, plain Hosting, Hosting.Health, and Prot
 Hosting references neither sibling. An area ApplicationModel reaches the closure through its
 direct Hosting.Resources reference.
 
+The opposite direction has its own guard, because resources consume libraries and libraries never
+depend on resources:
+
+> **COHLIB001** — No non-harness project under `libraries/**` or `sdks/**` may reference a
+> `resources/**` project, whether by project reference or by a resolved assembly. The one
+> exception is the same-area SDK: a project under `sdks/Assimalign.Cohesion.Sdk.<Area>/` may
+> reference `resources/<Area>/**` (precedent: `Sdk.Database.Tasks → Database.Sql.Schema`).
+
+When a library needs behavior an area owns, the library defines the seam and the area implements
+it: the gateway's store, certificate-authority, trust-store, command-input, telemetry, and
+credential seams live in `Assimalign.Cohesion.ApplicationModel`, and the shipped implementations
+are the opt-in `<Area>.ApplicationModel.Orchestration` packages below. The guard's two layers,
+harness exemptions, and scope computation are in `build-system.md` ("Library and SDK boundary
+guard (COHLIB001)"); relaxing it is an architectural decision on the same terms as this file's
+rules (owner decision 5 of 2026-09-25, recorded as R8 in `docs/DEVELOPER_EXPERIENCE_DESIGN.md`).
+
 Cross-references **between feature libraries in an area are fine** — the rule is
 hosting-centric, not hub-and-spoke. References to anything outside the area (`Http.*`,
 `Security.*`, `IdentityModel.*`, other areas' libraries) are likewise outside
@@ -59,8 +75,10 @@ example, `Database.Hosting` implement its admin control plane with `Web.Hosting`
 without exposing Web types through the Database reference pack. Public cross-area contracts use
 the ordinary `CohesionProjectReference`/`CohesionFrameworkAssembly` path instead.
 
-**Enforcement** lives in `build/Targets/Build.Rules.targets` (imported for every project;
-projects outside `resources/` are untouched). Violations fail the build:
+**Enforcement** lives in `build/Targets/Build.Rules.targets` (imported for every project; the
+COHRES and COHAM guards leave projects outside `resources/` untouched, and COHLIB001 is the only
+boundary guard that applies to `libraries/` and `sdks/`; the repo-wide COHNS001 `RootNamespace` check
+in the same file applies everywhere, see `general-rules.md`). Violations fail the build:
 
 - `COHRES001` is checked in two layers — the project-reference graph (every flavor:
   `CohesionProjectReference`, `CohesionPrivateProjectReference`, raw `ProjectReference`,
@@ -267,9 +285,73 @@ happen to compose.
   `Sdk.Gateway` injects an area's ApplicationModel only for the areas of the resource projects a
   gateway names in `CohesionResourceReference` (read from each project's `Sdk="Assimalign.Cohesion.Sdk.<Area>"`
   attribute, or the reference's `Area` metadata), and in-process gateways get exactly those areas'
-  `App.<Area>` frameworks; any other area package is the gateway's own explicit reference, and the
-  generated verb for a resource whose ApplicationModel is not referenced falls back to the untyped
-  `AddResource` path with warning `COHGW003`.
+  `App.<Area>` frameworks; any other area package is the gateway's own explicit reference.
+  `Sdk.Gateway` generates no per-resource verb: the gateway's `Program.cs` calls the area's
+  hand-written verb over the generated manifest,
+  `builder.AddWeb(Manifests.AppAApi, new WebResourceOptions { ... })`, and adds a kind without an
+  ApplicationModel package with `builder.AddResource(Manifests.<Name>)`. The `Add<Area>` verb is
+  therefore the area's public composition API, not an SDK implementation detail.
+- `Assimalign.Cohesion.<Area>.ApplicationModel.Orchestration` — **optional**: the gateway-side
+  provider package. It implements the gateway provider seams that `Assimalign.Cohesion.ApplicationModel`
+  defines (`IResourceSourceProvider`, `IResourceCertificateAuthority`, `ITrustedIssuerStore`,
+  `IResourceCommandInputResolver`, and the other roles on `ApplicationProviders`), so the area's
+  wire knowledge (paths, payload schemas, command kinds) lives here and not in
+  `libraries/ApplicationModel/**`. It ships explicit `Use<Area>(...)` registration verbs in two
+  forms that make the same registrations, each in its receiver's `Providers`: an
+  `extension(IApplicationBuilder)` member taking the
+  store's resource descriptor, for an application built in code, and an
+  `extension(IApplicationProviderBuilder)` member taking the store's `ResourceName`, which an
+  application set uses for a member whose model it imports
+  (`set.AddApplication(Applications.X, member => member.Use<Area>("<store>"))`).
+  `IApplicationBuilder` does not extend `IApplicationProviderBuilder`: they are separate
+  interfaces and the default builder implements both, so a single application registers through
+  the descriptor form and the `ResourceName` form is the application-set member surface (owner
+  decision O45 of 2026-09-27, R10 in `docs/DEVELOPER_EXPERIENCE_DESIGN.md`). A new area's
+  Orchestration package ships both forms. Precedents:
+  `SecretStore.ApplicationModel.Orchestration` (`UseSecretStore(store)`, then
+  `.AsCertificateAuthority()` / `.AsTrustStore()`) and
+  `ConfigurationStore.ApplicationModel.Orchestration` (`UseConfigurationStore(store)`). A verb
+  registers only for its own application; bindings to a store of another application are
+  rejected at `Build()`, or for an application-set member when the set starts (owner decision 4
+  of 2026-09-25; member validation accepted in O45).
+  - **Name and verb are load-bearing.** When a mount source `<source>:<key>` in the application's
+    own manifests names a store resource that has no registered provider, `Build()` (for an
+    application-set member, the set's start) throws an error built from that store's manifest
+    Kind: reference `Assimalign.Cohesion.<Kind>.ApplicationModel.Orchestration` and call
+    `builder.Use<Kind>(...)`, or for a member
+    `set.AddApplication(Applications.<Member>, application => application.Use<Kind>("<store>"))`.
+    The same package-and-verb hint, built from the target's manifest Kind, is produced when the
+    application declares a command whose target manifest marks its kind `requiresInputResolver`
+    and registers no `IResourceCommandInputResolver` for that kind (owner decision of 2026-09-28,
+    R11 in `docs/DEVELOPER_EXPERIENCE_DESIGN.md`; for a target of another application the error
+    asks for the resolver in `Providers.CommandInputs` instead). So an area whose command payloads
+    carry source expressions (`parameter:<name>`, `<store>:<key>`) that only the delivering gateway
+    can resolve marks those kinds `RequiresInputResolver="true"` on their `CohesionCommand` items in
+    `sdks/Assimalign.Cohesion.Sdk.<Area>/Targets/Sdk.<Area>.props`, and its Orchestration package's
+    `Use<Area>(...)` registers the resolver (precedent: `secretstore.add-secret` in
+    `Sdk.SecretStore.props`, resolved by `UseSecretStore`). An unmarked kind with no resolver is
+    delivered as declared; the SecretStore runtime still rejects an unresolved `add-secret` as
+    defense in depth.
+    A package or verb named any other way sends the developer to a package that does not exist.
+  - **References:** `Assimalign.Cohesion.ApplicationModel`, the area's own `<Area>.Client`, and
+    other `libraries/**` packages outside the Hosting and Gateway families. It never references
+    `Assimalign.Cohesion.Hosting*`, `Assimalign.Cohesion.ApplicationModel.Gateway*`, or
+    `<Area>.ApplicationModel`. The existing guards enforce all three. The assembly name ends in
+    `.Orchestration`, not `.ApplicationModel`, so COHRES004 classifies the package as a feature
+    library: it rejects Hosting directly, and it rejects `<Area>.ApplicationModel` transitively
+    through that package's direct `Hosting.Resources` reference. COHRES003 rejects the Gateway
+    family and COHRES001 rejects the runtime module; COHAM001 does not apply. Between the two
+    packages the arrow points Orchestration → Client, never back: `<Area>.Client` takes no
+    ApplicationModel reference, which keeps the client eligible for a shared framework (O2).
+  - **Delivery:** NuGet-only. It is never a member of an `App.<Area>` shared framework, and no
+    SDK injects it (neither `Sdk.<Area>` nor `Sdk.Gateway`). The gateway project references the
+    package and calls its verb in `Program.cs`; nothing registers by convention.
+  - **Namespace:** it declares the shared `Assimalign.Cohesion.ApplicationModel` namespace
+    (`RootNamespace` pinned in the csproj) with area-prefixed type names
+    (`SecretStoreSourceProvider`, `ConfigurationStoreSourceProvider`), so the gateway's one
+    `using` composes it with the ApplicationModel verbs. COHAM002 covers assembly names ending
+    in `.ApplicationModel.Orchestration` as well as `.ApplicationModel`, so the build rejects any
+    other `RootNamespace` (`build-system.md`, COHAM002).
 - `Assimalign.Cohesion.<Area>.Testing` — the optional shippable test factory that invokes a
   consumer's real `Program.cs` under a test-scoped ambient resource context. When present, this
   is the area's sole explicit `CohesionHostingIsolationExemptions` holder.
@@ -295,10 +377,21 @@ happen to compose.
   App carries `Assimalign.Cohesion.Connections` because every generated resource accessor exposes
   its `ConnectionString` type and every area hosting module depends on it; area frameworks must
   not duplicate that kernel entry.
-  `<Area>.ApplicationModel` and `<Area>.Client` packages are NuGet-only, injected by
-  `Sdk.<Area>` (its own area) and `Sdk.Gateway` (the areas of its referenced resource projects),
-  and never members of an `App.<Area>` shared framework (owner-signed developer-experience
-  design O2/O27).
+  `<Area>.ApplicationModel` packages are NuGet-only, injected by `Sdk.<Area>` (its own area) and
+  `Sdk.Gateway` (the areas of its referenced resource projects), and never members of an
+  `App.<Area>` shared framework (owner-signed developer-experience design O2/O27). No SDK injects
+  an `<Area>.Client` package, and a gateway references none directly: it delivers resource commands
+  through its generic control-plane command client, and it reads a store only through the
+  `<Area>.ApplicationModel.Orchestration` package that wraps the store's client (the client arrives
+  transitively with that package). The owner
+  decisions of 2026-09-25 supersede O13's "gateways may reference `<Area>.Client`". A client takes
+  no ApplicationModel reference, so it stays eligible for a shared framework: an area lists it in
+  `App.<Area>` when the area's own applications consume it at run time (`App.Database` carries
+  `Database.Client` and `Database.Sql.Client`) and otherwise ships it NuGet-only
+  (`Database.Graph.Client`, `SecretStore.Client`, `ConfigurationStore.Client`). The runtime
+  producer's `Directory.Build.props` records which choice the area made. `<Area>.ApplicationModel.Orchestration`
+  packages are NuGet-only, never framework members, and injected by no SDK; the gateway references
+  each one explicitly (above).
 
 Relaxing the rule itself (beyond a per-project exemption) is an architectural decision: change
 `build/Targets/Build.Rules.targets`, this file, and the owning area's README in the same commit,

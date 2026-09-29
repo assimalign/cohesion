@@ -17,6 +17,18 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.ConfigurationStore" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ConfigurationStore" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ConfigurationStore.Hosting" />
+
+        <!-- Deliberately EXCLUDED (NuGet-only, never App.ConfigurationStore members; resource-areas.md):
+             - ConfigurationStore.ApplicationModel - injected by Sdk.ConfigurationStore for
+               orchestration-enabled executables.
+             - ConfigurationStore.Client - no ConfigurationStore application consumes it at run
+               time; its consumer is ConfigurationStore.ApplicationModel.Orchestration on the
+               gateway side, which takes it as an ordinary package dependency (Orchestration ->
+               Client, never back).
+             - ConfigurationStore.ApplicationModel.Orchestration - the opt-in store provider. A
+               gateway references it explicitly and registers it in Program.cs
+               (UseConfigurationStore); no SDK injects it. -->
+
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />

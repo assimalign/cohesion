@@ -5,9 +5,11 @@ manifest with its statically linked executable assembly and absolute, resource-s
 root. The binding is keyed by the manifest's application and resource names, not by the manifest
 instance: a planned resource snapshots the manifest it was built from, so identity is the only key
 that survives `AddResource`. The gateway consults this registry whenever a resource has no
-descriptor binding, which is how a resource added through the area verb
-(`builder.AddWeb(Manifests.DocsWeb)`) or a third-party application model's verb over the same
-manifest is colocated. Rebinding the same names to different values is rejected.
+descriptor binding, which is how a resource is colocated whichever verb adds it: the area's
+hand-written verb (`builder.AddWeb(Manifests.DocsWeb)`), a third-party application model's verb
+over the same manifest, or `builder.AddResource(Manifests.DocsWeb)`. `Sdk.Gateway` generates no
+per-resource verb, so this registry is the only binding generated code writes. Rebinding the same
+names to different values is rejected.
 
 This method is SDK infrastructure and is hidden from IntelliSense. `Sdk.Gateway` emits one call per
 enabled, composable project resource inside the generated `Gateway.CreateBuilder(args)`, with

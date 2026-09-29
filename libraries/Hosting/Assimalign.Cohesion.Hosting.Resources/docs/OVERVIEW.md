@@ -10,7 +10,7 @@ neither sibling depends back on Resources.
 
 | Dependency | Use |
 | --- | --- |
-| `Assimalign.Cohesion.Core` | Environment contract, paths, URI helpers, and common primitives |
+| `Assimalign.Cohesion.Core` | Environment contract (`AppEnvironment`, `AppEnvironment.Variables`), paths, URI helpers, and common primitives |
 | `Assimalign.Cohesion.Hosting` | Host lifecycle and `IHostRunner`/`IHostRunObserver` seam |
 | `Assimalign.Cohesion.Hosting.Health` | Contributor registration and aggregate health reports |
 | `System.Security.Cryptography.ProtectedData` | Windows CurrentUser DPAPI mount payloads |
@@ -41,6 +41,8 @@ they need.
 - `IResourceEntryInvocation`
 - `IResourceControlPlane`, `ResourceControlPlane`
 - `ResourceCommand`
+- `IResourceCredentialVerifier`, `ResourceCredentialPresentation`, `ResourceCredentialVerification`,
+  `ResourceCredentialStatus`, `ResourceCaller`, `ResourceCallerKind`, `ResourceCredentialProfile`
 
 Health value types are owned by `Assimalign.Cohesion.Hosting.Health`; host lifecycle types are
 owned by `Assimalign.Cohesion.Hosting`.
@@ -109,10 +111,24 @@ replays, refuses another owner's claim to the same key, and prevents stale decla
 a newer declaration. Successful deletion releases the key. Commands exposes an owner-bearing snapshot;
 the HTTP adapter deliberately excludes payloads from listings.
 
+## Resource credentials
+
+The default resource credential is the ES256 application-key JWT, which every area hosting module
+verifies without registration. An application whose gateway issues another kind of credential
+registers an `IResourceCredentialVerifier` factory with
+`ResourceRuntime.RegisterCredentialVerifier(assembly, factory)`. Area modules resolve the invocation's
+verifier with `ResourceRuntime.TryGetCredentialVerifier(context)`, consult it first, fall through to
+the application-key verification on `NoResult`, and authorize the mapped `ResourceCaller`. The
+default profile's claim, scope, audience, clock-skew, and lifetime constants are
+`ResourceCredentialProfile`, which lives here beside the verifier seam because every gateway and
+hosting module that mints or verifies the default credential already references this package. The
+types are BCL-only, so the guarded ApplicationModel closure does not grow. See
+[DESIGN.md](DESIGN.md#resource-credential-verification).
+
 ## Endpoint certificate contract (31t)
 
 `ResourceContext.TryGetEndpointCertificate(endpoint, out leaf, out chain)` reads one ordinary Secret mount. The full constructor accepts an optional endpoint-to-mount dictionary; generated Resource.g.cs registers the same immutable metadata by executable assembly through ResourceRuntime.RegisterEndpointCertificates. Control-plane creation applies it to the current invocation. Without a mapping, the conventional mount is `tls`; a normalized environment lookup also handles names containing punctuation. The explicit-mount overload supports manually configured Web endpoints.
 
 Absent or empty mounts return false. Present material requires the leaf as the first certificate and exactly one private key anywhere, accepting PKCS#8, EC, and RSA key labels. Chain parsing accepts either producer order and includes supplied roots. PKCS#12 re-import gives Windows SslStream a usable key association. The caller owns and disposes the returned leaf and chain. Intermediate secret buffers are cleared. The implementation uses only BCL cryptography and preserves the COHAM001 closure and the existing ResourceMount carrier.
 
-`TryGetTrustBundle` reads ResourceEnvironment.TrustBundlePath through ResourceMount's protected-file reader. `CreateOutboundTrustValidator` preserves missing-certificate and hostname rejection, then builds a server-authentication chain with CustomRootTrust, CustomTrustStore and NoCheck revocation against the supplied anchors. It does not disable TLS validation.
+`TryGetTrustBundle` reads AppEnvironment.Variables.TrustBundlePath through ResourceMount's protected-file reader. `CreateOutboundTrustValidator` preserves missing-certificate and hostname rejection, then builds a server-authentication chain with CustomRootTrust, CustomTrustStore and NoCheck revocation against the supplied anchors. It does not disable TLS validation.

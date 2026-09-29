@@ -210,7 +210,7 @@ public sealed class CohesionCreateResourceManifest : Task
         ValidateMetadata(Probes, "CohesionProbe", "Endpoint", "Http", "Tcp", "Exec", "Grpc", "None");
         ValidateMetadata(Mounts, "CohesionMount", "Kind", "ContainerPath", "Source", "Size");
         ValidateMetadata(Settings, "CohesionSetting", "Default", "Type");
-        ValidateMetadata(Commands, "CohesionCommand");
+        ValidateMetadata(Commands, "CohesionCommand", "RequiresInputResolver");
         ValidateMetadata(ResourceReferences, "CohesionResourceReference", "Version", "Optional", "Endpoints");
         ValidateMetadata(ResourceProperties, "CohesionResourceProperty", "Value");
 
@@ -221,14 +221,7 @@ public sealed class CohesionCreateResourceManifest : Task
         List<ResourceReferenceModel> references = ParseReferences();
         Dictionary<string, ResourceProbeModel> probes = ParseProbes(endpoints);
         Dictionary<string, string> properties = ParseProperties();
-        string[] commands = Commands.Select(command => command.ItemSpec.Trim())
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(command => command, StringComparer.Ordinal)
-            .ToArray();
-        if (commands.Any(string.IsNullOrWhiteSpace))
-        {
-            Log.LogError("CohesionCommand requires a non-empty command kind.");
-        }
+        List<ResourceCommandModel> commands = ParseCommands();
 
         EnsureUniqueIdentifiers(settings.Select(setting => setting.Key), "CohesionSetting");
         EnsureUniqueIdentifiers(references.Select(reference => reference.Resource), "CohesionResourceReference");
@@ -462,6 +455,41 @@ public sealed class CohesionCreateResourceManifest : Task
                 size));
         }
         return result;
+    }
+
+    // One entry per command kind, sorted ordinally. RequiresInputResolver marks a kind whose declared
+    // payload the gateway must resolve before delivery; an item declaring the same kind twice must
+    // agree on it.
+    private List<ResourceCommandModel> ParseCommands()
+    {
+        var commands = new SortedDictionary<string, bool>(StringComparer.Ordinal);
+        foreach (ITaskItem item in Commands)
+        {
+            string kind = item.ItemSpec.Trim();
+            if (kind.Length == 0)
+            {
+                Log.LogError("CohesionCommand requires a non-empty command kind.");
+                continue;
+            }
+
+            bool requiresInputResolver = ParseBoolean(
+                item.GetMetadata("RequiresInputResolver"),
+                $"CohesionCommand '{kind}' RequiresInputResolver");
+            if (commands.TryGetValue(kind, out bool existing))
+            {
+                if (existing != requiresInputResolver)
+                {
+                    Log.LogError(
+                        $"CohesionCommand '{kind}' is declared more than once with different RequiresInputResolver values.");
+                }
+
+                continue;
+            }
+
+            commands.Add(kind, requiresInputResolver);
+        }
+
+        return commands.Select(pair => new ResourceCommandModel(pair.Key, pair.Value)).ToList();
     }
 
     private List<ResourceSettingModel> ParseSettings()

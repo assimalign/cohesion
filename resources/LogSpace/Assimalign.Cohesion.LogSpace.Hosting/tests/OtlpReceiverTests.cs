@@ -21,14 +21,16 @@ public sealed class OtlpReceiverTests
         var context = new ResourceContext(applicationName: "app", resourceName: "logs", environmentName: "Development", gatewayName: "local",
             contentRootPath: null, endpoints: null, mounts: null, settings: null, references: null,
             bootstrapCredential: ReadOnlyMemory<byte>.Empty, applicationTrustKey: identity.PublicKey, ambientValues: null);
-        using var verifier = new LogSpaceTokenVerifier(context);
+        var verifier = new LogSpaceTokenVerifier(context);
         string token = identity.Issue("logs", "web", telemetry: true);
-        verifier.Validate(token, "logs", DateTimeOffset.UtcNow, true, out string? emitter).ShouldBe(LogSpaceTokenStatus.Authorized);
-        emitter.ShouldBe("web");
-        verifier.Validate(token, "logs", DateTimeOffset.UtcNow, false, out _).ShouldBe(LogSpaceTokenStatus.Forbidden);
-        verifier.Validate(identity.Issue("other", "web", telemetry: true), "logs", DateTimeOffset.UtcNow, true, out _).ShouldBe(LogSpaceTokenStatus.Forbidden);
-        verifier.Validate(identity.Issue("logs"), "logs", DateTimeOffset.UtcNow, false, out _).ShouldBe(LogSpaceTokenStatus.Authorized);
-        verifier.Validate(identity.Issue("logs"), "logs", DateTimeOffset.UtcNow, true, out _).ShouldBe(LogSpaceTokenStatus.Forbidden);
+        ResourceCredentialVerification emitted = verifier.Validate(token, "logs", DateTimeOffset.UtcNow, true);
+        emitted.Status.ShouldBe(ResourceCredentialStatus.Authorized);
+        emitted.Caller.ShouldNotBeNull().Subject.ShouldBe("web");
+        emitted.Caller.Kind.ShouldBe(ResourceCallerKind.TelemetryEmitter);
+        verifier.Validate(token, "logs", DateTimeOffset.UtcNow, false).Status.ShouldBe(ResourceCredentialStatus.Forbidden);
+        verifier.Validate(identity.Issue("other", "web", telemetry: true), "logs", DateTimeOffset.UtcNow, true).Status.ShouldBe(ResourceCredentialStatus.Forbidden);
+        verifier.Validate(identity.Issue("logs"), "logs", DateTimeOffset.UtcNow, false).Status.ShouldBe(ResourceCredentialStatus.Authorized);
+        verifier.Validate(identity.Issue("logs"), "logs", DateTimeOffset.UtcNow, true).Status.ShouldBe(ResourceCredentialStatus.Forbidden);
     }
 
     [Fact(DisplayName = "Cohesion Test [LogSpace.Hosting] - Segments: persisted restart, filters and cursor retain ordering")]

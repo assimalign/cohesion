@@ -120,8 +120,29 @@
     "commands": {
       "type": "array",
       "items": {
-        "type": "string",
-        "minLength": 1
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "object",
+            "description": "A command whose declared payload the delivering gateway must resolve through a registered command-input resolver before delivery.",
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "minLength": 1
+              },
+              "requiresInputResolver": {
+                "type": "boolean"
+              }
+            }
+          }
+        ]
       }
     },
     "environment": {

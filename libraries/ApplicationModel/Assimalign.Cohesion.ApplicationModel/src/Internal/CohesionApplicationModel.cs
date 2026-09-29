@@ -20,7 +20,8 @@ internal sealed class CohesionApplicationModel : IApplicationModel
         ResourceName gatewayIdentity,
         bool adopt,
         bool restartOrphans,
-        IReadOnlyList<IResourceCommand>? commands = null)
+        IReadOnlyList<IResourceCommand>? commands = null,
+        ApplicationProviders? providers = null)
     {
         Name = name;
         Environment = environment ?? throw new ArgumentNullException(nameof(environment));
@@ -59,6 +60,9 @@ internal sealed class CohesionApplicationModel : IApplicationModel
         Adopt = adopt;
         RestartOrphans = restartOrphans;
         Owner = $"{name}@{gatewayIdentity}";
+        // The builder keeps authoring its own mutable registrations; the model holds a frozen
+        // snapshot so later registrations never reach an already-built model.
+        Providers = providers?.ToFrozen() ?? ApplicationProviders.Empty;
 
         var resources = new IApplicationResource[Descriptors.Count];
         for (int i = 0; i < Descriptors.Count; i++)
@@ -92,6 +96,8 @@ internal sealed class CohesionApplicationModel : IApplicationModel
     public IReadOnlyList<ResourcePlan> Plans { get; }
 
     public IReadOnlyList<IResourceCommand> Commands { get; }
+
+    public ApplicationProviders Providers { get; }
 
     private static IReadOnlyList<T> Copy<T>(IReadOnlyList<T> source)
     {

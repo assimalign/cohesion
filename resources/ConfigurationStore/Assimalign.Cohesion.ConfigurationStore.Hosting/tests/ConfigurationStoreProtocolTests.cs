@@ -80,8 +80,8 @@ public sealed class ConfigurationStoreProtocolTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [ConfigurationStore.Hosting] - Bootstrap authentication: missing token is 401 and wrong audience is 403")]
-    public async Task Namespaces_WithMissingOrWrongAudienceCredential_ShouldEnforceAuthenticationStatus()
+    [Fact(DisplayName = "Cohesion Test [ConfigurationStore.Hosting] - Bootstrap authentication: missing token is 401 and wrong audience or telemetry scope is 403")]
+    public async Task Namespaces_WithMissingWrongAudienceOrTelemetryCredential_ShouldEnforceAuthenticationStatus()
     {
         string dataPath = CreateTemporaryDirectory();
         try
@@ -114,6 +114,13 @@ public sealed class ConfigurationStoreProtocolTests
                     identity.Issue("api"));
                 using HttpResponseMessage wrongAudience = await client.SendAsync(request);
                 wrongAudience.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+                using var telemetryRequest = new HttpRequestMessage(HttpMethod.Get, route);
+                telemetryRequest.Headers.Authorization = new AuthenticationHeaderValue(
+                    "Bearer",
+                    identity.Issue("configuration", telemetry: true));
+                using HttpResponseMessage telemetry = await client.SendAsync(telemetryRequest);
+                telemetry.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
 
                 IConfigurationStoreClient valid = ConfigurationStoreClient.Create(
                     endpoint,

@@ -20,8 +20,17 @@ string[] applicationSetArgs = hasEnvironmentArgument || hasEnvironmentVariable
 var gatewayOptions = new LocalGatewayOptions();
 ApplicationGatewayCommandLine.Apply(gatewayOptions, applicationSetArgs);
 
+// A member's model arrives from its gateway's describe output and carries no providers, so the set
+// registers them for the member that needs them, as that member's own Program.cs does: Platform's
+// stores, certificate authority, trust store and telemetry sink. Identity and Networking read their
+// secrets from gateway parameters, and the zones read no store.
 IApplicationSet set = Application.CreateSet(new LocalGateway(gatewayOptions), applicationSetArgs)
-    .AddApplication(Applications.Platform)
+    .AddApplication(Applications.Platform, platform =>
+    {
+        platform.UseSecretStore("platform-secretstore").AsCertificateAuthority().AsTrustStore();
+        platform.UseConfigurationStore("platform-configurationstore");
+        platform.Providers.Telemetry = ResourceTelemetrySink.FromResource("platform-logspace");
+    })
     .AddApplication(Applications.Identity)
     .AddApplication(Applications.Networking)
     .AddApplication(Applications.AppA)

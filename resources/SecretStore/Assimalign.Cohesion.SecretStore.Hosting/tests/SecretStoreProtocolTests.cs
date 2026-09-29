@@ -90,8 +90,8 @@ public sealed class SecretStoreProtocolTests
         error.Message.ShouldContain("does not match", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [SecretStore.Hosting] - Bootstrap authentication: missing token is 401, wrong audience is 403, and valid token is 200")]
-    public async Task Secrets_WithMissingWrongAudienceAndValidCredentials_ShouldEnforceAuthenticationStatus()
+    [Fact(DisplayName = "Cohesion Test [SecretStore.Hosting] - Bootstrap authentication: missing token is 401, wrong audience or telemetry scope is 403, and valid token is 200")]
+    public async Task Secrets_WithMissingWrongAudienceTelemetryAndValidCredentials_ShouldEnforceAuthenticationStatus()
     {
         // Arrange
         string dataPath = SecretStoreTestHost.CreateTemporaryDirectory();
@@ -128,6 +128,13 @@ public sealed class SecretStoreProtocolTests
                 using HttpResponseMessage wrongAudience = await client.SendAsync(
                     wrongAudienceRequest,
                     cancellationTokenSource.Token);
+                using var telemetryRequest = new HttpRequestMessage(HttpMethod.Get, route);
+                telemetryRequest.Headers.Authorization = new AuthenticationHeaderValue(
+                    "Bearer",
+                    identity.Issue("secrets", telemetry: true));
+                using HttpResponseMessage telemetry = await client.SendAsync(
+                    telemetryRequest,
+                    cancellationTokenSource.Token);
                 using var validRequest = new HttpRequestMessage(HttpMethod.Get, route);
                 validRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 using HttpResponseMessage valid = await client.SendAsync(
@@ -139,6 +146,7 @@ public sealed class SecretStoreProtocolTests
                 missing.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
                 missing.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer");
                 wrongAudience.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+                telemetry.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
                 valid.StatusCode.ShouldBe(HttpStatusCode.OK);
                 Encoding.UTF8.GetString(value).ShouldBe("correct-horse");
             }

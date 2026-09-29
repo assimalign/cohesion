@@ -3,18 +3,19 @@ using System;
 using Assimalign.Cohesion.ApplicationModel;
 
 IApplicationBuilder builder = Gateway.CreateBuilder(args);
-_ = Manifests.GatewaySmokeDatabase;
-_ = Manifests.GatewaySmokeWeb;
 
-if (Array.Exists(args, static argument => argument == "--typed-verbs"))
+// The area ApplicationModel packages own the verbs; the gateway build supplies only the manifests.
+if (Array.Exists(args, static argument => argument == "--typed-options"))
 {
-    _ = builder.AddGatewaySmokeDatabase(options => options.Storage.Size = "20Gi");
-    _ = builder.AddGatewaySmokeWeb(options => options.Replicas = 2);
+    _ = builder.AddDatabase(
+        Manifests.GatewaySmokeDatabase,
+        new DatabaseResourceOptions { Storage = { Size = "20Gi" } });
+    _ = builder.AddWeb(Manifests.GatewaySmokeWeb, new WebResourceOptions { Replicas = 2 });
 }
 else
 {
-    builder.AddGatewaySmokeDatabase();
-    builder.AddGatewaySmokeWeb();
+    builder.AddDatabase(Manifests.GatewaySmokeDatabase);
+    builder.AddWeb(Manifests.GatewaySmokeWeb);
 }
 
 if (Array.Exists(args, static argument => argument == "--configure-provider"))

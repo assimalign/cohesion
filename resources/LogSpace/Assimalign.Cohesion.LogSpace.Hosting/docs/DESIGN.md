@@ -14,7 +14,9 @@ Middleware checks known path, method, authentication and application/json conten
 
 ## Authentication and middleware order
 
-The private ES256 verifier is modelled on Web.Hosting.Resources.BootstrapTokenVerifier: issuer=application, key ID/algorithm/signature, required iss/sub/aud/exp/nbf/iat/jti, at most 24-hour lifetime, audience=LogSpace resource name. Ingest additionally requires scope=telemetry and a nonblank subject identifying the emitter; service.name must equal that subject. The gateway uses a distinct (application,sink,emitter) token cache; tokens are not the sink's bootstrap credential.
+The private ES256 verifier is a thin configuration of the shared `JsonWebTokenValidator` (IdentityModel.Token.JsonWebToken) with `ResourceCredentialProfile` constants (Hosting.Resources): issuer=application, key ID/algorithm/signature, required iss/sub/aud/exp/nbf/iat/jti, at most 24-hour lifetime, audience=LogSpace resource name. Its profile leaves the subject rule to LogSpace because it depends on scope: ingest requires scope=telemetry and a nonblank subject identifying the emitter (mapped to a `TelemetryEmitter` caller); management requires no telemetry scope and subject=gateway (a `Gateway` caller). service.name must equal the emitter. The gateway uses a distinct (application,sink,emitter) token cache; tokens are not the sink's bootstrap credential.
+
+Both paths consult the resource's registered `IResourceCredentialVerifier` first (`ResourceRuntime.TryGetCredentialVerifier`); `NoResult` falls through to the default verifier. The mapped caller is then authorized the same way for either source: its `Application` must be the ambient application, ingestion admits only `TelemetryEmitter` callers with a nonblank `Subject` (the emitter), and management admits only `Gateway` callers whose `Subject` is the ambient gateway. For application-key tokens this reproduces the former iss/sub/scope rules exactly.
 
 The query middleware is registered BEFORE UseResourceControlPlane in LogSpaceControlPlaneEndpointService. ResourceControlPlaneMiddleware.InvokeAsync authenticates unknown /cohesion/v1/* paths then returns 404 (Web.Hosting.Resources/src/Internal/ResourceControlPlaneMiddleware.cs:44-59,185-191); it would swallow a later query handler. The earlier LogSpace middleware rejects telemetry-scoped credentials on every namespaced query/management request before forwarding other routes, protecting /stop and /commands despite the unchanged shared verifier. Query accepts only own-name audience with gateway subject and ordinary bootstrap/dev tokens. No cohesion-export audience was added.
 
@@ -28,11 +30,11 @@ R-5 explicitly defers the developer-experience design §8 Database.Embedded stor
 
 ## Telemetry ordering
 
-The gateway injects only after a same-application LogSpace is Running with an observed otlp endpoint; no self-export is injected. A producer prepared earlier gets no telemetry; a later preparation can receive it, while an already-running process needs restart to read changed environment. No implicit DependsOn was added. Explicit producer.DependsOn(sink) establishes deterministic startup. RemoteReference injection awaits an authenticated named-OTLP resolution contract.
+The gateway injects telemetry only for the sink the application registers in `Providers.Telemetry` and never discovers a sink by resource kind: a LogSpace receives exports only when registered as `ResourceTelemetrySink.FromResource(logSpace, "otlp")`, and `ResourceTelemetrySink.External(...)` names an endpoint outside the model instead. For a resource sink the gateway injects only after the sink is Running with an observed HTTPS otlp endpoint (Local may use a declared DevPort); the sink does not export to itself. A producer reconciled before the sink is Running starts without telemetry; a later preparation can receive it, while an already-running process needs restart to read changed environment. No DependsOn is inferred. Explicit producer.DependsOn(sink) establishes deterministic startup. The sink must be a resource of the registering application; `Build()` rejects a LogSpace of another application, and RemoteReference sinks await an authenticated named-OTLP resolution contract.
 
 ## Non-goals
 
-LogSpace.Telemetry remains empty project scaffolding, distinct from Hosting.Telemetry. Verifier consolidation, inferred telemetry dependencies, retention/archival, protobuf, gRPC, traces and metrics are separate deliverables.
+LogSpace.Telemetry remains empty project scaffolding, distinct from Hosting.Telemetry. Inferred telemetry dependencies, retention/archival, protobuf, gRPC, traces and metrics are separate deliverables.
 
 ## Concrete composition (T10 / O34)
 

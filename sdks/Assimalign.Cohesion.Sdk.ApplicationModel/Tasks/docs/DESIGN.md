@@ -17,13 +17,15 @@ flowchart TD
     Model --> Resource["resource.json and Resource*.g.cs"]
     Model --> Image["resource image and image index"]
     Gateway["Sdk.Gateway"] --> Model
-    Gateway --> Typed["Gateway.g.cs typed resource verbs"]
-    Package["Third-party build props"] --> Typed
+    Gateway --> Surface["Gateway.g.cs Manifests and builder surface"]
+    Program["Gateway Program.cs"] --> Surface
+    Program --> Verbs["Area ApplicationModel verbs"]
 ```
 
 Area SDKs import the ApplicationModel targets before the base targets. Gateway
-always takes the same path. Third-party package rows join the first-party typed
-kind rows during normal NuGet props evaluation.
+always takes the same path. The gateway's hand-written `Program.cs` references
+both the generated `Manifests` members and the area ApplicationModel verbs it
+composes them with; no package contributes build items to that surface.
 
 ## Package and file boundary
 
@@ -108,43 +110,59 @@ or application-model diagnostic. The base guard handles the distinct error in
 which a project says `enabled` but never imports this SDK.
 
 `CohesionCommand` items become the manifest's deterministic `commands` array.
-Names are trimmed, deduplicated ordinally, and sorted. Command declaration and
+Names are trimmed, deduplicated ordinally, and sorted. The item accepts one
+metadata, `RequiresInputResolver` (`true` or `false`, empty meaning `false`); a
+kind declared more than once must carry the same value. An unflagged kind is
+written as a string and a flagged one as
+`{ "kind": "...", "requiresInputResolver": true }`, so a manifest that flags
+nothing is unchanged. The flag tells a gateway that the resource accepts the
+command only after an `IResourceCommandInputResolver` has rewritten its declared
+payload; `Build()` fails when the declaring application registers no resolver
+for the kind, while unflagged kinds are still delivered as declared.
+`Sdk.SecretStore` flags `secretstore.add-secret`. The packed manifest's
+`RESOURCE_MANIFEST_README.md` states the full contract. Command declaration and
 execution remain runtime application-model concerns.
 
-## Typed gateway resource-kind contract
+## Gateway composition contract
 
-`CohesionGatewayResourceKind` is an open MSBuild item contract. The
-ApplicationModel SDK defines its metadata defaults; `Sdk.Gateway` contributes
-the first-party rows in `Targets/Sdk.Gateway.props`; any referenced package may
-contribute additional rows from `build` or `buildTransitive` props.
+This SDK's contract with `Sdk.Gateway` is the manifest itself. Gateway reads each
+referenced `resource.json` and generates a `Manifests.<Name>` member for it, plus
+`Externals`, `Applications`, and `References` for boundary-crossing and gateway
+references. It generates no per-resource verb. Composition is hand-written in
+the gateway's `Program.cs`:
 
-Example contribution:
+```csharp
+using Assimalign.Cohesion.ApplicationModel;
 
-```xml
-<Project>
-  <ItemGroup>
-    <CohesionGatewayResourceKind Include="Queue"
-      ApplicationModel="Contoso.Cohesion.Queue.ApplicationModel"
-      OptionsType="global::Contoso.Cohesion.QueueResourceOptions"
-      DescriptorType="global::Contoso.Cohesion.IQueueResourceDescriptor"
-      AddMethod="global::Contoso.Cohesion.QueueResourceExtensions.AddQueue" />
-  </ItemGroup>
-</Project>
+IApplicationBuilder builder = Gateway.CreateBuilder(args);
+builder.AddWeb(Manifests.OrdersApi, new WebResourceOptions { Replicas = 2 });
+builder.AddResource(Manifests.OrdersWorker);
 ```
 
-The item identity is the stable resource-kind name. `ApplicationModel`,
-`OptionsType`, and `AddMethod` are required. `ApplicationModel` matches the
-manifest's application-model package identity using ordinal-ignore-case
-comparison. `OptionsType` is instantiated for the generated configure callback.
-`AddMethod` is a fully qualified static method accepting the builder, manifest,
-and options. `DescriptorType` is optional and defaults to
-`global::Assimalign.Cohesion.ApplicationModel.IApplicationResourceDescriptor`.
+The typed verbs are ordinary `extension(IApplicationBuilder)` members that ship in
+each area's ApplicationModel package. Each takes a `ResourceManifest` and an
+optional instance of the area's options and returns a descriptor: the area's typed
+descriptor, carrying its command verbs, where the area defines one. `IApplicationBuilder.AddResource(ResourceManifest)`
+is the generic verb for a kind with no ApplicationModel in reach. A third-party
+ApplicationModel package extends the builder the same way, so extending gateway
+composition needs neither a change to `Sdk.Gateway` nor an MSBuild item
+contribution. Calling a verb whose ApplicationModel package the gateway does not
+reference is an ordinary compile error.
 
-The contribution must be restore-visible before Gateway source generation.
-When no row matches, or the named ApplicationModel package is absent from the
-gateway restore graph, Gateway retains the untyped `AddResource` fallback and
-reports COHGW003. Package-boundary tests pack a fake third-party ApplicationModel
-package and prove its row produces the typed verb without that warning.
+In-process bindings do not depend on the verb. `Gateway.CreateBuilder(args)`
+registers each binding by manifest identity, so a resource added through any verb
+over `Manifests.<Name>` is colocated.
+
+This replaces an open `CohesionGatewayResourceKind` item contract (resource kind,
+ApplicationModel identity, options type, descriptor type, and static add method)
+from which Gateway generated one typed `Add<Name>()` verb per resource, falling
+back to an untyped verb with warning COHGW003 when the named ApplicationModel
+package was not referenced. The item, its first-party rows, the generated verbs,
+and COHGW003 were withdrawn together. The first-party rows named resource-area
+types from inside `sdks/`, which libraries and SDKs may not depend on, and a
+hand-written call is checked by the compiler instead of by a build warning. The
+manifest's `applicationModel` field remains descriptive metadata; Gateway derives
+no package reference or verb from it.
 
 ## Container image production
 
@@ -194,8 +212,9 @@ set area defaults in the area's props, and use the exact conditional and
 marker-guarded targets imports shown in the overview. App supplies Connections
 once for the generated resource accessors and every area hosting module; do not
 duplicate Connections in App.<Area>.
-To add typed Gateway behavior, ship the item contribution with the
-ApplicationModel package; changing `Sdk.Gateway` is not required.
+To give gateways a typed verb for a new area, ship an `extension(IApplicationBuilder)`
+verb over `ResourceManifest` in the area's ApplicationModel package; neither this
+SDK nor `Sdk.Gateway` changes.
 
 Acceptance tests consume packed SDKs from `_out/packages` so the tests cover
 NuGet SDK resolution and the package boundary rather than only source-tree
@@ -207,4 +226,6 @@ manifest packing, certificate rules, and image behavior.
 This SDK does not own general project defaults, strongly typed settings, SDK pin
 validation, framework registration, or name-only project references. It also
 does not choose a platform implementation; platform providers remain package
-contributions consumed by Gateway.
+contributions consumed by Gateway. It defines no gateway resource-kind table and
+generates no composition verbs: gateway composition is hand-written against the
+area ApplicationModel packages.

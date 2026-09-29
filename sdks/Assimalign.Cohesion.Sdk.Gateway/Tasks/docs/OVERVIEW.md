@@ -35,28 +35,42 @@ unconditionally and produces its own Composite resource manifest as well as gene
 gateway source. The generated surface includes:
 
 - `Gateway.CreateBuilder(args)` with the application name compiled into the call;
-- `Manifests` and one same-application `Add<Name>()` verb per resource (there is no
-  `AddAllResources()`: the gateway names what it composes);
+- `Manifests`, one member per resource manifest the build captured;
 - `Externals` for references that cross an application boundary;
-- `Applications.<Name>` for referenced gateway applications;
+- `Applications.<Name>` for referenced gateway applications, and `References` for the
+  endpoint names they re-export;
 - `UseGateway(args)` and the provider-specific configuration overload.
 
-Generated Web, Database, ConfigurationStore, SecretStore, IdentityHub, Rezolvr, and
-LogSpace `Add*` verbs accept the area's typed options and return its typed descriptor.
+The generated surface has no resource verbs. The gateway's `Program.cs` names what it
+composes by calling the hand-written verb of the area's ApplicationModel package over the
+generated manifest, passing the area's typed options as an instance:
+
+```csharp
+using Assimalign.Cohesion.ApplicationModel;
+
+IApplicationBuilder builder = Gateway.CreateBuilder(args);
+IDatabaseResourceDescriptor database = builder.AddDatabase(Manifests.OrdersDatabase);
+database.AddDatabase("inventory").AddPrincipal("inventory", "reader");
+builder.AddWeb(Manifests.OrdersApi, new WebResourceOptions { Replicas = 2 });
+builder.AddResource(Manifests.OrdersWorker); // a kind with no ApplicationModel in reach
+builder.UseGateway(args);
+await builder.Build().RunAsync();
+```
+
+The area verbs return the area's typed descriptor, which carries its command verbs:
 Database exposes `AddDatabase` and `AddPrincipal`; ConfigurationStore exposes `SetValue`
 and `RemoveValue`; SecretStore exposes `AddSecret` and `IssueCertificate`; IdentityHub
 exposes `AddAudience` and `AddClient`; Rezolvr exposes `AddARecord` and `AddCnameRecord`.
-LogSpace supplies typed options for the telemetry sink without command verbs.
-Command-bearing manifests advertise accepted kinds as bare strings in `commands` and
-require their narrow client package, even when they are not used as mount sources.
+LogSpace supplies typed options for the telemetry sink without command verbs. A
+third-party ApplicationModel package composes the same way, through its own verb over
+`Manifests.<Name>`; the SDK keeps no resource-kind table for it to join.
 
-The typed-kind table is open. `Targets/Sdk.Gateway.props` contributes the first-party
-`CohesionGatewayResourceKind` rows, and referenced packages may contribute their own
-rows from `build` or `buildTransitive` props. Each row names its resource kind,
-ApplicationModel package, options type, optional descriptor type, and static add
-method. Gateway unions all rows before source generation, so a third-party
-ApplicationModel package can produce a typed verb without changing this SDK. See the
-[ApplicationModel SDK contract](../../../Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/docs/DESIGN.md#typed-gateway-resource-kind-contract).
+Nothing is injected by convention beyond the area ApplicationModel packages. No area
+client package is restored: commands travel through the gateway's generic control-plane
+command client. Store, certificate-authority, and trust providers come from opt-in
+`<Area>.ApplicationModel.Orchestration` packages that the gateway references and registers
+explicitly in `Program.cs` (for example `builder.UseSecretStore(...)`); a credential issuer or
+caller authenticator is assigned on `builder.Providers` there as well.
 
 Gateway inherits the base SDK's [project defaults](../../../Assimalign.Cohesion.Sdk/Tasks/docs/OVERVIEW.md#project-defaults):
 `net10.0`, preview language/features, disabled implicit usings, enabled nullable
@@ -115,7 +129,9 @@ resolver client in every mode and serves its listener for the realizing `Run` an
 Selecting `InProcess` does not by itself authorize resource assembly loading. A gateway with
 project resources must also set `CohesionGatewayInProcess=true`. The two-factor gate promotes
 only enabled, composable, same-application project resources into compiler/runtime references
-and generated in-process bindings. Each binding uses
+and generated in-process bindings. `Gateway.CreateBuilder(args)` registers each binding by
+manifest identity, so it applies whichever verb adds the resource: the area's typed verb,
+`AddResource`, or a third-party verb over `Manifests.<Name>`. Each binding uses
 `AppContext.BaseDirectory/cohesion/resources/<resource-name>`; build and publish copy that
 resource's declared content into the isolated root and disable ordinary transitive content
 flattening. Selected managed, native, satellite, and RID-specific runtime files are also carried
@@ -130,10 +146,6 @@ contracts are available and covered by package-boundary CI:
 - Docker and Kubernetes provider packages and their `CohesionGatewayProvider`
   contributions live outside this repository and require an agreed
   `CohesionPlatformsVersion`.
-- Web, Database, ConfigurationStore, SecretStore, IdentityHub, Rezolvr, and LogSpace are
-  the first-party typed ApplicationModel mappings. Referenced packages may add more
-  `CohesionGatewayResourceKind` rows. A manifest with no matching restore-visible row
-  uses the generic `ResourceOptions`/`AddResource` path.
 - Area injection is derived from the resource projects a gateway references. Each
   `CohesionResourceReference` project is read at evaluation time (so every restore engine,
   including Visual Studio's, sees the result) and its `Sdk="Assimalign.Cohesion.Sdk.<Area>"`
@@ -141,11 +153,17 @@ contracts are available and covered by package-boundary CI:
   those areas' `<Area>.ApplicationModel` packages are restored, at `$(CohesionVersion)` (or as
   repository projects inside cohesion). A gateway that composes an area it does not reference
   as a project, for example a resource that reaches it only through another project's closure,
-  adds that area's ApplicationModel package itself; until it does, the generated verb for that
-  resource uses the untyped path and the build reports `COHGW003`. The SecretStore, Database,
-  and ConfigurationStore clients stay restore-visible for every gateway because mount sources
-  and command targets can name a store no referenced project introduces; T11's restore-visible
-  producer descriptor remains the future contract for them.
+  either adds that area's ApplicationModel package itself to call the typed verb or composes
+  the manifest with the untyped `builder.AddResource(Manifests.<Name>)`.
+- Stores, certificate authorities, and trust stores are explicit registrations from opt-in
+  Orchestration packages, and credential issuers and caller authenticators are explicit
+  `builder.Providers` assignments; a mount source whose store has no registration fails at
+  `Build()` with the package and verb that provides it. A declared command fails the same way
+  when its target's manifest marks the kind `requiresInputResolver` and the gateway registers no
+  resolver for it: SecretStore's `AddSecret` needs `builder.UseSecretStore(...)` from
+  `Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration`. Cross-application store
+  sources are rejected at `Build()` for now; supporting them is a follow-up for when the store
+  resources mature.
 - The base SDK has no implicit framework reference, and Gateway keeps the shared
   auto-include switch disabled. An in-process gateway references
   `Assimalign.Cohesion.App` plus `App.<Area>` for exactly the referenced areas; App

@@ -1,8 +1,9 @@
 # Assimalign.Cohesion.ConfigurationStore.Client
 
 Thin, AOT-compatible protocol client for reading configuration namespaces and submitting
-configuration-store commands. The package is intended for gateways and other infrastructure that
-must resolve configuration without referencing the ConfigurationStore hosting runtime.
+configuration-store commands without referencing the ConfigurationStore hosting runtime. Gateways
+reach it only through `Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration`
+(`UseConfigurationStore(...)`); other infrastructure may reference it directly.
 
 ## Usage
 

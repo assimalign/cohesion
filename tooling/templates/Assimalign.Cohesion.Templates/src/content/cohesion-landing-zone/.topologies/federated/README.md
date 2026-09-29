@@ -10,6 +10,19 @@ Cross-domain references become generated externals; configure the consumer gatew
 bindings for your environment. The included programs retain the landed examples' developer-machine
 endpoint bindings and zone Database/API/SPA realization subset.
 
+Gateways compose their resources with the area verbs over the generated `Manifests` members, and
+nothing is registered by convention. `Example.Platform.Gateway` references the SecretStore and
+ConfigurationStore `ApplicationModel.Orchestration` packages and registers its SecretStore (the
+`platform-secretstore:<key>` mount source, certificate authority and trust store), its ConfigurationStore
+and its LogSpace telemetry sink in `Program.cs`. Cross-application store sources are a documented
+follow-up, so Identity and Networking read their secrets from gateway parameters: `identity-hub-tls`
+(a PEM bundle with the IdentityHub `https` certificate, its private key and chain) and
+`identity-signing-keys` for the identity gateway, `networking-vpn-keys` for the networking gateway.
+Set each with `cohesion parameter set <name> --stdin --project <gateway>`, which writes the encrypted
+`.cohesion/<application>/parameters.json` that `cohesion run --project <gateway>` reads, or pass
+`--parameter name=value` to the gateway. An unset parameter leaves its resource unrealized with an
+error naming it.
+
 The appsettings files describe the intended multi-cluster placement: Platform on cluster-03,
 Identity on cluster-01, Networking on cluster-02 and zones on cluster-04. Current providers
 are Local and InProcess, with Networking restricted to Local for its non-composable VPN data plane.

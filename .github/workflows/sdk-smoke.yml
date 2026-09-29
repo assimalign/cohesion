@@ -19,7 +19,6 @@ on:
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/**"
-      - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/**"
       - "resources/Database/Assimalign.Cohesion.Database.ApplicationModel/**"
       - "resources/Database/Assimalign.Cohesion.Database.Client/**"
@@ -35,13 +34,10 @@ on:
       - "resources/Database/Assimalign.Cohesion.Database.Types/**"
       - "resources/Database/Assimalign.Cohesion.Database/**"
       - "resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/**"
-      - "resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/**"
       - "resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/**"
       - "resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/**"
-      - "resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/**"
       - "resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/**"
-      - "resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/**"
       - "resources/Web/Assimalign.Cohesion.Web.ApplicationModel/**"
       - "resources/Web/Assimalign.Cohesion.Web.Hosting/**"
@@ -70,7 +66,6 @@ on:
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/**"
-      - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/**"
       - "resources/Database/Assimalign.Cohesion.Database.ApplicationModel/**"
       - "resources/Database/Assimalign.Cohesion.Database.Client/**"
@@ -86,13 +81,10 @@ on:
       - "resources/Database/Assimalign.Cohesion.Database.Types/**"
       - "resources/Database/Assimalign.Cohesion.Database/**"
       - "resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/**"
-      - "resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/**"
       - "resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/**"
       - "resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/**"
-      - "resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Client/**"
       - "resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/**"
-      - "resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/**"
       - "resources/Web/Assimalign.Cohesion.Web.ApplicationModel/**"
       - "resources/Web/Assimalign.Cohesion.Web.Hosting/**"
@@ -294,13 +286,16 @@ jobs:
           Import-Module ./installer/scripts/modules/CohesionPackaging.psm1 -Force
           $repository = (Get-Location).Path
           $packageDirectory = Join-Path $repository "_out/release/packages"
+          # No area client package is a gateway dependency. Database.Client and Database.Sql.Client
+          # stay because the base/ApplicationModel SDK harness's EnabledWeb consumer references them.
+          # Web and Web.Routing are absent: Gateway.ControlPlane routes its own endpoints, and every
+          # other Web consumer here receives them through the App.Web framework, not as packages.
           $packageIds = @(
             "Assimalign.Cohesion.ApplicationModel"
             "Assimalign.Cohesion.ApplicationModel.Gateway"
             "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane"
             "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
             "Assimalign.Cohesion.ConfigurationStore.ApplicationModel"
-            "Assimalign.Cohesion.ConfigurationStore.Client"
             "Assimalign.Cohesion.Connections"
             "Assimalign.Cohesion.Connections.Tcp"
             "Assimalign.Cohesion.Core"
@@ -323,19 +318,14 @@ jobs:
             "Assimalign.Cohesion.Http"
             "Assimalign.Cohesion.Http.Connections"
             "Assimalign.Cohesion.IdentityHub.ApplicationModel"
-            "Assimalign.Cohesion.IdentityHub.Client"
             "Assimalign.Cohesion.IdentityModel"
             "Assimalign.Cohesion.IdentityModel.Token"
             "Assimalign.Cohesion.IdentityModel.Token.JsonWebToken"
             "Assimalign.Cohesion.LogSpace.ApplicationModel"
             "Assimalign.Cohesion.Rezolvr.ApplicationModel"
-            "Assimalign.Cohesion.Rezolvr.Client"
             "Assimalign.Cohesion.SecretStore.ApplicationModel"
-            "Assimalign.Cohesion.SecretStore.Client"
             "Assimalign.Cohesion.Security.DataProtection"
-            "Assimalign.Cohesion.Web"
             "Assimalign.Cohesion.Web.ApplicationModel"
-            "Assimalign.Cohesion.Web.Routing"
           )
 
           $inventoryById = @{}
@@ -369,7 +359,6 @@ jobs:
             "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane"
             "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
             "Assimalign.Cohesion.ConfigurationStore.ApplicationModel"
-            "Assimalign.Cohesion.ConfigurationStore.Client"
             "Assimalign.Cohesion.Connections"
             "Assimalign.Cohesion.Connections.Tcp"
             "Assimalign.Cohesion.Core"
@@ -392,13 +381,11 @@ jobs:
             "Assimalign.Cohesion.Http"
             "Assimalign.Cohesion.Http.Connections"
             "Assimalign.Cohesion.IdentityHub.ApplicationModel"
-            "Assimalign.Cohesion.IdentityHub.Client"
             "Assimalign.Cohesion.IdentityModel"
             "Assimalign.Cohesion.IdentityModel.Token"
             "Assimalign.Cohesion.IdentityModel.Token.JsonWebToken"
             "Assimalign.Cohesion.LogSpace.ApplicationModel"
             "Assimalign.Cohesion.Rezolvr.ApplicationModel"
-            "Assimalign.Cohesion.Rezolvr.Client"
             "Assimalign.Cohesion.Sdk"
             "Assimalign.Cohesion.Sdk.ApplicationModel"
             "Assimalign.Cohesion.Sdk.ConfigurationStore"
@@ -410,11 +397,8 @@ jobs:
             "Assimalign.Cohesion.Sdk.SecretStore"
             "Assimalign.Cohesion.Sdk.Web"
             "Assimalign.Cohesion.SecretStore.ApplicationModel"
-            "Assimalign.Cohesion.SecretStore.Client"
             "Assimalign.Cohesion.Security.DataProtection"
-            "Assimalign.Cohesion.Web"
             "Assimalign.Cohesion.Web.ApplicationModel"
-            "Assimalign.Cohesion.Web.Routing"
           )
           $missing = @($required | Where-Object {
             -not (Test-Path -LiteralPath "_out/release/packages/$($_).$version.nupkg" -PathType Leaf)
@@ -563,9 +547,25 @@ jobs:
           }
 
           $source = Get-Content -LiteralPath $generated[0].FullName -Raw
-          foreach ($expected in @("CreateBuilder", "AddGatewaySmokeWeb", "AddGatewaySmokeDatabase", "UseGateway")) {
+          # The generated surface is manifests, in-process bindings registered by manifest identity,
+          # and gateway selection; Program.cs composes each resource with its hand-written area verb.
+          $expectedMembers = @(
+            "CreateBuilder"
+            "public static class Manifests"
+            "ResourceManifest GatewaySmokeWeb ="
+            "ResourceManifest GatewaySmokeDatabase ="
+            "Manifests.GatewaySmokeWeb.InProcess("
+            "Manifests.GatewaySmokeDatabase.InProcess("
+            "UseGateway"
+          )
+          foreach ($expected in $expectedMembers) {
             if (-not $source.Contains($expected, [System.StringComparison]::Ordinal)) {
               throw "Generated Gateway.g.cs is missing '$expected'."
+            }
+          }
+          foreach ($unexpected in @("CohesionGatewayResourceExtensions", "AddGatewaySmokeWeb(", "AddGatewaySmokeDatabase(")) {
+            if ($source.Contains($unexpected, [System.StringComparison]::Ordinal)) {
+              throw "Generated Gateway.g.cs still emits '$unexpected'; the SDK no longer generates per-resource verbs."
             }
           }
           if ($source.Contains("AddAllResources", [System.StringComparison]::Ordinal)) {

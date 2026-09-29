@@ -16,7 +16,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Resources;
 using HostingMount = Assimalign.Cohesion.Hosting.Resources.ResourceMount;
 
@@ -81,7 +80,7 @@ public sealed class GatewayCertificateTests
                 Task serve = ServeAsync(listener, leaf, timeout.Token);
                 var runner = new LocalProbeRunner(new LocalGatewayOptions { ProbeTimeout = TimeSpan.FromSeconds(5) });
                 var configuration = new LocalResourceConfiguration("cert-tests", new InMemoryResourceStateManager(), null!, null!,
-                    new Dictionary<string, string> { [ResourceEnvironment.TrustBundlePath] = authority.TrustPath }, [],
+                    new Dictionary<string, string> { [AppEnvironment.Variables.TrustBundlePath] = authority.TrustPath }, [],
                     null, null, null, null, false, RestartPolicy.Never, TimeSpan.FromSeconds(1), false);
                 ProbeAttemptResult result = await runner.RunAsync(ProbeSpec.Http(new Uri($"https://localhost:{((IPEndPoint)listener.LocalEndpoint).Port}/")), configuration, timeout.Token);
                 result.Succeeded.ShouldBe(trusted);
@@ -94,6 +93,13 @@ public sealed class GatewayCertificateTests
         }
     }
 
+    /// <summary>
+    /// Without a registered authority the leaf comes from the Local-only development authority.
+    /// With a SecretStore registered as the authority (outside Local), the store's own leaf still
+    /// comes from the gateway authority and the Web leaf comes from the store.
+    /// </summary>
+    /// <param name="withStore">Whether a SecretStore is registered as the certificate authority.</param>
+    /// <returns>A task representing the test.</returns>
     [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local HTTPS: Real Web host starts with the selected certificate issuer")]
     [InlineData(false)]
     [InlineData(true)]
@@ -111,8 +117,12 @@ public sealed class GatewayCertificateTests
         });
         var details = new ConcurrentQueue<string>();
         gateway.ResourceStates.StateChanged += (_, change) => details.Enqueue(change.Detail ?? change.Current.ToString());
-        IApplicationBuilder builder = Application.CreateBuilder("cert-tests", ["--environment", "Development"]).UseGateway(gateway);
+        // The development authority is Local-only (owner decision 3), so the unregistered case runs
+        // in Local; the registered authority is exercised outside Local, where it is required.
+        IApplicationBuilder builder = Application.CreateBuilder("cert-tests",
+            ["--environment", withStore ? AppEnvironment.Keys.Development : AppEnvironment.Keys.Local]).UseGateway(gateway);
         IApplicationResourceDescriptor? store = null;
+        var storeAuthority = new SecretStoreClientCertificateAuthority();
         if (withStore)
         {
             store = builder.AddResource(Manifest("secrets", "SecretStore", "api", "Assimalign.Cohesion.ApplicationModel.Gateway.TestHost") with
@@ -123,6 +133,9 @@ public sealed class GatewayCertificateTests
                     ["TEST_COMMAND_DATA"] = Path.Combine(root, "store-data"),
                 },
             });
+            builder.Providers.CertificateAuthority = new ResourceProviderBinding<IResourceCertificateAuthority>(
+                store.Resource.Name,
+                storeAuthority);
         }
         IApplicationResourceDescriptor web = builder.AddResource(Manifest("web", "Web", "https", "Assimalign.Cohesion.Web.HttpsHost"));
         if (store is not null)
@@ -145,6 +158,10 @@ public sealed class GatewayCertificateTests
             bool gatewayIssued = leaf.IssuerName.RawData.AsSpan().SequenceEqual(developmentRoot.SubjectName.RawData);
             gatewayIssued.ShouldBe(!withStore);
             File.Exists(Path.Combine(directory, ".state", "certs", "web-https.pem.protected")).ShouldBe(!withStore);
+            // The authority resource cannot issue its own first leaf, so the gateway issues it in
+            // every environment.
+            File.Exists(Path.Combine(directory, ".state", "certs", "secrets-api.pem.protected")).ShouldBe(withStore);
+            (storeAuthority.IssueCount > 0).ShouldBe(withStore);
             byte[] trust = new HostingMount(Path.Combine(directory, "web", ".state", "trust.pem")).ReadAllBytes();
             Encoding.UTF8.GetString(trust).ShouldNotContain("PRIVATE KEY");
             var observed = gateway.ResourceStates.GetObservedEndpoints(web.Resource.Id);

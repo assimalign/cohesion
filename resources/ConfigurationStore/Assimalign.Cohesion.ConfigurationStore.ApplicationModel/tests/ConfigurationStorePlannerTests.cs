@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text.Json;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Core;
 
 using Shouldly;
 using Xunit;

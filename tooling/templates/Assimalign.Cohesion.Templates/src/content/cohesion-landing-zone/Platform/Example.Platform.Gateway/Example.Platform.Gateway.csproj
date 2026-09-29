@@ -9,4 +9,9 @@
     <CohesionResourceReference Include="..\Example.Platform.ConfigurationStore\Example.Platform.ConfigurationStore.csproj" />
     <CohesionResourceReference Include="..\Example.Platform.LogSpace\Example.Platform.LogSpace.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Opt-in gateway providers: Program.cs registers the stores, the certificate authority and the trust store explicitly. -->
+    <CohesionPackageReference Include="Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration" Version="$(CohesionVersion)" />
+    <CohesionPackageReference Include="Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration" Version="$(CohesionVersion)" />
+  </ItemGroup>
 </Project>

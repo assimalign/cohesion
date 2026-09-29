@@ -2,10 +2,16 @@
 
 ## Design intent
 
-The client is the narrow gateway-side protocol boundary for ConfigurationStore. It reads named
-configuration namespaces and submits control-plane commands without exposing or depending on the
-store's hosting implementation. This keeps a gateway from acquiring a transitive dependency on
-`Assimalign.Cohesion.ConfigurationStore.Hosting`.
+The client is the narrow protocol boundary for ConfigurationStore. It reads named configuration
+namespaces and submits control-plane commands without exposing or depending on the store's hosting
+implementation, so no consumer acquires a transitive dependency on
+`Assimalign.Cohesion.ConfigurationStore.Hosting`. Its gateway-side consumer is
+`Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration`, whose source provider
+reads namespaces through it; the arrow points Orchestration → Client, never back. A gateway
+references no client: it reaches the store only through the Orchestration package it registers
+(`UseConfigurationStore(store)`) and delivers declared ConfigurationStore commands through its
+generic `ResourceControlPlaneCommandClient`. O13's allowance that gateways may reference
+`<Area>.Client` is superseded by the owner decisions of 2026-09-25 (R8).
 
 ## Dependency boundary
 

@@ -4,8 +4,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 /// <summary>
@@ -120,8 +118,8 @@ internal sealed class LocalPlanController : IApplicationResourceController
             environment.Add(name, value);
         }
 
-        environment[ResourceEnvironment.Gateway] = "local";
-        environment[ResourceEnvironment.ContentRoot] =
+        environment[AppEnvironment.Variables.Gateway] = "local";
+        environment[AppEnvironment.Variables.ContentRoot] =
             Path.GetDirectoryName(artifact.ExecutablePath) ?? ".";
 
         foreach (MountBinding mount in plan.Container.Mounts)

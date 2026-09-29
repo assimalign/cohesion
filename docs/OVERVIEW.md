@@ -35,7 +35,7 @@ connects the packages to the signed direction and records the build-out decision
 | OpenTelemetry | `Assimalign.Cohesion.OpenTelemetry` is implemented by item 31b (`acc951aa`): `OtlpProtocol`, `OtlpSignal`, `OtlpExporterOptions`, `IOtlpLogExporter`, `OtlpLogRecord`, and `OtlpExporter`; OTLP/HTTP JSON logs, with traces, metrics, and protobuf deferred. |
 | Resource declarative planes | All 18 areas deliver a guarded `<Area>.ApplicationModel` package: typed resource, planner, graph verbs, and the area's default-control-plane factory. They are NuGet-only. |
 | Web hosting family | `Assimalign.Cohesion.Web.Hosting.Resources` supplies resource control-plane integration; `Assimalign.Cohesion.Web.Hosting.Health` adapts Hosting contributors onto the independent Web health model. |
-| Orchestration clients | `SecretStore.Client`, `ConfigurationStore.Client`, `IdentityHub.Client`, and `Rezolvr.Client` support gateway-side protected mounts and commands. |
+| Orchestration clients | `SecretStore.Client` and `ConfigurationStore.Client` back the opt-in store providers in `SecretStore.ApplicationModel.Orchestration` and `ConfigurationStore.ApplicationModel.Orchestration`; a gateway references those packages, never a client. The gateway delivers resource commands through its generic `ResourceControlPlaneCommandClient` and takes no area client. The dedicated `IdentityHub.Client` and `Rezolvr.Client` packages are retired; `Database.Client` still ships `DatabaseCommandClient` for direct callers of the Database admin command endpoint. |
 
 The seven areas with real service hosts are **Web, Database, ConfigurationStore, SecretStore,
 IdentityHub, Rezolvr, and LogSpace**. The eleven generic hosts are **ApiManager, EmailHub,

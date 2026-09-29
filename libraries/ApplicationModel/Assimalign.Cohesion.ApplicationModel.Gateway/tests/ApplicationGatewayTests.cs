@@ -443,7 +443,11 @@ public class ApplicationGatewayTests
                 ApplicationName.Parse("appa"),
                 [])
             .UseGateway(gateway);
+        // The store is registered and in the model, but the worker does not reference it. It is
+        // declared first so the capturing controller records the worker's inputs last.
+        builder.AddResource(CreateManifest("configuration-store", WorkloadKind.Deployment));
         builder.AddResource(CreateManifest("worker", WorkloadKind.Deployment, mounts: mounts));
+        builder.Providers.Sources["configuration-store"] = new RecordingSourceProvider();
         IApplicationModel model = builder.Build().Model;
 
         // Act

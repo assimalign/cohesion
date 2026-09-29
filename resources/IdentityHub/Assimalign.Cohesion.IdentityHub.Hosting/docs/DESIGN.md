@@ -22,7 +22,7 @@ Issued access tokens contain `iss`, `sub`, `aud`, `iat`, `nbf`, `exp`, `jti`, `c
 
 The builder captures `ResourceRuntime.Current`, resolves a registered area control plane from the executable assembly, and calls `ResourceRuntime.HostBuilt` exactly once. Public `/healthz`, `/readyz`, and `/livez` routes coexist with `/cohesion/v1/healthz`, `/readyz`, `/livez`, `/endpoints`, `/stop`, and `/commands`.
 
-Every `/cohesion/v1/*` request is authenticated when a gateway is ambient. The verifier parses the application trust JWK, verifies the ES256 signature explicitly, then validates issuer, gateway subject, resource audience, required claims, temporal bounds, token ID, and a maximum 24-hour lifetime. Missing or malformed credentials return 401 with `WWW-Authenticate: Bearer`; a valid token for another resource returns 403. The default control plane serves the declarative AddAudience and AddClient command kinds.
+Every `/cohesion/v1/*` request is authenticated when a gateway is ambient. A credential verifier registered for the resource (`ResourceRuntime.TryGetCredentialVerifier`) is consulted first; `NoResult` falls through to the default application-key verifier, and the mapped `ResourceCaller` must be a `Gateway` of the ambient application whose `Subject` is the ambient gateway (the mapped form of the default issuer and subject rules). The default verifier configures the shared ES256 `JsonWebTokenValidator` with `ResourceCredentialProfile` constants: it parses the application trust JWK, verifies the ES256 signature, then validates issuer, gateway subject, resource audience, required claims, temporal bounds, token ID, and a maximum 24-hour lifetime. Missing or malformed credentials return 401 with `WWW-Authenticate: Bearer`; a valid token for another resource returns 403. The default control plane serves the declarative AddAudience and AddClient command kinds.
 
 ## AOT and dependency boundary
 
@@ -58,6 +58,11 @@ declaration stores the mount name, never credential bytes. Hosting reads and has
 credential when initializing or updating the registry, so restart requires the mount again.
 Clients must reference existing audiences; add the audience before the client. Conflicting resource
 seeds or changed client declarations are rejected until the owning declaration is deleted.
+
+`IdentityHubCommandProtocolTests` drives both kinds over the `commands` route of a real managed
+host: apply, replay under a new id, the owner-must-match-issuer refusal, ownership restored after a
+restart, and deletion revoking the command-declared client. The gateway delivers the same envelope
+through its generic `ResourceControlPlaneCommandClient`; the area ships no client package.
 
 ## HTTPS endpoint certificate contract (31t)
 

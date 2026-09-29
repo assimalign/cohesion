@@ -173,13 +173,75 @@ The command ledger is invocation-local, not durable. A host restart loses declar
 Area handlers must refuse to adopt pre-existing unmanaged resources when later deletion could destroy
 them; Database applies that rule. Durable command ownership remains a follow-up.
 
+## Resource credential verification
+
+The runtime contract fixes the bootstrap credential's carrier, not its format (`docs/RUNTIME_CONTRACT.md`,
+"Resource credentials"). The default is the ES256 application-key JWT, verified by each area hosting
+module with the shared validator in `IdentityModel.Token.JsonWebToken`. This package owns that
+default profile's constants, `ResourceCredentialProfile`, beside the verifier seam: the
+`cohesion_token_use`/`gateway` claim, the `scope`/`telemetry` emitter scope, the `cohesion-export`
+control-plane audience, the five-minute clock skew, and the 24-hour bootstrap and 8-hour developer
+lifetime ceilings. The strings are `const` for the same reason as `AppEnvironment.Variables`, so
+changing one is a breaking wire change; the clock skew and both lifetime ceilings are read-only
+static `TimeSpan` properties. The profile lives here rather than in Core (owner decision R9,
+2026-09-26) because every producer and verifier of
+the default credential — the gateway, its control plane, and the area hosting modules — already
+references Hosting.Resources, while the base ApplicationModel and the platform gateways never use
+it. An application whose gateway registers another credential issuer supplies a matching verifier
+through this package and needs none of these constants:
+
+- `IResourceCredentialVerifier.VerifyAsync(ResourceCredentialPresentation)` receives the presented
+  scheme and credential (`FromAuthorizationValue` splits an `Authorization` value at its first space),
+  the resource name it must be issued for, the instant, and an optional client certificate. It returns a
+  `ResourceCredentialVerification`: `NoResult` (the `default` value: not my credential), `Unauthorized`,
+  `Forbidden`, or `Authorized` with a `ResourceCaller` (application, subject, `ResourceCallerKind`, and
+  allowed command kinds).
+- `ResourceRuntime.RegisterCredentialVerifier(assembly, factory)` follows `RegisterControlPlane`
+  exactly: a process-wide `ConcurrentDictionary` keyed by the resource executable assembly, one
+  registration per assembly (a second throws), and resolution that prefers the active entry
+  invocation's logical assembly over the process entry assembly, so in-process members of one gateway
+  each see only their own verifier. `TryCreateCredentialVerifier(assembly)` is the direct mirror of
+  `TryCreateControlPlane` and creates a fresh verifier with `Current`.
+- Request-time authorization code holds a `ResourceContext`, not an assembly: the Web control-plane
+  middleware is a static entry shared by fifteen hosting modules. `TryCreateControlPlane` therefore
+  records the resolved resource assembly on the current context — only when an ambient frame already
+  exists or the assembly registered a control plane or endpoint certificates, so a plain application's
+  builder still never snapshots the process environment — and
+  `TryGetCredentialVerifier(context)` creates that assembly's verifier on first use and caches it on
+  the context under a lock. One invocation shares one verifier; separate scopes get separate
+  verifiers; a registration made after the builder resolved its control plane is still found on the
+  next request; a context that never resolved a control plane (a standalone resource) has none.
+
+```mermaid
+flowchart LR
+    Module["Area hosting module"] --> Runtime["ResourceRuntime.TryGetCredentialVerifier"]
+    Runtime --> Registered["Registered IResourceCredentialVerifier"]
+    Module --> Default["Default application-key verifier"]
+    Default --> Validator["IdentityModel ES256 validator"]
+    Default --> Profile["Hosting.Resources ResourceCredentialProfile"]
+```
+
+The diagram reads as references: the hosting module references the runtime, which resolves the
+registered verifier, and its own default verifier, which is configured from this package's
+`ResourceCredentialProfile` constants and executed by the IdentityModel validator. The module
+consults the registered verifier first; a `NoResult` verdict falls through to the default, any other verdict is final, and the module then
+authorizes the mapped caller (for example, the management plane admits only `Kind=Gateway` callers of
+its own application whose `Subject` is its own gateway; SecretStore and ConfigurationStore compare
+`Application` for ownership). For
+application-key tokens the mapping reproduces the former `iss`/`sub` comparisons exactly, so the
+accepted token set did not change.
+
+Every new type is BCL-only (`X509Certificate2` is the only non-primitive): Resources must not reference
+IdentityModel, because the COHAM001 allowlist of the area ApplicationModel packages includes Resources
+and would otherwise grow.
+
 ## Endpoint certificate contract (31t)
 
 `ResourceContext.TryGetEndpointCertificate(endpoint, out leaf, out chain)` reads one ordinary Secret mount. The full constructor accepts an optional endpoint-to-mount dictionary; generated Resource.g.cs registers the same immutable metadata by executable assembly through ResourceRuntime.RegisterEndpointCertificates. Control-plane creation applies it to the current invocation. Without a mapping, the conventional mount is `tls`; a normalized environment lookup also handles names containing punctuation. The explicit-mount overload supports manually configured Web endpoints.
 
 Absent or empty mounts return false. Present material requires the leaf as the first certificate and exactly one private key anywhere, accepting PKCS#8, EC, and RSA key labels. Chain parsing accepts either producer order and includes supplied roots. PKCS#12 re-import gives Windows SslStream a usable key association. The caller owns and disposes the returned leaf and chain. Intermediate secret buffers are cleared. The implementation uses only BCL cryptography and preserves the COHAM001 closure and the existing ResourceMount carrier.
 
-`TryGetTrustBundle` reads ResourceEnvironment.TrustBundlePath through ResourceMount's protected-file reader. `CreateOutboundTrustValidator` preserves missing-certificate and hostname rejection, then builds a server-authentication chain with CustomRootTrust, CustomTrustStore and NoCheck revocation against the supplied anchors. It does not disable TLS validation.
+`TryGetTrustBundle` reads AppEnvironment.Variables.TrustBundlePath through ResourceMount's protected-file reader. `CreateOutboundTrustValidator` preserves missing-certificate and hostname rejection, then builds a server-authentication chain with CustomRootTrust, CustomTrustStore and NoCheck revocation against the supplied anchors. It does not disable TLS validation.
 
 CreateDevelopmentEndpointCertificate supplies the shared ephemeral fallback only for loopback Local contexts. Hosts own and dispose the returned identity. The persisted gateway issuer remains separate from this standalone fallback.
 

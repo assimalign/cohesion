@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 using Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.Internal;
@@ -53,6 +54,14 @@ public static class GatewayControlPlane
     /// <summary>
     /// Installs SDK defaults without replacing explicitly configured server or client seams.
     /// </summary>
+    /// <remarks>
+    /// For <see cref="GatewayRunMode.Run"/> and <see cref="GatewayRunMode.Apply"/>, each entry of
+    /// <see cref="ApplicationGatewayOptions.CommandClients"/> becomes a command dispatcher of the
+    /// served control plane. A served command then selects its client exactly as local delivery
+    /// does: the client whose kind equals the target's manifest kind, otherwise the
+    /// <see cref="IGatewayResourceCommandClient.AnyKind"/> client. Only the first client per kind
+    /// is adapted, because the gateway never selects a later duplicate either.
+    /// </remarks>
     /// <param name="options">The gateway options to complete.</param>
     /// <param name="runMode">The selected gateway command mode.</param>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
@@ -77,9 +86,13 @@ public static class GatewayControlPlane
         {
             controlPlane.MetadataDirectory = metadataDirectory;
             controlPlane.TimeProvider = options.TimeProvider;
+            var kinds = new HashSet<string>(StringComparer.Ordinal);
             foreach (IGatewayResourceCommandClient client in options.CommandClients)
             {
-                controlPlane.CommandDispatchers.Add(new GatewayCommandDispatcher(client));
+                if (kinds.Add(client.ResourceKind))
+                {
+                    controlPlane.CommandDispatchers.Add(new GatewayCommandDispatcher(client));
+                }
             }
         });
     }

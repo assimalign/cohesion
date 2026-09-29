@@ -20,8 +20,9 @@ Each identity is unique and each template supports `-n`. The only framework choi
 The package project disables default item discovery, so embedded executable programs never compile
 into the packaging assembly. NuGet's default exclusions are disabled to retain `.gitignore`.
 
-The application and landing-zone trees follow the tracked `cohesion-examples` scaffolds at `f43e6fa`.
-The application tree is flattened to the repository root. The landing-zone source has 25 projects;
+The application and landing-zone trees follow the tracked `cohesion-examples` scaffolds at `f43e6fa`,
+except for the gateway programs and store mounts described under *Gateway composition and providers*,
+which moved ahead of that snapshot. The application tree is flattened to the repository root. The landing-zone source has 25 projects;
 `--topology federated` removes the root application-set gateway and substitutes only the solution,
 six gateway configuration files and README from `.topologies/federated`. This keeps the shared
 programs and project references identical. The package contains exactly 37 content project files.
@@ -71,6 +72,49 @@ Programs retain the landed composition scope. Zone gateways currently realize th
 subset while retaining the other references. Generic area configuration and full provider-backed
 production realization remain separate work; builds here do not claim runtime readiness of every domain.
 
+## Gateway composition and providers
+
+`Sdk.Gateway` generates `Manifests`, `Externals`, `Applications`, the provider catalog, `UseGateway`
+and `Gateway.CreateBuilder`, but no per-resource `Add<Member>()` verb. Every gateway program composes
+its resources with the area's hand-written verb over the generated manifest, for example
+`builder.AddWeb(Manifests.AppAApi)` or `builder.AddDatabase(Manifests.AcmeDatabase)`, and would use
+`builder.AddResource(Manifests.X)` for a kind without an ApplicationModel package. The programs pass
+no options because the landed scaffolds configured none; an options instance such as
+`new WebResourceOptions { Replicas = 2 }` replaces the retired `Action<TOptions>` callback.
+
+Nothing is registered by convention. Before the provider seams, a gateway silently used its
+application's own SecretStore as the certificate authority and trust store, resolved every
+`<store>:<key>` mount against a SecretStore or ConfigurationStore resource, and sent telemetry to its
+application's own LogSpace. The templates now reproduce that behavior explicitly, in the two places that
+compose the Platform application:
+
+| Gateway | Package references | Registrations |
+| --- | --- | --- |
+| `Example.Platform.Gateway` | SecretStore and ConfigurationStore `ApplicationModel.Orchestration` | `UseSecretStore(secrets).AsCertificateAuthority().AsTrustStore()`, `UseConfigurationStore(configuration)`, `Providers.Telemetry = ResourceTelemetrySink.FromResource(logs)` |
+| `Example.Gateway` (application set) | the same two packages | the same three registrations, by resource name, in the `AddApplication(Applications.Platform, platform => ...)` callback, because a member's describe output carries no providers |
+
+Each package is a `CohesionPackageReference` pinned to `$(CohesionVersion)`, the version the SDK itself
+was packed at, so a scaffold never names a package version. No other gateway composes a store:
+Identity and Networking hold no SecretStore, and the zone gateways leave their SecretStore referenced
+but unrealized.
+
+Cross-application store sources are a documented follow-up (owner decision 4): `Build()` rejects a
+mount whose `<source>:<key>` names another application's store. The landed IdentityHub read its TLS
+bundle and signing keys, and the VPN gateway its keys, from `platform-secretstore`; those mounts are
+now the parameters `identity-hub-tls`, `identity-signing-keys` and `networking-vpn-keys`, supplied with
+`cohesion parameter set <name> --stdin --project <gateway>` (plus `--app identity` or `--app networking`
+for the root application set) or `--parameter name=value`. The TLS source stays explicit rather than
+falling back to the gateway development authority, so the IdentityHub endpoint behaves the same in
+every environment; an unset parameter leaves the resource unrealized with an error naming it. The
+Platform SecretStore references stay, so the identity and networking gateways still bind
+`Externals.PlatformSecretStore`. No mount reads that store now; the reference remains a declared
+dependency only.
+
+Feed-free assertions keep this true without a package feed: no gateway program calls a parameterless
+`Add<Member>()` verb, a gateway references an Orchestration package exactly when its program calls
+that package's `Use<Area>` verb, every package reference is pinned to `$(CohesionVersion)`, and every
+`<source>:<key>` mount names a store of the consuming resource's own application.
+
 ## Packing and versioning
 
 `PrepareCohesionTemplates` copies tracked content into the intermediate output before NuGet gathers
@@ -102,7 +146,9 @@ Name replacement and explicit gateway identity receive separate coverage. Feed-b
 repeat those assertions, then substitute only the SDK pin values and the isolated smoke feed config.
 They build the generated tree and check manifest presence for enabled projects and absence for disabled
 ones. Package requirements are derived per template from the actual content SDKs and their area owner
-props, framework packs for the host RID, and the existing Gateway consumer closure.
+props, framework packs for the host RID, the existing Gateway consumer closure (the `_requiredPackageIds`
+list in the Gateway SDK's `ConsumerWorkspace.cs`), and each `CohesionPackageReference` in the content
+together with its repository project's `CohesionProjectReference` closure.
 The .NET SDK's `ProcessFrameworkReferences` also downloads targeting packs for every registered
 Cohesion framework to support transitive references. Gateway builds additionally request all
 registered runtime packs for the host RID. Discovery reads the base SDK's actual registrations
@@ -114,10 +160,15 @@ validation useful. A complete feed turns consumer build errors into failures, ne
 
 ## CI and inventory integration
 
-`tooling-templates.yml` prepares the 34-package Gateway closure plus five landing-zone ApplicationModel
-packages, then uses the shared build action to pack canonical SDK/framework packages for the runner's
-RID and build/test this package. The action's `SkipLibraries` bootstrap preserves the prepared libraries.
-Package publication remains exclusively in the repository release workflow.
+`tooling-templates.yml` prepares 28 library packages: the 23-package Gateway consumer closure, the
+VpnGateway ApplicationModel, and the two store Orchestration packages with their SecretStore and
+ConfigurationStore clients. Web, Web.Routing and the Database.Client closure left the list when
+Sdk.Gateway stopped injecting area clients. The workflow then uses the shared build action to pack
+canonical SDK/framework packages for the runner's RID and build/test this package. The action's `SkipLibraries` bootstrap preserves the prepared libraries.
+Package publication remains exclusively in the repository release workflow. Besides the template,
+SDK, build and framework-producer paths, the workflow triggers on `libraries/ApplicationModel/**` and
+the area `ApplicationModel` and `ApplicationModel.Orchestration` packages, because the gateway programs
+call those APIs directly.
 
 The shared release module must add this package and exact-path exclusions for all 37 template content
 projects, removing the two obsolete legacy exclusions. Those shared edits are handed to the orchestrator

@@ -5,7 +5,6 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 
-using Assimalign.Cohesion.Core;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry.Internal;
 using Assimalign.Cohesion.Logging;
@@ -24,7 +23,7 @@ public static class ResourceTelemetry
     public static bool IsEnabled(ResourceContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (context.GatewayName is null || !context.TryGetEnvironmentValue(ResourceEnvironment.TelemetryEndpoint, out string? value))
+        if (context.GatewayName is null || !context.TryGetEnvironmentValue(AppEnvironment.Variables.TelemetryEndpoint, out string? value))
         {
             return false;
         }
@@ -32,7 +31,7 @@ public static class ResourceTelemetry
         if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? endpoint) || endpoint.Scheme is not ("http" or "https") ||
             endpoint.UserInfo.Length != 0 || endpoint.Query.Length != 0 || endpoint.Fragment.Length != 0)
         {
-            throw new InvalidOperationException($"{nameof(ResourceEnvironment.TelemetryEndpoint)} requires an absolute HTTP(S) collector endpoint.");
+            throw new InvalidOperationException($"{nameof(AppEnvironment.Variables.TelemetryEndpoint)} requires an absolute HTTP(S) collector endpoint.");
         }
 
         return true;
@@ -48,7 +47,7 @@ public static class ResourceTelemetry
     /// <exception cref="UnauthorizedAccessException">The configured headers file is inaccessible.</exception>
     /// <exception cref="CryptographicException">The protected headers file cannot be unwrapped.</exception>
     /// <exception cref="FormatException">A configured HTTP header is invalid.</exception>
-    /// <exception cref="NotSupportedException"><see cref="ResourceEnvironment.TelemetryProtocol"/> selects the reserved gRPC protocol.</exception>
+    /// <exception cref="NotSupportedException"><see cref="AppEnvironment.Variables.TelemetryProtocol"/> selects the reserved gRPC protocol.</exception>
     public static bool Configure(ResourceContext context, ILoggerFactoryBuilder logging)
         => Configure(context, logging, out _);
 
@@ -61,7 +60,7 @@ public static class ResourceTelemetry
     /// <exception cref="UnauthorizedAccessException">The configured headers file is inaccessible.</exception>
     /// <exception cref="CryptographicException">The protected headers file cannot be unwrapped.</exception>
     /// <exception cref="FormatException">A configured HTTP header is invalid.</exception>
-    /// <exception cref="NotSupportedException"><see cref="ResourceEnvironment.TelemetryProtocol"/> selects the reserved gRPC protocol.</exception>
+    /// <exception cref="NotSupportedException"><see cref="AppEnvironment.Variables.TelemetryProtocol"/> selects the reserved gRPC protocol.</exception>
     public static ILoggerFactory? Configure(ResourceContext context) => Configure(context, out _);
 
     /// <summary>Configures an existing builder and returns the service that must be registered for bounded host-stop flush.</summary>
@@ -75,7 +74,7 @@ public static class ResourceTelemetry
     /// <exception cref="UnauthorizedAccessException">The configured headers file is inaccessible.</exception>
     /// <exception cref="CryptographicException">The protected headers file cannot be unwrapped.</exception>
     /// <exception cref="FormatException">A configured HTTP header is invalid.</exception>
-    /// <exception cref="NotSupportedException"><see cref="ResourceEnvironment.TelemetryProtocol"/> selects the reserved gRPC protocol.</exception>
+    /// <exception cref="NotSupportedException"><see cref="AppEnvironment.Variables.TelemetryProtocol"/> selects the reserved gRPC protocol.</exception>
     public static bool Configure(ResourceContext context, ILoggerFactoryBuilder logging, out IHostService? lifetime)
     {
         lifetime = null;
@@ -89,7 +88,7 @@ public static class ResourceTelemetry
         var provider = new OtlpLoggerProvider(OtlpExporter.CreateLogExporter(options));
         try { logging.AddProvider(provider); }
         catch { provider.Dispose(); throw; }
-        if (context.TryGetEnvironmentValue(ResourceEnvironment.LogFormat, out string? format) &&
+        if (context.TryGetEnvironmentValue(AppEnvironment.Variables.LogFormat, out string? format) &&
             string.Equals(format, "json", StringComparison.OrdinalIgnoreCase))
         {
             var console = new ConsoleLoggerProvider(new ConsoleLoggerOptions { Formatter = JsonConsoleFormatter.Write });
@@ -114,7 +113,7 @@ public static class ResourceTelemetry
     /// <exception cref="UnauthorizedAccessException">The configured headers file is inaccessible.</exception>
     /// <exception cref="CryptographicException">The protected headers file cannot be unwrapped.</exception>
     /// <exception cref="FormatException">A configured HTTP header is invalid.</exception>
-    /// <exception cref="NotSupportedException"><see cref="ResourceEnvironment.TelemetryProtocol"/> selects the reserved gRPC protocol.</exception>
+    /// <exception cref="NotSupportedException"><see cref="AppEnvironment.Variables.TelemetryProtocol"/> selects the reserved gRPC protocol.</exception>
     public static ILoggerFactory? Configure(ResourceContext context, out IHostService? lifetime)
     {
         lifetime = null;
@@ -132,24 +131,24 @@ public static class ResourceTelemetry
 
     internal static OtlpExporterOptions CreateOptions(ResourceContext context)
     {
-        context.TryGetEnvironmentValue(ResourceEnvironment.TelemetryProtocol, out string? protocol);
+        context.TryGetEnvironmentValue(AppEnvironment.Variables.TelemetryProtocol, out string? protocol);
         if (string.Equals(protocol, "otlp-grpc", StringComparison.OrdinalIgnoreCase))
         {
-            throw new NotSupportedException($"{nameof(ResourceEnvironment.TelemetryProtocol)}: otlp-grpc is reserved; this build serves OTLP over HTTP only.");
+            throw new NotSupportedException($"{nameof(AppEnvironment.Variables.TelemetryProtocol)}: otlp-grpc is reserved; this build serves OTLP over HTTP only.");
         }
 
         if (!string.IsNullOrWhiteSpace(protocol) && !string.Equals(protocol, "otlp-http", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"{nameof(ResourceEnvironment.TelemetryProtocol)} accepts otlp-http or reserved otlp-grpc.");
+            throw new InvalidOperationException($"{nameof(AppEnvironment.Variables.TelemetryProtocol)} accepts otlp-http or reserved otlp-grpc.");
         }
 
-        context.TryGetEnvironmentValue(ResourceEnvironment.TelemetryEndpoint, out string? endpoint);
+        context.TryGetEnvironmentValue(AppEnvironment.Variables.TelemetryEndpoint, out string? endpoint);
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (context.TryGetEnvironmentValue(ResourceEnvironment.TelemetryHeadersPath, out string? path))
+        if (context.TryGetEnvironmentValue(AppEnvironment.Variables.TelemetryHeadersPath, out string? path))
         {
             if (!Path.IsPathFullyQualified(path))
             {
-                throw new InvalidOperationException($"{nameof(ResourceEnvironment.TelemetryHeadersPath)} requires an absolute file path.");
+                throw new InvalidOperationException($"{nameof(AppEnvironment.Variables.TelemetryHeadersPath)} requires an absolute file path.");
             }
             // An actually empty document contains no protected payload to unwrap on Windows.
             byte[] bytes = new FileInfo(path).Length == 0 ? [] : new ResourceMount(path).ReadAllBytes();
@@ -189,14 +188,14 @@ public static class ResourceTelemetry
             int colon = line.IndexOf(':');
             if (colon <= 0)
             {
-                throw new InvalidOperationException($"{nameof(ResourceEnvironment.TelemetryHeadersPath)} contains a malformed header line.");
+                throw new InvalidOperationException($"{nameof(AppEnvironment.Variables.TelemetryHeadersPath)} contains a malformed header line.");
             }
 
             string name = line[..colon].Trim();
             string value = line[(colon + 1)..].Trim();
             if (value.Contains('\r') || value.Contains('\n'))
             {
-                throw new InvalidOperationException($"{nameof(ResourceEnvironment.TelemetryHeadersPath)} contains a malformed header value.");
+                throw new InvalidOperationException($"{nameof(AppEnvironment.Variables.TelemetryHeadersPath)} contains a malformed header value.");
             }
 
             headers[name] = value; // Last occurrence wins, case-insensitively.

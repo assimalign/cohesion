@@ -187,6 +187,66 @@ public class ResourceManifestTests
         json.ShouldContain("\"maxReplicas\":null", Case.Sensitive);
     }
 
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - JSON context: a command that requires an input resolver round-trips as an object and others stay strings")]
+    public void JsonContext_WithInputResolverCommand_ShouldRoundTripObjectForm()
+    {
+        // Arrange
+        ResourceManifest expected = CreateManifest() with
+        {
+            Commands =
+            [
+                new ResourceManifestCommand("rezolvr.record"),
+                new ResourceManifestCommand("rezolvr.resolve") { RequiresInputResolver = true },
+            ],
+        };
+
+        // Act
+        string json = JsonSerializer.Serialize(expected, ResourceManifestJsonContext.Default.ResourceManifest);
+        ResourceManifest actual = ResourceManifest.Parse(json);
+
+        // Assert
+        json.ShouldContain(
+            "\"commands\":[\"rezolvr.record\",{\"kind\":\"rezolvr.resolve\",\"requiresInputResolver\":true}]",
+            Case.Sensitive);
+        actual.Commands.Count.ShouldBe(2);
+        actual.Commands[0].ShouldBe(new ResourceManifestCommand("rezolvr.record"));
+        actual.Commands[1].ShouldBe(new ResourceManifestCommand("rezolvr.resolve") { RequiresInputResolver = true });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [ApplicationModel] - Parse: a command object must have a string kind, a boolean flag, and no other property")]
+    [InlineData("{\"requiresInputResolver\":true}", "requires a 'kind' property")]
+    [InlineData("{\"kind\":\"\"}", "must not be empty")]
+    [InlineData("{\"kind\":42}", "'kind' must be a JSON string")]
+    [InlineData("{\"kind\":\"rezolvr.resolve\",\"requiresInputResolver\":\"yes\"}", "'requiresInputResolver' must be true or false")]
+    [InlineData("{\"kind\":\"rezolvr.resolve\",\"resolver\":true}", "unknown property 'resolver'")]
+    [InlineData("42", "must be a JSON string or an object")]
+    public void Parse_MalformedCommand_ShouldThrow(string command, string expected)
+    {
+        // Arrange
+        string json = JsonSerializer.Serialize(CreateManifest(), ResourceManifestJsonContext.Default.ResourceManifest)
+            .Replace("\"commands\":[\"rezolvr.record\"]", $"\"commands\":[{command}]", StringComparison.Ordinal);
+
+        // Act
+        JsonException exception = Should.Throw<JsonException>(() => ResourceManifest.Parse(json));
+
+        // Assert
+        exception.Message.ShouldContain(expected, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Parse: an object command without the flag reads as not requiring an input resolver")]
+    public void Parse_CommandObjectWithoutFlag_ShouldNotRequireInputResolver()
+    {
+        // Arrange
+        string json = JsonSerializer.Serialize(CreateManifest(), ResourceManifestJsonContext.Default.ResourceManifest)
+            .Replace("\"commands\":[\"rezolvr.record\"]", "\"commands\":[{\"kind\":\"rezolvr.record\"}]", StringComparison.Ordinal);
+
+        // Act
+        ResourceManifest manifest = ResourceManifest.Parse(json);
+
+        // Assert
+        manifest.Commands.ShouldHaveSingleItem().ShouldBe(new ResourceManifestCommand("rezolvr.record"));
+    }
+
     [Fact(DisplayName = "Cohesion Test [ApplicationModel] - Validate: Should reject a property owned by another resource kind")]
     public void Validate_WithForeignPropertyPrefix_ShouldThrow()
     {

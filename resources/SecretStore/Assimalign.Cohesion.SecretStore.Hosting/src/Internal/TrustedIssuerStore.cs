@@ -116,13 +116,28 @@ internal sealed class TrustedIssuerStore
                 }
 
                 string compactToken = Encoding.ASCII.GetString(context.BootstrapCredential.Span);
-                BootstrapTokenValidation bootstrap = new BootstrapTokenVerifier(this).Validate(
+                var presentation = new ResourceCredentialPresentation(
+                    "Bearer",
                     compactToken,
                     context.ResourceName,
                     DateTimeOffset.UtcNow);
-                if (bootstrap.Status is not BootstrapTokenValidationStatus.Authorized ||
+                ResourceCredentialVerification bootstrap = default;
+                if (ResourceRuntime.TryGetCredentialVerifier(context, out IResourceCredentialVerifier? registered))
+                {
+                    bootstrap = await registered.VerifyAsync(presentation, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (bootstrap.Status is ResourceCredentialStatus.NoResult)
+                {
+                    bootstrap = new BootstrapTokenVerifier(this, context.ApplicationName).Validate(
+                        compactToken,
+                        context.ResourceName,
+                        presentation.Now);
+                }
+
+                if (bootstrap.Status is not ResourceCredentialStatus.Authorized ||
                     !string.Equals(
-                        bootstrap.Issuer,
+                        bootstrap.Caller?.Application,
                         context.ApplicationName,
                         StringComparison.Ordinal))
                 {

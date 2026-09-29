@@ -4,7 +4,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel;
-using Assimalign.Cohesion.Core;
 
 namespace Assimalign.Cohesion.ApplicationModel.Tests;
 
@@ -56,7 +55,7 @@ public sealed class ApplicationEnvironmentTests
             // Assert
             builder.Environment.Name.ToString().ShouldBe(expected);
             set.Environment.Name.ToString().ShouldBe(expected);
-            model.Plans.ShouldHaveSingleItem().Container.Environment[ResourceEnvironment.Environment]
+            model.Plans.ShouldHaveSingleItem().Container.Environment[AppEnvironment.Variables.Environment]
                 .ShouldBe(expected);
         });
     }

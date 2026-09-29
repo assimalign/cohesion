@@ -1,8 +1,6 @@
 using System;
 using System.IO;
 
-using Assimalign.Cohesion.Core;
-
 namespace Assimalign.Cohesion.Hosting.Resources.Internal;
 
 internal enum ResourceHostFailureKind
@@ -44,7 +42,7 @@ internal sealed class ResourceHostOptions
     {
         StopGraceSeconds = ValidateStopGraceSeconds(stopGraceSeconds);
         ContentRootPath = ResolveContentRootPath(contentRootPath);
-        StopEventName = stopEventName ?? ResourceEnvironment.GetValue(ResourceEnvironment.StopEvent);
+        StopEventName = stopEventName ?? AppEnvironment.GetValue(AppEnvironment.Variables.StopEvent);
         ProtocolLineWriter = protocolLineWriter ?? Console.Out.WriteLine;
         _exceptionClassifier = exceptionClassifier ?? (static _ => null);
         ExitCodeHandler = exitCodeHandler ?? SetProcessExitCode;
@@ -128,7 +126,7 @@ internal sealed class ResourceHostOptions
     internal static FileSystemPath ResolveContentRootPath(string? contentRootPath = null)
     {
         string? configuredPath = string.IsNullOrWhiteSpace(contentRootPath)
-            ? ResourceEnvironment.GetValue(ResourceEnvironment.ContentRoot)
+            ? AppEnvironment.GetValue(AppEnvironment.Variables.ContentRoot)
             : contentRootPath;
         string resolvedPath = string.IsNullOrWhiteSpace(configuredPath)
             ? AppContext.BaseDirectory
