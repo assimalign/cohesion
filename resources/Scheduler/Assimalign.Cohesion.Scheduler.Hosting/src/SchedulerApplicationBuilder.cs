@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Threading.Tasks;
 
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
@@ -15,12 +17,19 @@ namespace Assimalign.Cohesion.Scheduler.Hosting;
 /// <summary>
 /// Composes a Scheduler application and its hosting services.
 /// </summary>
+/// <remarks>
+/// Every dependency the application runs with is a registration in <see cref="Services"/>:
+/// declared jobs (<see cref="IScheduleJob"/>), schedule providers (<see cref="IScheduleProvider"/>),
+/// and lifecycle services (<see cref="IHostService"/>). The root
+/// <see cref="ISchedulerApplicationBuilder"/> verbs are shims over those registrations, so the Cron
+/// and Timer packages compose against the dependency-free root contract. <see cref="Build"/>
+/// closes registration, creates the service provider once, validates the schedules, and resolves
+/// the lifecycle services once, in registration order.
+/// </remarks>
 public sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
 {
-    private readonly Dictionary<JobId, IScheduleJob> _jobs = [];
-    private readonly List<IScheduleProvider> _providers = [];
-    private readonly List<Func<SchedulerApplicationContext, IHostService>> _serviceFactories = [];
-    private readonly ILoggerFactory? _loggerFactory;
+    private readonly SchedulerApplicationOptions _options;
+    private readonly SchedulerApplicationContext _context;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext? _resourceContext;
     private bool _isBuilt;
@@ -29,77 +38,118 @@ public sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
     {
         ArgumentNullException.ThrowIfNull(args);
 
+        Services = new ServiceProviderBuilder(new ServiceProviderOptions
+        {
+            EnableDynamicCode = false,
+            ValidateOnBuild = true,
+            ValidateScopes = true,
+        });
         if (resourceAssembly is not null &&
             ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
         {
             _controlPlane = controlPlane ?? throw new InvalidOperationException(
                 "The registered Scheduler resource control-plane factory returned null.");
             _resourceContext = ResourceRuntime.Current;
-            _loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+            ILoggerFactory? loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+            if (loggerFactory is not null)
+            {
+                Services.AddSingleton<ILoggerFactory>(loggerFactory);
+            }
             if (telemetry is not null)
             {
-                _serviceFactories.Insert(0, _ => telemetry);
+                // Registered ahead of every AddService call, so telemetry starts first and stops last.
+                Services.AddSingleton<IHostService>(telemetry);
             }
+            Services.AddSingleton<IResourceControlPlane>(_controlPlane);
         }
+
+        _options = new SchedulerApplicationOptions
+        {
+            Environment = _resourceContext?.EnvironmentName ?? AppEnvironment.GetEnvironmentName(),
+            ContentRootPath = _resourceContext is null
+                ? (FileSystemPath?)null
+                : FileSystemPath.Parse(_resourceContext.ContentRootPath),
+        };
+        _context = new SchedulerApplicationContext(_options);
     }
+
+    /// <summary>
+    /// Gets the application's service registrations.
+    /// </summary>
+    /// <remarks>
+    /// Registration closes when <see cref="Build"/> runs; a later registration throws
+    /// <see cref="InvalidOperationException"/>. Every <see cref="IHostService"/> registration joins
+    /// the application lifecycle in registration order, ahead of the scheduler's own execution
+    /// service. Register factory or instance services: the provider is created without dynamic
+    /// code. A factory-created service is owned by the application and disposed with it; an
+    /// instance stays owned by its caller.
+    /// </remarks>
+    public ServiceProviderBuilder Services { get; }
 
     /// <summary>
     /// Declares a job without scheduling it.
     /// </summary>
     /// <remarks>
     /// Cron and Timer feature packages bind declared jobs to providers separately. An unbound
-    /// job remains dormant.
+    /// job remains dormant. The job is registered in <see cref="Services"/> as an
+    /// <see cref="IScheduleJob"/>; declaring the same instance again has no effect.
     /// </remarks>
     /// <param name="job">The job declaration to register.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="job"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">A different job with the same identifier is registered.</exception>
-    public ISchedulerApplicationBuilder AddJob(IScheduleJob job)
+    public SchedulerApplicationBuilder AddJob(IScheduleJob job)
     {
         ArgumentNullException.ThrowIfNull(job);
 
-        if (_jobs.TryGetValue(job.Id, out IScheduleJob? existing))
+        foreach (IScheduleJob declared in GetRegisteredInstances<IScheduleJob>())
         {
-            if (!ReferenceEquals(existing, job))
+            if (declared.Id.Equals(job.Id))
             {
-                throw new InvalidOperationException(
-                    $"A different scheduler job with identifier '{job.Id}' is already declared.");
+                return ReferenceEquals(declared, job)
+                    ? this
+                    : throw new InvalidOperationException(
+                        $"A different scheduler job with identifier '{job.Id}' is already declared.");
             }
-
-            return this;
         }
 
-        _jobs.Add(job.Id, job);
+        Services.AddSingleton<IScheduleJob>(job);
         return this;
     }
 
     /// <summary>
     /// Adds a schedule provider to the scheduler application.
     /// </summary>
+    /// <remarks>
+    /// The provider is registered in <see cref="Services"/> as an <see cref="IScheduleProvider"/>.
+    /// </remarks>
     /// <param name="provider">The provider whose schedules the host executes.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="provider"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">The same provider instance is already registered.</exception>
-    public ISchedulerApplicationBuilder AddScheduleProvider(IScheduleProvider provider)
+    public SchedulerApplicationBuilder AddScheduleProvider(IScheduleProvider provider)
     {
         ArgumentNullException.ThrowIfNull(provider);
 
-        for (int index = 0; index < _providers.Count; index++)
+        foreach (IScheduleProvider registered in GetRegisteredInstances<IScheduleProvider>())
         {
-            if (ReferenceEquals(_providers[index], provider))
+            if (ReferenceEquals(registered, provider))
             {
                 throw new InvalidOperationException(
                     "The same scheduler provider instance cannot be registered more than once.");
             }
         }
 
-        _providers.Add(provider);
+        Services.AddSingleton<IScheduleProvider>(provider);
         return this;
     }
 
     /// <summary>
     /// Adds an existing host service to the scheduler application.
     /// </summary>
+    /// <remarks>
+    /// The service is registered in <see cref="Services"/> and stays owned by the caller.
+    /// </remarks>
     /// <param name="service">The service to add.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
@@ -107,13 +157,16 @@ public sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
     {
         ArgumentNullException.ThrowIfNull(service);
 
-        _serviceFactories.Add(_ => service);
+        Services.AddSingleton<IHostService>(service);
         return this;
     }
 
     /// <summary>
-    /// Adds a host service factory that is materialized once for each build.
+    /// Adds a host service factory that is invoked once, when the application is built.
     /// </summary>
+    /// <remarks>
+    /// The application owns and disposes the service the factory returns.
+    /// </remarks>
     /// <param name="factory">The factory to invoke with the scheduler host context.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
@@ -122,7 +175,8 @@ public sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
     {
         ArgumentNullException.ThrowIfNull(factory);
 
-        _serviceFactories.Add(factory);
+        Services.AddSingleton<IHostService>(_ => factory(_context)
+            ?? throw new InvalidOperationException("A scheduler service factory returned null."));
         return this;
     }
 
@@ -136,100 +190,85 @@ public sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
     /// </exception>
     public SchedulerApplication Build()
     {
-        if (_isBuilt)
-        {
-            throw new InvalidOperationException("The scheduler application has already been built.");
-        }
-
-        ISchedule[] schedules = GetValidatedSchedules();
-
-        var options = new SchedulerApplicationOptions
-        {
-            Environment = _resourceContext?.EnvironmentName ?? AppEnvironment.GetEnvironmentName(),
-            ContentRootPath = _resourceContext is null
-                ? (FileSystemPath?)null
-                : FileSystemPath.Parse(_resourceContext.ContentRootPath),
-        };
-        var context = new SchedulerApplicationContext(
-            options,
-            [.. _jobs.Values],
-            [.. _providers],
-            schedules);
-        var hostedServices = new List<IHostService>(_serviceFactories.Count + 2);
-
-        for (int index = 0; index < _serviceFactories.Count; index++)
-        {
-            hostedServices.Add(_serviceFactories[index](context)
-                ?? throw new InvalidOperationException("A scheduler service factory returned null."));
-        }
+        InvalidOperationException.ThrowIf(_isBuilt, "The scheduler application has already been built.");
 
         if (_controlPlane is not null && _resourceContext is not null)
         {
-            _controlPlane.AddHealthContributor(context);
+            _controlPlane.AddHealthContributor(_context);
             if (_resourceContext.Endpoints.TryGetValue("http", out Uri? endpoint))
             {
                 _controlPlane.ObserveEndpoint("http", endpoint);
-                hostedServices.Add(new SchedulerControlPlaneEndpointService(
+                Services.AddSingleton<IHostService>(_ => new SchedulerControlPlaneEndpointService(
                     endpoint,
                     _controlPlane,
                     _resourceContext,
-                    context));
+                    _context));
             }
         }
 
-        hostedServices.Add(new SchedulerExecutionService(schedules));
-        context.SetHostedServices(hostedServices);
-
-        var application = new SchedulerApplication(options, context);
-        if (_controlPlane is not null)
-        {
-            ResourceRuntime.HostBuilt(application, _controlPlane);
-        }
+        // Registered last, so schedules execute only after every other service has started and
+        // stop before any of them.
+        Services.AddSingleton<IHostService>(_ => new SchedulerExecutionService(_context.Schedules));
+        Services.AddSingleton<IHostEnvironment>(_context.Environment);
+        Services.AddSingleton<ISchedulerApplicationContext>(_context);
 
         _isBuilt = true;
-        return application;
+
+        // Registration closes here. The provider copies the registrations, so one added after
+        // Build would silently never reach it; the read-only container turns that into an error.
+        if (Services.Container is ServiceContainer container)
+        {
+            container.MakeReadOnly();
+        }
+
+        _context.SetServiceProvider(((IServiceProviderBuilder)Services).Build());
+        try
+        {
+            // Jobs, providers, and their schedules resolve and validate before any lifecycle
+            // service is created.
+            _context.ResolveSchedules();
+            _context.ResolveHostedServices();
+
+            var application = new SchedulerApplication(_options, _context);
+            if (_controlPlane is not null)
+            {
+                ResourceRuntime.HostBuilt(application, _controlPlane);
+            }
+
+            return application;
+        }
+        catch (Exception exception)
+        {
+            // The provider owns every service a factory created before the failure.
+            try
+            {
+                Task.Run(() => _context.DisposeServiceProviderAsync().AsTask()).GetAwaiter().GetResult();
+            }
+            catch (Exception disposalException)
+            {
+                throw new AggregateException(exception, disposalException);
+            }
+
+            throw;
+        }
     }
+
+    ISchedulerApplicationBuilder ISchedulerApplicationBuilder.AddJob(IScheduleJob job) => AddJob(job);
+
+    ISchedulerApplicationBuilder ISchedulerApplicationBuilder.AddScheduleProvider(IScheduleProvider provider) =>
+        AddScheduleProvider(provider);
 
     ISchedulerApplication ISchedulerApplicationBuilder.Build() => Build();
 
-    private ISchedule[] GetValidatedSchedules()
+    private IEnumerable<T> GetRegisteredInstances<T>()
+        where T : class
     {
-        var schedules = new List<ISchedule>();
-        var seenSchedules = new HashSet<ISchedule>(ReferenceEqualityComparer.Instance);
-
-        for (int providerIndex = 0; providerIndex < _providers.Count; providerIndex++)
+        foreach (ServiceDescriptor descriptor in Services.Container)
         {
-            IEnumerable<ISchedule> providerSchedules = _providers[providerIndex].GetSchedules()
-                ?? throw new InvalidOperationException("A scheduler provider returned a null schedule collection.");
-            foreach (ISchedule schedule in providerSchedules)
+            if (descriptor.ServiceType == typeof(T) && descriptor.ImplementationInstance is T instance)
             {
-                if (schedule is null)
-                {
-                    throw new InvalidOperationException("A scheduler provider returned a null schedule.");
-                }
-
-                if (!seenSchedules.Add(schedule))
-                {
-                    throw new InvalidOperationException(
-                        $"Schedule '{schedule.Name ?? schedule.Id.ToString()}' was returned more than once. " +
-                        "A schedule instance can be executed by only one provider registration.");
-                }
-
-                foreach (IScheduleJob job in schedule.Jobs)
-                {
-                    if (!_jobs.TryGetValue(job.Id, out IScheduleJob? declared) ||
-                        !ReferenceEquals(declared, job))
-                    {
-                        throw new InvalidOperationException(
-                            $"Schedule '{schedule.Name ?? schedule.Id.ToString()}' binds job " +
-                            $"'{job.Name ?? job.Id.ToString()}' before that job was declared with AddJob.");
-                    }
-                }
-
-                schedules.Add(schedule);
+                yield return instance;
             }
         }
-
-        return [.. schedules];
     }
 }

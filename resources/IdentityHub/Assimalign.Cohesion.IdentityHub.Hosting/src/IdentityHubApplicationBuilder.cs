@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Threading.Tasks;
 
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
@@ -15,17 +17,22 @@ namespace Assimalign.Cohesion.IdentityHub.Hosting;
 /// <summary>
 /// Composes an IdentityHub application and its hosting services.
 /// </summary>
+/// <remarks>
+/// Every dependency the application runs with is a registration in <see cref="Services"/>:
+/// declared audiences and clients, and the lifecycle services (<see cref="IHostService"/>).
+/// <see cref="Build"/> closes registration, creates the service provider once, validates the
+/// declared clients against the declared audiences, and resolves the lifecycle services once, in
+/// registration order; the identity endpoint is always the last of them.
+/// </remarks>
 public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuilder
 {
     private const string DefaultEndpoint = "https://127.0.0.1:8443";
 
     private readonly string[] _args;
-    private readonly Dictionary<string, IdentityHubClientRegistration> _clients = new(StringComparer.Ordinal);
-    private readonly ILoggerFactory? _loggerFactory;
+    private readonly string _environmentName;
+    private readonly IdentityHubApplicationContext _context;
     private readonly IResourceControlPlane? _controlPlane;
-    private readonly HashSet<string> _audiences = new(StringComparer.Ordinal);
     private readonly ResourceContext _resourceContext;
-    private readonly List<Func<IdentityHubApplicationContext, IHostService>> _serviceRegistrations = new();
     private bool _isBuilt;
 
     internal IdentityHubApplicationBuilder(string[] args, Assembly resourceAssembly)
@@ -34,62 +41,108 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
         ArgumentNullException.ThrowIfNull(resourceAssembly);
 
         _args = (string[])args.Clone();
+        Services = new ServiceProviderBuilder(new ServiceProviderOptions
+        {
+            EnableDynamicCode = false,
+            ValidateOnBuild = true,
+            ValidateScopes = true,
+        });
         _resourceContext = ResourceRuntime.Current;
-        _loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+        ILoggerFactory? loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+        if (loggerFactory is not null)
+        {
+            Services.AddSingleton<ILoggerFactory>(loggerFactory);
+        }
         if (telemetry is not null)
         {
-            _serviceRegistrations.Insert(0, _ => telemetry);
+            // Registered ahead of every AddService call, so telemetry starts first and stops last.
+            Services.AddSingleton<IHostService>(telemetry);
         }
         if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
         {
             _controlPlane = controlPlane ?? throw new InvalidOperationException(
                 "The registered IdentityHub control-plane factory returned null.");
+            Services.AddSingleton<IResourceControlPlane>(_controlPlane);
         }
+
+        _environmentName = _resourceContext.EnvironmentName;
+        _context = new IdentityHubApplicationContext(
+            _environmentName,
+            System.IO.FileSystemPath.Parse(_resourceContext.ContentRootPath));
     }
+
+    /// <summary>
+    /// Gets the application's service registrations.
+    /// </summary>
+    /// <remarks>
+    /// Registration closes when <see cref="Build"/> runs; a later registration throws
+    /// <see cref="InvalidOperationException"/>. Every <see cref="IHostService"/> registration joins
+    /// the application lifecycle in registration order, ahead of the identity endpoint. Register
+    /// factory or instance services: the provider is created without dynamic code. A
+    /// factory-created service is owned by the application and disposed with it; an instance stays
+    /// owned by its caller.
+    /// </remarks>
+    public ServiceProviderBuilder Services { get; }
 
     /// <summary>
     /// Declares an audience for access tokens issued by this identity hub.
     /// </summary>
+    /// <remarks>
+    /// The audience is registered in <see cref="Services"/>.
+    /// </remarks>
     /// <param name="audience">The exact audience identifier.</param>
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentException"><paramref name="audience"/> is empty or whitespace.</exception>
     /// <exception cref="InvalidOperationException">The audience is already declared or the application has been built.</exception>
-    public IIdentityHubApplicationBuilder AddAudience(string audience)
+    public IdentityHubApplicationBuilder AddAudience(string audience)
     {
         EnsureNotBuilt();
         ArgumentException.ThrowIfNullOrWhiteSpace(audience);
-        if (!_audiences.Add(audience))
+        foreach (ServiceDescriptor descriptor in Services.Container)
         {
-            throw new InvalidOperationException($"IdentityHub audience '{audience}' is already declared.");
+            if (descriptor.ImplementationInstance is IdentityHubAudience declared &&
+                string.Equals(declared.Value, audience, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"IdentityHub audience '{audience}' is already declared.");
+            }
         }
 
+        Services.AddSingleton(new IdentityHubAudience(audience));
         return this;
     }
 
     /// <summary>
     /// Registers an OAuth client in the identity hub's code-first configuration.
     /// </summary>
+    /// <remarks>
+    /// The client registration is added to <see cref="Services"/>; its audiences are validated
+    /// against the declared audiences when the application is built.
+    /// </remarks>
     /// <param name="clientId">The exact client identifier.</param>
     /// <param name="configure">The callback that configures grants, credentials, and audiences.</param>
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentException"><paramref name="clientId"/> is empty or whitespace.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="configure"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">The client is already registered or the application has been built.</exception>
-    public IIdentityHubApplicationBuilder AddClient(
+    public IdentityHubApplicationBuilder AddClient(
         string clientId,
         Action<IdentityHubClientOptions> configure)
     {
         EnsureNotBuilt();
         ArgumentException.ThrowIfNullOrWhiteSpace(clientId);
         ArgumentNullException.ThrowIfNull(configure);
-        if (_clients.ContainsKey(clientId))
+        foreach (ServiceDescriptor descriptor in Services.Container)
         {
-            throw new InvalidOperationException($"IdentityHub client '{clientId}' is already registered.");
+            if (descriptor.ImplementationInstance is IdentityHubClientRegistration registered &&
+                string.Equals(registered.ClientId, clientId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"IdentityHub client '{clientId}' is already registered.");
+            }
         }
 
         var options = new IdentityHubClientOptions();
         configure.Invoke(options);
-        _clients.Add(clientId, IdentityHubClientRegistration.Create(clientId, options));
+        Services.AddSingleton(IdentityHubClientRegistration.Create(clientId, options));
         return this;
     }
 
@@ -97,7 +150,8 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
     /// Registers a host service with the identity hub application.
     /// </summary>
     /// <remarks>
-    /// Host services start in registration order and stop in reverse registration order.
+    /// Host services start in registration order and stop in reverse registration order. The
+    /// service is registered in <see cref="Services"/> and stays owned by the caller.
     /// </remarks>
     /// <param name="service">The host service to register.</param>
     /// <returns>The same builder instance for chaining.</returns>
@@ -108,7 +162,7 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
         EnsureNotBuilt();
         ArgumentNullException.ThrowIfNull(service);
 
-        _serviceRegistrations.Add(_ => service);
+        Services.AddSingleton<IHostService>(service);
         return this;
     }
 
@@ -116,8 +170,9 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
     /// Registers a host service factory with the identity hub application.
     /// </summary>
     /// <remarks>
-    /// The factory is invoked once for each call to <see cref="Build"/> and receives that
-    /// application's final host context. The resulting service follows registration order.
+    /// The factory is invoked once, when the application is built, and receives the application's
+    /// final host context. The application owns and disposes the service it returns, which follows
+    /// registration order.
     /// </remarks>
     /// <param name="factory">The factory that creates the host service.</param>
     /// <returns>The same builder instance for chaining.</returns>
@@ -128,7 +183,8 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
         EnsureNotBuilt();
         ArgumentNullException.ThrowIfNull(factory);
 
-        _serviceRegistrations.Add(factory);
+        Services.AddSingleton<IHostService>(_ => factory.Invoke(_context)
+            ?? throw new InvalidOperationException("The identity hub application service factory returned null."));
         return this;
     }
 
@@ -137,54 +193,85 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
     /// </summary>
     /// <returns>The configured identity hub application.</returns>
     /// <exception cref="InvalidOperationException">
-    /// The application has already been built, a client has no valid grant or declared audience,
-    /// a service factory returns null, or the data mount has no filesystem path.
+    /// The builder has already built an application, a registered client is invalid, a registered
+    /// host service factory returns <see langword="null"/>, or the data mount has no filesystem path.
     /// </exception>
     /// <exception cref="ArgumentException">A command-line endpoint or data option is invalid or missing its value.</exception>
     public IdentityHubApplication Build()
     {
-        if (_isBuilt)
-        {
-            throw new InvalidOperationException("The identity hub application has already been built.");
-        }
-
-        ValidateRegistrations();
-        string environmentName = _resourceContext.EnvironmentName;
-        var options = new IdentityHubApplicationOptions { Environment = environmentName };
-        var context = new IdentityHubApplicationContext(
-            environmentName,
-            _resourceContext is null ? null : System.IO.FileSystemPath.Parse(_resourceContext.ContentRootPath));
-        var hostedServices = new IHostService[_serviceRegistrations.Count + 1];
-
-        for (int index = 0; index < _serviceRegistrations.Count; index++)
-        {
-            hostedServices[index] = _serviceRegistrations[index].Invoke(context)
-                ?? throw new InvalidOperationException(
-                    "The identity hub application service factory returned null.");
-        }
+        EnsureNotBuilt();
 
         Uri endpoint = ResolveEndpoint();
         string dataPath = ResolveDataPath();
         Directory.CreateDirectory(dataPath);
-        hostedServices[^1] = new IdentityEndpointService(
-            endpoint,
-            dataPath,
-            _audiences,
-            _clients,
-            _controlPlane,
-            _resourceContext,
-            context);
-        context.SetHostedServices(hostedServices);
+
+        Services.AddSingleton<IdentityHubRegistrations>(serviceProvider => IdentityHubRegistrations.Create(
+            serviceProvider.GetRequiredService<IEnumerable<IdentityHubAudience>>(),
+            serviceProvider.GetRequiredService<IEnumerable<IdentityHubClientRegistration>>()));
+
+        // Registered after every AddService call, so the endpoint starts last and stops first.
+        Services.AddSingleton<IHostService>(serviceProvider =>
+        {
+            IdentityHubRegistrations registrations = serviceProvider.GetRequiredService<IdentityHubRegistrations>();
+            return new IdentityEndpointService(
+                endpoint,
+                dataPath,
+                registrations.Audiences,
+                registrations.Clients,
+                _controlPlane,
+                _resourceContext,
+                _context);
+        });
+        Services.AddSingleton<IHostEnvironment>(_context.Environment);
+        Services.AddSingleton<IIdentityHubApplicationContext>(_context);
 
         _isBuilt = true;
-        var application = new IdentityHubApplication(options, context);
-        if (_controlPlane is not null)
+
+        // Registration closes here. The provider copies the registrations, so one added after
+        // Build would silently never reach it; the read-only container turns that into an error.
+        if (Services.Container is ServiceContainer container)
         {
-            ResourceRuntime.HostBuilt(application, _controlPlane);
+            container.MakeReadOnly();
         }
 
-        return application;
+        _context.SetServiceProvider(((IServiceProviderBuilder)Services).Build());
+        try
+        {
+            // The declared clients are validated before any lifecycle service is created.
+            _ = _context.ServiceProvider.GetRequiredService<IdentityHubRegistrations>();
+            _context.ResolveHostedServices();
+
+            var application = new IdentityHubApplication(
+                new IdentityHubApplicationOptions { Environment = _environmentName },
+                _context);
+            if (_controlPlane is not null)
+            {
+                ResourceRuntime.HostBuilt(application, _controlPlane);
+            }
+
+            return application;
+        }
+        catch (Exception exception)
+        {
+            // The provider owns every service a factory created before the failure.
+            try
+            {
+                Task.Run(() => _context.DisposeServiceProviderAsync().AsTask()).GetAwaiter().GetResult();
+            }
+            catch (Exception disposalException)
+            {
+                throw new AggregateException(exception, disposalException);
+            }
+
+            throw;
+        }
     }
+
+    IIdentityHubApplicationBuilder IIdentityHubApplicationBuilder.AddAudience(string audience) => AddAudience(audience);
+
+    IIdentityHubApplicationBuilder IIdentityHubApplicationBuilder.AddClient(
+        string clientId,
+        Action<IdentityHubClientOptions> configure) => AddClient(clientId, configure);
 
     IIdentityHubApplication IIdentityHubApplicationBuilder.Build() => Build();
 
@@ -193,34 +280,6 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
         if (_isBuilt)
         {
             throw new InvalidOperationException("The identity hub application has already been built.");
-        }
-    }
-
-    private void ValidateRegistrations()
-    {
-        foreach (IdentityHubClientRegistration client in _clients.Values)
-        {
-            if (!client.AllowsClientCredentials && !client.AllowDeviceAuthorization)
-            {
-                throw new InvalidOperationException(
-                    $"IdentityHub client '{client.ClientId}' must enable client credentials or device authorization.");
-            }
-
-            if (client.Audiences.Count is 0)
-            {
-                throw new InvalidOperationException(
-                    $"IdentityHub client '{client.ClientId}' must allow at least one declared audience.");
-            }
-
-            for (int index = 0; index < client.Audiences.Count; index++)
-            {
-                string audience = client.Audiences[index];
-                if (!_audiences.Contains(audience))
-                {
-                    throw new InvalidOperationException(
-                        $"IdentityHub client '{client.ClientId}' refers to undeclared audience '{audience}'.");
-                }
-            }
         }
     }
 

@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 244 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 637 |
+| Declared project references | 643 |
 | Declared shared-source links | 14 |
 
 ## Ambiguous project names
@@ -130,21 +130,21 @@ every shipped `resources/**` project off the `ApplicationModel.Gateway*` assembl
 | `libraries/Resilience` | libraries/Core, libraries/ObjectPool |
 | `libraries/Security` | _(none)_ |
 | `resources/ApiManager` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/Hosting, libraries/Http, resources/Web |
-| `resources/ConfigurationStore` | libraries/ApplicationModel, libraries/Core, libraries/Hosting, libraries/IdentityModel, resources/Web |
+| `resources/ConfigurationStore` | libraries/ApplicationModel, libraries/Core, libraries/DependencyInjection, libraries/Hosting, libraries/IdentityModel, resources/Web |
 | `resources/Database` | libraries/ApplicationModel, libraries/Configuration, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/FileSystem, libraries/Hosting, libraries/IdentityModel, resources/Web |
 | `resources/EmailHub` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/Hosting, libraries/Http, resources/Web |
 | `resources/EventHub` | libraries/ApplicationModel, libraries/Connections, libraries/DependencyInjection, libraries/Hosting, libraries/Http, resources/Web |
-| `resources/IdentityHub` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/Hosting, libraries/Http, libraries/IdentityModel, resources/Web |
+| `resources/IdentityHub` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/Hosting, libraries/Http, libraries/IdentityModel, resources/Web |
 | `resources/IoTHub` | libraries/ApplicationModel, libraries/Connections, libraries/DependencyInjection, libraries/Hosting, libraries/Http, resources/Web |
 | `resources/LoadBalancer` | libraries/ApplicationModel, libraries/Connections, libraries/DependencyInjection, libraries/Hosting, libraries/Http, resources/Web |
-| `resources/LogSpace` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/Hosting, libraries/Http, libraries/IdentityModel, resources/Web |
+| `resources/LogSpace` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/Hosting, libraries/Http, libraries/IdentityModel, resources/Web |
 | `resources/MediaHub` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/Hosting, libraries/Http, resources/Web |
 | `resources/MessageHub` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/Hosting, libraries/Http, resources/Web |
 | `resources/NatGateway` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/Hosting, libraries/Http, resources/Web |
 | `resources/NotificationHub` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/Hosting, libraries/Http, resources/Web |
-| `resources/Rezolvr` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/Hosting, libraries/Http, resources/Web |
-| `resources/Scheduler` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/Hosting, libraries/Http, libraries/IdentityModel, resources/Web |
-| `resources/SecretStore` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/Hosting, libraries/Http, libraries/IdentityModel, libraries/Security, resources/Web |
+| `resources/Rezolvr` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/Hosting, libraries/Http, resources/Web |
+| `resources/Scheduler` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/Hosting, libraries/Http, libraries/IdentityModel, resources/Web |
+| `resources/SecretStore` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/Hosting, libraries/Http, libraries/IdentityModel, libraries/Security, resources/Web |
 | `resources/VpnGateway` | libraries/ApplicationModel, libraries/Connections, libraries/Core, libraries/DependencyInjection, libraries/Hosting, libraries/Http, resources/Web |
 | `resources/Web` | libraries/ApplicationModel, libraries/Cache, libraries/Configuration, libraries/Connections, libraries/DependencyInjection, libraries/FileSystem, libraries/Hosting, libraries/Http, libraries/IdentityModel, libraries/Logging, libraries/Security |
 
@@ -658,7 +658,7 @@ flowchart LR
 | `Assimalign.Cohesion.ConfigurationStore.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.Hosting.Resources` | — | — | — |
 | `Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.ConfigurationStore.Client` | — | — | — |
 | `Assimalign.Cohesion.ConfigurationStore.Client` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.ConfigurationStore.Hosting` | `Assimalign.Cohesion.ConfigurationStore`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry` | `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
+| `Assimalign.Cohesion.ConfigurationStore.Hosting` | `Assimalign.Cohesion.ConfigurationStore`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry` | `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
 ### `resources/Database`
 
@@ -786,7 +786,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.IdentityHub` | `Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.IdentityModel` | — | — | — |
 | `Assimalign.Cohesion.IdentityHub.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.Hosting.Resources` | — | — | — |
-| `Assimalign.Cohesion.IdentityHub.Hosting` | `Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.IdentityHub` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Security`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Http.Forms`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
+| `Assimalign.Cohesion.IdentityHub.Hosting` | `Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.IdentityHub` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Security`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Http.Forms`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 | `Assimalign.Cohesion.IdentityHub.Models` | `Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.IdentityModel` | — | — | — |
 
 ### `resources/IoTHub`
@@ -848,7 +848,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.LogSpace` | `Assimalign.Cohesion.Core` | — | — | — |
 | `Assimalign.Cohesion.LogSpace.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.Hosting.Resources` | — | — | — |
-| `Assimalign.Cohesion.LogSpace.Hosting` | `Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.LogSpace` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Security`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Http.RequestLimits`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting`<br>`Assimalign.Cohesion.Web.Hosting.Resources` | — | — |
+| `Assimalign.Cohesion.LogSpace.Hosting` | `Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.LogSpace` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Security`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Http.RequestLimits`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting`<br>`Assimalign.Cohesion.Web.Hosting.Resources` | — | — |
 | `Assimalign.Cohesion.LogSpace.Telemetry` | — | — | — | — |
 
 ### `resources/MediaHub`
@@ -953,7 +953,7 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.Rezolvr` | `Assimalign.Cohesion.Core` | — | — | — |
 | `Assimalign.Cohesion.Rezolvr.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.Hosting.Resources` | — | — | — |
-| `Assimalign.Cohesion.Rezolvr.Hosting` | `Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.Rezolvr` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting`<br>`Assimalign.Cohesion.Web.Hosting.Resources` | — | — |
+| `Assimalign.Cohesion.Rezolvr.Hosting` | `Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.Rezolvr` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting`<br>`Assimalign.Cohesion.Web.Hosting.Resources` | — | — |
 
 ### `resources/Scheduler`
 
@@ -978,7 +978,7 @@ flowchart LR
 | `Assimalign.Cohesion.Scheduler` | `Assimalign.Cohesion.Core` | — | — | — |
 | `Assimalign.Cohesion.Scheduler.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.Hosting.Resources` | — | — | — |
 | `Assimalign.Cohesion.Scheduler.Cron` | `Assimalign.Cohesion.Scheduler` | — | — | — |
-| `Assimalign.Cohesion.Scheduler.Hosting` | `Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.Scheduler` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
+| `Assimalign.Cohesion.Scheduler.Hosting` | `Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.Scheduler` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 | `Assimalign.Cohesion.Scheduler.Timer` | `Assimalign.Cohesion.Scheduler` | — | — | — |
 
 ### `resources/SecretStore`
@@ -1004,7 +1004,7 @@ flowchart LR
 | `Assimalign.Cohesion.SecretStore.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.Hosting.Resources` | — | — | — |
 | `Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.SecretStore.Client` | — | — | — |
 | `Assimalign.Cohesion.SecretStore.Client` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.SecretStore.Hosting` | `Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.SecretStore` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Security`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Security.DataProtection`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
+| `Assimalign.Cohesion.SecretStore.Hosting` | `Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Resources`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.SecretStore` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Security`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Security.DataProtection`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
 ### `resources/VpnGateway`
 
@@ -1084,13 +1084,13 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.Connections.Tcp` | 29 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.Connections.Tcp.Tests, Assimalign.Cohesion.Database.Graph.Tests, … |
 | `Assimalign.Cohesion.Http.Connections` | 29 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.Connections.NamedPipes.Tests, Assimalign.Cohesion.Connections.Tcp.Tests, … |
 | `Assimalign.Cohesion.Hosting.Health` | 28 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.Database.Hosting.Tests, … |
+| `Assimalign.Cohesion.DependencyInjection` | 22 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.DependencyInjection.Tests, … |
 | `Assimalign.Cohesion.Connections.InMemory` | 20 | Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory.Tests, Assimalign.Cohesion.Connections.Security.Tests, Assimalign.Cohesion.Connections.Tests, … |
 | `Assimalign.Cohesion.Database` | 19 | Assimalign.Cohesion.Database.Blob, Assimalign.Cohesion.Database.Blob.Catalog, Assimalign.Cohesion.Database.Blob.Client, Assimalign.Cohesion.Database.Client, … |
 | `Assimalign.Cohesion.Hosting.Telemetry` | 19 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.EmailHub.Hosting, … |
 | `Assimalign.Cohesion.IdentityModel` | 19 | Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub, … |
 | `Assimalign.Cohesion.Database.Storage` | 18 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob, Assimalign.Cohesion.Database.Blob.Catalog, Assimalign.Cohesion.Database.Blob.Storage, … |
 | `Assimalign.Cohesion.Http.Streaming` | 17 | Assimalign.Cohesion.Http.Connections.Tests, Assimalign.Cohesion.Http.ServerSentEvents, Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse, Assimalign.Cohesion.Http.ServerSentEvents.Tests, … |
-| `Assimalign.Cohesion.DependencyInjection` | 16 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.DependencyInjection.Tests, Assimalign.Cohesion.EmailHub.Hosting, … |
 | `Assimalign.Cohesion.Web.Testing` | 16 | Assimalign.Cohesion.Web.Api.Tests, Assimalign.Cohesion.Web.Caching.Tests, Assimalign.Cohesion.Web.Compression.Tests, Assimalign.Cohesion.Web.Diagnostics.Tests, … |
 | `Assimalign.Cohesion.Database.Types` | 15 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Documents.Catalog, Assimalign.Cohesion.Database.Execution, Assimalign.Cohesion.Database.Graph.Catalog, … |
 | `Assimalign.Cohesion.FileSystem` | 15 | Assimalign.Cohesion.Configuration.FileSystem, Assimalign.Cohesion.Configuration.FileSystem.Tests, Assimalign.Cohesion.Configuration.Ini.Tests, Assimalign.Cohesion.Configuration.Json.Tests, … |
