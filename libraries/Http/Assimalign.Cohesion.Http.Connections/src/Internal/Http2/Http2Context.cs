@@ -6,12 +6,11 @@ internal sealed class Http2Context : TransportHttpContext
 {
     public Http2Context(
         Http2Stream stream,
-        Http2Request request,
-        Http2Response response,
+        in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
         IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http20, request, response, connectionInfo, requestAborted, features)
+        : base(HttpVersion.Http20, requestHead, connectionInfo, requestAborted, features)
     {
         Stream = stream;
     }

@@ -24,8 +24,8 @@ internal static class Http3HeaderCodec
     /// already-decoded request header section and builds the request head. The
     /// connection context decodes the QPACK field lines (static-only or against
     /// the dynamic table) and hands them here, so both paths validate identically.
-    /// The request body is not part of the head: the returned request carries a
-    /// placeholder body the caller replaces with the lazily read request-body
+    /// The request body is not part of the field section: the returned head carries
+    /// a placeholder body the caller replaces with the lazily read request-body
     /// stream.
     /// </summary>
     /// <param name="fields">The decoded name/value field lines, in wire order.</param>
@@ -33,9 +33,9 @@ internal static class Http3HeaderCodec
     /// <param name="trailers">The trailer collection the request surfaces, filled when a trailer section arrives.</param>
     /// <param name="extendedConnectProtocol">The <c>:protocol</c> pseudo-header value, when present.</param>
     /// <param name="contentLength">The declared <c>Content-Length</c>, or <see langword="null"/> when absent.</param>
-    /// <returns>The validated HTTP/3 request.</returns>
+    /// <returns>The validated HTTP/3 request head.</returns>
     /// <exception cref="InvalidDataException">Thrown when the field section violates an HTTP/3 message rule.</exception>
-    public static Http3Request BuildRequest(
+    public static TransportHttpRequestHead BuildRequestHead(
         List<(string Name, string Value)> fields,
         HttpScheme fallbackScheme,
         HttpTrailerCollection trailers,
@@ -189,7 +189,7 @@ internal static class Http3HeaderCodec
         // length makes the request malformed here, before it is dispatched.
         contentLength = ParseContentLength(headers);
 
-        return new Http3Request(
+        return new TransportHttpRequestHead(
             host,
             path,
             HttpMethod.GetCanonicalizedValue(method),

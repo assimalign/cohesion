@@ -1287,13 +1287,13 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
     {
         HttpScheme fallbackScheme = _isSecure ? HttpScheme.Https : HttpScheme.Http;
         HttpTrailerCollection trailers = new(isSupported: true);
-        Http3Request request;
+        TransportHttpRequestHead requestHead;
         string? extendedConnectProtocol;
         long? contentLength;
 
         try
         {
-            request = Http3HeaderCodec.BuildRequest(fields, fallbackScheme, trailers, out extendedConnectProtocol, out contentLength);
+            requestHead = Http3HeaderCodec.BuildRequestHead(fields, fallbackScheme, trailers, out extendedConnectProtocol, out contentLength);
         }
         catch (InvalidDataException exception)
         {
@@ -1302,7 +1302,7 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         }
 
         // RFC 9110 §9.3.6 / RFC 9114 §4.4 — a CONNECT's DATA frames are tunnel octets, not a message body.
-        bool isConnect = request.Method == HttpMethod.Connect;
+        bool isConnect = requestHead.Method == HttpMethod.Connect;
         Http3RequestBodyStream body = new(
             this,
             reader,
@@ -1314,9 +1314,8 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             _limits.MaxRequestBodySize,
             _limits.MaxRequestHeadersFrameSize,
             headToken);
-        request.Body = body;
+        requestHead = requestHead with { Body = body };
 
-        Http3Response response = new();
         HttpConnectionInfo connectionInfo = new(streamConnection.LocalEndPoint, streamConnection.RemoteEndPoint);
 
         if (_requestInterceptors.Length > 0 || _responseInterceptors.Length > 0)
@@ -1331,15 +1330,16 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
         // Request-parse interceptor phase — the HTTP/3 analogue of the HTTP/1.1 invocation point,
         // run as the request head is assembled. RFC 9110 §9.3.6 — a CONNECT's post-head octets are
         // tunnel traffic, so its body hooks are skipped (head hooks still run). The hook-populated
-        // feature collection flows into the exchange through the Http3Context features parameter;
-        // zero interceptors keeps the pre-seam fast path.
-        HttpFeatureCollection? features;
+        // feature collection and the (possibly wrapped) body flow into the exchange through the
+        // Http3Context constructor; zero interceptors keeps the pre-seam fast path. The returned cap
+        // is not used here: the lazy body freezes and enforces the knob at its first read.
+        HttpRequestInterceptionResult interception;
         try
         {
-            features = await HttpRequestInterceptorPipeline.InvokeAsync(
+            interception = await HttpRequestInterceptorPipeline.InterceptAsync(
                 _requestInterceptors,
                 HttpVersion.Http30,
-                request,
+                requestHead,
                 connectionInfo,
                 _limits.MaxRequestBodySize,
                 isConnect).ConfigureAwait(false);
@@ -1367,13 +1367,20 @@ internal sealed class Http3ConnectionContext : HttpConnectionContext
             return null;
         }
 
-        Http3Context context = new(request, response, connectionInfo, receiveToken, streamConnection, requestStreamId, body, features);
+        Http3Context context = new(
+            requestHead with { Body = interception.Body },
+            connectionInfo,
+            receiveToken,
+            streamConnection,
+            requestStreamId,
+            body,
+            interception.Features);
         body.AttachOwner(context);
 
         // RFC 9218 §4 — the request's Priority header sets the effective priority.
         // Parsing is tolerant: a malformed value leaves the default (urgency 3,
         // non-incremental) in place.
-        if (request.Headers.TryGetValue(HttpHeaderKey.Priority, out HttpHeaderValue priorityValue)
+        if (requestHead.Headers.TryGetValue(HttpHeaderKey.Priority, out HttpHeaderValue priorityValue)
             && HttpPriority.TryParse(priorityValue, out HttpPriority headerPriority))
         {
             context.EffectivePriority = headerPriority;

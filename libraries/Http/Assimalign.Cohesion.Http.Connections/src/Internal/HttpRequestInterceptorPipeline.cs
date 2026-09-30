@@ -5,16 +5,16 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
 /// <summary>
-/// Runs the listener's request-parse interceptors over a request whose head has just been
-/// assembled into a materialized <see cref="TransportHttpRequest"/> — the shape both the HTTP/2
-/// and HTTP/3 transports present at their context-construction sites.
+/// Runs the listener's request-parse interceptors over a request head the transport has just
+/// decoded (<see cref="TransportHttpRequestHead"/>), before the exchange context that will own the
+/// request exists. The HTTP/2 and HTTP/3 transports call it at their context-construction sites.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The HTTP/1.1 parser (<see cref="Http1MessageReader"/>) invokes the same seam inline on
 /// its own read path; this helper reproduces its ordering, CONNECT-skip, empty-body, freeze, and
-/// failure-path disposal semantics for the transports that hand over a completed request object,
-/// keeping the seam contract uniform across protocols. Per-protocol timing (documented on
+/// failure-path disposal semantics for the multiplexed transports, keeping the seam contract uniform
+/// across protocols. Per-protocol timing (documented on
 /// <see cref="IHttpExchangeInterceptor"/>): HTTP/2 dispatches at <c>END_HEADERS</c> with a
 /// streaming body, so hooks run before the application observes any body octet (DATA already
 /// received sits buffered in the stream's flow-control-bounded pipe); HTTP/3 dispatches at the
@@ -31,76 +31,25 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </para>
 /// <para>
 /// Zero registered interceptors is the fast path: no interception context, no feature collection,
-/// and no per-request allocation — the request flows through with its original body stream, exactly
-/// as before the seam was wired into these transports.
+/// and no per-request allocation — the head's body flows through unchanged, exactly as before the
+/// seam was wired into these transports.
 /// </para>
 /// </remarks>
 internal static class HttpRequestInterceptorPipeline
 {
     /// <summary>
-    /// Invokes the head and body hooks for <paramref name="request"/> and returns the
-    /// hook-populated feature collection to flow into the exchange, or <see langword="null"/> when
-    /// no interceptors are registered.
-    /// </summary>
-    /// <param name="interceptors">The listener's snapshotted request-parse interceptors.</param>
-    /// <param name="version">The HTTP version of the exchange.</param>
-    /// <param name="request">
-    /// The decoded request. Its <see cref="TransportHttpRequest.Body"/> is replaced with the
-    /// wrapped stream produced by the body hooks (unless the request is a CONNECT).
-    /// </param>
-    /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
-    /// <param name="maxRequestBodySize">
-    /// The registration's body-size cap seeded into the parse context. Interceptors may adjust it
-    /// until it freezes — after the head hooks, or at the first body read for a lazy body
-    /// (<see cref="IHttpLazyRequestBody"/>, which then enforces it itself: HTTP/3 answers 413).
-    /// HTTP/2 enforces the value frozen after the head hooks, which it reads through
-    /// <see cref="InterceptAsync"/>.
-    /// </param>
-    /// <param name="isConnect">
-    /// Whether the request is a CONNECT, whose post-head octets are tunnel traffic rather than a
-    /// message body; body hooks are skipped when <see langword="true"/>.
-    /// </param>
-    /// <returns>
-    /// The feature collection populated by the head hooks, or <see langword="null"/> for the
-    /// zero-interceptor fast path.
-    /// </returns>
-    /// <exception cref="Assimalign.Cohesion.Http.HttpRequestRejectedException">
-    /// Thrown when an interceptor rejects the request. Before it surfaces, the partially-built body
-    /// wrapper chain and every hook-attached feature are disposed, since no exchange context will
-    /// ever exist to own their disposal walk.
-    /// </exception>
-    public static async ValueTask<HttpFeatureCollection?> InvokeAsync(
-        IHttpExchangeInterceptor[] interceptors,
-        HttpVersion version,
-        TransportHttpRequest request,
-        HttpConnectionInfo connectionInfo,
-        long? maxRequestBodySize,
-        bool isConnect)
-    {
-        HttpRequestInterceptionResult result = await InterceptAsync(
-            interceptors,
-            version,
-            request,
-            connectionInfo,
-            maxRequestBodySize,
-            isConnect).ConfigureAwait(false);
-
-        return result.Features;
-    }
-
-    /// <summary>
-    /// Invokes the head and body hooks for <paramref name="request"/>, exactly as
-    /// <see cref="InvokeAsync"/> does, and additionally returns the effective request-body cap — the
-    /// parse context's knob as frozen after the head hooks — for a transport that enforces it. A lazy
-    /// body (<see cref="IHttpLazyRequestBody"/>) is handed the parse context instead and freezes the
-    /// knob at its first read, so for it the returned cap is only the knob's value when the hooks
+    /// Invokes the head and body hooks for <paramref name="head"/> and returns what the exchange is
+    /// built from: the hook-populated feature collection, the effective request-body cap — the parse
+    /// context's knob as frozen after the head hooks — and the effective body stream. A lazy body
+    /// (<see cref="IHttpLazyRequestBody"/>) is handed the parse context instead and freezes the knob
+    /// at its first read, so for it the returned cap is only the knob's value when the hooks
     /// finished; the body enforces the value frozen at that read.
     /// </summary>
     /// <param name="interceptors">The listener's snapshotted request-parse interceptors.</param>
     /// <param name="version">The HTTP version of the exchange.</param>
-    /// <param name="request">
-    /// The decoded request. Its <see cref="TransportHttpRequest.Body"/> is replaced with the
-    /// wrapped stream produced by the body hooks (unless the request is a CONNECT).
+    /// <param name="head">
+    /// The decoded request head. Its <see cref="TransportHttpRequestHead.Body"/> is the transport body
+    /// the body hooks wrap (unless the request is a CONNECT).
     /// </param>
     /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
     /// <param name="maxRequestBodySize">The registration's body-size cap seeded into the parse context.</param>
@@ -110,16 +59,19 @@ internal static class HttpRequestInterceptorPipeline
     /// </param>
     /// <returns>
     /// The hook-populated feature collection (<see langword="null"/> on the zero-interceptor fast
-    /// path) and the effective cap (<paramref name="maxRequestBodySize"/> unchanged on the fast path).
+    /// path), the effective cap (<paramref name="maxRequestBodySize"/> unchanged on the fast path),
+    /// and the body the request exposes: the outermost wrapper the body hooks produced, or the head's
+    /// own body on the fast path and for a CONNECT.
     /// </returns>
     /// <exception cref="Assimalign.Cohesion.Http.HttpRequestRejectedException">
     /// Thrown when an interceptor rejects the request, after the partially-built body wrapper chain
-    /// and every hook-attached feature have been disposed.
+    /// and every hook-attached feature have been disposed, since no exchange context will ever exist
+    /// to own their disposal walk.
     /// </exception>
     public static async ValueTask<HttpRequestInterceptionResult> InterceptAsync(
         IHttpExchangeInterceptor[] interceptors,
         HttpVersion version,
-        TransportHttpRequest request,
+        TransportHttpRequestHead head,
         HttpConnectionInfo connectionInfo,
         long? maxRequestBodySize,
         bool isConnect)
@@ -129,19 +81,19 @@ internal static class HttpRequestInterceptorPipeline
         // the registration's configured limit, untouched by any hook.
         if (interceptors.Length == 0)
         {
-            return new HttpRequestInterceptionResult(null, maxRequestBodySize);
+            return new HttpRequestInterceptionResult(null, maxRequestBodySize, head.Body);
         }
 
         HttpFeatureCollection features = new();
         HttpExchangeInterceptorRequestContext context = new()
         {
             Version = version,
-            Method = request.Method,
-            Path = request.Path,
-            Scheme = request.Scheme,
-            Host = request.Host,
+            Method = head.Method,
+            Path = head.Path,
+            Scheme = head.Scheme,
+            Host = head.Host,
             // Hooks observe headers through a read-only view; derived values belong in Features.
-            Headers = request.Headers.AsReadOnly(),
+            Headers = head.Headers.AsReadOnly(),
             Features = features,
             ConnectionInfo = connectionInfo,
             MaxRequestBodySize = maxRequestBodySize,
@@ -149,7 +101,7 @@ internal static class HttpRequestInterceptorPipeline
 
         // Tracks the outermost body stream produced so far so the failure path can tear down the
         // partial wrapper chain (the outermost wrapper owns the streams it wraps).
-        Stream body = request.Body;
+        Stream body = head.Body;
 
         try
         {
@@ -166,7 +118,7 @@ internal static class HttpRequestInterceptorPipeline
             // than at the reader's pace) has the knob frozen here, so the effective value is fixed
             // for the remainder of the exchange (write-through features observe the freeze
             // immediately) and returned to the transport below.
-            if (request.Body is IHttpLazyRequestBody lazyBody)
+            if (head.Body is IHttpLazyRequestBody lazyBody)
             {
                 lazyBody.AttachInterception(context);
             }
@@ -194,14 +146,12 @@ internal static class HttpRequestInterceptorPipeline
                 {
                     body = interceptor.AfterRequestBody(context, body);
                 }
-
-                request.Body = body;
             }
 
             // Unless the body is lazy, the knob was frozen after the head hooks, so this is the value
             // the transport enforces for the rest of the exchange. A lazy body resolves and enforces
             // its own value at its first read.
-            return new HttpRequestInterceptionResult(features, context.MaxRequestBodySize);
+            return new HttpRequestInterceptionResult(features, context.MaxRequestBodySize, body);
         }
         catch
         {

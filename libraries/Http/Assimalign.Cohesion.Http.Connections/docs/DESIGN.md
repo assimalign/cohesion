@@ -138,6 +138,44 @@ have no connection-level byte stream — the HTTP/3 connection context
 `NotSupportedHttpConnectionContext` — no longer fabricate a fake pipe
 over `Stream.Null`; the member simply does not exist.
 
+### Exchange construction: the context builds its request and response
+
+Every version decodes a request head off the wire — host, path, method, scheme,
+query, headers, body stream and trailers, carried as the internal
+`TransportHttpRequestHead` — and runs the request-parse interceptors over it
+before any exchange exists. The interceptor pipeline returns the effective
+body (the outermost hook wrapper) alongside the hook-populated features. Only
+then does the transport construct its version's context (`Http1Context`,
+`Http2Context`, `Http3Context`), passing the head. The shared
+`TransportHttpContext` constructor builds one `TransportHttpRequest` and one
+`TransportHttpResponse` and passes itself to each, so `request.HttpContext`
+and `response.HttpContext` are read-only and assigned at construction. They
+are never observed unset, and nothing can re-parent them (#699).
+
+The request and response are the same sealed types on every version. The
+former per-version subclasses (`Http1Request` … `Http3Response`) added no
+members, so they were removed. Version-specific state lives on the contexts:
+the HTTP/1.1 keep-alive decision, the HTTP/2 stream, and the HTTP/3 stream
+connection and lazy body.
+
+Alternatives considered and rejected:
+
+- **The previous wire-up.** The transports built request, then response, then
+  context, and the context constructor called an internal `AttachContext` on
+  the request and response. That kept a mutating method on both types whose
+  only purpose was construction order, and a getter guard that threw for a
+  state that existed only mid-construction.
+- **A `Func<HttpContext>` handed to the request.** It removes the mutation but
+  costs an indirection and a captured closure per exchange for a reference
+  that never changes.
+- **A `protected init` accessor on the public `HttpRequest.HttpContext`.**
+  That changes the public abstract surface, and every implementation, to solve
+  an ordering problem internal to this package.
+
+The same rule is documented on `HttpRequest.HttpContext`: a context
+constructs its request and response and passes itself to each. A
+non-transport implementation, such as a test double, follows it too.
+
 ### The host contract: dispatch and fault finalization
 
 A host drives each connection context in a loop — receive an exchange, run its
@@ -240,10 +278,12 @@ request's lifecycle hooks in order:
    registration order, each receiving the previous result — the last registered
    interceptor produces the outermost wrapper. CONNECT tunnels skip body hooks;
    empty bodies still run them.
-5. Constructs the exchange, flowing the hook-populated feature collection in
-   through the context constructors (the previously-dormant `features`
-   parameters on `Http1Context`/`Http2Context`/`Http3Context` and
-   `TransportHttpContext` now forward it).
+5. Constructs the exchange, flowing the hook-populated feature collection and
+   the effective body in through the context constructors (the request head
+   carries the body; the `features` parameters on
+   `Http1Context`/`Http2Context`/`Http3Context` and `TransportHttpContext`
+   forward the collection). See "Exchange construction: the context builds
+   its request and response".
 
 **Zero registered interceptors is a true fast path**: no context, no feature
 collection, no read-only header view, no hook dispatch — the parser enforces

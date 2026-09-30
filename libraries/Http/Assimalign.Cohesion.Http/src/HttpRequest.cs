@@ -39,7 +39,17 @@ public abstract class HttpRequest : IHttpRequest
     /// <inheritdoc cref="IHttpRequest.Trailers" />
     public virtual HttpTrailerCollection Trailers => HttpTrailerCollection.Unsupported;
 
-    /// <inheritdoc cref="IHttpRequest.HttpContext" />
+    /// <summary>
+    /// Gets the context of the exchange this request belongs to.
+    /// </summary>
+    /// <remarks>
+    /// The back-reference is fixed when the request is constructed. The owning context constructs
+    /// its request and response and passes itself to each, so an implementation stores the context
+    /// in a read-only field and it can never be observed unset or re-parented. A transport that
+    /// decodes the request before the context exists hands the decoded values to the context
+    /// instead of a finished request: the <c>Assimalign.Cohesion.Http.Connections</c> transports
+    /// decode a request head, and each exchange context builds its request from that head.
+    /// </remarks>
     public abstract HttpContext HttpContext { get; }
 
     /// <inheritdoc />

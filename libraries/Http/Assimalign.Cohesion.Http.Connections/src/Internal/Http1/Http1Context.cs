@@ -8,14 +8,13 @@ internal sealed class Http1Context : TransportHttpContext
     private readonly Http1RequestBodyStream _requestBody;
 
     public Http1Context(
-        Http1Request request,
-        Http1Response response,
+        in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
         bool keepAlive,
         Http1RequestBodyStream requestBody,
         IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http11, request, response, connectionInfo, requestAborted, features)
+        : base(HttpVersion.Http11, requestHead, connectionInfo, requestAborted, features)
     {
         KeepAlive = keepAlive;
         _requestBody = requestBody;

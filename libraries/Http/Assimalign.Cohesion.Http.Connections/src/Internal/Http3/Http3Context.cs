@@ -7,15 +7,14 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 internal sealed class Http3Context : TransportHttpContext
 {
     public Http3Context(
-        Http3Request request,
-        Http3Response response,
+        in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
         IConnection streamConnection,
         long streamId,
         Http3RequestBodyStream requestBody,
         IHttpFeatureCollection? features = null)
-        : base(HttpVersion.Http30, request, response, connectionInfo, requestAborted, features)
+        : base(HttpVersion.Http30, requestHead, connectionInfo, requestAborted, features)
     {
         StreamConnection = streamConnection;
         StreamId = streamId;

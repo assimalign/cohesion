@@ -815,7 +815,7 @@ internal sealed class Http2Stream
             : string.Equals(decodedHeaders.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? HttpScheme.Https : HttpScheme.Http;
 
         HttpMethod method = HttpMethod.GetCanonicalizedValue(decodedHeaders.Method ?? HttpMethod.Get.Value);
-        Http2Request request = new(
+        TransportHttpRequestHead requestHead = new(
             host,
             path,
             method,
@@ -836,13 +836,14 @@ internal sealed class Http2Stream
 
         // Request-parse interceptor phase. RFC 9110 §9.3.6 — a CONNECT's post-head octets are
         // tunnel traffic rather than a message body, so body hooks are skipped for it (head hooks
-        // still run). The hook-populated feature collection flows into the exchange through the
-        // Http2Context features parameter; zero interceptors keeps the pre-seam fast path.
+        // still run). The hook-populated feature collection and the (possibly wrapped) body flow
+        // into the exchange through the Http2Context constructor; zero interceptors keeps the
+        // pre-seam fast path.
         bool isConnect = method == HttpMethod.Connect;
         HttpRequestInterceptionResult interception = await HttpRequestInterceptorPipeline.InterceptAsync(
             interceptors,
             HttpVersion.Http20,
-            request,
+            requestHead,
             connectionInfo,
             maxRequestBodySize,
             isConnect).ConfigureAwait(false);
@@ -857,7 +858,12 @@ internal sealed class Http2Stream
             && TryGetDeclaredContentLength(decodedHeaders.Headers, out long declaredLength)
             && declaredLength > limit;
 
-        Http2Context context = new(this, request, new Http2Response(), connectionInfo, requestAborted, interception.Features);
+        Http2Context context = new(
+            this,
+            requestHead with { Body = interception.Body },
+            connectionInfo,
+            requestAborted,
+            interception.Features);
 
         // Surface the :protocol pseudo-header (RFC 8441) generically so a
         // higher layer (the Assimalign.Cohesion.Http.ExtendedConnect package)

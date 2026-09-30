@@ -5,6 +5,16 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Http.Connections.Internal;
 
+/// <summary>
+/// The exchange context every HTTP version's transport derives from.
+/// </summary>
+/// <remarks>
+/// The context constructs its own request and response and passes itself to each, so their
+/// <see cref="HttpRequest.HttpContext"/> / <see cref="HttpResponse.HttpContext"/> back-references
+/// are fixed at construction (#699). A transport therefore hands the constructor the decoded
+/// <see cref="TransportHttpRequestHead"/>, after the request-parse interceptors have run over it,
+/// rather than a finished request.
+/// </remarks>
 internal abstract class TransportHttpContext : HttpContext
 {
     // Backs RequestAborted. Linked to the transport-supplied token so the
@@ -14,15 +24,16 @@ internal abstract class TransportHttpContext : HttpContext
 
     protected TransportHttpContext(
         HttpVersion version,
-        TransportHttpRequest request,
-        TransportHttpResponse response,
+        in TransportHttpRequestHead requestHead,
         HttpConnectionInfo connectionInfo,
         CancellationToken requestAborted,
         IHttpFeatureCollection? features = null)
     {
         Version = version;
-        Request = request;
-        Response = response;
+        // The request and response only store the reference; neither calls back into this context
+        // while it is still being constructed.
+        Request = new TransportHttpRequest(this, requestHead);
+        Response = new TransportHttpResponse(this);
         ConnectionInfo = connectionInfo;
         _abortedSource = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
         // The parser pre-populates the feature collection when request-parse interceptors
@@ -40,19 +51,11 @@ internal abstract class TransportHttpContext : HttpContext
             _ => new HttpFeatureCollection(features),
         };
         Items = new Dictionary<string, object?>(System.StringComparer.Ordinal);
-
-        // Wire the back-references last so the request and response can resolve
-        // their owning context from this point forward. Construction order in
-        // the transports is request -> response -> context, so the
-        // HttpContext back-reference can only be installed after the context
-        // itself exists.
-        request.AttachContext(this);
-        response.AttachContext(this);
     }
 
     public override HttpVersion Version { get; }
-    public override HttpRequest Request { get; }
-    public override HttpResponse Response { get; }
+    public override TransportHttpRequest Request { get; }
+    public override TransportHttpResponse Response { get; }
     public override HttpConnectionInfo ConnectionInfo { get; }
     public override HttpFeatureCollection Features { get; }
     public override IDictionary<string, object?> Items { get; }
