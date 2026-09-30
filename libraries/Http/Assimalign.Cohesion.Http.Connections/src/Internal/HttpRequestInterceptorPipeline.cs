@@ -17,10 +17,17 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// keeping the seam contract uniform across protocols. Per-protocol timing (documented on
 /// <see cref="IHttpExchangeInterceptor"/>): HTTP/2 dispatches at <c>END_HEADERS</c> with a
 /// streaming body, so hooks run before the application observes any body octet (DATA already
-/// received sits buffered in the stream's flow-control-bounded pipe); HTTP/3 drains the request
-/// stream before header decode, so hooks run before the body is <em>exposed</em> but not before
-/// it was <em>received</em>. Body hooks therefore wrap a forward-only stream that may still be
-/// arriving — exactly what the hook contract requires wrappers to tolerate.
+/// received sits buffered in the stream's flow-control-bounded pipe); HTTP/3 dispatches at the
+/// request's HEADERS frame and reads the body lazily, so hooks run before any body octet is read.
+/// Body hooks therefore wrap a forward-only stream that may still be arriving — exactly what the
+/// hook contract requires wrappers to tolerate.
+/// </para>
+/// <para>
+/// Freeze timing follows the body, not the protocol: a transport body that is read lazily and
+/// enforces the cap itself (<see cref="IHttpLazyRequestBody"/> — HTTP/3) receives the parse context
+/// and freezes the knob at its first read, exactly like HTTP/1.1; any other body (HTTP/2) has the
+/// knob frozen here, after the head hooks, and its transport enforces the value
+/// <see cref="InterceptAsync"/> returns.
 /// </para>
 /// <para>
 /// Zero registered interceptors is the fast path: no interception context, no feature collection,
@@ -44,9 +51,10 @@ internal static class HttpRequestInterceptorPipeline
     /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
     /// <param name="maxRequestBodySize">
     /// The registration's body-size cap seeded into the parse context. Interceptors may adjust it
-    /// until it is frozen after the head hooks. HTTP/3 carries the value for hook-attached features
-    /// (it bounds body buffering via QUIC flow control); HTTP/2 enforces the frozen value, which it
-    /// reads through <see cref="InterceptAsync"/>.
+    /// until it freezes — after the head hooks, or at the first body read for a lazy body
+    /// (<see cref="IHttpLazyRequestBody"/>, which then enforces it itself: HTTP/3 answers 413).
+    /// HTTP/2 enforces the value frozen after the head hooks, which it reads through
+    /// <see cref="InterceptAsync"/>.
     /// </param>
     /// <param name="isConnect">
     /// Whether the request is a CONNECT, whose post-head octets are tunnel traffic rather than a
@@ -83,7 +91,10 @@ internal static class HttpRequestInterceptorPipeline
     /// <summary>
     /// Invokes the head and body hooks for <paramref name="request"/>, exactly as
     /// <see cref="InvokeAsync"/> does, and additionally returns the effective request-body cap — the
-    /// parse context's knob as frozen after the head hooks — for a transport that enforces it.
+    /// parse context's knob as frozen after the head hooks — for a transport that enforces it. A lazy
+    /// body (<see cref="IHttpLazyRequestBody"/>) is handed the parse context instead and freezes the
+    /// knob at its first read, so for it the returned cap is only the knob's value when the hooks
+    /// finished; the body enforces the value frozen at that read.
     /// </summary>
     /// <param name="interceptors">The listener's snapshotted request-parse interceptors.</param>
     /// <param name="version">The HTTP version of the exchange.</param>
@@ -148,11 +159,21 @@ internal static class HttpRequestInterceptorPipeline
                 interceptor.AfterRequestHead(context);
             }
 
-            // The head hooks have run; freeze the knob so the effective cap is fixed for the
-            // remainder of the exchange (write-through features observe the freeze immediately).
-            // Matches the h1 timing contract — on the buffered transports there is no wire read to
-            // begin, so the freeze happens here rather than at the first body byte.
-            context.FreezeMaxRequestBodySize();
+            // The head hooks have run. A lazy transport body that enforces the cap itself (HTTP/3)
+            // takes the context and freezes the knob at its first read — the h1 timing contract, so
+            // BeforeRequestBody hooks and middleware keep the pre-read override window. Any other
+            // body (HTTP/2's flow-controlled pipe, whose transport enforces the cap on receipt rather
+            // than at the reader's pace) has the knob frozen here, so the effective value is fixed
+            // for the remainder of the exchange (write-through features observe the freeze
+            // immediately) and returned to the transport below.
+            if (request.Body is IHttpLazyRequestBody lazyBody)
+            {
+                lazyBody.AttachInterception(context);
+            }
+            else
+            {
+                context.FreezeMaxRequestBodySize();
+            }
 
             // Body hooks chain in registration order — each receives the previous result, so the
             // last registered interceptor produces the outermost wrapper. CONNECT tunnels are
@@ -160,9 +181,10 @@ internal static class HttpRequestInterceptorPipeline
             // run so wrappers over the (empty) representation stay meaningful.
             if (!isConnect)
             {
-                // The body is about to be exposed — the effective knobs are frozen and every head
-                // hook has run. On these transports the octets may already sit buffered (see the
-                // per-protocol timing remarks above); the hook observes "before exposure".
+                // The body is about to be exposed and every head hook has run. The knob is frozen
+                // unless the body is lazy (see above); on HTTP/2 octets may already sit buffered in
+                // the flow-controlled pipe (see the per-protocol timing remarks above), so the hook
+                // observes "before exposure".
                 foreach (IHttpExchangeInterceptor interceptor in interceptors)
                 {
                     interceptor.BeforeRequestBody(context);
@@ -176,8 +198,9 @@ internal static class HttpRequestInterceptorPipeline
                 request.Body = body;
             }
 
-            // The knob was frozen after the head hooks, so this is the value the transport enforces
-            // for the rest of the exchange.
+            // Unless the body is lazy, the knob was frozen after the head hooks, so this is the value
+            // the transport enforces for the rest of the exchange. A lazy body resolves and enforces
+            // its own value at its first read.
             return new HttpRequestInterceptionResult(features, context.MaxRequestBodySize);
         }
         catch

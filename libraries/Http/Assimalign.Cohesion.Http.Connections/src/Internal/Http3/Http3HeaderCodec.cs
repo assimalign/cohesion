@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 
 
@@ -9,34 +10,37 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// Bridges QPACK field sections (RFC 9204) to the HTTP message model and
 /// enforces the HTTP/3 field-section rules (RFC 9114 §4.2 / §4.3): the
 /// pseudo-header set, pseudo-before-regular ordering, lowercase field
-/// names, connection-specific field prohibition, and required request
-/// pseudo-headers. The QPACK dynamic table is disabled, so encoding and
-/// decoding reference only the static table or literals.
+/// names, connection-specific field prohibition, required request
+/// pseudo-headers, and — for a trailer section — the absence of
+/// pseudo-headers and framing fields. Decoding the QPACK representation
+/// itself (static table, or the opt-in dynamic table) is the connection
+/// context's job; this codec validates the decoded field lines. Response
+/// field sections are encoded against the static table and literals only.
 /// </summary>
 internal static class Http3HeaderCodec
 {
-    public static Http3Request DecodeRequestHeaders(ReadOnlySpan<byte> headerBlock, HttpScheme fallbackScheme, byte[] bodyBytes, out string? extendedConnectProtocol)
-    {
-        // Static-only QPACK decode (dynamic table disabled): the field section
-        // resolves against the static table or literals only.
-        List<(string Name, string Value)> fields = QPackFieldSectionDecoder.Decode(headerBlock);
-        return BuildRequest(fields, fallbackScheme, bodyBytes, out extendedConnectProtocol);
-    }
-
     /// <summary>
     /// Applies the HTTP/3 field-section rules (RFC 9114 §4.2 / §4.3) to an
-    /// already-decoded QPACK field section and builds the request. The dynamic
-    /// QPACK path (which resolves against the connection dynamic table) decodes
-    /// the field lines separately, then reuses this validation so static-only and
-    /// dynamic requests behave identically.
+    /// already-decoded request header section and builds the request head. The
+    /// connection context decodes the QPACK field lines (static-only or against
+    /// the dynamic table) and hands them here, so both paths validate identically.
+    /// The request body is not part of the head: the returned request carries a
+    /// placeholder body the caller replaces with the lazily read request-body
+    /// stream.
     /// </summary>
     /// <param name="fields">The decoded name/value field lines, in wire order.</param>
     /// <param name="fallbackScheme">The scheme to use when no <c>:scheme</c> is present.</param>
-    /// <param name="bodyBytes">The request body octets.</param>
+    /// <param name="trailers">The trailer collection the request surfaces, filled when a trailer section arrives.</param>
     /// <param name="extendedConnectProtocol">The <c>:protocol</c> pseudo-header value, when present.</param>
+    /// <param name="contentLength">The declared <c>Content-Length</c>, or <see langword="null"/> when absent.</param>
     /// <returns>The validated HTTP/3 request.</returns>
     /// <exception cref="InvalidDataException">Thrown when the field section violates an HTTP/3 message rule.</exception>
-    public static Http3Request BuildRequest(List<(string Name, string Value)> fields, HttpScheme fallbackScheme, byte[] bodyBytes, out string? extendedConnectProtocol)
+    public static Http3Request BuildRequest(
+        List<(string Name, string Value)> fields,
+        HttpScheme fallbackScheme,
+        HttpTrailerCollection trailers,
+        out string? extendedConnectProtocol,
+        out long? contentLength)
     {
         HttpHeaderCollection headers = new();
         string? authority = null;
@@ -180,6 +184,11 @@ internal static class Http3HeaderCodec
         // transport itself does not interpret extended CONNECT.
         extendedConnectProtocol = protocol;
 
+        // RFC 9114 §4.1.2 — the request body is checked against a declared
+        // Content-Length as its DATA frames arrive; a value that is not a valid
+        // length makes the request malformed here, before it is dispatched.
+        contentLength = ParseContentLength(headers);
+
         return new Http3Request(
             host,
             path,
@@ -187,7 +196,77 @@ internal static class Http3HeaderCodec
             scheme,
             query,
             headers,
-            new MemoryStream(bodyBytes, writable: false));
+            Stream.Null,
+            trailers);
+    }
+
+    /// <summary>
+    /// Validates a decoded request trailer section (RFC 9114 §4.1) and adds its fields to
+    /// <paramref name="trailers"/>. A trailer section carries no pseudo-header fields
+    /// (RFC 9114 §4.3), follows the same field-name rules as a header section (RFC 9114 §4.2),
+    /// and may not carry the fields that frame or route a message — <c>Content-Length</c> and
+    /// <c>Host</c> — which a trailer could otherwise use to contradict the head it follows
+    /// (RFC 9110 §6.5.1; the HTTP/1.1 reader rejects the same set).
+    /// </summary>
+    /// <param name="fields">The decoded name/value field lines, in wire order.</param>
+    /// <param name="trailers">The request's trailer collection.</param>
+    /// <exception cref="InvalidDataException">Thrown when the trailer section violates an HTTP/3 message rule.</exception>
+    public static void AddTrailers(List<(string Name, string Value)> fields, HttpTrailerCollection trailers)
+    {
+        foreach ((string name, string value) in fields)
+        {
+            if (name.Length == 0)
+            {
+                throw new InvalidDataException("HTTP/3 trailer section contains a zero-length field name.");
+            }
+
+            if (name[0] == ':')
+            {
+                throw new InvalidDataException($"HTTP/3 trailer section contains the pseudo-header field '{name}' (RFC 9114 §4.3).");
+            }
+
+            if (!IsLowercaseFieldName(name))
+            {
+                throw new InvalidDataException($"HTTP/3 trailer field name '{name}' must be lowercase (RFC 9114 §4.2).");
+            }
+
+            HttpHeaderKey key = new(name);
+
+            if (HttpFieldNormalization.IsForbiddenInHttp2Or3(key)
+                || key.Equals(HttpHeaderKey.ContentLength)
+                || key.Equals(HttpHeaderKey.Host))
+            {
+                throw new InvalidDataException($"HTTP/3 trailer field '{name}' is not permitted in a trailer section (RFC 9114 §4.2, RFC 9110 §6.5.1).");
+            }
+
+            if (trailers.TryGetValue(key, out HttpHeaderValue existingValue))
+            {
+                trailers[key] = HttpFieldNormalization.CombineFieldValue(key, existingValue, value);
+            }
+            else
+            {
+                trailers[key] = value;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Encodes the field section of a bodyless final response the transport answers on its own —
+    /// the <c>:status</c> pseudo-header and <c>content-length: 0</c> — used when a request is
+    /// refused before it ever became an exchange (a request-body limit violated while a request
+    /// interceptor read the body).
+    /// </summary>
+    /// <param name="statusCode">The final status code.</param>
+    /// <returns>The QPACK-encoded field section.</returns>
+    public static byte[] EncodeStatusOnlyResponseHeaders(HttpStatusCode statusCode)
+    {
+        List<(string Name, string Value)> fields =
+        [
+            (":status", ((int)statusCode).ToString(CultureInfo.InvariantCulture)),
+            ("content-length", "0"),
+        ];
+
+        return QPackFieldSectionEncoder.Encode(fields);
     }
 
     /// <summary>
@@ -300,6 +379,60 @@ internal static class Http3HeaderCodec
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Parses the request's <c>Content-Length</c>, if any (RFC 9110 §8.6): one or more identical
+    /// non-negative decimal values — as separate field lines or a comma-separated list — or the
+    /// request is malformed (RFC 9114 §4.1.2).
+    /// </summary>
+    private static long? ParseContentLength(HttpHeaderCollection headers)
+    {
+        if (!headers.TryGetValue(HttpHeaderKey.ContentLength, out HttpHeaderValue raw))
+        {
+            return null;
+        }
+
+        long? agreed = null;
+
+        foreach (string? entry in raw)
+        {
+            if (entry is null)
+            {
+                continue;
+            }
+
+            foreach (string segment in entry.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (!IsAsciiDigits(segment)
+                    || !long.TryParse(segment, NumberStyles.None, CultureInfo.InvariantCulture, out long parsed))
+                {
+                    throw new InvalidDataException($"HTTP/3 request Content-Length value '{segment}' is not a non-negative decimal integer (RFC 9110 §8.6).");
+                }
+
+                if (agreed is { } existing && existing != parsed)
+                {
+                    throw new InvalidDataException($"HTTP/3 request declares conflicting Content-Length values ({existing} and {parsed}) (RFC 9110 §8.6).");
+                }
+
+                agreed = parsed;
+            }
+        }
+
+        return agreed ?? throw new InvalidDataException("HTTP/3 request carries an empty Content-Length field (RFC 9110 §8.6).");
+    }
+
+    private static bool IsAsciiDigits(string value)
+    {
+        foreach (char c in value)
+        {
+            if (c is < '0' or > '9')
+            {
+                return false;
+            }
+        }
+
+        return value.Length > 0;
     }
 
     private static HttpQueryCollection ParseQuery(string requestTarget, out HttpPath path)

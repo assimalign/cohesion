@@ -11,8 +11,9 @@ internal sealed class Http3Request : TransportHttpRequest
         HttpScheme scheme,
         HttpQueryCollection query,
         HttpHeaderCollection headers,
-        Stream body)
-        : base(host, path, method, scheme, query, headers, body)
+        Stream body,
+        HttpTrailerCollection? trailers = null)
+        : base(host, path, method, scheme, query, headers, body, trailers)
     {
     }
 }

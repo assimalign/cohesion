@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -92,6 +93,62 @@ public class HttpContextTransportExtensionsTests
         context.HasResponseStarted.ShouldBeTrue();
 
         await connectionContext.SendAsync(context);
+        await context.DisposeAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HasResponseStarted/Http3: Should turn true at the first streamed flush")]
+    public async Task HasResponseStarted_Http3StreamedFlush_ShouldTurnTrueAtTheFirstFlush()
+    {
+        // Arrange
+        TestConnection stream = new(HttpProtocolPayloadFactory.CreateHttp3Request("GET", "/stream", "https", "api.test"));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(new TestMultiplexedConnectionListener(new TestMultiplexedConnection(stream)));
+        options.Interceptors.Add(HttpResponseStreaming.CreateInterceptor());
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext context = await ReadSingleContextAsync(connectionContext);
+
+        context.HasResponseStarted.ShouldBeFalse();
+
+        // Act
+        await context.Response.Streaming.FlushAsync();
+
+        // Assert
+        context.HasResponseStarted.ShouldBeTrue();
+
+        await connectionContext.SendAsync(context);
+        await context.DisposeAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Http.Connections] - HasResponseStarted/Http3: Should stay false after a 413 body rejection until the send answers it")]
+    public async Task HasResponseStarted_Http3RejectedBody_ShouldStayFalseUntilTheSendAnswers413()
+    {
+        // Arrange — the body is over the cap, so its read fails before anything reaches the wire: the
+        // host may still replace the response, and the transport then answers 413 in its place.
+        TestConnection stream = new(HttpProtocolPayloadFactory.CreateHttp3Request("POST", "/upload", "https", "api.test", body: new byte[64]));
+        HttpConnectionListenerOptions options = new();
+        options.UseHttp3(
+            new TestMultiplexedConnectionListener(new TestMultiplexedConnection(stream)),
+            static http3 => http3.Limits.MaxRequestBodySize = 16);
+
+        await using HttpConnectionListener listener = new(options);
+        IHttpConnectionContext connectionContext = await (await listener.AcceptOrListenAsync()).OpenAsync();
+        IHttpContext context = await ReadSingleContextAsync(connectionContext);
+
+        await Should.ThrowAsync<IOException>(() => context.Request.Body.ReadAsync(new byte[128]).AsTask());
+        context.HasResponseStarted.ShouldBeFalse();
+
+        // Act — the replacement a host stages for a faulted exchange (WebApplicationServer's 500).
+        context.Response.StatusCode = HttpStatusCode.InternalServerError;
+        await connectionContext.SendAsync(context);
+
+        // Assert — the transport committed its 413 in the replacement's place.
+        context.HasResponseStarted.ShouldBeTrue();
+        byte[] output = await stream.ReadOutputAsync();
+        IReadOnlyList<(long FrameType, byte[] Payload)> frames = HttpProtocolPayloadFactory.ParseHttp3Frames(output);
+        HttpProtocolPayloadFactory.DecodeLiteralHttp3Headers(frames.ShouldHaveSingleItem().Payload)[":status"].ShouldBe("413");
+
         await context.DisposeAsync();
     }
 

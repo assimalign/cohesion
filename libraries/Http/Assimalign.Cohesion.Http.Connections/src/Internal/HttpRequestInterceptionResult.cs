@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// <param name="MaxRequestBodySize">
 /// The effective per-request body-size cap, in octets, or <see langword="null"/> for unbounded. With
 /// interceptors registered this is the parse context's knob as frozen after the head hooks ran;
-/// without them it is the registration's configured limit, unchanged.
+/// without them it is the registration's configured limit, unchanged. A lazy body
+/// (<see cref="IHttpLazyRequestBody"/> — HTTP/3) freezes the knob at its first read instead, so for
+/// it this is only the knob's value when the hooks finished, and the body enforces its own.
 /// </param>
 internal readonly record struct HttpRequestInterceptionResult(HttpFeatureCollection? Features, long? MaxRequestBodySize);

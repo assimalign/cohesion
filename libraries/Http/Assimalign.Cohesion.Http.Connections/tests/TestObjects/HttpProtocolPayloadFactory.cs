@@ -86,6 +86,38 @@ internal static class HttpProtocolPayloadFactory
     }
 
     /// <summary>
+    /// Builds one complete HTTP/3 frame (RFC 9114 §7.1): the type and payload length as QUIC
+    /// variable-length integers, then the payload. Used to drive request streams frame by frame —
+    /// DATA chunks, trailing HEADERS, frames of unknown or prohibited type.
+    /// </summary>
+    public static byte[] CreateHttp3Frame(long frameType, byte[] payload)
+    {
+        using MemoryStream buffer = new();
+        WriteHttp3Frame(buffer, frameType, payload);
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Builds only an HTTP/3 frame header — the type and a declared payload length — with no payload
+    /// octets. Used to drive malformed-length cases: a frame the stream ends inside of, or a frame
+    /// longer than a configured limit.
+    /// </summary>
+    public static byte[] CreateHttp3FrameHeader(long frameType, long payloadLength)
+    {
+        using MemoryStream buffer = new();
+        WriteQuicInteger(buffer, frameType);
+        WriteQuicInteger(buffer, payloadLength);
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// Builds a HEADERS frame whose field section carries the supplied field lines verbatim (literal
+    /// names and values, RFC 9204 §4.5.6) — a trailer section when sent after the request's DATA.
+    /// </summary>
+    public static byte[] CreateHttp3HeadersFrame(params (string Name, string Value)[] fields)
+        => CreateHttp3RequestRaw(fields);
+
+    /// <summary>
     /// Builds the bytes a peer would send on its HTTP/3 control stream: the
     /// control stream-type prefix (0x00) followed by a SETTINGS frame carrying
     /// the supplied identifier/value pairs.
