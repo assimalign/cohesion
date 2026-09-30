@@ -3,6 +3,8 @@ using System.Threading;
 using System.Reflection;
 using System.Collections.Generic;
 
+using Assimalign.Cohesion.DependencyInjection.Properties;
+
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
 internal sealed class CallSiteRuntimeResolverVisitor : CallSiteVisitor<CallSiteRuntimeResolverVisitor.CallSiteRuntimeResolverContext, object>
@@ -109,14 +111,33 @@ internal sealed class CallSiteRuntimeResolverVisitor : CallSiteVisitor<CallSiteR
                 return resolved;
             }
 
-            resolved = VisitCallSiteMain(callSite, new CallSiteRuntimeResolverContext
+            // Only the thread holding the lock can see the flag set, so seeing it means this thread
+            // re-entered the call site while creating it: a cycle through a factory, which call-site
+            // construction cannot see. The lock is re-entrant, so without this check the recursion
+            // runs until the stack guard moves it to another thread, which then waits on this lock
+            // forever.
+            if (callSite.IsResolving)
             {
-                Scope = serviceProviderEngine,
-                AcquiredLocks = context.AcquiredLocks | lockType
-            });
-            serviceProviderEngine.CaptureDisposable(resolved);
-            callSite.Value = resolved;
-            return resolved;
+                throw new InvalidOperationException(
+                    Resources.GetCircularDependencyExceptionMessage(TypeNameHelper.GetTypeDisplayName(callSite.ServiceType)));
+            }
+
+            callSite.IsResolving = true;
+            try
+            {
+                resolved = VisitCallSiteMain(callSite, new CallSiteRuntimeResolverContext
+                {
+                    Scope = serviceProviderEngine,
+                    AcquiredLocks = context.AcquiredLocks | lockType
+                });
+                serviceProviderEngine.CaptureDisposable(resolved);
+                callSite.Value = resolved;
+                return resolved;
+            }
+            finally
+            {
+                callSite.IsResolving = false;
+            }
         }
     }
     protected override object VisitScopeCache(CallSiteService callSite, CallSiteRuntimeResolverContext context)

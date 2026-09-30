@@ -35,6 +35,106 @@ an instance registration with dynamic code disabled. It verified 1,024 resolutio
 validation, and owned versus borrowed disposal. Existing constructor/open-generic trim/AOT
 diagnostics remain outside this resolver-policy change; the strict factory path ran successfully.
 
+## Scope disposal
+
+A scope records every disposable service it creates and disposes them in reverse order of
+capture, so a service is disposed before the services it was built from.
+
+- **Every service is disposed.** A service whose disposal throws does not stop the rest. Once all
+  are done, a single failure is rethrown as itself and several are thrown together as an
+  `AggregateException`. `DisposeAsync` reports them through the task it returns.
+- **Each instance is disposed once.** One instance can be captured more than once, typically a
+  singleton exposed as several services through forwarding factories
+  (`AddSingleton<IFoo>(provider => provider.GetRequiredService<Foo>())`). When disposal begins,
+  every capture after the first is removed, so the instance is disposed once and still after the
+  services that depend on it.
+- **A scope captures nothing after disposal.** A service created after that point is disposed at
+  once and the resolution throws `ObjectDisposedException`.
+
+The lifecycle of a scope:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active
+    Active --> Active: capture a disposable service
+    Active --> Disposing: Dispose or DisposeAsync
+    Disposing --> Disposed: dispose each instance once, newest first, then report failures
+    Disposed --> Disposed: dispose a late capture, throw ObjectDisposedException
+```
+
+## Circular dependencies
+
+A cycle through constructor parameters is rejected while the call site is built, with the chain
+that closes it. A cycle through a factory cannot be seen then, because a factory is opaque, so it
+is caught when it happens. While the runtime resolver creates a singleton it marks the call site,
+and the creating thread re-entering a marked call site throws `InvalidOperationException` ("A
+circular dependency was detected for the service of type ..."). The mark is read and written only
+under the call site's lock: another thread asking for the same singleton waits for it, as before,
+instead of failing.
+
+Before, the lock's re-entrancy let the recursion run until the stack guard moved it to another
+thread, which then waited on that lock forever. Only root-cached resolution is guarded, as
+upstream: a cycle between scoped factories inside a child scope is still not detected.
+
+## Scope validation
+
+With `ValidateScopes`, the provider records the first scoped service in each call site's tree and
+rejects a scoped service resolved from the root provider or captured by a singleton.
+
+- **Per registration, not per service type.** Records are keyed by the call site's cache key,
+  which is the service type and slot. A scoped registration that is not the default therefore no
+  longer makes the default registration fail from the root provider.
+- **Each call site is walked once.** The record doubles as a memo. Walking every path instead of
+  every call site made validation exponential in the depth of a graph that shares dependencies:
+  2.5 s for 54 registrations 26 layers deep, against 0.13 ms memoized.
+- **The singleton check runs on every visit, memoized ones included**, because a memo records what
+  a tree contains, not which singleton reached it.
+- **Every call site has a key of its own.** A constant call site carries its registration's slot,
+  and an uncached enumerable its own key. Upstream keys an instance registration at slot 0 whatever
+  its position, so its memoized walk lets an earlier instance registration answer for a scoped
+  default and misses a singleton that captures it; this port does not.
+
+## Enumerable resolution and slots
+
+A registration's slot counts back from the last registration of its service; slot 0 is the one
+`GetService` returns. Single and enumerable resolution share call sites through the (service
+type, slot) key, so both must assign the same slots.
+
+When a closed service type matches exact and open generic registrations, `GetService` prefers the
+exact one. Enumeration therefore hands slots to every exact registration before any open generic
+one, while still listing the registrations in declaration order. An open generic whose constraints
+the type argument does not satisfy is left out of the enumeration. When it is the last
+registration it still owns slot 0, so `GetService` reports the constraint violation rather than
+returning an earlier registration, whichever of the two resolves first.
+
+## Upstream lineage
+
+This library is a fork of `Microsoft.Extensions.DependencyInjection` from the .NET 7 era, without
+keyed services, and the base commit was not recorded. It was last compared with `dotnet/runtime`
+main at `03d8bb9` (2026-09-29). Fixes ported since the fork:
+
+| Upstream change | Fixes |
+| --- | --- |
+| [dotnet/runtime#80410](https://github.com/dotnet/runtime/pull/80410) | Slots for closed and open generic registrations of one service |
+| [dotnet/runtime#86683](https://github.com/dotnet/runtime/pull/86683) | An allocation in every `CaptureDisposable` call |
+| [dotnet/runtime#87354](https://github.com/dotnet/runtime/pull/87354) | Scope validation keyed by service type |
+| [dotnet/runtime#96254](https://github.com/dotnet/runtime/pull/96254), [dotnet/runtime#98661](https://github.com/dotnet/runtime/pull/98661) | The exponential validation walk |
+| [dotnet/runtime#115974](https://github.com/dotnet/runtime/pull/115974) | The event source's provider list growing without bound |
+| [dotnet/runtime#123255](https://github.com/dotnet/runtime/pull/123255) | "Last wins" when the last open generic cannot close |
+| [dotnet/runtime#123342](https://github.com/dotnet/runtime/pull/123342) | Scope disposal stopping at the first exception |
+| [dotnet/runtime#124331](https://github.com/dotnet/runtime/pull/124331) | Deadlock on a circular dependency through a factory |
+| [dotnet/runtime#128768](https://github.com/dotnet/runtime/pull/128768) | Disposal of an instance once per capture |
+
+Where this port differs from upstream on purpose:
+
+- Constant call sites are keyed by slot, as described under *Scope validation*.
+- Re-entry is detected with a flag on the call site rather than a thread-static set. Because only
+  the lock holder can see the flag, it gives the same answer without a per-thread allocation.
+- The scoped-in-singleton error names the scoped service it found, not the dependency the
+  singleton reached it through.
+- `DisposeAsync` reports disposal failures through the returned task rather than throwing
+  synchronously.
+
 ## Layout Example
 
 ```text

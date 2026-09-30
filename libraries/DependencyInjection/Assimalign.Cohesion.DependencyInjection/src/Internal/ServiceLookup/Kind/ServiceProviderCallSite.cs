@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
 internal sealed class ServiceProviderCallSite : CallSiteService
 {
-    public ServiceProviderCallSite() : base(CallSiteResultCache.None)
+    public ServiceProviderCallSite() : base(CallSiteResultCache.None(typeof(IServiceProvider)))
     {
     }
 

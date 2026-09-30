@@ -22,10 +22,26 @@ internal sealed class ServiceEventSource : EventSource
     // Event source doesn't support large payloads so we chunk large payloads like formatted call site tree and descriptors
     private const int MaxChunkSize = 10 * 1024;
 
+    // Providers built and not yet disposed, so a listener that attaches later still receives their
+    // summaries. A provider that is never disposed leaves a dead reference behind; those are pruned
+    // when the list has doubled since the last pruning, which bounds it by twice the live providers.
     private readonly List<WeakReference<ServiceProvider>> _providers = new();
+    private int? _survivingProviders;
 
     private ServiceEventSource() : base(EventSourceSettings.EtwSelfDescribingEventFormat)
     {
+    }
+
+    /// <summary>The providers currently tracked for late listeners, dead references included.</summary>
+    internal int TrackedProviderCount
+    {
+        get
+        {
+            lock (_providers)
+            {
+                return _providers.Count;
+            }
+        }
     }
 
     // NOTE
@@ -142,6 +158,16 @@ internal sealed class ServiceEventSource : EventSource
     {
         lock (_providers)
         {
+            int providers = _providers.Count;
+            if (providers > 0 &&
+                (_survivingProviders is int surviving
+                    ? (uint)providers >= 2 * (uint)surviving
+                    : providers == _providers.Capacity))
+            {
+                _providers.RemoveAll(static reference => !reference.TryGetTarget(out _));
+                _survivingProviders = _providers.Count;
+            }
+
             _providers.Add(new WeakReference<ServiceProvider>(provider));
         }
 
@@ -155,11 +181,16 @@ internal sealed class ServiceEventSource : EventSource
         {
             for (int i = _providers.Count - 1; i >= 0; i--)
             {
-                // remove the provider, along with any stale references
+                // remove the provider, along with any stale references found before it
                 WeakReference<ServiceProvider> reference = _providers[i];
                 if (!reference.TryGetTarget(out ServiceProvider target) || target == provider)
                 {
                     _providers.RemoveAt(i);
+
+                    if (target is not null)
+                    {
+                        break;
+                    }
                 }
             }
         }

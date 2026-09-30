@@ -7,25 +7,25 @@ using Assimalign.Cohesion.DependencyInjection.Properties;
 
 internal sealed class CallSiteValidatorVisitor : CallSiteVisitor<CallSiteValidatorVisitor.CallSiteValidatorState, Type?>
 {
-    // Keys are services being resolved via GetService, values - first scoped service in their call site tree
-    private readonly ConcurrentDictionary<Type, Type> _scopedServices = new();
+    // Keyed by call-site cache key (service type and slot), never by service type alone: a service
+    // type's registrations that are not the default have call sites of their own, and a scoped one
+    // must not flag the default registration. The value is the first scoped service in the call
+    // site's tree, or null when the tree has none.
+    private readonly ConcurrentDictionary<CallSiteServiceCacheKey, Type?> _scopedServices = new();
 
-    public void ValidateCallSite(CallSiteService callSite)
+    public void ValidateCallSite(CallSiteService callSite) => VisitCallSite(callSite, default);
+
+    public void ValidateResolution(CallSiteService callSite, IServiceScope scope, IServiceScope rootScope)
     {
-        var scoped = VisitCallSite(callSite, default);
-        if (scoped != null)
+        if (ReferenceEquals(scope, rootScope)
+            && _scopedServices.TryGetValue(callSite.Cache.Key, out Type? scopedService)
+            && scopedService != null)
         {
-            _scopedServices[callSite.ServiceType] = scoped;
-        }
-    }
-    public void ValidateResolution(Type serviceType, IServiceScope scope, IServiceScope rootScope)
-    {
-        if (ReferenceEquals(scope, rootScope) && _scopedServices.TryGetValue(serviceType, out Type? scopedService))
-        {
+            Type serviceType = callSite.ServiceType;
             if (serviceType == scopedService)
             {
                 throw new InvalidOperationException(
-                    Resources.GetDirectScopedResolvedFromRootExceptionMessage( 
+                    Resources.GetDirectScopedResolvedFromRootExceptionMessage(
                         serviceType,
                         nameof(ServiceLifetime.Scoped).ToLowerInvariant()));
             }
@@ -36,6 +36,30 @@ internal sealed class CallSiteValidatorVisitor : CallSiteVisitor<CallSiteValidat
                     scopedService,
                     nameof(ServiceLifetime.Scoped).ToLowerInvariant()));
         }
+    }
+
+    protected override Type? VisitCallSite(CallSiteService callSite, CallSiteValidatorState state)
+    {
+        // Walk each call site's tree once. Without the memo a graph that shares dependencies is
+        // walked once per path through it, which grows exponentially with its depth.
+        if (!_scopedServices.TryGetValue(callSite.Cache.Key, out Type? firstScopedService))
+        {
+            firstScopedService = base.VisitCallSite(callSite, state);
+            _scopedServices[callSite.Cache.Key] = firstScopedService;
+        }
+
+        // Checked on every visit, memoized ones included: the memo records what a tree contains, not
+        // which singleton reached it.
+        if (firstScopedService != null && state.Singleton != null)
+        {
+            throw new InvalidOperationException(Resources.GetScopedInSingletonExceptionMessage(
+                firstScopedService,
+                state.Singleton.ServiceType,
+                nameof(ServiceLifetime.Scoped).ToLowerInvariant(),
+                nameof(ServiceLifetime.Singleton).ToLowerInvariant()));
+        }
+
+        return firstScopedService;
     }
 
     protected override Type? VisitConstructor(ConstructorCallSite constructorCallSite, CallSiteValidatorState state)
@@ -76,16 +100,9 @@ internal sealed class CallSiteValidatorVisitor : CallSiteVisitor<CallSiteValidat
         {
             return null;
         }
-        if (state.Singleton != null)
-        {
-            throw new InvalidOperationException(Resources.GetScopedInSingletonExceptionMessage(
-                scopedCallSite.ServiceType,
-                state.Singleton.ServiceType,
-                nameof(ServiceLifetime.Scoped).ToLowerInvariant(),
-                nameof(ServiceLifetime.Singleton).ToLowerInvariant()
-                ));
-        }
 
+        // A singleton consuming this service is reported by VisitCallSite, which sees memoized
+        // trees too.
         VisitCallSiteMain(scopedCallSite, state);
         return scopedCallSite.ServiceType;
     }

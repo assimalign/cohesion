@@ -15,6 +15,7 @@ namespace Assimalign.Cohesion.DependencyInjection.Tests;
 /// <summary>
 /// Verifies per-provider resolver compilation policy and interpreted service lifetimes.
 /// </summary>
+[Collection(nameof(EventSourceCollection))]
 public sealed class ServiceProviderDynamicCodeTests
 {
     /// <summary>
