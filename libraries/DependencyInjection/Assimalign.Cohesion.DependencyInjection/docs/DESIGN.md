@@ -66,15 +66,26 @@ stateDiagram-v2
 
 A cycle through constructor parameters is rejected while the call site is built, with the chain
 that closes it. A cycle through a factory cannot be seen then, because a factory is opaque, so it
-is caught when it happens. While the runtime resolver creates a singleton it marks the call site,
-and the creating thread re-entering a marked call site throws `InvalidOperationException` ("A
-circular dependency was detected for the service of type ..."). The mark is read and written only
-under the call site's lock: another thread asking for the same singleton waits for it, as before,
-instead of failing.
+is caught when it happens and throws `InvalidOperationException` ("A circular dependency was
+detected for the service of type ...") instead of deadlocking:
 
-Before, the lock's re-entrancy let the recursion run until the stack guard moved it to another
-thread, which then waited on that lock forever. Only root-cached resolution is guarded, as
-upstream: a cycle between scoped factories inside a child scope is still not detected.
+- **Singletons, and scoped services resolved from the root provider.** While the runtime resolver
+  creates the value it marks the call site. The mark is read and written only under the call site's
+  lock, so only the creating thread can see it; another thread asking for the same singleton waits
+  for it, as before.
+- **Scoped services in a child scope.** While a scope creates a scoped service it holds a
+  reservation for it in its own cache, and finding that reservation means the creation asked for
+  itself again. A mark on the call site would not work here, because two scopes can create the same
+  service at the same time. Every resolver follows one protocol on the scope: reserve the entry,
+  store the service in it, or release it when creation fails so a later request tries again. That
+  covers the IL and expression-tree resolvers as well as the interpreted one, because a factory can
+  close a cycle after its service was compiled. The cache is private to the scope, so no resolver
+  can read a reservation as a service.
+
+Before, the locks' re-entrancy let the recursion run until the interpreted resolver's stack guard
+moved it to another thread, which then waited on the lock forever. Compiled resolvers have no stack
+guard, so the same cycle overflowed the stack. A cycle made only of transient services is still not
+detected: nothing caches a transient, so there is no entry to reserve.
 
 ## Scope validation
 
@@ -130,6 +141,8 @@ Where this port differs from upstream on purpose:
 - Constant call sites are keyed by slot, as described under *Scope validation*.
 - Re-entry is detected with a flag on the call site rather than a thread-static set. Because only
   the lock holder can see the flag, it gives the same answer without a per-thread allocation.
+- A cycle between scoped factories in a child scope is detected. Upstream detects cycles only for
+  services cached at the root.
 - The scoped-in-singleton error names the scoped service it found, not the dependency the
   singleton reached it through.
 - `DisposeAsync` reports disposal failures through the returned task rather than throwing

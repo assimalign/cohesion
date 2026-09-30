@@ -1,21 +1,222 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.DependencyInjection.Internal;
+
 using static Assimalign.Cohesion.DependencyInjection.Tests.CircularDependencyFixtures;
 
 namespace Assimalign.Cohesion.DependencyInjection.Tests;
 
 /// <summary>
-/// Verifies that a singleton resolved again while it is being created, which only a factory can
-/// cause, throws instead of deadlocking.
+/// Verifies that a singleton or scoped service resolved again while it is being created, which only a
+/// factory can cause, throws instead of deadlocking.
 /// </summary>
 public sealed class ServiceProviderCircularDependencyTests
 {
     private static readonly TimeSpan _deadlockTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// The resolver that creates scoped services. The compiled resolvers are forced on so the first
+    /// resolution already runs compiled code, rather than after the dynamic engine's warm-up.
+    /// </summary>
+    public enum ScopedResolver
+    {
+        Interpreted,
+        Emitted,
+        Expressions,
+    }
+
+    [Theory(DisplayName = "Cohesion Test [DependencyInjection] - GetService: Should throw when a scoped factory resolves its own service in a scope")]
+    [InlineData(ScopedResolver.Interpreted)]
+    [InlineData(ScopedResolver.Emitted)]
+    [InlineData(ScopedResolver.Expressions)]
+    public void GetService_WhenScopedFactoryResolvesItselfInScope_ShouldThrowInsteadOfDeadlocking(ScopedResolver resolver)
+    {
+        if (!CanRun(resolver))
+        {
+            return;
+        }
+
+        // Arrange
+        using var provider = Build(resolver, builder =>
+            builder.AddScoped<SelfReferencingService>(services =>
+                new SelfReferencingService(services.GetRequiredService<SelfReferencingService>())));
+        IServiceScope scope = provider.CreateScope(); // Not a using: see ResolveOnWorkerThread.
+
+        // Act
+        Exception? failure = ResolveOnWorkerThread(scope.ServiceProvider, typeof(SelfReferencingService));
+
+        // Assert
+        var exception = failure.ShouldBeOfType<InvalidOperationException>();
+        exception.Message.ShouldContain("circular dependency");
+        exception.Message.ShouldContain(nameof(SelfReferencingService));
+        scope.Dispose();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [DependencyInjection] - GetService: Should throw when scoped factories resolve each other in a scope")]
+    [InlineData(ScopedResolver.Interpreted)]
+    [InlineData(ScopedResolver.Emitted)]
+    [InlineData(ScopedResolver.Expressions)]
+    public void GetService_WhenScopedFactoriesResolveEachOtherInScope_ShouldThrowInsteadOfDeadlocking(ScopedResolver resolver)
+    {
+        if (!CanRun(resolver))
+        {
+            return;
+        }
+
+        // Arrange
+        using var provider = Build(resolver, builder =>
+        {
+            builder.AddScoped<FactoryCycleA>(services => new FactoryCycleA(services.GetRequiredService<FactoryCycleB>()));
+            builder.AddScoped<FactoryCycleB>(services => new FactoryCycleB(services.GetRequiredService<FactoryCycleA>()));
+        });
+        IServiceScope scope = provider.CreateScope(); // Not a using: see ResolveOnWorkerThread.
+
+        // Act
+        Exception? failure = ResolveOnWorkerThread(scope.ServiceProvider, typeof(FactoryCycleA));
+
+        // Assert
+        failure.ShouldBeOfType<InvalidOperationException>().Message.ShouldContain("circular dependency");
+        scope.Dispose();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [DependencyInjection] - GetService: Should resolve a scoped service in the same scope once its cycle is gone")]
+    [InlineData(ScopedResolver.Interpreted)]
+    [InlineData(ScopedResolver.Emitted)]
+    [InlineData(ScopedResolver.Expressions)]
+    public void GetService_AfterScopedCircularResolutionFailed_ShouldResolveInTheSameScope(ScopedResolver resolver)
+    {
+        if (!CanRun(resolver))
+        {
+            return;
+        }
+
+        // Arrange: a failed creation must give its reservation back, or the scope would report every
+        // later request as a cycle.
+        bool resolveItself = true;
+        using var provider = Build(resolver, builder =>
+            builder.AddScoped<SelfReferencingService>(services => resolveItself
+                ? new SelfReferencingService(services.GetRequiredService<SelfReferencingService>())
+                : new SelfReferencingService(null)));
+        IServiceScope scope = provider.CreateScope(); // Not a using: see ResolveOnWorkerThread.
+        ResolveOnWorkerThread(scope.ServiceProvider, typeof(SelfReferencingService)).ShouldBeOfType<InvalidOperationException>();
+        resolveItself = false;
+
+        // Act
+        var service = scope.ServiceProvider.GetRequiredService<SelfReferencingService>();
+
+        // Assert
+        service.Inner.ShouldBeNull();
+        scope.ServiceProvider.GetRequiredService<SelfReferencingService>().ShouldBeSameAs(service);
+        scope.Dispose();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [DependencyInjection] - GetService: Should create a scoped service again after its factory threw")]
+    [InlineData(ScopedResolver.Interpreted)]
+    [InlineData(ScopedResolver.Emitted)]
+    [InlineData(ScopedResolver.Expressions)]
+    public void GetService_AfterScopedFactoryThrew_ShouldCreateTheServiceOnTheNextRequest(ScopedResolver resolver)
+    {
+        if (!CanRun(resolver))
+        {
+            return;
+        }
+
+        // Arrange
+        int attempts = 0;
+        using var provider = Build(resolver, builder =>
+            builder.AddScoped<SlowService>(_ => ++attempts == 1
+                ? throw new InvalidOperationException("First attempt fails.")
+                : new SlowService()));
+        using IServiceScope scope = provider.CreateScope();
+        Should.Throw<InvalidOperationException>(() => scope.ServiceProvider.GetService(typeof(SlowService)))
+            .Message.ShouldBe("First attempt fails.");
+
+        // Act
+        var service = scope.ServiceProvider.GetRequiredService<SlowService>();
+
+        // Assert
+        scope.ServiceProvider.GetRequiredService<SlowService>().ShouldBeSameAs(service);
+        attempts.ShouldBe(2);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [DependencyInjection] - GetService: Should share a scoped service that another scoped factory resolves")]
+    [InlineData(ScopedResolver.Interpreted)]
+    [InlineData(ScopedResolver.Emitted)]
+    [InlineData(ScopedResolver.Expressions)]
+    public void GetService_WhenScopedFactoryResolvesAnotherScopedService_ShouldShareItWithTheScope(ScopedResolver resolver)
+    {
+        if (!CanRun(resolver))
+        {
+            return;
+        }
+
+        // Arrange
+        using var provider = Build(resolver, builder =>
+        {
+            builder.AddScoped<ScopedLeaf>();
+            builder.AddScoped<NestedScopedService>(services => new NestedScopedService(services.GetRequiredService<ScopedLeaf>()));
+        });
+        using IServiceScope scope = provider.CreateScope();
+
+        // Act
+        var nested = scope.ServiceProvider.GetRequiredService<NestedScopedService>();
+
+        // Assert
+        scope.ServiceProvider.GetRequiredService<ScopedLeaf>().ShouldBeSameAs(nested.Leaf);
+        scope.ServiceProvider.GetRequiredService<NestedScopedService>().ShouldBeSameAs(nested);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [DependencyInjection] - GetService: Should let two scopes create one scoped service at the same time")]
+    [InlineData(ScopedResolver.Interpreted)]
+    [InlineData(ScopedResolver.Emitted)]
+    [InlineData(ScopedResolver.Expressions)]
+    public async Task GetService_WhenTwoScopesCreateTheSameServiceAtOnce_ShouldNotReportACycle(ScopedResolver resolver)
+    {
+        if (!CanRun(resolver))
+        {
+            return;
+        }
+
+        // Arrange: each factory waits inside its creation until the other has started, so both scopes
+        // hold a reservation for the same service at the same time.
+        using var bothCreating = new Barrier(2);
+        using var provider = Build(resolver, builder =>
+            builder.AddScoped<SlowService>(_ =>
+            {
+                bothCreating.SignalAndWait(_deadlockTimeout).ShouldBeTrue("The other scope never started creating the service.");
+                return new SlowService();
+            }));
+
+        // Act
+        Task<object> first = Task.Run(() => ResolveInNewScope(provider));
+        Task<object> second = Task.Run(() => ResolveInNewScope(provider));
+        object[] services = await Task.WhenAll(first, second).WaitAsync(_deadlockTimeout);
+
+        // Assert
+        services[0].ShouldBeOfType<SlowService>();
+        services[1].ShouldBeOfType<SlowService>().ShouldNotBeSameAs(services[0]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [DependencyInjection] - GetService: Should throw when a scoped factory resolves its own service from the root provider")]
+    public void GetService_WhenScopedFactoryResolvesItselfFromRoot_ShouldThrowInsteadOfDeadlocking()
+    {
+        // Arrange: resolved from the root provider, a scoped service is cached like a singleton.
+        using var provider = Build(builder =>
+            builder.AddScoped<SelfReferencingService>(services =>
+                new SelfReferencingService(services.GetRequiredService<SelfReferencingService>())));
+
+        // Act
+        Exception? failure = ResolveOnWorkerThread(provider, typeof(SelfReferencingService));
+
+        // Assert
+        failure.ShouldBeOfType<InvalidOperationException>().Message.ShouldContain("circular dependency");
+    }
 
     [Fact(DisplayName = "Cohesion Test [DependencyInjection] - GetService: Should throw when a singleton factory resolves its own service")]
     public void GetService_WhenSingletonFactoryResolvesItself_ShouldThrowInsteadOfDeadlocking()
@@ -152,8 +353,36 @@ public sealed class ServiceProviderCircularDependencyTests
         return (ServiceProvider)((IServiceProviderBuilder)builder).Build();
     }
 
+    private static ServiceProvider Build(ScopedResolver resolver, Action<ServiceProviderBuilder> configure)
+    {
+        using var builder = new ServiceProviderBuilder(new ServiceProviderOptions { EnableDynamicCode = false });
+        configure(builder);
+        var provider = (ServiceProvider)((IServiceProviderBuilder)builder).Build();
+
+        // Without dynamic code the provider interprets; the compiled engines build a resolver on first use.
+        provider.engine = resolver switch
+        {
+            ScopedResolver.Emitted => new ILEmitServiceProviderEngine(provider),
+            ScopedResolver.Expressions => new ExpressionsServiceProviderEngine(provider),
+            _ => provider.engine,
+        };
+        return provider;
+    }
+
+    // The compiled resolvers generate code, which NativeAOT cannot run.
+    private static bool CanRun(ScopedResolver resolver) =>
+        resolver == ScopedResolver.Interpreted || RuntimeFeature.IsDynamicCodeCompiled;
+
+    private static object ResolveInNewScope(ServiceProvider provider)
+    {
+        using IServiceScope scope = provider.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<SlowService>();
+    }
+
     // Before the fix this deadlocked rather than throwing, so it runs on a background thread that the
-    // test abandons if it never finishes.
+    // test abandons if it never finishes. An abandoned resolution keeps holding its scope's lock, which
+    // disposing the scope takes, so a test that passes a scope disposes it only after this returns.
+    // Disposing it from a using would hang the test in cleanup instead of failing it.
     private static Exception? ResolveOnWorkerThread(IServiceProvider provider, Type serviceType)
     {
         Exception? failure = null;

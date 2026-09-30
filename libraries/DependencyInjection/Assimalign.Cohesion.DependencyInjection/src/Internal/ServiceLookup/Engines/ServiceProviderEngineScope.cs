@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.DependencyInjection.Properties;
@@ -13,25 +14,29 @@ internal sealed class ServiceProviderEngineScope : IServiceScope, IServiceProvid
     // instead of allocating a set.
     private const int maxDisposablesForLinearDeduplication = 16;
 
+    // Held in _resolvedServices for a scoped service while this scope creates it.
+    private static readonly object _creationInProgress = new();
+
     // For testing only. An entry is null where BeginDispose removed a repeated capture of one instance.
     internal IList<object?> Disposables => _disposables ?? (IList<object?>)Array.Empty<object?>();
 
+    // The scoped services this scope created. Private so that every resolver goes through the
+    // reservation protocol below and none can mistake a reservation for a service.
+    private readonly Dictionary<CallSiteServiceCacheKey, object?> _resolvedServices;
     private bool _disposed;
     private List<object?>? _disposables;
 
     public ServiceProviderEngineScope(ServiceProvider provider, bool isRootScope)
     {
-        ResolvedServices = new();
+        _resolvedServices = new();
         RootProvider = provider;
         IsRootScope = isRootScope;
     }
 
-    internal Dictionary<CallSiteServiceCacheKey, object?> ResolvedServices { get; }
-
     // This lock protects state on the scope, in particular, for the root scope, it protects
-    // the list of disposable entries only, since ResolvedServices are cached on CallSites
-    // For other scopes, it protects ResolvedServices and the list of disposables
-    internal object Sync => ResolvedServices;
+    // the list of disposable entries only, since its singletons are cached on CallSites
+    // For other scopes, it protects _resolvedServices and the list of disposables
+    internal object Sync => _resolvedServices;
 
     public bool IsRootScope { get; }
 
@@ -49,6 +54,54 @@ internal sealed class ServiceProviderEngineScope : IServiceScope, IServiceProvid
 
     public IServiceProvider ServiceProvider => this;
     public IServiceScope CreateScope() => RootProvider.CreateScope();
+
+    // The three members below are the scoped-service cache protocol shared by the interpreted and
+    // the compiled resolvers. They run while holding Sync, or on a stack-guard fork acting for the
+    // thread that holds it, so no other thread reads the entries meanwhile.
+
+    /// <summary>
+    /// Returns the cached scoped service for <paramref name="key"/>, or reserves its entry for this
+    /// scope to create it.
+    /// </summary>
+    /// <remarks>
+    /// Finding the reservation means the service's own creation asked for it again. Only a factory can
+    /// do that, because a constructor cycle is rejected when the call site is built, and the service
+    /// can never be created: before the reservation existed, the re-entrant lock let the recursion run
+    /// until the stack guard moved it to another thread, which then waited on this scope's lock forever.
+    /// </remarks>
+    /// <returns><see langword="true"/> with the cached service; <see langword="false"/> once the entry is reserved.</returns>
+    /// <exception cref="InvalidOperationException">The service is already being created in this scope.</exception>
+    internal bool TryGetOrReserveScopedService(CallSiteServiceCacheKey key, out object? service)
+    {
+        ref object? entry = ref CollectionsMarshal.GetValueRefOrAddDefault(_resolvedServices, key, out bool exists);
+        if (!exists)
+        {
+            entry = _creationInProgress;
+            service = null;
+            return false;
+        }
+
+        if (ReferenceEquals(entry, _creationInProgress))
+        {
+            throw new InvalidOperationException(
+                Resources.GetCircularDependencyExceptionMessage(TypeNameHelper.GetTypeDisplayName(key.Type)));
+        }
+
+        service = entry;
+        return true;
+    }
+
+    /// <summary>
+    /// Replaces the reservation for <paramref name="key"/> with the service created for it.
+    /// </summary>
+    internal void StoreScopedService(CallSiteServiceCacheKey key, object? service) => _resolvedServices[key] = service;
+
+    /// <summary>
+    /// Drops the reservation for <paramref name="key"/> after its creation failed, so a later request
+    /// creates the service again, as it did before reservations existed.
+    /// </summary>
+    internal void ReleaseScopedServiceReservation(CallSiteServiceCacheKey key) => _resolvedServices.Remove(key);
+
     internal object CaptureDisposable(object service)
     {
         if (ReferenceEquals(this, service) || !(service is IDisposable || service is IAsyncDisposable))
@@ -268,14 +321,14 @@ internal sealed class ServiceProviderEngineScope : IServiceScope, IServiceProvid
             }
 
             // Track statistics about the scope (number of disposable objects and number of disposed services)
-            ServiceEventSource.Log.ScopeDisposed(RootProvider, ResolvedServices.Count, _disposables?.Count ?? 0);
+            ServiceEventSource.Log.ScopeDisposed(RootProvider, _resolvedServices.Count, _disposables?.Count ?? 0);
 
             // We've transitioned to the disposed state, so future calls to
             // CaptureDisposable will immediately dispose the object.
             // No further changes to _disposables are allowed.
             _disposed = true;
 
-            // ResolvedServices is never cleared for singletons because there might be a compilation running in background
+            // _resolvedServices is never cleared for singletons because there might be a compilation running in background
             // trying to get a cached singleton service. If it doesn't find it
             // it will try to create a new one which will result in an ObjectDisposedException.
         }

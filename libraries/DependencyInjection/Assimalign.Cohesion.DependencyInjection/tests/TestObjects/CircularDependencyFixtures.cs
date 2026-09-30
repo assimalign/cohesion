@@ -51,6 +51,20 @@ internal static class CircularDependencyFixtures
     {
     }
 
+    internal sealed class ScopedLeaf
+    {
+    }
+
+    internal sealed class NestedScopedService
+    {
+        public NestedScopedService(ScopedLeaf leaf)
+        {
+            Leaf = leaf;
+        }
+
+        public ScopedLeaf Leaf { get; }
+    }
+
     /// <summary>
     /// Starts work while being constructed that resolves this singleton again on the same thread.
     /// </summary>
