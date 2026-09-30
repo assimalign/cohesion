@@ -15,13 +15,13 @@ using Assimalign.Cohesion.DependencyInjection.Internal;
 public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDisposable
 {
     private readonly CallSiteValidatorVisitor? _callSiteValidator;
-    private readonly Func<Type, Func<ServiceProviderEngineScope, object?>> _createServiceAccessor;
+    private readonly Func<Type, ServiceAccessor> _createServiceAccessor;
 
     // Internal for testing
     internal ServiceProviderEngine engine;
 
     internal bool IsDisposed;
-    private ConcurrentDictionary<Type, Func<ServiceProviderEngineScope, object?>> _realizedServices;
+    private readonly ConcurrentDictionary<Type, ServiceAccessor> _serviceAccessors;
 
     internal CallSiteFactory CallSiteFactory { get; }
     internal ServiceProviderEngineScope Root { get; }
@@ -35,7 +35,7 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
         Root = new ServiceProviderEngineScope(this, isRootScope: true);
         engine = GetEngine(options.EnableDynamicCode);
         _createServiceAccessor = CreateServiceAccessor;
-        _realizedServices = new ConcurrentDictionary<Type, Func<ServiceProviderEngineScope, object?>>();
+        _serviceAccessors = new ConcurrentDictionary<Type, ServiceAccessor>();
 
         CallSiteFactory = new CallSiteFactory(container);
         CallSiteFactory.Add(typeof(IServiceProvider), new ServiceProviderCallSite()); // The list of built in services that aren't part of the list of service descriptors. keep this in sync with CallSiteFactory.IsService
@@ -101,9 +101,12 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
     {
         _callSiteValidator?.ValidateCallSite(callSite);
     }
-    private void OnResolve(Type serviceType, IServiceScope scope)
+    private void OnResolve(CallSiteService? callSite, IServiceScope scope)
     {
-        _callSiteValidator?.ValidateResolution(serviceType, scope, Root);
+        if (callSite != null)
+        {
+            _callSiteValidator?.ValidateResolution(callSite, scope, Root);
+        }
     }
     internal object GetService(Type serviceType, ServiceProviderEngineScope serviceProviderEngineScope)
     {
@@ -112,13 +115,13 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
             ThrowHelper.ThrowObjectDisposedException();
         }
 
-        var realizedService = _realizedServices.GetOrAdd(serviceType, this._createServiceAccessor);
+        ServiceAccessor serviceAccessor = _serviceAccessors.GetOrAdd(serviceType, _createServiceAccessor);
 
-        OnResolve(serviceType, serviceProviderEngineScope);
+        OnResolve(serviceAccessor.CallSite, serviceProviderEngineScope);
 
         ServiceEventSource.Log.ServiceResolved(this, serviceType);
 
-        var result = realizedService.Invoke(serviceProviderEngineScope);
+        var result = serviceAccessor.RealizedService.Invoke(serviceProviderEngineScope);
 
         System.Diagnostics.Debug.Assert(result is null || CallSiteFactory.IsService(serviceType));
 
@@ -144,7 +147,7 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
             throw new InvalidOperationException($"Error while validating the service descriptor '{descriptor}': {exception.Message}", exception);
         }
     }
-    private Func<ServiceProviderEngineScope, object> CreateServiceAccessor(Type serviceType)
+    private ServiceAccessor CreateServiceAccessor(Type serviceType)
     {
         var callSite = CallSiteFactory.GetCallSite(serviceType, new CallSiteChain());
         if (callSite != null)
@@ -156,17 +159,17 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
             if (callSite.Cache.Location == CallSiteResultCacheLocation.Root)
             {
                 object value = CallSiteRuntimeResolverVisitor.Instance.Resolve(callSite, Root);
-                return scope => value;
+                return new ServiceAccessor(callSite, scope => value);
             }
 
-            return engine.RealizeService(callSite);
+            return new ServiceAccessor(callSite, engine.RealizeService(callSite));
         }
 
-        return _ => null;
+        return new ServiceAccessor(null, static _ => null);
     }
     internal void ReplaceServiceAccessor(CallSiteService callSite, Func<ServiceProviderEngineScope, object> accessor)
     {
-        _realizedServices[callSite.ServiceType] = accessor;
+        _serviceAccessors[callSite.ServiceType] = new ServiceAccessor(callSite, accessor);
     }
     internal IServiceScope CreateScope()
     {
@@ -187,5 +190,20 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
         [UnconditionalSuppressMessage("AotAnalysis", "IL3050:RequiresDynamicCode",
                 Justification = "CreateDynamicEngine is guarded by EnableDynamicCode and RuntimeFeature.IsDynamicCodeCompiled.")] // see also https://github.com/dotnet/linker/issues/2715
         ServiceProviderEngine CreateDynamicEngine() => new DynamicServiceProviderEngine(this);
+    }
+
+    // The resolver for one service type, kept with the call site it was built from so that
+    // resolution-time scope validation can look the call site up by its cache key.
+    private sealed class ServiceAccessor
+    {
+        public ServiceAccessor(CallSiteService? callSite, Func<ServiceProviderEngineScope, object?> realizedService)
+        {
+            CallSite = callSite;
+            RealizedService = realizedService;
+        }
+
+        public CallSiteService? CallSite { get; }
+
+        public Func<ServiceProviderEngineScope, object?> RealizedService { get; }
     }
 }

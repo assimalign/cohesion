@@ -4,8 +4,6 @@ namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
 internal readonly struct CallSiteServiceCacheKey : IEquatable<CallSiteServiceCacheKey>
 {
-    public static CallSiteServiceCacheKey Empty { get; } = new CallSiteServiceCacheKey(null, 0);
-
     /// <summary>
     /// Type of service being cached
     /// </summary>

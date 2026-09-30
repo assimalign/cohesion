@@ -3,7 +3,6 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -17,13 +16,7 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
 {
     private static readonly ParameterExpression _scopeParameter = Expression.Parameter(typeof(ServiceProviderEngineScope));
 
-    private static readonly ParameterExpression _resolvedServices = Expression.Variable(typeof(IDictionary<CallSiteServiceCacheKey, object>), _scopeParameter.Name + "resolvedServices");
     private static readonly ParameterExpression _sync = Expression.Variable(typeof(object), _scopeParameter.Name + "sync");
-    private static readonly BinaryExpression _resolvedServicesVariableAssignment =
-        Expression.Assign(_resolvedServices,
-            Expression.Property(
-                _scopeParameter,
-                typeof(ServiceProviderEngineScope).GetProperty(nameof(ServiceProviderEngineScope.ResolvedServices), BindingFlags.Instance | BindingFlags.NonPublic)!));
 
     private static readonly BinaryExpression _syncVariableAssignment =
         Expression.Assign(_sync,
@@ -78,8 +71,7 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
         {
             return Expression.Lambda<Func<ServiceProviderEngineScope, object>>(
                 Expression.Block(
-                    new[] { _resolvedServices, _sync },
-                    _resolvedServicesVariableAssignment,
+                    new[] { _sync },
                     _syncVariableAssignment,
                     BuildScopedExpression(callSite)),
                 _scopeParameter);
@@ -219,38 +211,37 @@ internal sealed class CallSiteExpressionResolverBuilderVisitor : CallSiteVisitor
             typeof(CallSiteServiceCacheKey));
 
         ParameterExpression resolvedVariable = Expression.Variable(typeof(object), "resolved");
+        ParameterExpression storedVariable = Expression.Variable(typeof(bool), "stored");
 
-        ParameterExpression resolvedServices = _resolvedServices;
-
-        MethodCallExpression tryGetValueExpression = Expression.Call(
-            resolvedServices,
-            ServiceLookupHelpers.TryGetValueMethodInfo,
+        // Throws when this scope is already creating the service: a cycle through a factory.
+        MethodCallExpression tryGetOrReserveExpression = Expression.Call(
+            _scopeParameter,
+            ServiceLookupHelpers.TryGetOrReserveScopedServiceMethodInfo,
             keyExpression,
             resolvedVariable);
 
         Expression captureDisposible = TryCaptureDisposable(callSite, _scopeParameter, VisitCallSiteMain(callSite, null));
 
-        BinaryExpression assignExpression = Expression.Assign(
-            resolvedVariable,
-            captureDisposible);
+        BlockExpression createExpression = Expression.Block(
+            Expression.Assign(resolvedVariable, captureDisposible),
+            Expression.Call(_scopeParameter, ServiceLookupHelpers.StoreScopedServiceMethodInfo, keyExpression, resolvedVariable),
+            Expression.Assign(storedVariable, Expression.Constant(true)));
 
-        MethodCallExpression addValueExpression = Expression.Call(
-            resolvedServices,
-            ServiceLookupHelpers.AddMethodInfo,
-            keyExpression,
-            resolvedVariable);
+        // Keep the reservation only if the value was stored in it.
+        ConditionalExpression releaseExpression = Expression.IfThen(
+            Expression.Not(storedVariable),
+            Expression.Call(_scopeParameter, ServiceLookupHelpers.ReleaseScopedServiceReservationMethodInfo, keyExpression));
 
         BlockExpression blockExpression = Expression.Block(
             typeof(object),
             new[]
             {
-                    resolvedVariable
+                    resolvedVariable,
+                    storedVariable
             },
             Expression.IfThen(
-                Expression.Not(tryGetValueExpression),
-                Expression.Block(
-                    assignExpression,
-                    addValueExpression)),
+                Expression.Not(tryGetOrReserveExpression),
+                Expression.TryFinally(createExpression, releaseExpression)),
             resolvedVariable);
 
 

@@ -18,6 +18,15 @@ internal abstract class CallSiteService
     public CallSiteResultCache Cache { get; }
     public object Value { get; set; }
 
+    /// <summary>
+    /// Set while the runtime resolver creates this call site's root-cached value.
+    /// </summary>
+    /// <remarks>
+    /// Read and written only while holding the lock on this call site, so only the thread creating
+    /// the value can observe it set.
+    /// </remarks>
+    internal bool IsResolving { get; set; }
+
     public bool CaptureDisposable =>
         ImplementationType == null ||
         typeof(IDisposable).IsAssignableFrom(ImplementationType) ||
