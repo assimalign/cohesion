@@ -87,6 +87,33 @@ internal static class GuardSmoke
                 && response.Content.Headers.ContentType?.MediaType == "application/problem+json";
         });
 
+        failures += await CheckAsync("route group binds its prefix value under its endpoint policies", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("tenants/acme/orders/9", cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response.StatusCode == HttpStatusCode.OK && body.Contains("acme-order-9", StringComparison.Ordinal);
+        });
+
+        failures += await CheckAsync("path branch sees its base and the remaining path", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("branch/x/y", cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response.StatusCode == HttpStatusCode.OK && body == "/branch|/x/y";
+        });
+
+        failures += await CheckAsync("fallback answers a client route with index.html", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("app/settings", cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response.StatusCode == HttpStatusCode.OK && body.Contains("cohesion-web-aot-guard", StringComparison.Ordinal);
+        });
+
+        failures += await CheckAsync("fallback leaves a missing asset 404", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("missing.js", cancellationToken);
+            return response.StatusCode == HttpStatusCode.NotFound;
+        });
+
         Console.WriteLine(failures == 0 ? "AOT guard smoke: all checks passed." : $"AOT guard smoke: {failures} check(s) failed.");
         return failures == 0 ? 0 : 1;
     }

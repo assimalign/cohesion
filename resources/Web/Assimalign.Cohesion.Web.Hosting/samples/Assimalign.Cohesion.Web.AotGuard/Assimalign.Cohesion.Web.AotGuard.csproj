@@ -2,7 +2,8 @@
   <PropertyGroup>
     <RootNamespace>Assimalign.Cohesion.Web.AotGuard</RootNamespace>
     <!--
-        NativeAOT guard for the Web area (#1052). A representative application composes routing,
+        NativeAOT guard for the Web area (#1052). A representative application composes routing
+        (route groups, endpoint policy verbs, the static-file fallback), pipeline branching,
         source-generated typed binding, source-generated JSON, error handling, Cookie and JWT Bearer
         authentication, static files, response compression, request decompression, rate limiting
         and request timeouts. Two layers:

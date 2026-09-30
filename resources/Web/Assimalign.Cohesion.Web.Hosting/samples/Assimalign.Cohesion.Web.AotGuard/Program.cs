@@ -49,6 +49,19 @@ await using WebApplication application = builder.Build();
 application.UseErrorHandling();
 application.UseResponseCompression();
 application.UseRequestDecompression();
+application.UseStaticFiles();
+application.UseAuthentication();
+application.Map("/branch", branch => branch.Run(async context =>
+{
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    context.Response.Headers[HttpHeaderKey.ContentType] = "text/plain; charset=utf-8";
+    await context.Response.Body.WriteAsync(
+        Encoding.UTF8.GetBytes($"{context.GetPathBase()}|{context.GetEffectivePath()}"),
+        context.RequestCancelled);
+}));
+application.UseRouting();
+
+// Endpoint policy middleware reads the endpoint UseRouting published, so it follows it.
 application.UseRequestTimeouts(TimeSpan.FromSeconds(30));
 application.UseRateLimiting(options => options.GlobalPolicy = RateLimitingPolicy.Create(
     static (IHttpContext _) => "global",
@@ -57,9 +70,6 @@ application.UseRateLimiting(options => options.GlobalPolicy = RateLimitingPolicy
         PermitLimit = 1000,
         Window = TimeSpan.FromMinutes(1),
     })));
-application.UseStaticFiles();
-application.UseAuthentication();
-application.UseRouting();
 
 application.MapGet("/items/{id:int}", async (int id, IHttpContext context) =>
 {
@@ -97,6 +107,27 @@ application.MapGet("/boom", async (IHttpContext context) =>
     await Task.Yield();
     throw new InvalidOperationException("The AOT guard's fault endpoint.");
 });
+
+// A route group: the typed endpoint binds the group's prefix value, and the group's and the route's
+// policy verbs must both be applied, or dispatch fails closed.
+IRouterGroupBuilder tenants = application.MapGroup("/tenants/{tenant}")
+    .WithRequestTimeout(TimeSpan.FromSeconds(10));
+tenants.MapGet("orders/{id:int}", async (string tenant, int id, IHttpContext context) =>
+{
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    await context.Response.WriteContentAsync(new GuardItem(id, $"{tenant}-order-{id}"), context.RequestCancelled);
+})
+    .WithName("tenant-order")
+    .RequireRateLimiting(RateLimitingPolicy.Create(
+        static (IHttpContext _) => "tenant-orders",
+        static (string _) => new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 1000,
+            Window = TimeSpan.FromMinutes(1),
+        })));
+
+// A single-page application's client routes; a path that names a file is never answered with it.
+application.MapFallbackToFile("index.html");
 
 if (!smoke)
 {
