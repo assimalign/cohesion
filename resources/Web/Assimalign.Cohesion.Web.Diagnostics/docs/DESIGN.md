@@ -63,15 +63,27 @@ the Logging library's own correlation mechanism, not a bespoke one.
   evaluates once, at the application's first body write — by which point the response head is
   set. Request capture is decided upfront from the request headers.
 - **Per-endpoint overrides read after `next`, not before.** The logging middleware sits ahead
-  of routing (it must see unrouted requests), so no endpoint is known when it starts. By the
-  time the downstream pipeline completes, routing has installed `IRouteMatchFeature`, and one
-  metadata lookup (`GetMetadata<HttpLoggingMetadata>`, last-wins) is effectively free. The
+  of routing (it must also log the exchanges middleware ahead of routing reject), so no endpoint
+  is known when it starts. `UseRouting` publishes the matched endpoint (`IRouteMatchFeature`) on
+  the exchange and calls `next`; the pipeline's terminal runs it (#1054), and the match is still
+  there when the pipeline unwinds, so one metadata lookup (`GetMetadata<HttpLoggingMetadata>`,
+  last-wins) is effectively free. Before #1054 routing was terminal and published the same
+  feature before running the handler, so the post-`next` read carried across the split
+  unchanged; only the preflight rule below is new. The
   consequence is honest and documented: an override freely widens/narrows *emission-time*
   fields (request line, headers, status, duration — all still readable post-pipeline), but the
   *capture* fields (`RequestBody`/`ResponseBody`/`BytesTransferred`) can only narrow, because
   the streams were armed (or not) before routing ran. `HttpLoggingFields.None` suppresses the
   entry entirely — the health-probe case. `HttpLoggingMetadata` is a sealed concrete carrier
-  per the metadata-carrier discipline; there is no `IHttpLoggingMetadata`.
+  per the metadata-carrier discipline; there is no `IHttpLoggingMetadata`. Access logging is
+  optional behavior, so the carrier does not name a required middleware
+  (`IRouteMiddlewareMetadata`): an endpoint dispatched without `UseHttpLogging` is just not
+  logged.
+- **A CORS preflight is logged with the configured fields.** Routing publishes the candidate
+  endpoint of a CORS preflight (`IsPreflight`) so CORS can read its metadata, but the candidate
+  never runs for the preflight. An override describes the exchanges its endpoint handles, so it
+  is not applied to the preflight: otherwise an `OPTIONS` request naming a silenced endpoint would
+  vanish from the access log while being answered by something else entirely.
 - **The effective identity is read, never guessed.** Scheme, host, and client address are the
   effective values from `Assimalign.Cohesion.Http.Forwarded` (see "Behind a proxy" below): what
   the forwarded-headers trust model vouched for, otherwise the transport's. The middleware never
@@ -173,7 +185,8 @@ rewrites the request — and leaves every trust decision to `Web.ForwardedHeader
 `UseHttpLogging` belongs **first** in the pipeline — before authentication, CORS, host
 filtering, and routing — so rejected and unrouted exchanges are still logged. Behind a proxy,
 `UseForwardedHeaders` goes directly after it: the entry reads the effective identity after the
-pipeline unwinds (see "Behind a proxy"). Two consequences to be aware of:
+pipeline unwinds (see "Behind a proxy"). Per-endpoint overrides are read at the same point, so
+they need no position relative to `UseRouting`. Two consequences to be aware of:
 
 - Anything registered *before* it is invisible to the access log.
 - Captured bodies are whatever crosses the wire at its position: place it after a

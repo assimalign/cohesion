@@ -149,13 +149,19 @@ internal sealed class HttpLoggingMiddleware : IWebApplicationMiddleware
 
     /// <summary>
     /// Resolves the field set for the completed exchange: the configured fields unless the
-    /// matched endpoint carries an <see cref="HttpLoggingMetadata"/> override (last-wins via the
-    /// endpoint metadata bag). Capture fields can only narrow — they were armed (or not) before
-    /// routing decided the endpoint.
+    /// endpoint that handled it carries an <see cref="HttpLoggingMetadata"/> override (last-wins
+    /// via the endpoint metadata bag). The endpoint <c>UseRouting</c> published is still on the
+    /// exchange after the pipeline unwinds, so this works with logging registered ahead of routing.
+    /// A CORS preflight's candidate endpoint never handles the preflight, so its override does not
+    /// apply to it. Capture fields can only narrow — they were armed (or not) from the configured
+    /// fields before the downstream pipeline ran.
     /// </summary>
     private static HttpLoggingFields ResolveEffectiveFields(IHttpContext context, HttpLoggingFields configured)
     {
-        HttpLoggingMetadata? metadata = context.GetEndpointMetadata<HttpLoggingMetadata>();
+        HttpLoggingMetadata? metadata = context.GetRouteMatch() is { IsPreflight: false } endpoint
+            ? endpoint.Metadata.GetMetadata<HttpLoggingMetadata>()
+            : null;
+
         if (metadata is null)
         {
             return configured;

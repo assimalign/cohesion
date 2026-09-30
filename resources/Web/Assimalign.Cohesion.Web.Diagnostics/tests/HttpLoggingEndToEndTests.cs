@@ -297,6 +297,48 @@ public class HttpLoggingEndToEndTests
         entries[0].Attributes[HttpLoggingAttributes.RequestPath].ShouldBe("/orders");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: A CORS preflight is logged even when its candidate endpoint silences logging")]
+    public async Task EndpointMetadata_CorsPreflight_ShouldNotApplyCandidateOverride()
+    {
+        // Arrange — the probe silences the exchanges it handles; a preflight naming it is not one of
+        // them (the candidate never runs, and the terminal answers the plain OPTIONS request).
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        RecordingLoggerProvider recorded = new();
+        using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        routes.Map(new Route(
+            CohesionHttpMethod.Get,
+            "/healthz",
+            new RouterRouteHandler(context =>
+            {
+                context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+                return Task.CompletedTask;
+            }),
+            new RouterRouteMetadataCollection(new HttpLoggingMetadata(HttpLoggingFields.None))));
+
+        using HttpClient client = factory.CreateClient();
+        using HttpRequestMessage preflight = new(System.Net.Http.HttpMethod.Options, "/healthz");
+        preflight.Headers.TryAddWithoutValidation("Origin", "https://app.example").ShouldBeTrue();
+        preflight.Headers.TryAddWithoutValidation("Access-Control-Request-Method", "GET").ShouldBeTrue();
+
+        // Act
+        using HttpResponseMessage response = await client.SendAsync(preflight, cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.MethodNotAllowed);
+
+        ILoggerEntry entry = (await WaitForEntriesAsync(recorded, 1, cancellation.Token))[0];
+        entry.Attributes[HttpLoggingAttributes.RequestMethod].ShouldBe("OPTIONS");
+        entry.Attributes[HttpLoggingAttributes.RequestPath].ShouldBe("/healthz");
+        entry.Attributes[HttpLoggingAttributes.ResponseStatusCode].ShouldBe(405);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: Endpoint metadata narrows the emitted field set")]
     public async Task EndpointMetadata_NarrowedFields_ShouldLimitAttributes()
     {

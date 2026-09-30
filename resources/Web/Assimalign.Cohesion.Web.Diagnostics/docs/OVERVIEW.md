@@ -53,7 +53,10 @@ bodies are opt-in** because they routinely carry secrets. Header redaction is
 allowlists.
 
 Per-endpoint overrides attach an `HttpLoggingMetadata` to the route's metadata bag (last-wins);
-`HttpLoggingFields.None` silences an endpoint entirely — the usual choice for health probes.
+`HttpLoggingFields.None` silences an endpoint entirely — the usual choice for health probes. The
+override is read from the endpoint `UseRouting` published when the pipeline unwinds, so it applies
+with `UseHttpLogging` registered first. It covers the exchanges the endpoint handles, not a CORS
+preflight that names it, which is logged with the configured fields.
 
 ## Dependencies
 
