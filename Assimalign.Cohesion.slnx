@@ -2494,6 +2494,10 @@
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/examples/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/samples/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/Assimalign.Cohesion.Web.AotGuard.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Hosting/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Hosting/src/Assimalign.Cohesion.Web.Hosting.csproj" />
 	</Folder>

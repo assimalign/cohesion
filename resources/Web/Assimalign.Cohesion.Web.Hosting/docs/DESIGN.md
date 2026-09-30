@@ -284,6 +284,17 @@ The gate is chosen for AOT-safety: a semaphore, stored `Task`s, and a
 context disposal is a `switch` type test, not a reflection probe. No runtime code
 generation, no `Assembly.LoadFrom`, no reflection-based serialization.
 
+**The Web NativeAOT guard (#1052)** is the evidence for the area as a whole, not just this
+module: `samples/Assimalign.Cohesion.Web.AotGuard` composes a representative application
+(routing, source-generated typed binding and JSON, error handling, Cookie and JWT Bearer
+authentication, static files, response compression, request decompression, rate limiting and
+request timeouts). Its csproj promotes the trim/AOT analyzer diagnostics and ILC's per-assembly
+summaries (IL2104/IL3053) to errors, so a trim or AOT warning in any library it reaches fails the
+publish. `resource-web.yml`'s `aot-guard` job publishes it with `PublishAot` for linux-x64 and runs
+the native binary with `--smoke`, which serves on a free loopback port and checks every feature
+over real HTTP. The first run surfaced four DependencyInjection call-site diagnostics, resolved as
+described in that library's DESIGN ("NativeAOT compatibility checks").
+
 ## Application feature seeding
 
 `IWebApplicationBuilder.AddFeature` registers `IHttpFeature` singletons (routing's

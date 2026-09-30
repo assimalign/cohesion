@@ -1334,6 +1334,10 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Hosting/examples/Hosting1/Hosting1.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/samples/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard/Assimalign.Cohesion.Web.AotGuard.csproj" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/src/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Hosting/src/Assimalign.Cohesion.Web.Hosting.csproj" />
 	</Folder>
