@@ -563,8 +563,12 @@ logging) does not implement the interface.
   should check `context.GetRouteMatch()`, or move ahead of `UseRouting`.
 - **405 is answered at the terminal.** Middleware registered after `UseRouting` also runs for it.
 - **Policy middleware moves after `UseRouting`.** `UseRateLimiting`, `UseRequestTimeouts` and
-  `UseOutputCache` read the published endpoint. Registered ahead of `UseRouting`, their endpoint
-  policies fail the request (rate limits, timeouts) or are skipped (output caching).
+  `UseOutputCache` read the published endpoint. Registered ahead of `UseRouting`, an endpoint's rate
+  limit or timeout fails its requests at dispatch. Output caching keeps only its base policy there:
+  it never stores a response from an endpoint that carries `OutputCacheMetadata`, so an opt-out still
+  holds but an opt-in has no effect.
+- **Compression follows the cache.** `UseResponseCompression` must sit inside `UseOutputCache`, so in
+  an application that caches it moves after `UseRouting` too (Web.Caching DESIGN, "Ordering").
 - **Custom pipeline builders** must honor `IWebEndpointFeature` at their terminal: run the endpoint
   when present, and apply their unhandled-request behavior otherwise.
 

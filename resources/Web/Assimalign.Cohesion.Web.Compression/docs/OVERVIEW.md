@@ -45,7 +45,8 @@ verbs over the BCL codecs only — no external dependencies, AOT-safe.
 ## Usage
 
 ```csharp
-// Response compression — register early so it wraps the responses it should compress.
+// Response compression — register early so it wraps the responses it should compress. With output
+// caching, register it after UseRouting and UseOutputCache instead (Web.Caching DESIGN, "Ordering").
 application.UseResponseCompression(options =>
 {
     options.EnableForHttps = false;              // BREACH: default; enable only when safe

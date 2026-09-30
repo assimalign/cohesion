@@ -82,6 +82,16 @@ buffered response is reset and rewritten. When the exception boundary resets the
 the headers (including any `Content-Encoding`/`Vary` the wrapper staged) and the wrapper's
 `CompleteAsync` then finalizes over the reset body harmlessly.
 
+### Composition with output caching (#1054)
+
+The output cache must wrap compression, so its buffered copy holds the encoded bytes and the `Vary`
+this middleware stamps: `UseRouting` → `UseOutputCache` → `UseResponseCompression`. Since routing
+stopped being terminal, the cache reads the endpoint `UseRouting` publishes and therefore sits after
+it, which puts compression after `UseRouting` as well in an application that caches. Compression
+itself needs nothing from routing; the cost is that a middleware answering ahead of `UseRouting`
+(static files, for example) is outside its reach and relies on its own encoding (precompressed
+assets). Web.Caching DESIGN, "Ordering", carries the full reasoning.
+
 ## Vary: always append, never clobber
 
 The representation depends on `Accept-Encoding`, so every response for an eligible media type
