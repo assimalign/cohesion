@@ -4,4 +4,14 @@
         <_CohesionIntermediateOutputPath>$(IntermediateOutputPath)\Cohesion</_CohesionIntermediateOutputPath>
 		<CohesionApplicationModel Condition="'$(CohesionApplicationModel)' == ''">disabled</CohesionApplicationModel>
     </PropertyGroup>
+
+	<!--
+		A resource executable's host reads appsettings.json and appsettings.{Environment}.json
+		from its content root, AppContext.BaseDirectory for a plain application, so they ship with
+		the build and publish output. Microsoft.NET.Sdk's props defined the default None items
+		before this import; a consumer's own None Update in the project body still wins.
+	-->
+	<ItemGroup Condition="'$(_CohesionResourceSdk)' == 'true' and '$(OutputType)' == 'Exe'">
+		<None Update="appsettings*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+	</ItemGroup>
 </Project>

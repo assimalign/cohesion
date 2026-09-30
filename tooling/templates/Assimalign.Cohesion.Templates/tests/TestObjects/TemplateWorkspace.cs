@@ -3,6 +3,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
@@ -74,6 +78,77 @@ internal sealed class TemplateWorkspace : IDisposable
                     new XElement("package", new XAttribute("pattern", "*"))))))
             .Save(Path.Combine(output, "nuget.config"));
         await RunAsync(output, ["build", "--nologo", "-m:1", "-nr:false"], cancellationToken);
+    }
+
+    /// <summary>
+    /// Starts a built Web application's apphost on a free loopback port and returns the body of a
+    /// GET to <paramref name="path"/>. The endpoint arrives through configuration (the command
+    /// line), which a plain entry-point application binds without any UseServer call.
+    /// </summary>
+    internal async Task<string> GetFromBuiltWebApplicationAsync(string output, string name, string path,
+        CancellationToken cancellationToken = default)
+    {
+        string executableName = OperatingSystem.IsWindows() ? name + ".exe" : name;
+        string executable = Directory.GetFiles(Path.Combine(output, "bin"), executableName, SearchOption.AllDirectories)
+            .Where(candidate => File.Exists(Path.Combine(Path.GetDirectoryName(candidate)!, name + ".dll")))
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .First();
+
+        int port;
+        using (var probe = new TcpListener(IPAddress.Loopback, 0))
+        {
+            probe.Start();
+            port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        }
+
+        var start = new ProcessStartInfo(executable)
+        {
+            WorkingDirectory = Path.GetDirectoryName(executable)!,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        start.ArgumentList.Add("--Http:Endpoints:Test:Host=127.0.0.1");
+        start.ArgumentList.Add($"--Http:Endpoints:Test:Port={port}");
+
+        var log = new StringBuilder();
+        using Process process = Process.Start(start) ?? throw new InvalidOperationException($"Could not start {executable}.");
+        process.OutputDataReceived += (_, line) => { lock (log) { log.AppendLine(line.Data); } };
+        process.ErrorDataReceived += (_, line) => { lock (log) { log.AppendLine(line.Data); } };
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+            while (true)
+            {
+                if (process.HasExited)
+                {
+                    throw new InvalidOperationException($"{name} exited {process.ExitCode} before answering:\n{log}");
+                }
+
+                try
+                {
+                    return await client.GetStringAsync($"http://127.0.0.1:{port}{path}", cancellationToken).ConfigureAwait(false);
+                }
+                catch (HttpRequestException) when (DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            File.AppendAllText(Path.Combine(Root, "dotnet.log"), $"{executable} (port {port})\n{log}\n");
+        }
     }
 
     internal async Task<string> RunAsync(string workingDirectory, IReadOnlyList<string> arguments,

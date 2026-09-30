@@ -53,7 +53,17 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 
     private bool _isBuilt;
 
+    // CreateBuilder(args) is the application entry point: it composes the default configuration
+    // and, for a plain application, the default listener (see ApplyDefaultEndpoints).
+    private readonly bool _isEntryPoint;
+
     internal void OwnEndpointCertificate(X509Certificate2 certificate) => _context.EndpointCertificates.Add(certificate);
+
+    /// <summary>
+    /// Gets or sets the endpoint a plain entry-point application binds when neither its code nor
+    /// its configuration declares a listener. Tests substitute an ephemeral port.
+    /// </summary>
+    internal IPEndPoint DevelopmentEndPoint { get; set; } = HttpServerConfiguration.DevelopmentEndPoint;
 
     public WebApplicationBuilder(WebApplicationOptions options)
         : this(options, resourceAssembly: null)
@@ -92,6 +102,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         Configuration = new ConfigurationManager();
         if (args is not null)
         {
+            _isEntryPoint = true;
             AddDefaultConfiguration(args, contentRootPath, resourceContext);
         }
 
@@ -234,6 +245,8 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             ResourceControlPlaneMiddleware.Validate(_resourceContext);
         }
 
+        ApplyDefaultEndpoints();
+
         var applicationOptions = new WebApplicationOptions
         {
             Environment = _options.Environment,
@@ -372,6 +385,37 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         return string.Equals(protocol, "tcp", StringComparison.OrdinalIgnoreCase)
             ? new TcpConnectionFactory()
             : null;
+    }
+
+    // A plain entry-point application (CreateBuilder(args), no generated control plane) that
+    // configured no listener and registered no custom server serves the Http:Endpoints section,
+    // or the loopback development endpoint when that section is empty, so `dotnet run` answers
+    // instead of running without a listener. Explicit compositions (CreateBuilder(options), a
+    // UseServer/UseConfiguration call, a custom server) and orchestrated resources, whose
+    // endpoints come from the ambient resource context, are left exactly as composed.
+    private void ApplyDefaultEndpoints()
+    {
+        if (!_isEntryPoint || _controlPlane is not null || Server.HasListenerConfiguration)
+        {
+            return;
+        }
+
+        int servers = 0;
+        foreach (ServiceDescriptor descriptor in Services.Container)
+        {
+            if (descriptor.ServiceType == typeof(IWebApplicationServer))
+            {
+                servers++;
+            }
+        }
+
+        // The first registration is the default server itself.
+        if (servers > 1)
+        {
+            return;
+        }
+
+        Server.UseDefaultEndpoints(Configuration, DevelopmentEndPoint);
     }
 
     // The explicit option wins, then the ambient resource context, then the application's base

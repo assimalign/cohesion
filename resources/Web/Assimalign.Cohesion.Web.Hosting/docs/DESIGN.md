@@ -529,6 +529,28 @@ HTTP/3 registration and the connection-dispatch rewrite are
 separate concerns (the latter under #762). Data-rate limits are deferred with
 the transport's streaming-body rework.
 
+### Entry-point defaults (#1047)
+
+A **plain entry-point application** — `WebApplication.CreateBuilder(args)` with no generated
+control plane — that configured no listener of its own gets one when it is built:
+
+- the endpoints under `Http:Endpoints`, bound exactly as `UseConfiguration` binds them, from every
+  configuration source the entry point composes (appsettings, `COHESION_CONFIG__*`, command line);
+- otherwise HTTP/1.1 on the **development endpoint**, `127.0.0.1:5000` (loopback only, so an
+  unconfigured application is never exposed beyond the machine), with any configured `Http:Limits`.
+
+"Configured no listener" means no `Server.UseServer`/`UseConfiguration` call and no server
+registered beside the default one (`AddServer`, `Server.UseServer<TServer>`, or a direct
+`IWebApplicationServer` registration), checked in `Build` against the service container. The
+configuration is read when the default server is created at host start, so sources added after
+`CreateBuilder` still apply.
+
+Before 2026-09 the default server was silently inactive in that case, so `dotnet new cohesion-web
+&& dotnet run` started and listened on nothing. Explicit compositions keep that behavior on purpose:
+`CreateBuilder(options)`, a custom-only composition, and tests that build an application without a
+server are left exactly as composed. An orchestrated resource binds its ambient endpoint instead
+(below), and never the development endpoint.
+
 ### AOT posture
 
 No reflection, no codegen, no dynamic activation. The binder is straight-line
@@ -758,7 +780,7 @@ handling.
 
 ## HTTPS endpoint certificate contract (31t)
 
-The enabled resource's `http` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged. Ambient binding tries http and then https by endpoint name, admitting both URI schemes. Manual Http:Endpoints configuration also accepts Protocol Https/Http1s/Http2s and Certificate as a mount name. Server.UseConfiguration remains opt-in and is not wired by default.
+The enabled resource's `http` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged. Ambient binding tries http and then https by endpoint name, admitting both URI schemes. Manual Http:Endpoints configuration also accepts Protocol Https/Http1s/Http2s and Certificate as a mount name. Server.UseConfiguration stays opt-in for explicit compositions; a plain entry-point application with no listener of its own binds `Http:Endpoints` by default (see "Entry-point defaults").
 
 ## Optional telemetry (31b)
 

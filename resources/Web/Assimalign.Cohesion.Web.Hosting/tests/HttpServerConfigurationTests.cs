@@ -202,6 +202,41 @@ public class HttpServerConfigurationTests
             () => HttpServerConfiguration.Bind(configuration, HttpServerConfiguration.DefaultSectionKey, options));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Default endpoints: the binder registers the development endpoint when none is configured")]
+    public async Task BindOrDefault_NoEndpoints_ShouldRegisterDevelopmentEndPoint()
+    {
+        // Arrange
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>());
+        var options = new HttpConnectionListenerOptions();
+
+        // Act
+        HttpServerConfiguration.BindOrDefault(configuration, HttpServerConfiguration.DefaultSectionKey, options, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
+
+        // Assert
+        await using HttpConnectionListener listener = new(options);
+        listener.Protocols.ShouldBe(HttpProtocol.Http11);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Default endpoints: the binder registers only configured endpoints when present")]
+    public async Task BindOrDefault_ConfiguredEndpoint_ShouldNotRegisterDevelopmentEndPoint()
+    {
+        // Arrange — an HTTP/2 endpoint; a development endpoint would add HTTP/1.1 to the protocols.
+        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Http:Endpoints:Main:Protocol"] = "Http2",
+            ["Http:Endpoints:Main:Host"] = "127.0.0.1",
+            ["Http:Endpoints:Main:Port"] = "0",
+        });
+        var options = new HttpConnectionListenerOptions();
+
+        // Act
+        HttpServerConfiguration.BindOrDefault(configuration, HttpServerConfiguration.DefaultSectionKey, options, new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
+
+        // Assert
+        await using HttpConnectionListener listener = new(options);
+        listener.Protocols.ShouldBe(HttpProtocol.Http20);
+    }
+
     private static IConfiguration BuildConfiguration(IDictionary<string, string?> values)
     {
         ConfigurationManager manager = new();

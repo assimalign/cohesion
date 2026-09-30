@@ -66,6 +66,71 @@ internal static class HttpServerConfiguration
     public const string DefaultSectionKey = "Http";
 
     /// <summary>
+    /// The endpoint an entry-point application (<c>WebApplication.CreateBuilder(args)</c>) binds
+    /// when neither its code nor its configuration declares a listener: HTTP/1.1 on
+    /// <c>127.0.0.1:5000</c>, loopback only, so an unconfigured application is never exposed
+    /// beyond the machine.
+    /// </summary>
+    public static readonly IPEndPoint DevelopmentEndPoint = new(IPAddress.Loopback, 5000);
+
+    /// <summary>
+    /// Binds the endpoints declared under <paramref name="sectionKey"/>, or — when the section
+    /// declares none — HTTP/1.1 on <paramref name="developmentEndPoint"/>. The section's
+    /// <c>Limits</c> apply either way.
+    /// </summary>
+    /// <param name="configuration">The configuration to read from.</param>
+    /// <param name="sectionKey">The root section key (for example <c>"Http"</c>).</param>
+    /// <param name="options">The listener options to populate.</param>
+    /// <param name="developmentEndPoint">The endpoint bound when no endpoint is configured.</param>
+    /// <param name="ownCertificate">Receives certificate ownership for disposal with the host.</param>
+    /// <exception cref="ArgumentNullException">Thrown when a required argument is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when a configured value cannot be parsed.</exception>
+    public static void BindOrDefault(
+        IConfiguration configuration,
+        string sectionKey,
+        HttpConnectionListenerOptions options,
+        IPEndPoint developmentEndPoint,
+        Action<X509Certificate2>? ownCertificate = null)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentException.ThrowIfNullOrEmpty(sectionKey);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(developmentEndPoint);
+
+        Http1ConnectionListenerOptions.Http1Limits boundLimits = new();
+        BindLimits(configuration, sectionKey, boundLimits);
+
+        if (HasEndpoints(configuration, sectionKey))
+        {
+            BindEndpoints(configuration, sectionKey, options, boundLimits, ownCertificate);
+            return;
+        }
+
+        options.UseHttp1(
+            () => TcpConnectionListener.Create(tcp => tcp.EndPoint = developmentEndPoint),
+            http1 => CopyHttp1Limits(boundLimits, http1.Limits));
+    }
+
+    private static bool HasEndpoints(IConfiguration configuration, string sectionKey)
+    {
+        IConfigurationSection? endpoints = configuration.GetSection($"{sectionKey}:Endpoints");
+        if (endpoints is null)
+        {
+            return false;
+        }
+
+        foreach (IConfigurationEntry child in endpoints.GetChildren())
+        {
+            if (child is IConfigurationSection)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Binds the endpoints and limits declared under <paramref name="sectionKey"/> onto
     /// <paramref name="options"/>.
     /// </summary>

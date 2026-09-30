@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 
+using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Http;
@@ -158,6 +160,29 @@ public sealed class WebApplicationServerBuilder
         _configurations.Add(configure);
 
         return this;
+    }
+
+    /// <summary>
+    /// Gets whether the default server has at least one listener configuration.
+    /// </summary>
+    internal bool HasListenerConfiguration => _configurations.Count > 0;
+
+    /// <summary>
+    /// Configures the default server from the <c>Http</c> configuration section, binding
+    /// <paramref name="developmentEndPoint"/> when the section declares no endpoint. The
+    /// configuration is read when the server is created at host start, so sources added after
+    /// this call still apply.
+    /// </summary>
+    /// <param name="configuration">The application configuration.</param>
+    /// <param name="developmentEndPoint">The endpoint bound when no endpoint is configured.</param>
+    internal void UseDefaultEndpoints(IConfiguration configuration, IPEndPoint developmentEndPoint)
+    {
+        UseServer((_, options) => HttpServerConfiguration.BindOrDefault(
+            configuration,
+            HttpServerConfiguration.DefaultSectionKey,
+            options,
+            developmentEndPoint,
+            OwnEndpointCertificate));
     }
 
     /// <summary>
