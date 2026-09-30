@@ -135,6 +135,37 @@ Where this port differs from upstream on purpose:
 - `DisposeAsync` reports disposal failures through the returned task rather than throwing
   synchronously.
 
+## Diagnostics
+
+The container reports through one internal event source, `Assimalign.Cohesion.DependencyInjection`,
+following `.claude/rules/event-source.md`. The provider-built summary is its only `Informational`
+event, so an application that forwards Cohesion sources into its logs at `Information` gets one
+entry per provider. Everything else is `Verbose`, except the error a failed background compilation
+raises. Events 7 and 8 carry the `ServiceProviderInitialized` keyword (`0x1`).
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `CallSiteBuilt` | Verbose | `serviceType`, `callSite` (JSON in 10 KB chunks), `chunkIndex`, `chunkCount`, `serviceProviderHashCode` |
+| 2 | `ServiceResolved` | Verbose | `serviceType`, `serviceProviderHashCode` |
+| 3 | `ExpressionTreeGenerated` | Verbose | `serviceType`, `nodeCount`, `serviceProviderHashCode` |
+| 4 | `DynamicMethodBuilt` | Verbose | `serviceType`, `methodSize`, `serviceProviderHashCode` |
+| 5 | `ScopeDisposed` | Verbose | `serviceProviderHashCode`, `scopedServicesResolved`, `disposableServices` |
+| 6 | `ServiceRealizationFailed` | Error | `exceptionType`, `exceptionMessage`, `serviceProviderHashCode` |
+| 7 | `ServiceProviderBuilt` | Informational | `serviceProviderHashCode`, `singletonServices`, `scopedServices`, `transientServices`, `closedGenericsServices`, `openGenericsServices` |
+| 8 | `ServiceProviderDescriptors` | Verbose | `serviceProviderHashCode`, `descriptors` (JSON in 10 KB chunks), `chunkIndex`, `chunkCount` |
+
+- **No counters.**
+- **The resolver compilation events, 3 and 4, are kept although NativeAOT never raises them.** They
+  are how the dynamic-code tests prove that a provider generated no code. Event 3 is written only by
+  the expression-tree resolver, which is compiled but not selected while the IL resolver is built in.
+- **Late listeners.** Building a provider records it, and a listener that attaches later receives
+  events 7 and 8 for every provider still alive. The record holds weak references and is pruned
+  whenever it has doubled since the last pruning, so providers that are never disposed no longer
+  accumulate in it.
+- The source was named `Assimalign-Cohesion-DependencyInjection` until it was brought into line with
+  the convention (issue #1037). The descriptor dump moved from `Informational` to `Verbose` at the
+  same time, so forwarding at `Information` does not log every registration.
+
 ## Layout Example
 
 ```text

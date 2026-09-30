@@ -268,7 +268,7 @@ internal sealed class ServiceProviderEngineScope : IServiceScope, IServiceProvid
             }
 
             // Track statistics about the scope (number of disposable objects and number of disposed services)
-            ServiceEventSource.Log.ScopeDisposed(RootProvider.GetHashCode(), ResolvedServices.Count, _disposables?.Count ?? 0);
+            ServiceEventSource.Log.ScopeDisposed(RootProvider, ResolvedServices.Count, _disposables?.Count ?? 0);
 
             // We've transitioned to the disposed state, so future calls to
             // CaptureDisposable will immediately dispose the object.
