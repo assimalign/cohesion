@@ -9,6 +9,7 @@ maintenance scripts. These tools reuse the SDK and gateway contracts in
 | [CLI](Cli/Assimalign.Cohesion.Cli/docs/OVERVIEW.md) | `Assimalign.Cohesion.Cli`: the `cohesion` .NET tool and local developer state readers/writers. |
 | [Templates](templates/README.md) | `Assimalign.Cohesion.Templates`: `dotnet new` applications, landing zones, gateways, composites and standalone resources. |
 | [Dev scripts](scripts/README.md) | PowerShell `New-CohesionDotnetSolution` for repository solution generation. |
+| [Database Studio](Assimalign.Cohesion.Database.Studio/README.md) | Throw-away, Windows-only MAUI editor for exercising the Database engines as a consumer. Not shipped: `IsPackable=false`, in no solution or CI matrix. |
 
 ## The cohesion tool
 
