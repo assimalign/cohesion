@@ -359,9 +359,10 @@ public class HttpLoggingEndToEndTests
 
         using HttpClient client = factory.CreateClient();
 
-        // Act — the middleware rethrows, so the server's exception-isolation boundary tears the
-        // connection down and the client observes a transport failure.
-        await Should.ThrowAsync<HttpRequestException>(() => client.GetAsync("/kaboom", cancellation.Token));
+        // Act — the middleware rethrows, so the server's exception-isolation boundary answers the
+        // faulted exchange with a bare 500.
+        using HttpResponseMessage response = await client.GetAsync("/kaboom", cancellation.Token);
+        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.InternalServerError);
 
         // Assert
         ILoggerEntry entry = (await WaitForEntriesAsync(recorded, 1, cancellation.Token))[0];

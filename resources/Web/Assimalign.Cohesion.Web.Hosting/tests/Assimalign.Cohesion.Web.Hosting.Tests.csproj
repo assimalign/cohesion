@@ -12,7 +12,12 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Connections" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.RequestLimits" />
+		<!-- Test-only: a stream that faults after its response started through the streaming feature
+		     must be reset, not finalized (#1049). The runtime module takes no dependency on it. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration" />
+		<!-- Test-only: a raw in-memory connection pipelines HTTP/1.1 requests, which a real client never does. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Quic" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Security" />

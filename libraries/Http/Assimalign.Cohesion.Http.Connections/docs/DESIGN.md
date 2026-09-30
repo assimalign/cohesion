@@ -134,6 +134,38 @@ have no connection-level byte stream — the HTTP/3 connection context
 `NotSupportedHttpConnectionContext` — no longer fabricate a fake pipe
 over `Stream.Null`; the member simply does not exist.
 
+### The host contract: dispatch and fault finalization
+
+A host drives each connection context in a loop — receive an exchange, run its
+application, finalize it with `SendAsync` — and two properties of that loop are part
+of this package's contract, not implementation detail:
+
+- **HTTP/1.1 exchanges are consumed one at a time.** The HTTP/1.1 receive enumerator
+  does the connection-level work for the next request inside `MoveNextAsync` — it reads
+  the finished exchange's keep-alive decision, drains the request body the application
+  left unread, and only then parses the next head — so a host must not ask for the next
+  exchange until the previous one has been sent. HTTP/2 and HTTP/3 exchanges may be
+  served concurrently: neither needs an exchange to finish before it can yield the next
+  (the HTTP/2 frame pump runs independently of the consumer; the HTTP/3 loop accepts
+  the next request stream on request), and `SendAsync` is safe for different exchanges
+  at once (the HTTP/2 write scheduler serializes frames; HTTP/3 writes each response to
+  its own QUIC stream). The number of exchanges in flight is bounded by stream admission —
+  `SETTINGS_MAX_CONCURRENT_STREAMS` and the QUIC stream credit — not by the host.
+  `Web.Hosting`'s `WebApplicationServer` is the reference host (#1049).
+- **Every exchange is finalized exactly once through `SendAsync`.** A reset is
+  requested with `IHttpContext.Cancel` before the send, which the transport maps to the
+  version's wire rejection (see "The `SendAsync` inversion"). A host that finalizes an
+  exchange whose application faulted has to choose between a replacement response and a
+  reset, and only the transport knows which is still possible. It reads
+  `HttpContextTransportExtensions.HasResponseStarted` (an extension property on
+  `IHttpContext`) — the same state `IHttpExchangeControl.HasResponseStarted` reports to
+  response interceptors, true once the final head is committed by a streamed write or
+  flush through the raw body sink or by the buffered send. Before the start a
+  replacement (for example a bare `500`) can still be sent; after it, sending would
+  finalize the started response as if its truncated body were whole, so the host resets
+  instead. The probe is a type test over the transport's own exchange types and reports
+  `false` for any other `IHttpContext`, whose response the transport cannot observe.
+
 ### TLS is a pre-composed layer, not an HTTP concern
 
 TLS never happens inside this package. The composition root layers it

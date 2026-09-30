@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Concurrent;
+using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -178,28 +181,27 @@ public class WebApplicationServerTests
         await server.StopAsync();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: A pipeline exception tears down only that connection and the loop keeps serving")]
-    public async Task StartAsync_WhenPipelineThrows_TearsDownOnlyThatConnectionAndKeepsServing()
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: A pipeline exception fails only its exchange with a 500 and the connection keeps serving")]
+    public async Task StartAsync_WhenPipelineThrows_AnswersThatExchangeWith500AndKeepsServing()
     {
-        // Arrange — A's exchange throws from the pipeline; B's is served normally.
-        FakeHttpContext exchangeA = new();
+        // Arrange — on keep-alive connection A the first exchange throws after staging a partial
+        // response, and the second is served normally; connection B is untouched.
+        FakeHttpResponse faultedResponse = new();
+        faultedResponse.Headers[HttpHeaderKey.ContentType] = "application/json";
+        await faultedResponse.Body.WriteAsync(new byte[] { 1, 2, 3 });
+
+        FakeHttpContext faulted = new(response: faultedResponse);
+        FakeHttpContext keepAlive = new();
         FakeHttpContext exchangeB = new();
 
-        FakeHttpConnection connectionA = new(new FakeHttpConnectionContext(new[] { exchangeA }));
+        FakeHttpConnection connectionA = new(new FakeHttpConnectionContext(new[] { faulted, keepAlive }));
         FakeHttpConnection connectionB = new(new FakeHttpConnectionContext(new[] { exchangeB }));
 
-        InvalidOperationException fault = new("pipeline boom");
-        TaskCompletionSource exchangeBProcessed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         FakePipeline pipeline = new((context, _) =>
         {
-            if (ReferenceEquals(context, exchangeA))
+            if (ReferenceEquals(context, faulted))
             {
-                throw fault;
-            }
-
-            if (ReferenceEquals(context, exchangeB))
-            {
-                exchangeBProcessed.TrySetResult();
+                throw new InvalidOperationException("pipeline boom");
             }
 
             return Task.CompletedTask;
@@ -211,17 +213,409 @@ public class WebApplicationServerTests
         // Act
         await server.StartAsync();
 
-        // Assert — the faulted connection is aborted and disposed; the survivor is served.
+        // Assert — the faulted exchange is answered with a bare 500 in place of what it staged, and
+        // the same connection goes on to serve the next request; nothing is aborted.
         await Should.NotThrowAsync(() => connectionA.Disposed.Task.WaitAsync(_timeout));
-        connectionA.AbortCount.ShouldBe(1);
-        connectionA.AbortReason.ShouldBeSameAs(fault);
+        faultedResponse.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        faultedResponse.Headers.Count.ShouldBe(0);
+        faultedResponse.Body.Length.ShouldBe(0);
+        faulted.CancelCount.ShouldBe(0);
+        faulted.DisposeCount.ShouldBe(1);
+        pipeline.Executed.ShouldContain(keepAlive);
+        keepAlive.DisposeCount.ShouldBe(1);
+        connectionA.Context.SendCount.ShouldBe(2);
+        connectionA.AbortCount.ShouldBe(0);
         connectionA.Context.DisposeCount.ShouldBe(1);
-        exchangeA.DisposeCount.ShouldBe(1);
 
-        await Should.NotThrowAsync(() => exchangeBProcessed.Task.WaitAsync(_timeout));
         await Should.NotThrowAsync(() => connectionB.Disposed.Task.WaitAsync(_timeout));
         connectionB.AbortCount.ShouldBe(0);
         connectionB.Context.SendCount.ShouldBe(1);
+
+        await server.StopAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: A faulted HTTP/1.1 exchange whose response cannot be replaced is reset and ends its connection")]
+    public async Task StartAsync_WhenSequentialFaultCannotBeAnswered_ResetsTheExchangeAndEndsTheConnection()
+    {
+        // Arrange — the faulted exchange exposes no usable response, so no 500 can replace it: the
+        // server resets it, and a sequential connection ends with a reset exchange.
+        FakeHttpContext faulted = new();
+        FakeHttpContext next = new();
+        FakeHttpConnection connection = new(new FakeHttpConnectionContext(new[] { faulted, next }));
+        FakePipeline pipeline = new((context, _) => ReferenceEquals(context, faulted)
+            ? throw new InvalidOperationException("pipeline boom")
+            : Task.CompletedTask);
+        WebApplicationServer server = CreateServer(pipeline, new FakeHttpConnectionListener(connection));
+
+        // Act
+        await server.StartAsync();
+
+        // Assert
+        await Should.NotThrowAsync(() => connection.Disposed.Task.WaitAsync(_timeout));
+        faulted.CancelCount.ShouldBe(1);
+        faulted.DisposeCount.ShouldBe(1);
+        connection.Context.SendCount.ShouldBe(1);
+        pipeline.Executed.ShouldNotContain(next);
+        connection.AbortCount.ShouldBe(0);
+
+        await server.StopAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: A failed HTTP/1.1 send aborts only that connection")]
+    public async Task StartAsync_WhenSequentialSendFails_AbortsTheConnection()
+    {
+        // Arrange — the response of the first exchange cannot be written, so the connection's
+        // framing is unknown and it cannot carry the second request.
+        IOException sendFailure = new("wire gone");
+        FakeHttpContext first = new();
+        FakeHttpContext second = new();
+        FakeHttpConnectionContext connectionContext = new(new[] { first, second })
+        {
+            SendHandler = (_, _) => ValueTask.FromException(sendFailure),
+        };
+        FakeHttpConnection connection = new(connectionContext);
+        FakePipeline pipeline = new();
+        WebApplicationServer server = CreateServer(pipeline, new FakeHttpConnectionListener(connection));
+
+        // Act
+        await server.StartAsync();
+
+        // Assert
+        await Should.NotThrowAsync(() => connection.Disposed.Task.WaitAsync(_timeout));
+        connection.AbortCount.ShouldBe(1);
+        connection.AbortReason.ShouldBeSameAs(sendFailure);
+        first.DisposeCount.ShouldBe(1);
+        pipeline.Executed.ShouldNotContain(second);
+        connectionContext.DisposeCount.ShouldBe(1);
+
+        await server.StopAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: HTTP/1.1 exchanges are served one at a time, the next received only after the previous response is sent")]
+    public async Task ServeConnection_WithSequentialExchanges_ReceivesTheNextOnlyAfterThePreviousIsSentAndDisposed()
+    {
+        // Arrange — every step is journaled. The pipeline yields, so a server that dispatched
+        // HTTP/1.1 exchanges concurrently would ask for the second before the first was sent.
+        ConcurrentQueue<string> journal = new();
+        FakeHttpContext first = new() { OnDisposing = () => journal.Enqueue("dispose:first") };
+        FakeHttpContext second = new() { OnDisposing = () => journal.Enqueue("dispose:second") };
+        string NameOf(IHttpContext exchange) => ReferenceEquals(exchange, first) ? "first" : "second";
+
+        FakeHttpConnectionContext connectionContext = new(new[] { first, second })
+        {
+            OnReceiving = exchange => journal.Enqueue($"receive:{NameOf(exchange)}"),
+            SendHandler = (exchange, _) =>
+            {
+                journal.Enqueue($"send:{NameOf(exchange)}");
+                return ValueTask.CompletedTask;
+            },
+        };
+        FakeHttpConnection connection = new(connectionContext);
+        FakePipeline pipeline = new(async (context, _) =>
+        {
+            journal.Enqueue($"execute:{NameOf(context)}");
+            await Task.Delay(20);
+        });
+        WebApplicationServer server = CreateServer(pipeline, new FakeHttpConnectionListener(connection));
+
+        // Act
+        await server.StartAsync();
+        await Should.NotThrowAsync(() => connection.Disposed.Task.WaitAsync(_timeout));
+
+        // Assert
+        journal.ShouldBe(new[]
+        {
+            "receive:first", "execute:first", "send:first", "dispose:first",
+            "receive:second", "execute:second", "send:second", "dispose:second",
+        });
+
+        await server.StopAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: Multiplexed exchanges on one connection run concurrently")]
+    public async Task ServeConnection_WithMultiplexedExchanges_RunsThemConcurrently()
+    {
+        // Arrange — the first stream's pipeline returns only after the second stream's response has
+        // been sent. Serving the connection's exchanges one at a time would park here until shutdown.
+        FakeHttpContext first = new(HttpVersion.Http20);
+        FakeHttpContext second = new(HttpVersion.Http20);
+        TaskCompletionSource secondSent = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        ConcurrentQueue<IHttpContext> sendOrder = new();
+        FakeHttpConnectionContext connectionContext = new(new[] { first, second })
+        {
+            SendHandler = (exchange, _) =>
+            {
+                sendOrder.Enqueue(exchange);
+
+                if (ReferenceEquals(exchange, second))
+                {
+                    secondSent.TrySetResult();
+                }
+
+                return ValueTask.CompletedTask;
+            },
+        };
+        FakeHttpConnection connection = new(connectionContext);
+        FakePipeline pipeline = new(async (context, cancellationToken) =>
+        {
+            if (ReferenceEquals(context, first))
+            {
+                await secondSent.Task.WaitAsync(cancellationToken);
+            }
+        });
+        WebApplicationServer server = CreateServer(pipeline, new FakeHttpConnectionListener(connection));
+
+        // Act
+        await server.StartAsync();
+
+        // Assert — both streams are answered with their own responses, the second first.
+        await Should.NotThrowAsync(() => connection.Disposed.Task.WaitAsync(_timeout));
+        sendOrder.ShouldBe(new IHttpContext[] { second, first });
+        first.CancelCount.ShouldBe(0);
+        second.CancelCount.ShouldBe(0);
+        first.DisposeCount.ShouldBe(1);
+        second.DisposeCount.ShouldBe(1);
+        connection.AbortCount.ShouldBe(0);
+
+        await server.StopAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: A faulting stream is answered with 500 while its sibling on the same connection is served")]
+    public async Task ServeConnection_WhenMultiplexedPipelineThrows_AnswersOnlyThatStreamWith500()
+    {
+        // Arrange — the sibling stream parks until the faulted stream has been answered, so it is
+        // still in flight on the same connection when the fault is handled.
+        FakeHttpResponse faultedResponse = new();
+        faultedResponse.Headers[HttpHeaderKey.ContentType] = "text/plain";
+        await faultedResponse.Body.WriteAsync(new byte[] { 1, 2, 3 });
+        FakeHttpResponse siblingResponse = new();
+
+        FakeHttpContext faulted = new(HttpVersion.Http20, faultedResponse);
+        FakeHttpContext sibling = new(HttpVersion.Http20, siblingResponse);
+        TaskCompletionSource faultedAnswered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        FakeHttpConnectionContext connectionContext = new(new[] { faulted, sibling })
+        {
+            SendHandler = (exchange, _) =>
+            {
+                if (ReferenceEquals(exchange, faulted))
+                {
+                    faultedAnswered.TrySetResult();
+                }
+
+                return ValueTask.CompletedTask;
+            },
+        };
+        FakeHttpConnection connection = new(connectionContext);
+        FakePipeline pipeline = new(async (context, cancellationToken) =>
+        {
+            if (ReferenceEquals(context, faulted))
+            {
+                throw new InvalidOperationException("stream boom");
+            }
+
+            await faultedAnswered.Task.WaitAsync(cancellationToken);
+            context.Response.StatusCode = HttpStatusCode.Accepted;
+        });
+        WebApplicationServer server = CreateServer(pipeline, new FakeHttpConnectionListener(connection));
+
+        // Act
+        await server.StartAsync();
+
+        // Assert
+        await Should.NotThrowAsync(() => connection.Disposed.Task.WaitAsync(_timeout));
+        faultedResponse.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        faultedResponse.Headers.Count.ShouldBe(0);
+        faultedResponse.Body.Length.ShouldBe(0);
+        faulted.CancelCount.ShouldBe(0);
+        siblingResponse.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+        sibling.CancelCount.ShouldBe(0);
+        connectionContext.SendCount.ShouldBe(2);
+        connection.AbortCount.ShouldBe(0);
+
+        await server.StopAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: A faulted stream whose response cannot be replaced is reset while its sibling is served")]
+    public async Task ServeConnection_WhenMultiplexedFaultCannotBeAnswered_ResetsOnlyThatStream()
+    {
+        // Arrange — the faulted stream exposes no usable response, so the server resets it: it
+        // cancels the exchange and hands it back to the transport, which maps that to the version's
+        // per-stream reset.
+        FakeHttpContext faulted = new(HttpVersion.Http20);
+        FakeHttpContext sibling = new(HttpVersion.Http20);
+        FakeHttpConnection connection = new(new FakeHttpConnectionContext(new[] { faulted, sibling }));
+        FakePipeline pipeline = new((context, _) => ReferenceEquals(context, faulted)
+            ? throw new InvalidOperationException("stream boom")
+            : Task.CompletedTask);
+        WebApplicationServer server = CreateServer(pipeline, new FakeHttpConnectionListener(connection));
+
+        // Act
+        await server.StartAsync();
+
+        // Assert
+        await Should.NotThrowAsync(() => connection.Disposed.Task.WaitAsync(_timeout));
+        faulted.CancelCount.ShouldBe(1);
+        sibling.CancelCount.ShouldBe(0);
+        connection.Context.SendCount.ShouldBe(2);
+        connection.AbortCount.ShouldBe(0);
+
+        await server.StopAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: A cancelled stream is reset without affecting its sibling")]
+    public async Task ServeConnection_WhenMultiplexedExchangeIsCancelled_ResetsOnlyThatStream()
+    {
+        // Arrange — the exchange's own cancellation fired (a peer reset, say) and its pipeline
+        // unwound with OperationCanceledException: an abandoned exchange, not a fault.
+        using CancellationTokenSource peerReset = new();
+        peerReset.Cancel();
+        FakeHttpContext cancelled = new(HttpVersion.Http20, new FakeHttpResponse(), peerReset.Token);
+        FakeHttpContext sibling = new(HttpVersion.Http20);
+        FakeHttpConnection connection = new(new FakeHttpConnectionContext(new[] { cancelled, sibling }));
+        FakePipeline pipeline = new((context, _) =>
+        {
+            context.RequestCancelled.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        });
+        WebApplicationServer server = CreateServer(pipeline, new FakeHttpConnectionListener(connection));
+
+        // Act
+        await server.StartAsync();
+
+        // Assert — reset, not answered with a 500.
+        await Should.NotThrowAsync(() => connection.Disposed.Task.WaitAsync(_timeout));
+        cancelled.CancelCount.ShouldBe(1);
+        cancelled.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        sibling.CancelCount.ShouldBe(0);
+        connection.Context.SendCount.ShouldBe(2);
+        connection.AbortCount.ShouldBe(0);
+
+        await server.StopAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: A failed send on one stream resets that stream and its sibling is served")]
+    public async Task ServeConnection_WhenMultiplexedSendFails_ResetsOnlyThatStream()
+    {
+        // Arrange — the first write of the failing stream throws; the reset that follows succeeds.
+        FakeHttpContext failing = new(HttpVersion.Http20);
+        FakeHttpContext sibling = new(HttpVersion.Http20);
+        int failingSends = 0;
+        FakeHttpConnectionContext connectionContext = new(new[] { failing, sibling })
+        {
+            SendHandler = (exchange, _) =>
+                ReferenceEquals(exchange, failing) && Interlocked.Increment(ref failingSends) == 1
+                    ? ValueTask.FromException(new IOException("stream write failed"))
+                    : ValueTask.CompletedTask,
+        };
+        FakeHttpConnection connection = new(connectionContext);
+        WebApplicationServer server = CreateServer(new FakePipeline(), new FakeHttpConnectionListener(connection));
+
+        // Act
+        await server.StartAsync();
+
+        // Assert — the failing stream was reset (cancelled, then handed back to the transport once
+        // more); the sibling was answered normally; the connection was never aborted.
+        await Should.NotThrowAsync(() => connection.Disposed.Task.WaitAsync(_timeout));
+        failing.CancelCount.ShouldBe(1);
+        Volatile.Read(ref failingSends).ShouldBe(2);
+        sibling.CancelCount.ShouldBe(0);
+        connectionContext.SendCount.ShouldBe(3);
+        connection.AbortCount.ShouldBe(0);
+        failing.DisposeCount.ShouldBe(1);
+        sibling.DisposeCount.ShouldBe(1);
+
+        await server.StopAsync();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: StopAsync waits for an in-flight stream before disposing its connection")]
+    public async Task StopAsync_WithInFlightMultiplexedExchange_WaitsForItBeforeDisposingTheConnection()
+    {
+        // Arrange — the stream ignores cancellation and parks on a test-owned gate; the connection's
+        // receive loop parks after yielding it, the way an HTTP/2 connection waits for its next stream.
+        TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        bool contextDisposedFirst = false;
+        FakeHttpConnectionContext connectionContext = null!;
+        FakeHttpContext exchange = new(HttpVersion.Http20)
+        {
+            OnDisposing = () => contextDisposedFirst = connectionContext.DisposeCount > 0,
+        };
+        connectionContext = new FakeHttpConnectionContext(new[] { exchange }, parkAfterExchanges: true);
+        FakeHttpConnection connection = new(connectionContext);
+        FakePipeline pipeline = new(async (_, _) =>
+        {
+            entered.TrySetResult();
+            await release.Task;
+        });
+        FakeHttpConnectionListener listener = new(connection);
+        WebApplicationServer server = CreateServer(pipeline, listener);
+
+        await server.StartAsync();
+        await entered.Task.WaitAsync(_timeout);
+
+        // Act
+        Task stopTask = server.StopAsync();
+        await Task.Delay(250);
+
+        // Assert — the stop is held by the running stream, and nothing was torn down under it.
+        stopTask.IsCompleted.ShouldBeFalse();
+        connection.DisposeCount.ShouldBe(0);
+        connectionContext.DisposeCount.ShouldBe(0);
+
+        release.TrySetResult();
+        await Should.NotThrowAsync(() => stopTask.WaitAsync(_timeout));
+        exchange.DisposeCount.ShouldBe(1);
+        contextDisposedFirst.ShouldBeFalse();
+        connectionContext.DisposeCount.ShouldBe(1);
+        connection.DisposeCount.ShouldBe(1);
+        listener.DisposeCount.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Server: A multiplexed connection holds its concurrency slot until its streams drain")]
+    public async Task StartAsync_WithMaxConcurrentConnections_HoldsTheSlotUntilInFlightStreamsDrain()
+    {
+        // Arrange — cap of 1. Connection A's receive sequence ends right after it yields one stream,
+        // which then parks; connection B must stay in the backlog until that stream finishes.
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        FakeHttpContext streamA = new(HttpVersion.Http20);
+        FakeHttpConnection connectionA = new(new FakeHttpConnectionContext(new[] { streamA }));
+
+        FakeHttpContext exchangeB = new();
+        FakeHttpConnection connectionB = new(new FakeHttpConnectionContext(new[] { exchangeB }));
+
+        TaskCompletionSource exchangeBProcessed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        FakePipeline pipeline = new(async (context, _) =>
+        {
+            if (ReferenceEquals(context, streamA))
+            {
+                await release.Task;
+            }
+
+            if (ReferenceEquals(context, exchangeB))
+            {
+                exchangeBProcessed.TrySetResult();
+            }
+        });
+
+        WebApplicationServer server = CreateServer(
+            pipeline,
+            new FakeHttpConnectionListener(connectionA, connectionB),
+            maxConcurrentConnections: 1);
+
+        // Act
+        await server.StartAsync();
+        await Should.NotThrowAsync(() => WaitForAsync(() => pipeline.Executed.Contains(streamA), _timeout));
+
+        // Assert — A's receive loop is done, but its stream still holds the slot.
+        await Task.Delay(250);
+        connectionB.OpenCount.ShouldBe(0);
+        connectionA.DisposeCount.ShouldBe(0);
+
+        release.TrySetResult();
+
+        await Should.NotThrowAsync(() => exchangeBProcessed.Task.WaitAsync(_timeout));
+        connectionA.DisposeCount.ShouldBe(1);
+        connectionB.OpenCount.ShouldBe(1);
 
         await server.StopAsync();
     }
