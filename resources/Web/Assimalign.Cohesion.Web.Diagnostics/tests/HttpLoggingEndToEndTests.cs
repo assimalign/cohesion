@@ -297,6 +297,44 @@ public class HttpLoggingEndToEndTests
         entries[0].Attributes[HttpLoggingAttributes.RequestPath].ShouldBe("/orders");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: WithHttpLogging on a group applies to its routes, and a route override wins")]
+    public async Task WithHttpLogging_OnGroupAndRoute_ShouldApplyMostSpecificFields()
+    {
+        // Arrange — the probes group is silenced through the convention verb (#1055); one probe opts back
+        // in with the request line only.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        RecordingLoggerProvider recorded = new();
+        using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
+
+        RouterRouteHandler ok = new(context =>
+        {
+            context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+            return Task.CompletedTask;
+        });
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        IRouterGroupBuilder probes = routes.MapGroup("/probes").WithHttpLogging(HttpLoggingFields.None);
+        probes.Map(CohesionHttpMethod.Get, "live", ok);
+        probes.Map(CohesionHttpMethod.Get, "ready", ok).WithHttpLogging(HttpLoggingFields.RequestLine);
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act — the silenced probe first, so its entry would precede the other if it were logged.
+        (await client.GetAsync("/probes/live", cancellation.Token)).Dispose();
+        (await client.GetAsync("/probes/ready", cancellation.Token)).Dispose();
+
+        // Assert
+        IReadOnlyList<ILoggerEntry> entries = await WaitForEntriesAsync(recorded, 1, cancellation.Token);
+        entries.Count.ShouldBe(1);
+        entries[0].Attributes[HttpLoggingAttributes.RequestPath].ShouldBe("/probes/ready");
+        entries[0].Attributes.ContainsKey(HttpLoggingAttributes.ResponseStatusCode).ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: A CORS preflight is logged even when its candidate endpoint silences logging")]
     public async Task EndpointMetadata_CorsPreflight_ShouldNotApplyCandidateOverride()
     {

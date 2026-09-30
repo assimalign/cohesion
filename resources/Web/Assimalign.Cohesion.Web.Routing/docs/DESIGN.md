@@ -438,6 +438,10 @@ only) and `RequireHost` (a `RouteHostMetadata`, routes and groups). A verb is pl
 composition, and ordering follows the rules above. `IRouterBuilder.Map(IRouterRoute)` still maps a
 finished route whose metadata is fixed; it returns the router builder, as before.
 
+Feature packages ship theirs over the same contract: `RequireRateLimiting`/`DisableRateLimiting`
+(Web.RateLimiting), `WithRequestTimeout`/`DisableRequestTimeout` (Web.RequestTimeouts),
+`CacheOutput`/`DisableOutputCache` (Web.Caching), and `WithHttpLogging` (Web.Diagnostics).
+
 **Why not a mutable route.** `Route` stays immutable and receives its metadata collection at
 construction. The deferred collection is the only mutable piece, and it becomes immutable at build.
 Anything that reads metadata before the build (a test constructing a `Router` directly) resolves it

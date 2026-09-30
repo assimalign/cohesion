@@ -90,6 +90,11 @@ flowchart TD
   (`GetMetadata<RateLimitingMetadata>()`), so an endpoint-level declaration overrides a group-level one. A
   named policy is resolved against `options.AddPolicy`; an unknown name throws
   `InvalidOperationException`, a configuration error surfaced by the first request that reaches it.
+- **Declared with convention verbs (#1055).** `RequireRateLimiting(name)`, `RequireRateLimiting(policy)`
+  and `DisableRateLimiting()` are generic extension members over routing's `IRouterConventionBuilder`, so
+  one verb serves a mapped route and a route group and returns the receiver's own builder type. Each
+  appends a `RateLimitingMetadata`; routing composes it when the route table is built, outer group first,
+  so the last-wins read above resolves the most specific declaration regardless of call order.
 - **Asynchronous, with queueing.** The endpoint lease is acquired exactly like the global one:
   `AcquireAsync(context, permits, context.RequestCancelled)`. A queueing limiter holds the request until a
   permit frees up. A client that goes away while queued stops the wait: the `OperationCanceledException`

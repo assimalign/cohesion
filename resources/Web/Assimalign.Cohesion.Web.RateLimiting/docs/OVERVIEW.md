@@ -69,11 +69,17 @@ app.UseRateLimiting(options =>
     };
 });
 
-// Attach the named policy to an endpoint through routing metadata (Map time).
+// Attach the named policy where the endpoint is mapped, or to every route of a group.
+app.MapGet("/report", BuildReportAsync).RequireRateLimiting("expensive");
+
+IRouterGroupBuilder admin = app.MapGroup("/admin").RequireRateLimiting("expensive");
+admin.MapGet("ping", PingAsync).DisableRateLimiting();   // exempt one route of the group
+
+// The verbs append RateLimitingMetadata; attaching it through the route's metadata is equivalent.
 routes.Map(new Route(
     HttpMethod.Get,
-    "/report",
-    new RouterRouteHandler(BuildReportAsync),
+    "/export",
+    new RouterRouteHandler(ExportAsync),
     new RouterRouteMetadataCollection(new RateLimitingMetadata("expensive"))));
 ```
 

@@ -48,8 +48,15 @@ app.UseOutputCache(options => options.AddPolicy("catalog", policy =>
     policy.Tag("catalog");
 }));
 
-routes.Map(new Route(HttpMethod.Get, "/catalog",
-    new RouterRouteHandler(GetCatalog),
+// Declare it where the endpoint is mapped, or on a group; a route can opt out of its group.
+IRouterGroupBuilder catalog = app.MapGroup("/catalog").CacheOutput("catalog");
+catalog.MapGet("items", GetItems);
+catalog.MapGet("live", GetLiveStock).DisableOutputCache();
+app.MapGet("/home", GetHome).CacheOutput();   // base/default policy, even in opt-in mode
+
+// The verbs append OutputCacheMetadata; attaching it through the route's metadata is equivalent.
+routes.Map(new Route(HttpMethod.Get, "/offers",
+    new RouterRouteHandler(GetOffers),
     new RouterRouteMetadataCollection(new OutputCacheMetadata("catalog"))));
 
 // Invalidate by tag when the underlying data changes.

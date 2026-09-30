@@ -78,7 +78,9 @@ the Logging library's own correlation mechanism, not a bespoke one.
   per the metadata-carrier discipline; there is no `IHttpLoggingMetadata`. Access logging is
   optional behavior, so the carrier does not name a required middleware
   (`IRouteMiddlewareMetadata`): an endpoint dispatched without `UseHttpLogging` is just not
-  logged.
+  logged. Applications attach it with the convention verb `WithHttpLogging(fields)` (#1055), a
+  generic extension member over routing's `IRouterConventionBuilder` that serves routes and groups
+  alike; routing composes the metadata at route-table build, outer group first.
 - **A CORS preflight is logged with the configured fields.** Routing publishes the candidate
   endpoint of a CORS preflight (`IsPreflight`) so CORS can read its metadata, but the candidate
   never runs for the preflight. An override describes the exchanges its endpoint handles, so it

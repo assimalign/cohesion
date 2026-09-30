@@ -167,6 +167,11 @@ two small allocations per request (the timeout source and the linked source).
 - An endpoint policy **replaces** the effective policy outright (timeout *and* response
   members); policies do not merge member-by-member — merging invites "where did this status
   come from" archaeology.
+- Applications declare it with the convention verbs (#1055) `WithRequestTimeout(TimeSpan)`,
+  `WithRequestTimeout(RequestTimeoutPolicy)` and `DisableRequestTimeout()`: generic extension
+  members over routing's `IRouterConventionBuilder`, so one verb serves a mapped route and a route
+  group. Each appends a `RequestTimeoutMetadata`, which routing composes when the route table is
+  built, outer group first; the last-wins read resolves the most specific declaration.
 - The timeout response: `WriteResponse` (imperative, owns everything) beats
   `WriteProblemDetails` (RFC 9457 payload via `Web.ProblemDetails`) beats the bare status.
   Before writing, staged response state is reset (headers cleared, buffered body truncated) —

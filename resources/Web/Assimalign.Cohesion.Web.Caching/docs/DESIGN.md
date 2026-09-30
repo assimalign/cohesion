@@ -72,6 +72,11 @@ requires `UseOutputCache` after `UseRouting`.
   `RateLimitingOptions`), the middleware-wide `MaximumBodySize` and store `SizeLimit`, and the `TimeProvider`.
 - **`OutputCacheMetadata`** — the sealed per-endpoint carrier: a named policy, an inline policy,
   `Enabled` (opt in under the base/default policy), or `Disabled` (opt out).
+- **Convention verbs (#1055)** — `CacheOutput()`, `CacheOutput(name)`, `CacheOutput(policy)` and
+  `DisableOutputCache()` append those four shapes. They are generic extension members over routing's
+  `IRouterConventionBuilder`, so one verb serves a mapped route and a route group; routing composes the
+  metadata when the route table is built, outer group first, which the last-wins resolution below relies
+  on.
 
 **Resolution** (in the middleware): a matched endpoint's metadata wins last-wins over the base policy —
 inline policy → named policy → `Enabled` (base/default) → `Disabled` (no caching). With no metadata the

@@ -45,11 +45,13 @@ application.UseRequestTimeouts(options => options.DefaultPolicy = new RequestTim
     WriteProblemDetails = true,
 });
 
-// Per-endpoint override / disable via the endpoint metadata bag.
-routes.Map(new Route(HttpMethod.Get, "/report", handler,
-    new RouterRouteMetadataCollection(new RequestTimeoutMetadata(TimeSpan.FromMinutes(2)))));
-routes.Map(new Route(HttpMethod.Get, "/stream", streamHandler,
-    new RouterRouteMetadataCollection(RequestTimeoutMetadata.Disabled)));
+// Per-endpoint override / disable where the endpoint is mapped (a route group takes the same verbs).
+application.MapGet("/report", handler).WithRequestTimeout(TimeSpan.FromMinutes(2));
+application.MapGet("/stream", streamHandler).DisableRequestTimeout();
+
+// The verbs append RequestTimeoutMetadata; attaching it through the route's metadata is equivalent.
+routes.Map(new Route(HttpMethod.Get, "/export", exportHandler,
+    new RouterRouteMetadataCollection(new RequestTimeoutMetadata(TimeSpan.FromMinutes(5)))));
 ```
 
 Registered ahead of `UseRouting`, the global default still governs every request, but no endpoint
@@ -65,6 +67,7 @@ is known when the middleware runs: an endpoint whose metadata carries a timeout 
 | `RequestTimeoutOptions` | Middleware options: `DefaultPolicy`, `TimeProvider`, `SuspendWhenDebuggerAttached` |
 | `IRequestTimeoutFeature` | Per-exchange feature: `Token`, `Disable()`, `SetTimeout(TimeSpan)` |
 | `WebApplicationExtensions` | `UseRequestTimeouts(...)` pipeline verbs |
+| `RequestTimeoutRouteConventionExtensions` | `WithRequestTimeout(TimeSpan)`, `WithRequestTimeout(RequestTimeoutPolicy)` and `DisableRequestTimeout()` on a mapped route or a route group |
 
 ## Dependencies
 
