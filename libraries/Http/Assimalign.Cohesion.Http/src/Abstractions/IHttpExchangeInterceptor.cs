@@ -15,9 +15,9 @@ namespace Assimalign.Cohesion.Http;
 /// The hooks follow the exchange's lifecycle in order. Request phase (parse path):
 /// <see cref="AfterRequestHead"/> → <see cref="BeforeRequestBody"/> →
 /// <see cref="AfterRequestBody"/>; the body-size knob freezes when the transport begins consuming
-/// the body (HTTP/1.1: at the first read of the streamed body, after dispatch — so it is still
-/// adjustable in every parse-path hook; HTTP/2 / HTTP/3: before <see cref="BeforeRequestBody"/>,
-/// as the buffered body is about to be exposed). Response phase: <see cref="BeforeResponse"/> (exchange setup,
+/// the body (HTTP/1.1 and HTTP/3: at the first read of the lazily read body, after dispatch — so it
+/// is still adjustable in every parse-path hook; HTTP/2: before <see cref="BeforeRequestBody"/>, as
+/// the flow-controlled body is about to be exposed). Response phase: <see cref="BeforeResponse"/> (exchange setup,
 /// before the application handler) → <see cref="BeforeResponseHeadAsync"/> (the final head is
 /// about to commit) → <see cref="AfterResponseAsync"/> (the final response is fully written).
 /// <see cref="Scopes"/> declares which phases the interceptor participates in, so the transport
@@ -83,10 +83,11 @@ public interface IHttpExchangeInterceptor
     /// <see langword="false"/>.
     /// </para>
     /// <para>
-    /// Timing is protocol-dependent: on HTTP/1.1 the head hook runs before any body octet is
-    /// consumed from the wire, so body-size adjustments precede enforcement; HTTP/2 and HTTP/3
-    /// currently buffer a stream's body before the head is decoded, so the hook runs before the
-    /// body is <em>exposed</em> but not before it was <em>received</em>.
+    /// Timing is protocol-dependent: on HTTP/1.1 and HTTP/3 the head hook runs before any body
+    /// octet is read, so body-size adjustments precede enforcement; HTTP/2 dispatches at the end of
+    /// the header block, and DATA that already arrived sits in the stream's flow-control-bounded
+    /// buffer, so the hook runs before the body is <em>exposed</em> but not necessarily before all
+    /// of it was <em>received</em>.
     /// </para>
     /// </remarks>
     /// <param name="context">The parse-time view of the request being read.</param>
@@ -97,11 +98,11 @@ public interface IHttpExchangeInterceptor
 
     /// <summary>
     /// Called once per request, after every head hook has run, immediately before the transport
-    /// surfaces (HTTP/1.1: the lazily streamed body, no octet consumed yet) or exposes
-    /// (HTTP/2 / HTTP/3: the buffered body) the request body. On HTTP/1.1 this precedes any
+    /// surfaces (HTTP/1.1 and HTTP/3: the lazily read body, no octet consumed yet) or exposes
+    /// (HTTP/2: the flow-controlled body) the request body. On HTTP/1.1 this precedes any
     /// <c>Expect: 100-continue</c> solicitation — itself lazy, emitted at the first body read — so
-    /// a hook that rejects here does so before the body is solicited from the peer, and the
-    /// body-size knob is still adjustable (it freezes at the first body read); on HTTP/2 / HTTP/3
+    /// a hook that rejects here does so before the body is solicited from the peer. On HTTP/1.1 and
+    /// HTTP/3 the body-size knob is still adjustable (it freezes at the first body read); on HTTP/2
     /// the cap has already been frozen when this hook runs. Skipped for CONNECT tunnels, whose
     /// post-head octets are tunnel traffic rather than a message body. Requires
     /// <see cref="HttpInterceptorScopes.Request"/>.

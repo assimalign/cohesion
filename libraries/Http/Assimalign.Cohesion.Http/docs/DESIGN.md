@@ -109,10 +109,11 @@ dictionaries. Fully AOT/trim safe.
 - **Trailer emission / per-version surfacing.** The core models the trailer
   collection; whether a given transport surfaces or emits it is the transport's
   concern, and `IsSupported` reports the truth per exchange. The HTTP/1.1
-  transport surfaces inbound request trailers (chunked) today; HTTP/2 / HTTP/3
-  trailing-HEADERS surfacing and HTTP/1.1 outbound chunked-trailer emission are
-  wired incrementally by the version transports — the model makes each a
-  drop-in (`IsSupported = true` + a populated `HttpTrailerCollection`).
+  (chunked) and HTTP/3 (trailing HEADERS frame, #1066) transports surface
+  inbound request trailers today; HTTP/2 trailing-HEADERS surfacing and
+  HTTP/1.1 outbound chunked-trailer emission are wired incrementally by the
+  version transports — the model makes each a drop-in (`IsSupported = true` +
+  a populated `HttpTrailerCollection`).
 - **Per-field parsers.** `HttpFieldRules` classifies field *names*; it does not
   parse field *values* (dates, cache-control directives, etc.). Value parsing
   belongs to the field-specific consumer, and the shared toolkit those consumers
@@ -639,10 +640,11 @@ referencing any feature package. In lifecycle order:
 - `AfterRequestHead(context)` runs after the head is parsed and before the body
   is surfaced: attach typed features, adjust the body-size knob, or throw the
   typed rejection.
-- `BeforeRequestBody(context)` runs after every head hook and the knob freeze,
-  immediately before the transport reads (HTTP/1.1) or exposes (HTTP/2 / HTTP/3)
-  the body — the knobs are read-only here; observe, attach, or reject. Skipped
-  for CONNECT tunnels.
+- `BeforeRequestBody(context)` runs after every head hook, immediately before
+  the transport surfaces the body: observe, attach, or reject. The body-size
+  knob freezes at the first body read on HTTP/1.1 and HTTP/3, so it is still
+  adjustable here; HTTP/2 freezes it before this hook. Skipped for CONNECT
+  tunnels.
 - `Stream AfterRequestBody(context, body)` runs after the body stream is
   materialized: return the stream unchanged or a wrapper (read-only decorators,
   digest hashing, decompression). Wrappers own what they wrap.
