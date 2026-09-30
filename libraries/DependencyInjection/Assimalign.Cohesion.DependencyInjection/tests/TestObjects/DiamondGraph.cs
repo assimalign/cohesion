@@ -1,5 +1,3 @@
-using System;
-
 namespace Assimalign.Cohesion.DependencyInjection.Tests;
 
 /// <summary>
@@ -9,42 +7,78 @@ namespace Assimalign.Cohesion.DependencyInjection.Tests;
 /// </summary>
 internal static class DiamondGraph
 {
-    internal static Type[] Services { get; } =
-    [
-        typeof(Layer0A), typeof(Layer0B),
-        typeof(Layer1A), typeof(Layer1B),
-        typeof(Layer2A), typeof(Layer2B),
-        typeof(Layer3A), typeof(Layer3B),
-        typeof(Layer4A), typeof(Layer4B),
-        typeof(Layer5A), typeof(Layer5B),
-        typeof(Layer6A), typeof(Layer6B),
-        typeof(Layer7A), typeof(Layer7B),
-        typeof(Layer8A), typeof(Layer8B),
-        typeof(Layer9A), typeof(Layer9B),
-        typeof(Layer10A), typeof(Layer10B),
-        typeof(Layer11A), typeof(Layer11B),
-        typeof(Layer12A), typeof(Layer12B),
-        typeof(Layer13A), typeof(Layer13B),
-        typeof(Layer14A), typeof(Layer14B),
-        typeof(Layer15A), typeof(Layer15B),
-        typeof(Layer16A), typeof(Layer16B),
-        typeof(Layer17A), typeof(Layer17B),
-        typeof(Layer18A), typeof(Layer18B),
-        typeof(Layer19A), typeof(Layer19B),
-        typeof(Layer20A), typeof(Layer20B),
-        typeof(Layer21A), typeof(Layer21B),
-        typeof(Layer22A), typeof(Layer22B),
-        typeof(Layer23A), typeof(Layer23B),
-        typeof(Layer24A), typeof(Layer24B),
-        typeof(Layer25A), typeof(Layer25B),
-        typeof(Layer26A), typeof(Layer26B),
-        typeof(Layer27A), typeof(Layer27B),
-        typeof(Layer28A), typeof(Layer28B),
-        typeof(Layer29A), typeof(Layer29B),
-        typeof(Layer30A), typeof(Layer30B),
-        typeof(Layer31A), typeof(Layer31B),
-        typeof(Layer32A), typeof(Layer32B),
-    ];
+    /// <summary>
+    /// Registers every service of the graph as a transient.
+    /// </summary>
+    internal static void AddTransients(IServiceProviderBuilder builder)
+    {
+        builder.AddTransient<Layer0A>();
+        builder.AddTransient<Layer0B>();
+        builder.AddTransient<Layer1A>();
+        builder.AddTransient<Layer1B>();
+        builder.AddTransient<Layer2A>();
+        builder.AddTransient<Layer2B>();
+        builder.AddTransient<Layer3A>();
+        builder.AddTransient<Layer3B>();
+        builder.AddTransient<Layer4A>();
+        builder.AddTransient<Layer4B>();
+        builder.AddTransient<Layer5A>();
+        builder.AddTransient<Layer5B>();
+        builder.AddTransient<Layer6A>();
+        builder.AddTransient<Layer6B>();
+        builder.AddTransient<Layer7A>();
+        builder.AddTransient<Layer7B>();
+        builder.AddTransient<Layer8A>();
+        builder.AddTransient<Layer8B>();
+        builder.AddTransient<Layer9A>();
+        builder.AddTransient<Layer9B>();
+        builder.AddTransient<Layer10A>();
+        builder.AddTransient<Layer10B>();
+        builder.AddTransient<Layer11A>();
+        builder.AddTransient<Layer11B>();
+        builder.AddTransient<Layer12A>();
+        builder.AddTransient<Layer12B>();
+        builder.AddTransient<Layer13A>();
+        builder.AddTransient<Layer13B>();
+        builder.AddTransient<Layer14A>();
+        builder.AddTransient<Layer14B>();
+        builder.AddTransient<Layer15A>();
+        builder.AddTransient<Layer15B>();
+        builder.AddTransient<Layer16A>();
+        builder.AddTransient<Layer16B>();
+        builder.AddTransient<Layer17A>();
+        builder.AddTransient<Layer17B>();
+        builder.AddTransient<Layer18A>();
+        builder.AddTransient<Layer18B>();
+        builder.AddTransient<Layer19A>();
+        builder.AddTransient<Layer19B>();
+        builder.AddTransient<Layer20A>();
+        builder.AddTransient<Layer20B>();
+        builder.AddTransient<Layer21A>();
+        builder.AddTransient<Layer21B>();
+        builder.AddTransient<Layer22A>();
+        builder.AddTransient<Layer22B>();
+        builder.AddTransient<Layer23A>();
+        builder.AddTransient<Layer23B>();
+        builder.AddTransient<Layer24A>();
+        builder.AddTransient<Layer24B>();
+        builder.AddTransient<Layer25A>();
+        builder.AddTransient<Layer25B>();
+        builder.AddTransient<Layer26A>();
+        builder.AddTransient<Layer26B>();
+        builder.AddTransient<Layer27A>();
+        builder.AddTransient<Layer27B>();
+        builder.AddTransient<Layer28A>();
+        builder.AddTransient<Layer28B>();
+        builder.AddTransient<Layer29A>();
+        builder.AddTransient<Layer29B>();
+        builder.AddTransient<Layer30A>();
+        builder.AddTransient<Layer30B>();
+        builder.AddTransient<Layer31A>();
+        builder.AddTransient<Layer31B>();
+        builder.AddTransient<Layer32A>();
+        builder.AddTransient<Layer32B>();
+    }
 
     internal sealed class Layer0A
     {

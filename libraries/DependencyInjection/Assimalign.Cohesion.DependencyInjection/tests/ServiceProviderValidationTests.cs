@@ -133,10 +133,7 @@ public sealed class ServiceProviderValidationTests
         // Arrange: 66 services and 2^32 paths. Walking every path took seconds by 26 layers and
         // roughly quadrupled with every two more.
         using var builder = CreateBuilder(validateOnBuild: true);
-        foreach (Type service in DiamondGraph.Services)
-        {
-            builder.AddTransient(service);
-        }
+        DiamondGraph.AddTransients(builder);
 
         // Act
         Exception? failure = null;
