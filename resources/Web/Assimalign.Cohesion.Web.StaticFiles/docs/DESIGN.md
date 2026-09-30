@@ -103,6 +103,27 @@ range (GET only; If-Range gate) ──▶ 416 | single 206 | full 200
 open stream → head (Content-*, ETag, Last-Modified, Accept-Ranges, Cache-Control, Vary) → body (GET)
 ```
 
+The request path the flow starts from is `context.GetEffectivePath()` (#1056). Inside a
+`Map("/static", branch)` branch that is the path below `/static`, so `branch.UseStaticFiles()` serves
+`/static/app.js` from `wwwroot/app.js`. The add-a-slash redirect still builds its `Location` from the
+full request path, so it stays correct inside a branch. Outside a branch the effective path is the
+request path.
+
+## Single-page-application fallback (`MapFallbackToFile`, #1056)
+
+`app.MapFallbackToFile("index.html")` maps the application's fallback route (Web.Routing's
+`MapFallback`: lowest precedence, `GET`/`HEAD`, never a file-name path, never a 405). Its handler
+serves the named file from the web root through the same middleware, entered at an internal
+`ServeAsync(context, path, next)` with the file's path instead of the request's. The fallback
+response therefore gets the full static-files treatment: content type, validators, conditional GET,
+ranges and precompressed siblings. That entry point exists because the request is never rewritten
+(the Web area's effective-value model). A file path that escapes the web root is rejected when the
+fallback is mapped, and a missing file answers 404.
+
+The package takes a `Web.Routing` reference for this (a feature-to-feature reference, allowed by
+the Web dependency rule). Register `UseStaticFiles()` ahead of `UseRouting()`, so an existing asset is
+served before routing, and the fallback answers only what remains.
+
 ## HTTP/1.1 percent-decode parity (transport-owned)
 
 The traversal gate runs over the **decoded** request path, and every transport now decodes it

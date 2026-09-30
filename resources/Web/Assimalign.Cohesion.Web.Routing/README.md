@@ -20,7 +20,10 @@ models were set aside on 2026-07-10.
 - Applies **inline constraints** that both validate and, for type constraints (`int`, `long`,
   `decimal`, `double`, `float`, `bool`, `guid`, `datetime`), **convert** the value to its CLR type —
   parsed once, invariant culture — plus text/value validators (`length`, `minlength`, `maxlength`,
-  `min`, `max`, `range`, `regex`, `alpha`, `when`).
+  `min`, `max`, `range`, `regex`, `alpha`, `when`, `nonfile`).
+- Maps **fallback routes** (`MapFallback`): the lowest-precedence `GET`/`HEAD` route for paths no
+  other route matches, never answering a file-name path (`nonfile`) and never turning an unmatched
+  path into a 405. `MapFallbackToFile` in `Web.StaticFiles` builds the single-page-application shape on it.
 - Composes **route groups** (`MapGroup`) at builder time. A prefix (which may itself contain
   parameters, e.g. `{tenant}/api`) and shared parameter policies are merged onto each child route
   **at registration**, so grouped routes match at exactly the cost of directly-mapped ones and

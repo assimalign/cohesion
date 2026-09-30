@@ -47,6 +47,19 @@ app.UseStaticFiles(contentRoot, options =>
 });
 ```
 
+A single-page application serves its assets first and answers every client-side route with
+`index.html`. The fallback never answers a file-name path, so a missing asset stays a 404:
+
+```csharp
+app.UseStaticFiles();                  // existing assets
+app.UseRouting();                      // API routes
+app.MapGet("/api/orders", ...);
+app.MapFallbackToFile("index.html");   // everything else that is not a file
+```
+
+Static files can also be mounted in a path branch, which serves below the branch's prefix:
+`app.Map("/static", branch => branch.UseStaticFiles())`.
+
 ## What a served response carries
 
 | Concern | Behavior |

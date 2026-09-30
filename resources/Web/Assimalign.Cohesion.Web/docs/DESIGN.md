@@ -65,6 +65,41 @@ that selected it, so the root does not absorb routing. Every `IWebApplicationPip
 implementation must honor the contract at its terminal. That includes test doubles, which is
 why the Routing tests' application double runs the published endpoint too.
 
+The terminal itself is the root's `WebApplicationTerminal.InvokeAsync` (#1056): run the published
+endpoint, or set a bodyless `404` on an untouched response. `WebApplication` in Web.Hosting and every
+non-rejoining branch end in it, so there is one definition of "unhandled".
+
+## Pipeline branching (#1056)
+
+`WebApplicationBranchingExtensions` adds four verbs over `IWebApplicationPipelineBuilder`:
+
+| Verb | Runs the branch when | Rejoins the main pipeline |
+|---|---|---|
+| `Map(path, branch)` | the path starts with `path` at a segment boundary (case-insensitive) | no; ends in `WebApplicationTerminal` |
+| `MapWhen(predicate, branch)` | `predicate(context)` is true | no; ends in `WebApplicationTerminal` |
+| `UseWhen(predicate, branch)` | `predicate(context)` is true | yes; the branch's `next` is the rest of the pipeline |
+| `Run(terminal)` | always, where registered | no; nothing after it runs |
+
+A branch is collected by an internal `WebApplicationBranchBuilder` and composed by the containing
+pipeline when that pipeline is built. Every branch registration is kept in the component-factory
+shape that takes the application context, so middleware that needs the context at composition time
+(`UseStaticFiles` reads the web root) composes inside a branch exactly as it does on the application.
+An endpoint selected before a non-rejoining branch still runs at the branch's terminal.
+
+**`Map(path)` does not rewrite the request.** `IHttpRequest.Path` is read-only on the interface, and
+the Web area's model is to publish an effective view rather than mutate the request (owner decision 3,
+the forwarded-headers model; request mutation is the open #782 gate). A path branch publishes
+`IWebPathBaseFeature`: the accumulated `PathBase` (outermost prefix first) and the `Path` below it.
+Middleware that can be mounted in a branch reads `context.GetEffectivePath()`, which `Web.StaticFiles`
+does. Absolute URLs keep using the full `IHttpRequest.Path`, which also keeps a redirect such as
+static files' add-a-slash correct inside a branch. A nested `Map` matches against the effective path, so
+prefixes compose. The view is removed when the branch returns.
+
+**Branches hold middleware, not routes.** Routes belong to the application's router (`app.MapGet`,
+`app.MapGroup`), and per-endpoint behavior is endpoint metadata. The routing verbs require the
+application builder (`TBuilder : IWebApplicationPipelineBuilder, IWebApplication`), so they are not
+available on a branch. A sub-path API is a route group; a sub-path asset mount is a `Map` branch.
+
 ## Application lifecycle services
 
 The concrete `WebApplicationBuilder.AddService` in `Web.Hosting` accepts an

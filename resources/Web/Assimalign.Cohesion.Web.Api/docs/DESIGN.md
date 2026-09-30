@@ -36,6 +36,10 @@ attach where the endpoint is mapped, for example
 composes when the route table is built (Web.Routing DESIGN, "Endpoint convention builders"). Before
 #1055 the verbs returned the pipeline builder, and a typed endpoint could carry no metadata at all.
 
+**Fallback (#1056).** `app.MapFallback(middleware)` and `app.MapFallback(pattern, middleware)` map
+Web.Routing's fallback route (lowest precedence, `GET`/`HEAD`, never a file-name path, never a 405). For
+a single-page application use `MapFallbackToFile` in `Web.StaticFiles`.
+
 **Groups hold typed endpoints.** `app.MapGroup(prefix)` returns the router's `IRouterGroupBuilder`.
 `RouterGroupBuilderEndpointExtensions` gives it the same two families: the raw middleware
 overloads, and the `Delegate` placeholders the generator intercepts. `api.MapGet("orders/{id:int}",

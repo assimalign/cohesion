@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 
 using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Http;
@@ -52,20 +51,9 @@ public static class WebApplicationStaticFilesExtensions
 
             return builder.Use((IWebApplicationContext context, WebApplicationMiddleware next) =>
             {
-                if (context.WebRootPath is not { IsEmpty: false } webRoot || !Directory.Exists(webRoot.ToString()))
-                {
-                    return next;
-                }
+                StaticFilesMiddleware? middleware = WebRootStaticFiles.TryCreate(context, options);
 
-                var fileSystem = new PhysicalFileSystem(new PhysicalFileSystemOptions
-                {
-                    Root = webRoot,
-                    IsReadOnly = true,
-                    Name = "StaticFiles",
-                });
-                var middleware = new StaticFilesMiddleware(fileSystem, options);
-
-                return httpContext => middleware.InvokeAsync(httpContext, next);
+                return middleware is null ? next : httpContext => middleware.InvokeAsync(httpContext, next);
             });
         }
 
@@ -111,7 +99,7 @@ public static class WebApplicationStaticFilesExtensions
         }
     }
 
-    private static void Validate(StaticFilesOptions options)
+    internal static void Validate(StaticFilesOptions options)
     {
         // HttpPath also admits the "*" asterisk form; a mount prefix must be an origin-form path.
         if (options.RequestPath.Value.Length == 0 || options.RequestPath.Value[0] != '/')

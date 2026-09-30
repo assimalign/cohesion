@@ -5,6 +5,8 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<!-- MapFallbackToFile maps a fallback route on the application router. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Physical" />

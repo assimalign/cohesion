@@ -73,8 +73,22 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
         // (HttpPath.FromUriComponent in Http1MessageReader / Http2Stream / Http3HeaderCodec), so the
         // traversal gate and the file lookup see the same decoded text regardless of protocol — "%2e%2e"
         // arrives here as ".." on h1 exactly as it does on h2/h3. The middleware MUST NOT re-decode, or
-        // an encoded octet would decode twice; it trusts the transport's single decode.
-        string path = context.Request.Path.Value;
+        // an encoded octet would decode twice; it trusts the transport's single decode. Inside a
+        // Map(path) branch the effective path is the path below the branch's prefix (#1056).
+        await ServeAsync(context, context.GetEffectivePath().Value, next);
+    }
+
+    /// <summary>
+    /// Serves the file <paramref name="path"/> names, relative to the mount's request-path prefix, or
+    /// calls <paramref name="next"/> when this mount holds no servable file there.
+    /// </summary>
+    /// <param name="context">The exchange.</param>
+    /// <param name="path">The decoded request path to resolve (the request's own, or a fallback's file).</param>
+    /// <param name="next">The delegate invoked when no file is served.</param>
+    /// <returns>A task that completes when the response (or <paramref name="next"/>) has completed.</returns>
+    internal async Task ServeAsync(IHttpContext context, string path, WebApplicationMiddleware next)
+    {
+        HttpMethod method = context.Request.Method;
 
         if (!StaticFilePath.TryGetRelativePath(path, _prefix, out string remainder))
         {

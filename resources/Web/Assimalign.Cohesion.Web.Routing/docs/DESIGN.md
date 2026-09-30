@@ -499,6 +499,29 @@ The middleware calls `router.Match(context)` once and publishes the result:
 `IRouter.RouteAsync` still matches **and** dispatches in one call for callers that use the router
 directly without the middleware, so a direct `RouteAsync` also produces a correct 405 with `Allow`.
 
+### Fallback routes (#1056)
+
+`MapFallback(handler)` maps `{**path:nonfile}` for `GET` (and `HEAD` through the `GET` rule), marked
+with an internal `RouteFallbackMetadata`. The router treats the marker two ways:
+
+- **Evaluated last.** Fallback candidates sort after every other route, ahead of precedence. A
+  fallback registered first still loses to an application catch-all at the same precedence.
+  Fallbacks rank among themselves by ordinary precedence, so `MapFallback("admin/{**path:nonfile}", …)`
+  wins for `/admin/*` over the site-wide fallback.
+- **Never part of a 405.** A request whose path only a fallback matched, with a method the fallback
+  does not accept, is a 404. Otherwise every `POST` to an unknown path would become a `405 Allow: GET,
+  HEAD`. A real route's 405 is unaffected.
+
+The `nonfile` built-in policy keeps a fallback from answering a request for a missing asset. It rejects
+a value whose last segment has a file extension (`/app.js`, `/v1.2/readme.md`), accepts the directory
+form (`/v1.2/`, the site root), and so leaves missing files to the 404. `Web.StaticFiles` builds
+`MapFallbackToFile("index.html")` on `MapFallback`; `Web.Api` adds `app.MapFallback(middleware)`.
+
+**Omitted catch-alls match.** The site root reaches the fallback because an omitted catch-all captures
+no value, as "Parameter policies" and the link generator's collapsing rule already stated. The inbound
+matcher used to reject an empty catch-all, so `/files/{**path}` did not match the `/files` URL the link
+generator produces for it. That inconsistency is fixed with #1056.
+
 ### Why dispatch is implicit, at the pipeline terminal
 
 The endpoint runs at the pipeline's terminal; there is no `UseEndpoints` step. An explicit dispatch

@@ -471,7 +471,9 @@ terminal reached only when every registered middleware chained to `next`.
 published the root's `IWebEndpointFeature`, the terminal runs that endpoint. That is
 where a matched route's handler runs, after every middleware registered behind
 `UseRouting`, and where routing's 405 is written. The terminal reads only the root
-seam; it cannot see `Web.Routing` (COHRES002).
+seam; it cannot see `Web.Routing` (COHRES002). The terminal is the root's
+`WebApplicationTerminal.InvokeAsync` (#1056), shared with every non-rejoining pipeline
+branch, so the application and its branches agree on what "unhandled" means.
 
 **The 404 fallback (#881).** With no endpoint selected, the request went unhandled.
 The terminal used to be a silent `Task.CompletedTask`, which handed the

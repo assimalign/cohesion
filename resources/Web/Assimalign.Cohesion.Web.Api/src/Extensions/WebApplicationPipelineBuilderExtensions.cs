@@ -77,6 +77,42 @@ public static class WebApplicationPipelineBuilderExtensions
         }
 
         /// <summary>
+        /// Maps the application's fallback route to the supplied terminal middleware: it answers
+        /// <c>GET</c> (and <c>HEAD</c>) requests whose path no other route matches and whose last segment
+        /// names no file (<c>{**path:nonfile}</c>). See <c>IRouterBuilder.MapFallback</c> for the semantics.
+        /// </summary>
+        /// <param name="middleware">The middleware to execute for requests the fallback answers.</param>
+        /// <returns>The fallback route's builder, for attaching endpoint metadata.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="middleware"/> is <see langword="null"/>.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>AddRouting</c>), or the route table has already been built.</exception>
+        public IRouterRouteBuilder MapFallback(WebApplicationMiddleware middleware)
+        {
+            ArgumentNullException.ThrowIfNull(builder);
+            ArgumentNullException.ThrowIfNull(middleware);
+
+            return EndpointMapping.GetRouterBuilder(builder.Context).MapFallback(new RouterRouteHandler(middleware));
+        }
+
+        /// <summary>
+        /// Maps a fallback route with its own template (for example <c>admin/{**path:nonfile}</c>) to the
+        /// supplied terminal middleware.
+        /// </summary>
+        /// <param name="pattern">The fallback route's template.</param>
+        /// <param name="middleware">The middleware to execute for requests the fallback answers.</param>
+        /// <returns>The fallback route's builder, for attaching endpoint metadata.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="middleware"/> is <see langword="null"/>.</exception>
+        /// <exception cref="ArgumentException"><paramref name="pattern"/> is <see langword="null"/> or empty.</exception>
+        /// <exception cref="InvalidOperationException">Routing has not been registered (call <c>AddRouting</c>), or the route table has already been built.</exception>
+        public IRouterRouteBuilder MapFallback(string pattern, WebApplicationMiddleware middleware)
+        {
+            ArgumentNullException.ThrowIfNull(builder);
+            ArgumentException.ThrowIfNullOrEmpty(pattern);
+            ArgumentNullException.ThrowIfNull(middleware);
+
+            return EndpointMapping.GetRouterBuilder(builder.Context).MapFallback(pattern, new RouterRouteHandler(middleware));
+        }
+
+        /// <summary>
         /// Maps a GET route pattern to the supplied terminal middleware.
         /// </summary>
         /// <param name="pattern">The route pattern to parse.</param>
