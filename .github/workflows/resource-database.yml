@@ -6,6 +6,8 @@ on:
       # acceptance fixture, and the engine/wire streaming fixtures under Blob and Blob.Client.
       # Fixtures sit inside the projects whose tests drive them.
       - 'resources/Database/**'
+      - '!resources/Database/**/*.slnx'
+      - '!resources/Database/**/*.md'
       # The E2E job packs through Install-Local.ps1, which derives the SampleHost's SDK pins from
       # the root global.json; a change to either must re-run it.
       - 'installer/scripts/Install-Local.ps1'

@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'libraries/ApplicationModel/**'
+      - '!libraries/ApplicationModel/**/*.slnx'
+      - '!libraries/ApplicationModel/**/*.md'
       - '.github/workflows/library-application-model.yml'                 # When Pipeline File Changes
 
 permissions:

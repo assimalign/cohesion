@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'libraries/Resilience/**'
+      - '!libraries/Resilience/**/*.slnx'
+      - '!libraries/Resilience/**/*.md'
       - '.github/workflows/library-resilience.yml'                 # When Pipeline File Changes
 
 permissions:

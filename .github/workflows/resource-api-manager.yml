@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'resources/ApiManager/**'
+      - '!resources/ApiManager/**/*.slnx'
+      - '!resources/ApiManager/**/*.md'
       - '.github/workflows/resource-api-manager.yml'        # When Pipeline File Changes
 
 permissions:

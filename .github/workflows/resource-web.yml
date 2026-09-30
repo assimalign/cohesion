@@ -6,6 +6,8 @@ on:
       # listed separately because it belongs to the Gateway's tests, not to this area
       # (.claude/rules/resource-areas.md) — the Web runtime it composes is still this area's.
       - 'resources/Web/**'
+      - '!resources/Web/**/*.slnx'
+      - '!resources/Web/**/*.md'
       - 'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost/**'
       - '.github/workflows/resource-web.yml'        # When Pipeline File Changes
 

@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "resources/NotificationHub/**"
+      - "!resources/NotificationHub/**/*.slnx"
+      - "!resources/NotificationHub/**/*.md"
       - ".github/workflows/resource-notification-hub.yml" # When Pipeline File Changes
 
 permissions:

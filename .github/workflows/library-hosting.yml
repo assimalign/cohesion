@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "libraries/Hosting/**"
+      - "!libraries/Hosting/**/*.slnx"
+      - "!libraries/Hosting/**/*.md"
       - ".github/workflows/library-hosting.yml" # When Pipeline File Changes
 permissions:
   contents: read

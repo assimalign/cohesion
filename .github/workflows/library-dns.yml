@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "libraries/Dns/**"
+      - "!libraries/Dns/**/*.slnx"
+      - "!libraries/Dns/**/*.md"
       - ".github/workflows/library-dns.yml" # When Pipeline File Changes
 permissions:
   contents: read

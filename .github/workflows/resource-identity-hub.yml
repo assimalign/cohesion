@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'resources/IdentityHub/**'
+      - '!resources/IdentityHub/**/*.slnx'
+      - '!resources/IdentityHub/**/*.md'
       - '.github/workflows/resource-identity-hub.yml'
 
 permissions:

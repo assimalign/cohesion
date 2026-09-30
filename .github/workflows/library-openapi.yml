@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - 'libraries/OpenApi/**'
+      - '!libraries/OpenApi/**/*.slnx'
+      - '!libraries/OpenApi/**/*.md'
       - '.github/workflows/library-openapi.yml'                 # When Pipeline File Changes
 
 permissions:

@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "libraries/DependencyInjection/**"
+      - "!libraries/DependencyInjection/**/*.slnx"
+      - "!libraries/DependencyInjection/**/*.md"
       - ".github/workflows/library-DependencyInjection.yml" # When Pipeline File Changes
 permissions:
   contents: read

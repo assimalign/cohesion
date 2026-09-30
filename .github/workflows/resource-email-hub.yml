@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'resources/EmailHub/**'
+      - '!resources/EmailHub/**/*.slnx'
+      - '!resources/EmailHub/**/*.md'
       - '.github/workflows/resource-email-hub.yml'
 
 permissions:

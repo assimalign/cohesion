@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'resources/EventHub/**'
+      - '!resources/EventHub/**/*.slnx'
+      - '!resources/EventHub/**/*.md'
       - '.github/workflows/resource-event-hub.yml'        # When Pipeline File Changes
 
 permissions:

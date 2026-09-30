@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - 'libraries/OpenTelemetry/**'
+      - '!libraries/OpenTelemetry/**/*.slnx'
+      - '!libraries/OpenTelemetry/**/*.md'
       - '.github/workflows/library-opentelemetry.yml'                 # When Pipeline File Changes
 
 permissions:

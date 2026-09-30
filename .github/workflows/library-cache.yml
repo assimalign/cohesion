@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "libraries/Cache/**"
+      - "!libraries/Cache/**/*.slnx"
+      - "!libraries/Cache/**/*.md"
       - ".github/workflows/library-cache.yml" # When Pipeline File Changes
 permissions:
   contents: read

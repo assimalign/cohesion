@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "resources/LogSpace/**"
+      - "!resources/LogSpace/**/*.slnx"
+      - "!resources/LogSpace/**/*.md"
       # The area's acceptance fixture lives in the fixtures/ folder of the project whose
       # tests drive it (.claude/rules/resource-areas.md) - still this area's input.
       - "libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost/**"

@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'resources/IoTHub/**'
+      - '!resources/IoTHub/**/*.slnx'
+      - '!resources/IoTHub/**/*.md'
       - '.github/workflows/resource-iot-hub.yml'        # When Pipeline File Changes
 
 permissions:

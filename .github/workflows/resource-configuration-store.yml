@@ -6,6 +6,8 @@ on:
       # through a real ApplicationModel.Gateway (StoreGateway : ApplicationGateway), so a change to
       # the provider seams, the gateway that resolves through them, or Core reruns them.
       - 'resources/ConfigurationStore/**'
+      - '!resources/ConfigurationStore/**/*.slnx'
+      - '!resources/ConfigurationStore/**/*.md'
       - 'libraries/ApplicationModel/**'
       - 'libraries/Core/**'
       - '.github/workflows/resource-configuration-store.yml'        # When Pipeline File Changes
