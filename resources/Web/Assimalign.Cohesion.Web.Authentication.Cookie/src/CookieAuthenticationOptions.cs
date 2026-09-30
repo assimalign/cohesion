@@ -33,9 +33,13 @@ public sealed class CookieAuthenticationOptions
     /// ticket lifetime and persistence, so any value set here for those is overwritten.
     /// </summary>
     /// <remarks>
-    /// Defaults to <c>HttpOnly=true</c>, <c>SameSite=Lax</c>, <c>Path=/</c>. Production
-    /// deployments served over HTTPS should set <see cref="HttpCookieOptions.Secure"/> to
-    /// <see langword="true"/>.
+    /// Defaults to <c>HttpOnly=true</c>, <c>SameSite=Lax</c>, <c>Path=/</c>. Whenever the effective
+    /// request scheme is HTTPS — a direct TLS connection, or TLS terminated at a trusted proxy that
+    /// the forwarded-headers middleware (<c>UseForwardedHeaders</c>) resolved — the emitted cookie is
+    /// marked <c>Secure</c> regardless of this template. Set <see cref="HttpCookieOptions.Secure"/> to
+    /// <see langword="true"/> to mark it <c>Secure</c> on every request, including ones the
+    /// application cannot recognize as HTTPS (for example behind a TLS-terminating proxy without
+    /// forwarded-headers resolution).
     /// </remarks>
     public HttpCookieOptions Cookie { get; } = new()
     {

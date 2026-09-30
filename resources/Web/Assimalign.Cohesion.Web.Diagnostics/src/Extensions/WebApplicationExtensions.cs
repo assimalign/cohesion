@@ -19,7 +19,10 @@ using Assimalign.Cohesion.Web.Diagnostics.Internal;
 /// <para>
 /// <b>Ordering.</b> Register HTTP logging <em>first</em>, ahead of authentication, CORS, and
 /// routing, so every exchange is logged — including the ones those middleware reject. Anything
-/// registered before it is invisible to the access log. When bodies are captured
+/// registered before it is invisible to the access log. Behind a proxy, register
+/// <c>UseForwardedHeaders</c> directly after it: the entry reads the effective scheme, host, and
+/// client address when it is emitted, after the pipeline unwinds, so it records the forwarded
+/// client even though logging runs first. When bodies are captured
 /// (<see cref="HttpLoggingFields.RequestBody"/> / <see cref="HttpLoggingFields.ResponseBody"/>),
 /// remember the captured bytes are whatever crosses the wire at this position in the pipeline —
 /// place logging <em>after</em> a decompression middleware to capture decoded payloads, before

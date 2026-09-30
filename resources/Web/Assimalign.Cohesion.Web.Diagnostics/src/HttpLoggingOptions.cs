@@ -160,16 +160,19 @@ public sealed class HttpLoggingOptions
     };
 
     /// <summary>
-    /// Gets or sets the resolver for the effective client address logged under
+    /// Gets or sets a resolver that overrides the client address logged under
     /// <see cref="HttpLoggingAttributes.ClientAddress"/>. When <see langword="null"/> (the
-    /// default) the transport socket peer (<see cref="IHttpConnectionInfo.RemoteIp"/>) is
-    /// logged.
+    /// default) the effective client address is logged
+    /// (<see cref="HttpContextForwardedExtensions.EffectiveRemoteIp"/>): the client a trusted proxy
+    /// chain vouched for when the forwarded-headers middleware ran, otherwise the transport socket
+    /// peer (<see cref="IHttpConnectionInfo.RemoteIp"/>).
     /// </summary>
     /// <remarks>
-    /// This is the composition seam for proxy awareness: once the forwarded-headers middleware
-    /// (issue #778) establishes a trusted client address on the exchange, plug a resolver here
-    /// that reads it. Until then the socket peer is the only honest answer — the middleware
-    /// never trusts <c>X-Forwarded-For</c> on its own.
+    /// Proxy awareness needs no resolver: register <c>UseForwardedHeaders</c> and the default
+    /// already logs the forwarded client. The middleware never parses <c>Forwarded</c> or
+    /// <c>X-Forwarded-For</c> itself. Set a resolver only for a client source that trust model does
+    /// not cover, and only one whose trust you establish yourself. A resolver that throws falls back
+    /// to the effective client address.
     /// </remarks>
     public Func<IHttpContext, IPAddress?>? ClientAddressResolver { get; set; }
 

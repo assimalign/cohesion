@@ -14,8 +14,8 @@ public static class HostFilteringExtensions
     extension(IWebApplicationPipelineBuilder builder)
     {
         /// <summary>
-        /// Adds middleware that validates each request's transport-resolved host against the
-        /// configured allowlist, rejecting a mismatching — or, by default, empty — host with
+        /// Adds middleware that validates each request's effective host against the configured
+        /// allowlist, rejecting a mismatching — or, by default, empty — host with
         /// <c>400 Bad Request</c> and short-circuiting the pipeline.
         /// </summary>
         /// <param name="configure">Configures the allowlist and the empty-host policy.</param>
@@ -29,7 +29,17 @@ public static class HostFilteringExtensions
         /// <para>
         /// Register this middleware <em>first</em>: a host that fails validation should be
         /// rejected before any other middleware observes the request. Registration order is
-        /// the pipeline order.
+        /// the pipeline order. The one middleware that belongs ahead of it is
+        /// <c>UseForwardedHeaders</c>, when the application runs behind a trusted proxy.
+        /// </para>
+        /// <para>
+        /// The host validated is the <em>effective</em> host
+        /// (<see cref="HttpContextForwardedExtensions.EffectiveHost"/>). Registered after
+        /// <c>UseForwardedHeaders</c>, that is the host a trusted proxy forwarded — the host the
+        /// client addressed and every downstream consumer reads — so allowlist the public names.
+        /// Registered before it (or without it), it is the transport-resolved host. This guard
+        /// never reads forwarding headers itself; which hops are believed is the forwarded-headers
+        /// trust model's decision.
         /// </para>
         /// <para>
         /// The allowlist compiles into an <see cref="HttpHostMatcher"/> exactly once, inside

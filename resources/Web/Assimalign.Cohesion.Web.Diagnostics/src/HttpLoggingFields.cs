@@ -32,12 +32,14 @@ public enum HttpLoggingFields
     RequestMethod = 1 << 0,
 
     /// <summary>
-    /// The request scheme (<c>http.request.scheme</c>).
+    /// The effective request scheme (<c>http.request.scheme</c>): the scheme a trusted proxy
+    /// forwarded when the forwarded-headers middleware resolved one, otherwise the transport's.
     /// </summary>
     RequestScheme = 1 << 1,
 
     /// <summary>
-    /// The request host (<c>http.request.host</c>).
+    /// The effective request host (<c>http.request.host</c>): the host a trusted proxy forwarded
+    /// when the forwarded-headers middleware resolved one, otherwise the transport-resolved host.
     /// </summary>
     RequestHost = 1 << 2,
 
@@ -97,9 +99,11 @@ public enum HttpLoggingFields
 
     /// <summary>
     /// The effective client address and port (<c>http.client.address</c> /
-    /// <c>http.client.port</c>). Resolved through
-    /// <see cref="HttpLoggingOptions.ClientAddressResolver"/> when set; otherwise the transport
-    /// socket peer.
+    /// <c>http.client.port</c>): the client a trusted proxy chain vouched for when the
+    /// forwarded-headers middleware ran, otherwise the transport socket peer; the address comes from
+    /// <see cref="HttpLoggingOptions.ClientAddressResolver"/> when one is set. When the transport
+    /// peer is not that client, it is logged too (<c>network.peer.address</c> /
+    /// <c>network.peer.port</c>).
     /// </summary>
     ClientAddress = 1 << 12,
 

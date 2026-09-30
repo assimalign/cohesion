@@ -55,13 +55,32 @@ inline policy → named policy → `Enabled` (base/default) → `Disabled` (no c
 
 ## Cache key — primary key plus a Vary variant
 
-The **primary key** is built before the endpoint runs from the request method, scheme, host, and path,
-plus the policy's `VaryBy*` rules: `VaryByHeaders` (request-header values), `VaryByRouteValues` (matched
-route values from the pre-flight match), and `VaryByQueryKeys` (empty folds the *entire*, sorted query
-string; non-empty selects listed keys). Components are fenced with the ASCII unit separator so boundaries
-are unambiguous without hashing; a distributed adapter may hash the string.
+The **primary key** is built before the endpoint runs from the request method, the effective scheme and
+host (below), and the path, plus the policy's `VaryBy*` rules: `VaryByHeaders` (request-header values),
+`VaryByRouteValues` (matched route values from the pre-flight match), and `VaryByQueryKeys` (empty folds
+the *entire*, sorted query string; non-empty selects listed keys). Components are fenced with the ASCII
+unit separator so boundaries are unambiguous without hashing; a distributed adapter may hash the string.
 
 The **variant key** folds in the stored response's own `Vary` header (see below).
+
+### Scheme and host are the effective values (#1050)
+
+The scheme and host components are `context.EffectiveScheme` and `context.EffectiveHost` from
+`Assimalign.Cohesion.Http.Forwarded` — what a trusted proxy forwarded when `UseForwardedHeaders` ran
+first, otherwise the wire values (owner decision 3 in `docs/programs/HTTP_WEB_PROGRAM_PLAN.md` §7.4:
+consumers read the effective values; nothing rewrites the request). The rest of the pipeline builds
+responses from those values: HTTPS redirection and HSTS judge the effective scheme, redirects and absolute
+links use the effective host, and host-bound content follows the host the client addressed. Keyed on the
+wire values behind a TLS-terminating, host-rewriting proxy, every client-facing scheme and host would
+collapse onto one wire scheme and upstream authority, so one could be served another's stored response —
+for example a representation meant for `https://tenant-a.example` replayed to `tenant-b.example`, or a
+response cached for an `https` request replayed to a plaintext one that HTTPS redirection would otherwise
+have upgraded. That is the unkeyed-input shape of web cache poisoning, so the key follows the effective
+values.
+
+The package never reads forwarding headers: without the forwarded-headers middleware (or from a peer
+outside its trust model) the effective values are the wire values and the key is unchanged from before, so
+a client-asserted `X-Forwarded-Host` neither splits nor poisons the cache.
 
 ## THE VARY DECISION — honor the response `Vary` header (RFC-faithful), with ordering
 
@@ -258,3 +277,10 @@ bypass, non-cacheable method). End-to-end tests over `WebApplicationTestFactory`
 a hit skips the endpoint (downstream-invocation counting), a differing query misses, the response `Vary`
 keeps a client from a foreign variant, an authenticated request bypasses, tag eviction forces a re-fetch,
 and per-endpoint opt-in through routing metadata caches only the marked endpoint.
+
+`tests/OutputCacheForwardedTests.cs` covers the effective key with the real forwarded-headers middleware
+(the test project references `Web.ForwardedHeaders`): end to end, behind the factory's trusted local
+transport, each forwarded host and each forwarded scheme gets its own entry while repeats still hit, and
+without the middleware a spoofed `X-Forwarded-Host` does not partition the cache; at the unit level, keys
+built for plaintext requests from a trusted proxy address follow the forwarded host rather than the wire
+host.

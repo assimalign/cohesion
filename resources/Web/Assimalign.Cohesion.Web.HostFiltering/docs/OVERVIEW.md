@@ -39,14 +39,24 @@ app.UseHostFiltering(options =>
 // ...the rest of the pipeline...
 ```
 
-A request whose transport-resolved host (HTTP/1.1 request-target/`Host`
-precedence, HTTP/2 / HTTP/3 `:authority`) does not match answers
-`400 Bad Request` with an empty body and short-circuits.
+A request whose effective host does not match answers `400 Bad Request` with an
+empty body and short-circuits. The effective host is the transport-resolved
+host (HTTP/1.1 request-target/`Host` precedence, HTTP/2 / HTTP/3
+`:authority`), unless the application runs behind a trusted proxy and
+registers `UseForwardedHeaders` first — then it is the host the proxy
+forwarded, and the allowlist should name the public hosts:
+
+```csharp
+app.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
+app.UseHostFiltering(options => options.AllowedHosts.Add("example.com"));
+```
 
 ## Dependencies
 
 - `Assimalign.Cohesion.Web` — the pipeline abstractions the verb extends.
 - `Assimalign.Cohesion.Http` — `HttpHost` and `HttpHostMatcher`.
+- `Assimalign.Cohesion.Http.Forwarded` — the `EffectiveHost` read, which falls
+  back to the transport-resolved host when no forwarded-headers middleware ran.
 
 Delivered to applications through the `App.Web` shared framework (via
 `Sdk.Web`); no project wiring required. See `docs/DESIGN.md` for the design

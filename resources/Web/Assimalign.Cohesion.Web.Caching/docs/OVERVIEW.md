@@ -24,6 +24,8 @@ primitives from `Assimalign.Cohesion.Http` (#755) — it re-implements no header
 - `Assimalign.Cohesion.Web.Routing` — the router match (endpoint discovery) and the endpoint-metadata seam.
 - `Assimalign.Cohesion.Http` — the `IHttpContext` surface and the #755 `HttpCacheControl` / `HttpFreshness`
   primitives.
+- `Assimalign.Cohesion.Http.Forwarded` — the effective scheme and host the primary key is built from
+  (forwarded by a trusted proxy when `UseForwardedHeaders` runs first, otherwise the wire values).
 - `Assimalign.Cohesion.Http.Streaming` — the `IHttpResponseStreamingFeature.HasStarted` guard.
 - `Assimalign.Cohesion.Caching` / `Assimalign.Cohesion.Caching.InMemory` — the synchronous cache
   foundation the default in-memory store adapts.

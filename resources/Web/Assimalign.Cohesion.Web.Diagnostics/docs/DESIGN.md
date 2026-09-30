@@ -72,12 +72,12 @@ the Logging library's own correlation mechanism, not a bespoke one.
   the streams were armed (or not) before routing ran. `HttpLoggingFields.None` suppresses the
   entry entirely — the health-probe case. `HttpLoggingMetadata` is a sealed concrete carrier
   per the metadata-carrier discipline; there is no `IHttpLoggingMetadata`.
-- **Effective client address is a seam, not a guess.** The default logs the transport socket
-  peer (`IHttpConnectionInfo.RemoteIp`) — the only honest answer until a trust model exists.
-  The middleware never parses `X-Forwarded-For` itself; when the forwarded-headers middleware
-  (#778) merges, its trusted result plugs in through
-  `HttpLoggingOptions.ClientAddressResolver`. A faulting resolver falls back to the socket peer
-  rather than failing the exchange.
+- **The effective identity is read, never guessed.** Scheme, host, and client address are the
+  effective values from `Assimalign.Cohesion.Http.Forwarded` (see "Behind a proxy" below): what
+  the forwarded-headers trust model vouched for, otherwise the transport's. The middleware never
+  parses `Forwarded`/`X-Forwarded-For` itself. `HttpLoggingOptions.ClientAddressResolver`
+  remains as an override for a client source that trust model does not cover; a faulting
+  resolver falls back to the effective client rather than failing the exchange.
 - **One package, two halves.** The provider could live in `libraries/Logging.File`, but the W3C
   format is defined by HTTP exchange semantics (`cs-method`, `sc-status`, `time-taken`), i.e. by
   the attribute contract this package owns. Shipping them together keeps the contract and its
@@ -108,6 +108,43 @@ Duration comes from `TimeProvider.GetTimestamp()`/`GetElapsedTime` and entry tim
 `TimeProvider.GetUtcNow()`, so tests can substitute a fake `TimeProvider` for deterministic
 output.
 
+## Behind a proxy — effective identity, peer kept beside it
+
+An access log that records the proxy as every request's client is useless for audit, and one that
+believes `X-Forwarded-For` from anyone is forgeable (#1050, defect D7). The package reads the
+`Effective*` convention of `Assimalign.Cohesion.Http.Forwarded` — owner decision 3 in
+`docs/programs/HTTP_WEB_PROGRAM_PLAN.md` §7.4: consumers read the effective values; nothing
+rewrites the request — and leaves every trust decision to `Web.ForwardedHeaders`:
+
+| Attribute | Value |
+| --- | --- |
+| `http.request.scheme` / `http.request.host` | `EffectiveScheme` / `EffectiveHost`: forwarded by a trusted proxy, otherwise the wire values |
+| `http.client.address` | `EffectiveRemoteIp` (or the `ClientAddressResolver` result): the client a trusted chain vouched for, otherwise the transport peer |
+| `http.client.port` | the effective endpoint's port: the forwarded node's port when a hop resolved the client (omitted when it carried none), otherwise the transport's |
+| `network.peer.address` / `network.peer.port` | the transport peer — normally the nearest proxy — emitted only when it is not the logged client |
+
+- **Why both addresses.** Replacing the peer with the forwarded client loses the hop that
+  delivered the exchange, which is what a forensic reader needs to spot a misconfigured trust list
+  or an unexpected ingress path. The peer pair costs nothing on a direct connection (it is omitted
+  when it equals the client) and uses the OpenTelemetry names for exactly this distinction
+  (`client.address` behind intermediaries versus `network.peer.address`). The existing attribute
+  names are unchanged; only their values became proxy-aware.
+- **Why only the effective scheme and host.** Behind a proxy the wire scheme and host describe the
+  internal proxy-to-app hop, which is deployment configuration rather than per-exchange evidence,
+  so no attribute is spent on them. `IHttpForwardedFeature.OriginalScheme`/`OriginalHost` keep
+  them available to any consumer that wants them.
+- **Timing, and why `UseHttpLogging` can still run first.** The attributes are read in the
+  middleware's `finally`, after the pipeline unwinds; the forwarded-headers middleware leaves its
+  feature on the exchange, so the entry carries the forwarded identity even though logging is
+  registered ahead of `UseForwardedHeaders`. An exchange rejected *before* `UseForwardedHeaders`
+  runs is logged with the transport values.
+- **W3C output.** `c-ip` renders `http.client.address` and `cs-host` renders `http.request.host`,
+  so access-log files show the forwarded client and host with no format change; the fixed
+  `#Fields` list gains no peer column.
+- **No trust, no change.** Without the forwarded-headers middleware (or from a peer outside its
+  trust model) every effective value is the transport's, so a client that sends
+  `X-Forwarded-For` itself cannot forge its logged address.
+
 ## The W3C provider
 
 - **Formats.** `W3CExtended` (the W3C Extended Log File Format: `#Version`/`#Fields`
@@ -134,8 +171,9 @@ output.
 ## Ordering guidance
 
 `UseHttpLogging` belongs **first** in the pipeline — before authentication, CORS, host
-filtering, and routing — so rejected and unrouted exchanges are still logged. Two consequences
-to be aware of:
+filtering, and routing — so rejected and unrouted exchanges are still logged. Behind a proxy,
+`UseForwardedHeaders` goes directly after it: the entry reads the effective identity after the
+pipeline unwinds (see "Behind a proxy"). Two consequences to be aware of:
 
 - Anything registered *before* it is invisible to the access log.
 - Captured bodies are whatever crosses the wire at its position: place it after a
@@ -154,8 +192,9 @@ decodes UTF-8 into a string only at emission. The package carries the repo-wide
 - **No general-purpose file logging provider.** The W3C writer renders HTTP exchanges only. A
   text/JSON file provider for application logging is Logging-area work; when it exists, the
   rotation machinery here is the reference implementation to lift.
-- **No proxy trust model.** `X-Forwarded-For`/`Forwarded` parsing and trust decisions are #778's
-  middleware; this package only exposes the resolver seam.
+- **No proxy trust model.** `X-Forwarded-For`/`Forwarded` parsing and trust decisions belong to
+  `Web.ForwardedHeaders`; this package reads its published result through the `Effective*`
+  convention and never re-parses forwarding headers.
 - **No error handling.** The middleware observes exceptions and rethrows; status-code pages and
   the exception boundary are #881 (over the #864 `OnError` hook).
 - **No push/export telemetry.** OTLP export, metrics, and `EventSource` counters are the

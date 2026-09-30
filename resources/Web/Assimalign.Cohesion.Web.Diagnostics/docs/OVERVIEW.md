@@ -39,7 +39,9 @@ application
 ```
 
 Register `UseHttpLogging` **first** — ahead of authentication, CORS, and routing — so rejected
-exchanges are logged too.
+exchanges are logged too. Behind a proxy, `UseForwardedHeaders` goes directly after it: the entry
+records the effective (forwarded) client address, scheme, and host, and keeps the transport peer
+beside them under `network.peer.address`.
 
 ## Field selection and redaction
 
@@ -59,6 +61,7 @@ Per-endpoint overrides attach an `HttpLoggingMetadata` to the route's metadata b
 | --- | --- |
 | `Assimalign.Cohesion.Web` | the middleware/pipeline abstractions |
 | `Assimalign.Cohesion.Web.Routing` | reads the endpoint metadata bag for per-endpoint overrides |
+| `Assimalign.Cohesion.Http.Forwarded` | the effective scheme, host, and client address (`Effective*`), resolved by `UseForwardedHeaders` behind a trusted proxy |
 | `Assimalign.Cohesion.Logging` | the emission model (`ILogger`, `LoggerEntry`, `LoggerProvider`) |
 
 See [DESIGN.md](DESIGN.md) for the architecture and the decisions behind it.

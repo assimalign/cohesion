@@ -117,8 +117,26 @@ through compressed-length observation (BREACH). So `EnableForHttps` defaults to 
 `https` request the middleware does nothing — no wrapper, no `Vary`, no compression. The scheme is
 known at entry, so the default path skips HTTPS responses with zero per-response overhead. Enabling
 the flag is an explicit, documented opt-in for pipelines whose responses do not mix a secret with
-reflected input. Compression over HTTP (for example behind a TLS-terminating proxy where the app
-sees `http`) is on by default.
+reflected input. Compression over HTTP is on by default.
+
+### Behind a TLS-terminating proxy — the guard reads the effective scheme
+
+BREACH attacks the TLS channel the *client* sees, so "over `https`" must mean the client-facing
+scheme, not the app-facing hop. The guard reads `context.EffectiveScheme` from
+`Assimalign.Cohesion.Http.Forwarded` (owner decision 3 in `docs/programs/HTTP_WEB_PROGRAM_PLAN.md`
+§7.4: consumers read the effective values; nothing rewrites the request):
+
+- **With `UseForwardedHeaders`** registered ahead of `UseResponseCompression`, a response a trusted
+  proxy relays over TLS is treated as HTTPS and left uncompressed unless `EnableForHttps` is set.
+  Before #1050 the guard read the wire scheme, so every such response was compressed on the TLS leg
+  — the exposure the default exists to prevent (defect D7).
+- **Without it** — or from a peer outside the forwarded-headers trust model — the effective scheme is
+  the transport-derived one: the app sees `http` behind the proxy and compresses as before. A client
+  that sends `X-Forwarded-Proto: https` itself cannot switch compression off, because this package
+  never reads forwarding headers.
+
+Deployments that relied on the old behavior (compression behind a trusted TLS-terminating proxy) set
+`EnableForHttps` explicitly once the proxy is resolved — the same opt-in a direct-TLS deployment makes.
 
 ## Request decompression
 

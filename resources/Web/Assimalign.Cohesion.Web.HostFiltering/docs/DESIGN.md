@@ -46,14 +46,16 @@ it belongs (see below). What was kept from the first iteration:
   behavior, zero overhead). Calling it demands a non-empty allowlist — an
   empty one would compile to deny-all and is treated as a configuration error;
   pass `*` to accept any host while keeping the empty-host policy enforced.
-- **The request-time check.** The transports already resolve the effective
-  host with the correct per-version precedence (HTTP/1.1 absolute/authority-
-  form target supersedes `Host` per RFC 9112 §3.2.2; HTTP/2 / HTTP/3
-  `:authority` via `HttpFieldNormalization.ResolveAuthority`), so the
-  middleware reads `IHttpRequest.Host` and performs one component split plus
-  span comparisons. A mismatch answers `400 Bad Request` with an empty body
-  (the HTTP/1.1 writer synthesizes `Content-Length: 0`) and short-circuits;
-  the connection itself is left alive.
+- **The request-time check.** The transports already resolve the wire host
+  with the correct per-version precedence (HTTP/1.1 absolute/authority-form
+  target supersedes `Host` per RFC 9112 §3.2.2; HTTP/2 / HTTP/3 `:authority`
+  via `HttpFieldNormalization.ResolveAuthority`), and the forwarded-headers
+  middleware publishes a proxy-forwarded host as a typed value too. The
+  middleware reads the effective host (`context.EffectiveHost`, see "Validating
+  the forwarded host" below) and performs one feature lookup, one component
+  split, and span comparisons. A mismatch answers `400 Bad Request` with an
+  empty body (the HTTP/1.1 writer synthesizes `Content-Length: 0`) and
+  short-circuits; the connection itself is left alive.
 
 **Why the 400 has no body:** a richer problem-details payload would drag a
 `Web.ProblemDetails` dependency into a guard that should stay minimal;
@@ -80,29 +82,60 @@ merely skips a route candidate. Use filtering to bound the hosts the
 application answers *at all*, and host-constrained routes to fan traffic
 across the hosts inside that boundary.
 
-## Ordering — forwarded headers (`Web.ForwardedHeaders`, #778 / PR #892)
+One asymmetry is known and recorded: behind a proxy that forwards a host,
+filtering validates the *effective* host (below) while routing's host
+constraints still match the *wire* host (`Router.Match` reads
+`IHttpRequest.Host`). The two agree whenever the proxy passes the client's
+`Host` through; when it rewrites `Host` and forwards the original in
+`X-Forwarded-Host`, host-constrained routes see the upstream authority. Moving
+routing onto the effective host is left to the routing rework (Stage 6 of the
+HTTP/Web program), not changed here.
+
+## Validating the forwarded host (`Web.ForwardedHeaders`, #778; #1050)
 
 The forwarded-headers middleware's output is **a feature, never mutation**: its
-trust walk publishes `IHttpForwardedFeature` (read through the `Effective*`
-convention in `Http.Forwarded`) and never rewrites `IHttpRequest.Host`. Two
-consequences for composition:
+trust walk publishes `IHttpForwardedFeature` and never rewrites
+`IHttpRequest.Host`. Consumers read the result through the `Effective*`
+convention in `Http.Forwarded` (owner decision 3 in
+`docs/programs/HTTP_WEB_PROGRAM_PLAN.md` §7.4). This guard is one of those
+consumers: **it validates `context.EffectiveHost`**, which is
 
-- **This guard always validates the wire host** — behind a proxy, the
-  authority the proxy actually dialed — regardless of where it sits relative
-  to `UseForwardedHeaders`. Allowlist the name(s) the transport really
-  receives. Because the filter consumes nothing from the forwarded feature,
-  the two registrations are order-independent today; keeping
-  `UseHostFiltering` at the very front simply makes rejection cheapest (no
-  trust walk for a request that is about to 400).
-- **The forwarded (public) host is deliberately out of this guard's scope.**
-  The forwarded walk shape-checks `host` assertions but, by its own design,
-  leaves *which* hosts are acceptable "a consumer allowlist concern". If
-  validating `EffectiveHost` against an allowlist becomes a real need, it is
-  an explicit future knob on this package (and would require registration
-  after `UseForwardedHeaders`) — not something that happens implicitly. This
-  mirrors ASP.NET's split, where forwarded-host acceptance
-  (`ForwardedHeadersOptions.AllowedHosts`) is configured separately from host
-  filtering.
+- the host a trusted proxy forwarded, when `UseForwardedHeaders` ran first and
+  accepted a hop that carried one, and
+- the transport-resolved wire host otherwise — no forwarded-headers
+  middleware, an untrusted peer, a hop that forwarded no host, or a
+  registration that puts this guard ahead of `UseForwardedHeaders`.
+
+**Why the effective host.** The forwarded walk shape-checks `host` assertions
+but leaves *which* hosts are acceptable to a consumer allowlist. The effective
+host is the one every downstream consumer reads — HTTPS redirection's
+`Location`, absolute-URL generation, output-cache keys — so it is the value
+Host-header injection would poison and the value the allowlist must bound.
+Validating only the wire host behind a proxy would check the authority the
+proxy dialed (usually a fixed internal name) while an attacker-influenced
+forwarded host flowed downstream unchecked. The earlier position — "forwarded
+host out of scope, a future knob" — was replaced by this default rather than a
+knob: without the forwarded-headers middleware the effective host *is* the wire
+host, so no proxy-less deployment sees a change.
+
+**Trust dependency.** The guard never reads `Forwarded`/`X-Forwarded-Host`
+itself. A forwarded host reaches it only through the forwarded-headers trust
+model (`KnownProxies`/`KnownNetworks`, `ForwardLimit`, header selection), so a
+client that asserts `X-Forwarded-Host` directly is validated on its wire host.
+The trust model decides *whose* host assertion is believed; this guard decides
+whether the believed host is one the application serves.
+
+**Ordering.** Register `UseForwardedHeaders` first and `UseHostFiltering`
+directly after it, and allowlist the **public** names clients use. Registered
+the other way round, the guard runs before the feature exists and validates
+the wire host — a supported, deliberate configuration for deployments that want
+to bound the upstream authority instead, but then the forwarded host is not
+bounded by this guard. This composition differs from ASP.NET, whose
+forwarded-headers middleware rewrites `Request.Host` in place (so host filtering
+registered after it validates the forwarded host implicitly) and which also
+offers a separate forwarded-host allowlist
+(`ForwardedHeadersOptions.AllowedHosts`); here the rewrite is replaced by the
+effective read, and the one allowlist covers both cases.
 
 ## AOT posture
 
@@ -134,3 +167,12 @@ what `HttpClient` cannot produce: a missing `Host` header (the empty-host
 policy both ways) and absolute-form request-targets superseding the `Host`
 header (RFC 9112 §3.2.2). The pattern grammar itself is unit-tested with the
 matcher in `Assimalign.Cohesion.Http`.
+
+`tests/HostFilteringForwardedTests.cs` composes the real forwarded-headers
+middleware (the test project references `Web.ForwardedHeaders`) in front of the
+guard over the same factory, whose in-memory peer is trusted as a local
+transport — the simulated proxy. It pins that an allowlisted forwarded host is
+accepted even when the wire host is not, that a forwarded host outside the
+allowlist is rejected even when the wire host is allowlisted, and that without
+the forwarded-headers middleware, or with the guard registered ahead of it, the
+wire host is validated and forwarding headers are ignored.

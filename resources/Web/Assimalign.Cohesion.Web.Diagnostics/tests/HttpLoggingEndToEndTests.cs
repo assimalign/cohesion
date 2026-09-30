@@ -441,8 +441,8 @@ public class HttpLoggingEndToEndTests
     [Fact(DisplayName = "Cohesion Test [Web.Diagnostics] - E2E: The client-address resolver seam overrides the socket peer")]
     public async Task ClientAddress_ResolverSeam_ShouldOverrideSocketPeer()
     {
-        // Arrange — until the #778 forwarded middleware merges, the resolver is the seam a
-        // proxy-aware composition plugs in; the default remains the socket peer.
+        // Arrange — the resolver overrides the logged client for a source the forwarded-headers
+        // trust model does not cover; without one the effective client address is logged.
         using CancellationTokenSource cancellation = new(_testTimeout);
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();

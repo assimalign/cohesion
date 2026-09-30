@@ -93,15 +93,59 @@ in v1 (the redirect targets and the parameter name are configurable).
 
 ## Cookie hardening defaults
 
-The emitted cookie defaults to `HttpOnly=true`, `SameSite=Lax`, `Path=/`.
-`Secure` defaults to `false` because the transport scheme is not modeled as
-a policy here; production deployments over HTTPS set `Secure=true`. A
+The emitted cookie defaults to `HttpOnly=true`, `SameSite=Lax`, `Path=/`. A
 persistent sign-in (`IsPersistent=true`) emits `Expires`/`Max-Age`; a
 non-persistent one emits a session cookie. Sign-out emits a deletion cookie
 (empty value, epoch `Expires`, zero `Max-Age`). The underlying
 `HttpCookie` validates its value against the RFC 6265 cookie-octet grammar;
 the protected ticket is base64url-encoded (unpadded), whose alphabet is a
 subset of that grammar, so it can never split the `Set-Cookie` line.
+
+### `Secure` — a floor on the effective scheme, not a policy surface
+
+Every cookie the handler emits (issue, sliding renewal, sign-out deletion) is
+built from the `Cookie` template and then given one floor: **when the effective
+request scheme is HTTPS, `Secure` is set**, whatever the template says. The
+template's own `Secure = true` still marks the cookie `Secure` on every request.
+
+"Effective" is `context.EffectiveScheme` from `Assimalign.Cohesion.Http.Forwarded`
+(owner decision 3 in `docs/programs/HTTP_WEB_PROGRAM_PLAN.md` §7.4: consumers read
+the effective values; nothing rewrites the request). A direct TLS connection
+counts, and so does TLS terminated at a proxy that `UseForwardedHeaders` trusts.
+Without the forwarded-headers middleware — or from a peer outside its trust
+model — the effective scheme is the transport-derived one, so a client that
+sends `X-Forwarded-Proto: https` itself changes nothing. Register
+`UseForwardedHeaders` ahead of `UseAuthentication`.
+
+Why a floor and not the options considered with it (#1050, defect D7):
+
+- **Keep the static template (the previous behavior).** `Secure` defaulted to
+  `false` and only the template decided. A deployment that served HTTPS and
+  forgot `Secure = true` issued the ticket without it, and the browser would
+  send the ticket over any later plaintext request to the host. Behind a
+  TLS-terminating proxy there was no way to say "Secure when the client used
+  HTTPS" at all. Rejected.
+- **A tri-state secure policy option** (ASP.NET's `CookieSecurePolicy`:
+  `SameAsRequest` / `Always` / `None`). That is new public surface and a
+  default-choosing decision, and cookie-policy enforcement — including the
+  secure default for this handler — is #156's scope (`Web.CookiePolicy`). Not
+  taken here.
+- **Chosen: template OR effective HTTPS.** It is a pure hardening with no public
+  API change: over HTTPS the cookie can only gain `Secure`, and over plaintext
+  the template decides exactly as before. What it removes is the ability to emit
+  a non-`Secure` ticket over HTTPS — a credential the browser would then also
+  send over plaintext, since only the `Secure` attribute confines a cookie to
+  secure channels (RFC 6265bis §4.1.2.5). It composes with #156: whatever policy
+  that item adds reads the same effective scheme.
+
+### Redirects and the return URL need no host or scheme
+
+The challenge and forbid redirects emit a relative `Location` — the configured
+path plus `ReturnUrl=<request path>` — which the user agent resolves against the
+URL it actually requested. Nothing in the handler reads `Request.Host`,
+`Request.Scheme`, or the connection for them, so they are correct behind a proxy
+by construction; an absolute return URL would have to be built from the
+effective scheme and host.
 
 ## Interface-first posture
 

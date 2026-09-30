@@ -10,8 +10,9 @@ namespace Assimalign.Cohesion.Web.HttpsPolicy;
 /// <remarks>
 /// <para>
 /// The options are captured once at builder time — the middleware resolves nothing per request. The
-/// redirect target is rebuilt from the request itself: the <c>https</c> scheme, the request's own host
-/// (its port replaced by <see cref="HttpsPort"/>), and the request path and query preserved. Both the
+/// redirect target is rebuilt from the request itself: the <c>https</c> scheme, the request's effective
+/// host (the host the client addressed, as resolved by the forwarded-headers middleware behind a trusted
+/// proxy; its port replaced by <see cref="HttpsPort"/>), and the request path and query preserved. Both the
 /// redirect status and the HTTPS port are validated when the verb is called, so a misconfiguration
 /// surfaces at startup rather than as per-request behavior.
 /// </para>
@@ -40,7 +41,8 @@ public sealed class HttpsRedirectionOptions
     /// <remarks>
     /// The port is an explicit setting because a feature-package middleware cannot see the server's
     /// endpoint bindings without referencing the hosting module (which the resource hosting-isolation
-    /// rule forbids). Set it to the port the HTTPS listener actually binds.
+    /// rule forbids). Set it to the HTTPS port clients actually reach: the port the HTTPS listener binds,
+    /// or, behind a TLS-terminating proxy, the proxy's public HTTPS port.
     /// </remarks>
     public int HttpsPort { get; set; } = 443;
 }

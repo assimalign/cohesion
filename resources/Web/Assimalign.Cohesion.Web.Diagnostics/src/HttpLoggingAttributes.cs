@@ -19,6 +19,13 @@ namespace Assimalign.Cohesion.Web.Diagnostics;
 /// <c>http.response.header.&lt;name&gt;</c> with the header name lower-cased, so consumers can
 /// look headers up without case juggling.
 /// </para>
+/// <para>
+/// Scheme, host, and client attributes carry the <em>effective</em> values — what a trusted proxy
+/// chain vouched for when the forwarded-headers middleware ran, otherwise the transport's (the
+/// <c>Effective*</c> convention of <c>Assimalign.Cohesion.Http.Forwarded</c>). When the logged
+/// client is not the transport peer, the peer is recorded under <see cref="PeerAddress"/> /
+/// <see cref="PeerPort"/>.
+/// </para>
 /// </remarks>
 public static class HttpLoggingAttributes
 {
@@ -34,10 +41,17 @@ public static class HttpLoggingAttributes
     /// <summary>The request method, e.g. <c>GET</c>. String.</summary>
     public const string RequestMethod = "http.request.method";
 
-    /// <summary>The request scheme, <c>http</c> or <c>https</c>. String.</summary>
+    /// <summary>
+    /// The effective request scheme, <c>http</c> or <c>https</c> — the scheme the client used on the
+    /// outermost trusted hop when the forwarded-headers middleware resolved one, otherwise the
+    /// transport's. String.
+    /// </summary>
     public const string RequestScheme = "http.request.scheme";
 
-    /// <summary>The request host (authority). String.</summary>
+    /// <summary>
+    /// The effective request host (authority) — the host a trusted proxy forwarded when the
+    /// forwarded-headers middleware resolved one, otherwise the transport-resolved host. String.
+    /// </summary>
     public const string RequestHost = "http.request.host";
 
     /// <summary>The request path. String.</summary>
@@ -73,11 +87,31 @@ public static class HttpLoggingAttributes
     /// <summary>The exchange duration in milliseconds. Double.</summary>
     public const string Duration = "http.duration";
 
-    /// <summary>The effective client IP address. String.</summary>
+    /// <summary>
+    /// The effective client IP address — the client a trusted proxy chain vouched for when the
+    /// forwarded-headers middleware ran, otherwise the transport peer — or the
+    /// <see cref="HttpLoggingOptions.ClientAddressResolver"/> result when one is configured. String.
+    /// </summary>
     public const string ClientAddress = "http.client.address";
 
-    /// <summary>The client port of the transport connection. Int.</summary>
+    /// <summary>
+    /// The effective client port — the forwarded client node's port when a trusted hop resolved the
+    /// client (omitted when that node carried none), otherwise the transport connection's. Int.
+    /// </summary>
     public const string ClientPort = "http.client.port";
+
+    /// <summary>
+    /// The transport peer's IP address — the directly connected hop, normally the nearest proxy —
+    /// emitted only when it differs from <see cref="ClientAddress"/>. Named after the OpenTelemetry
+    /// <c>network.peer.address</c> attribute. String.
+    /// </summary>
+    public const string PeerAddress = "network.peer.address";
+
+    /// <summary>
+    /// The transport peer's port, emitted alongside <see cref="PeerAddress"/>. Named after the
+    /// OpenTelemetry <c>network.peer.port</c> attribute. Int.
+    /// </summary>
+    public const string PeerPort = "network.peer.port";
 
     /// <summary>The W3C trace-context trace id parsed from the inbound <c>traceparent</c> header. String (32 hex digits).</summary>
     public const string TraceId = "trace.id";

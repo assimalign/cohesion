@@ -211,8 +211,11 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
             Path = _options.CookiePath,
             HttpOnly = _options.CookieHttpOnly,
             SameSite = HttpCookieSameSiteMode.Lax,
-            // Secure is bound to the transport-derived scheme: emitted only over HTTPS.
-            Secure = _context.Request.Scheme == HttpScheme.Https,
+            // Secure is bound to the effective scheme: emitted whenever the client reached the
+            // application over HTTPS — directly, or through a trusted TLS-terminating proxy the
+            // forwarded-headers middleware vouched for. Without that middleware the effective
+            // scheme is the transport-derived one.
+            Secure = _context.EffectiveScheme == HttpScheme.Https,
             // Session-scoped: no Expires / Max-Age, so the cookie clears when the
             // browser session ends. Server-side idle timeout governs expiry.
         };

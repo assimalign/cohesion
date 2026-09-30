@@ -22,11 +22,14 @@ public static class WebApplicationExtensions
         /// <remarks>
         /// <para>
         /// <b>Ordering contract: register this middleware first.</b> Every middleware
-        /// that consumes client identity — CORS, authentication, cookie policy, redirect
-        /// generation, rate limiting, access logging — must run <em>after</em> it, or it
-        /// will observe the proxy hop instead of the client. Until the repo-wide
-        /// middleware-ordering rules land (#26/#145), ordering is by registration order:
-        /// make this the first <c>Use</c> call on the pipeline.
+        /// that consumes client identity before calling the next one — host filtering, HTTPS
+        /// redirection, CORS, authentication, cookie policy, redirect generation, rate
+        /// limiting — must run <em>after</em> it, or it will observe the proxy hop instead of
+        /// the client. Consumers that read after the pipeline unwinds (HSTS emission, access
+        /// logging) see the resolved identity wherever they sit, because the feature stays on
+        /// the exchange. Until the repo-wide middleware-ordering rules land (#26/#145),
+        /// ordering is by registration order: make this the first <c>Use</c> call on the
+        /// pipeline, or the second, directly after <c>UseHttpLogging</c>.
         /// </para>
         /// <para>
         /// The options are validated and snapshotted here, at composition time — there is

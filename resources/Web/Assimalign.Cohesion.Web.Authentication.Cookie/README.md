@@ -37,5 +37,9 @@ builder.AddAuthentication(o => o.DefaultScheme = CookieAuthenticationDefaults.Au
 app.UseAuthentication();
 ```
 
+Over HTTPS the ticket cookie is always `Secure`, even without `Cookie.Secure`:
+the handler reads the effective scheme, so TLS terminated at a trusted proxy
+counts once `UseForwardedHeaders` runs ahead of `UseAuthentication`.
+
 See [docs/DESIGN.md](docs/DESIGN.md) for the ticket format, sliding-renewal
 rule, and the redirect-vs-status decision.
