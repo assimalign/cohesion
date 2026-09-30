@@ -29,6 +29,13 @@ public sealed class ServiceProvider : IServiceProvider, IDisposable, IAsyncDispo
         "Assimalign.Cohesion.DependencyInjection.VerifyOpenGenericServiceTrimmability",
         out bool verifyOpenGenerics) ? verifyOpenGenerics : false;
 
+    // Without dynamic code (NativeAOT), code for a generic instantiation or array over a value type
+    // may not exist, so the call-site factory rejects value-type IEnumerable<T> items and value-type
+    // open-generic arguments up front instead of failing later at resolution. NativeAOT treats
+    // RuntimeFeature.IsDynamicCodeSupported as constant false, which is what makes the suppressed
+    // MakeGenericType/MakeArrayType sites safe.
+    internal static bool VerifyAotCompatibility => !RuntimeFeature.IsDynamicCodeSupported;
+
     internal ServiceProvider(ServiceContainer container, ServiceProviderOptions options)
     {
         // note that Root needs to be set before calling GetEngine(), because the engine may need to access Root

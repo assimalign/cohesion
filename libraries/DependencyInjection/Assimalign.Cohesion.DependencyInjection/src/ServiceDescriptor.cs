@@ -81,8 +81,14 @@ public class ServiceDescriptor
     public Type ServiceType { get; }
 
     /// <summary>
-    /// 
+    /// Gets the type the container constructs for this service, or <see langword="null"/> when the
+    /// descriptor carries an instance or a factory.
     /// </summary>
+    /// <remarks>
+    /// Annotated for public constructors, matching the constructor parameter it is assigned from,
+    /// so the trimmer keeps the constructors the container selects at resolution time.
+    /// </remarks>
+    [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]
     public Type? ImplementationType { get; }
 
     /// <summary>

@@ -35,6 +35,28 @@ an instance registration with dynamic code disabled. It verified 1,024 resolutio
 validation, and owned versus borrowed disposal. Existing constructor/open-generic trim/AOT
 diagnostics remain outside this resolver-policy change; the strict factory path ran successfully.
 
+## NativeAOT compatibility checks
+
+The Web NativeAOT guard (`resources/Web/Assimalign.Cohesion.Web.Hosting/samples/Assimalign.Cohesion.Web.AotGuard`,
+#1052) surfaced the call-site factory's trim/AOT diagnostics as ILC errors. They are resolved the
+way the upstream container resolves them:
+
+- `ServiceDescriptor.ImplementationType` carries
+  `[DynamicallyAccessedMembers(PublicConstructors)]`, matching the constructor parameter it is
+  assigned from, so the constructors the factory selects survive trimming (IL2072).
+- `ServiceProvider.VerifyAotCompatibility` is `!RuntimeFeature.IsDynamicCodeSupported`. While it
+  holds, the call-site factory rejects an `IEnumerable<T>` whose `T` is a value type, and an
+  open-generic closure over a value-type argument, with an `InvalidOperationException` at
+  call-site construction. Code for those instantiations may not exist without dynamic code.
+- The remaining `MakeGenericType`/`MakeArrayType` sites (`TryCreateOpenGeneric`,
+  `EnumerableCallSite.ServiceType`/`ImplementationType`) carry `UnconditionalSuppressMessage`
+  (IL3050) whose justification is that check: only reference-type instantiations, which share
+  canonical code, are ever created under NativeAOT.
+
+Hosting modules register factories and instances only (`resource-areas.md`), so none of them relies
+on value-type enumerables or open generics; the checks turn a latent native crash into a
+descriptive startup failure for anyone who does.
+
 ## Layout Example
 
 ```text
