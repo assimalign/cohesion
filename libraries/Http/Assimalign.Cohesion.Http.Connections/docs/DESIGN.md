@@ -194,8 +194,10 @@ request's lifecycle hooks in order:
    HTTP/3 the pipeline freezes the knob first, so their hooks observe the frozen
    value. CONNECT tunnels skip it.
 4. Materializes the body stream — on HTTP/1.1 the lazy `Http1RequestBodyStream`
-   (cap enforced at read time, 413 on violation); on HTTP/2 / HTTP/3 the
-   already-buffered stream — and runs every `AfterRequestBody` hook in
+   (cap enforced at read time, 413 on violation); on HTTP/2 the flow-controlled
+   streaming body (the frozen cap enforced on receipt, 413 on violation — see
+   "HTTP/2 response flow control, HEAD, and the request-body cap"); on HTTP/3
+   the already-buffered stream — and runs every `AfterRequestBody` hook in
    registration order, each receiving the previous result — the last registered
    interceptor produces the outermost wrapper. CONNECT tunnels skip body hooks;
    empty bodies still run them.
@@ -287,7 +289,10 @@ partially-built wrapper chain and disposes every hook-attached feature (same
 walk semantics) before the failure surfaces. On HTTP/1.1 that is the parser; on
 HTTP/2 and HTTP/3 it is the shared `HttpRequestInterceptorPipeline`, which
 disposes the chain and features in its own `catch` before rethrowing to the
-transport's rejection handler. Hook-attached disposables therefore never leak on
+transport's rejection handler. HTTP/2's one rejection *after* the pipeline
+succeeds — a declared `content-length` over the frozen cap — builds the exchange
+and disposes it at once, so the exchange's own disposal walk tears down the same
+chain and features. Hook-attached disposables therefore never leak on
 the rejection paths an attacker can drive for free (e.g. an oversized
 `Content-Length` declaration, rejected before any body byte is read).
 
@@ -328,14 +333,18 @@ wrappers to tolerate). HTTP/3 still drains a request stream before header
 decode, so its hooks run before the body is *exposed*, not before it was
 *received*.
 
-The **cap-enforcement posture is unchanged by the wiring**: no hard body-size
-cap is enforced on h2 or h3 yet (h2 bounds body buffering via flow-control
-backpressure, h3 via QUIC flow control — the hard cap and connection timeouts
-remain tracked follow-up work, per `HttpConnectionListenerLimits`). A hook that
-lowers the cap on those transports today adjusts only the value hook-attached
-features expose; the seam wires the hook *invocation*, and each request's parse
-context already carries the frozen post-hook value for those paths to consume
-when they gain enforcement.
+The **cap is enforced on h1 and h2, not yet on h3.** HTTP/2 reads the parse
+context's frozen post-hook value back from the pipeline
+(`HttpRequestInterceptorPipeline.InterceptAsync` returns it beside the feature
+collection) and enforces it on the stream: a declared `content-length` over the
+cap is answered `413` before the request is dispatched, and a body that grows
+past it is answered on receipt (see "HTTP/2 response flow control, HEAD, and the
+request-body cap"). Because the h2 pipeline freezes the knob at dispatch, the cap
+is final before the application runs — the middleware-visible override window
+that h1 keeps open until the first body read does not exist on h2. HTTP/3 still
+bounds body buffering only through QUIC flow control; a hook that lowers the cap
+there adjusts the value hook-attached features expose, and the hard cap remains
+tracked follow-up work (per `HttpConnectionListenerLimits`).
 
 ### AOT posture
 
@@ -505,7 +514,9 @@ emitted by the transport when it finalizes the exchange, not by the feature, and
   **without** a synthesized `Content-Length` (the body is delimited by
   `END_STREAM`); each write emits one or more DATA frames split on the peer's
   `MAX_FRAME_SIZE`, each flushed through the transport; finalize emits an empty DATA
-  frame carrying `END_STREAM`.
+  frame carrying `END_STREAM`. A response to HEAD commits a HEADERS frame that
+  carries `END_STREAM` itself; every body write is discarded and finalize only
+  performs the stream cleanup (RFC 9110 §9.3.2), matching the HTTP/1.1 sink.
 - **HTTP/3 — incremental DATA frames (RFC 9114).** Same shape over the QUIC request
   stream (a HEADERS frame with no `Content-Length`, then DATA frames). The body is
   delimited by the QUIC stream **end** (RFC 9114 §4.1), so when the response completes
@@ -520,7 +531,7 @@ emitted by the transport when it finalizes the exchange, not by the feature, and
 - **HTTP/2** multiplexes over one TCP stream and tracks flow-control windows in
   software, so send-side backpressure is enforced here. `WriteStreamingDataAsync`
   calls `AcquireSendWindowAsync`, which consumes credit from **both** the
-  connection-level and stream-level send windows (RFC 9113 §5.2) and, when both are
+  connection-level and stream-level send windows (RFC 9113 §5.2) and, when either is
   exhausted, parks on a `TaskCompletionSource` signal until credit is replenished by
   an inbound `WINDOW_UPDATE` (or a `SETTINGS_INITIAL_WINDOW_SIZE` increase). Those
   frames are processed by the **background frame pump** (see the HTTP/2 flow-control
@@ -531,7 +542,11 @@ emitted by the transport when it finalizes the exchange, not by the feature, and
   asynchronously so a parked writer never resumes inline under the lock. If the pump
   exits (wire failure, connection error, teardown) send credit is marked permanently
   closed and a parked writer fails with a wire-level `IOException` instead of
-  hanging on a signal nothing will ever complete.
+  hanging on a signal nothing will ever complete. A stream reset wakes a parked
+  writer too, which then discards the rest of its write (RFC 9113 §5.4.2), and credit
+  reserved for a frame that never reached the wire is returned. The buffered
+  `SendAsync` path uses the same mechanism — see "HTTP/2 response flow control, HEAD,
+  and the request-body cap".
 - **HTTP/3** rides QUIC, whose per-stream flow control is applied by the transport on
   the underlying `Stream.WriteAsync`, so no software window accounting is needed here.
 
@@ -552,9 +567,8 @@ HTTP/2 flow controller is lock + `TaskCompletionSource` signaling.
   deferred (h2 paces via flow control, h3 via QUIC). The **HTTP/1.1** streaming write path *does*
   now enforce `MinResponseDataRate` (a slow reader that fails to drain the response is abandoned) —
   see "HTTP/1.1 request-body streaming and data rates" below.
-- **HEAD-body suppression on HTTP/2 / HTTP/3.** Only the HTTP/1.1 path suppresses the
-  body for HEAD; the h2/h3 buffered paths never did, and the sink matches their
-  existing behavior.
+- **HEAD-body suppression on HTTP/3.** HTTP/1.1 and HTTP/2 suppress the body for HEAD
+  on both the buffered path and the sink; the h3 buffered path and sink do not yet.
 - **A streaming/SSE dependency in this library.** By design — the feature packages
   own it; this transport only exposes the sink and the interceptor seam.
 
@@ -955,7 +969,9 @@ governed by the frame machinery and live under
 `Http2ConnectionListenerOptions.Limits` (`Http2Limits`) — see "HTTP/2 abuse
 limits" below. HTTP/2 request-body buffering is bounded by flow-control
 backpressure, documented in "HTTP/2 request-body flow control and
-backpressure" below. `MaxConcurrentConnections` is an accept-loop concern
+backpressure" below, and its size by the shared `MaxRequestBodySize`
+(`413`), documented in "HTTP/2 response flow control, HEAD, and the
+request-body cap". `MaxConcurrentConnections` is an accept-loop concern
 owned by the Web-runtime rewrite, not this surface.
 
 ### AOT posture
@@ -1189,8 +1205,9 @@ These are HTTP/2 frame-machinery limits. HTTP/3's equivalent stream-churn and
 flow-control limits live in the QUIC transport (`MAX_STREAMS`, QUIC flow
 control), not here — deliberately, per the guardrail that h3 stream limits are a
 QUIC-transport concern. HTTP/2 request-body buffering is bounded by the
-flow-control backpressure documented in the next section; the two surfaces are
-complementary (frame-rate abuse here, byte-volume abuse there).
+flow-control backpressure documented in the next section, and the body's total
+size by the `413` cap after it; the surfaces are complementary (frame-rate abuse
+here, byte-volume abuse there).
 
 ### AOT posture
 
@@ -1331,13 +1348,164 @@ are value-type octet counters guarded by monitors.
 
 ### Non-goals
 
-- **Outbound (response) flow control.** `SendAsync` does not yet consult the
-  per-stream send window; a streaming response write path (with send-side
-  backpressure and SSE) is tracked separately (#769). Response bodies are still
-  buffered before framing.
 - **A configurable initial window.** The advertised
   `SETTINGS_INITIAL_WINDOW_SIZE` is the fixed RFC default (65535). Exposing a
   tunable stream/connection window (Kestrel-style) is a later refinement.
+
+## HTTP/2 response flow control, HEAD, and the request-body cap
+
+### The defects this closes (#1048)
+
+The buffered `SendAsync` path is the one every Web response takes, because
+Web.Hosting registers no streaming interceptor. It had three gaps:
+
+- **No send-side flow control.** It wrote DATA frames in `MAX_FRAME_SIZE` chunks
+  without acquiring send-window credit, which RFC 9113 §6.9 forbids, and it never
+  debited the connection or stream send windows. The peer's `WINDOW_UPDATE`s
+  therefore kept growing the server's copy of the window; after about 2 GiB of
+  responses on one connection it passed 2^31-1 and the server answered a
+  *compliant* client with `GOAWAY(FLOW_CONTROL_ERROR)` (RFC 9113 §6.9.1).
+- **HEAD responses carried a body.**
+- **No request-body cap.** `MaxRequestBodySize` was enforced on HTTP/1.1 only.
+
+### Buffered sends acquire credit before every DATA frame
+
+`WriteBufferedResponseAsync` holds the connection write gate across the HEADERS
+[+ CONTINUATION…] block and every DATA frame the send windows can cover, reserving
+credit from **both** windows before each frame (`TryReserveSendWindow`, the
+non-waiting half of the mechanism `AcquireSendWindowAsync` shares with the
+streaming path). While credit lasts, a buffered response is still one contiguous
+sequence, and the RFC 9218 scheduler still orders whole responses under contention
+(see "The write scheduler"). When a frame finds a window exhausted, the writer
+flushes, releases the gate, waits in `AcquireSendWindowAsync` for a
+`WINDOW_UPDATE`, then re-acquires the gate at its priority for the rest.
+`END_STREAM` rides the last DATA frame, or the HEADERS frame when there is no
+content.
+
+The writer never parks while holding the gate: the frame pump needs the gate to
+write the SETTINGS and PING acknowledgements that precede the credit it is waiting
+for, and every other stream would stall behind it. The alternative — re-acquiring
+the gate per DATA frame, as the streaming path does — was rejected because it would
+interleave non-incremental buffered responses frame by frame, where RFC 9218 §10
+asks for them one after another; releasing only when flow control blocks is the
+smallest change that makes the path compliant. The trade-off accepted is the one
+the buffered path already had: a large, well-credited response holds the gate for
+its whole credited burst.
+
+The accounting invariant: every DATA octet the server writes was reserved from both
+windows first, so the server's windows equal the peer's view of them, and a
+compliant peer's `WINDOW_UPDATE` can never push them past 2^31-1. Credit reserved
+for a frame that never reaches the wire — the wait for the gate was cancelled, or
+the stream was reset while the writer queued — is returned (`ReturnSendWindow`),
+because the peer never received those octets and will never credit them back.
+
+### Reset and cancellation release a waiting writer
+
+- **A stream reset** — the peer's `RST_STREAM`, or one the server emits — marks the
+  stream reset and wakes every writer parked on credit. RFC 9113 §5.4.2: no further
+  frame may be sent for the stream, so the writer reserves no more credit, discards
+  the rest of the response, and `SendAsync` returns normally. The application
+  observed the reset through `RequestCancelled`, and an aborted exchange fires no
+  `AfterResponse` hooks. A reset is not a failure of the send: a host that treats a
+  throwing `SendAsync` as fatal to the connection keeps the connection's other
+  streams. The streaming sink behaves the same way.
+- **Cancellation** of the `SendAsync` token cancels the wait with
+  `OperationCanceledException`. That token is the host's shutdown signal, so the
+  stream is left for the connection teardown, or the peer, to reset.
+- **The pump exiting** still fails a waiting writer with `IOException`, because no
+  credit can ever arrive.
+
+### Each stream has one final-response owner
+
+RFC 9113 §8.1: a stream carries exactly one final response. `Http2Stream` records
+who owns it. The application claims it when its buffered send or its streaming head
+commit starts the final response; the transport claims it only to answer a request
+it rejects itself (`413`). The frame pump and the application race for the claim,
+so it is taken with `Interlocked`, and the loser writes nothing: an application
+whose claim fails discards its response, and a pump that finds the application's
+response under way resets the stream instead of sending a `413`.
+`CanWriteResponse` — the application owns the response, has not completed it, and
+the stream is not reset — gates every DATA frame and the streaming terminator. An
+interim (`1xx`) response is discarded once the final response is claimed or the
+stream is reset.
+
+The ownership states, as the paragraph above describes them:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unclaimed
+    Unclaimed --> Application: application commits its response head
+    Unclaimed --> Transport: request body crosses the cap
+    Application --> Completed: END_STREAM of the response written
+    Application --> [*]: stream reset, rest of the response discarded
+    Transport --> [*]: 413 sent, then reset NO_ERROR or removed
+    Completed --> [*]: removed, or reset NO_ERROR if the peer is still sending
+```
+
+### HEAD
+
+RFC 9110 §9.3.2: a HEAD response carries the header section a GET would, and no
+content. The buffered path sends HEADERS only, with `END_STREAM` on the HEADERS
+frame. A `content-length` the application set is preserved. One is synthesized only
+from a body the handler actually produced, which is the GET representation's length.
+An empty HEAD body gets none, because RFC 9110 §8.6 forbids a `content-length` that
+differs from what GET would send, and the transport cannot know that value. (The
+HTTP/1.1 writer still synthesizes `Content-Length: 0` in that case; aligning it is
+outside this change.) The streaming sink ends the stream on its HEADERS frame and
+discards body writes.
+
+### The request-body cap (413)
+
+The cap is the parse context's `MaxRequestBodySize` as frozen at dispatch:
+`HttpRequestInterceptorPipeline.InterceptAsync` returns it, and without
+interceptors it is `Http2Limits.MaxRequestBodySize`. `CreateContextAsync` arms it
+on the stream, and it is enforced in two places:
+
+- **A declared `content-length` over the cap** is refused before a single body octet
+  is read. The exchange is built (the hooks ran) and disposed at once — its disposal
+  walk tears down the hook-attached features and the body-wrapper chain — so it
+  never reaches the application, and the pump answers `413`.
+- **The running total on receipt.** `Http2Stream.ReceiveData` counts the de-padded
+  DATA octets, since padding is framing, not content. The frame that crosses the cap
+  is not delivered. The body pipe is completed with an `IOException` instead, so a
+  reader drains what arrived below the cap and then fails. Enforcing on receipt,
+  rather than at the reader's pace, bounds what the peer can push even when the
+  handler never reads the body. The frame's flow-control cost stays consumed, and
+  the stream's removal, which every rejection path ends in, reclaims it to the
+  connection window.
+
+The wire answer depends on the state of the response:
+
+| Response state when the cap is crossed | Wire answer | Why |
+|---|---|---|
+| Not started | `413` (HEADERS with `END_STREAM`, `content-length: 0`), then `RST_STREAM(NO_ERROR)`, or plain removal when the peer already ended the stream | RFC 9113 §8.1: after a complete response, a server may ask the client to stop sending with `RST_STREAM(NO_ERROR)`, and the client must not discard the response because of it. |
+| Under way (owned by the application) | `RST_STREAM(CANCEL)` | A `413` can no longer be sent, and the response cannot complete without content the server refuses. §8.1 reserves `NO_ERROR` for after a complete response. `PROTOCOL_ERROR` or `ENHANCE_YOUR_CALM` would blame the peer for a well-formed body that merely exceeds this server's policy. `CANCEL` (RFC 9113 §7: the stream is no longer needed) matches the interceptor-rejection reset. |
+| Complete | Nothing further | The send path's own §8.1 `RST_STREAM(NO_ERROR)` stops the rest of the body. |
+
+The transport's `413` bypasses the response hooks, like HTTP/1.1's minimal limit
+responses. A handler already running observes the rejection: `RequestCancelled`
+fires (through the reset, or directly when the `413` closed both halves of the
+stream), its body read fails, and any response it still sends is discarded because
+the transport owns the stream's final response.
+
+CONNECT is exempt. RFC 9110 §9.3.6: its post-head octets are tunnel traffic, not
+content, and an extended-CONNECT WebSocket is long-lived.
+
+### AOT posture
+
+No reflection and no runtime code generation. The ownership claim is an
+`Interlocked` compare-exchange on an `int`, the reset and completion markers are
+volatile flags, and the cap is a running `long` counter maintained by the pump.
+
+### Non-goals
+
+- **A middleware-visible override window on HTTP/2.** The h2 pipeline freezes the
+  knob at dispatch, so `IHttpMaxRequestBodySizeFeature` is read-only from the first
+  middleware onward. Freezing at the first body read, as HTTP/1.1 does, is a later
+  change.
+- **`content-length` versus DATA-total validation.** RFC 9113 §8.1.1 makes a
+  mismatch a malformed request. The declaration is used here only for the early
+  rejection; the cap bounds the rest.
 
 ## HTTP/2 graceful close (GOAWAY + stream drain)
 
@@ -2060,9 +2228,13 @@ The ordering policy is a pure, synchronous function (`SelectNextWaiterIndex`) so
 it is unit-tested in isolation, separate from the async gate. Both response write
 paths go through it:
 
-- The **buffered** path (`SendAsync`) holds the gate for the whole contiguous
-  HEADERS [+ CONTINUATION…] [+ DATA…] sequence, so the scheduler orders **which
-  stream's queued response proceeds next** under contention.
+- The **buffered** path (`SendAsync`) holds the gate for the contiguous
+  HEADERS [+ CONTINUATION…] [+ DATA…] sequence for as long as the peer's
+  flow-control windows cover it, so the scheduler orders **which stream's queued
+  response proceeds next** under contention. When credit runs out the writer
+  releases the gate before it waits for `WINDOW_UPDATE` and re-queues at its
+  priority for the rest (see "HTTP/2 response flow control, HEAD, and the
+  request-body cap").
 - The **streaming** path acquires the gate **per DATA frame** — and only after
   the send-window credit for that frame has been granted, so a writer parked on
   flow control never holds the gate. This is what delivers real frame-level

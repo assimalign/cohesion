@@ -44,9 +44,9 @@ internal static class HttpRequestInterceptorPipeline
     /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
     /// <param name="maxRequestBodySize">
     /// The registration's body-size cap seeded into the parse context. Interceptors may adjust it
-    /// until it is frozen after the head hooks; on these transports the value is carried for
-    /// hook-attached features (h2 bounds body buffering via flow-control backpressure, h3 via QUIC
-    /// flow control) — the hard wire-level cap remains tracked follow-up work.
+    /// until it is frozen after the head hooks. HTTP/3 carries the value for hook-attached features
+    /// (it bounds body buffering via QUIC flow control); HTTP/2 enforces the frozen value, which it
+    /// reads through <see cref="InterceptAsync"/>.
     /// </param>
     /// <param name="isConnect">
     /// Whether the request is a CONNECT, whose post-head octets are tunnel traffic rather than a
@@ -69,11 +69,56 @@ internal static class HttpRequestInterceptorPipeline
         long? maxRequestBodySize,
         bool isConnect)
     {
+        HttpRequestInterceptionResult result = await InterceptAsync(
+            interceptors,
+            version,
+            request,
+            connectionInfo,
+            maxRequestBodySize,
+            isConnect).ConfigureAwait(false);
+
+        return result.Features;
+    }
+
+    /// <summary>
+    /// Invokes the head and body hooks for <paramref name="request"/>, exactly as
+    /// <see cref="InvokeAsync"/> does, and additionally returns the effective request-body cap — the
+    /// parse context's knob as frozen after the head hooks — for a transport that enforces it.
+    /// </summary>
+    /// <param name="interceptors">The listener's snapshotted request-parse interceptors.</param>
+    /// <param name="version">The HTTP version of the exchange.</param>
+    /// <param name="request">
+    /// The decoded request. Its <see cref="TransportHttpRequest.Body"/> is replaced with the
+    /// wrapped stream produced by the body hooks (unless the request is a CONNECT).
+    /// </param>
+    /// <param name="connectionInfo">The transport endpoints for the exchange.</param>
+    /// <param name="maxRequestBodySize">The registration's body-size cap seeded into the parse context.</param>
+    /// <param name="isConnect">
+    /// Whether the request is a CONNECT, whose post-head octets are tunnel traffic rather than a
+    /// message body; body hooks are skipped when <see langword="true"/>.
+    /// </param>
+    /// <returns>
+    /// The hook-populated feature collection (<see langword="null"/> on the zero-interceptor fast
+    /// path) and the effective cap (<paramref name="maxRequestBodySize"/> unchanged on the fast path).
+    /// </returns>
+    /// <exception cref="Assimalign.Cohesion.Http.HttpRequestRejectedException">
+    /// Thrown when an interceptor rejects the request, after the partially-built body wrapper chain
+    /// and every hook-attached feature have been disposed.
+    /// </exception>
+    public static async ValueTask<HttpRequestInterceptionResult> InterceptAsync(
+        IHttpExchangeInterceptor[] interceptors,
+        HttpVersion version,
+        TransportHttpRequest request,
+        HttpConnectionInfo connectionInfo,
+        long? maxRequestBodySize,
+        bool isConnect)
+    {
         // Zero registered interceptors keeps the exact pre-seam fast path: no context, no feature
-        // collection, no hook dispatch, and the request keeps its original body stream.
+        // collection, no hook dispatch, and the request keeps its original body stream. The cap is
+        // the registration's configured limit, untouched by any hook.
         if (interceptors.Length == 0)
         {
-            return null;
+            return new HttpRequestInterceptionResult(null, maxRequestBodySize);
         }
 
         HttpFeatureCollection features = new();
@@ -131,7 +176,9 @@ internal static class HttpRequestInterceptorPipeline
                 request.Body = body;
             }
 
-            return features;
+            // The knob was frozen after the head hooks, so this is the value the transport enforces
+            // for the rest of the exchange.
+            return new HttpRequestInterceptionResult(features, context.MaxRequestBodySize);
         }
         catch
         {

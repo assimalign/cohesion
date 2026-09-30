@@ -4,8 +4,8 @@ Per-request limit features for the Cohesion HTTP server. Ships the typed
 `IHttpMaxRequestBodySizeFeature` — a per-exchange view over the request body-size cap the server
 transport enforces — attached by a parse-time `IHttpExchangeInterceptor` to every request. All
 three protocol parse paths (HTTP/1.1, HTTP/2, HTTP/3) invoke the interceptor seam (#819), so the
-feature is present regardless of protocol; the wire-level cap enforcement itself remains
-HTTP/1.1-only (see `docs/DESIGN.md`, "Protocol coverage").
+feature is present regardless of protocol; the wire-level cap itself is enforced by HTTP/1.1 and
+HTTP/2, not yet by HTTP/3 (see `docs/DESIGN.md`, "Protocol coverage").
 
 - **Depends on:** `Assimalign.Cohesion.Http` (core) only. The server transport
   (`Assimalign.Cohesion.Http.Connections`) never references this package; it invokes the

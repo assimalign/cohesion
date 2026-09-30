@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Channels;
@@ -35,6 +36,13 @@ namespace Assimalign.Cohesion.Http.Connections.Internal;
 /// </remarks>
 internal sealed class Http2Stream
 {
+    // _responseOwner values. RFC 9113 §8.1 — a stream carries exactly one final response, written
+    // either by the application or, when the transport rejects the request itself (413), by the
+    // transport.
+    private const int responseOwnerNone = 0;
+    private const int responseOwnerApplication = 1;
+    private const int responseOwnerTransport = 2;
+
     private readonly MemoryStream _headerBlock;
     // RFC 9113 §6.10 / §10.5.1 — cap the raw header-block bytes accumulated across a HEADERS frame
     // and its CONTINUATION frames. Without this bound a CONTINUATION flood — an endless run of
@@ -74,6 +82,29 @@ internal sealed class Http2Stream
     //     decrement). Interlocked because the pump, the request handler, and
     //     the graceful-close path race for the transitions.
     private int _exchangeAccounting;
+
+    // RFC 9113 §5.4.2 — set once the stream has been reset in either direction (RST_STREAM received
+    // from the peer, or emitted locally). No further frame may be sent on a reset stream, so response
+    // writers read this to abandon an in-flight response, and a writer parked on send-window credit
+    // is woken to observe it. Written under _stateLock, read lock-free by the writer threads.
+    private volatile bool _reset;
+
+    // Who owns this stream's final response (the responseOwner* constants): the application claims
+    // it when its buffered send or streaming head commit starts the final response; the transport
+    // claims it only to answer a request it rejects itself. The frame pump and the application race
+    // for the claim, so it is taken with Interlocked.
+    private int _responseOwner;
+
+    // Set once the END_STREAM completing the application's final response is on the wire.
+    private volatile bool _responseCompleted;
+
+    // RFC 9110 §15.5.14 — the effective request-body cap frozen at dispatch (null = unbounded; always
+    // null for CONNECT, whose post-head octets are tunnel traffic, not a message body), the running
+    // total of de-padded DATA octets received, and whether the cap has been crossed. Pump-only state:
+    // the frame pump is the single writer and the single reader.
+    private long? _maxRequestBodySize;
+    private long _requestBodyReceived;
+    private bool _requestBodyRejected;
 
     /// <summary>
     /// Send-side flow-control window — the number of DATA octets we
@@ -200,6 +231,80 @@ internal sealed class Http2Stream
     }
 
     /// <summary>
+    /// Whether the stream has been reset in either direction — an inbound <c>RST_STREAM</c> or one
+    /// the server emitted. RFC 9113 §5.4.2: no further frame may be sent for a reset stream, so a
+    /// response writer that observes this abandons whatever it has not yet written.
+    /// </summary>
+    public bool IsReset => _reset;
+
+    /// <summary>
+    /// Whether the request head declared a <c>content-length</c> larger than the stream's frozen
+    /// request-body cap. Decided when the context is created, so the transport can reject the request
+    /// with <c>413</c> before a single body octet is read (RFC 9110 §15.5.14).
+    /// </summary>
+    public bool IsDeclaredBodyOverLimit { get; private set; }
+
+    /// <summary>
+    /// Whether the stream's final response has been claimed, by the application or by the transport.
+    /// Once it has, an interim (<c>1xx</c>) response can no longer precede it.
+    /// </summary>
+    public bool IsResponseClaimed => Volatile.Read(ref _responseOwner) != responseOwnerNone;
+
+    /// <summary>
+    /// Whether the transport claimed the stream's final response to answer a request it rejected
+    /// itself (<c>413 Content Too Large</c>). The application's response for such an exchange is never
+    /// written.
+    /// </summary>
+    public bool IsAnsweredByTransport => Volatile.Read(ref _responseOwner) == responseOwnerTransport;
+
+    /// <summary>
+    /// Whether the <c>END_STREAM</c> completing the application's final response has been written.
+    /// </summary>
+    public bool IsResponseCompleted => _responseCompleted;
+
+    /// <summary>
+    /// Whether the application may still write frames for its final response: the application owns
+    /// the response, has not completed it, and the stream has not been reset.
+    /// </summary>
+    public bool CanWriteResponse =>
+        !_reset && !_responseCompleted && Volatile.Read(ref _responseOwner) == responseOwnerApplication;
+
+    /// <summary>
+    /// Claims the stream's final response for the application — called by the buffered send path and
+    /// by the streaming head commit immediately before the final response's HEADERS are written.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the application now owns the final response;
+    /// <see langword="false"/> when the transport already answered the stream itself (a rejected
+    /// request body), in which case that answer stands and the application writes nothing.
+    /// </returns>
+    public bool TryClaimResponse()
+    {
+        return Interlocked.CompareExchange(ref _responseOwner, responseOwnerApplication, responseOwnerNone) == responseOwnerNone;
+    }
+
+    /// <summary>
+    /// Claims the stream's final response for the transport, to answer a request it rejects itself
+    /// (<c>413 Content Too Large</c>).
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the transport now owns the final response;
+    /// <see langword="false"/> when the application already started its own.
+    /// </returns>
+    public bool TryClaimResponseForRejection()
+    {
+        return Interlocked.CompareExchange(ref _responseOwner, responseOwnerTransport, responseOwnerNone) == responseOwnerNone;
+    }
+
+    /// <summary>
+    /// Records that the <c>END_STREAM</c> completing the application's final response is on the wire.
+    /// </summary>
+    public void CompleteResponse()
+    {
+        _responseCompleted = true;
+    }
+
+    /// <summary>
     /// Whether the stream has reached the terminal <see cref="Http2StreamState.Closed"/>
     /// state.
     /// </summary>
@@ -317,7 +422,7 @@ internal sealed class Http2Stream
 
     /// <summary>
     /// Queues an inbound DATA payload onto the body pipe and applies the END_STREAM
-    /// transition.
+    /// transition, enforcing the stream's request-body cap on receipt.
     /// </summary>
     /// <param name="data">The de-padded application data.</param>
     /// <param name="flowControlLength">
@@ -325,6 +430,14 @@ internal sealed class Http2Stream
     /// credit back to the peer once the application consumes this chunk.
     /// </param>
     /// <param name="endStream">Whether the frame carried END_STREAM.</param>
+    /// <returns>
+    /// <see langword="true"/> when the payload was delivered to the body pipe;
+    /// <see langword="false"/> when the request content has crossed the stream's body-size cap
+    /// (RFC 9110 §15.5.14). The crossing frame, and any later one, is not delivered: the body pipe is
+    /// failed instead, so the reader drains the octets received below the cap and then observes an
+    /// <see cref="IOException"/>. The caller answers the violation on the wire. The frame's
+    /// flow-control cost stays consumed; the caller's stream removal reclaims it.
+    /// </returns>
     /// <exception cref="Http2StreamException">
     /// Thrown when DATA is received on a stream that has already had its remote
     /// half closed (STREAM_CLOSED — RFC 9113 §5.1).
@@ -333,7 +446,7 @@ internal sealed class Http2Stream
     /// Thrown when DATA is received on a stream in <see cref="Http2StreamState.Idle"/>
     /// (no HEADERS yet) — that is a PROTOCOL_ERROR connection-level fault.
     /// </exception>
-    public void ReceiveData(ReadOnlyMemory<byte> data, int flowControlLength, bool endStream)
+    public bool ReceiveData(ReadOnlyMemory<byte> data, int flowControlLength, bool endStream)
     {
         lock (_stateLock)
         {
@@ -368,6 +481,27 @@ internal sealed class Http2Stream
             }
         }
 
+        // RFC 9110 §15.5.14 — the request content is capped on receipt, against the de-padded octets
+        // (padding is framing, not content). Enforcing here rather than on the reader's pace means the
+        // cap bounds what the peer may push even when the handler never reads the body.
+        if (_requestBodyRejected)
+        {
+            return false;
+        }
+
+        if (_maxRequestBodySize is { } limit)
+        {
+            _requestBodyReceived += data.Length;
+
+            if (_requestBodyReceived > limit)
+            {
+                _requestBodyRejected = true;
+                FailBody(new IOException(
+                    $"The HTTP/2 request body on stream {StreamId} exceeded the maximum request body size of {limit} octets (413 Content Too Large)."));
+                return false;
+            }
+        }
+
         if (!data.IsEmpty || flowControlLength > 0)
         {
             _bodyChannel.Writer.TryWrite(new Http2DataChunk(data, flowControlLength));
@@ -377,6 +511,8 @@ internal sealed class Http2Stream
         {
             CompleteBody();
         }
+
+        return true;
     }
 
     /// <summary>
@@ -403,6 +539,7 @@ internal sealed class Http2Stream
 
             State = Http2StreamState.Closed;
             InputCompleted = true;
+            _reset = true;
         }
 
         CompleteBody();
@@ -439,9 +576,20 @@ internal sealed class Http2Stream
         {
             State = Http2StreamState.Closed;
             InputCompleted = true;
+            _reset = true;
         }
 
         CompleteBody();
+        TryFireAbort();
+    }
+
+    /// <summary>
+    /// Fires <see cref="RequestAborted"/> for an exchange the transport ended without a reset — its
+    /// own <c>413</c> completed a stream the peer had already half-closed — so a handler still running
+    /// learns its request is over. Idempotent.
+    /// </summary>
+    public void AbortRequest()
+    {
         TryFireAbort();
     }
 
@@ -506,6 +654,19 @@ internal sealed class Http2Stream
         if (Interlocked.Exchange(ref _bodyCompleted, 1) == 0)
         {
             _bodyChannel.Writer.TryComplete();
+        }
+    }
+
+    /// <summary>
+    /// Completes the body pipe with <paramref name="error"/>: the reader still drains every chunk
+    /// already delivered, then its next read throws <paramref name="error"/>. Shares
+    /// <see cref="CompleteBody"/>'s one-shot latch, so a body that already completed is unaffected.
+    /// </summary>
+    private void FailBody(Exception error)
+    {
+        if (Interlocked.Exchange(ref _bodyCompleted, 1) == 0)
+        {
+            _bodyChannel.Writer.TryComplete(error);
         }
     }
 
@@ -654,7 +815,7 @@ internal sealed class Http2Stream
         // still run). The hook-populated feature collection flows into the exchange through the
         // Http2Context features parameter; zero interceptors keeps the pre-seam fast path.
         bool isConnect = method == HttpMethod.Connect;
-        HttpFeatureCollection? features = await HttpRequestInterceptorPipeline.InvokeAsync(
+        HttpRequestInterceptionResult interception = await HttpRequestInterceptorPipeline.InterceptAsync(
             interceptors,
             HttpVersion.Http20,
             request,
@@ -662,7 +823,17 @@ internal sealed class Http2Stream
             maxRequestBodySize,
             isConnect).ConfigureAwait(false);
 
-        Http2Context context = new(this, request, new Http2Response(), connectionInfo, requestAborted, features);
+        // RFC 9110 §15.5.14 — arm the request-body cap. The pipeline froze the knob after the head
+        // hooks, so the value is final for the exchange (an IHttpMaxRequestBodySizeFeature is
+        // read-only from dispatch on HTTP/2). ReceiveData enforces it on receipt; a declared
+        // content-length over it is flagged here so the connection rejects the request before a
+        // single body octet is read. A CONNECT tunnel carries no message body, so it is uncapped.
+        _maxRequestBodySize = isConnect ? null : interception.MaxRequestBodySize;
+        IsDeclaredBodyOverLimit = _maxRequestBodySize is { } limit
+            && TryGetDeclaredContentLength(decodedHeaders.Headers, out long declaredLength)
+            && declaredLength > limit;
+
+        Http2Context context = new(this, request, new Http2Response(), connectionInfo, requestAborted, interception.Features);
 
         // Surface the :protocol pseudo-header (RFC 8441) generically so a
         // higher layer (the Assimalign.Cohesion.Http.ExtendedConnect package)
@@ -673,6 +844,21 @@ internal sealed class Http2Stream
         }
 
         return context;
+    }
+
+    /// <summary>
+    /// Reads a single, well-formed <c>content-length</c> value (RFC 9110 §8.6: a non-negative decimal
+    /// integer). An absent, repeated, or unparsable field yields <see langword="false"/>: the
+    /// declaration is then simply not used for the early rejection, and the receipt-side running total
+    /// still enforces the cap.
+    /// </summary>
+    private static bool TryGetDeclaredContentLength(HttpHeaderCollection headers, out long contentLength)
+    {
+        contentLength = 0;
+
+        return headers.TryGetValue(HttpHeaderKey.ContentLength, out HttpHeaderValue value)
+            && value.Count == 1
+            && long.TryParse(value.Value, NumberStyles.None, CultureInfo.InvariantCulture, out contentLength);
     }
 
     private static HttpQueryCollection ParseQuery(string requestTarget, out HttpPath path)
