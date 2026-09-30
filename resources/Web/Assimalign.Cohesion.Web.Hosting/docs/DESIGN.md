@@ -462,11 +462,19 @@ failure such as an invalid route table fails `StartAsync` with nothing to roll b
 host `Failed`. `ExecuteAsync` runs no middleware for a token that is already cancelled; middleware
 observe cancellation through `RequestCancelled`.
 
-## The pipeline terminal — bodyless 404 fallback (#881)
+## The pipeline terminal — endpoint dispatch and the bodyless 404 fallback (#881, #1054)
 
 `WebApplication`'s pipeline `Build()` composes the innermost middleware — the
-terminal reached only when every registered middleware chained to `next` and none
-produced a response. It used to be a silent `Task.CompletedTask`, which handed the
+terminal reached only when every registered middleware chained to `next`.
+
+**Endpoint dispatch (#1054).** When an endpoint-selecting middleware (`UseRouting`)
+published the root's `IWebEndpointFeature`, the terminal runs that endpoint. That is
+where a matched route's handler runs, after every middleware registered behind
+`UseRouting`, and where routing's 405 is written. The terminal reads only the root
+seam; it cannot see `Web.Routing` (COHRES002).
+
+**The 404 fallback (#881).** With no endpoint selected, the request went unhandled.
+The terminal used to be a silent `Task.CompletedTask`, which handed the
 transport an empty `200` for any unhandled request. It now sets a **bodyless
 `404 Not Found`** when the response arrives untouched (still `200`, no body, no
 `Content-Type`, no `Location`); a response a middleware already shaped — a non-`200`

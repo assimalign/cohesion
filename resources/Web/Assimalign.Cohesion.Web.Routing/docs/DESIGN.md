@@ -421,17 +421,85 @@ added after the third of five children would apply to only the last two.
 ## Pipeline integration (`UseRouting`)
 
 When the pipeline is built, the `UseRouting` middleware factory builds the application's router
-(see "Router lifecycle" below). For each request the middleware calls `router.Match(context)` once
-and dispatches on the result:
+(see "Router lifecycle" below). For each request the middleware **selects** the endpoint and calls
+`next`. It never runs the endpoint and never short-circuits (#1054). The pipeline's terminal runs
+whatever was selected, through the root's `IWebEndpointFeature`.
 
-- `Matched` → store the match on the context (`SetRouteMatch`) and invoke the handler with the
-  request's `RequestCancelled` token (terminal; downstream middleware does not run).
-- `MethodNotAllowed` → set `405` and the `Allow` header, then **short-circuit** (do not fall
-  through to the terminal 404 pipeline).
-- `NoMatch` → call `next`, letting the rest of the pipeline (and any terminal 404) handle it.
+```mermaid
+flowchart TD
+    Earlier["Middleware before UseRouting: no endpoint known"] --> Routing["UseRouting: match and publish, then next"]
+    Routing --> Later["Middleware after UseRouting: endpoint and metadata known"]
+    Later --> Terminal["Pipeline terminal"]
+    Terminal --> Run["Run the selected endpoint"]
+    Terminal --> NotFound["No endpoint selected: bodyless 404"]
+```
 
-`IRouter.RouteAsync` performs the same dispatch for callers that use the router directly without
-the middleware, so a direct `RouteAsync` also produces a correct 405 with `Allow`.
+The middleware calls `router.Match(context)` once and publishes the result:
+
+- `Matched` → `SetRouteMatch` publishes the route as an `IRouteMatchFeature`, which is also the
+  exchange's `IWebEndpointFeature`. The terminal invokes the handler with the request's
+  `RequestCancelled` token.
+- `MethodNotAllowed` → a 405 endpoint is published. It is an `IWebEndpointFeature` only, not a route
+  match, so metadata consumers see no endpoint. The terminal sets `405` and the `Allow` header.
+- A **CORS preflight** to a path that no route accepts `OPTIONS` on → routing matches again with the
+  method named in `Access-Control-Request-Method` (`IRouter.Match(context, method)`). A candidate
+  is published as an `IRouteMatchFeature` with `IsPreflight` set, so CORS can read its metadata.
+  The candidate never runs for the preflight: if no middleware answers it, the terminal answers
+  the plain `OPTIONS` request with `405` and `Allow`. A path with an explicit `OPTIONS` route handles
+  the request itself, with no preflight flag.
+- `NoMatch` → any endpoint an earlier selection published is cleared, so the request reaches the
+  terminal's 404 rather than a stale endpoint.
+
+`HEAD` keeps being served by a `GET` route (the matcher's rule, unchanged).
+
+`IRouter.RouteAsync` still matches **and** dispatches in one call for callers that use the router
+directly without the middleware, so a direct `RouteAsync` also produces a correct 405 with `Allow`.
+
+### Why dispatch is implicit, at the pipeline terminal
+
+The endpoint runs at the pipeline's terminal; there is no `UseEndpoints` step. An explicit dispatch
+middleware would silently turn every existing application into a 404 server: its routes would match
+and publish, and nothing would run them. The terminal belongs to the pipeline builder
+(`WebApplication` in Web.Hosting), and COHRES002 forbids Web.Hosting from referencing Web.Routing.
+So the selected endpoint reaches the terminal through a root seam, `IWebEndpointFeature`, which
+carries only the delegate to run. The route, its values and its metadata stay in Web.Routing's
+`IRouteMatchFeature`. `RouteMatchFeature` implements both contracts.
+
+### Endpoint metadata consumers and ordering
+
+Middleware that applies endpoint policies reads the published endpoint through
+`context.GetEndpointMetadata<T>()`. It must therefore be registered **after** `UseRouting`. The
+supported order is:
+
+```
+UseRouting → UseRateLimiting / UseRequestTimeouts / UseOutputCache → (endpoint)
+```
+
+Before #1054, routing was terminal, and these consumers intercepted `Features.Set(IRouteMatchFeature)`
+through a feature-collection wrapper (or, for output caching, matched a second time). That only
+allowed synchronous policies and was invisible in the pipeline order. Those workarounds are removed.
+
+**Fail closed on a missing policy middleware.** Metadata whose silent absence would weaken a safety
+property implements `IRouteMiddlewareMetadata` and names the middleware that honors it, for example
+`UseRateLimiting`. That middleware calls `context.AcknowledgeEndpointMiddleware(name)` once it has
+applied the endpoint's policy. When the terminal dispatches the endpoint, any such metadata the
+request never acknowledged throws `InvalidOperationException` naming the endpoint and the missing
+middleware. The endpoint is not run without its policy. This catches both a missing middleware and
+one registered ahead of `UseRouting`, which silently disabled endpoint rate limits in an application
+migrated from terminal routing. Metadata that only tunes optional behavior (output caching, access
+logging) does not implement the interface.
+
+### Migration from terminal routing (#1054)
+
+- **Middleware registered after `UseRouting` now runs for matched requests.** Before, it ran only
+  for requests no route matched. A middleware placed after `UseRouting` as a "not found" fallback
+  should check `context.GetRouteMatch()`, or move ahead of `UseRouting`.
+- **405 is answered at the terminal.** Middleware registered after `UseRouting` also runs for it.
+- **Policy middleware moves after `UseRouting`.** `UseRateLimiting`, `UseRequestTimeouts` and
+  `UseOutputCache` read the published endpoint. Registered ahead of `UseRouting`, their endpoint
+  policies fail the request (rate limits, timeouts) or are skipped (output caching).
+- **Custom pipeline builders** must honor `IWebEndpointFeature` at their terminal: run the endpoint
+  when present, and apply their unhandled-request behavior otherwise.
 
 ### Per-application router state (the isolation rule) (#789)
 

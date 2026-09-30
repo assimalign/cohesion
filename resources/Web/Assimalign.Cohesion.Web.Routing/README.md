@@ -55,11 +55,12 @@ models were set aside on 2026-07-10.
 | `IRouterGroupBuilder` / `RouterBuilderExtensions.MapGroup` | Builder-time route groups: prefix + shared policies + shared metadata composed onto children at registration; nestable; child-over-group overrides. |
 | `RouteHostConstraint` | Parsed host constraint (`host[:port]`, `*.wildcard`, `*`, bracketed IPv6) with `Parse`/`TryParse`/`IsMatch`. |
 | `RouteHostMetadata` | Sealed endpoint-metadata carrier declaring the hosts a route accepts; consulted by `Router` during candidate selection. |
-| `IRouteMatchFeature` | The per-request feature carrying the matched route, its values, and its metadata. |
+| `IRouteMatchFeature` | The per-request feature carrying the matched route, its values, and its metadata (and `IsPreflight` for a CORS preflight's candidate). It is also the exchange's `IWebEndpointFeature`, which the pipeline terminal runs. |
+| `IRouteMiddlewareMetadata` | Endpoint metadata that names the middleware which must honor it; dispatch fails the request when that middleware never acknowledged the endpoint (`AcknowledgeEndpointMiddleware`). |
 | `RouteNameMetadata` | Sealed endpoint-metadata carrier naming a route for URL generation; unique per router, checked at build time. |
 | `ILinkGenerator` | Outbound URL generation (`GetPathByName`, `GetUriByName`, `TryGetPathByValues`, …); exposed as `IRouter.LinkGenerator` and via `context.GetLinkGenerator()`. |
-| `HttpContextRoutingExtensions` | `SetRouteMatch` / `GetRouteMatch` / `TryGetRoute` / `TryGetRouteValues` / `GetEndpointMetadata`(`<T>`) / `GetLinkGenerator` over the routing features. |
-| `RoutingExtensions.UseRouting` | Pipeline integration (dispatch / 405 / fall-through). |
+| `HttpContextRoutingExtensions` | `SetRouteMatch` / `GetRouteMatch` / `TryGetRoute` / `TryGetRouteValues` / `GetEndpointMetadata`(`<T>`) / `AcknowledgeEndpointMiddleware` / `GetLinkGenerator` over the routing features. |
+| `RoutingExtensions.UseRouting` | Pipeline integration: selects the endpoint (match / 405 / preflight candidate / none) and calls `next`; the terminal runs it. |
 
 ## Usage
 
@@ -88,11 +89,20 @@ switch (match.Status)
 }
 ```
 
-Within a web application pipeline, prefer `builder.UseRouting()`, which performs this dispatch
-(invoke handler / emit 405 + `Allow` / fall through to the next middleware) for you. Map every
-route before the application starts: the router is built once, when the pipeline is built at
-startup, so an invalid route table (such as a duplicate route name) fails the start, and mapping a
-route afterwards throws `InvalidOperationException`.
+Within a web application pipeline, prefer `builder.UseRouting()`. It **selects** the endpoint and
+calls `next`, and the pipeline's terminal runs the endpoint (or answers 405 with `Allow`, or 404).
+Middleware registered after `UseRouting` therefore runs with the matched endpoint and its metadata
+known (`context.GetEndpointMetadata<T>()`). Register policy middleware such as `UseRateLimiting`,
+`UseRequestTimeouts` and `UseOutputCache` there. A CORS preflight resolves the candidate endpoint
+for the requested method (`IRouteMatchFeature.IsPreflight`) without running it. Map every route
+before the application starts: the router is built once, when the pipeline is built at startup, so
+an invalid route table (such as a duplicate route name) fails the start, and mapping a route
+afterwards throws `InvalidOperationException`.
+
+> **Migrating from terminal routing (#1054).** `UseRouting` used to run a matched route's handler
+> itself, so middleware registered after it ran only for unmatched requests. It now runs for every
+> request, and the handler runs at the terminal. See "Migration from terminal routing" in
+> [docs/DESIGN.md](docs/DESIGN.md).
 
 Outbound, a route named through its metadata generates URLs back out of the same table:
 

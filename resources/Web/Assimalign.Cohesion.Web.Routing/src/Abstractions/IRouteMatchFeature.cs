@@ -18,9 +18,12 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// contract type rather than by string key.
 /// </para>
 /// <para>
-/// The feature is installed by the router when a request matches a route (see
-/// the <c>SetRouteMatch</c> extension on <see cref="IHttpContext"/>). When no
-/// route has matched, no feature is present and
+/// <c>UseRouting</c> installs the feature when a request matches a route (see
+/// the <c>SetRouteMatch</c> extension on <see cref="IHttpContext"/>) and then
+/// calls <c>next</c>: every middleware registered after <c>UseRouting</c> runs
+/// with the match known, and the pipeline's terminal runs the matched route's
+/// handler. When no route has matched, including a 405 (the path matched but
+/// the method did not), no feature is present and
 /// <see cref="HttpFeatureCollectionExtensions.Get{TFeature}"/> returns
 /// <see langword="null"/>.
 /// </para>
@@ -32,6 +35,22 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// </remarks>
 public interface IRouteMatchFeature : IHttpFeature
 {
+    /// <summary>
+    /// Gets whether the request is a CORS preflight and <see cref="Route"/> is only its candidate
+    /// endpoint.
+    /// </summary>
+    /// <remarks>
+    /// A CORS preflight is an <c>OPTIONS</c> request carrying <c>Origin</c> and
+    /// <c>Access-Control-Request-Method</c> (Fetch Standard). When no route accepts <c>OPTIONS</c> on
+    /// the path, routing resolves the route the actual request would reach with the requested method
+    /// and publishes it with this flag set, so CORS can read the candidate's metadata. The candidate
+    /// never runs for the preflight: when no middleware answers the preflight, the terminal answers
+    /// it as the plain <c>OPTIONS</c> request it is (<c>405</c> with <c>Allow</c>). Middleware that apply
+    /// endpoint policies to the actual request (authorization, rate limits) skip a preflight, which by
+    /// definition carries no credentials and runs no handler.
+    /// </remarks>
+    bool IsPreflight => false;
+
     /// <summary>
     /// Gets the route that matched the current request, or <see langword="null"/>
     /// when the feature carries no match.

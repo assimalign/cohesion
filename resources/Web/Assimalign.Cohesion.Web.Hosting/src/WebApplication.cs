@@ -123,21 +123,30 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     }
 
     /// <summary>
-    /// The pipeline terminal. Reaching it means every registered middleware chained to <c>next</c>
-    /// and none produced a terminal response, so the request went unhandled — set a bodyless
-    /// <c>404 Not Found</c> rather than completing silently, which would hand the transport an empty
-    /// <c>200</c>. A middleware that already chose a non-<c>200</c> status, set a redirect
-    /// <c>Location</c>, or wrote a body/content type is left untouched.
+    /// The pipeline terminal. Reaching it means every registered middleware chained to <c>next</c>.
+    /// When an endpoint-selecting middleware (such as <c>UseRouting</c>) published an
+    /// <see cref="IWebEndpointFeature"/>, the terminal runs that endpoint. Otherwise the request went
+    /// unhandled, and the terminal sets a bodyless <c>404 Not Found</c> rather than completing
+    /// silently, which would hand the transport an empty <c>200</c>. A middleware that already chose a
+    /// non-<c>200</c> status, set a redirect <c>Location</c>, or wrote a body/content type is left
+    /// untouched.
     /// </summary>
     /// <remarks>
     /// The 404 is deliberately payload-free. The resource hosting-isolation rule (COHRES002) forbids
     /// this runtime module from referencing the Web feature libraries — including
-    /// <c>Web.ProblemDetails</c> — so the terminal cannot render problem+json here. The opt-in
-    /// status-code-pages middleware (<c>UseStatusCodePages</c> in <c>Web.ErrorHandling</c>) is what
-    /// upgrades a bodyless <c>4xx</c>/<c>5xx</c> into an RFC 9457 problem+json body.
+    /// <c>Web.ProblemDetails</c> and <c>Web.Routing</c> — so the terminal cannot render problem+json
+    /// here, and it reaches the selected endpoint only through the root's
+    /// <see cref="IWebEndpointFeature"/> seam. The opt-in status-code-pages middleware
+    /// (<c>UseStatusCodePages</c> in <c>Web.ErrorHandling</c>) is what upgrades a bodyless
+    /// <c>4xx</c>/<c>5xx</c> into an RFC 9457 problem+json body.
     /// </remarks>
     private static Task TerminalAsync(IHttpContext context)
     {
+        if (context.Features.Get<IWebEndpointFeature>() is { } endpoint)
+        {
+            return endpoint.Endpoint.Invoke(context);
+        }
+
         IHttpResponse response = context.Response;
 
         if (response.StatusCode.Value == HttpStatusCode.Ok.Value &&

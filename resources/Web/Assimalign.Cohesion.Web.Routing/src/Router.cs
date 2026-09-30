@@ -115,7 +115,15 @@ public sealed class Router : IRouter
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        HttpMethod method = context.Request.Method;
+        return Match(context, context.Request.Method);
+    }
+
+    /// <inheritdoc />
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    public RouteMatch Match(IHttpContext context, HttpMethod method)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
         HttpHost host = context.Request.Host;
         List<HttpMethod>? allowed = null;
 

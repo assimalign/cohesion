@@ -49,6 +49,22 @@ pipeline, and the delegate it returns runs for each request. The factory body is
 composition-time seam for work that must fail at startup rather than on a request, without a
 dependency on the hosting runtime: `UseRouting` builds the application's route table there (#1051).
 
+## Endpoint selection and the pipeline terminal (#1054)
+
+Selecting an endpoint and running it are separate pipeline steps. A selecting middleware
+(`UseRouting` in `Web.Routing`) publishes an `IWebEndpointFeature` and calls `next`, so every
+middleware registered after it runs with the endpoint known. The pipeline's **terminal** (the
+innermost delegate a pipeline builder composes, reached when every middleware called `next`)
+runs `IWebEndpointFeature.Endpoint` when the feature is present, and otherwise applies the
+builder's unhandled-request behavior (`WebApplication`'s bodyless 404).
+
+The feature is a root seam because the terminal belongs to the pipeline builder, which lives in
+`Web.Hosting`, and COHRES002 forbids that module from referencing `Web.Routing`. It carries only
+the delegate to run. The endpoint's model (its route, values and metadata) stays in the package
+that selected it, so the root does not absorb routing. Every `IWebApplicationPipelineBuilder`
+implementation must honor the contract at its terminal. That includes test doubles, which is
+why the Routing tests' application double runs the published endpoint too.
+
 ## Application lifecycle services
 
 The concrete `WebApplicationBuilder.AddService` in `Web.Hosting` accepts an
