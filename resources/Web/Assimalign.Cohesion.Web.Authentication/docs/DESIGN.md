@@ -47,7 +47,7 @@ different:
 - **Middleware composes it.** Authentication-result metadata, ticket
   properties, and downstream re-authentication all want to mutate the
   same object reference, not look it up by name and risk replacing it.
-- **AOT-safe lookup.** `Features.Get<IHttpAuthenticationFeature>()` is
+- **AOT-safe lookup.** `Features.Get<IAuthenticationFeature>()` is
   `typeof(T)`-keyed; no reflection, no string-table lookup, no boxing.
 
 `IHttpContext.Features` &mdash; defined in the protocol core but
@@ -65,7 +65,7 @@ later is additive and source-compatible; locking in a wide surface up
 front based on guesses is not.
 
 This deliberately mirrors ASP.NET Core's
-`IHttpAuthenticationFeature` evolution: the original shape was just
+`IAuthenticationFeature` evolution: the original shape was just
 `User`, and per-scheme handlers grew in `IAuthenticationService`
 sibling features rather than bloating the per-request feature.
 
@@ -73,7 +73,7 @@ sibling features rather than bloating the per-request feature.
 
 Every consumer that touches `context.User` would otherwise need a
 defensive null-check. Returning a singleton empty `ClaimsPrincipal`
-(no identity, no claims) when no `IHttpAuthenticationFeature` is
+(no identity, no claims) when no `IAuthenticationFeature` is
 attached matches the ASP.NET Core `HttpContext.User` default so
 existing patterns like `if (context.User.Identity?.IsAuthenticated)`
 work unchanged. The empty principal is a static singleton; it costs
@@ -81,7 +81,7 @@ nothing to return.
 
 The setter, in contrast, throws on `null` &mdash; setting "no user"
 should be done by removing the feature
-(`context.Features.Set<IHttpAuthenticationFeature>(null)`), not by
+(`context.Features.Set<IAuthenticationFeature>(null)`), not by
 installing a feature with a null `User`. That keeps the invariant
 "if a feature exists, its `User` is non-null" cheap to reason about.
 
@@ -180,7 +180,7 @@ a challenge reuses one initialized instance.
 **Result feature alongside the principal feature.**
 `IAuthenticationResultFeature` holds the default-scheme `AuthenticateResult`
 (ticket, properties, failure) so authorization and diagnostics can inspect
-*how* the principal was established, next to `IHttpAuthenticationFeature`
+*how* the principal was established, next to `IAuthenticationFeature`
 which holds only `context.User`. This mirrors ASP.NET Core's
 `IAuthenticateResultFeature`.
 
@@ -236,7 +236,7 @@ the `App.Web` shared framework delivers the family to applications
 `<IsAotCompatible>true</IsAotCompatible>` is inherited from the shared
 build targets. The package contains no reflection, no runtime code
 generation, and no dynamic type loading. The feature lookup uses
-`typeof(IHttpAuthenticationFeature)` as a JIT-time constant key into a
+`typeof(IAuthenticationFeature)` as a JIT-time constant key into a
 `Dictionary<Type, object>`; trim and AOT roots are unaffected.
 
 `ClaimsPrincipal` itself is AOT-safe in .NET 10; no special

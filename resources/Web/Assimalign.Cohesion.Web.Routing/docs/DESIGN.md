@@ -7,9 +7,11 @@ given an inbound `IHttpContext`, which handler (if any) should run, and — when
 should — whether that is a *no route* (404) or a *wrong method* (405) situation. It also
 carries the **endpoint metadata** each route declares and surfaces the **route-match
 result** to the rest of the pipeline as a typed feature. It is a foundation primitive: the
-API, function, controller, and metadata programming models (issues #149, #151, #787, #788,
-#796) all build on the matcher, the typed route values, and the metadata seam defined here, so
-their behavior must be predictable, standards-aware, and reflection-free before those layers are added.
+typed-endpoint binding, content negotiation, named routes, host matching and metadata consumers
+(issues #149, #787, #788, #796) all build on the matcher, the typed route values, and the metadata
+seam defined here, so their behavior must be predictable, standards-aware, and reflection-free.
+(The controller and function programming models, #151, were set aside on 2026-07-10 when the Web
+area went middleware-first.)
 
 Scope of this library:
 

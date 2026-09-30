@@ -3,9 +3,10 @@
 This document captures the design intent behind the shipped HTTP transport
 surface. It is intentionally focused on the design decisions a future
 reader (or future Claude session) would otherwise have to re-derive from
-diffs. `DESIGN_SUGGESTION.md` in this same folder is a separate,
-forward-looking proposal for a multiplex-aware refactor; this file
-describes the surface as it ships today.
+diffs. It describes the surface as it ships today. (It used to point at a
+forward-looking `DESIGN_SUGGESTION.md` for a multiplex-aware refactor; that file
+was never committed, and the multiplexed dispatch it anticipated now lives in the
+Web server, #1049.)
 
 ## Transport seam: consuming `Assimalign.Cohesion.Connections`
 
@@ -2454,8 +2455,7 @@ oversight.
 
 - A full design write-up covering the protocol context hierarchy
   (`HttpConnection` / `HttpConnectionContext` / per-protocol
-  implementations) is still owed. See `DESIGN_SUGGESTION.md` for the
-  in-flight multiplex-aware refactor proposal.
+  implementations) is still owed.
 - Async feature initialization (see "Non-goals" above) is worth
   revisiting once a concrete consumer appears that genuinely needs it.
 

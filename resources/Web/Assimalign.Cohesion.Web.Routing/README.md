@@ -2,8 +2,10 @@
 
 Deterministic, standards-aware HTTP route matching for the Cohesion Web stack. This is an
 **L3** service-platform library: it consumes the L1 `Assimalign.Cohesion.Http` protocol
-primitives and is consumed by the higher-level web programming models (API, functions,
-controllers, metadata, results).
+primitives and is consumed by the Web API surface: `Web.Api`'s source-generated typed endpoints,
+endpoint metadata consumers (rate limiting, request timeouts, output caching, logging), and link
+generation. The Web area is middleware-first; the controller, function and result programming
+models were set aside on 2026-07-10.
 
 ## What it does
 

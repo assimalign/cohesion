@@ -966,6 +966,7 @@ The registered resource constructor calls ResourceTelemetry.Configure using the 
 
 The root contracts and feature libraries reference no `Assimalign.Cohesion.Hosting*`
 library. `Web.Hosting.Resources` and `Web.Hosting.Health` own reusable hosting
-integration. They never reference this runtime module. COHRES002 still permits this
-module to reference only the Web root, so its internal control-plane terminal stays
-independent of `Web.Hosting.Resources`; consolidation is the 31f follow-up.
+integration. They never reference this runtime module. COHRES002 permits this
+module to reference the Web root and its own hosting family, and it consumes
+`Web.Hosting.Resources` for the enabled resource's control-plane terminal
+(`Internal/EnabledResourcePipeline.cs`).

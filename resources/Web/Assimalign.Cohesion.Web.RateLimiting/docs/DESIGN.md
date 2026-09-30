@@ -172,9 +172,10 @@ pipeline builder and an `IHttpContext` double (`tests/TestObjects/`), and
 comes from a **fixed-window, one-permit** policy: a window limiter does not return its permit on lease
 disposal, so a second same-window request is rejected with **no timing dependency** (the window is an hour,
 far beyond any test). The **concurrency** limiter (permit returned on completion) covers the
-"permit held for the request lifetime" semantic through two genuinely concurrent unit-level executions —
-never over the in-memory driver, whose per-connection dispatch is sequential and would deadlock an
-intra-connection concurrency test. Coverage: admit/reject, the 429 + `Retry-After` answer, a custom
+"permit held for the request lifetime" semantic through two genuinely concurrent unit-level executions.
+The in-memory driver's default HTTP/1.1 connection dispatches one exchange at a time, so an
+intra-connection concurrency test over it would deadlock; HTTP/2 streams are dispatched concurrently
+(#1049), so an end-to-end concurrency test needs the factory's HTTP/2 protocol. Coverage: admit/reject, the 429 + `Retry-After` answer, a custom
 rejection status, the `OnRejected` and `OnDecision` hooks, forwarded-composing client-address partitioning,
 named / inline / disabled / unknown per-endpoint policies, the committed-head abort, and the concurrency
 permit hold.
