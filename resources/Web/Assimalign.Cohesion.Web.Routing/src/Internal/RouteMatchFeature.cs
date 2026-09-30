@@ -96,7 +96,8 @@ internal sealed class RouteMatchFeature : IRouteMatchFeature, IWebEndpointFeatur
         for (int i = 0; i < metadata.Count; i++)
         {
             if (metadata[i] is IRouteMiddlewareMetadata { RequiredMiddleware: { Length: > 0 } middleware }
-                && _acknowledged?.Contains(middleware) != true)
+                && _acknowledged?.Contains(middleware) != true
+                && !IsSuperseded(metadata, i))
             {
                 throw new InvalidOperationException(
                     $"The endpoint '{Describe(Route)}' declares {metadata[i].GetType().Name}, which only " +
@@ -104,6 +105,24 @@ internal sealed class RouteMatchFeature : IRouteMatchFeature, IWebEndpointFeatur
                     $"{middleware}() after UseRouting() so it runs before the endpoint.");
             }
         }
+    }
+
+    // Consumers read metadata last-wins, so an item that a later item of the same type replaces (a
+    // group's policy that the route disables, for example) is never applied and requires nothing.
+    // Metadata lists are short; the scan allocates nothing.
+    private static bool IsSuperseded(IRouterRouteMetadataCollection metadata, int index)
+    {
+        Type type = metadata[index].GetType();
+
+        for (int j = index + 1; j < metadata.Count; j++)
+        {
+            if (metadata[j].GetType() == type)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string Describe(IRouterRoute route)

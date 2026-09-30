@@ -560,6 +560,11 @@ one registered ahead of `UseRouting`, which silently disabled endpoint rate limi
 migrated from terminal routing. Metadata that only tunes optional behavior (output caching, access
 logging) does not implement the interface.
 
+The check follows the same last-wins read as the consumers: among items of one runtime type, only
+the last places a requirement. A group that requires a rate limit and a route that disables it
+therefore run without `UseRateLimiting`, and the reverse still fails closed. Checking every item
+would reject exactly the group-plus-override shape the convention verbs make routine.
+
 ### Migration from terminal routing (#1054)
 
 - **Middleware registered after `UseRouting` now runs for matched requests.** Before, it ran only

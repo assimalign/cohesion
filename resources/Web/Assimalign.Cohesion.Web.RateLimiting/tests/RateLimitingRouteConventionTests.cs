@@ -117,6 +117,51 @@ public class RateLimitingRouteConventionTests
         second.StatusCode.ShouldBe(NetHttpStatusCode.OK);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - Conventions: A route that disables its group's policy should run without UseRateLimiting")]
+    public async Task DisableRateLimiting_OnRouteWithoutMiddleware_ShouldRunTheRoute()
+    {
+        // Arrange — no UseRateLimiting at all: the group's route still fails closed, the exempt one runs.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        InvalidOperationException? dispatchFailure = null;
+
+        // Observes the dispatch failure the way an exception boundary would.
+        factory.Application.Use(async (context, next) =>
+        {
+            try
+            {
+                await next.Invoke(context);
+            }
+            catch (InvalidOperationException exception)
+            {
+                dispatchFailure = exception;
+                context.Response.StatusCode = CohesionHttpStatusCode.InternalServerError;
+            }
+        });
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        IRouterGroupBuilder api = routes.MapGroup("/api").RequireRateLimiting(SinglePermitPerPath());
+        api.Map(CohesionHttpMethod.Get, "limited", Ok());
+        api.Map(CohesionHttpMethod.Get, "open", Ok()).DisableRateLimiting();
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage open = await client.GetAsync("/api/open", cancellationToken);
+        InvalidOperationException? openFailure = dispatchFailure;
+        using HttpResponseMessage limited = await client.GetAsync("/api/limited", cancellationToken);
+
+        // Assert
+        open.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        openFailure.ShouldBeNull();
+        limited.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        dispatchFailure.ShouldNotBeNull().Message.ShouldContain("UseRateLimiting()", Case.Sensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - Conventions: A verb on a null builder should throw ArgumentNullException")]
     public void RequireRateLimiting_NullBuilder_ShouldThrow()
     {

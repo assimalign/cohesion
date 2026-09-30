@@ -267,6 +267,47 @@ public class EndpointSelectionTests
         handler.WasInvoked.ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - Endpoint: A requirement that a later item of the same type replaces places no requirement")]
+    public async Task Dispatch_WithSupersededRequiredMiddleware_ShouldRunEndpoint()
+    {
+        // Arrange — a group-level policy the route disables: the last item is what consumers apply.
+        RecordingRouterRouteHandler handler = new();
+        TestWebApplication app = new();
+        app.AddRouting();
+        app.UseRouting().Map(new Route(
+            HttpMethod.Get,
+            "/exempt",
+            handler,
+            new RouterRouteMetadataCollection(new PolicyMetadata("UseRateLimiting"), new PolicyMetadata(requiredMiddleware: null))));
+
+        // Act
+        await app.ExecuteAsync(TestHttpContext.Create(HttpMethod.Get, "/exempt"));
+
+        // Assert
+        handler.WasInvoked.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Routing] - Endpoint: A requirement that replaces a disabled item still fails closed")]
+    public async Task Dispatch_WithRequirementAfterDisabledItem_ShouldThrow()
+    {
+        // Arrange — a route re-enabling what its group disabled.
+        RecordingRouterRouteHandler handler = new();
+        TestWebApplication app = new();
+        app.AddRouting();
+        app.UseRouting().Map(new Route(
+            HttpMethod.Get,
+            "/limited",
+            handler,
+            new RouterRouteMetadataCollection(new PolicyMetadata(requiredMiddleware: null), new PolicyMetadata("UseRateLimiting"))));
+
+        // Act
+        await Should.ThrowAsync<InvalidOperationException>(
+            () => app.ExecuteAsync(TestHttpContext.Create(HttpMethod.Get, "/limited")));
+
+        // Assert
+        handler.WasInvoked.ShouldBeFalse();
+    }
+
     private static TestHttpContext CreatePreflight(string path, string requestedMethod)
     {
         TestHttpContext context = TestHttpContext.Create(HttpMethod.Options, path);

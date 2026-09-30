@@ -17,6 +17,11 @@ namespace Assimalign.Cohesion.Web.Routing;
 /// endpoint and the middleware, instead of running the endpoint without its policy.
 /// </para>
 /// <para>
+/// Only the item consumers apply is checked. Metadata is read last-wins, so when several items share
+/// a runtime type, the last one decides: a group's policy that a route disables places no
+/// requirement, and a route that re-enables a policy its group disabled does.
+/// </para>
+/// <para>
 /// Metadata that only tunes optional behavior (output caching, access logging) does not implement
 /// this interface: running the endpoint without it loses nothing a caller relies on.
 /// </para>
