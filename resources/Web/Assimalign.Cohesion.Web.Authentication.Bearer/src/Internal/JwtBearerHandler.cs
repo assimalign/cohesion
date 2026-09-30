@@ -182,9 +182,12 @@ internal sealed class JwtBearerHandler : IAuthenticationHandler
         return options;
     }
 
+    // Fail closed: validation is on unless the application turned it off, and an empty accepted
+    // list with validation on matches nothing (JwtBearerAuthentication.Validate rejects that
+    // configuration up front, so this is the defense for options mutated after registration).
     private bool IssuerIsValid(JsonWebToken jwt)
     {
-        if (_options.ValidIssuers.Count == 0)
+        if (!_options.ValidateIssuer)
         {
             return true;
         }
@@ -194,7 +197,7 @@ internal sealed class JwtBearerHandler : IAuthenticationHandler
 
     private bool AudienceIsValid(JsonWebToken jwt)
     {
-        if (_options.ValidAudiences.Count == 0)
+        if (!_options.ValidateAudience)
         {
             return true;
         }
