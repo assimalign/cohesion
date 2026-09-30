@@ -376,6 +376,14 @@ Two invariants are load-bearing:
   surfaces this as its existing malformed-request-target failure (an `InvalidDataException`
   classified as a wire-level fault — the connection is dropped, never mistaken for a literal
   reachable path), reaching the same reject outcome the shared decode produces on h2/h3.
+- **On HTTP/2 the rejection is scoped to the stream (#937).** A `:path` that does not decode to a
+  legal path — the illegal decoded octets above, an illegal character sent literally, or a value
+  without a leading `/` — is a malformed request, and RFC 9113 §8.1.1 / §8.3.1 make that a stream
+  error of type `PROTOCOL_ERROR`. `Http2Stream.CreateContextAsync` translates the decode failure
+  into an `Http2StreamException`, so the frame pump resets that one stream and keeps serving the
+  connection's others; no GOAWAY is sent. The header block was fully decoded first, so the
+  connection-wide HPACK state is intact, which is what makes a stream-level answer safe. The
+  decode semantics are unchanged; only the failure's scope is.
 
 Why decode in the transport rather than in `HttpRequestTarget`: the value object is a purely
 syntactic RFC 9112 §3.2 parse whose `Path`/`RawValue` stay wire-faithful (its tests pin

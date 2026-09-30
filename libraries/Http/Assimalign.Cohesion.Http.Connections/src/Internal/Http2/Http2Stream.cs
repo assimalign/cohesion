@@ -735,6 +735,10 @@ internal sealed class Http2Stream
     /// <exception cref="HttpRequestRejectedException">
     /// Thrown when a request-parse interceptor rejects the request.
     /// </exception>
+    /// <exception cref="Http2StreamException">
+    /// Thrown with <see cref="Http2ErrorCode.ProtocolError"/> when the <c>:path</c> does not decode to a
+    /// legal path — a malformed request, reset per stream (RFC 9113 §8.1.1).
+    /// </exception>
     public async ValueTask<Http2Context> CreateContextAsync(
         HPackDecoder decoder,
         HttpConnectionInfo connectionInfo,
@@ -777,11 +781,31 @@ internal sealed class Http2Stream
             throw new Http2ConnectionException(Http2ErrorCode.ProtocolError, extendedConnectViolation);
         }
 
+        // RFC 3986 §2.4 — the :path is percent-decoded through the same HttpPath.FromUriComponent
+        // decode HTTP/1.1 and HTTP/3 use. A :path whose decoded form is not a legal path — a decoded
+        // space, control character, '?', '#', or NUL, or no leading '/' — makes the request malformed,
+        // which RFC 9113 §8.1.1 / §8.3.1 require to be a stream error of type PROTOCOL_ERROR. The
+        // header block has been fully decoded, so the connection's HPACK state is intact: only this
+        // stream is reset and the connection keeps serving its other streams. The decode semantics
+        // themselves are unchanged (h1/h2/h3 parity); only the failure's scope is.
+        HttpQueryCollection query;
+        HttpPath path;
+        try
+        {
+            query = ParseQuery(decodedHeaders.Path ?? "/", out path);
+        }
+        catch (Exception exception) when (exception is HttpException or InvalidOperationException)
+        {
+            throw new Http2StreamException(
+                StreamId,
+                Http2ErrorCode.ProtocolError,
+                $"HTTP/2 stream {StreamId} carried a malformed :path: {exception.Message}");
+        }
+
         // RFC 9113 §5.2 — the body streams in through the flow-control-aware pipe
         // rather than being buffered whole before dispatch, so a large upload is
         // bounded by the advertised receive window and paced by the reader.
         Stream body = new Http2RequestBodyStream(_bodyChannel.Reader, onBodyConsumed, StreamId, requestAborted);
-        HttpQueryCollection query = ParseQuery(decodedHeaders.Path ?? "/", out HttpPath path);
         // RFC 9113 §8.3.1 — :authority supersedes Host. Resolution is shared
         // across versions via HttpFieldNormalization so HTTP/2 and HTTP/3
         // reconcile authority identically.

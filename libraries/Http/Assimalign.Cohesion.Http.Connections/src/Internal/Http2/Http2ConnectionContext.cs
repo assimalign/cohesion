@@ -1595,9 +1595,17 @@ internal sealed class Http2ConnectionContext : HttpStreamConnectionContext, IAsy
     /// the head is assembled into a context, before the consumer observes it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A request whose declared <c>content-length</c> exceeds its frozen body-size cap is not
     /// dispatched: RFC 9110 §15.5.14 — it is answered <c>413</c> before a single body octet is read,
     /// and the exchange never reaches the application.
+    /// </para>
+    /// <para>
+    /// A malformed <c>:path</c> surfaces from <see cref="Http2Stream.CreateContextAsync"/> as an
+    /// <see cref="Http2StreamException"/> carrying <c>PROTOCOL_ERROR</c>, which the pump's stream-error
+    /// handler turns into an <c>RST_STREAM</c> for that stream alone (RFC 9113 §8.1.1) — the
+    /// connection keeps serving its other streams.
+    /// </para>
     /// </remarks>
     private async Task<Http2Context?> TryDispatchStreamAsync(Http2Stream stream, CancellationToken cancellationToken)
     {
