@@ -429,6 +429,13 @@ Two invariants are load-bearing:
   connection's others; no GOAWAY is sent. The header block was fully decoded first, so the
   connection-wide HPACK state is intact, which is what makes a stream-level answer safe. The
   decode semantics are unchanged; only the failure's scope is.
+- **On HTTP/3 the rejection is scoped to the stream too (#937).** The same malformed `:path`
+  is a malformed request under RFC 9114 §4.1.2, a stream error of type `H3_MESSAGE_ERROR`.
+  `Http3HeaderCodec` reports the decode failure as the `InvalidDataException` it raises for
+  every other message rule, so `Http3ConnectionContext` resets that request stream alone and
+  keeps accepting and serving the connection's others. The field section was fully decoded
+  first (and acknowledged, if it referenced the dynamic table), so the connection's QPACK state
+  is intact.
 
 Why decode in the transport rather than in `HttpRequestTarget`: the value object is a purely
 syntactic RFC 9112 §3.2 parse whose `Path`/`RawValue` stay wire-faithful (its tests pin
@@ -1887,7 +1894,7 @@ transport intends (RFC 9114 §8.1):
 | Complete response sent; request not read to its end and not drainable | `STOP_SENDING` | `H3_NO_ERROR` | RFC 9114 §4.1: the server does not need the rest of a request it fully answered |
 | Application cancelled the exchange (`IHttpContext.Cancel`) | reset (both directions) | `H3_REQUEST_CANCELLED` | §4.1.1: processing began, so never `H3_REQUEST_REJECTED`, which promises the request was not processed |
 | Refused before dispatch — an interceptor rejection, teardown before dispatch, or assembled but never handed over | reset | `H3_REQUEST_REJECTED` | §4.1.1: no application processing, so the peer may retry |
-| Malformed request (field section, Content-Length, trailers) | reset | `H3_MESSAGE_ERROR` | §4.1.2 |
+| Malformed request (field section, `:path`, Content-Length, trailers) | reset | `H3_MESSAGE_ERROR` | §4.1.2 |
 | HEADERS frame longer than `MaxRequestHeadersFrameSize` | reset | `H3_FRAME_ERROR` | §7.1 names invalid frame sizes; a local limit leaves connection state intact, so the error is scoped to the stream (§8) |
 | Stream ended before its HEADERS frame | reset | `H3_REQUEST_INCOMPLETE` | §8.1 |
 | A frame truncated by the stream's end | connection close | `H3_FRAME_ERROR` | §7.1 requires a connection error |
@@ -2329,6 +2336,10 @@ rules:
 - **Uniqueness.** A pseudo-header MUST NOT repeat.
 - **Required fields.** A non-CONNECT request MUST carry `:method`,
   `:scheme`, and a non-empty `:path`.
+- **Path.** The `:path` must percent-decode to a legal path (see
+  "Request-target percent-decoding (h1/h2/h3 parity)"): a decoded space,
+  control character, `?`, `#`, or NUL, an illegal literal character, or a
+  missing leading `/` is malformed (#937).
 - **Lowercase names.** A regular field name with an uppercase character is
   malformed.
 - **Connection-specific fields** are rejected, and `:authority`

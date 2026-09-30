@@ -441,11 +441,40 @@ internal static class Http3HeaderCodec
 
         if (queryIndex >= 0)
         {
-            path = HttpPath.FromUriComponent(requestTarget[..queryIndex]);
+            path = DecodePath(requestTarget[..queryIndex]);
             return new HttpQuery(requestTarget[(queryIndex + 1)..]).Parse();
         }
 
-        path = HttpPath.FromUriComponent(requestTarget);
+        path = DecodePath(requestTarget);
         return new HttpQueryCollection();
+    }
+
+    /// <summary>
+    /// Percent-decodes the path component of the <c>:path</c> pseudo-header through the
+    /// <see cref="HttpPath.FromUriComponent"/> decode HTTP/1.1 and HTTP/2 share (RFC 3986 §2.4).
+    /// </summary>
+    /// <param name="pathComponent">The <c>:path</c> value up to its query.</param>
+    /// <returns>The decoded path.</returns>
+    /// <exception cref="InvalidDataException">
+    /// Thrown when the value does not decode to a legal path — a decoded space, control character,
+    /// <c>?</c>, <c>#</c>, or NUL, an illegal character sent literally, or no leading <c>/</c>. That
+    /// makes the request malformed (RFC 9114 §4.1.2), reported like every other rule in this codec,
+    /// so the connection context resets the request stream alone with <c>H3_MESSAGE_ERROR</c>. The
+    /// decode itself is unchanged (h1/h2/h3 parity); only the failure's scope is.
+    /// </exception>
+    private static HttpPath DecodePath(string pathComponent)
+    {
+        try
+        {
+            return HttpPath.FromUriComponent(pathComponent);
+        }
+        catch (Exception exception) when (exception is HttpException or InvalidOperationException)
+        {
+            // HttpPath rejects an illegal character or a missing leading '/' with an HttpException;
+            // the URL decoder rejects a decoded NUL with an InvalidOperationException.
+            throw new InvalidDataException(
+                $"HTTP/3 request carries a malformed :path pseudo-header (RFC 9114 §4.1.2): {exception.Message}",
+                exception);
+        }
     }
 }
