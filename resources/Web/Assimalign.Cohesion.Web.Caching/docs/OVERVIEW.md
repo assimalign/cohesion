@@ -10,7 +10,7 @@ primitives from `Assimalign.Cohesion.Http` (#755) — it re-implements no header
 - **Cache cacheable GET/HEAD responses** at the server, needing no client participation — the standard
   enterprise capability for high-traffic API and page workloads.
 - **Policy model at builder time**: a base policy applied to every request, named policies, and
-  per-endpoint overrides through a sealed metadata carrier resolved at the router's route-match seam.
+  per-endpoint overrides through a sealed metadata carrier read from the endpoint `UseRouting` publishes.
 - **Correct cache-or-bypass decisions** via the #755 typed `Cache-Control` primitives: bypass on
   `no-store`/`private`/`Set-Cookie`, on non-safe methods, and on non-`200` responses; never cache
   authenticated responses by default.
@@ -21,7 +21,7 @@ primitives from `Assimalign.Cohesion.Http` (#755) — it re-implements no header
 ## Dependencies
 
 - `Assimalign.Cohesion.Web` — the root pipeline-builder seam the `UseOutputCache` verb composes against.
-- `Assimalign.Cohesion.Web.Routing` — the router match (endpoint discovery) and the endpoint-metadata seam.
+- `Assimalign.Cohesion.Web.Routing` — the published route match (endpoint, route values) and the endpoint-metadata seam.
 - `Assimalign.Cohesion.Http` — the `IHttpContext` surface and the #755 `HttpCacheControl` / `HttpFreshness`
   primitives.
 - `Assimalign.Cohesion.Http.Forwarded` — the effective scheme and host the primary key is built from
@@ -35,6 +35,8 @@ It never references `Assimalign.Cohesion.Web.Hosting` (the resource hosting-isol
 ## Usage
 
 ```csharp
+var routes = app.UseRouting();
+
 // Base-policy mode: cache every GET/HEAD for one minute.
 app.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = TimeSpan.FromMinutes(1)));
 
@@ -46,7 +48,6 @@ app.UseOutputCache(options => options.AddPolicy("catalog", policy =>
     policy.Tag("catalog");
 }));
 
-var routes = app.UseRouting();
 routes.Map(new Route(HttpMethod.Get, "/catalog",
     new RouterRouteHandler(GetCatalog),
     new RouterRouteMetadataCollection(new OutputCacheMetadata("catalog"))));
@@ -55,8 +56,10 @@ routes.Map(new Route(HttpMethod.Get, "/catalog",
 await store.EvictByTagAsync("catalog");
 ```
 
-Register `UseOutputCache` **before** `UseResponseCompression`, any content-negotiated write, and
-`UseRouting` (see `DESIGN.md` for why the ordering is load-bearing).
+Register `UseOutputCache` **after** `UseRouting`, and **before** `UseResponseCompression` and any
+content-negotiated write (see `DESIGN.md` for why the ordering is load-bearing). Registered ahead of
+`UseRouting`, only the base policy applies: endpoint metadata cannot opt an endpoint in, and a response
+from an endpoint that carries it is never stored, so an opt-out still holds.
 
 ## Documentation
 

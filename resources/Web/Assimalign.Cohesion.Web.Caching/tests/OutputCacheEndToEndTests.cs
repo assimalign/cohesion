@@ -24,8 +24,10 @@ namespace Assimalign.Cohesion.Web.Caching.Tests;
 /// Full-pipeline coverage over the <see cref="WebApplicationTestFactory"/> (in-memory HTTP/1.1): a cache
 /// hit skips downstream, a differing query misses, the response's own <c>Vary</c> header keeps a client
 /// from receiving a variant it did not request, an authenticated request bypasses, tag eviction forces a
-/// re-fetch, and per-endpoint opt-in through routing metadata caches only the marked endpoint. Requests
-/// are sequential on one client, matching the in-memory transport's sequential dispatch.
+/// re-fetch, per-endpoint opt-in through the endpoint <c>UseRouting</c> published caches only the marked
+/// endpoint, and a middleware registered ahead of <c>UseRouting</c> never stores a response from an
+/// endpoint whose metadata it could not apply. Requests are sequential on one client, matching the
+/// in-memory transport's sequential dispatch.
 /// </summary>
 public class OutputCacheEndToEndTests
 {
@@ -243,8 +245,6 @@ public class OutputCacheEndToEndTests
         int cachedHits = 0;
         int plainHits = 0;
 
-        factory.Application.UseOutputCache();
-
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(new Route(
             CohesionHttpMethod.Get,
@@ -266,6 +266,8 @@ public class OutputCacheEndToEndTests
                 await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"p-{n}"), context.RequestCancelled);
             })));
 
+        factory.Application.UseOutputCache();
+
         using HttpClient client = factory.CreateClient();
 
         // Act
@@ -282,6 +284,61 @@ public class OutputCacheEndToEndTests
         plain1.ShouldBe("p-1");
         plain2.ShouldBe("p-2");
         plainHits.ShouldBe(2);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Caching] - E2E: Registered before UseRouting, a response from an endpoint with metadata is never stored")]
+    public async Task UseOutputCache_RegisteredBeforeRouting_ShouldNotStoreEndpointWithMetadata()
+    {
+        // Arrange — a base policy with the middleware ahead of routing: it decides before the endpoint is
+        // known. The opted-out endpoint must still never be cached; the plain one is cached as usual.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        int privateHits = 0;
+        int publicHits = 0;
+
+        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = _longDuration));
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        routes.Map(new Route(
+            CohesionHttpMethod.Get,
+            "/private",
+            new RouterRouteHandler(async context =>
+            {
+                int n = Interlocked.Increment(ref privateHits);
+                context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+                await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"private-{n}"), context.RequestCancelled);
+            }),
+            new RouterRouteMetadataCollection(OutputCacheMetadata.Disabled)));
+        routes.Map(new Route(
+            CohesionHttpMethod.Get,
+            "/public",
+            new RouterRouteHandler(async context =>
+            {
+                int n = Interlocked.Increment(ref publicHits);
+                context.Response.StatusCode = CohesionHttpStatusCode.Ok;
+                await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes($"public-{n}"), context.RequestCancelled);
+            })));
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        string private1 = await client.GetStringAsync("/private", cancellationToken);
+        string private2 = await client.GetStringAsync("/private", cancellationToken);
+        string public1 = await client.GetStringAsync("/public", cancellationToken);
+        string public2 = await client.GetStringAsync("/public", cancellationToken);
+
+        // Assert
+        private1.ShouldBe("private-1");
+        private2.ShouldBe("private-2");
+        privateHits.ShouldBe(2);
+
+        public1.ShouldBe("public-1");
+        public2.ShouldBe("public-1");
+        publicHits.ShouldBe(1);
     }
 
     private static async Task<string> SendAsync(HttpClient client, string clientTag, CancellationToken cancellationToken)

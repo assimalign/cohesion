@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Caching.Internal;
 using Assimalign.Cohesion.Web.Caching.Tests.TestObjects;
+using Assimalign.Cohesion.Web.Routing;
 
 using Shouldly;
 
@@ -16,7 +17,8 @@ namespace Assimalign.Cohesion.Web.Caching.Tests;
 /// Unit coverage for the middleware's cache-or-bypass decisions driven directly over an in-memory
 /// context double: the hit path skips downstream and stamps <c>Age</c>; the request/response bypass
 /// matrix (authenticated request, <c>Set-Cookie</c> response, request <c>no-store</c>, non-200 status,
-/// over-cap body) never serves a stale or shared representation.
+/// over-cap body) never serves a stale or shared representation; and the per-endpoint policy and route
+/// values come from the endpoint published ahead of the middleware, never from a second route match.
 /// </summary>
 public class OutputCacheMiddlewareTests
 {
@@ -214,6 +216,82 @@ public class OutputCacheMiddlewareTests
         await RunAsync(middleware, c2, Handler(counter, "b"));
 
         // Assert
+        counter.Count.ShouldBe(2);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: The published endpoint's metadata should decide without running the route matcher")]
+    public async Task Invoke_PublishedEndpointMetadata_ShouldCacheWithoutMatchingAgain()
+    {
+        // Arrange — opt-in mode (no base policy), so only the published endpoint's metadata can enable
+        // caching; the router is unreachable, so running the matcher a second time would throw.
+        OutputCacheOptions options = new();
+        using InMemoryOutputCacheStore store = new(options.SizeLimit, options.TimeProvider);
+        OutputCacheMiddleware middleware = new(store, options);
+        Counter counter = new();
+
+        static OutputCacheTestContext Routed()
+        {
+            OutputCacheTestContext context = new();
+            context.Features.Set<IRouterFeature>(new ThrowingRouterFeature());
+            context.Features.Set<IRouteMatchFeature>(new FakeRouteMatchFeature(OutputCacheMetadata.Enabled));
+            return context;
+        }
+
+        // Act
+        string first = await RunAsync(middleware, Routed(), Handler(counter, "payload"));
+        string second = await RunAsync(middleware, Routed(), Handler(counter, "SHOULD-NOT-RUN"));
+
+        // Assert
+        first.ShouldBe("payload");
+        second.ShouldBe("payload");
+        counter.Count.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: Disabled metadata on the published endpoint should bypass the base policy")]
+    public async Task Invoke_PublishedEndpointDisabled_ShouldBypassBasePolicy()
+    {
+        // Arrange
+        OutputCacheMiddleware middleware = CreateMiddleware(out _);
+        Counter counter = new();
+
+        static OutputCacheTestContext Routed()
+        {
+            OutputCacheTestContext context = new();
+            context.Features.Set<IRouteMatchFeature>(new FakeRouteMatchFeature(OutputCacheMetadata.Disabled));
+            return context;
+        }
+
+        // Act
+        await RunAsync(middleware, Routed(), Handler(counter, "a"));
+        await RunAsync(middleware, Routed(), Handler(counter, "b"));
+
+        // Assert — never cached, so the endpoint runs each time.
+        counter.Count.ShouldBe(2);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Caching] - Middleware: The published endpoint's route values should partition VaryByRouteValue")]
+    public async Task Invoke_PublishedRouteValues_ShouldPartitionVaryByRouteValue()
+    {
+        // Arrange — one path, and a route value routing resolved differently for each request.
+        OutputCacheMiddleware middleware = CreateMiddleware(out _, options => options.AddBasePolicy(policy => policy.VaryByRouteValue("tenant")));
+        Counter counter = new();
+
+        static OutputCacheTestContext Routed(string tenant)
+        {
+            OutputCacheTestContext context = new();
+            context.Features.Set<IRouteMatchFeature>(new FakeRouteMatchFeature(new RouteValueDictionary { ["tenant"] = tenant }));
+            return context;
+        }
+
+        // Act
+        string alpha = await RunAsync(middleware, Routed("alpha"), Handler(counter, "alpha-1"));
+        string beta = await RunAsync(middleware, Routed("beta"), Handler(counter, "beta-1"));
+        string alphaAgain = await RunAsync(middleware, Routed("alpha"), Handler(counter, "SHOULD-NOT-RUN"));
+
+        // Assert
+        alpha.ShouldBe("alpha-1");
+        beta.ShouldBe("beta-1");
+        alphaAgain.ShouldBe("alpha-1");
         counter.Count.ShouldBe(2);
     }
 }

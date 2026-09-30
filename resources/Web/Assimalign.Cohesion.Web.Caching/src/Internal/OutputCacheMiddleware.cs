@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Web.Caching.Internal;
 
 /// <summary>
 /// The output-cache middleware. For a cacheable GET/HEAD request it resolves the effective policy
-/// (base policy overridden by the matched endpoint's <see cref="OutputCacheMetadata"/>), computes the
+/// (base policy overridden by the published endpoint's <see cref="OutputCacheMetadata"/>), computes the
 /// cache key, and serves a stored response directly — without invoking the endpoint — adding an
 /// <c>Age</c> header. On a miss it wraps the response body in a size-capped buffering tee, invokes the
 /// endpoint, and stores a cacheable outcome keyed so that the response's own <c>Vary</c> header governs
@@ -20,20 +20,26 @@ namespace Assimalign.Cohesion.Web.Caching.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Endpoint resolution.</b> Cohesion's router matches and dispatches in one step, so there is no
-/// pipeline slot between "route matched" and "handler runs" for an async concern that must skip the
-/// handler on a hit. This middleware therefore performs the router's own side-effect-free
-/// <see cref="IRouter.Match(IHttpContext)"/> ahead of <c>UseRouting</c> to discover the endpoint and read
-/// its <see cref="OutputCacheMetadata"/> before deciding — the same metadata seam the reactive
-/// route-match feature exposes, resolved proactively so the lookup can await the store and short-circuit
-/// the pipeline. When routing is not registered the base policy alone governs.
+/// <b>Endpoint resolution.</b> <c>UseRouting</c> publishes the matched endpoint and calls <c>next</c>,
+/// and the pipeline's terminal runs it. Registered after <c>UseRouting</c>, this middleware reads the
+/// published match (<see cref="HttpContextRoutingExtensions"/>' <c>GetRouteMatch</c>) for the endpoint's
+/// <see cref="OutputCacheMetadata"/> and route values, decides, and on a hit answers without calling
+/// <c>next</c>, so the endpoint never runs. It never runs the matcher itself. With no published endpoint
+/// (no route matched, or routing not registered) the base policy alone governs.
 /// </para>
 /// <para>
-/// <b>Ordering.</b> Register <c>UseOutputCache</c> ahead of <c>UseResponseCompression</c> and any
-/// content-negotiated write, so the buffered body captures the fully-encoded bytes and the captured
-/// <c>Vary</c> already carries <c>Accept-Encoding</c>/<c>Accept</c>. Because the variant key folds in the
-/// stored <c>Vary</c>, a client that cannot accept a stored variant computes a different key and never
-/// receives it.
+/// <b>Registered ahead of <c>UseRouting</c></b>, the middleware decides before any endpoint is known:
+/// the base policy governs, and endpoint metadata cannot opt an endpoint in. So that it cannot opt one
+/// out either, a response is not stored when routing publishes, only after this middleware decided, an
+/// endpoint carrying <see cref="OutputCacheMetadata"/>: that metadata may disable caching, or name a
+/// policy with other keys, tags or duration than the ones the entry would have been stored under.
+/// </para>
+/// <para>
+/// <b>Ordering.</b> Register <c>UseOutputCache</c> after <c>UseRouting</c> and ahead of
+/// <c>UseResponseCompression</c> and any content-negotiated write, so the buffered body captures the
+/// fully-encoded bytes and the captured <c>Vary</c> already carries <c>Accept-Encoding</c>/<c>Accept</c>.
+/// Because the variant key folds in the stored <c>Vary</c>, a client that cannot accept a stored variant
+/// computes a different key and never receives it.
 /// </para>
 /// </remarks>
 internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
@@ -82,18 +88,11 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
             return;
         }
 
-        // Resolve the endpoint ahead of routing (pure, side-effect-free) and its per-endpoint policy.
-        RouteValueDictionary? routeValues = null;
-        OutputCacheMetadata? metadata = null;
-        if (context.Features.Get<IRouterFeature>() is { } routerFeature)
-        {
-            RouteMatch match = routerFeature.Router.Match(context);
-            if (match.Status == RouteMatchStatus.Matched && match.Route is { } route)
-            {
-                routeValues = match.Values;
-                metadata = route.Metadata.GetMetadata<OutputCacheMetadata>();
-            }
-        }
+        // The endpoint UseRouting published ahead of this middleware, and its per-endpoint policy. A CORS
+        // preflight's candidate endpoint never runs; an OPTIONS request has already passed through above,
+        // so the IsPreflight test only keeps this read honest to the route-match contract.
+        IRouteMatchFeature? endpoint = context.GetRouteMatch() is { IsPreflight: false } match ? match : null;
+        OutputCacheMetadata? metadata = endpoint?.Metadata.GetMetadata<OutputCacheMetadata>();
 
         OutputCachePolicy? policy = ResolvePolicy(metadata);
         if (policy is null || !policy.Enabled)
@@ -110,7 +109,7 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
             return;
         }
 
-        string primaryKey = OutputCacheKeyBuilder.BuildPrimaryKey(context, policy, routeValues);
+        string primaryKey = OutputCacheKeyBuilder.BuildPrimaryKey(context, policy, endpoint?.Values);
 
         OutputCacheEntry? hit = await LookupAsync(context, primaryKey).ConfigureAwait(false);
         if (hit is not null && !IsResponseStarted(context))
@@ -134,8 +133,19 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
             context.Response.Body = originalBody;
         }
 
+        if (endpoint is null && PublishedEndpointCarriesMetadata(context))
+        {
+            // Registered ahead of UseRouting: the endpoint surfaced only after the decision, and the
+            // metadata the entry would have ignored may opt the endpoint out or name another policy.
+            return;
+        }
+
         await TryStoreAsync(context, policy, primaryKey, buffer).ConfigureAwait(false);
     }
+
+    private static bool PublishedEndpointCarriesMetadata(IHttpContext context)
+        => context.GetRouteMatch() is { IsPreflight: false } late
+            && late.Metadata.GetMetadata<OutputCacheMetadata>() is not null;
 
     private async ValueTask<OutputCacheEntry?> LookupAsync(IHttpContext context, string primaryKey)
     {
