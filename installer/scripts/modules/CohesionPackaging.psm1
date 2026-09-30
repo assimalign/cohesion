@@ -133,6 +133,9 @@ $script:CohesionReleaseLibrary = @(
     'libraries/Http/Assimalign.Cohesion.Http.Antiforgery'
     'libraries/Http/Assimalign.Cohesion.Http.Forwarded'
     'libraries/Http/Assimalign.Cohesion.Http.Streaming'
+    'libraries/Http/Assimalign.Cohesion.Http.DigestFields'
+    'libraries/Http/Assimalign.Cohesion.Http.InterimResponses'
+    'libraries/Http/Assimalign.Cohesion.Http.ServerSentEvents'
 
     # libraries/IdentityModel
     'libraries/IdentityModel/Assimalign.Cohesion.IdentityModel'
@@ -448,10 +451,7 @@ $script:CohesionCiMatrixExclusion = [ordered]@{
     'libraries/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http1/Assimalign.Cohesion.Http.Connections.Examples.Http1.csproj' = 'Example project is not an independently shipped CI matrix entry.'
     'libraries/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http2/Assimalign.Cohesion.Http.Connections.Examples.Http2.csproj' = 'Example project is not an independently shipped CI matrix entry.'
     'libraries/Http/Assimalign.Cohesion.Http.Connections/examples/Assimalign.Cohesion.Http.Connections.Examples.Http3/Assimalign.Cohesion.Http.Connections.Examples.Http3.csproj' = 'Example project is not an independently shipped CI matrix entry.'
-    'libraries/Http/Assimalign.Cohesion.Http.DigestFields/src/Assimalign.Cohesion.Http.DigestFields.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
-    'libraries/Http/Assimalign.Cohesion.Http.InterimResponses/src/Assimalign.Cohesion.Http.InterimResponses.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'libraries/Http/Assimalign.Cohesion.Http.ServerSentEvents/examples/Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse/Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse.csproj' = 'Example project is not an independently shipped CI matrix entry.'
-    'libraries/Http/Assimalign.Cohesion.Http.ServerSentEvents/src/Assimalign.Cohesion.Http.ServerSentEvents.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Attributes/src/Assimalign.Cohesion.OpenApi.Attributes.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Fluent/src/Assimalign.Cohesion.OpenApi.Fluent.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'
     'libraries/OpenApi/Assimalign.Cohesion.OpenApi.Generation/src/Assimalign.Cohesion.OpenApi.Generation.csproj' = 'Pre-existing project predates the matrix guard; CI and release onboarding require a separate work item.'

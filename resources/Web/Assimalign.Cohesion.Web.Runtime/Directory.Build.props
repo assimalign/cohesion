@@ -74,11 +74,14 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Sessions" />
 
         <!-- App-facing HTTP capabilities delivered deliberately even though no Web
-             assembly references them: incremental response streaming and the
-             Server-Sent Events primitives ride the transport interceptor seam and
-             are consumed directly by application handlers. -->
+             assembly references them: incremental response streaming, the
+             Server-Sent Events primitives, 1xx interim responses (100 Continue,
+             103 Early Hints) and RFC 9530 digest fields ride the transport
+             interceptor seam and are consumed directly by application handlers. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Streaming" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.ServerSentEvents" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.InterimResponses" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.DigestFields" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections.Security" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
