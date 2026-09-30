@@ -110,6 +110,8 @@ internal sealed class TestWebApplication : IWebApplicationBuilder, IWebApplicati
 
         public FileSystemPath? ContentRootPath => null;
 
+        public FileSystemPath? WebRootPath => null;
+
         public IEnumerable<IWebApplicationMiddleware> Middleware => Array.Empty<IWebApplicationMiddleware>();
 
         public IEnumerable<IWebApplicationServer> Servers => Array.Empty<IWebApplicationServer>();

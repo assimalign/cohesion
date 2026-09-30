@@ -146,7 +146,10 @@ public sealed class WebApplicationTestFactory : IWebApplicationTestFactory
         _listener = new InMemoryConnectionListener();
         _connectionFactory = _listener.CreateFactory();
 
-        Builder = WebApplication.CreateBuilder();
+        Builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            ContentRootPath = options.ContentRootPath,
+        });
         Builder.Server.UseServer(listenerOptions =>
         {
             if (_options.Protocol == WebApplicationTestProtocol.Http2)

@@ -22,6 +22,18 @@ rule applied to a feature family that always ships together.
   library already models mounts (physical, in-memory, aggregate, isolated-storage) with a
   richer surface than ASP.NET's `IFileProvider`, and the mount boundary doubles as the
   security boundary: the middleware cannot express a lookup outside the mounted root.
+  Lookups are mount-relative: the middleware strips the request path's leading `/` before
+  calling the mount, because every provider merges a relative path against its own root while
+  a leading `/` is absolute in the provider's namespace (the drive root for the physical
+  provider).
+- **The parameterless verb serves the web root, never the content root (#1045).**
+  `UseStaticFiles()` mounts `IWebApplicationContext.WebRootPath` — `wwwroot` under the content
+  root by default, resolved by the hosting runtime — and passes every request through when the
+  application has no web root. Until 2026-09 it mounted `ContentRootPath`, which Web.Hosting
+  never set, so it fell back to the process working directory; `.json` is a served content type,
+  which exposed `appsettings*.json`. Its options are configured and validated once, when the
+  verb is called, exactly like the explicit `UseStaticFiles(IFileSystem, ...)` overloads (they
+  used to be rebuilt on every request).
 - **Middleware-first, no result types.** The 2026-07-10 direction withdrew `IResult`; this
   package writes status, headers, and body directly on `IHttpResponse`. The `#864` edge
   (serializer registry / `OnError`) was dropped from this item accordingly — errors here are

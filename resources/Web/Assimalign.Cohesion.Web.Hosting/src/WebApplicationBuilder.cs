@@ -84,16 +84,15 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             options.Environment = resourceContext.EnvironmentName;
         }
 
-        Environment = resourceContext is null
-            ? new HostEnvironment(options.Environment!)
-            : new HostEnvironment(options.Environment!)
-            {
-                ContentRootPath = FileSystemPath.Parse(resourceContext.ContentRootPath),
-            };
+        string contentRootPath = ResolveContentRoot(options.ContentRootPath, resourceContext);
+        Environment = new HostEnvironment(options.Environment!)
+        {
+            ContentRootPath = FileSystemPath.Parse(contentRootPath),
+        };
         Configuration = new ConfigurationManager();
         if (args is not null)
         {
-            AddDefaultConfiguration(args, resourceContext);
+            AddDefaultConfiguration(args, contentRootPath, resourceContext);
         }
 
         Logging = new LoggerFactoryBuilder();
@@ -105,7 +104,11 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         });
         Server = new WebApplicationServerBuilder(this);
 
-        _context = new WebApplicationContext();
+        _context = new WebApplicationContext
+        {
+            ContentRootPath = Environment.ContentRootPath,
+            WebRootPath = ResolveWebRoot(contentRootPath, options.WebRootPath),
+        };
 
         if (_controlPlane is not null && resourceContext is not null)
         {
@@ -371,9 +374,45 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             : null;
     }
 
-    private void AddDefaultConfiguration(string[] args, ResourceContext? resourceContext)
+    // The explicit option wins, then the ambient resource context, then the application's base
+    // directory (where the SDK copies appsettings*.json and wwwroot).
+    private static string ResolveContentRoot(FileSystemPath? configured, ResourceContext? resourceContext)
     {
-        string contentRootPath = resourceContext?.ContentRootPath ?? AppContext.BaseDirectory;
+        if (configured is { IsEmpty: false } contentRoot)
+        {
+            return System.IO.Path.GetFullPath(contentRoot.ToString());
+        }
+
+        return resourceContext?.ContentRootPath ?? AppContext.BaseDirectory;
+    }
+
+    // A configured web root is resolved against the content root and kept even when it does not
+    // exist yet (the static-files middleware then serves nothing). Without one, wwwroot under the
+    // content root is the web root only when that directory exists. The content root itself is
+    // never a web root: it holds appsettings*.json and the application's binaries.
+    private static FileSystemPath? ResolveWebRoot(string contentRootPath, FileSystemPath? configured)
+    {
+        if (configured is { IsEmpty: false } webRoot)
+        {
+            string path = webRoot.ToString();
+            return FileSystemPath.Parse(System.IO.Path.IsPathRooted(path)
+                ? System.IO.Path.GetFullPath(path)
+                : System.IO.Path.GetFullPath(System.IO.Path.Combine(contentRootPath, path)));
+        }
+
+        // Explicit branches: FileSystemPath converts implicitly from string, so "cond ? path : null"
+        // would type as FileSystemPath and turn the null into an empty (non-null) path.
+        string defaultWebRoot = System.IO.Path.Combine(contentRootPath, "wwwroot");
+        if (!Directory.Exists(defaultWebRoot))
+        {
+            return null;
+        }
+
+        return FileSystemPath.Parse(defaultWebRoot);
+    }
+
+    private void AddDefaultConfiguration(string[] args, string contentRootPath, ResourceContext? resourceContext)
+    {
         var contentRoot = new PhysicalFileSystem(new PhysicalFileSystemOptions
         {
             Root = contentRootPath,

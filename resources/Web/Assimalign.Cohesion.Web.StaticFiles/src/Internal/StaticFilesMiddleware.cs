@@ -282,13 +282,26 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
     private bool TryGetInfo(FileSystemPath path, [NotNullWhen(true)] out IFileSystemInfo? info)
     {
         info = null;
+
+        // Lookups are mount-relative. Every provider merges a relative path against its own root,
+        // but a leading '/' means "absolute in the provider's namespace": the mount root for the
+        // in-memory provider, the drive root for the physical one, whose Merge then refuses the
+        // path. Stripping it here is safe because the traversal gate and FileSystemPath.Parse have
+        // already rejected dot segments.
+        ReadOnlySpan<char> relative = path.AsSpan().TrimStart('/');
+        if (relative.IsEmpty)
+        {
+            return false;
+        }
+
+        FileSystemPath mountPath = FileSystemPath.Parse(relative);
         try
         {
-            if (!_fileSystem.Exists(path))
+            if (!_fileSystem.Exists(mountPath))
             {
                 return false;
             }
-            info = _fileSystem.GetInfo(path);
+            info = _fileSystem.GetInfo(mountPath);
             return true;
         }
         catch (FileSystemException)

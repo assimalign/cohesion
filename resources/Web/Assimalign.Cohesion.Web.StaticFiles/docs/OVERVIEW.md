@@ -18,6 +18,18 @@ than re-deriving any RFC semantics locally.
 
 ## Usage
 
+The parameterless verb serves the application's web root: `wwwroot` under the content root
+(`IWebApplicationContext.WebRootPath`, set by the hosting runtime). It never serves the content
+root itself or the working directory, and it passes every request through when the application
+has no web root:
+
+```csharp
+app.UseStaticFiles();                                  // serves <content root>/wwwroot
+app.UseStaticFiles(options => options.CacheControl = "public, max-age=3600");
+```
+
+Mount any other file system explicitly:
+
 ```csharp
 using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Web.StaticFiles;

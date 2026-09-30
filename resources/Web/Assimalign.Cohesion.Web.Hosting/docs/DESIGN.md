@@ -437,9 +437,17 @@ and `Development` selects `appsettings.Development.json`. `Local` denotes a deve
 machine; `Development` denotes a deployable environment. Neither file is an alias for
 the other, and the unset environment default remains `Production`.
 
-The JSON files resolve from the ambient `Hosting.Resources`
-`ResourceContext.ContentRootPath` for an
-enabled resource and from `AppContext.BaseDirectory` otherwise. An in-process
+The JSON files resolve from the content root: `WebApplicationOptions.ContentRootPath` when
+set, otherwise the ambient `Hosting.Resources` `ResourceContext.ContentRootPath` for an
+enabled resource, otherwise `AppContext.BaseDirectory`. The same content root is published on
+`HostEnvironment.ContentRootPath` and `IWebApplicationContext.ContentRootPath`.
+
+The **web root** — the directory `UseStaticFiles()` serves — is resolved against the content
+root: `WebApplicationOptions.WebRootPath` when set (a relative path is combined with the content
+root, and the value is kept even before the directory exists), otherwise `wwwroot` under the
+content root when that directory exists, otherwise none. It is published on
+`IWebApplicationContext.WebRootPath`. The content root itself is never a web root, because it
+holds `appsettings*.json` and the application's binaries. An in-process
 gateway supplies settings directly on that ambient `ResourceContext`, rather than
 mutating process-wide environment variables. The builder folds those settings into
 the deployment-setting layer before the caller's command-line arguments, so the
