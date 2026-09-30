@@ -189,6 +189,8 @@ The audit behind these stages is §7. Within each stage, rows are in the recomme
 
 ### Stage 5 — Make what ships safe and honest
 
+**Status:** delivered 2026-09-30 on the Phase 2 branch and awaiting owner review. Commits and follow-ups are in §5.
+
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
 | #1045 | E | Serve static files from a web root, never the process working directory (D1) | — |
@@ -278,6 +280,28 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
 - **Batch 5 merged (2026-07-20):** #928 ([PR #932](https://github.com/assimalign/cohesion/pull/932)), #895 ([#933](https://github.com/assimalign/cohesion/pull/933)), #890 ([#934](https://github.com/assimalign/cohesion/pull/934)), #796 ([#936](https://github.com/assimalign/cohesion/pull/936)). §4 drained except the two decision gates (#782, #765).
 - **Project #13 inventory (2026-09-29):** closed #25, #28 and #142–#145 as delivered, #153 as not planned, #154 and #380–#382 as duplicates; added "Scope update" notes to #27, #29, #146, #147, #152 and #155.
 - **Phase 2 opened (2026-09-30):** a code-read audit of `main` found that §4 never scheduled the May-filed security and API items (CORS #3/#109–#111, authorization #155, cookie policy #156, OpenAPI #152, host lifecycle #146/#147), and that shipped code carries security, conformance and DX defects. Snapshot, defects and decisions are in §7. The owner approved the lineup the same day; it was filed as #1045–#1066 and added to §4 as Stages 5–10. By owner instruction, Phase 2 runs on one branch (`claude/http-web-program-inventory-798a2d`) with at least one commit per stage and an owner review before each next stage starts, in place of §1's one-issue-per-branch protocol.
+- **Stage 5 delivered (2026-09-30), awaiting owner review.** One commit per issue on the Phase 2 branch, not pushed:
+  - #1046 `cd47f0d0`, #1045 `656233d3`, #1047 `5da6d7dc`, #1053 `8cfffc11`, #1050 `23a2874c`
+  - #1052 `e190ca7b` (DI call-site factory made AOT-clean) and `f4b509d5` (guard and CI job)
+  - #1048 `10def15e`, #937 `fdd4f232` (HTTP/2) and `7667fb7e` (HTTP/3), #1051 `a4401268`, #1049 `db758492`
+  - #1066 `f45b4e30`, plus `2a2e0afc` (Content-Digest verified lazily on HTTP/3)
+  - #699 `0ebbdc1d`
+  - `2ac5c565` regenerated `docs/DEPENDENCIES.md`; `70f2ad34` fixed the §7.5 docs drift.
+
+  Verification: every touched suite passes, including Http.Connections 520, Http 1231, Web.Hosting 136 and Web.Testing 19. The Web NativeAOT guard publishes and passes 7/7 smoke checks. The `cohesion-web` and `cohesion-spa` template run tests pass against a locally packed SDK.
+
+  #1047 had a second root cause: plain resource executables were framework-dependent on frameworks that ship only as runtime packs. The base SDK now defaults every resource executable to self-contained.
+
+  Behavior changes for the review:
+  - `AddJwtBearer` throws at registration when issuers or audiences are unset.
+  - `UseStaticFiles()` serves only `<content root>/wwwroot`.
+  - Plain entry points bind `Http:Endpoints`, or `127.0.0.1:5000` when none is configured.
+  - HTTP/2 and HTTP/3 enforce the body cap with 413.
+  - Routes mapped after start throw.
+  - A faulting HTTP/2 or HTTP/3 exchange gets a 500 or a stream reset instead of taking down the connection. HTTP/1.1 mid-body limit breaches now surface as 500 (#1071).
+  - A Content-Digest mismatch on HTTP/3 surfaces at the terminal read instead of a pre-dispatch 400.
+
+  Scope-creep filed: #1071–#1076 and #1077–#1085. #1080 records that real-QUIC resets carry the driver's default error code until the Connections contract can carry one.
 - **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
 | Date | Issue | PR | Notes |
@@ -360,6 +384,13 @@ What works end to end:
 | D11 | Unfinished packages reach consumers: the three placeholders in §7.1 (`Web.Cors`, `Web.Authorization`, `Web.CookiePolicy`). `Http.ServerSentEvents` is an App.Web member but is excluded from CI, so its tests never run; the same is true of `Http.DigestFields` and `Http.InterimResponses`. | `Web.Runtime/Directory.Build.props`; `$script:CohesionCiMatrixExclusion` in `CohesionPackaging.psm1` | packaging |
 | D12 | Key-material defaults don't survive real deployments. The antiforgery protector defaults to a per-process random key, so tokens die on restart and don't work across instances. The DataProtection key ring defaults to `AppContext.BaseDirectory/DataProtection-Keys`, which fails in read-only and multi-instance containers. | `Http.Antiforgery/src/HttpAntiforgeryOptions.cs:52`; `Web.Authentication/src/AuthenticationBuilder.cs:69-73` | ops |
 
+**After Stage 5 (2026-09-30):**
+- Fixed: D1–D8, D10, and D11's CI half.
+- Still open:
+  - D9 → Stage 9, #1063.
+  - D12 → Stage 10, #806–#808.
+  - D11's placeholder half: the empty `Web.Cors` and `Web.Authorization` and the no-op `Web.CookiePolicy` still ship in App.Web until Stage 7 fills them (#3, #155, #156).
+
 ### 7.3 Missing capabilities
 
 | Capability | Status | Tracking |
@@ -377,9 +408,9 @@ What works end to end:
 | Server telemetry (`ActivitySource`, `Meter`, `traceparent`, request ID) | Absent in both Web and Http | #1064 |
 | Hosting diagnostics; lame-duck drain | Absent | #147; #146 |
 | mTLS (client certificates visible to handlers); multi-protocol ALPN endpoints; config for HTTP/3, limits and the connection cap | Absent | #1065; #1063 |
-| HTTP/2 and HTTP/3 request-body cap (413); HTTP/2 timeouts; trailers | Absent (413 is HTTP/1.1-only) | #1048, #1066; trailers deferred along with gRPC |
+| HTTP/2 and HTTP/3 request-body cap (413); HTTP/2 timeouts; trailers | Body cap delivered in Stage 5 on both protocols (#1048, #1066). HTTP/3 now surfaces request trailers. HTTP/2 and HTTP/3 timeouts and data rates are still absent. | #1085; HTTP/2 request trailers deferred along with gRPC |
 | Security headers (CSP, nosniff, Referrer-Policy, frame-ancestors) | Absent | #1058 |
-| A representative Web app AOT-published in CI | Absent. Only a middleware-free app is AOT-published, in the Gateway smoke test | #1052 |
+| A representative Web app AOT-published in CI | Delivered in Stage 5: `Web.AotGuard` is published NativeAOT and smoke-tested by the `resource-web.yml` `aot-guard` job | #1052 |
 | OIDC handler; JWT Bearer authority/JWKS discovery | Absent | blocked on IdentityModel #829/#830 |
 | WebSockets | Absent. The HTTP/1.1 Upgrade and extended CONNECT bootstrap exist | #765 (needs an ADR) |
 | URL rewrite | Absent | #782 (needs the request-mutation seam decision) |
