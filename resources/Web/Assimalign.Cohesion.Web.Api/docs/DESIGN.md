@@ -30,6 +30,18 @@ All `Map*` overloads compose on the router: they resolve the `IRouterFeature` an
 so an application still calls `AddRouting()` (builder) and `UseRouting()` (pipeline) exactly as it
 does for the raw router surface.
 
+**Every `Map*` returns the mapped route's `IRouterRouteBuilder` (#1055).** Per-endpoint policies
+attach where the endpoint is mapped, for example
+`app.MapGet("/orders/{id:int}", handler).WithName("order").RequireRateLimiting("api")`. Metadata
+composes when the route table is built (Web.Routing DESIGN, "Endpoint convention builders"). Before
+#1055 the verbs returned the pipeline builder, and a typed endpoint could carry no metadata at all.
+
+**Groups hold typed endpoints.** `app.MapGroup(prefix)` returns the router's `IRouterGroupBuilder`.
+`RouterGroupBuilderEndpointExtensions` gives it the same two families: the raw middleware
+overloads, and the `Delegate` placeholders the generator intercepts. `api.MapGet("orders/{id:int}",
+(int id) => ...)` therefore binds exactly like an application endpoint, and the group's prefix,
+metadata and policies compose onto it.
+
 ## The Source Generator
 
 `EndpointBindingGenerator` (an `IIncrementalGenerator` in `analyzers/`, netstandard2.0 — the sanctioned
@@ -59,7 +71,11 @@ Each handler parameter is classified once, at compile time:
    `[FromBody]`, `[FromForm]` (each with an optional `Name`, except `[FromBody]`).
 3. **Convention** otherwise: a name matching a `{token}` in a literal route pattern → route;
    a scalar type (`string`, `IParsable<T>` primitives, enums, and their `Nullable<>` forms) → query;
-   a complex type → body.
+   a complex type → body. **Route-or-query** replaces query for a scalar the call site cannot place
+   (#1055). That happens in two cases: a route-group endpoint, whose group prefix is declared
+   elsewhere (`MapGroup("api/{tenant}")` + `api.MapGet("orders", (string tenant) => ...)`), and a
+   pattern that is not a string literal. The thunk reads the route value when the matched route
+   captured one, and the query string otherwise.
 
 Scalars convert inline with `IParsable<T>.TryParse(..., CultureInfo.InvariantCulture, ...)` (enums via
 `Enum.TryParse<T>`), so no runtime binder or reflection is needed. Route values arrive as `object?`

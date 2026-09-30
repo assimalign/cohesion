@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 
 using Assimalign.Cohesion.Http;
-using Assimalign.Cohesion.Web.Routing.Metadata;
 using Assimalign.Cohesion.Web.Routing.Patterns;
 using Assimalign.Cohesion.Web.Routing.Policies;
 
@@ -14,16 +14,31 @@ namespace Assimalign.Cohesion.Web.Routing.Internal;
 /// fully-composed <see cref="Route"/> in the underlying <see cref="IRouterBuilder"/> — the router
 /// never sees the group.
 /// </summary>
+/// <remarks>
+/// Two kinds of shared configuration compose differently. Parameter policies are resolved when a
+/// child's template is parsed at registration, so they must be declared before the first child or
+/// nested group (they freeze then). Metadata is composed when the route table is built
+/// (<see cref="DeferredRouteMetadata"/>), so it applies to every child regardless of call order,
+/// and nested groups read their ancestors' metadata through the parent chain rather than a
+/// snapshot.
+/// </remarks>
 internal sealed class RouterGroupBuilder : IRouterGroupBuilder
 {
     private readonly IRouterBuilder _routerBuilder;
+    private readonly RouterGroupBuilder? _parent;
     private readonly RouteParameterPolicyMap _policyMap;
-    private readonly List<object> _metadata;
-    private bool _frozen;
+    private readonly List<object> _metadata = new();
+    private readonly Lock _lock = new();
+    private bool _policiesFrozen;
+
+    // Set once a route of this group (or of a nested group) resolved its metadata, which happens when
+    // the route table is built: group metadata attached afterwards could no longer apply.
+    private bool _metadataSealed;
 
     internal RouterGroupBuilder(IRouterBuilder routerBuilder, RouterGroupBuilder? parent, string prefix)
     {
         _routerBuilder = routerBuilder;
+        _parent = parent;
 
         Prefix = CombineTemplates(parent?.Prefix ?? string.Empty, NormalizeTemplate(prefix));
 
@@ -34,14 +49,11 @@ internal sealed class RouterGroupBuilder : IRouterGroupBuilder
             RoutePatternParser.Parse(Prefix);
         }
 
-        // Snapshot the parent's shared configuration. Copies (not references) keep sibling groups
-        // and the parent isolated from this group's own WithMetadata/WithParameterPolicy calls.
+        // Snapshot the parent's parameter policies. A copy (not a reference) keeps sibling groups and
+        // the parent isolated from this group's own WithParameterPolicy calls.
         _policyMap = parent is null
             ? RouteParameterPolicyMap.CreateDefault()
             : new RouteParameterPolicyMap(parent._policyMap);
-        _metadata = parent is null
-            ? new List<object>()
-            : new List<object>(parent._metadata);
     }
 
     /// <inheritdoc />
@@ -54,9 +66,10 @@ internal sealed class RouterGroupBuilder : IRouterGroupBuilder
 
         RouterGroupBuilder nested = new(_routerBuilder, this, prefix);
 
-        // The nested group snapshotted this group's shared configuration; later mutations here
-        // would silently not reach it, so freeze instead.
-        _frozen = true;
+        // The nested group snapshotted this group's parameter policies; a later registration here
+        // would silently not reach it, so freeze instead. Metadata needs no freeze: the nested group
+        // reads it through the parent chain when the route table is built.
+        _policiesFrozen = true;
 
         return nested;
     }
@@ -64,25 +77,27 @@ internal sealed class RouterGroupBuilder : IRouterGroupBuilder
     /// <inheritdoc />
     public IRouterGroupBuilder WithMetadata(params object[] items)
     {
-        ArgumentNullException.ThrowIfNull(items);
-        ThrowIfFrozen();
+        DeferredRouteMetadata.Validate(items);
 
-        foreach (object item in items)
+        lock (_lock)
         {
-            if (item is null)
+            if (_metadataSealed)
             {
-                throw new ArgumentException("Endpoint metadata items must not be null.", nameof(items));
+                throw DeferredRouteMetadata.RouteTableBuilt();
             }
+
+            _metadata.AddRange(items);
         }
 
-        _metadata.AddRange(items);
         return this;
     }
+
+    IRouterConventionBuilder IRouterConventionBuilder.WithMetadata(params object[] items) => WithMetadata(items);
 
     /// <inheritdoc />
     public IRouterGroupBuilder WithParameterPolicy(string policyName, RouteParameterPolicy policy)
     {
-        ThrowIfFrozen();
+        ThrowIfPoliciesFrozen();
 
         _policyMap.Add(policyName, policy);
         return this;
@@ -91,20 +106,20 @@ internal sealed class RouterGroupBuilder : IRouterGroupBuilder
     /// <inheritdoc />
     public IRouterGroupBuilder WithParameterPolicy(string policyName, Func<string?, RouteParameterPolicy> factory)
     {
-        ThrowIfFrozen();
+        ThrowIfPoliciesFrozen();
 
         _policyMap.Add(policyName, factory);
         return this;
     }
 
     /// <inheritdoc />
-    public IRouterGroupBuilder Map(HttpMethod method, string template, IRouterRouteHandler handler)
+    public IRouterRouteBuilder Map(HttpMethod method, string template, IRouterRouteHandler handler)
     {
         return MapCore(new[] { method }, template, handler, metadata: null, policies: null);
     }
 
     /// <inheritdoc />
-    public IRouterGroupBuilder Map(HttpMethod method, string template, IRouterRouteHandler handler, IRouterRouteMetadataCollection metadata)
+    public IRouterRouteBuilder Map(HttpMethod method, string template, IRouterRouteHandler handler, IRouterRouteMetadataCollection metadata)
     {
         ArgumentNullException.ThrowIfNull(metadata);
 
@@ -112,13 +127,13 @@ internal sealed class RouterGroupBuilder : IRouterGroupBuilder
     }
 
     /// <inheritdoc />
-    public IRouterGroupBuilder Map(IEnumerable<HttpMethod> methods, string template, IRouterRouteHandler handler)
+    public IRouterRouteBuilder Map(IEnumerable<HttpMethod> methods, string template, IRouterRouteHandler handler)
     {
         return MapCore(methods, template, handler, metadata: null, policies: null);
     }
 
     /// <inheritdoc />
-    public IRouterGroupBuilder Map(IEnumerable<HttpMethod> methods, string template, IRouterRouteHandler handler, IRouterRouteMetadataCollection metadata)
+    public IRouterRouteBuilder Map(IEnumerable<HttpMethod> methods, string template, IRouterRouteHandler handler, IRouterRouteMetadataCollection metadata)
     {
         ArgumentNullException.ThrowIfNull(metadata);
 
@@ -126,14 +141,31 @@ internal sealed class RouterGroupBuilder : IRouterGroupBuilder
     }
 
     /// <inheritdoc />
-    public IRouterGroupBuilder Map(IEnumerable<HttpMethod> methods, string template, IRouterRouteHandler handler, IRouterRouteMetadataCollection? metadata, Action<RouteParameterPolicyMap> policies)
+    public IRouterRouteBuilder Map(IEnumerable<HttpMethod> methods, string template, IRouterRouteHandler handler, IRouterRouteMetadataCollection? metadata, Action<RouteParameterPolicyMap> policies)
     {
         ArgumentNullException.ThrowIfNull(policies);
 
         return MapCore(methods, template, handler, metadata, policies);
     }
 
-    private IRouterGroupBuilder MapCore(
+    /// <summary>
+    /// Appends the metadata of this group's ancestors (outermost first), then its own, and seals every
+    /// group in the chain against further metadata. Called when a child route's metadata is resolved,
+    /// as the route table is built.
+    /// </summary>
+    /// <param name="items">The list the metadata is appended to.</param>
+    internal void CollectMetadata(List<object> items)
+    {
+        _parent?.CollectMetadata(items);
+
+        lock (_lock)
+        {
+            _metadataSealed = true;
+            items.AddRange(_metadata);
+        }
+    }
+
+    private IRouterRouteBuilder MapCore(
         IEnumerable<HttpMethod> methods,
         string template,
         IRouterRouteHandler handler,
@@ -159,47 +191,26 @@ internal sealed class RouterGroupBuilder : IRouterGroupBuilder
             policies(policyMap);
         }
 
-        Route route = new(methods, pattern, policyMap, handler, BuildMetadata(metadata));
+        // Group items first, route-level items last, composed when the route table is built: the
+        // collection's last-wins GetMetadata<T> makes the route-level (most specific) declaration
+        // the override, whatever order the metadata calls were made in.
+        DeferredRouteMetadata deferred = new(this, metadata);
+        Route route = new(methods, pattern, policyMap, handler, deferred);
 
         _routerBuilder.Map(route);
-        _frozen = true;
+        _policiesFrozen = true;
 
-        return this;
+        return new RouterRouteBuilder(deferred);
     }
 
-    private IRouterRouteMetadataCollection BuildMetadata(IRouterRouteMetadataCollection? routeMetadata)
+    private void ThrowIfPoliciesFrozen()
     {
-        int routeCount = routeMetadata?.Count ?? 0;
-
-        if (_metadata.Count == 0)
-        {
-            // Metadata collections are immutable by contract, so the route-level one is reusable as-is.
-            return routeCount == 0
-                ? RouterRouteMetadataCollection.Empty
-                : routeMetadata!;
-        }
-
-        List<object> items = new(_metadata.Count + routeCount);
-        items.AddRange(_metadata);
-
-        if (routeMetadata is not null)
-        {
-            // Group items first, route-level items last: the collection's last-wins GetMetadata<T>
-            // makes the route-level (most specific) declaration the override.
-            items.AddRange(routeMetadata);
-        }
-
-        return new RouterRouteMetadataCollection(items);
-    }
-
-    private void ThrowIfFrozen()
-    {
-        if (_frozen)
+        if (_policiesFrozen)
         {
             throw new InvalidOperationException(
-                "The route group's shared configuration is frozen because a child route or nested group has " +
-                "already been registered. Declare group-level metadata and parameter policies before mapping " +
-                "children so they apply to all child routes.");
+                "The route group's parameter policies are frozen because a child route or nested group has " +
+                "already been registered, and child templates resolve their inline policies when they are mapped. " +
+                "Declare group-level parameter policies before mapping children so they apply to all child routes.");
         }
     }
 

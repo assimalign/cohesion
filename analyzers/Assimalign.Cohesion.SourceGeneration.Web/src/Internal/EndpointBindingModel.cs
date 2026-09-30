@@ -12,7 +12,15 @@ internal enum BindingSource
     Query,
     Header,
     Form,
-    Body
+    Body,
+
+    /// <summary>
+    /// A route value when the matched route captured one, otherwise the query string. Used when the call
+    /// site cannot see the whole route template (a route-group endpoint, whose prefix is declared
+    /// elsewhere, or a non-literal pattern), so a parameter the visible template does not name may still
+    /// be a route parameter.
+    /// </summary>
+    RouteOrQuery
 }
 
 /// <summary>How a raw source value is converted to the parameter's type.</summary>

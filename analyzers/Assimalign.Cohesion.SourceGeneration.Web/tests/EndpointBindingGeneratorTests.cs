@@ -120,4 +120,37 @@ public class EndpointBindingGeneratorTests
 
         generated.ShouldNotContain("Intercept_", Case.Sensitive);
     }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: interceptors return the mapped route's builder")]
+    public void Generator_Interceptor_ReturnsRouteBuilder()
+    {
+        string generated = Run("""app.MapGet("/users/{id}", async (int id, IHttpContext context) => { await Task.CompletedTask; });""");
+
+        generated.ShouldContain("public static global::Assimalign.Cohesion.Web.Routing.IRouterRouteBuilder Intercept_0(", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a route-group endpoint binds names outside its template from route or query")]
+    public void Generator_GroupEndpoint_BindsUnnamedParametersFromRouteOrQuery()
+    {
+        string generated = Run("""app.MapGroup("api/{tenant}").MapGet("orders/{id}", async (string tenant, int id, IHttpContext context) => { await Task.CompletedTask; });""");
+
+        // The group receiver is intercepted like the application's.
+        generated.ShouldContain("(this global::Assimalign.Cohesion.Web.Routing.IRouterGroupBuilder builder", Case.Sensitive);
+
+        // 'id' is in the visible template: a plain route read. 'tenant' comes from the group prefix,
+        // which the call site cannot see: route values first, then the query string.
+        generated.ShouldContain("__routeValues1.TryGetValue(\"id\"", Case.Sensitive);
+        generated.ShouldNotContain("context.Request.Query.TryGetValue(\"id\"", Case.Sensitive);
+        generated.ShouldContain("__routeValues0.TryGetValue(\"tenant\"", Case.Sensitive);
+        generated.ShouldContain("if (__raw0 is null && context.Request.Query.TryGetValue(\"tenant\", out var __query0))", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: an application endpoint with a literal template keeps query inference")]
+    public void Generator_ApplicationEndpoint_LiteralTemplate_KeepsQueryInference()
+    {
+        string generated = Run("""app.MapGet("/search", async (string q, IHttpContext context) => { await Task.CompletedTask; });""");
+
+        generated.ShouldContain("context.Request.Query.TryGetValue(\"q\", out var __query0) ? __query0.Value : null", Case.Sensitive);
+        generated.ShouldNotContain("__routeValues0", Case.Sensitive);
+    }
 }

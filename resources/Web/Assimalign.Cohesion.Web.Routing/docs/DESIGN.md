@@ -383,21 +383,65 @@ Because the prefix segments are part of the composed `RoutePattern`,
 outranks a parameter at the same depth regardless of which was registered first or whether either
 came from a group. No group-aware code exists in `Router` or `RoutePrecedence`.
 
-### Deterministic sharing: snapshot at creation, freeze at first child
+### Deterministic sharing: policies freeze, metadata composes at build (#1055)
 
-A group's shared state is a **snapshot**: a nested group copies its parent's policy map
-(`RouteParameterPolicyMap`'s copy constructor) and metadata list at creation, so siblings and
-parents stay isolated. A root group starts from `RouteParameterPolicyMap.CreateDefault()`.
+The two kinds of shared state follow different rules, because they are consumed at different
+times.
 
-Shared configuration is declared first, children second — enforced, not conventional: once a
-group registers its first child route **or** nested group, its shared configuration **freezes**
-and later `WithMetadata`/`WithParameterPolicy` calls throw `InvalidOperationException`. This is
-the deliberate divergence from ASP.NET's `RouteGroupBuilder`, which defers convention application
-to endpoint-build time so late-added conventions still reach earlier children. Deferral needs a
-build-time flush hook and mutable pending state on the builder; the freeze rule gets the same
-guarantee — *shared values apply to every child* — with immediate composition, immutable routes,
-and an order-independent result. The failure mode it prevents is silent: without it, metadata
-added after the third of five children would apply to only the last two.
+**Parameter policies are a snapshot that freezes.** A child resolves its inline policies when its
+template is parsed, at registration. A nested group copies its parent's policy map
+(`RouteParameterPolicyMap`'s copy constructor) at creation, so siblings and parents stay isolated;
+a root group starts from `RouteParameterPolicyMap.CreateDefault()`. Once a group registers its first
+child route **or** nested group, its policies freeze and later `WithParameterPolicy` calls throw
+`InvalidOperationException`. Without the freeze, a policy registered after the third of five
+children would silently apply only to the last two.
+
+**Metadata is composed when the route table is built.** Before #1055, metadata froze the same way,
+which was the deliberate divergence from ASP.NET's `RouteGroupBuilder`. #1055 reverses that. With
+typed endpoints returning a convention builder, and feature verbs (`RequireRateLimiting`,
+`CacheOutput`) attaching metadata to groups and routes alike, a freeze would force every policy
+declaration to precede every `Map`, which is the ordering hazard conventions exist to remove. Each
+grouped route carries a `DeferredRouteMetadata` that holds the route's own items and a reference to
+its group, and `RouterBuilder.Build` resolves it once, at startup. Resolution walks the group chain
+through parent references rather than snapshots, so metadata added to a parent after nesting still
+reaches the nested group's routes. The result is order-independent:
+
+- a group's metadata reaches children mapped before and after the call;
+- a route's metadata can be attached after it is mapped (`app.MapGet(...).WithName("x")`);
+- metadata attached after the build throws, because it could no longer apply.
+
+The cost the original design avoided is a build-time flush plus mutable pending state. Both are
+contained in one internal type, and routes stay immutable once built.
+
+### Endpoint convention builders (#1055)
+
+Every `Map` that maps a route from a template returns an `IRouterRouteBuilder`:
+`IRouterBuilder.Map(method, template, handler)` (a `RouterBuilderExtensions` member), every group
+`Map` overload, and Web.Api's raw and source-generated `Map*`. Groups and route builders share one
+contract, `IRouterConventionBuilder.WithMetadata`, so a feature ships its policy verb once, as a
+generic extension member that works for routes and groups and keeps the receiver's builder type
+for chaining:
+
+```csharp
+extension<TBuilder>(TBuilder builder) where TBuilder : IRouterConventionBuilder
+{
+    public TBuilder RequireRateLimiting(string policyName)
+    {
+        builder.WithMetadata(new RateLimitingMetadata(policyName));
+        return builder;
+    }
+}
+```
+
+Routing ships its own two verbs the same way: `WithName` (a `RouteNameMetadata`, route builders
+only) and `RequireHost` (a `RouteHostMetadata`, routes and groups). A verb is plain metadata
+composition, and ordering follows the rules above. `IRouterBuilder.Map(IRouterRoute)` still maps a
+finished route whose metadata is fixed; it returns the router builder, as before.
+
+**Why not a mutable route.** `Route` stays immutable and receives its metadata collection at
+construction. The deferred collection is the only mutable piece, and it becomes immutable at build.
+Anything that reads metadata before the build (a test constructing a `Router` directly) resolves it
+at that read, so a route never observes two different metadata sets.
 
 ### Override rules (child over group, always)
 

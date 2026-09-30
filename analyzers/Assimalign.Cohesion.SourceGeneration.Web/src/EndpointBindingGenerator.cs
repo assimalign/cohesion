@@ -15,7 +15,8 @@ namespace Assimalign.Cohesion.SourceGeneration.Web;
 
 /// <summary>
 /// Emits AOT-safe binding thunks for the typed <c>Map*</c> endpoint overloads on
-/// <c>Assimalign.Cohesion.Web.WebApplicationPipelineBuilderExtensions</c>. Each typed call site — for
+/// <c>Assimalign.Cohesion.Web.WebApplicationPipelineBuilderExtensions</c> (the application) and
+/// <c>Assimalign.Cohesion.Web.RouterGroupBuilderEndpointExtensions</c> (route groups). Each typed call site — for
 /// example <c>app.MapGet("/users/{id}", (int id, IHttpContext context) =&gt; ...)</c> — is intercepted
 /// with a C# interceptor that casts the handler back to its concrete delegate type, binds each
 /// parameter from the request (route / query / header / body / form, plus direct injections), and
@@ -139,10 +140,27 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
         // Route tokens from a literal pattern power name-based route inference.
         HashSet<string> routeTokens = new(System.StringComparer.OrdinalIgnoreCase);
+        bool literalPattern = false;
         if (arguments[patternParameterIndex].Expression is LiteralExpressionSyntax { Token.Value: string patternText })
         {
             CollectRouteTokens(patternText, routeTokens);
+            literalPattern = true;
         }
+
+        if (invocation.Expression is not MemberAccessExpressionSyntax receiverAccess
+            || model.GetTypeInfo(receiverAccess.Expression, ct).Type is not ITypeSymbol receiverType)
+        {
+            return null;
+        }
+
+        // The visible template is the whole template only for a literal pattern mapped on the
+        // application. A route-group endpoint composes a prefix declared elsewhere, so a parameter its
+        // own template does not name may still be a route parameter: bind it from the route values,
+        // falling back to the query string.
+        INamedTypeSymbol? groupType = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Web.Routing.IRouterGroupBuilder");
+        bool partialTemplate = !literalPattern
+            || (groupType is not null
+                && (SymbolEqualityComparer.Default.Equals(receiverType, groupType) || ImplementsInterface(receiverType, groupType)));
 
         INamedTypeSymbol? parsableType = compilation.GetTypeByMetadataName("System.IParsable`1");
         INamedTypeSymbol? contextType = compilation.GetTypeByMetadataName("Assimalign.Cohesion.Http.IHttpContext");
@@ -158,6 +176,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             if (!TryClassify(
                     handler.Parameters[i],
                     routeTokens,
+                    partialTemplate,
                     parsableType,
                     contextType,
                     cancellationType,
@@ -195,12 +214,6 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             return null;
         }
 
-        if (invocation.Expression is not MemberAccessExpressionSyntax receiverAccess
-            || model.GetTypeInfo(receiverAccess.Expression, ct).Type is not ITypeSymbol receiverType)
-        {
-            return null;
-        }
-
         string methodExpression = hasMethodParameter
             ? "method"
             : "global::Assimalign.Cohesion.Http.HttpMethod." + VerbToMethod(method.Name);
@@ -222,6 +235,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     private static bool TryClassify(
         IParameterSymbol parameter,
         HashSet<string> routeTokens,
+        bool partialTemplate,
         INamedTypeSymbol? parsableType,
         INamedTypeSymbol? contextType,
         INamedTypeSymbol? cancellationType,
@@ -268,6 +282,10 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         else if (routeTokens.Contains(parameter.Name))
         {
             source = BindingSource.Route;
+        }
+        else if (partialTemplate)
+        {
+            source = BindingSource.RouteOrQuery;
         }
         else
         {
@@ -482,7 +500,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         }
 
         builder.Append("        ").AppendLine(model.InterceptsAttribute);
-        builder.Append("        public static global::Assimalign.Cohesion.Web.IWebApplicationPipelineBuilder Intercept_")
+        builder.Append("        public static global::Assimalign.Cohesion.Web.Routing.IRouterRouteBuilder Intercept_")
             .Append(index)
             .Append("(this ")
             .Append(model.ReceiverType)
@@ -553,7 +571,11 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
                 return;
 
             case BindingSource.Route:
-                EmitRoute(builder, parameter, index, indent);
+                EmitRoute(builder, parameter, index, indent, fallbackToQuery: false);
+                return;
+
+            case BindingSource.RouteOrQuery:
+                EmitRoute(builder, parameter, index, indent, fallbackToQuery: true);
                 return;
 
             default:
@@ -587,7 +609,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
         builder.Append(indent).AppendLine("}");
     }
 
-    private static void EmitRoute(StringBuilder builder, ParameterBinding parameter, int index, string indent)
+    private static void EmitRoute(StringBuilder builder, ParameterBinding parameter, int index, string indent, bool fallbackToQuery)
     {
         builder.Append(indent).Append(parameter.DeclaredType).Append(" __arg").Append(index).AppendLine(";");
         builder.Append(indent).Append("object? __raw").Append(index).AppendLine(" = null;");
@@ -595,8 +617,19 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             .Append(index).Append(" is not null) { __routeValues").Append(index).Append(".TryGetValue(\"").Append(parameter.Key)
             .Append("\", out __raw").Append(index).AppendLine("); }");
 
+        if (fallbackToQuery)
+        {
+            // The visible template does not name the parameter, so a route value comes from a group
+            // prefix when the route has one; otherwise the query string supplies it.
+            builder.Append(indent).Append("if (__raw").Append(index).Append(" is null && context.Request.Query.TryGetValue(\"")
+                .Append(parameter.Key).Append("\", out var __query").Append(index).Append(")) { __raw").Append(index)
+                .Append(" = __query").Append(index).AppendLine(".Value; }");
+        }
+
         string raw = "__raw" + index;
         string arg = "__arg" + index;
+        string required = fallbackToQuery ? "The value is required." : "The route value is required.";
+        string unparsable = fallbackToQuery ? "The value could not be parsed." : "The route value could not be parsed.";
 
         switch (parameter.Conversion)
         {
@@ -604,7 +637,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
                 if (parameter.Required)
                 {
                     builder.Append(indent).Append("if (").Append(raw).AppendLine(" is null)");
-                    EmitBadRequest(builder, indent, parameter.Key, "The route value is required.");
+                    EmitBadRequest(builder, indent, parameter.Key, required);
                 }
 
                 builder.Append(indent).Append(arg).Append(" = ").Append(raw).Append(" as string ?? ").Append(raw).AppendLine("?.ToString();");
@@ -617,19 +650,22 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
                 builder.Append(indent).Append("else if (").Append(raw).Append(" is not null && ")
                     .Append(ParseExpression(parameter.Conversion, parameter.CoreType, raw + ".ToString()", arg)).AppendLine(") { }");
                 builder.Append(indent).AppendLine("else");
-                EmitBadRequest(builder, indent, parameter.Key, "The route value could not be parsed.");
+                EmitBadRequest(builder, indent, parameter.Key, unparsable);
                 return;
 
             case ConversionKind.NullableParsable:
             case ConversionKind.NullableEnum:
-                builder.Append(indent).Append("if (").Append(raw).Append(" is null) { ").Append(arg).AppendLine(" = null; }");
+                // An empty query value reads as absent, as it does for a plain query parameter.
+                builder.Append(indent).Append("if (").Append(raw)
+                    .Append(fallbackToQuery ? " is null or string { Length: 0 }) { " : " is null) { ")
+                    .Append(arg).AppendLine(" = null; }");
                 builder.Append(indent).Append("else if (").Append(raw).Append(" is ").Append(parameter.CoreType).Append(" __typed").Append(index)
                     .Append(") { ").Append(arg).Append(" = __typed").Append(index).AppendLine("; }");
                 builder.Append(indent).Append("else if (")
                     .Append(ParseExpression(parameter.Conversion, parameter.CoreType, raw + ".ToString()", "var __parsed" + index))
                     .Append(") { ").Append(arg).Append(" = __parsed").Append(index).AppendLine("; }");
                 builder.Append(indent).AppendLine("else");
-                EmitBadRequest(builder, indent, parameter.Key, "The route value could not be parsed.");
+                EmitBadRequest(builder, indent, parameter.Key, unparsable);
                 return;
         }
     }

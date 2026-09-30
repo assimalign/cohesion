@@ -21,10 +21,14 @@ models were set aside on 2026-07-10.
   `decimal`, `double`, `float`, `bool`, `guid`, `datetime`), **convert** the value to its CLR type —
   parsed once, invariant culture — plus text/value validators (`length`, `minlength`, `maxlength`,
   `min`, `max`, `range`, `regex`, `alpha`, `when`).
-- Composes **route groups** (`MapGroup`) at builder time: a prefix (which may itself contain
-  parameters, e.g. `{tenant}/api`), shared parameter policies, and shared endpoint metadata are
-  merged onto each child route **at registration**, so grouped routes match at exactly the cost
-  of directly-mapped ones and participate normally in precedence.
+- Composes **route groups** (`MapGroup`) at builder time. A prefix (which may itself contain
+  parameters, e.g. `{tenant}/api`) and shared parameter policies are merged onto each child route
+  **at registration**, so grouped routes match at exactly the cost of directly-mapped ones and
+  participate normally in precedence. Shared endpoint metadata is composed when the route table is
+  built, so it reaches every child regardless of call order.
+- Returns an **endpoint convention builder** from every template `Map` (`IRouterRouteBuilder`), so
+  per-route metadata and policy verbs (`WithMetadata`, `WithName`, `RequireHost`, and feature verbs
+  such as `RequireRateLimiting`) attach where the route is mapped (#1055).
 - Carries an immutable, typed **endpoint-metadata bag** on each route and surfaces the
   **route-match result** (route + typed values + metadata) as a strongly-typed HTTP feature — the
   reflection-free seam that auth, docs, and observability consume.
@@ -52,7 +56,9 @@ models were set aside on 2026-07-10.
 | `RouteParameterPolicy` / `TypedRouteParameterPolicy` | Inline constraint base types. `TypedRouteParameterPolicy` validates **and** converts (parse-once); the public extension point for custom typed constraints. |
 | `RouteParameterPolicyMap` | Resolves inline policy names (`int`, `guid`, `length(n)`, `min(n)`, `range(a,b)`, …) to executable policies; `CreateDefault()` registers the built-ins. |
 | `IRouterRouteMetadataCollection` / `RouterRouteMetadataCollection` | Immutable, ordered, reflection-free endpoint-metadata bag (`GetMetadata<T>` is last-wins). |
-| `IRouterGroupBuilder` / `RouterBuilderExtensions.MapGroup` | Builder-time route groups: prefix + shared policies + shared metadata composed onto children at registration; nestable; child-over-group overrides. |
+| `IRouterGroupBuilder` / `RouterBuilderExtensions.MapGroup` | Builder-time route groups: prefix + shared policies composed onto children at registration, shared metadata composed at build; nestable; child-over-group overrides. |
+| `IRouterConventionBuilder` / `IRouterRouteBuilder` | Endpoint convention builders: `WithMetadata` on one route (returned by every template `Map`) or on a group; composed when the route table is built. |
+| `RouterConventionBuilderExtensions` | Routing's convention verbs: `WithName` (routes) and `RequireHost` (routes and groups). |
 | `RouteHostConstraint` | Parsed host constraint (`host[:port]`, `*.wildcard`, `*`, bracketed IPv6) with `Parse`/`TryParse`/`IsMatch`. |
 | `RouteHostMetadata` | Sealed endpoint-metadata carrier declaring the hosts a route accepts; consulted by `Router` during candidate selection. |
 | `IRouteMatchFeature` | The per-request feature carrying the matched route, its values, and its metadata (and `IsPreflight` for a CORS preflight's candidate). It is also the exchange's `IWebEndpointFeature`, which the pipeline terminal runs. |
@@ -72,13 +78,14 @@ var router = new Router(new IRouterRoute[]
     new Route(new[] { HttpMethod.Get, HttpMethod.Post }, "/items", itemsHandler),
 });
 
-// Or compose grouped endpoints on a builder — shared config first, children second.
-// Shared metadata items are the ordinary sealed carriers (here the #788 host constraint):
+// Or compose grouped endpoints on a builder. Every template Map returns the route's builder, and
+// group metadata reaches every child whenever it is attached (it composes at build):
 var builder = new RouterBuilder();
-builder.MapGroup("api/v1")
-    .WithMetadata(new RouteHostMetadata("api.example.com")) // applies to every child
-    .Map(HttpMethod.Get, "orders/{id:int}", getOrder)       // matches /api/v1/orders/{id:int}
-    .Map(HttpMethod.Get, "", index);                        // matches /api/v1
+IRouterGroupBuilder v1 = builder.MapGroup("api/v1");
+v1.Map(HttpMethod.Get, "orders/{id:int}", getOrder)   // matches /api/v1/orders/{id:int}
+  .WithName("order");                                 // route-level metadata
+v1.Map(HttpMethod.Get, "", index);                    // matches /api/v1
+v1.RequireHost("api.example.com");                    // applies to both children
 
 RouteMatch match = router.Match(context);
 switch (match.Status)

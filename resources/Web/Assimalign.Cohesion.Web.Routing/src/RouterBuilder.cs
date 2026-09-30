@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 
+using Assimalign.Cohesion.Web.Routing.Internal;
+
 namespace Assimalign.Cohesion.Web.Routing;
 
 /// <summary>
@@ -61,6 +63,17 @@ public sealed class RouterBuilder : IRouterBuilder
             router = _router;
             if (router is null)
             {
+                // Compose the metadata attached through route and group convention builders now, so
+                // every route's final metadata is fixed before the router reads it (host constraints,
+                // route names) and later WithMetadata calls fail instead of silently not applying.
+                foreach (IRouterRoute route in _routes)
+                {
+                    if (route.Metadata is DeferredRouteMetadata deferred)
+                    {
+                        deferred.Resolve();
+                    }
+                }
+
                 router = new Router(_routes);
                 Volatile.Write(ref _router, router);
             }

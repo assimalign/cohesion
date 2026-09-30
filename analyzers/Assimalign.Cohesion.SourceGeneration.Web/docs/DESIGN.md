@@ -28,7 +28,11 @@ overload.
 
 Per parameter, in order: direct injections (`IHttpContext`, `CancellationToken`, `IHttpFeature`
 implementations) win first; then an explicit `[From*]` attribute; then convention (route-token name
-match → route, scalar → query, complex → body). Scalar-ness is decided by `System.IParsable<T>`,
+match → route, scalar → query, complex → body). When the call site cannot see the whole template, a
+scalar the visible template does not name binds **route-or-query** instead of query (#1055): route
+values first, then the query string. The call site cannot see the whole template when the receiver
+is an `IRouterGroupBuilder`, whose prefix is declared elsewhere, or when the pattern argument is not
+a string literal. Scalar-ness is decided by `System.IParsable<T>`,
 enum-ness, `string`, and `Nullable<>` of those. The model stores fully-qualified type strings so the
 emit phase needs no symbols and incremental caching stays value-based (via `EquatableArray<T>`).
 
@@ -45,7 +49,11 @@ Each interceptor:
   (`IHttpContentSerializationFeature` reader probe → 415, `ReadContentAsync<T>` with `JsonException`
   → 400 / `HttpContentSerializationException` → 415), and direct injections.
 - Registers the thunk through the raw `Map` overload — which binds to `WebApplicationMiddleware`, not
-  the typed overload, so generated registration is never itself intercepted.
+  the typed overload, so generated registration is never itself intercepted — and returns the raw
+  overload's `IRouterRouteBuilder`, the intercepted overload's return type (#1055), so the caller's
+  `.WithMetadata(...)`/`.WithName(...)` chain applies to the generated route. The receiver is the call
+  site's own type: the application, or an `IRouterGroupBuilder`, whose raw `Map` overload lives in
+  Web.Api's `RouterGroupBuilderEndpointExtensions`.
 
 Conversions use `IParsable<T>.TryParse` / `Enum.TryParse<T>` with `InvariantCulture`, so no runtime
 binder helper is required and the emitted code carries no reflection.
