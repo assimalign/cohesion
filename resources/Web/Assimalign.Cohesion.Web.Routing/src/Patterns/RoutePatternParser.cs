@@ -6,7 +6,10 @@ using System.Text;
 
 namespace Assimalign.Cohesion.Web.Routing.Patterns;
 
-
+/// <summary>
+/// Parses route templates (for example <c>/users/{id:int}/files/{**path}</c>) into immutable
+/// <see cref="RoutePattern"/> instances.
+/// </summary>
 public sealed class RoutePatternParser
 {
 
@@ -16,8 +19,26 @@ public sealed class RoutePatternParser
     private const char QuestionMark = '?';
     private const string PeriodString = ".";
 
+    private const string unmatchedOpenBraceError =
+        "It ends with an unmatched '{'. Close the parameter with '}', or write a literal '{' as '{{'.";
+
+    private const string optionalParameterPrecededByPeriodHint =
+        "In a segment with several parts, only a period ('.') may come directly before an optional parameter, for example '{name}.{ext?}'.";
+
     internal static readonly SearchValues<char> InvalidParameterNameChars = SearchValues.Create("/{}?*");
 
+    /// <summary>
+    /// Parses a route template into a <see cref="RoutePattern"/>.
+    /// </summary>
+    /// <param name="pattern">
+    /// The route template. A leading <c>/</c> or <c>~/</c> is ignored.
+    /// </param>
+    /// <returns>The parsed route pattern.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="pattern"/> is <see langword="null"/>.</exception>
+    /// <exception cref="RoutePatternException">
+    /// <paramref name="pattern"/> is not a valid route template. The message names the template and
+    /// the part of it that is invalid, and says how to fix it.
+    /// </exception>
     public static RoutePattern Parse(string pattern)
     {
         ArgumentNullException.ThrowIfNull(pattern);
@@ -35,12 +56,12 @@ public sealed class RoutePatternParser
             {
                 // If we get here is means that there's a consecutive '/' character.
                 // Templates don't start with a '/' and parsing a segment consumes the separator.
-                throw new RoutePatternException(pattern, "");//Resources.TemplateRoute_CannotHaveConsecutiveSeparators);
+                throw CreateException(pattern, "It contains an empty segment ('//'). Separate path segments with a single '/'.");
             }
 
             if (!ParseSegment(context, segments))
             {
-                throw new RoutePatternException(pattern, context.Error ?? "The route pattern is invalid.");
+                throw CreateException(pattern, context.Error);
             }
 
             // A successful parse should always result in us being at the end or at a separator.
@@ -60,8 +81,17 @@ public sealed class RoutePatternParser
         }
         else
         {
-            throw new RoutePatternException(pattern, context.Error ?? "The route pattern is invalid.");
+            throw CreateException(pattern, context.Error);
         }
+    }
+
+    private static RoutePatternException CreateException(string pattern, string? error)
+    {
+        // Every error path records a specific reason; the fallback only guards a future path that
+        // forgets to, so the message is never empty.
+        return new RoutePatternException(
+            pattern,
+            $"The route template '{pattern}' is invalid. {error ?? "It could not be parsed."}");
     }
 
     private static bool ParseSegment(Context context, List<RoutePatternPathSegment> pathSegments)
@@ -80,7 +110,7 @@ public sealed class RoutePatternParser
                 if (!context.MoveNext())
                 {
                     // This is a dangling open-brace, which is not allowed
-                    context.Error = "";//Resources.TemplateRoute_MismatchedParameter;
+                    context.Error = unmatchedOpenBraceError;
                     return false;
                 }
 
@@ -153,7 +183,9 @@ public sealed class RoutePatternParser
                     if (context.Current != OpenBrace)
                     {
                         // If we see something like "{p1:regex(^\d{3", we will come here.
-                        context.Error = ""; //Resources.TemplateRoute_UnescapedBrace;
+                        context.Error =
+                            $"The parameter '{context.MarkedText()}' contains an unescaped '{{'. " +
+                            "Inside a parameter, write a literal '{' as '{{'.";
                         return false;
                     }
                 }
@@ -161,7 +193,9 @@ public sealed class RoutePatternParser
                 {
                     // This is a dangling open-brace, which is not allowed
                     // Example: "{p1:regex(^\d{"
-                    context.Error = ""; //Resources.TemplateRoute_MismatchedParameter;
+                    context.Error =
+                        $"The parameter '{context.MarkedText()}' is not closed: the template ends after an unescaped '{{'. " +
+                        "Close the parameter with '}', and write a literal '{' inside it as '{{'.";
                     return false;
                 }
             }
@@ -189,8 +223,10 @@ public sealed class RoutePatternParser
 
             if (!context.MoveNext())
             {
-                // This is a dangling open-brace, which is not allowed
-                context.Error = "";//Resources.TemplateRoute_MismatchedParameter;
+                // The template ends inside the parameter: its closing brace is missing.
+                context.Error =
+                    $"The parameter '{context.MarkedText()}' is not closed: the template ends before its closing '}}'. " +
+                    "End the parameter with '}'.";
                 return false;
             }
         }
@@ -198,7 +234,7 @@ public sealed class RoutePatternParser
         var text = context.Capture();
         if (text == "{}")
         {
-            context.Error = "";//Resources.FormatTemplateRoute_InvalidParameterName(string.Empty);
+            context.Error = "It contains an empty parameter '{}'. Name the parameter, for example '{id}'.";
             return false;
         }
 
@@ -212,7 +248,9 @@ public sealed class RoutePatternParser
         // See #475 - this is here because InlineRouteParameterParser can't return errors
         if (decoded.StartsWith('*') && decoded.EndsWith('?'))
         {
-            context.Error = "";// Resources.TemplateRoute_CatchAllCannotBeOptional;
+            context.Error =
+                $"The catch-all parameter '{text}' cannot be optional: a catch-all already matches when the rest of the path is empty. " +
+                "Remove the '?'.";
             return false;
         }
 
@@ -222,12 +260,14 @@ public sealed class RoutePatternParser
             // The only way to declare an optional parameter is to have a ? at the end,
             // hence we cannot have both default value and optional parameter within the template.
             // A workaround is to add it as a separate entry in the defaults argument.
-            context.Error = "";// Resources.TemplateRoute_OptionalCannotHaveDefaultValue;
+            context.Error =
+                $"The parameter '{text}' is both optional ('?') and has a default value ('='). " +
+                "Use one or the other: a parameter with a default value can already be left out of the path.";
             return false;
         }
 
         var parameterName = templatePart.Name;
-        if (IsValidParameterName(context, parameterName))
+        if (IsValidParameterName(context, parameterName, text))
         {
             parts.Add(templatePart);
             return true;
@@ -254,7 +294,7 @@ public sealed class RoutePatternParser
                 if (!context.MoveNext())
                 {
                     // This is a dangling open-brace, which is not allowed
-                    context.Error = "";//Resources.TemplateRoute_MismatchedParameter;
+                    context.Error = unmatchedOpenBraceError;
                     return false;
                 }
 
@@ -274,7 +314,7 @@ public sealed class RoutePatternParser
                 if (!context.MoveNext())
                 {
                     // This is a dangling close-brace, which is not allowed
-                    context.Error = "";//Resources.TemplateRoute_MismatchedParameter;
+                    context.Error = "It ends with an unmatched '}'. Write a literal '}' as '}}'.";
                     return false;
                 }
 
@@ -285,7 +325,9 @@ public sealed class RoutePatternParser
                 else
                 {
                     // This is an unbalanced close-brace, which is not allowed
-                    context.Error = "";//Resources.TemplateRoute_MismatchedParameter;
+                    context.Error =
+                        $"The literal text '{context.MarkedText(includeCurrent: false)}' contains an unmatched '}}'. " +
+                        "Write a literal '}' as '}}', or open a parameter with '{'.";
                     return false;
                 }
             }
@@ -322,7 +364,9 @@ public sealed class RoutePatternParser
                     && parameter.IsCatchAll &&
                     (i != segments.Count - 1 || j != segment.Segments.Count - 1))
                 {
-                    context.Error = "";//Resources.TemplateRoute_CatchAllMustBeLast;
+                    context.Error =
+                        $"The catch-all parameter '{parameter.DebuggerToString()}' must be the last segment of the template, but more segments follow it. " +
+                        "Move the catch-all to the end, or remove the segments after it.";
                     return false;
                 }
             }
@@ -339,7 +383,9 @@ public sealed class RoutePatternParser
             var part = parts[i];
             if (part is RoutePatternParameterSegment parameter && parameter.IsCatchAll && parts.Count > 1)
             {
-                context.Error = "";//Resources.TemplateRoute_CannotHaveCatchAllInMultiSegment;
+                context.Error =
+                    $"The segment '{RoutePatternPathSegment.DebuggerToString(parts)}' combines the catch-all parameter '{parameter.DebuggerToString()}' with other text. " +
+                    "A catch-all parameter must be the only content of its segment.";
                 return false;
             }
         }
@@ -359,29 +405,21 @@ public sealed class RoutePatternParser
 
                     if (!previousPart.IsLiteral && !previousPart.IsSeparator)
                     {
-                        // The optional parameter is preceded by something that is not a literal or separator
-                        // Example of error message:
-                        // "In the segment '{RouteValue}{param?}', the optional parameter 'param' is preceded
-                        // by an invalid segment '{RouteValue}'. Only a period (.) can precede an optional parameter.
-                        context.Error = "";
-                        //Resources.FormatTemplateRoute_OptionalParameterCanbBePrecededByPeriod(
-                        //	RoutePatternPathSegment.DebuggerToString(parts),
-                        //	parameter.Name,
-                        //	parts[i - 1].DebuggerToString());
+                        // The optional parameter is preceded by something that is not a literal or separator,
+                        // for example another parameter: '{name}{ext?}'.
+                        context.Error =
+                            $"In the segment '{RoutePatternPathSegment.DebuggerToString(parts)}', the optional parameter '{parameter.Name}' directly follows '{previousPart.DebuggerToString()}'. " +
+                            optionalParameterPrecededByPeriodHint;
 
                         return false;
                     }
                     else if (previousPart is RoutePatternLiteralSegment literal && literal.Content != PeriodString)
                     {
-                        // The optional parameter is preceded by a literal other than period.
-                        // Example of error message:
-                        // "In the segment '{RouteValue}-{param?}', the optional parameter 'param' is preceded
-                        // by an invalid segment '-'. Only a period (.) can precede an optional parameter.
-                        context.Error = "";
-                        //Resources.FormatTemplateRoute_OptionalParameterCanbBePrecededByPeriod(
-                        //	RoutePatternPathSegment.DebuggerToString(parts),
-                        //	parameter.Name,
-                        //	parts[i - 1].DebuggerToString());
+                        // The optional parameter is preceded by a literal other than period, for example
+                        // '{name}-{ext?}'.
+                        context.Error =
+                            $"In the segment '{RoutePatternPathSegment.DebuggerToString(parts)}', the optional parameter '{parameter.Name}' follows '{literal.Content}'. " +
+                            optionalParameterPrecededByPeriodHint;
 
                         return false;
                     }
@@ -390,15 +428,11 @@ public sealed class RoutePatternParser
                 }
                 else
                 {
-                    // This optional parameter is not the last one in the segment
-                    // Example:
-                    // An optional parameter must be at the end of the segment. In the segment '{RouteValue?})',
-                    // optional parameter 'RouteValue' is followed by ')'
-                    context.Error = "";
-                    //Resources.FormatTemplateRoute_OptionalParameterHasTobeTheLast(
-                    //	RoutePatternPathSegment.DebuggerToString(parts),
-                    //	parameter.Name,
-                    //	parts[i + 1].DebuggerToString());
+                    // This optional parameter is not the last one in the segment, for example
+                    // '{name?}.{ext}'.
+                    context.Error =
+                        $"In the segment '{RoutePatternPathSegment.DebuggerToString(parts)}', the optional parameter '{parameter.Name}' is followed by '{parts[i + 1].DebuggerToString()}'. " +
+                        "An optional parameter must be the last part of its segment.";
 
                     return false;
                 }
@@ -412,7 +446,12 @@ public sealed class RoutePatternParser
             var part = parts[i];
             if (part.IsParameter && isLastSegmentParameter)
             {
-                context.Error = "";// Resources.TemplateRoute_CannotHaveConsecutiveParameters;
+                string previous = parts[i - 1].DebuggerToString();
+                string current = part.DebuggerToString();
+
+                context.Error =
+                    $"The segment '{RoutePatternPathSegment.DebuggerToString(parts)}' places the parameters '{previous}' and '{current}' next to each other, so the boundary between their values is ambiguous. " +
+                    $"Separate them with literal text, for example '{previous}-{current}'.";
                 return false;
             }
 
@@ -422,17 +461,28 @@ public sealed class RoutePatternParser
         return true;
     }
 
-    private static bool IsValidParameterName(Context context, string parameterName)
+    private static bool IsValidParameterName(Context context, string parameterName, string parameterText)
     {
-        if (parameterName.Length == 0 || parameterName.AsSpan().IndexOfAny(InvalidParameterNameChars) >= 0)
+        if (parameterName.Length == 0)
         {
-            context.Error = "";//Resources.FormatTemplateRoute_InvalidParameterName(parameterName);
+            context.Error = $"The parameter '{parameterText}' has no name. Name the parameter, for example '{{id}}'.";
+            return false;
+        }
+
+        int invalidIndex = parameterName.AsSpan().IndexOfAny(InvalidParameterNameChars);
+        if (invalidIndex >= 0)
+        {
+            context.Error =
+                $"The parameter name '{parameterName}' contains '{parameterName[invalidIndex]}'. " +
+                "A parameter name cannot contain '/', '{', '}', '?' or '*'.";
             return false;
         }
 
         if (!context.ParameterNames.Add(parameterName))
         {
-            context.Error = ""; //Resources.FormatTemplateRoute_RepeatedParameter(parameterName);
+            context.Error =
+                $"The parameter name '{parameterName}' is used more than once. " +
+                "Parameter names must be unique within a template, ignoring case.";
             return false;
         }
 
@@ -446,7 +496,9 @@ public sealed class RoutePatternParser
 
         if (literal.Contains(QuestionMark))
         {
-            context.Error = ""; //Resources.FormatTemplateRoute_InvalidLiteral(literal);
+            context.Error =
+                $"The literal text '{literal}' contains '?'. A '?' may only end a parameter to make it optional (for example '{{id?}}'); " +
+                "a route template never includes a query string.";
             return false;
         }
 
@@ -465,7 +517,9 @@ public sealed class RoutePatternParser
         }
         else if (routePattern.StartsWith('~'))
         {
-            throw new RoutePatternException(routePattern, "");//Resources.TemplateRoute_InvalidRouteTemplate);
+            throw CreateException(
+                routePattern,
+                "It starts with '~' but not '~/'. Begin the template with '~/', with '/', or with its first path segment.");
         }
         return routePattern;
     }
@@ -533,6 +587,19 @@ public sealed class RoutePatternParser
             }
 
             return string.Empty;
+        }
+
+        // The text from the mark up to the current character (inclusive by default), without clearing
+        // the mark: error messages quote the part of the template being parsed when the error is found.
+        public string MarkedText(bool includeCurrent = true)
+        {
+            if (!_mark.HasValue)
+            {
+                return string.Empty;
+            }
+
+            int end = Math.Min(includeCurrent ? _index + 1 : _index, _template.Length);
+            return _template.Substring(_mark.Value, end - _mark.Value);
         }
 
         private string DebuggerToString()

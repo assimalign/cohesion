@@ -16,13 +16,27 @@ using Assimalign.Cohesion.Http;
 public interface IRouterFeature : IHttpFeature
 {
     /// <summary>
-    /// Gets the router built from the mapped routes. The router is built once, on first access, and
-    /// reused for the lifetime of the feature.
+    /// Gets the router built from the mapped routes.
     /// </summary>
+    /// <remarks>
+    /// The router is built once and reused for the lifetime of the feature. <c>UseRouting</c> builds it
+    /// when the application's request pipeline is built at startup, before the first request, so an
+    /// invalid route table fails the application's start rather than its requests; an earlier access
+    /// builds it then. Building fixes the route table: mapping another route into
+    /// <see cref="Builder"/> afterwards throws <see cref="System.InvalidOperationException"/>. Access is
+    /// thread-safe.
+    /// </remarks>
+    /// <exception cref="System.InvalidOperationException">
+    /// The route table is invalid, for example because two routes register the same route name.
+    /// </exception>
     IRouter Router { get; }
 
     /// <summary>
     /// Gets the builder into which the application's routes are mapped.
     /// </summary>
+    /// <remarks>
+    /// Routes can be mapped until <see cref="Router"/> is built; afterwards the builder throws
+    /// <see cref="System.InvalidOperationException"/>.
+    /// </remarks>
     IRouterBuilder Builder { get; }
 }

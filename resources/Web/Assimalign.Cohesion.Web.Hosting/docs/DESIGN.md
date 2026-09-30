@@ -317,6 +317,12 @@ Two deliberate properties:
   only its own DI-registered features, which is half of the process-wide isolation
   story (#789's per-application router state is the other half).
 
+**The pipeline is built before any service starts (#1051).** `WebApplication.OnStartingAsync`
+resolves the servers, and with them the pipeline and every middleware factory, so a composition
+failure such as an invalid route table fails `StartAsync` with nothing to roll back and leaves the
+host `Failed`. `ExecuteAsync` runs no middleware for a token that is already cancelled; middleware
+observe cancellation through `RequestCancelled`.
+
 ## The pipeline terminal — bodyless 404 fallback (#881)
 
 `WebApplication`'s pipeline `Build()` composes the innermost middleware — the

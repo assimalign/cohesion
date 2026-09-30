@@ -54,6 +54,26 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
         }
     }
 
+    /// <summary>
+    /// Resolves the application's servers, and with them its request pipeline, before any
+    /// lifecycle service starts.
+    /// </summary>
+    /// <remarks>
+    /// Resolving the servers builds the request pipeline the default server captures, which runs
+    /// every middleware factory; routing builds its route table there. Doing it ahead of every
+    /// service start makes a composition failure, such as an invalid route table, fail the start
+    /// with nothing started and nothing to roll back, and leaves the host
+    /// <see cref="HostState.Failed"/>.
+    /// </remarks>
+    /// <param name="cancellationToken">Aborts the startup if signaled.</param>
+    /// <returns>A task that completes when the hook has finished.</returns>
+    protected override Task OnStartingAsync(CancellationToken cancellationToken = default)
+    {
+        _ = _context.Servers;
+
+        return base.OnStartingAsync(cancellationToken);
+    }
+
     public WebApplication Use(Func<IHttpContext, WebApplicationMiddleware, Task> middleware)
     {
         ArgumentNullException.ThrowIfNull(middleware);

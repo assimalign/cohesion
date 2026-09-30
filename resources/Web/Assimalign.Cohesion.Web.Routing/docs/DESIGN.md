@@ -418,11 +418,12 @@ added after the third of five children would apply to only the last two.
 
 ## Pipeline integration (`UseRouting`)
 
-The `UseRouting` middleware resolves the `IRouterFeature`, calls `router.Match(context)` once,
+When the pipeline is built, the `UseRouting` middleware factory builds the application's router
+(see "Router lifecycle" below). For each request the middleware calls `router.Match(context)` once
 and dispatches on the result:
 
-- `Matched` → store the match on the context (`SetRouteMatch`) and invoke the handler
-  (terminal; downstream middleware does not run).
+- `Matched` → store the match on the context (`SetRouteMatch`) and invoke the handler with the
+  request's `RequestCancelled` token (terminal; downstream middleware does not run).
 - `MethodNotAllowed` → set `405` and the `Allow` header, then **short-circuit** (do not fall
   through to the terminal 404 pipeline).
 - `NoMatch` → call `next`, letting the rest of the pipeline (and any terminal 404) handle it.
@@ -434,7 +435,8 @@ the middleware, so a direct `RouteAsync` also produces a correct 405 with `Allow
 
 **Routing state is per application, never process-wide.** Each web application owns exactly one
 `IRouterFeature` (the `internal RouterFeature`), which holds that application's `IRouterBuilder` and
-the immutable `IRouter` lazily built from it. The wiring guarantees a single builder per app:
+the immutable `IRouter` built from it once, at startup. The wiring guarantees a single builder per
+app:
 
 - `AddRouting()` (builder time) registers the per-application `RouterFeature` as an `IHttpFeature`.
   Because it is one DI singleton per application, two applications get two distinct features.
@@ -442,9 +444,10 @@ the immutable `IRouter` lazily built from it. The wiring guarantees a single bui
   (`builder.Context.Features`) and returns its `Builder`. `MapGet`/`Map` (in `Web.Api`) resolve the
   same feature the same way. So `AddRouting`, `UseRouting`, and `MapGet` all map into and match
   against one per-application builder. `UseRouting` throws if `AddRouting` was not called first.
-- At request time the middleware resolves the router from the per-request feature collection
-  (`context.Features.Get<IRouterFeature>()`), which is seeded from the application's features — the
-  same instance whose `Builder` was mapped into.
+- When the pipeline is built, the middleware factory takes the router from that same feature and
+  its request delegate closes over it, so requests match against exactly the table the application
+  mapped into. The host still seeds the feature onto every request's `context.Features`, which is
+  where request-time readers such as `GetLinkGenerator()` find it.
 
 This replaces the original defect: `UseRouting()` returned a process-wide `static
 RouterBuilder.Shared` while `AddRouting()` registered a *different* per-app builder. Routes mapped
@@ -452,6 +455,82 @@ through `UseRouting()` therefore landed in a static that every application in th
 breaking Cohesion's multi-service in-process hosting, where several `WebApplication`s must keep
 isolated route tables. The static is deleted; there is no shared builder anywhere in the library.
 `PerApplicationRouterStateTests` proves two applications in one process serve only their own routes.
+
+### Router lifecycle: built once, at startup (#1051)
+
+An application's router is built exactly once, when its request pipeline is built at startup, and
+its route table is closed from then on. Before #1051 the router was built lazily, and without
+synchronization, on the first request: a route-table error (a duplicate route name, a named route
+without a pattern) failed every request instead of the start, and a route mapped after the first
+request was silently ignored — contradicting the build-time guarantee in "Uniqueness fails at build
+time" below.
+
+The sequence below shows the three steps, all of which run before the first request:
+`UseRouting` registers a middleware factory, `Program.cs` maps routes, and the host's pipeline
+build invokes the factory, which builds the router and closes the route table.
+
+```mermaid
+sequenceDiagram
+    participant App as Program.cs
+    participant Routing as UseRouting
+    participant Pipeline as Pipeline builder
+    participant Builder as RouterBuilder
+    App->>Routing: UseRouting()
+    Routing->>Pipeline: Use(factory)
+    App->>Builder: Map / MapGet / MapGroup
+    App->>Pipeline: host start builds the pipeline
+    Pipeline->>Routing: factory(next)
+    Routing->>Builder: Build()
+    Builder-->>Routing: router, route table closed
+    Note over App,Builder: A later Map throws InvalidOperationException
+```
+
+- **The trigger is the pipeline builder, not the host.** `UseRouting` registers its middleware
+  through the component-factory overload of `IWebApplicationPipelineBuilder.Use`. The pipeline
+  builder invokes that factory once, when it composes the pipeline — the Web host does that at
+  startup, when it resolves the servers that serve the pipeline — and the factory reads
+  `IRouterFeature.Router`, which builds the router. The request delegate the factory returns closes
+  over that router, so a request never builds, locks, or looks up the router feature.
+- **Building closes the route table.** `RouterBuilder.Build()` builds one router: the first call
+  closes the builder and builds, later calls return the same router, and `Map` afterwards throws
+  `InvalidOperationException` naming the route. `Build` and `Map` share one lock, so concurrent
+  first calls build once and a `Map` racing the build is either in the table or rejected. A failed
+  build keeps the table closed and fails the same way on every later call; the exception is not
+  cached.
+- **Errors surface as a failed start.** A duplicate route name throws from the pipeline build, so
+  the host's `StartAsync` fails. `WebApplication` resolves its servers, whose default server builds
+  the pipeline, before it starts any service, so the host ends `Failed` with nothing to roll back.
+  An invalid template fails earlier still: `Route` parses its template when it is constructed,
+  which is during `Map`.
+- **Request-time readers** of `IRouterFeature.Router` (`GetLinkGenerator()`, output caching) get the
+  router built at startup. In an application without `UseRouting`, the first such read builds it,
+  still exactly once.
+
+**Why this seam.** Three alternatives were rejected:
+
+- *Web.Hosting calls into routing at startup.* Web.Hosting may not reference feature libraries
+  (COHRES002), and Web.Routing may reference neither Web.Hosting nor any `Hosting*` library
+  (COHRES001, COHRES004).
+- *A new root lifecycle contract*, such as a freeze or application-starting hook on
+  `IWebApplication` or on a feature. It adds public surface for something the root contract already
+  provides: the component-factory `Use` overload is a composition-time callback that runs exactly
+  when the pipeline is composed. The root's XML docs now state that contract.
+- *Lazy construction made thread-safe.* It fixes the race but not the failure mode, because errors
+  would still surface on the first request.
+
+### Cancellation (#1051)
+
+`UseRouting` hands a matched route's handler the request's own `IHttpContext.RequestCancelled`
+token, and `IRouter.RouteAsync` passes its caller's token through. `UseRouting` used to allocate a
+linked `CancellationTokenSource` per request that added nothing over the request token; it is gone.
+Passing the context's token, rather than one captured elsewhere, matters when middleware decorates
+the context: request timeouts wrap it so that `RequestCancelled` is the timeout-linked token, and
+that is the token the handler sees.
+
+`RouterRouteHandler` adapts a `WebApplicationMiddleware`, which takes no token, so it honors its
+token at the boundary: an already-cancelled token returns a cancelled task without starting the
+middleware, and a running middleware observes cancellation through `RequestCancelled`. The Web
+host's pipeline treats its own `ExecuteAsync` token the same way.
 
 ## Parameter policies (constraints)
 
@@ -537,9 +616,10 @@ guarantees the validated, immutable name its build-time index snapshots.
 Route names are **unique per router, compared case-insensitively**. The name index is built inside
 `RouterLinkGenerator`, which the `Router` constructor creates eagerly — so a duplicate name (or a
 named route that exposes no pattern) throws `InvalidOperationException` when the route table is
-built (`RouterBuilder.Build()` / `Router` construction), never at request time. Per-application
-isolation (#789) scopes uniqueness naturally: two applications in one process can both have a
-route named `user`.
+built (`RouterBuilder.Build()` / `Router` construction), never at request time. For an application
+that is its start: `UseRouting` builds the router when the pipeline is built (#1051; see "Router
+lifecycle" above). Per-application isolation (#789) scopes uniqueness naturally: two applications
+in one process can both have a route named `user`.
 
 ### The `ILinkGenerator` surface
 
@@ -603,6 +683,38 @@ configuration error and throws at build time). This was chosen over type-testing
 `Route` inside the generator, which would have silently dropped wrapped/decorated routes (the shape
 #786 groups may produce) out of link generation.
 
+## Error model: template errors name the problem (#1051)
+
+Every invalid template throws `RoutePatternException`. Its `Pattern` is the template, and its
+message names the template, the part of it that is wrong, and the fix:
+
+> The route template '/orders/{id' is invalid. The parameter '{id' is not closed: the template ends
+> before its closing '}'. End the parameter with '}'.
+
+Each error path records its specific reason where the problem is found, quoting the offending
+segment, parameter, or literal, and `RoutePatternParser.Parse` prefixes the template. Before #1051
+every path produced an empty message: nineteen recorded an empty reason, with the intended wording
+left commented out, and two threw an empty message directly. The classes of error, each pinned by a
+row in `RoutePatternParserTests`:
+
+| Class | Example |
+|---|---|
+| Empty segment | `api//status` |
+| Unmatched `{` or `}` | `api/{`, `orders}`, `ord}ers` |
+| Unescaped `{` inside a parameter | `{id:regex(^\d{3}$)}` |
+| Parameter not closed | `{id:int`, `{id{` |
+| Empty parameter, or a parameter with no name | `{}`, `{*}` |
+| Invalid or repeated parameter name | `{a*b}`, `{id}/{ID}` |
+| Optional catch-all, or optional with a default | `{*path?}`, `{id=5?}` |
+| Catch-all not last, or sharing its segment | `{**path}/extra`, `x{*path}` |
+| Optional parameter misplaced in a multi-part segment | `{name}{ext?}`, `{name}-{ext?}`, `{name?}.{ext}` |
+| Adjacent parameters | `{name}{ext}` |
+| `?` in literal text | `orders?page=1` |
+| `~` not followed by `/` | `~orders` |
+
+Route groups re-parse the composed template (see "Route groups"), so a conflict between a prefix
+and a child, such as a repeated parameter name, reports through the same messages.
+
 ## AOT posture
 
 - No reflection, no runtime code generation, no dynamic activation anywhere in the match path or the
@@ -627,6 +739,9 @@ configuration error and throws at build time). This was chosen over type-testing
 - `Router` snapshots its routes into an immutable list and precomputes the precedence-ordered
   evaluation array in its constructor. A router instance is therefore safe to share across
   concurrent requests; there is no per-request mutable router state.
+- `RouterBuilder` builds one router. The first `Build()` closes the route table; later calls return
+  the same router, and `Map` afterwards throws `InvalidOperationException` (#1051, "Router
+  lifecycle" above).
 - `RouteMatch` is an immutable value; the only mutable per-request outputs are the
   `RouteValueDictionary` and the installed `IRouteMatchFeature`.
 - Metadata construction throws `ArgumentException` on a `null` item so a malformed metadata list fails
@@ -659,6 +774,8 @@ The endpoint-metadata seam (#150) is consumed by:
 - **#787 Named routes + link generation** — see the outbound URL generation section above.
   `OutboundPrecedence` is live code now; route names ride the #150 metadata seam and duplicate
   names fail when the route table is built.
+- **#1051 Startup router build, template error messages, cancellation** — see "Router lifecycle",
+  "Cancellation", and the error-model section above.
 
 ## Non-goals (delivered elsewhere in the routing epic #28)
 

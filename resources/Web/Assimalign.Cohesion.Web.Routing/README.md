@@ -87,7 +87,10 @@ switch (match.Status)
 ```
 
 Within a web application pipeline, prefer `builder.UseRouting()`, which performs this dispatch
-(invoke handler / emit 405 + `Allow` / fall through to the next middleware) for you.
+(invoke handler / emit 405 + `Allow` / fall through to the next middleware) for you. Map every
+route before the application starts: the router is built once, when the pipeline is built at
+startup, so an invalid route table (such as a duplicate route name) fails the start, and mapping a
+route afterwards throws `InvalidOperationException`.
 
 Outbound, a route named through its metadata generates URLs back out of the same table:
 

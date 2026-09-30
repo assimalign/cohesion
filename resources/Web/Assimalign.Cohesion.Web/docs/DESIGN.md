@@ -44,6 +44,11 @@ extensibility mechanism, which is why the pipeline contracts here stay this smal
 application lambdas onto the core `Use(Func<WebApplicationMiddleware, WebApplicationMiddleware>)`
 registration form.
 
+That core form is a component factory: the pipeline builder invokes it once, when it builds the
+pipeline, and the delegate it returns runs for each request. The factory body is therefore the
+composition-time seam for work that must fail at startup rather than on a request, without a
+dependency on the hosting runtime: `UseRouting` builds the application's route table there (#1051).
+
 ## Application lifecycle services
 
 The concrete `WebApplicationBuilder.AddService` in `Web.Hosting` accepts an
