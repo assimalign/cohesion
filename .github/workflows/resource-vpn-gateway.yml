@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'resources/VpnGateway/**'
+      - '!resources/VpnGateway/**/*.slnx'
+      - '!resources/VpnGateway/**/*.md'
       - '.github/workflows/resource-vpn-gateway.yml'
 
 permissions:

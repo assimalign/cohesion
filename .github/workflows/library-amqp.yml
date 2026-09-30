@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'libraries/Amqp/**'
+      - '!libraries/Amqp/**/*.slnx'
+      - '!libraries/Amqp/**/*.md'
       - '.github/workflows/library-amqp.yml'                 # When Pipeline File Changes
 
 permissions:

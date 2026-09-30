@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "libraries/Connections/**"
+      - "!libraries/Connections/**/*.slnx"
+      - "!libraries/Connections/**/*.md"
       - ".github/workflows/library-connections.yml" # When Pipeline File Changes
 permissions:
   contents: read

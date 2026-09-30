@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'resources/Rezolvr/**'
+      - '!resources/Rezolvr/**/*.slnx'
+      - '!resources/Rezolvr/**/*.md'
       - '.github/workflows/resource-rezolvr.yml'
 
 permissions:

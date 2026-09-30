@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Threading.Tasks;
 
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Hosting.Telemetry;
@@ -16,17 +18,24 @@ namespace Assimalign.Cohesion.SecretStore.Hosting;
 /// <summary>
 /// Composes a SecretStore application and its hosting services.
 /// </summary>
+/// <remarks>
+/// Every dependency the application runs with is a registration in <see cref="Services"/>:
+/// declared secrets and certificate-authority options, the data-protection provider, the secret
+/// repository, the trust-grant store, the certificate authority, and the lifecycle services
+/// (<see cref="IHostService"/>). <see cref="Build"/> closes registration, creates the service
+/// provider once, and resolves the lifecycle services once, in registration order; the secrets
+/// endpoint is always the last of them. The application disposes every collaborator the provider
+/// created when it is disposed.
+/// </remarks>
 public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuilder
 {
     private const string DefaultEndpoint = "https://127.0.0.1:8443";
 
     private readonly string[] _args;
-    private readonly ILoggerFactory? _loggerFactory;
+    private readonly string _environmentName;
+    private readonly SecretStoreApplicationContext _context;
     private readonly IResourceControlPlane? _controlPlane;
     private readonly ResourceContext _resourceContext;
-    private readonly Dictionary<string, ReadOnlyMemory<byte>> _secrets = new(StringComparer.Ordinal);
-    private readonly List<Func<SecretStoreApplicationContext, IHostService>> _serviceFactories = [];
-    private CertificateAuthorityOptions? _certificateAuthority;
     private bool _isBuilt;
 
     internal SecretStoreApplicationBuilder(string[] args, Assembly resourceAssembly)
@@ -35,18 +44,48 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
         ArgumentNullException.ThrowIfNull(resourceAssembly);
 
         _args = (string[])args.Clone();
+        Services = new ServiceProviderBuilder(new ServiceProviderOptions
+        {
+            EnableDynamicCode = false,
+            ValidateOnBuild = true,
+            ValidateScopes = true,
+        });
         _resourceContext = ResourceRuntime.Current;
-        _loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+        ILoggerFactory? loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
+        if (loggerFactory is not null)
+        {
+            Services.AddSingleton<ILoggerFactory>(loggerFactory);
+        }
         if (telemetry is not null)
         {
-            _serviceFactories.Insert(0, _ => telemetry);
+            // Registered ahead of every AddService call, so telemetry starts first and stops last.
+            Services.AddSingleton<IHostService>(telemetry);
         }
         if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
         {
             _controlPlane = controlPlane ?? throw new InvalidOperationException(
                 "The registered SecretStore control-plane factory returned null.");
+            Services.AddSingleton<IResourceControlPlane>(_controlPlane);
         }
+
+        _environmentName = _resourceContext.EnvironmentName;
+        _context = new SecretStoreApplicationContext(
+            _environmentName,
+            System.IO.FileSystemPath.Parse(_resourceContext.ContentRootPath));
     }
+
+    /// <summary>
+    /// Gets the application's service registrations.
+    /// </summary>
+    /// <remarks>
+    /// Registration closes when <see cref="Build"/> runs; a later registration throws
+    /// <see cref="InvalidOperationException"/>. Every <see cref="IHostService"/> registration joins
+    /// the application lifecycle in registration order, ahead of the secrets endpoint. Register
+    /// factory or instance services: the provider is created without dynamic code. A
+    /// factory-created service is owned by the application and disposed with it; an instance stays
+    /// owned by its caller.
+    /// </remarks>
+    public ServiceProviderBuilder Services { get; }
 
     /// <summary>
     /// Declares an initial secret at a logical store path.
@@ -58,7 +97,8 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     /// </para>
     /// <para>
     /// Implementations snapshot <paramref name="value"/> during registration. Paths are compared
-    /// using ordinal semantics and are not normalized.
+    /// using ordinal semantics and are not normalized. The declaration is registered in
+    /// <see cref="Services"/>.
     /// </para>
     /// </remarks>
     /// <param name="path">The logical path at which to seed the secret.</param>
@@ -68,7 +108,7 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     /// <paramref name="path"/> is empty or whitespace, or names an implementation-reserved path.
     /// </exception>
     /// <exception cref="InvalidOperationException">The path has already been declared on this builder.</exception>
-    public ISecretStoreApplicationBuilder AddSecret(
+    public SecretStoreApplicationBuilder AddSecret(
         string path,
         ReadOnlyMemory<byte> value)
     {
@@ -80,11 +120,16 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
                 nameof(path));
         }
 
-        if (!_secrets.TryAdd(path, value.ToArray()))
+        foreach (ServiceDescriptor descriptor in Services.Container)
         {
-            throw new InvalidOperationException($"Secret path '{path}' is already declared.");
+            if (descriptor.ImplementationInstance is SecretSeed declared &&
+                string.Equals(declared.Path, path, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"Secret path '{path}' is already declared.");
+            }
         }
 
+        Services.AddSingleton(new SecretSeed(path, value.ToArray()));
         return this;
     }
 
@@ -97,7 +142,8 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     /// Platform endpoint selects gateway-mediated intermediate enrollment. When neither is configured,
     /// <see cref="CertificateAuthorityOptions.SelfSeedWhenNoPlatform"/> controls whether the store
     /// creates a self-signed development root. A failed configured Platform enrollment never
-    /// silently falls back to an unrelated self-signed root.
+    /// silently falls back to an unrelated self-signed root. A snapshot of the options is
+    /// registered in <see cref="Services"/>.
     /// </remarks>
     /// <param name="configure">An optional callback that configures the certificate authority.</param>
     /// <returns>The same builder instance for chaining.</returns>
@@ -109,24 +155,30 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     /// A certificate authority has already been declared, or no first-start authority source is
     /// enabled.
     /// </exception>
-    public ISecretStoreApplicationBuilder AddCertificateAuthority(
+    public SecretStoreApplicationBuilder AddCertificateAuthority(
         Action<CertificateAuthorityOptions>? configure = null)
     {
-        if (_certificateAuthority is not null)
+        foreach (ServiceDescriptor descriptor in Services.Container)
         {
-            throw new InvalidOperationException("A certificate authority is already declared.");
+            if (descriptor.ServiceType == typeof(CertificateAuthorityOptions))
+            {
+                throw new InvalidOperationException("A certificate authority is already declared.");
+            }
         }
 
         var options = new CertificateAuthorityOptions();
         configure?.Invoke(options);
         ValidateCertificateAuthority(options);
-        _certificateAuthority = Snapshot(options);
+        Services.AddSingleton(Snapshot(options));
         return this;
     }
 
     /// <summary>
     /// Adds an existing host service to the secret store application.
     /// </summary>
+    /// <remarks>
+    /// The service is registered in <see cref="Services"/> and stays owned by the caller.
+    /// </remarks>
     /// <param name="service">The service to add.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="service"/> is <see langword="null"/>.</exception>
@@ -134,13 +186,16 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     {
         ArgumentNullException.ThrowIfNull(service);
 
-        _serviceFactories.Add(_ => service);
+        Services.AddSingleton<IHostService>(service);
         return this;
     }
 
     /// <summary>
-    /// Adds a host service factory that is materialized once for each build.
+    /// Adds a host service factory that is invoked once, when the application is built.
     /// </summary>
+    /// <remarks>
+    /// The application owns and disposes the service the factory returns.
+    /// </remarks>
     /// <param name="factory">The factory to invoke with the secret store host context.</param>
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
@@ -149,7 +204,8 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     {
         ArgumentNullException.ThrowIfNull(factory);
 
-        _serviceFactories.Add(factory);
+        Services.AddSingleton<IHostService>(_ => factory(_context)
+            ?? throw new InvalidOperationException("A secret store service factory returned null."));
         return this;
     }
 
@@ -164,22 +220,7 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     /// <exception cref="ArgumentException">A command-line endpoint or data option is empty or missing its value.</exception>
     public SecretStoreApplication Build()
     {
-        if (_isBuilt)
-        {
-            throw new InvalidOperationException("The secret store application has already been built.");
-        }
-
-        string environmentName = _resourceContext.EnvironmentName;
-        var options = new SecretStoreApplicationOptions { Environment = environmentName };
-        var context = new SecretStoreApplicationContext(
-            environmentName,
-            _resourceContext is null ? null : System.IO.FileSystemPath.Parse(_resourceContext.ContentRootPath));
-        var hostedServices = new IHostService[_serviceFactories.Count + 1];
-        for (int index = 0; index < _serviceFactories.Count; index++)
-        {
-            hostedServices[index] = _serviceFactories[index](context)
-                ?? throw new InvalidOperationException("A secret store service factory returned null.");
-        }
+        InvalidOperationException.ThrowIf(_isBuilt, "The secret store application has already been built.");
 
         Uri endpoint = ResolveEndpoint();
         string dataPath = ResolveDataPath();
@@ -188,7 +229,8 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
         string keyRingPath = Path.Combine(dataPath, "key-ring");
         Directory.CreateDirectory(keyRingPath);
         ProtectedFileStore.HardenKeyDirectory(keyRingPath);
-        IDataProtectionProvider protectionProvider = DataProtectionProvider.Create(
+
+        Services.AddSingleton<IDataProtectionProvider>(_ => DataProtectionProvider.Create(
             KeyRepository.CreateFileSystem(keyRingPath),
             protectionOptions =>
             {
@@ -196,40 +238,91 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
                     $"SecretStore:{_resourceContext.ApplicationName ?? "standalone"}:{_resourceContext.ResourceName ?? "default"}";
                 protectionOptions.KeyLifetime = TimeSpan.FromDays(90);
                 protectionOptions.UnprotectGracePeriod = TimeSpan.FromDays(36500);
-            });
-        var repository = new SecretStoreRepository(
+            }));
+        Services.AddSingleton<SecretStoreRepository>(serviceProvider =>
+        {
+            var seeds = new Dictionary<string, ReadOnlyMemory<byte>>(StringComparer.Ordinal);
+            foreach (SecretSeed seed in serviceProvider.GetRequiredService<IEnumerable<SecretSeed>>())
+            {
+                if (!seeds.TryAdd(seed.Path, seed.Value))
+                {
+                    throw new InvalidOperationException($"Secret path '{seed.Path}' is already declared.");
+                }
+            }
+
+            return new SecretStoreRepository(
+                dataPath,
+                serviceProvider.GetRequiredService<IDataProtectionProvider>().CreateProtector("secret-store", "secrets", "v1"),
+                seeds);
+        });
+        Services.AddSingleton<TrustedIssuerStore>(serviceProvider => new TrustedIssuerStore(
             dataPath,
-            protectionProvider.CreateProtector("secret-store", "secrets", "v1"),
-            _secrets);
-        var trustedIssuers = new TrustedIssuerStore(
+            serviceProvider.GetRequiredService<IDataProtectionProvider>().CreateProtector("secret-store", "trusted-issuers", "v1")));
+        Services.AddSingleton<CertificateAuthorityManager>(serviceProvider => new CertificateAuthorityManager(
             dataPath,
-            protectionProvider.CreateProtector("secret-store", "trusted-issuers", "v1"));
-        var authority = new CertificateAuthorityManager(
-            dataPath,
-            protectionProvider,
-            _certificateAuthority ?? new CertificateAuthorityOptions(),
+            serviceProvider.GetRequiredService<IDataProtectionProvider>(),
+            serviceProvider.GetService<CertificateAuthorityOptions>() ?? new CertificateAuthorityOptions(),
             _resourceContext.ApplicationName,
-            _resourceContext.ResourceName);
-        var endpointService = new SecretsEndpointService(
+            _resourceContext.ResourceName));
+
+        // Registered after every AddService call, so the endpoint starts last and stops first.
+        Services.AddSingleton<IHostService>(serviceProvider => new SecretsEndpointService(
             endpoint,
-            repository,
-            trustedIssuers,
-            authority,
+            serviceProvider.GetRequiredService<SecretStoreRepository>(),
+            serviceProvider.GetRequiredService<TrustedIssuerStore>(),
+            serviceProvider.GetRequiredService<CertificateAuthorityManager>(),
             _controlPlane,
             _resourceContext,
-            context);
-        hostedServices[^1] = endpointService;
+            _context));
+        Services.AddSingleton<IHostEnvironment>(_context.Environment);
+        Services.AddSingleton<ISecretStoreApplicationContext>(_context);
 
-        context.SetHostedServices(hostedServices);
         _isBuilt = true;
-        var application = new SecretStoreApplication(options, context, endpointService);
-        if (_controlPlane is not null)
+
+        // Registration closes here. The provider copies the registrations, so one added after
+        // Build would silently never reach it; the read-only container turns that into an error.
+        if (Services.Container is ServiceContainer container)
         {
-            ResourceRuntime.HostBuilt(application, _controlPlane);
+            container.MakeReadOnly();
         }
 
-        return application;
+        _context.SetServiceProvider(((IServiceProviderBuilder)Services).Build());
+        try
+        {
+            _context.ResolveHostedServices();
+
+            var application = new SecretStoreApplication(
+                new SecretStoreApplicationOptions { Environment = _environmentName },
+                _context);
+            if (_controlPlane is not null)
+            {
+                ResourceRuntime.HostBuilt(application, _controlPlane);
+            }
+
+            return application;
+        }
+        catch (Exception exception)
+        {
+            // The provider owns every service a factory created before the failure.
+            try
+            {
+                Task.Run(() => _context.DisposeServiceProviderAsync().AsTask()).GetAwaiter().GetResult();
+            }
+            catch (Exception disposalException)
+            {
+                throw new AggregateException(exception, disposalException);
+            }
+
+            throw;
+        }
     }
+
+    ISecretStoreApplicationBuilder ISecretStoreApplicationBuilder.AddSecret(
+        string path,
+        ReadOnlyMemory<byte> value) => AddSecret(path, value);
+
+    ISecretStoreApplicationBuilder ISecretStoreApplicationBuilder.AddCertificateAuthority(
+        Action<CertificateAuthorityOptions>? configure) => AddCertificateAuthority(configure);
 
     ISecretStoreApplication ISecretStoreApplicationBuilder.Build() => Build();
 

@@ -52,20 +52,51 @@ Three properties fall out of that intent and shape the whole implementation:
 
 ## Application lifecycle composition
 
-The concrete `WebApplicationBuilder.AddService` verb registers application lifecycle
-services independently of server registration. At `Build`, `WebApplicationBuilder`
-invokes each deferred service factory exactly once against the final
-`WebApplicationContext` and freezes the resulting services in registration order.
-`WebApplicationContext.HostedServices` enumerates that snapshot before the DI-owned
-server-service registrations, including the constructor-reserved default-server slot.
+`WebApplicationBuilder.Services` is the application's one composition registry. Every
+dependency the host runs with is a registration in it, and the root
+`IWebApplicationBuilder` verbs are explicit-interface shims over those registrations:
 
-The Web host rejects concurrent service start or stop, so this two-phase enumeration is
-the lifecycle guarantee: every application service starts before any Web server, services
-preserve their own registration order, and reverse host shutdown drains every server
-before stopping application services. Keeping the application-service snapshot outside
-the server's DI registry is intentional; otherwise the default server, registered when
-the concrete builder is constructed, would precede later `AddService` calls and violate
-the public contract.
+| Verb | Registration |
+| --- | --- |
+| `AddService(IHostService)` / `AddService(Func<WebApplicationContext, IHostService>)` | `IHostService` |
+| `IWebApplicationBuilder.AddServer(...)`, `Server.UseServer<TServer>(...)` | `IWebApplicationServer` |
+| `IWebApplicationBuilder.AddFeature(...)` | `IHttpFeature` |
+| `AddHealthCheck(name, check)` | `IHealthContributor` |
+
+A value becomes an instance registration, which stays owned by its caller; a
+`Func<IWebApplicationContext, T>` becomes a factory registration invoked once with the
+final context, and the application owns what it returns. Factories receive the context,
+never the provider, which is what keeps the container out of the feature libraries that
+call these verbs. A direct `Services.AddSingleton<IHostService>(...)` or
+`AddSingleton<IWebApplicationServer>(...)` is equivalent to the matching verb.
+
+**The service type is the lifecycle phase.** The host runs two phases, each in its own
+registration order: every `IHostService` registration (the application services), then
+every `IWebApplicationServer` registration (the servers). Because the phases are distinct
+service types, registration order across them is irrelevant, so the default server
+(registered when the builder is constructed) never precedes a later `AddService` call.
+`WebApplicationContext.HostedServices` concatenates the two snapshots, adapting each
+server that is not itself an `IHostService` exactly once. The Web host rejects concurrent
+service start or stop, so every application service starts before any Web server and
+reverse shutdown drains every server before stopping application services. Before this
+registry held everything, `AddService` kept a private list beside the DI-owned server
+slot to get the same guarantee.
+
+**Resolve once, at the boundary that consumes it.** `Build` makes the container read-only
+(a later registration throws instead of silently missing the provider), creates the
+provider once, and resolves the application services, running each factory exactly once
+against the final context. Servers resolve once at host start, because the default
+server captures the composed pipeline and middleware is added to the built application.
+Features resolve once at pipeline build (below). Nothing resolves per request.
+
+**The application owns the provider.** Disposing a `WebApplication` stops the host, then
+disposes the provider, which disposes every factory-created service in reverse creation
+order; a failed `Build` disposes it before rethrowing. The provider was previously never
+disposed.
+
+`AddPipeline` is the one root verb that is not a registration: it replaces the default
+pipeline with a single value, which the hosted `IWebApplicationPipeline` registered at
+`Build` wraps with the enabled-resource terminals.
 
 ## Server dispatch model
 
@@ -88,21 +119,22 @@ stored accept-loop task and return. A bind failure is surfaced as
 `HostStartupException`, preserving the transport exception as its inner exception;
 the `ResourceHost` from `Hosting.Resources` can therefore classify typed
 configuration/dependency causes as
-exit 64/69 and other pre-ready bind failures as exit 70. The default server is
-registered as both `IWebApplicationServer` and `IHostService`, resolving to the
-same singleton, so the host lifecycle actually drives this boundary. When an
-application registers only a custom server and supplies no default-listener
-configuration, the reserved default host-service slot is inert; it does not start an
-empty aggregate alongside the custom server.
+exit 64/69 and other pre-ready bind failures as exit 70. The default server is the
+first `IWebApplicationServer` registration and implements `IHostService` itself, so the
+host lifecycle drives this boundary directly. When an application registers only a
+custom server and supplies no default-listener configuration, the default registration
+resolves to an internal inert placeholder that `WebApplicationContext` excludes from both
+`Servers` and `HostedServices`; it does not start an empty aggregate alongside the
+custom server.
 
 The root `IWebApplicationBuilder.AddServer` overloads accept servers that know nothing
-about Hosting. `Web.Hosting` registers one internal `IHostService` adapter per server;
-the adapter delegates start/stop while `WebApplicationContext.Servers` unwraps it back to
-the original Web contract object. The adapter is registered only as a host service, so it
-cannot replace the default server's `IWebApplicationServer` singleton. Consequently a
-configured default and a custom server each start exactly once, in registration order,
-and stop in reverse order. The factory overload is a singleton registration and receives
-the final application context.
+about Hosting. They register the server as an `IWebApplicationServer`, and
+`WebApplicationContext` wraps each one that is not an `IHostService` in one internal
+lifecycle adapter when it snapshots the server phase, so `Servers` exposes the original
+Web contract objects. A configured default and a custom server each start exactly once,
+in registration order, and stop in reverse order. The factory overload is a singleton
+registration that receives the final application context. `Web.Testing` starts the first
+server registration, which is always the default server.
 
 **One accept loop, one task per connection.** The loop accepts a connection and
 *hands it off* to `ServeConnectionAsync` on its own `Task`, then loops straight
@@ -267,8 +299,9 @@ Two deliberate properties:
 - **Builder-time snapshot, not request-time service location.** The feature set is
   materialized at pipeline build (which happens when the server is resolved). Per
   the hosting philosophy, nothing resolves services per request — the per-exchange
-  work is a plain array walk. Features registered after the pipeline is built are
-  not observed, the same snapshot rule the middleware list follows.
+  work is a plain array walk. Registration closes at `Build`, before any pipeline
+  exists, so the snapshot always holds every feature; a feature factory runs once,
+  the first time the application's features resolve.
 - **Application-registered features are per-application.** Each application seeds
   only its own DI-registered features, which is half of the process-wide isolation
   story (#789's per-application router state is the other half).

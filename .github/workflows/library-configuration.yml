@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "libraries/Configuration/**"
+      - "!libraries/Configuration/**/*.slnx"
+      - "!libraries/Configuration/**/*.md"
       - ".github/workflows/library-configuration.yml" # When Pipeline File Changes
 permissions:
   contents: read

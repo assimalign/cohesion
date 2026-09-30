@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "libraries/ObjectPool/**"
+      - "!libraries/ObjectPool/**/*.slnx"
+      - "!libraries/ObjectPool/**/*.md"
       - ".github/workflows/library-object-pool.yml" # When Pipeline File Changes
 permissions:
   contents: read

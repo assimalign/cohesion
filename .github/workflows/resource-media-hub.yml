@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "resources/MediaHub/**"
+      - "!resources/MediaHub/**/*.slnx"
+      - "!resources/MediaHub/**/*.md"
       - ".github/workflows/resource-media-hub.yml" # When Pipeline File Changes
 
 permissions:

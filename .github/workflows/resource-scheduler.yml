@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'resources/Scheduler/**'
+      - '!resources/Scheduler/**/*.slnx'
+      - '!resources/Scheduler/**/*.md'
       - '.github/workflows/resource-scheduler.yml'
 
 permissions:

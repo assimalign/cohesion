@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "libraries/ObjectMapping/**"
+      - "!libraries/ObjectMapping/**/*.slnx"
+      - "!libraries/ObjectMapping/**/*.md"
       - ".github/workflows/library-object-mapping.yml" # When Pipeline File Changes
 permissions:
   contents: read

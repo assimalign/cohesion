@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "libraries/Logging/**"
+      - "!libraries/Logging/**/*.slnx"
+      - "!libraries/Logging/**/*.md"
       - ".github/workflows/library-logging.yml" # When Pipeline File Changes
 permissions:
   contents: read

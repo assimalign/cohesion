@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - 'libraries/IdentityModel/**'
+      - '!libraries/IdentityModel/**/*.slnx'
+      - '!libraries/IdentityModel/**/*.md'
       - '.github/workflows/library-identity-model.yml'                 # When Pipeline File Changes
 
 permissions:

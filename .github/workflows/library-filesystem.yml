@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "libraries/FileSystem/**"
+      - "!libraries/FileSystem/**/*.slnx"
+      - "!libraries/FileSystem/**/*.md"
       - ".github/workflows/library-filesystem.yml" # When Pipeline File Changes
 permissions:
   contents: read

@@ -29,6 +29,19 @@ public sealed class IdentityHubApplication : Host<IdentityHubApplicationContext>
     /// </summary>
     public override IdentityHubApplicationContext Context => _context;
 
+    /// <inheritdoc />
+    protected override async ValueTask DisposeAsync(bool disposing)
+    {
+        await base.DisposeAsync(disposing).ConfigureAwait(false);
+        if (disposing)
+        {
+            // The application owns its service provider: disposing it releases every service a
+            // registered factory created, including the identity endpoint, after the host has
+            // stopped them. Instance registrations stay with their callers.
+            await _context.DisposeServiceProviderAsync().ConfigureAwait(false);
+        }
+    }
+
     IIdentityHubApplicationContext IIdentityHubApplication.Context => _context;
 
     Task IIdentityHubApplication.StartAsync(CancellationToken cancellationToken) =>

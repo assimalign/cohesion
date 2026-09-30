@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "libraries/ObjectValidation/**"
+      - "!libraries/ObjectValidation/**/*.slnx"
+      - "!libraries/ObjectValidation/**/*.md"
       - ".github/workflows/library-object-validation.yml" # When Pipeline File Changes
 permissions:
   contents: read

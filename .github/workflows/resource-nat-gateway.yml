@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "resources/NatGateway/**"
+      - "!resources/NatGateway/**/*.slnx"
+      - "!resources/NatGateway/**/*.md"
       - ".github/workflows/resource-nat-gateway.yml" # When Pipeline File Changes
 
 permissions:

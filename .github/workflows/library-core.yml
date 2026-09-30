@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "libraries/Core/**"
+      - "!libraries/Core/**/*.slnx"
+      - "!libraries/Core/**/*.md"
       - "libraries/Hosting/**/src/**/*.cs"
       - "libraries/ApplicationModel/**/src/**/*.cs"
       - "docs/RUNTIME_CONTRACT.md"

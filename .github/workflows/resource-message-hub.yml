@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "resources/MessageHub/**"
+      - "!resources/MessageHub/**/*.slnx"
+      - "!resources/MessageHub/**/*.md"
       - ".github/workflows/resource-message-hub.yml" # When Pipeline File Changes
 
 permissions:

@@ -217,6 +217,65 @@ happen to compose.
 - **The owning area's CI workflow carries the fixture path** in its `paths:` trigger filter, so a
   change to the fixture still builds the area that depends on it.
 
+## Hosting composition — DI is the dependency control
+
+The area root and its feature libraries stay DI-free (COHRES004, `component-integration.md`); they
+meet in `<Area>.Hosting`, and inside that module the container is the **only** composition
+registry. Not every area has `Add(...)`/`Use(...)` feature verbs, but every hosting module composes
+this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md`,
+"Application lifecycle composition"); the filler template is EmailHub.
+
+- **The concrete builder owns one `ServiceProviderBuilder Services`**, created with
+  `EnableDynamicCode = false`, `ValidateOnBuild = true`, `ValidateScopes = true`. The module
+  registers factories and instances only, never implementation types, so resolution stays
+  reflection-free. The hosting module takes a public `CohesionProjectReference` to
+  `Assimalign.Cohesion.DependencyInjection` (the App kernel already carries it; no framework
+  member-list change).
+- **Every composition input is a registration; there is no parallel private registry.**
+  `AddService(IHostService)` is `Services.AddSingleton<IHostService>(service)`;
+  `AddService(Func<<Area>ApplicationContext, IHostService>)` is a factory registration closed over
+  the context. Health checks register `IHealthContributor`, control-plane command handlers
+  register `IResourceCommandHandler` (both handed to the control plane once, at `Build`), the
+  module's own endpoints and data-plane services register `IHostService`, and collaborators they
+  share (repositories, stores, key providers) are singletons their factories resolve. DI holds the
+  dependency graph, not option values: single-valued configuration of one component (listener
+  options, a concurrency cap, Web's `AddPipeline` replacement) stays builder state.
+- **Root verbs are explicit-interface shims.** Each `I<Area>ApplicationBuilder` member is
+  implemented explicitly and does one thing: translate the root's dependency-free shape into a
+  singleton registration. A value becomes an instance registration; a
+  `Func<I<Area>ApplicationContext, T>` becomes a factory registration invoked once with the area
+  context. Factories receive the context, **never `IServiceProvider`** — that is what keeps the
+  container out of the libraries that call these verbs. A public concrete counterpart that returns
+  the concrete builder (for chaining with `AddService`) is allowed; the explicit member forwards to
+  it. Registration-time duplicate checks read `Services.Container`, never a second collection.
+  Precedents: `IWebApplicationBuilder.AddFeature/AddServer` → `IHttpFeature`/`IWebApplicationServer`;
+  `ISchedulerApplicationBuilder.AddJob/AddScheduleProvider` → `IScheduleJob`/`IScheduleProvider`.
+- **The service type is the lifecycle phase; registration order is the order within a phase.**
+  A single-phase area registers everything as `IHostService` and places its own services by
+  *when* they register: telemetry in the builder constructor (first), hard-wired endpoints in
+  `Build` (last). An area with more than one phase gives each phase its own service type — Web runs
+  `IHostService` (application services) before `IWebApplicationServer` (servers) — so no
+  registration-order hack is needed across phases.
+- **Resolve once, at the composition boundary.** `Build` makes the container read-only
+  (`ServiceContainer.MakeReadOnly()`; a later registration throws instead of silently missing the
+  provider), creates the provider exactly once, validates and resolves every aggregate it consumes
+  into arrays, and throws on a second call. An aggregate consumed later resolves once at its own
+  boundary (Web: features at pipeline build, servers at host start). Nothing resolves per request
+  or per operation, and no `IServiceProvider` reaches root or feature code.
+- **The application owns the provider.** `DisposeAsync` stops the host, then disposes the provider:
+  factory-created services are owned and disposed in reverse creation order; instance
+  registrations are borrowed and left to their callers. A failed `Build` disposes the provider
+  before rethrowing. The concrete context exposes the provider as `ServiceProvider` for
+  hosting-layer factories. Known limit: the provider's disposal is fail-fast — the first
+  `Dispose` that throws ends the pass and later services stay undisposed.
+- **Not yet migrated: `Database.Hosting`.** Its engine and service registries keep explicit
+  ownership that is stronger than the provider's (engine factories observe preceding engines;
+  build rollback and disposal continue past a failure and aggregate it, which its tests pin).
+  Moving them into the container needs the provider to continue-and-aggregate first. Its
+  `Services` registry (reflection-free options, closed registrations) and its ownership of the
+  built provider already follow this section; its explicit `IDatabaseApplicationBuilder.AddEngine`
+  shims still forward to the private engine registry rather than to `Services`.
+
 ## What every area is expected to provide
 
 - `Assimalign.Cohesion.<Area>` — the area root: the base abstractions and composition seams
@@ -268,7 +327,8 @@ happen to compose.
   `Assimalign.Cohesion.Hosting.Resources`, and `Assimalign.Cohesion.Hosting.Health` without
   referencing their area's ApplicationModel package. **If the hosting module ever appears to need a same-area dependency
   beyond the root and its own hosting family, that is an architecture revisit — surface it to the user — not a case for
-  the exemption property or for pushing the dependency's types into the root.**
+  the exemption property or for pushing the dependency's types into the root.** It composes through
+  its container ("Hosting composition — DI is the dependency control", above).
 - `Assimalign.Cohesion.<Area>.ApplicationModel` — the AOT-compatible, dependency-guarded declarative plane: a
   manifest-backed typed resource, platform-neutral planner, `Add<Area>(...)` graph verbs, and the
   area's default-control-plane contract/factory. Its direct Cohesion references are

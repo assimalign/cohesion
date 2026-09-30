@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - "resources/LoadBalancer/**"
+      - "!resources/LoadBalancer/**/*.slnx"
+      - "!resources/LoadBalancer/**/*.md"
       - ".github/workflows/resource-load-balancer.yml" # When Pipeline File Changes
 
 permissions:
