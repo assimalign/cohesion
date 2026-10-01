@@ -18,6 +18,9 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
+      # Every leg reports its own result. With fail-fast, one failing project cancelled the rest
+      # of the matrix and left a branch with no signal for the other Web libraries (#1093).
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         # Every buildable Web project is listed so the area's dependency-rule guard
@@ -70,6 +73,7 @@ jobs:
   https-sample:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         projects: ['Assimalign.Cohesion.Web.HttpsHost']
