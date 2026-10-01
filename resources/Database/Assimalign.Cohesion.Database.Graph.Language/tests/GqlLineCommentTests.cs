@@ -8,13 +8,19 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 /// <summary>
 /// A <c>--</c> comment, ISO/IEC 39075's <c>&lt;simple comment&gt;</c>, ends at the first line
 /// terminator: LF, CR, NEL, LS or PS. The shared lexer used to end it only at LF, so a clause
-/// after a lone CR was comment text and <c>MATCH (a) -- c&lt;CR&gt;WHERE ... DETACH DELETE a</c>
-/// deleted every node (#1150). Diagnostic lines break at the same terminators. Nothing here asserts
+/// after a lone CR was comment text and
+/// <c>MATCH (a) -- c&lt;CR&gt;WHERE a.name = 'x'&lt;LF&gt;DETACH DELETE a</c> deleted every node
+/// (#1150). With <c>DETACH DELETE</c> on the CR line too, the comment swallowed it as well and the
+/// statement failed instead. Diagnostic lines break at the same terminators. Nothing here asserts
 /// on <c>--</c> directly after <c>)</c> or <c>]</c>, which gql-label-direction (#1139) owns.
 /// </summary>
 public sealed class GqlLineCommentTests
 {
-    /// <summary>The WHERE after the comment stays in effect, for a read and for a delete.</summary>
+    /// <summary>
+    /// The WHERE after the comment stays in effect, for a read and for a delete. The last delete
+    /// puts <c>DETACH DELETE</c> on the line after the WHERE: that is the form the old lexer ran as
+    /// an unfiltered delete, because only the WHERE's line was swallowed.
+    /// </summary>
     /// <param name="terminator">The line terminator, by name (see <see cref="Terminator"/>).</param>
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Comments: a WHERE after a line comment stays in effect at every terminator")]
     [InlineData("LF")]
@@ -29,10 +35,12 @@ public sealed class GqlLineCommentTests
         string separator = Terminator(terminator);
         string read = "MATCH (a:Person) -- note" + separator + "WHERE a.age > 1 RETURN a";
         string delete = "MATCH (a:Person) -- note" + separator + "WHERE a.name = 'x' DETACH DELETE a";
+        string deleteOnNextLine = "MATCH (a:Person) -- note" + separator + "WHERE a.name = 'x'\nDETACH DELETE a";
 
         // Act
         var readStatement = Parse(read);
         var deleteStatement = Parse(delete);
+        var deleteOnNextLineStatement = Parse(deleteOnNextLine);
 
         // Assert
         readStatement.Diagnostics.ShouldBeEmpty();
@@ -45,6 +53,11 @@ public sealed class GqlLineCommentTests
         deleteStatement.GqlExpression.Predicate.ShouldBeOfType<GqlBinaryExpression>().Operator.ShouldBe("=");
         deleteStatement.GqlExpression.DetachDelete.ShouldBeTrue();
         deleteStatement.GqlExpression.DeleteVariables.ShouldBe(["a"]);
+
+        deleteOnNextLineStatement.Diagnostics.ShouldBeEmpty();
+        deleteOnNextLineStatement.GqlExpression.Predicate.ShouldBeOfType<GqlBinaryExpression>().Operator.ShouldBe("=");
+        deleteOnNextLineStatement.GqlExpression.DetachDelete.ShouldBeTrue();
+        deleteOnNextLineStatement.GqlExpression.DeleteVariables.ShouldBe(["a"]);
     }
 
     /// <summary>

@@ -165,6 +165,79 @@ public sealed class TokenLexerLineCommentTests
     }
 
     /// <summary>
+    /// A quoted identifier may span lines, so a terminator inside it ends nothing and a <c>--</c>
+    /// inside it starts no comment.
+    /// </summary>
+    /// <param name="terminator">The line terminator inside the quoted identifier, by name.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Language] - Lexer: a terminator inside a quoted identifier is part of the name")]
+    [InlineData("LF")]
+    [InlineData("CR")]
+    [InlineData("CRLF")]
+    [InlineData("NEL")]
+    [InlineData("LS")]
+    [InlineData("PS")]
+    public void MoveNext_TerminatorInsideQuotedIdentifier_ShouldStayInTheIdentifier(string terminator)
+    {
+        // Arrange
+        string quoted = "\"q" + Terminator(terminator) + "--x\"";
+
+        // Act
+        var tokens = Lex(quoted + " WHERE");
+
+        // Assert
+        tokens.ShouldBe([(TokenType.QuotedIdentifier, quoted, 0), (TokenType.Identifier, "WHERE", quoted.Length + 1)]);
+    }
+
+    /// <summary>
+    /// A block comment may span lines, so a terminator inside it ends nothing and a <c>--</c>
+    /// inside it starts no line comment: the block comment still ends at its <c>*/</c>.
+    /// </summary>
+    /// <param name="terminator">The line terminator inside the block comment, by name.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Language] - Lexer: a terminator inside a block comment ends nothing")]
+    [InlineData("LF")]
+    [InlineData("CR")]
+    [InlineData("CRLF")]
+    [InlineData("NEL")]
+    [InlineData("LS")]
+    [InlineData("PS")]
+    public void MoveNext_TerminatorInsideBlockComment_ShouldStayInTheComment(string terminator)
+    {
+        // Arrange
+        string separator = Terminator(terminator);
+        string block = "/* a" + separator + "-- b" + separator + "*/";
+
+        // Act
+        var tokens = Lex(block + " WHERE");
+
+        // Assert
+        tokens.ShouldBe([(TokenType.Comment, block, 0), (TokenType.Identifier, "WHERE", block.Length + 1)]);
+    }
+
+    /// <summary>
+    /// A <c>/*</c> inside a line comment opens no block comment, so the line comment still ends
+    /// at its terminator and the next line lexes as code.
+    /// </summary>
+    /// <param name="terminator">The line terminator after the comment, by name.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Language] - Lexer: /* inside a line comment opens nothing")]
+    [InlineData("LF")]
+    [InlineData("CR")]
+    [InlineData("CRLF")]
+    [InlineData("NEL")]
+    [InlineData("LS")]
+    [InlineData("PS")]
+    public void MoveNext_BlockCommentOpenerInsideLineComment_ShouldEndAtTheTerminator(string terminator)
+    {
+        // Arrange
+        string separator = Terminator(terminator);
+
+        // Act
+        var tokens = Lex("-- a /* b" + separator + "WHERE");
+
+        // Assert
+        tokens.ShouldBe([(TokenType.Comment, "-- a /* b", 0), (TokenType.Identifier, "WHERE", 9 + separator.Length)]);
+    }
+
+    /// <summary>
     /// Vertical tab and form feed are whitespace but not line terminators, as in PostgreSQL and
     /// C#, so they stay inside a comment.
     /// </summary>
