@@ -35,6 +35,7 @@ public sealed class SqlArithmeticWireTests
     [InlineData("SELECT ABS(-9223372036854775807 - 1) FROM users", OutOfRange)]
     [InlineData("SELECT (-9223372036854775807 - 1) / -1 FROM users", OutOfRange)]
     [InlineData("SELECT SUM(CAST('79228162514264337593543950335' AS DECIMAL)) FROM users", OutOfRange)]
+    [InlineData("UPDATE users SET id = id + 2147483647", OutOfRange)]
     public async Task QueryAsync_ArithmeticFault_ShouldReturnCodedExecutionFailure(string statement, string code)
     {
         // Arrange
@@ -77,6 +78,74 @@ public sealed class SqlArithmeticWireTests
 
         (await connection.QueryAsync("SELECT COUNT(*) AS total FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
             .ShouldHaveSingleItem()["total"].ShouldBe(2L);
+    }
+
+    /// <summary>A bound nonzero divisor too small for Decimal is out of range, never reported as zero.</summary>
+    /// <param name="divisor">The bound nonzero divisor.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Arithmetic: a nonzero approximate divisor below Decimal's step fails with COHSQLE002")]
+    [MemberData(nameof(UnderflowingDivisors))]
+    public async Task QueryAsync_UnderflowingApproximateDivisor_ShouldFailOutOfRange(object divisor)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        var parameters = new Dictionary<string, object?> { ["divisor"] = divisor };
+
+        // Act / Assert
+        foreach (string op in new[] { "/", "%" })
+        {
+            SqlClientException failure = await Should.ThrowAsync<SqlClientException>(async () =>
+                await connection.QueryAsync($"SELECT score {op} @divisor FROM users", parameters, SqlClientTestHarness.Timeout()));
+            failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+            failure.ConnectionUsable.ShouldBeTrue();
+            failure.Message.ShouldStartWith(OutOfRange + ":", Case.Sensitive);
+            failure.Message.ShouldContain("underflows DECIMAL", Case.Sensitive);
+        }
+
+        (await connection.QueryAsync("SELECT COUNT(*) AS total FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
+            .ShouldHaveSingleItem()["total"].ShouldBe(2L);
+    }
+
+    /// <summary>Supplies a nonzero REAL and DOUBLE below Decimal's smallest step.</summary>
+    /// <returns>The underflowing divisors.</returns>
+    public static IEnumerable<object[]> UnderflowingDivisors() => [[1e-30f], [1e-30d]];
+
+    /// <summary>Incomparable ORDER BY keys fail the command, not the connection.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Evaluation: incomparable ORDER BY keys are an execution failure that keeps the connection")]
+    public async Task QueryAsync_IncomparableOrderByKeys_ShouldKeepConnection()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        SqlClientException failure = await Should.ThrowAsync<SqlClientException>(async () =>
+            await connection.QueryAsync("SELECT id FROM users ORDER BY CASE WHEN id = 1 THEN 'a' ELSE id END",
+                cancellationToken: SqlClientTestHarness.Timeout()));
+
+        // Assert
+        failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+        failure.ConnectionUsable.ShouldBeTrue();
+        failure.Message.ShouldStartWith("Cannot compare values of types", Case.Sensitive);
+        (await connection.QueryAsync("SELECT COUNT(*) AS total FROM users", cancellationToken: SqlClientTestHarness.Timeout()))
+            .ShouldHaveSingleItem()["total"].ShouldBe(2L);
+    }
+
+    /// <summary>A guarded divisor does not fault: AND stops once its left operand is FALSE.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Arithmetic: an AND guard prevents a division by zero over the wire")]
+    public async Task QueryAsync_GuardedDivision_ShouldNotFault()
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        SqlResultSet result = await connection.QueryAsync(
+            "SELECT COUNT(*) AS total FROM users WHERE score - score <> 0 AND id / (score - score) > 1",
+            cancellationToken: SqlClientTestHarness.Timeout());
+
+        // Assert
+        result.ShouldHaveSingleItem()["total"].ShouldBe(0L);
     }
 
     /// <summary>Supplies a zero of each numeric runtime type the wire codec carries.</summary>

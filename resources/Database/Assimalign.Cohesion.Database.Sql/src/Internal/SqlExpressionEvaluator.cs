@@ -258,6 +258,14 @@ internal sealed class SqlExpressionEvaluator
     private static string ColumnName(SqlColumnReferenceExpression column)
         => string.Join('.', new[] { column.SchemaName, column.TableAlias, column.ColumnName }.Where(part => part is not null));
 
+    /// <summary>The magnitude of the BIGINT minimum, which only a negated literal can spell.</summary>
+    private const ulong BigIntMinimumMagnitude = 9223372036854775808UL;
+
+    /// <remarks>
+    /// A numeric literal its type cannot hold raises <see cref="OverflowException"/> with
+    /// the literal's text. <see cref="Evaluate"/> codes it as out of range, and a CAST
+    /// operand still reports it as a conversion failure.
+    /// </remarks>
     private static object? EvaluateLiteral(SqlLiteralExpression literal)
     {
         return literal.LiteralType switch
@@ -265,10 +273,34 @@ internal sealed class SqlExpressionEvaluator
             SqlLiteralType.Null => null,
             SqlLiteralType.String => literal.Value,
             SqlLiteralType.Boolean => literal.Value.Equals("TRUE", StringComparison.OrdinalIgnoreCase),
-            SqlLiteralType.Integer => long.Parse(literal.Value, CultureInfo.InvariantCulture),
-            SqlLiteralType.Float => SqlCastConverter.ParseNumericLiteral(literal.Value),
+            SqlLiteralType.Integer => ParseIntegerLiteral(literal.Value),
+            SqlLiteralType.Float => ParseFractionalLiteral(literal.Value),
             _ => throw new DatabaseException($"Literal type {literal.LiteralType} is not supported."),
         };
+    }
+
+    private static long ParseIntegerLiteral(string text)
+    {
+        try
+        {
+            return long.Parse(text, CultureInfo.InvariantCulture);
+        }
+        catch (OverflowException exception)
+        {
+            throw new OverflowException($"integer literal {text} exceeds BIGINT.", exception);
+        }
+    }
+
+    private static decimal ParseFractionalLiteral(string text)
+    {
+        try
+        {
+            return SqlCastConverter.ParseNumericLiteral(text);
+        }
+        catch (OverflowException exception)
+        {
+            throw new OverflowException($"numeric literal {text} cannot be represented exactly as DECIMAL.", exception);
+        }
     }
 
     /// <summary>
@@ -308,6 +340,15 @@ internal sealed class SqlExpressionEvaluator
         if (binary.Operator is SqlBinaryOperator.And or SqlBinaryOperator.Or)
         {
             bool? left = EvaluateCore(binary.Left, row) as bool?;
+
+            // FALSE AND x and TRUE OR x are decided by the left operand whatever x is,
+            // including UNKNOWN, so the right operand is not evaluated: a guard such as
+            // d <> 0 AND x / d > 1 never divides by zero.
+            if (binary.Operator == SqlBinaryOperator.And ? left is false : left is true)
+            {
+                return left;
+            }
+
             bool? right = EvaluateCore(binary.Right, row) as bool?;
 
             return binary.Operator == SqlBinaryOperator.And
@@ -352,6 +393,17 @@ internal sealed class SqlExpressionEvaluator
 
     private object? EvaluateUnary(SqlUnaryExpression unary, object?[] row)
     {
+        // The BIGINT minimum's magnitude is one past BIGINT's maximum, so its literal
+        // cannot be parsed before the sign applies. A negated integer literal of exactly
+        // that magnitude is read as the signed literal it spells.
+        if (unary.Operator == SqlUnaryOperator.Negate
+            && unary.Operand is SqlLiteralExpression { LiteralType: SqlLiteralType.Integer } magnitude
+            && ulong.TryParse(magnitude.Value, NumberStyles.None, CultureInfo.InvariantCulture, out ulong digits)
+            && digits == BigIntMinimumMagnitude)
+        {
+            return long.MinValue;
+        }
+
         object? operand = EvaluateCore(unary.Operand, row);
 
         if (operand is null)
@@ -560,7 +612,9 @@ internal sealed class SqlExpressionEvaluator
     /// <summary>
     /// Retains decimal arithmetic conversion independently of value comparison. An
     /// approximate operand outside Decimal's range, or a NaN or infinity, cannot take
-    /// part in Decimal arithmetic and fails the statement as out of range.
+    /// part in Decimal arithmetic and fails the statement as out of range. A nonzero
+    /// approximate operand below Decimal's smallest step (1e-28) rounds to 0 like any
+    /// other digit the conversion drops; <see cref="Arithmetic"/> rejects it as a divisor.
     /// </summary>
     private static decimal ToArithmeticNumber(object value)
     {
@@ -580,13 +634,14 @@ internal sealed class SqlExpressionEvaluator
         }
         catch (OverflowException exception)
         {
-            string text = value is float single
-                ? single.ToString("R", CultureInfo.InvariantCulture)
-                : ((double)value).ToString("R", CultureInfo.InvariantCulture);
             throw SqlEvaluationException.NumericValueOutOfRange(
-                $"approximate operand {text} cannot be represented as DECIMAL for arithmetic.", exception);
+                $"approximate operand {ApproximateText(value)} cannot be represented as DECIMAL for arithmetic.", exception);
         }
     }
+
+    private static string ApproximateText(object value) => value is float single
+        ? single.ToString("R", CultureInfo.InvariantCulture)
+        : ((double)value).ToString("R", CultureInfo.InvariantCulture);
 
     private static bool IsArithmeticNumber(object value)
         => value is sbyte or short or int or long or float or double or decimal;
@@ -596,7 +651,8 @@ internal sealed class SqlExpressionEvaluator
     /// <summary>
     /// Applies a binary arithmetic operator. Exact integer operands compute in BIGINT
     /// with overflow checking; any approximate or decimal operand promotes both sides
-    /// to Decimal. A zero divisor and a result outside the computed type fail the
+    /// to Decimal. A zero divisor, a nonzero approximate divisor that Decimal cannot
+    /// distinguish from zero, and a result outside the computed type fail the
     /// statement with their coded diagnostics; nothing wraps or saturates.
     /// </summary>
     private static object Arithmetic(SqlBinaryOperator op, object left, object right)
@@ -639,6 +695,15 @@ internal sealed class SqlExpressionEvaluator
         decimal y = ToArithmeticNumber(right);
         if (y == 0m && op is SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo)
         {
+            // Zero is judged on the operand as supplied. A nonzero REAL or DOUBLE below
+            // Decimal's smallest step converts to 0, and dividing by it has no Decimal
+            // result: that is out of range, not a division by zero.
+            if (right is float single && single != 0f || right is double number && number != 0d)
+            {
+                throw SqlEvaluationException.NumericValueOutOfRange(
+                    $"approximate divisor {ApproximateText(right)} underflows DECIMAL for '{OperatorText(op)}'.");
+            }
+
             throw SqlEvaluationException.DivisionByZero(OperatorText(op));
         }
 

@@ -382,7 +382,8 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   while preserving version stamps. DDL is self-committing and refused in explicit
   transactions. Schema-owned tables retain their existing live-session DDL guard.
 - **Expression evaluation** is interpretive with SQL null propagation (nulls
-  reject predicates, comparisons with null are null, `AND`/`OR` are three-valued),
+  reject predicates, comparisons with null are null, `AND`/`OR` are three-valued
+  and skip the right operand once `FALSE AND` or `TRUE OR` decides the result),
   overflow-checked BIGINT arithmetic for exact integers and promotion to decimal
   otherwise, ordinal string comparison, hand-rolled `LIKE`
   (`%`/`_`), `CASE`, `BETWEEN`, `IN` (lists), `IS NULL`, parameters (`@name`
@@ -397,8 +398,14 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   from the expression tree (an oversized literal, for example), so no raw runtime
   fault leaves evaluation. Recursion runs through `EvaluateCore`, below that
   boundary, so `CAST` still reports an operand it cannot represent as a
-  conversion failure. Aggregate accumulation and the result-type normalization of
-  projected values code their own overflow the same way. The exception is an
+  conversion failure. Aggregate accumulation, the result-type normalization of
+  projected values, and store assignment into an integer or `DECIMAL` column
+  (`CoerceForColumn`) code their own overflow the same way. A nonzero REAL or
+  DOUBLE divisor that converts to Decimal zero is out of range, not a division
+  by zero, because zero is judged on the operand as supplied. `SortRows` unwraps
+  the `InvalidOperationException` the runtime sort puts around a throwing
+  comparer, so incomparable `ORDER BY` keys fail the statement with the
+  comparer's own `DatabaseException` instead of ending a wire session. The exception is an
   internal `DatabaseException` whose message leads with the code, the convention
   Graph's `COHDBG` codes use, until the area root grows a structured diagnostics
   carrier. Evaluation runs in a write statement's first phase, before any
@@ -723,7 +730,9 @@ record moves with the machinery):
   violation). Evaluation faults (division by zero, numeric overflow) are
   `DatabaseException`s carrying a `COHSQLE` code, so they take this path and
   the session stays ready (#1069; before that fix a raw `DivideByZeroException`
-  reached the `Internal` catch-all and closed the session). Framing/order violations (`ProtocolException`, malformed parameter
+  reached the `Internal` catch-all and closed the session, and so did the
+  `InvalidOperationException` the runtime sort wraps around an `ORDER BY` key
+  comparison that fails). Framing/order violations (`ProtocolException`, malformed parameter
   components) → `ProtocolViolation` **and close**; anything unexpected →
   `Internal` and close. A child-root exception that escapes raw (for example a
   `StorageException` the engine failed to wrap) reaches the wire as `Internal`

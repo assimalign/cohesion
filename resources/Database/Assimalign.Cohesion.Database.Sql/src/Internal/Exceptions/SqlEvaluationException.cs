@@ -3,9 +3,10 @@ using System;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// A data exception raised while evaluating a scalar expression or aggregate: the
-/// statement fails with a stable engine code, and the session and any open
-/// transaction stay usable, exactly as for any other statement failure.
+/// A data exception raised while evaluating a scalar expression or aggregate, or while
+/// storing a numeric value into a column: the statement fails with a stable engine
+/// code, and the session and any open transaction stay usable, exactly as for any
+/// other statement failure.
 /// </summary>
 /// <remarks>
 /// The code leads the message (<c>COHSQLE001: ...</c>), the engine-code convention
@@ -47,7 +48,8 @@ internal sealed class SqlEvaluationException : DatabaseException
 
     /// <summary>
     /// Codes a runtime arithmetic fault that no evaluation site coded at its source,
-    /// such as an oversized numeric literal. Division faults keep their own code.
+    /// such as an oversized numeric literal, whose message names the literal. Division
+    /// faults keep their own code.
     /// </summary>
     /// <param name="exception">The runtime arithmetic fault.</param>
     /// <returns>The coded failure.</returns>

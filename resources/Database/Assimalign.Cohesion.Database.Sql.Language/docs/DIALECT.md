@@ -319,21 +319,27 @@ Integer `/` truncates toward zero and `%` takes the dividend's sign
 `2147483647 + 1` is the exact BIGINT `2147483648`, not a fault. `x % -1` is 0
 for every integer, including the BIGINT minimum. Approximate operands enter
 Decimal arithmetic through the runtime floating-point conversion, as before
-(about 7 significant digits for REAL and 15 for DOUBLE).
+(about 7 significant digits for REAL and 15 for DOUBLE). A nonzero REAL or
+DOUBLE smaller in magnitude than Decimal's smallest step (1e-28) converts to 0
+like any other digit the conversion drops, so `@tiny + 1` is `1`. As a divisor
+it has no Decimal quotient and reports `COHSQLE002`, not a division by zero.
 
-A fault fails the statement. Nothing wraps, saturates, or becomes NULL:
+An arithmetic fault fails the statement. No operator result wraps, saturates, or
+becomes NULL:
 
 | Code | ISO SQLSTATE | Raised when |
 |---|---|---|
-| `COHSQLE001` | 22012, division by zero | The right operand of `/` or `%` is zero: integer, decimal, or approximate, whether it is a literal, column, computed value, or bound parameter. |
-| `COHSQLE002` | 22003, numeric value out of range | A BIGINT result leaves -9223372036854775808..9223372036854775807, including `-x`, `ABS(x)`, and `x / -1` for the minimum; a Decimal result exceeds `System.Decimal`; a REAL or DOUBLE operand is NaN, infinite, or beyond Decimal's range; a numeric literal does not fit its type; `SUM` or `AVG` overflows or meets a non-finite value; or a value does not fit the common type of `CASE`/`COALESCE` branches. |
+| `COHSQLE001` | 22012, division by zero | The right operand of `/` or `%` is zero: integer, decimal, or approximate (either signed zero), whether it is a literal, column, computed value, or bound parameter. |
+| `COHSQLE002` | 22003, numeric value out of range | A BIGINT result leaves -9223372036854775808..9223372036854775807, including `-x`, `ABS(x)`, and `x / -1` for the minimum; a Decimal result exceeds `System.Decimal`; a REAL or DOUBLE operand is NaN, infinite, or beyond Decimal's range, or is a nonzero divisor below Decimal's smallest step; a numeric literal does not fit its type (see Literals); `SUM` or `AVG` overflows or meets a non-finite value; a value does not fit the common type of `CASE`/`COALESCE` branches; or a value does not fit the integer or `DECIMAL` column it is stored into. |
 
 The code leads the message, for example
 `COHSQLE001: Division by zero: the right operand of '/' is zero.` In process the
 statement throws a `DatabaseException` with that message. Over the wire the server
 reports `ExecutionFailure` with the same text, and the SQL client raises
 `SqlClientException` with `Kind = ExecutionFailure` and `ConnectionUsable = true`.
-An evaluation fault never terminates a session.
+An evaluation fault never terminates a session. That covers the coded faults above
+and uncoded query errors raised while rows are evaluated, such as `ORDER BY` keys
+the value order cannot compare (`Cannot compare values of types ...`).
 
 - **Atomicity:** every expression of a DML statement, including CHECK
   constraints, is evaluated before its first write, so a faulting `INSERT`,
@@ -348,12 +354,21 @@ An evaluation fault never terminates a session.
   comparand that faults during index-seek planning is not used for the seek, and
   the scan faults on the first row that evaluates it. `LIMIT` and `OFFSET`
   expressions are evaluated during planning and fault there.
+- **Short-circuit:** `AND` and `OR` evaluate their left operand first and skip the
+  right one when the left decides the result (`FALSE AND x`, `TRUE OR x`). A guard
+  such as `d <> 0 AND x / d > 1` therefore never divides by zero; a guard written
+  after the division, or a left operand that is NULL, does not protect it. `CASE`
+  evaluates only the selected branch and `COALESCE` stops at the first non-NULL
+  argument. Every other operator and function evaluates all of its operands.
+- **Store assignment:** a value an integer or `DECIMAL` column cannot hold, such as
+  `UPDATE t SET i = i + 1` on an `INT` at 2147483647, reports `COHSQLE002`
+  (`value '2147483648' does not fit column 'i' of type Int32.`). A value that is not
+  a number at all keeps the uncoded `Cannot convert value ...` error, and a REAL
+  column stores a finite DOUBLE beyond REAL's range as an infinity.
 - **CAST:** arithmetic inside a CAST operand keeps its own code
   (`CAST(1 / 0 AS INT)` reports `COHSQLE001`). A value or literal the target cannot
-  represent remains a CAST failure under the conversion contract below.
-- **Not coded here:** storing an in-range BIGINT or Decimal result into a narrower
-  column is destination coercion and keeps its `Cannot convert value ...` error;
-  CAST range failures keep their `CAST ... failed` message.
+  represent remains a CAST failure under the conversion contract below, with its
+  `CAST ... failed` message.
 
 ## Grouping and aggregate functions (#1020)
 
@@ -555,6 +570,17 @@ the mapper diagnoses such retained names before emitting SQL.
 | Boolean | `TRUE`, `FALSE` | `Boolean` |
 | Null | `NULL` | `Null` |
 
+The engine evaluates an integer literal as BIGINT and a fractional or exponent
+literal as an exact `System.Decimal`, whatever the target. A literal its type cannot
+hold reports `COHSQLE002` and names itself, for example
+`integer literal 9223372036854775808 exceeds BIGINT.`: an integer literal above
+9223372036854775807 (write `12345678901234567890.0` for a larger exact value), or
+a fractional literal Decimal cannot hold exactly, with more than 28 decimal places
+or beyond Decimal's range (`1e-30`, `1e40`), even when it is stored into a REAL or
+DOUBLE column. Bind such approximate values as parameters. A negated integer literal is read as one signed literal, so
+`-9223372036854775808` is the BIGINT minimum. Inside `CAST` an unrepresentable
+literal stays a CAST failure.
+
 ## Type names (the `SqlTypeNames` table)
 
 | SQL names | Shared type identity |
@@ -667,7 +693,7 @@ function names are lexed but not supported (see the statement matrix).
 | `SQL0005` | Error | Unsupported CAST target or invalid target parameters |
 | `SQL0100` | Information | Statement does not end with `;` |
 | `COHSQLE001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
-| `COHSQLE002` | Error | Numeric value out of range during evaluation (ISO SQLSTATE 22003) |
+| `COHSQLE002` | Error | Numeric value out of range during evaluation or store assignment (ISO SQLSTATE 22003) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -234,8 +235,18 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        return ordered!.Select(x => x.Row).ToList();
-
+        try
+        {
+            return ordered!.Select(x => x.Row).ToList();
+        }
+        catch (InvalidOperationException exception) when (exception.InnerException is DatabaseException inner)
+        {
+            // The runtime sort wraps a throwing comparer in InvalidOperationException.
+            // Two keys the value order cannot compare are a statement error, so the
+            // comparer's own DatabaseException is the failure, not a session-ending fault.
+            ExceptionDispatchInfo.Throw(inner);
+            throw;
+        }
     }
 
     /// <summary>Hashes each projected string with exactly the collation used for its equality.</summary>
@@ -1392,6 +1403,14 @@ internal sealed partial class SqlPlanExecutor
                 },
                 _ => throw new DatabaseException($"Column type {column.Type.Type} cannot store values yet."),
             };
+        }
+        catch (OverflowException exception) when (column.Type.Type is DatabaseType.Int8 or DatabaseType.Int16
+            or DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal)
+        {
+            // ISO store assignment: a value the numeric column cannot hold is a numeric
+            // value out of range (SQLSTATE 22003), the same fault as an overflowing result.
+            throw SqlEvaluationException.NumericValueOutOfRange(
+                $"value '{Convert.ToString(value, CultureInfo.InvariantCulture)}' does not fit column '{column.Name}' of type {column.Type.Type}.", exception);
         }
         catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException)
         {
