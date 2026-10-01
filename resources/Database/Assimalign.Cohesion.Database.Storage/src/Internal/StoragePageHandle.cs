@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 
 namespace Assimalign.Cohesion.Database.Storage.Internal;
 
@@ -12,7 +13,7 @@ internal sealed class StoragePageHandle : IStoragePageHandle
 {
     private readonly StorageBufferPool _pool;
     internal readonly StorageBufferPool.BufferEntry Entry;
-    private bool _disposed;
+    private int _disposed;
 
     internal StoragePageHandle(PageId pageId, StorageBufferPool.BufferEntry entry, StorageBufferPool pool)
     {
@@ -25,7 +26,18 @@ internal sealed class StoragePageHandle : IStoragePageHandle
     public PageId Id { get; }
 
     /// <inheritdoc />
-    public Page Page => Entry.Page;
+    public Page Page
+    {
+        get
+        {
+#if DEBUG
+            // After its pin is released the entry may already hold another page: a
+            // reference through a released handle is a use-after-unpin.
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+#endif
+            return Entry.Page;
+        }
+    }
 
     /// <inheritdoc />
     public bool IsDirty => Entry.IsDirty;
@@ -34,15 +46,15 @@ internal sealed class StoragePageHandle : IStoragePageHandle
     public int PinCount => Entry.PinCount;
 
     /// <inheritdoc />
-    public void MarkDirty() => Entry.IsDirty = true;
+    public void MarkDirty() => Entry.MarkDirty();
 
     /// <inheritdoc />
     public void Dispose()
     {
-        if (!_disposed)
+        // Exactly one release per handle, even when two threads dispose it at once.
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            _pool.Unpin(Id);
-            _disposed = true;
+            _pool.Unpin(Entry);
         }
     }
 }

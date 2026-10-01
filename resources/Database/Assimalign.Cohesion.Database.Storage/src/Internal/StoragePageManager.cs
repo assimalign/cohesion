@@ -38,16 +38,17 @@ internal sealed class StoragePageManager : IStoragePageManager
         // since the page doesn't exist in the stream yet)
         var handle = _bufferPool.Pin(pageId, _stream);
 
-        // Now extend the stream to accommodate the new page
-        long requiredLength = ((long)pageId + 1) * Page.Size;
-        if (_stream.Length < requiredLength)
-        {
-            _stream.SetLength(requiredLength);
-        }
+        // Now extend the stream to accommodate the new page. Grow only, and under the pool
+        // lock that every page read and write-back holds: a concurrent allocation of a
+        // higher page may already have extended it (a shorter length would cut that page
+        // off), and an in-memory stream replaces its array when it grows, which would drop
+        // a write-back landing in the old array.
+        _bufferPool.EnsureLength(_stream, ((long)pageId + 1) * Page.Size);
 
-        // Initialize the fresh page (local copy shares the same pointer)
+        // Initialize the fresh page (local copy shares the same pointer). The clear spans
+        // the pool buffer's fixed size, never a length read from the page's own header.
         var page = handle.Page;
-        page.AsSpan().Clear();
+        new Span<byte>(page.Pointer, Page.Size).Clear();
         page.Id = (long)pageId;
         page.Type = type;
         handle.MarkDirty();
@@ -63,7 +64,7 @@ internal sealed class StoragePageManager : IStoragePageManager
         using (var handle = _bufferPool.Pin(pageId, _stream))
         {
             var page = handle.Page;
-            page.AsSpan().Clear();
+            new Span<byte>(page.Pointer, Page.Size).Clear();
             page.Id = (long)pageId;
             page.Type = PageType.Free;
             handle.MarkDirty();

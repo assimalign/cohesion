@@ -106,8 +106,20 @@ preserve bytes even when no durable flush was issued.
 Pin-counting with RAII handles (`IStoragePageHandle`): a page cannot be evicted while
 pinned, dirty pages are written back (checksum-stamped) before eviction, and handles
 release their pin on dispose. Contrast with a `Memory<byte>`-pooling design: pages are
-*pinned* GC handles exposing raw pointers because the slotted-page and header structs
+*pinned* buffers exposing raw pointers because the slotted-page and header structs
 are `unsafe` overlays — the pool guarantees pointer stability for the handle's lifetime.
+
+- **Buffers live on the pinned object heap** (`GC.AllocateArray(..., pinned: true)`),
+  not behind `GCHandle`s. A pinned-heap array never moves and stays valid while anything
+  references it — the entry, and through it every handle — so no code path can release
+  a pin out from under a live pointer. Disposing the pool drops its bookkeeping and
+  nothing else; a handle that outlives its pool still points at live memory. (With
+  `GCHandle`s, disposing the storage while an iterator held a page freed the pin, after
+  which the GC was free to move the buffer under the iterator's pointer.)
+- **A handle releases the pin it took.** Disposing a handle unpins its own entry, not
+  whatever is resident under the page id, and disposal is idempotent across threads.
+- **Content changes only under a pin.** Readers and writers take pins; the pool takes
+  no part in content access. The write-back rules below rest on that.
 
 - **Eviction is least-recently-used** over unpinned entries: pins and cache hits move a
   page to the MRU end; capacity overflow evicts from the LRU end, skipping pinned
@@ -115,16 +127,57 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   the pool never silently exceeds its memory budget. LRU (not clock/2Q) because the
   pool is fully lock-serialized anyway, so the precise policy costs nothing extra and
   is trivially testable.
-- **Buffers are reused**: evicted entries return their pinned 8 KiB buffers (GC handle
-  and all) to a recycle stack, so steady-state page churn performs zero allocations —
-  fresh pages are zeroed on reuse so recycled buffers never leak prior content.
+- **Buffers are reused**: evicted entries return their pinned 8 KiB buffers to a
+  recycle stack, so steady-state page churn performs zero allocations — fresh pages
+  are zeroed on reuse so recycled buffers never leak prior content.
 - **Failed loads never poison the cache**: a page that fails checksum verification is
   not cached; its buffer goes straight back to the recycle stack and the exception
-  propagates.
+  propagates. The same holds for a page whose header claims an overflow area that does
+  not fit the 8 KiB buffer (`StorageCorruptionException`): `Page.AsSpan()` and
+  `AsBodySpan()` size their spans from that header, nothing writes overflow pages yet,
+  and an unstamped page (checksum zero) is never verified, so the header alone would
+  otherwise hand the B-tree a writable span past the buffer.
+- **Extension runs under the pool lock.** Allocating a page past the end of the data
+  stream grows the stream through `EnsureLength`, under the same lock every page read
+  and write-back holds, and only ever grows it. An in-memory stream copies its array
+  into a new one when it grows; a write-back that landed in the old array after its
+  region was copied was lost while the pool recorded the page clean, so a later eviction
+  dropped the change and the reload was stale or all zeros (#1157 review). The
+  `StorageStream` adapter over a plain `Stream` also routes `Length` and `SetLength`
+  through the gate that serializes its page reads and writes, so the stream is safe on
+  its own, not only under the pool.
 - **One lock.** All pool state is guarded by a single monitor. Page *content* access is
   the caller's concern (a handle hands out a raw pointer); the transaction layer above
   provides content-level isolation. Sharding the lock is a measured-need optimization,
   not a default.
+- **Write-back writes a private copy.** A pinned writer can change a page while the pool
+  writes it back — `FlushAll` and `FlushPage` write pinned pages, and until #1157 the
+  paced page writer did too. Write-back therefore copies the page first, stamps the
+  checksum on the copy, and writes the copy: the bytes on the stream always verify. The
+  write-ahead
+  LSN is read from the copy as well — a writer stamps the page LSN before changing the
+  bytes that record covers, so the copy's LSN covers every change in it.
+- **Dirty state is a version, not a flag.** `MarkDirty` advances the entry's
+  modification version; a write-back records the entry clean only up to the version it
+  observed before copying. A change made during the write keeps the page dirty. With a
+  boolean, a writer's `MarkDirty` could land between the write and the write-back's
+  "clean", the page was later evicted without being written, and the reload either lost
+  the change or failed its checksum — the storage concurrency suite reproduces exactly
+  that against the old pool.
+- **Paced write-back skips pinned pages.** An unpinned page is quiescent, so the page
+  writer only ever writes complete images; a pinned dirty page waits for a later pass,
+  an eviction, or the checkpoint (which runs with no transaction active).
+- **Invariants.** The structural check (`CheckInvariants`) verifies, under the lock,
+  that every resident entry has a non-negative pin count, is not on the recycle stack,
+  and owns exactly one node of the LRU list keyed by its page; that the LRU list holds
+  nothing else; and that recycled entries are unpinned and detached. It is compiled
+  into every configuration. Debug builds also run it after every pool operation and add
+  per-operation checks: a handle never releases a pin on an entry that is no longer
+  resident, a page is never unpinned more often than it was pinned, and a handle's page
+  is never read after the handle was disposed. Release builds skip the per-operation
+  checks and ignore an over-release. CI runs the suites in Release, so the explicit
+  check, the injected-violation tests and the per-phase checks of the concurrency suites
+  run there too; the per-operation checks run in local Debug runs.
 
 ## The record layer
 
@@ -135,6 +188,38 @@ storage — row, document, KV entry, node/edge record — is "a variable-length 
 sequence addressed by (page, slot)". Records above `SlottedPage.MaxRecordSize` are
 rejected at the API boundary; multi-page records ride overflow pages (a later feature —
 the flags and page type are reserved).
+
+**No offset taken from a page is trusted.** The page is native memory, so an offset
+past its end is a write into whatever the runtime placed next to the buffer — that is
+how #1157 killed the process (below). Every `SlottedPage` operation checks the geometry
+it is about to use and fails with `StorageCorruptionException` (carrying the page id)
+instead of dereferencing it:
+
+- **Writes** (`InsertSlot`, `UpdateSlot`, `Compact`) run on a page their transaction
+  owns, so they hold the page to its full invariant: the slot directory fits the body,
+  the free-data end lies between the body start and the slot directory, and the slot
+  being changed addresses bytes inside the record area.
+- **Reads** (`ReadSlot`, `GetSlotLength`) can run beside the page's single writer — a
+  scan takes a pin, not a latch — so they enforce only what holds in every state a
+  well-formed page passes through: the slot index lies inside a directory a page can
+  hold, and the record lies inside the page body. That is what keeps a read inside the
+  buffer. A read racing a change can still see a torn record — stale bytes, or a
+  corruption error if it catches a rollback's page restore half-way, where it used to
+  read past the buffer — which is the content-isolation question page latches would
+  answer; the layers above own it today.
+- **Relocation needs the whole record.** An update that outgrows its slot appends the
+  record at the free-data end and leaves the old bytes as dead space, so it requires
+  the record's full length in free space and leaves the page untouched when it does
+  not fit (the caller relocates to another page — the catalogs' delete-and-insert).
+- **`Compact` moves records in offset order.** A relocated record can sit above a
+  record with a higher slot index; compacting in slot order overwrote it. Overlapping
+  records are corruption and fail before any byte moves. Nothing calls `Compact` yet:
+  dead space from relocations is not reclaimed in place (see the #1157 follow-up below).
+- **Clears span the buffer, not the header.** Freeing and allocating a page clear a
+  fixed `Page.Size` (or body) span; `Page.AsSpan()` honors the reserved overflow size in
+  the header, and a header is page content that a corrupt page controls. The pool refuses
+  to load a page whose overflow header does not fit its buffer (above), so a span taken
+  from a pooled page stays inside it.
 
 ### Per-owner record chains
 
@@ -370,6 +455,111 @@ preserving existing undo/redo semantics and torn-tail handling. The replay memor
 cost is transaction/page identities plus one page image, not the journal payload
 size. This permits Blob journals larger than available memory to reopen.
 
+## #1157: the access violation under concurrent ALTER TABLE
+
+**Symptom.** Concurrent `ALTER TABLE ... ADD/DROP COLUMN` (or `ADD/DROP CONSTRAINT`)
+beside `INSERT` writers ended the process with `AccessViolationException` in
+`LinkedList.Remove` ← `StorageBufferPool.Touch` ← `Pin` ← `StoragePageManager.GetPage`
+← `Storage.CommitTransaction` ← `DefaultSqlCatalog.ReplaceTable`. `Pin` and `Touch`
+already ran under the pool lock, so the list was not raced: something had overwritten
+managed memory.
+
+**How it was found.** A diagnostic build moved every page buffer into native memory
+flanked by large no-access reservations, so a write outside a page faults at the
+writing instruction instead of corrupting a neighbour. The fault moved to
+`SlottedPage.UpdateSlot`, inside the catalog's `UpsertRecord`. A single-threaded loop of
+`ADD COLUMN` / `DROP COLUMN` with no writers at all then crashed between cycle 50 and
+100: concurrency only changed the timing.
+
+**Root cause.** `UpdateSlot` relocates a record that outgrows its slot by appending it
+at the free-data end, leaving the old bytes behind as dead space — but it checked only
+the record's *growth* (`new length - old length`) against the free space. Each ALTER
+rewrites the table's catalog record: `DROP COLUMN` shrinks it in place, the next `ADD
+COLUMN` grows it and relocates it, so every cycle consumed one record's worth of the
+catalog page. Once less than a full record was free — 92 bytes free, a 200-byte
+record, 20 bytes of growth — the append ran through the slot directory and 104 bytes
+past the end of the page, and the header's free-data end became 8296. The pool
+allocated each `BufferEntry` immediately after its 8 KiB buffer (measured: the object
+starts 8 bytes after the buffer's last byte, its LRU-node reference about 24 bytes
+after), so the overflow overwrote the entry's `Node` reference; the very next `Pin` of
+that page — the commit's after-image capture — handed the garbage reference to
+`LinkedList.Remove`. Neither a missing lock nor state shared between the catalog and
+data storages was involved, and the pin/unpin/recycle lifecycle was intact.
+
+**The fix** removes the cause and the class: relocation requires the whole record in
+free space and leaves the page untouched otherwise (the catalog then relocates the
+record to another page, as it already did for `SlottedPageException`), and every
+slotted-page operation checks the geometry it uses before it dereferences an offset
+(the record-layer rules above).
+
+**Found by the same tests, fixed with it.** The storage-level concurrency suite written
+for #1157 failed on three further defects, each independent of the ALTER crash:
+
+- *Write-back raced pinned writers* — a torn checksum and a lost dirty bit, so a page
+  could be evicted clean and reloaded stale or failing verification ("Page N failed
+  checksum verification"). The SQL engine's page writer runs beside its writers, so
+  this was reachable in production. Fixed by the private write-back copy, the dirty
+  version, and the pinned-page skip (buffer-pool rules above).
+- *The free-space map was unsynchronized.* Allocation, commit-time frees and scans'
+  allocation checks run on different threads; an unsynchronized allocator can hand one
+  page to two transactions, and a `HashSet` read during a write can throw or answer
+  wrongly. Every member now takes the map's lock.
+- *Extending the data stream raced page I/O.* Two allocations extending the stream at
+  once could set the shorter length last and cut the other page off. Worse, extension
+  ran outside both the pool lock and the gate that serializes the stream's page reads
+  and writes (`StorageStream.SetLength` went straight to the inner stream). When an
+  in-memory stream grows past its capacity it copies its array into a new one; a
+  write-back that landed in the old array after its region was copied was lost while
+  the pool recorded the page clean, so a later eviction dropped the change and the
+  reload was stale or all zeros. This was the in-memory engines' default path, and the
+  SQL engine lost index entries for committed rows under a fast page writer. Extension
+  now only grows, through `EnsureLength` under the pool lock, and `StorageStream` routes
+  `Length` and `SetLength` through its handle's gate (buffer-pool rules above). File
+  handles were not affected by the array copy, but share the grow-only, locked path.
+
+The pinned-object-heap buffers close the remaining lifecycle hazard (a disposed pool
+freeing pins under live pointers), and the invariant check keeps the pool's structure
+verified under every test.
+
+The review also closed two neighbouring holes in the same class: the pool refuses a
+page whose overflow header does not fit its buffer (otherwise `Page.AsSpan()` would size
+a span past the buffer from page content), and the SQL catalog refuses a table, index or
+registration definition that encodes past `SlottedPage.MaxRecordSize` with a
+`SqlCatalogException` before touching storage, where it used to fail half-way through a
+relocation with a raw `SlottedPageException`.
+
+**Tests.** `SlottedPageTests` reproduce the overflow deterministically between guard
+regions and cover each geometry check; `StorageBufferPoolConcurrencyTests` and
+`StorageConcurrencyTests` pin, unpin, evict, write back and commit from several threads
+against pools of six and eight pages, verifying contents, checksums, the pool
+invariants and a reopen after every phase. `StorageStreamTests` grow an in-memory
+stream across eight capacity doublings while another thread writes pages, and
+`StorageConcurrencyTests` updates records in place over the production in-memory stream
+while inserts extend it and the page writer runs, re-reading every row before each
+update and at the end; both failed in each of six runs against the old extension path.
+`SqlConcurrentDdlStressTests` (in `Database.Sql`) run the issue's reproducer — in memory
+and file backed, columns, constraints and both, several seeds — for two seconds per case
+in CI, or as long as `COHESION_SQL_STRESS_SECONDS` says locally (60 or more for the long
+mode), and check that every committed row reads back, again after a reopen. Their table
+carries a padding CHECK that makes its catalog record about 4.4 KiB, more than half a
+page body, so no page can hold two images of it and every successful ADD meets the
+state the old relocation overflowed from; each case runs until at least three ADDs
+succeeded. Every one of these cases crashes the test host with the old `UpdateSlot`
+within seconds, as do the deterministic `ADD/DROP COLUMN` and `ADD/DROP CONSTRAINT`
+loops.
+
+**Open follow-ups.** Dead space left by relocations and deletes is not reclaimed in
+place: `Compact` is correct now, but compacting moves other records, and scans read
+pages under a pin without a latch, so in-place compaction waits for page latches.
+Under heavy ALTER churn a catalog page fills with dead record images, the record moves
+to another page, and the dead space stays until its page holds no live record.
+Separately, the SQL index seek and the version store treat any
+`StorageException` from a record read as "reclaimed" and skip the record; that now
+includes `StorageCorruptionException`, which deserves to surface rather than hide a row.
+Overflow pages themselves remain unimplemented: until they are, `Page.AsSpan()` trusts
+the header only because the pool refuses an oversized one at load, and a `Page` built
+over caller memory carries no such check. Each follow-up needs its own work item.
+
 ## Error model
 
 `StorageException` is the area root for this library. `StorageIOException` (stream and
@@ -383,7 +573,10 @@ it, so consumers can catch the family or the specific failure.
 No reflection, no runtime codegen. Header structs are explicit-layout overlays read
 through pointers; encodings are hand-written span code. `AllowUnsafeBlocks` is enabled
 for the pointer overlays — the unsafe surface is confined to `Units/` and the buffer
-pool's pinned buffers.
+pool's pinned buffers. Pinned-object-heap allocation (`GC.AllocateArray(..., pinned:
+true)`) is supported by NativeAOT; the pool's per-operation invariant checks are
+compiled out of release builds (`[Conditional("DEBUG")]`), while the structural check
+they share stays in every build for tests to call.
 
 ## Non-goals
 

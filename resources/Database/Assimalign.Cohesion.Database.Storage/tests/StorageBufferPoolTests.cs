@@ -203,6 +203,65 @@ public class StorageBufferPoolTests
         stream.Dispose();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Storage] - BufferPool: a page whose header claims an overflow area past its buffer is refused")]
+    [InlineData(Page.Size, false)]
+    [InlineData(Page.Size, true)]
+    [InlineData(-1, true)]
+    public unsafe void Pin_HeaderOverflowPastTheBuffer_ShouldThrowAndStayOutOfCache(int overflowSize, bool stamped)
+    {
+        // Arrange: Page.AsSpan sizes its span from the overflow header. An unstamped page
+        // (checksum zero) is never verified, and a stamped one verifies whatever its header
+        // says, so the header alone must not size a span past the 8 KiB buffer.
+        var bytes = new byte[Page.Size];
+        fixed (byte* pointer = bytes)
+        {
+            var page = new Page(pointer);
+            page.Type = PageType.Data;
+            page.Flags = PageFlags.Overflow;
+            page.OverflowSize = overflowSize;
+        }
+
+        if (stamped)
+        {
+            PageChecksum.Stamp(bytes);
+        }
+
+        using var stream = new StorageStream(new MemoryStream(bytes));
+        using var pool = new StorageBufferPool(2);
+
+        // Act
+        var exception = Should.Throw<StorageCorruptionException>(() => pool.Pin((PageId)0L, stream));
+
+        // Assert
+        exception.Message.ShouldContain("overflow");
+        pool.Count.ShouldBe(0);
+        pool.CheckInvariants();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: a page whose overflow area fits its buffer loads")]
+    public unsafe void Pin_HeaderOverflowInsideTheBuffer_ShouldLoad()
+    {
+        // Arrange
+        var bytes = new byte[Page.Size];
+        fixed (byte* pointer = bytes)
+        {
+            var page = new Page(pointer);
+            page.Type = PageType.Data;
+            page.Flags = PageFlags.Overflow;
+            page.OverflowSize = Page.Size - Page.HeaderSize;
+        }
+
+        PageChecksum.Stamp(bytes);
+        using var stream = new StorageStream(new MemoryStream(bytes));
+        using var pool = new StorageBufferPool(2);
+
+        // Act
+        using var handle = pool.Pin((PageId)0L, stream);
+
+        // Assert
+        handle.Page.AsSpan().Length.ShouldBe(Page.Size);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: concurrent pin/unpin churn stays consistent")]
     public async Task Pin_ConcurrentChurn_ShouldStayConsistent()
     {

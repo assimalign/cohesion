@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -8,6 +9,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog.Tests;
@@ -382,5 +384,68 @@ public class SqlCatalogTests
         await catalog.SetRecordSpaceFormatVersionAsync(3);
         harness.MarkerKinds().ShouldBe([4]);
         Reopen(harness).RecordSpaceFormatVersion.ShouldBe(3);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Record size: a column addition past one catalog record is refused and the table is kept")]
+    public async Task AddColumn_DefinitionPastTheRecordSize_ShouldThrowAndKeepTheTable()
+    {
+        // Arrange: each long-named column adds about a hundred bytes to the table's record,
+        // which must fit one slotted-page slot.
+        var (catalog, harness) = OpenFresh();
+        await catalog.CreateTableAsync("dbo", "wide", [Column("id", DatabaseType.Int64)]);
+        string prefix = new('w', 100);
+        int added = 0;
+        SqlCatalogException? failure = null;
+
+        // Act
+        for (int column = 1; column <= 200 && failure is null; column++)
+        {
+            try
+            {
+                await catalog.AddColumnAsync("dbo", "wide", Column($"{prefix}{column}", DatabaseType.Int32));
+                added++;
+            }
+            catch (SqlCatalogException exception)
+            {
+                failure = exception;
+            }
+        }
+
+        // Assert: a catalog error naming the table, and the definition is the last one
+        // that fit, in memory and after a reopen; smaller changes still succeed.
+        failure.ShouldNotBeNull();
+        failure.Message.ShouldContain("table 'dbo.wide'", Case.Sensitive);
+        failure.Message.ShouldContain(SlottedPage.MaxRecordSize.ToString(CultureInfo.InvariantCulture), Case.Sensitive);
+        added.ShouldBeGreaterThan(40);
+        catalog.TryGetTable("dbo", "wide", out var table).ShouldBeTrue();
+        table.Columns.Count.ShouldBe(1 + added);
+        Reopen(harness).TryGetTable("dbo", "wide", out var persisted).ShouldBeTrue();
+        persisted.Columns.Count.ShouldBe(1 + added);
+        await catalog.DropColumnAsync("dbo", "wide", $"{prefix}{added}");
+        await catalog.AddColumnAsync("dbo", "wide", Column("small", DatabaseType.Int32));
+        Reopen(harness).TryGetTable("dbo", "wide", out var shrunk).ShouldBeTrue();
+        shrunk.FindColumn("small").ShouldNotBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Record size: a table definition past one catalog record is refused and nothing is created")]
+    public async Task CreateTable_DefinitionPastTheRecordSize_ShouldThrowAndCreateNothing()
+    {
+        // Arrange
+        var (catalog, harness) = OpenFresh();
+        var columns = Enumerable.Range(0, 120)
+            .Select(column => Column($"{new string('n', 100)}{column}", DatabaseType.String))
+            .ToList();
+
+        // Act
+        var failure = await Should.ThrowAsync<SqlCatalogException>(async () =>
+            await catalog.CreateTableAsync("dbo", "huge", columns));
+
+        // Assert
+        failure.Message.ShouldContain("table 'dbo.huge'", Case.Sensitive);
+        catalog.TryGetTable("dbo", "huge", out _).ShouldBeFalse();
+        Reopen(harness).TryGetTable("dbo", "huge", out _).ShouldBeFalse();
+        await catalog.CreateTableAsync("dbo", "huge", columns.Take(10).ToList());
+        Reopen(harness).TryGetTable("dbo", "huge", out var created).ShouldBeTrue();
+        created.Columns.Count.ShouldBe(10);
     }
 }

@@ -31,12 +31,23 @@ public interface IStorageBufferPool : IDisposable
     /// <param name="pageId">The identifier of the page to pin.</param>
     /// <param name="stream">The storage stream to read from if the page is not cached.</param>
     /// <returns>A handle to the pinned page.</returns>
+    /// <exception cref="ObjectDisposedException">The pool has been disposed.</exception>
+    /// <exception cref="StorageCorruptionException">
+    /// The page read from <paramref name="stream"/> failed its checksum, or its header
+    /// describes bytes past the end of the page buffer. The page is not cached.
+    /// </exception>
+    /// <exception cref="StorageIOException">The pool is full and every resident page is pinned, or the stream ended inside the page.</exception>
     IStoragePageHandle Pin(PageId pageId, StorageStream stream);
 
     /// <summary>
     /// Decrements the pin count for the specified page. When the pin count
     /// reaches zero, the page becomes eligible for eviction.
     /// </summary>
+    /// <remarks>
+    /// Releasing a pin the page does not hold is a caller bug. Debug builds of the shared
+    /// pool throw <see cref="InvalidOperationException"/> for it; release builds leave the
+    /// pin count at zero. A page that is not resident is ignored.
+    /// </remarks>
     /// <param name="pageId">The identifier of the page to unpin.</param>
     void Unpin(PageId pageId);
 
@@ -46,6 +57,7 @@ public interface IStorageBufferPool : IDisposable
     /// <param name="pageId">The identifier of the page to look up.</param>
     /// <param name="handle">When this method returns, contains the page handle if the page was found; otherwise, <c>null</c>.</param>
     /// <returns><c>true</c> if the page was found in the pool; otherwise, <c>false</c>.</returns>
+    /// <exception cref="ObjectDisposedException">The pool has been disposed.</exception>
     bool TryGet(PageId pageId, out IStoragePageHandle? handle);
 
     /// <summary>
