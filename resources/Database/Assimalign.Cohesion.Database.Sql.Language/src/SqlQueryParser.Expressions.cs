@@ -24,7 +24,9 @@ public sealed partial class SqlQueryParser
     //   ParseAddition           → ParseMultiplication ((+|-||) ParseMultiplication)*
     //                            (an infix ~, ~*, ~~, !~ ... here reports COHDBL001)
     //   ParseMultiplication     → ParseUnary ((*|/|%) ParseUnary)*
-    //   ParseUnary              → (-|~)? ParseCollate   (a prefix ~ reports COHDBL001)
+    //   ParseUnary              → (-|+|~) ParseUnary | ParseCollate
+    //                            (a prefix ~ reports COHDBL001; a + directly before a
+    //                            numeric literal is part of the literal, see ParsePrimary)
     //   ParseCollate            → ParsePrimary (COLLATE name)*
     //   ParsePrimary            → literal | column_ref | param | function(...)
     //                            | (expr) | (SELECT ...) | CASE | CAST | EXISTS | *
@@ -385,7 +387,8 @@ public sealed partial class SqlQueryParser
         return left;
     }
 
-    // The operand of a sign is itself a unary expression, so - -1 is 1, as in ISO SQL.
+    // The operand of a sign is itself a unary expression, so - -1 is 1 and + -a is -a, as in
+    // ISO SQL.
     private SqlExpression ParseUnary(ref TokenLexer lexer)
     {
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Minus)
@@ -394,6 +397,19 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
             var operand = ParseUnary(ref lexer);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.Negate,
+                Location.Create(1, 1, pos, pos));
+        }
+
+        // ISO unary plus. Directly before a numeric literal the sign stays part of the
+        // literal (ParsePrimary folds it), so ORDER BY +1 remains the ordinal 1; on any
+        // other operand it is an operator. +a and +(1 + 2) used to be parse errors because
+        // the AST had no unary plus (#1068).
+        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Plus && !IsSignedNumericLiteral(lexer))
+        {
+            var pos = lexer.Current.Position;
+            Advance(ref lexer);
+            var operand = ParseUnary(ref lexer);
+            return new SqlUnaryExpression(operand, SqlUnaryOperator.Plus,
                 Location.Create(1, 1, pos, pos));
         }
 
@@ -420,6 +436,15 @@ public sealed partial class SqlQueryParser
 
         return ParseCollate(ref lexer);
     }
+
+    /// <summary>
+    /// Whether the current <c>+</c> directly precedes a numeric literal, comments aside. Such a
+    /// sign is part of the literal rather than a unary plus, which keeps <c>ORDER BY +1</c> an
+    /// ordinal and gives <c>+1</c> the same tree as <c>1</c>.
+    /// </summary>
+    private static bool IsSignedNumericLiteral(TokenLexer lexer)
+        => lexer.Current.Type == TokenType.Plus && AdvancePastComments(ref lexer) &&
+           lexer.Current.Type is TokenType.Integer or TokenType.Float;
 
     /// <summary>
     /// Whether an infix <c>~</c> operator starts at the current token: <c>~</c> itself, or
@@ -498,8 +523,7 @@ public sealed partial class SqlQueryParser
         // distinguish +1 from a larger constant expression such as +1 + 1.
         if (lexer.Current.Type == TokenType.Plus)
         {
-            var next = lexer;
-            if (AdvancePastComments(ref next) && next.Current.Type is TokenType.Integer or TokenType.Float)
+            if (IsSignedNumericLiteral(lexer))
             {
                 Advance(ref lexer);
                 string value = CurrentText(ref lexer);
