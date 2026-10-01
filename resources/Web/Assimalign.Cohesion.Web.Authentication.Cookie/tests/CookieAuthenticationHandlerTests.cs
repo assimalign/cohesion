@@ -131,6 +131,22 @@ public sealed class CookieAuthenticationHandlerTests : IDisposable
         cookie.Options.SameSite.ShouldBe(HttpCookieSameSiteMode.Lax);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Authentication.Cookie] - SignIn: The default template should emit an essential cookie, so a consent policy never suppresses it")]
+    public async Task SignIn_DefaultTemplate_ShouldEmitEssentialCookie()
+    {
+        // Arrange
+        CookieAuthenticationOptions options = CreateOptions();
+        TestHttpContext context = TestHttpContext.Create();
+        IAuthenticationSignInHandler handler = await InitializeAsync(options, context);
+
+        // Act
+        await handler.SignInAsync(CreatePrincipal("alice"), properties: null);
+
+        // Assert
+        options.Cookie.IsEssential.ShouldBeTrue();
+        GetEmittedCookie(context, options.CookieName).Options.IsEssential.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Authentication.Cookie] - Authenticate with no cookie yields NoResult")]
     public async Task Authenticate_NoCookie_NoResult()
     {

@@ -93,7 +93,8 @@ in v1 (the redirect targets and the parameter name are configurable).
 
 ## Cookie hardening defaults
 
-The emitted cookie defaults to `HttpOnly=true`, `SameSite=Lax`, `Path=/`. A
+The emitted cookie defaults to `HttpOnly=true`, `SameSite=Lax`, `Path=/`, and
+`IsEssential=true` (see "Under the cookie policy" below). A
 persistent sign-in (`IsPersistent=true`) emits `Expires`/`Max-Age`; a
 non-persistent one emits a session cookie. Sign-out emits a deletion cookie
 (empty value, epoch `Expires`, zero `Max-Age`). The underlying
@@ -126,17 +127,48 @@ Why a floor and not the options considered with it (#1050, defect D7):
   TLS-terminating proxy there was no way to say "Secure when the client used
   HTTPS" at all. Rejected.
 - **A tri-state secure policy option** (ASP.NET's `CookieSecurePolicy`:
-  `SameAsRequest` / `Always` / `None`). That is new public surface and a
-  default-choosing decision, and cookie-policy enforcement — including the
-  secure default for this handler — is #156's scope (`Web.CookiePolicy`). Not
-  taken here.
+  `SameAsRequest` / `Always` / `None`) on this handler. That is new public
+  surface and a default-choosing decision for every cookie, not just the
+  ticket, so it lives in `Web.CookiePolicy` (#156) as `CookiePolicyOptions.Secure`
+  rather than here.
 - **Chosen: template OR effective HTTPS.** It is a pure hardening with no public
   API change: over HTTPS the cookie can only gain `Secure`, and over plaintext
   the template decides exactly as before. What it removes is the ability to emit
   a non-`Secure` ticket over HTTPS — a credential the browser would then also
   send over plaintext, since only the `Secure` attribute confines a cookie to
-  secure channels (RFC 6265bis §4.1.2.5). It composes with #156: whatever policy
-  that item adds reads the same effective scheme.
+  secure channels (RFC 6265bis §4.1.2.5). It composes with `Web.CookiePolicy`
+  (#156), whose default `SameAsRequest` reads the same effective scheme, so
+  the two never disagree.
+
+### Under the cookie policy (#156)
+
+The handler emits through `response.Cookies`, so when `UseCookiePolicy` runs the
+policy judges the ticket, its renewal, and the sign-out deletion like any other
+cookie. Its consent rule, attribute floors, and RFC 6265bis requirements apply.
+What that means for the defaults:
+
+- **The ticket is essential.** `Cookie.IsEssential` defaults to `true`. That was
+  the one gap #156 found: before the policy existed nothing read `IsEssential`,
+  so the template never set it, and under a consent requirement a non-essential
+  ticket would be dropped on every request; a user could never stay signed in.
+  Signing in is something the user asked for, which is what "essential" means.
+  An application that collects consent before it offers sign-in can set it to
+  `false`.
+- **`Secure` behind a proxy** is the handler's floor above plus the policy's
+  `SameAsRequest`; both read the effective scheme.
+- **`SameSite`** stays `Lax` unless `MinimumSameSitePolicy` raises it. `Strict`
+  withholds the ticket from top-level navigations that arrive from another
+  site, so a user following a link in is treated as signed out on that first
+  request.
+- **A `__Host-` ticket name** works: the template's `Path=/` and absent `Domain`,
+  plus the `Secure` floor over HTTPS, satisfy the prefix. Over plaintext the
+  policy's `Upgrade` adds `Secure`, which only a `localhost` client accepts, and
+  `Reject` drops the ticket.
+- **Sign-out always passes:** the deletion cookie is a deletion, which consent
+  never blocks.
+
+The handler takes no reference to `Web.CookiePolicy`; the two meet only in the
+cookie model.
 
 ### Redirects and the return URL need no host or scheme
 
@@ -167,7 +199,8 @@ metadata resolution is an `is`-test scan.
 - **OAuth2 / OIDC interactive login.** Redirect-based external sign-in is a
   follow-up; this handler only manages a first-party session cookie.
 - **Cookie policy (consent, same-site overrides).** Cross-cutting cookie
-  policy is `Web.CookiePolicy`'s concern.
+  policy is `Web.CookiePolicy`'s concern; the handler only marks its ticket
+  essential (see "Under the cookie policy").
 - **Key management.** The rotating key ring and its persistence live in
   `Security.DataProtection`, carried at builder time by
   `AuthenticationBuilder.DataProtectionProvider` (the default key ring, or
