@@ -38,6 +38,12 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         _catalog = defaultCollation is null
             ? SqlCatalog.Open(catalogStorage)
             : SqlCatalog.Open(catalogStorage, defaultCollation);
+
+        // Refuse a newer data-storage format before any engine component reads
+        // the data file set: recovery's scrub, index purge and checkpoint below
+        // would otherwise run with this engine's older semantics.
+        ThrowIfFormatIsNewer();
+
         _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new SqlTransactionRecordSpace(storage));
 
         // Re-attach the persisted secondary indexes before recovery: the
@@ -78,18 +84,12 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     }
 
     /// <summary>
-    /// Upgrades an older data storage in place, at open, before any session
-    /// exists: a pre-MVCC (version-1) space first gains version stamps, a
-    /// pre-chain (version-2) space is relocated into per-object page chains, and
-    /// a version-3 space rebuilds the indexes whose keys carry temporal
-    /// components under the identity encoding; the catalog then persists the
-    /// current format version. Each stage commits all-or-nothing and is
-    /// idempotent across the two-storage crash window, because the marker write
-    /// is last: a crash after a stage's commit re-runs it safely (see each stage).
-    /// A version newer than this engine writes is refused rather than read with
-    /// an older key encoding.
+    /// Refuses a data storage on a format newer than this engine writes, rather
+    /// than reading it with an older key encoding. Runs as soon as the catalog is
+    /// open, before the transaction coordinator, the index manager or recovery
+    /// touch the data file set.
     /// </summary>
-    private void UpgradeRecordSpaceIfNeeded()
+    private void ThrowIfFormatIsNewer()
     {
         int version = _catalog.RecordSpaceFormatVersion;
 
@@ -99,8 +99,25 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
                 $"Database '{Name}' uses data-storage format version {version}, newer than this engine understands " +
                 $"({SqlRowCodec.RecordSpaceFormatVersion}).");
         }
+    }
 
-        if (version == SqlRowCodec.RecordSpaceFormatVersion)
+    /// <summary>
+    /// Upgrades an older data storage in place, at open, before any session
+    /// exists: a pre-MVCC (version-1) space first gains version stamps, a
+    /// pre-chain (version-2) space is relocated into per-object page chains, and
+    /// a version-3 space rebuilds the indexes whose keys carry temporal
+    /// components under the identity encoding; the catalog then persists the
+    /// current format version. Each stage commits all-or-nothing and is
+    /// idempotent across the two-storage crash window, because the marker write
+    /// is last: a crash after a stage's commit re-runs it safely (see each stage).
+    /// A version newer than this engine writes never gets here: the constructor
+    /// refuses it first (<see cref="ThrowIfFormatIsNewer"/>).
+    /// </summary>
+    private void UpgradeRecordSpaceIfNeeded()
+    {
+        int version = _catalog.RecordSpaceFormatVersion;
+
+        if (version >= SqlRowCodec.RecordSpaceFormatVersion)
         {
             return;
         }

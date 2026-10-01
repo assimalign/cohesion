@@ -27,6 +27,15 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     private const int indexRecordKind = 5;
     private const int schemaStateRecordKind = 6;
     private const int defaultCollationRecordKind = 7;
+
+    // The record-space format marker from version 4 on (#1099). Catalogs written
+    // before format 4 (through 10.0.0-preview.1) load kinds 1-7 only and refuse
+    // any other kind, so persisting a format-4 marker under a new kind makes those
+    // engines fail the open instead of accepting the database and writing
+    // format-3 index keys into it. Versions 1-3 keep the kind-4 record.
+    private const int fencedRecordSpaceFormatKind = 8;
+    private const int firstFencedRecordSpaceFormatVersion = 4;
+
     private const int schemaStateChunkSize = 3 * 1024;
 
     private static readonly Encoding _strictUtf8 = new UTF8Encoding(
@@ -516,8 +525,11 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
 
         lock (_sync)
         {
+            int kind = version >= firstFencedRecordSpaceFormatVersion
+                ? fencedRecordSpaceFormatKind
+                : recordSpaceFormatKind;
             var writer = new DatabaseKeyWriter();
-            writer.AppendInt32(recordSpaceFormatKind).AppendInt32(version);
+            writer.AppendInt32(kind).AppendInt32(version);
             byte[] record = writer.ToArray();
 
             using (var transaction = _storage.BeginTransaction())
@@ -622,6 +634,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                     break;
 
                 case recordSpaceFormatKind:
+                case fencedRecordSpaceFormatKind:
                     _recordSpaceFormatVersion = reader.ReadInt32();
                     _formatLocation = (unit.PageId, unit.SlotIndex);
                     break;

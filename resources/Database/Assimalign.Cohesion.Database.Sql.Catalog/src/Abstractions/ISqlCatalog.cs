@@ -172,7 +172,10 @@ public interface ISqlCatalog
     /// <summary>
     /// Persists the record-space format version. Self-committing, like every
     /// catalog write; called by the engine after a record-space upgrade (or at
-    /// database creation, when the space is born on the current format).
+    /// database creation, when the space is born on the current format). From
+    /// version 4 on, the marker is stored in a form that catalogs written before
+    /// version 4 refuse to load, so an older engine fails the open instead of
+    /// writing older-format data into the database.
     /// </summary>
     /// <param name="version">The format version to persist.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>

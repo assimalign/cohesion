@@ -39,15 +39,40 @@ public class SqlCatalogTests
             return SqlCatalog.Open(storage);
         }
 
-        public ISqlCatalog Reopen()
+        public ISqlCatalog Reopen() => SqlCatalog.Open(OpenCopy());
+
+        /// <summary>
+        /// Reads the raw catalog records the way a catalog's load does and returns
+        /// the kinds of the record-space format marker records found (4 or 8).
+        /// </summary>
+        public List<int> MarkerKinds()
+        {
+            using var storage = OpenCopy();
+            using var iterator = storage.GetUnitIterator();
+            var kinds = new List<int>();
+
+            while (iterator.MoveNext())
+            {
+                var reader = new DatabaseKeyReader(iterator.Current.Data.Span);
+                int kind = reader.ReadInt32();
+
+                if (kind is 4 or 8)
+                {
+                    kinds.Add(kind);
+                }
+            }
+
+            return kinds;
+        }
+
+        private SqlStorage OpenCopy()
         {
             var dataCopy = new MemoryStream();
             dataCopy.Write(_data.ToArray());
             var journalCopy = new MemoryStream();
             journalCopy.Write(_journal.ToArray());
 
-            var storage = SqlStorage.Open(dataCopy, journalCopy, new MemoryStream());
-            return SqlCatalog.Open(storage);
+            return SqlStorage.Open(dataCopy, journalCopy, new MemoryStream());
         }
     }
 
@@ -327,5 +352,35 @@ public class SqlCatalogTests
         reopened.Tables.Count.ShouldBe(50);
         reopened.TryGetTable("dbo", "table_49", out var last).ShouldBeTrue();
         last.Columns.Count.ShouldBe(20);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Format marker: version 4 and later persist under a record kind earlier catalogs refuse (#1099)")]
+    public async Task SetRecordSpaceFormatVersion_FromVersionFour_ShouldUseFencedRecordKind()
+    {
+        // Arrange
+        var (catalog, harness) = OpenFresh();
+        harness.MarkerKinds().ShouldBeEmpty();
+
+        // Act + Assert: versions 1-3 keep the kind-4 record every catalog reads...
+        await catalog.SetRecordSpaceFormatVersionAsync(3);
+        harness.MarkerKinds().ShouldBe([4]);
+        Reopen(harness).RecordSpaceFormatVersion.ShouldBe(3);
+
+        // ...version 4 rewrites it as a kind-8 record. Catalogs before format 4
+        // (through 10.0.0-preview.1) load kinds 1-7 only and refuse any other,
+        // so an engine that would write format-3 index keys cannot open it...
+        await catalog.SetRecordSpaceFormatVersionAsync(4);
+        harness.MarkerKinds().ShouldBe([8]);
+        Reopen(harness).RecordSpaceFormatVersion.ShouldBe(4);
+
+        // ...later versions stay behind the same fence...
+        await catalog.SetRecordSpaceFormatVersionAsync(5);
+        harness.MarkerKinds().ShouldBe([8]);
+        Reopen(harness).RecordSpaceFormatVersion.ShouldBe(5);
+
+        // ...and lowering the marker below 4 restores the single kind-4 record.
+        await catalog.SetRecordSpaceFormatVersionAsync(3);
+        harness.MarkerKinds().ShouldBe([4]);
+        Reopen(harness).RecordSpaceFormatVersion.ShouldBe(3);
     }
 }
