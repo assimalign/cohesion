@@ -52,6 +52,24 @@ public sealed class SqlStatementCompletenessExecutionTests
     [InlineData("UPDATE t SET name = :name WHERE id = 1;")]
     [InlineData("DELETE FROM t WHERE id = 1; DELETE FROM t;")]
     [InlineData("BEGIN; DELETE FROM t;")]
+    [InlineData("UPDATE t SET name = 'abc WHERE id = 1;")]
+    [InlineData("UPDATE t SET name = 'it''s WHERE id = 1;")]
+    [InlineData("DELETE FROM t /* WHERE id = 1;")]
+    [InlineData("DELETE FROM t /* /* nested */ WHERE id = 1;")]
+    [InlineData("DELETE FROM t # WHERE id = 1;")]
+    [InlineData("UPDATE t SET age = 0 WHERE flag NOT FALSE;")]
+    [InlineData("DELETE FROM t WHERE NOT (flag NOT NULL);")]
+    [InlineData("DELETE FROM t WHERE (id = 1;")]
+    [InlineData("DELETE FROM t WHERE id IN (1, 2;")]
+    [InlineData("DELETE FROM t WHERE id BETWEEN 1 2;")]
+    [InlineData("UPDATE t SET name = CASE WHEN id = 1 'a' END WHERE id = 1;")]
+    [InlineData("UPDATE t SET name = 'z', WHERE id = 1;")]
+    [InlineData("UPDATE t SET name 'q' WHERE id = 1;")]
+    [InlineData("UPDATE t;")]
+    [InlineData("DELETE;")]
+    [InlineData("INSERT INTO t VALUES (5, 'x', 1, TRUE), ();")]
+    [InlineData("INSERT INTO t (id, name,, age) VALUES (5, 'x', 1);")]
+    [InlineData("DELETE FROM t WHRE id = 1 RETURNING *;")]
     public async Task ExecuteAsync_LeftoverText_ShouldReportSyntaxErrorWithoutMutation(string sql)
     {
         // Arrange
@@ -101,6 +119,66 @@ public sealed class SqlStatementCompletenessExecutionTests
     }
 
     /// <summary>
+    /// Malformed DDL fails at parse time and leaves the schema as it was. Type arguments
+    /// used to be the concatenated text up to ')', so VARCHAR(25 5) created a 255-character
+    /// column and VARCHAR(MAX) threw a raw FormatException from the planner.
+    /// </summary>
+    /// <param name="sql">The malformed DDL statement.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Completeness: malformed DDL fails at parse time and changes no schema")]
+    [InlineData("CREATE TABLE z (a VARCHAR(25 5));")]
+    [InlineData("CREATE TABLE z (b DECIMAL(10, 2, 5));")]
+    [InlineData("CREATE TABLE z (c VARCHAR(-5));")]
+    [InlineData("CREATE TABLE z (a VARCHAR(MAX));")]
+    [InlineData("CREATE TABLE z (a VARCHAR(abc));")]
+    [InlineData("CREATE TABLE z (a TEXT NOT);")]
+    [InlineData("CREATE TABLE IF NOT z (a INT);")]
+    [InlineData("ALTER TABLE t ADD COLUMN c VARCHAR(MAX);")]
+    [InlineData("ALTER TABLE ADD COLUMN c INT;")]
+    [InlineData("ALTER INDEX ix RENAME TO iy;")]
+    [InlineData("CREATE INDEX ON t (name);")]
+    [InlineData("CREATE INDEX IF EXISTS ix ON t (name);")]
+    [InlineData("CREATE INDEX ix ON t (name,, age);")]
+    [InlineData("DROP TABLE IF t;")]
+    public async Task ExecuteAsync_MalformedDdl_ShouldFailAtParseTimeWithoutSchemaChange(string sql)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-completeness-ddl" });
+        var database = await engine.CreateDatabaseAsync("completeness");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await SeedAsync(session, withRows: true);
+        var before = await SchemaSnapshotAsync(session);
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
+
+        // Assert
+        error.Message.ShouldContain("SQL0003", Case.Sensitive);
+        (await SchemaSnapshotAsync(session)).ShouldBe(before);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Completeness: a sign applies to a signed operand")]
+    public async Task ExecuteAsync_NestedUnaryMinus_ShouldNegateTwice()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-completeness-unary" });
+        var database = await engine.CreateDatabaseAsync("completeness");
+        await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+        await SeedAsync(session, withRows: true);
+
+        // Act
+        var result = await ExecuteAsync(session, "UPDATE t SET age = - -1 WHERE id = 1;");
+
+        // Assert
+        result.AffectedCount.ShouldBe(1);
+        (await RowsAsync(session, "SELECT age, - -age, -(-age) FROM t ORDER BY id;")).ShouldBe(
+        [
+            new object?[] { 1, 1, 1 },
+            new object?[] { 45, 45, 45 },
+            new object?[] { 41, 41, 41 },
+        ]);
+    }
+
+    /// <summary>
     /// An unknown function is rejected for the whole statement before a row is read, so
     /// the outcome no longer depends on whether the table has rows.
     /// </summary>
@@ -125,6 +203,8 @@ public sealed class SqlStatementCompletenessExecutionTests
     [InlineData("INSERT INTO t (id, name) SELECT id, FOO(name) FROM u;")]
     [InlineData("CREATE TABLE c (a INT CHECK (FOO(a) > 0));")]
     [InlineData("ALTER TABLE t ADD CONSTRAINT ck CHECK (FOO(age) > 0);")]
+    [InlineData("ALTER TABLE t ADD COLUMN extra INT DEFAULT FOO();")]
+    [InlineData("CREATE TABLE c (a INT DEFAULT FOO());")]
     public async Task ExecuteAsync_UnknownFunction_ShouldFailAtPlanTimeWhateverTheRows(string sql)
     {
         foreach (bool withRows in new[] { false, true })
@@ -194,6 +274,16 @@ public sealed class SqlStatementCompletenessExecutionTests
         {
             (await ExecuteAsync(session, statement)).Status.ShouldBe(QueryResultStatus.Success, statement);
         }
+    }
+
+    private static async Task<string[]> SchemaSnapshotAsync(IDatabaseSession session)
+    {
+        var columns = await RowsAsync(session,
+            "SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, IS_NULLABLE " +
+            "FROM INFORMATION_SCHEMA.COLUMNS ORDER BY TABLE_NAME, ORDINAL_POSITION;");
+        var indexes = await RowsAsync(session,
+            "SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME FROM COHESION_SCHEMA.INDEXES ORDER BY TABLE_NAME, INDEX_NAME, ORDINAL_POSITION;");
+        return [.. columns.Select(row => "c:" + string.Join(",", row)), .. indexes.Select(row => "i:" + string.Join(",", row)), .. await SnapshotAsync(session)];
     }
 
     private static async Task<string[]> SnapshotAsync(IDatabaseSession session)

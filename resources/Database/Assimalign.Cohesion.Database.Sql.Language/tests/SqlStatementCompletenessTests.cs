@@ -86,10 +86,12 @@ public sealed class SqlStatementCompletenessTests
 
     /// <summary>
     /// Leftovers appended to every complete form: words (the first may be read as an
-    /// alias), a literal, a stray parenthesis, a misspelled clause, and text after the
-    /// terminating ';' — including a second statement.
+    /// alias), a literal, a stray parenthesis, a misspelled clause, text after the
+    /// terminating ';' — including a second statement — an unterminated string or block
+    /// comment that would swallow the rest, and a character outside the dialect.
     /// </summary>
-    private static readonly string[] _leftovers = [" x y", " 1", " )", " WHRE id = 1", "; x", "; DELETE FROM t", ";;"];
+    private static readonly string[] _leftovers =
+        [" x y", " 1", " )", " WHRE id = 1", "; x", "; DELETE FROM t", ";;", " 'x", " /* x", " # x"];
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Completeness: every advertised clause and statement kind has a corpus form")]
     public void Corpus_EveryClauseAndStatementKind_ShouldHaveACompleteForm()
@@ -189,7 +191,168 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("SELECT id FROM t WHERE id = ^:id;", ":")]
     [InlineData("UPDATE t SET a = ^:a WHERE id = 1;", ":")]
     [InlineData("DELETE FROM t WHERE id = 1; ^DELETE FROM t;", "DELETE")]
+    [InlineData("UPDATE t SET name = ^'abc WHERE id = 1;", "'")]
+    [InlineData("UPDATE t SET name = ^'it''s WHERE id = 1;", "'")]
+    [InlineData("DELETE FROM t ^/* WHERE id = 1;", "/*")]
+    [InlineData("DELETE FROM t ^/* /* nested */ WHERE id = 1;", "/*")]
+    [InlineData("SELECT ^\"id FROM t;", "\"")]
+    [InlineData("DELETE FROM t ^# WHERE id = 1;", "#")]
+    [InlineData("DELETE FROM t WHERE a NOT ^NULL;", "NULL")]
+    [InlineData("UPDATE t SET age = 0 WHERE flag NOT ^FALSE;", "FALSE")]
+    [InlineData("DELETE FROM t WHERE NOT (flag NOT ^NULL);", "NULL")]
+    [InlineData("SELECT id FROM t WHERE NOT flag NOT ^TRUE;", "TRUE")]
+    [InlineData("SELECT a NOT ^NULL FROM t;", "NULL")]
     public void Parse_DroppedTail_ShouldReportOneSyntaxErrorAtIt(string marked, string located)
+        => AssertOneSyntaxErrorAt(marked, located);
+
+    /// <summary>
+    /// A missing token, keyword or name is reported where it was expected, once, instead of
+    /// being skipped or replaced by a placeholder that the statement then executes.
+    /// </summary>
+    /// <param name="marked">A malformed statement; '^' marks where the diagnostic starts.</param>
+    /// <param name="located">The source text the diagnostic covers.</param>
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: missing tokens, keywords and names report one SQL0003 where expected")]
+    [InlineData("DELETE FROM t WHERE (id = 1^;", ";")]
+    [InlineData("DELETE FROM t WHERE id IN (1, 2^;", ";")]
+    [InlineData("DELETE FROM t WHERE id IN ^1;", "1")]
+    [InlineData("DELETE FROM t WHERE id BETWEEN 1 ^2;", "2")]
+    [InlineData("UPDATE t SET name = CASE WHEN id = 1 ^'a' END WHERE id = 1;", "'a'")]
+    [InlineData("UPDATE t SET name = CASE WHEN id = 1 THEN 'a' ^WHERE id = 1;", "WHERE")]
+    [InlineData("SELECT id FROM t ORDER ^id;", "id")]
+    [InlineData("SELECT COUNT(id ^FROM t;", "FROM")]
+    [InlineData("SELECT id FROM t WHERE EXISTS (SELECT id FROM u^;", ";")]
+    [InlineData("UPDATE t SET name = 'z', ^WHERE id = 1;", "WHERE")]
+    [InlineData("UPDATE t SET name ^'q' WHERE id = 1;", "'q'")]
+    [InlineData("UPDATE t SET ^= 1 WHERE id = 1;", "=")]
+    [InlineData("UPDATE t SET name ^WHERE id = 1;", "WHERE")]
+    [InlineData("UPDATE t^;", ";")]
+    [InlineData("DELETE^;", ";")]
+    [InlineData("DELETE FROM ^WHERE id = 1;", "WHERE")]
+    [InlineData("SELECT 1 FROM^;", ";")]
+    [InlineData("SELECT * FROM t JOIN ^ON t.id = 1;", "ON")]
+    [InlineData("SELECT * FROM t AS^;", ";")]
+    [InlineData("INSERT INTO t VALUES (1), (^);", ")")]
+    [InlineData("INSERT INTO t VALUES (1),^;", ";")]
+    [InlineData("INSERT INTO t (id, name,^, age) VALUES (5, 'x', 1);", ",")]
+    [InlineData("INSERT INTO t (^) VALUES (1);", ")")]
+    [InlineData("INSERT INTO t (id) ^DEFAULT VALUES;", "DEFAULT")]
+    [InlineData("CREATE INDEX ^ON t (name);", "ON")]
+    [InlineData("CREATE INDEX ix ON t (name,^, age);", ",")]
+    [InlineData("CREATE INDEX ix ON t^;", ";")]
+    [InlineData("DROP INDEX ix ^t;", "t")]
+    [InlineData("DROP TABLE IF ^t;", "t")]
+    [InlineData("DROP TABLE IF ^NOT EXISTS t;", "NOT")]
+    [InlineData("CREATE INDEX IF ^EXISTS ix ON t (name);", "EXISTS")]
+    [InlineData("CREATE INDEX IF NOT ^ix ON t (name);", "ix")]
+    [InlineData("CREATE TABLE IF NOT ^x (a INT);", "x")]
+    [InlineData("CREATE TABLE ^(a INT);", "(")]
+    [InlineData("CREATE TABLE z (a TEXT NOT^);", ")")]
+    [InlineData("CREATE TABLE z (a INT,^);", ")")]
+    [InlineData("CREATE TABLE z (a^);", ")")]
+    [InlineData("CREATE TABLE z (a VARCHAR(25 ^5));", "5")]
+    [InlineData("CREATE TABLE z (b DECIMAL(10, 2^, 5));", ",")]
+    [InlineData("CREATE TABLE z (c VARCHAR(^-5));", "-")]
+    [InlineData("CREATE TABLE z (a VARCHAR(^MAX));", "MAX")]
+    [InlineData("CREATE TABLE z (a VARCHAR(^99999999999));", "99999999999")]
+    [InlineData("ALTER TABLE t ADD COLUMN c VARCHAR(^1e3);", "1e3")]
+    [InlineData("ALTER ^INDEX ix RENAME TO iy;", "INDEX")]
+    [InlineData("ALTER ^t ADD COLUMN c INT;", "t")]
+    [InlineData("ALTER TABLE ^ADD COLUMN c INT;", "ADD")]
+    [InlineData("CREATE TABLE c (a INT DEFAULT ^:x);", ":")]
+    [InlineData("CREATE TABLE c (a INT DEFAULT 1 ^FOO BAR, b INT);", "FOO")]
+    [InlineData("SELECT a ^IS DISTINCT FROM;", "IS DISTINCT FROM")]
+    [InlineData("DELETE FROM t WHERE id = 1 AND name LIKE 'x' ^ESCAPE;", "ESCAPE")]
+    public void Parse_MissingToken_ShouldReportOneSyntaxErrorWhereExpected(string marked, string located)
+        => AssertOneSyntaxErrorAt(marked, located);
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Completeness: a second statement after the terminator is reported separately")]
+    public void Parse_UnclosedTypeArgumentsFollowedByStatement_ShouldReportBoth()
+    {
+        // Act
+        var errors = Errors(Parse("CREATE TABLE z (a VARCHAR(10; DROP TABLE t));"));
+
+        // Assert
+        errors.Select(error => error.Message).ShouldBe(
+        [
+            "Expected ')' after the type arguments but found ';'.",
+            "Unexpected 'DROP' after ';'. A request accepts exactly one statement.",
+        ]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Completeness: type arguments are normalized integer literals")]
+    public void Parse_TypeArguments_ShouldNormalizeToIntegerLiterals()
+    {
+        // Act
+        var statement = Parse("CREATE TABLE z (a VARCHAR( 10 ), b DECIMAL(18 , 4), c INT);");
+
+        // Assert
+        Errors(statement).ShouldBeEmpty();
+        statement.SqlExpression.ShouldBeOfType<SqlCreateTableExpression>().Columns
+            .Select(column => column.DataType).ShouldBe(["VARCHAR(10)", "DECIMAL(18,4)", "INT"]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Completeness: terminated literals, quoted identifiers and comments parse")]
+    public void Parse_TerminatedLexemes_ShouldReportNoError()
+    {
+        // Act
+        var statement = Parse("SELECT 'it''s', '''' /* a /* nested */ b */, \"id\" FROM t -- done\n;");
+
+        // Assert
+        Errors(statement).ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: an unterminated comment or a stray character is an error on its own")]
+    [InlineData("/* only a comment", "Unterminated block comment")]
+    [InlineData("SELECT 1 \U0001F643;", "Unexpected character U+1F643")]
+    [InlineData("SELECT 1 ​;", "Unexpected character U+200B")]
+    public void Parse_LexicalError_ShouldReportSyntaxError(string sql, string message)
+    {
+        // Act
+        var errors = Errors(Parse(sql));
+
+        // Assert
+        errors.Where(error => error.Code == "SQL0003").ShouldHaveSingleItem().Message!.ShouldStartWith(message, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Completeness: a sign applies to a signed operand")]
+    public void Parse_NestedUnaryMinus_ShouldNestTheOperators()
+    {
+        // Act
+        var statement = Parse("SELECT - -1, ~ -a FROM t;");
+
+        // Assert
+        Errors(statement).ShouldBeEmpty();
+        var columns = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns;
+        var negate = columns[0].Expression.ShouldBeOfType<SqlUnaryExpression>();
+        negate.Operator.ShouldBe(SqlUnaryOperator.Negate);
+        negate.Operand.ShouldBeOfType<SqlUnaryExpression>().Operator.ShouldBe(SqlUnaryOperator.Negate);
+        columns[1].Expression.ShouldBeOfType<SqlUnaryExpression>().Operand.ShouldBeOfType<SqlUnaryExpression>()
+            .Operator.ShouldBe(SqlUnaryOperator.Negate);
+    }
+
+    /// <summary>
+    /// A recognized clause outside the profile reports COHDBL001, and text from that clause
+    /// on adds no second diagnostic. Text the parser stopped at before reaching the clause
+    /// still reports SQL0003, so fixing the clause does not reveal a new error.
+    /// </summary>
+    /// <param name="sql">A statement with a clause outside the profile.</param>
+    /// <param name="expected">The error codes, in order.</param>
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: an unsupported clause owns the text after it, not the text before it")]
+    [InlineData("DELETE FROM t WHERE id = 1 RETURNING *;", new[] { "COHDBL001" })]
+    [InlineData("DELETE FROM t WHERE id = 1 RETURNING *; DELETE FROM t;", new[] { "COHDBL001" })]
+    [InlineData("DELETE FROM t WHRE id = 1 RETURNING *;", new[] { "SQL0003", "COHDBL001" })]
+    [InlineData("SELECT * FROM (SELECT id FROM u) d ORDER BY id;", new[] { "COHDBL001" })]
+    [InlineData("SELECT * FROM t JOIN (SELECT id FROM u) q ON t.id = q.id;", new[] { "COHDBL001" })]
+    public void Parse_UnsupportedClause_ShouldOwnOnlyTheTextAfterIt(string sql, string[] expected)
+    {
+        // Act
+        var errors = Errors(Parse(sql));
+
+        // Assert
+        errors.Select(error => error.Code).ShouldBe(expected);
+    }
+
+    private static void AssertOneSyntaxErrorAt(string marked, string located)
     {
         // Arrange
         int start = marked.IndexOf('^', StringComparison.Ordinal);

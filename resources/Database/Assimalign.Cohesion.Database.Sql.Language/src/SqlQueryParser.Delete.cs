@@ -17,13 +17,7 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
         }
 
-        // Table reference
-        SqlTableReference? table = null;
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-        {
-            table = ParseTableReference(ref lexer);
-        }
-        table ??= new SqlTableReference("?", null, null);
+        var table = ParseRequiredTableReference(ref lexer);
 
         // WHERE
         SqlExpression? where = null;

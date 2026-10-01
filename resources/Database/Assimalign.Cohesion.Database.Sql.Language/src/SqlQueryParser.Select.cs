@@ -28,10 +28,9 @@ public sealed partial class SqlQueryParser
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "FROM"))
         {
             Advance(ref lexer);
-            if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-            {
-                from = ParseTableReference(ref lexer);
-            }
+
+            // A missing table is an error; SELECT 1 FROM; used to run as SELECT 1.
+            from = ParseRequiredTableReference(ref lexer);
         }
 
         // JOINs
@@ -116,10 +115,7 @@ public sealed partial class SqlQueryParser
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ORDER"))
         {
             Advance(ref lexer);
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "BY"))
-            {
-                Advance(ref lexer);
-            }
+            ExpectKeyword(ref lexer, "BY", "BY after ORDER");
 
             orderBy.Add(ParseOrderByColumn(ref lexer));
             while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
@@ -243,12 +239,7 @@ public sealed partial class SqlQueryParser
             }
 
             // Expect table reference after JOIN keyword
-            SqlTableReference? table = null;
-            if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-            {
-                table = ParseTableReference(ref lexer);
-            }
-            table ??= new SqlTableReference("?", null, null);
+            var table = ParseRequiredTableReference(ref lexer);
 
             // ON condition
             SqlExpression? condition = null;

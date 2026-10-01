@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
@@ -41,71 +42,91 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
         }
 
-        // IF NOT EXISTS
-        bool ifNotExists = false;
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "IF"))
-        {
-            Advance(ref lexer);
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "NOT"))
-            {
-                Advance(ref lexer);
-            }
+        bool ifNotExists = ParseExistenceGuard(ref lexer, notExists: true);
 
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "EXISTS"))
-            {
-                ifNotExists = true;
-                Advance(ref lexer);
-            }
-        }
-
-        // Index name
+        // Index name. ON in its place means the name is missing: CREATE INDEX ON t (a)
+        // used to create an index named ON.
         string indexName = "?";
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
+        if (IsNameToken(ref lexer))
         {
             indexName = CurrentIdentifierText(ref lexer);
             Advance(ref lexer);
         }
+        else
+        {
+            AddExpectedDiagnostic(ref lexer, "an index name");
+        }
 
         // ON <table>
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ON"))
-        {
-            Advance(ref lexer);
-        }
+        ExpectKeyword(ref lexer, "ON", "ON and the indexed table");
 
         var table = ParseUnaliasedTableReference(ref lexer);
 
-        // Key column list: ( col [, col]* )
+        // Key column list: ( col [, col]* ). Every element must name a column.
         var columns = new List<string>();
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
+        if (Expect(ref lexer, TokenType.LeftParen, "'(' and the index columns"))
         {
-            Advance(ref lexer);
-
-            while (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
+            while (true)
             {
-                if (IsIdentifierOrKeyword(ref lexer))
+                if (!IsNameToken(ref lexer))
                 {
-                    columns.Add(CurrentIdentifierText(ref lexer));
-                    Advance(ref lexer);
+                    AddExpectedDiagnostic(ref lexer, "an index column name");
+                    break;
                 }
 
-                if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
-                {
-                    Advance(ref lexer);
-                }
-                else
+                columns.Add(CurrentIdentifierText(ref lexer));
+                Advance(ref lexer);
+                if (lexer.Current.Type != TokenType.Comma)
                 {
                     break;
                 }
-            }
-
-            if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-            {
                 Advance(ref lexer);
             }
+
+            SkipToClosingParenthesis(ref lexer);
         }
 
         return new SqlCreateIndexExpression(indexName, table, columns, isUnique, ifNotExists, null,
             Location.Create(1, 1, pos, _lastTokenEnd));
+    }
+
+    /// <summary>
+    /// Parses <c>IF NOT EXISTS</c> (<paramref name="notExists"/>, the CREATE form) or
+    /// <c>IF EXISTS</c> (the DROP form) when IF is current. A partial or mismatched
+    /// sequence is an error: IF alone used to be skipped, so <c>DROP TABLE IF t</c>
+    /// dropped t and <c>CREATE INDEX IF EXISTS</c> meant IF NOT EXISTS (#1068).
+    /// </summary>
+    private bool ParseExistenceGuard(ref TokenLexer lexer, bool notExists)
+    {
+        if (!IsKeyword(ref lexer, "IF"))
+        {
+            return false;
+        }
+
+        Advance(ref lexer);
+        if (IsKeyword(ref lexer, "NOT") != notExists)
+        {
+            AddExpectedDiagnostic(ref lexer, notExists ? "NOT EXISTS after IF" : "EXISTS after IF");
+
+            // Recover past the rest of the guard so the object name is still read as one.
+            if (IsKeyword(ref lexer, "NOT"))
+            {
+                Advance(ref lexer);
+            }
+            if (IsKeyword(ref lexer, "EXISTS"))
+            {
+                Advance(ref lexer);
+            }
+            return notExists;
+        }
+
+        if (notExists)
+        {
+            Advance(ref lexer); // consume NOT
+        }
+
+        ExpectKeyword(ref lexer, "EXISTS", notExists ? "EXISTS after IF NOT" : "EXISTS after IF");
+        return true;
     }
 
     private SqlCreateTableExpression ParseCreateTable(ref TokenLexer lexer, int pos)
@@ -116,44 +137,10 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
         }
 
-        // IF NOT EXISTS
-        bool ifNotExists = false;
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "IF"))
-        {
-            Advance(ref lexer);
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "NOT"))
-            {
-                Advance(ref lexer);
-            }
+        bool ifNotExists = ParseExistenceGuard(ref lexer, notExists: true);
 
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "EXISTS"))
-            {
-                ifNotExists = true;
-                Advance(ref lexer);
-            }
-        }
-
-        // Table reference
-        SqlTableReference? table = null;
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-        {
-            // Don't parse alias for CREATE TABLE
-            string firstPart = CurrentIdentifierText(ref lexer);
-            string? schemaName = null;
-
-            if (Advance(ref lexer) && lexer.Current.Type == TokenType.Dot)
-            {
-                if (Advance(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-                {
-                    schemaName = firstPart;
-                    firstPart = CurrentIdentifierText(ref lexer);
-                    Advance(ref lexer);
-                }
-            }
-
-            table = new SqlTableReference(firstPart, schemaName, null);
-        }
-        table ??= new SqlTableReference("?", null, null);
+        // Table reference (no alias)
+        var table = ParseUnaliasedTableReference(ref lexer);
 
         // Column definitions: ( col1 TYPE, col2 TYPE, ... )
         var columns = new List<SqlColumnDefinition>();
@@ -179,6 +166,10 @@ public sealed partial class SqlQueryParser
                 if (lexer.Current.Type == TokenType.Comma)
                 {
                     Advance(ref lexer);
+                    if (lexer.Current.Type == TokenType.RightParen)
+                    {
+                        AddExpectedDiagnostic(ref lexer, "a column or constraint definition after ','");
+                    }
                 }
                 else { break; }
             }
@@ -193,37 +184,31 @@ public sealed partial class SqlQueryParser
     private SqlColumnDefinition ParseColumnDefinition(ref TokenLexer lexer)
     {
         string columnName = string.Empty;
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
+        if (IsIdentifierOrKeyword(ref lexer))
         {
             columnName = CurrentIdentifierText(ref lexer);
             Advance(ref lexer);
         }
+        else
+        {
+            AddExpectedDiagnostic(ref lexer, "a column name");
+        }
 
-        // Data type (consume one or more tokens until we hit a constraint keyword, comma, or paren)
         string dataType = string.Empty;
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
+        if (IsIdentifierOrKeyword(ref lexer))
         {
             dataType = CurrentText(ref lexer);
             Advance(ref lexer);
 
             // Handle parameterized types: VARCHAR(100), DECIMAL(18, 4)
-            if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
+            if (lexer.Current.Type == TokenType.LeftParen)
             {
-                dataType += "(";
-                Advance(ref lexer);
-
-                while (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
-                {
-                    dataType += CurrentText(ref lexer);
-                    Advance(ref lexer);
-                }
-
-                if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-                {
-                    dataType += ")";
-                    Advance(ref lexer);
-                }
+                dataType += ParseTypeArguments(ref lexer);
             }
+        }
+        else
+        {
+            AddExpectedDiagnostic(ref lexer, $"a data type for column '{columnName}'");
         }
 
         // Parse optional constraints
@@ -250,10 +235,15 @@ public sealed partial class SqlQueryParser
             else if (IsKeyword(ref lexer, "NOT"))
             {
                 Advance(ref lexer);
-                if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "NULL"))
+                if (IsKeyword(ref lexer, "NULL"))
                 {
                     isNullable = false;
                     Advance(ref lexer);
+                }
+                else
+                {
+                    // A bare NOT used to be skipped, leaving the column nullable.
+                    AddExpectedDiagnostic(ref lexer, "NULL after NOT");
                 }
             }
             else if (IsKeyword(ref lexer, "NULL"))
@@ -277,12 +267,83 @@ public sealed partial class SqlQueryParser
             }
             else
             {
+                // Recovery leaves an offending token in place, so this may already be
+                // reported; either way, skip to the end of this column definition so one
+                // mistake yields one diagnostic.
                 AddSyntaxDiagnostic(ref lexer, "Expected a column constraint or the end of the column definition.");
-                Advance(ref lexer);
+                SkipToColumnDefinitionEnd(ref lexer);
             }
         }
 
         return new SqlColumnDefinition(columnName, dataType, isNullable, isPrimaryKey, defaultValue, constraints, collationName);
+    }
+
+    /// <summary>
+    /// Parses the arguments of a parameterized type, <c>(n)</c> or <c>(n, m)</c>, into
+    /// their normalized text. Each argument must be an unsigned integer literal. The
+    /// arguments used to be the concatenated text of every token up to <c>)</c>, so
+    /// <c>VARCHAR(25 5)</c> became VARCHAR(255), <c>DECIMAL(10, 2, 5)</c> lost its third
+    /// argument and <c>VARCHAR(MAX)</c> failed in the planner with a raw format error.
+    /// </summary>
+    private string ParseTypeArguments(ref TokenLexer lexer)
+    {
+        Advance(ref lexer); // consume (
+        if (TryReadCastArgument(ref lexer, out int? first))
+        {
+            int? second = null;
+            bool valid = true;
+            if (lexer.Current.Type == TokenType.Comma)
+            {
+                Advance(ref lexer);
+                valid = TryReadCastArgument(ref lexer, out second);
+            }
+
+            if (valid && lexer.Current.Type == TokenType.RightParen)
+            {
+                Advance(ref lexer);
+                return second is null
+                    ? string.Create(CultureInfo.InvariantCulture, $"({first})")
+                    : string.Create(CultureInfo.InvariantCulture, $"({first},{second})");
+            }
+
+            if (valid && (IsAtEnd(ref lexer) || lexer.Current.Type == TokenType.Semicolon))
+            {
+                AddExpectedDiagnostic(ref lexer, "')' after the type arguments");
+                return string.Empty;
+            }
+        }
+
+        AddSyntaxDiagnostic(ref lexer,
+            "Type arguments must be one or two unsigned integer literals within the Int32 range, as in VARCHAR(100) or DECIMAL(18, 4).");
+        SkipToClosingParenthesis(ref lexer);
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Skips to the <c>,</c> or <c>)</c> that ends the current column definition, across
+    /// nested parentheses, stopping at <c>;</c>.
+    /// </summary>
+    private void SkipToColumnDefinitionEnd(ref TokenLexer lexer)
+    {
+        int depth = 0;
+        while (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon)
+        {
+            if (depth == 0 && lexer.Current.Type is TokenType.Comma or TokenType.RightParen)
+            {
+                return;
+            }
+
+            if (lexer.Current.Type == TokenType.LeftParen)
+            {
+                depth++;
+            }
+            else if (lexer.Current.Type == TokenType.RightParen)
+            {
+                depth--;
+            }
+
+            Advance(ref lexer);
+        }
     }
 
     /// <summary>
@@ -296,32 +357,31 @@ public sealed partial class SqlQueryParser
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume ALTER
 
-        // TABLE
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "TABLE"))
+        // TABLE is required: ALTER INDEX ix RENAME TO iy used to report IX as the
+        // unsupported ALTER TABLE action.
+        if (!IsKeyword(ref lexer, "TABLE"))
         {
-            Advance(ref lexer);
-        }
-
-        // Table reference (no alias)
-        SqlTableReference? table = null;
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-        {
-            string firstPart = CurrentIdentifierText(ref lexer);
-            string? schemaName = null;
-
-            if (Advance(ref lexer) && lexer.Current.Type == TokenType.Dot)
+            if (lexer.Current.Type == TokenType.Keyword)
             {
-                if (Advance(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-                {
-                    schemaName = firstPart;
-                    firstPart = CurrentIdentifierText(ref lexer);
-                    Advance(ref lexer);
-                }
+                AddSyntaxDiagnostic(ref lexer,
+                    $"ALTER {CurrentText(ref lexer).ToUpperInvariant()} is not supported; the dialect supports ALTER TABLE only.");
+            }
+            else
+            {
+                AddExpectedDiagnostic(ref lexer, "TABLE after ALTER");
             }
 
-            table = new SqlTableReference(firstPart, schemaName, null);
+            ConsumeRemaining(ref lexer);
+            return new SqlQueryExpression(SqlQueryCommandType.Alter, null,
+                Location.Create(1, 1, pos, _lastTokenEnd));
         }
-        table ??= new SqlTableReference("?", null, null);
+        Advance(ref lexer);
+
+        // Table reference (no alias). ADD or DROP here means the table name is missing:
+        // ALTER TABLE ADD COLUMN c INT used to report COLUMN as the unsupported action.
+        var table = IsKeyword(ref lexer, "ADD") || IsKeyword(ref lexer, "DROP")
+            ? MissingTableReference(ref lexer)
+            : ParseUnaliasedTableReference(ref lexer);
 
         // Action: ADD or DROP
         SqlAlterAction action;
@@ -434,31 +494,22 @@ public sealed partial class SqlQueryParser
     {
         Advance(ref lexer); // consume INDEX
 
-        // IF EXISTS
-        bool ifExists = false;
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "IF"))
-        {
-            Advance(ref lexer);
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "EXISTS"))
-            {
-                ifExists = true;
-                Advance(ref lexer);
-            }
-        }
+        bool ifExists = ParseExistenceGuard(ref lexer, notExists: false);
 
         // Index name
         string indexName = "?";
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
+        if (IsNameToken(ref lexer))
         {
             indexName = CurrentIdentifierText(ref lexer);
             Advance(ref lexer);
         }
+        else
+        {
+            AddExpectedDiagnostic(ref lexer, "an index name");
+        }
 
         // ON <table> — required by the dialect (index names are table-scoped).
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ON"))
-        {
-            Advance(ref lexer);
-        }
+        ExpectKeyword(ref lexer, "ON", "ON and the table of the index");
 
         var table = ParseUnaliasedTableReference(ref lexer);
 
@@ -474,17 +525,7 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
         }
 
-        // IF EXISTS
-        bool ifExists = false;
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "IF"))
-        {
-            Advance(ref lexer);
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "EXISTS"))
-            {
-                ifExists = true;
-                Advance(ref lexer);
-            }
-        }
+        bool ifExists = ParseExistenceGuard(ref lexer, notExists: false);
 
         var table = ParseUnaliasedTableReference(ref lexer);
 
@@ -494,12 +535,12 @@ public sealed partial class SqlQueryParser
 
     /// <summary>
     /// Parses an optionally schema-qualified table reference without alias
-    /// support (the DDL form), yielding a <c>?</c> placeholder when the reference
-    /// is missing (total parsing — the planner rejects placeholders precisely).
+    /// support (the DDL form). A missing reference is reported and yields the
+    /// <c>?</c> placeholder, which never executes because of that error.
     /// </summary>
     private SqlTableReference ParseUnaliasedTableReference(ref TokenLexer lexer)
     {
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
+        if (IsNameToken(ref lexer))
         {
             string firstPart = CurrentIdentifierText(ref lexer);
             string? schemaName = null;
@@ -512,11 +553,21 @@ public sealed partial class SqlQueryParser
                     firstPart = CurrentIdentifierText(ref lexer);
                     Advance(ref lexer);
                 }
+                else
+                {
+                    AddExpectedDiagnostic(ref lexer, "a table name after '.'");
+                }
             }
 
             return new SqlTableReference(firstPart, schemaName, null);
         }
 
+        return MissingTableReference(ref lexer);
+    }
+
+    private SqlTableReference MissingTableReference(ref TokenLexer lexer)
+    {
+        AddExpectedDiagnostic(ref lexer, "a table name");
         return new SqlTableReference("?", null, null);
     }
 }

@@ -118,28 +118,19 @@ public sealed partial class SqlQueryParser
         bool notBefore = false;
         if (IsKeyword(ref lexer, "NOT"))
         {
-            // Peek ahead to see if it's NOT BETWEEN, NOT IN, or NOT LIKE
-            // We need to save state to backtrack. Since we can't save ref struct state,
-            // we'll check the next keyword by pattern.
-            // For now, handle NOT BETWEEN/IN/LIKE by consuming NOT then checking.
-            var savedPos = lexer.Current.Position;
             notBefore = true;
             Advance(ref lexer);
 
-            if (IsAtEnd(ref lexer))
-            {
-                return left;
-            }
-
             if (!IsKeyword(ref lexer, "BETWEEN") && !IsKeyword(ref lexer, "IN") && !IsKeyword(ref lexer, "LIKE"))
             {
-                // It was NOT something_else, treat as a logical NOT on a comparison
-                // This shouldn't normally happen in this position, fall through
-                // by creating a NOT unary on whatever follows
-                var rest = ParseComparison(ref lexer);
-                return new SqlBinaryExpression(left, SqlBinaryOperator.And,
-                    new SqlUnaryExpression(rest, SqlUnaryOperator.Not, Location.Create(1, 1, savedPos, savedPos)),
-                    Location.Create(1, 1, savedPos, savedPos));
+                // x NOT y is not a predicate. It used to parse as x AND NOT y, so SQLite's
+                // postfix a NOT NULL filtered out every row and flag NOT FALSE matched only
+                // TRUE rows (#1068). The token after NOT stays in place, so the leftover
+                // check finds it already reported.
+                AddSyntaxDiagnostic(ref lexer, IsAtEnd(ref lexer)
+                    ? "Expected BETWEEN, IN or LIKE after NOT before the end of the statement."
+                    : $"Expected BETWEEN, IN or LIKE after NOT but found {DescribeToken(ref lexer)}; write IS NOT NULL, or put NOT before the whole predicate.");
+                return left;
             }
         }
 
@@ -148,10 +139,7 @@ public sealed partial class SqlQueryParser
             var pos = lexer.Current.Position;
             Advance(ref lexer);
             var low = ParseAddition(ref lexer);
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "AND"))
-            {
-                Advance(ref lexer);
-            }
+            ExpectKeyword(ref lexer, "AND", "AND between the BETWEEN bounds");
 
             var high = ParseAddition(ref lexer);
             return new SqlBetweenExpression(left, low, high, notBefore, Location.Create(1, 1, pos, pos));
@@ -170,10 +158,7 @@ public sealed partial class SqlQueryParser
                 if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
                 {
                     var subquery = ParseSubquery(ref lexer);
-                    if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-                    {
-                        Advance(ref lexer);
-                    }
+                    Expect(ref lexer, TokenType.RightParen, "')' after the IN subquery");
 
                     return new SqlInExpression(left, null, subquery, notBefore, Location.Create(1, 1, pos, pos));
                 }
@@ -189,13 +174,12 @@ public sealed partial class SqlQueryParser
                         values.Add(ParseExpression(ref lexer));
                     }
                 }
-                if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-                {
-                    Advance(ref lexer);
-                }
+                Expect(ref lexer, TokenType.RightParen, "')' after the IN list");
 
                 return new SqlInExpression(left, values, null, notBefore, Location.Create(1, 1, pos, pos));
             }
+
+            AddExpectedDiagnostic(ref lexer, "'(' after IN");
             return new SqlInExpression(left, Array.Empty<SqlExpression>(), null, notBefore, Location.Create(1, 1, pos, pos));
         }
 
@@ -212,7 +196,10 @@ public sealed partial class SqlQueryParser
                 AddSyntaxDiagnostic(ref lexer,
                     "LIKE ... ESCAPE is not supported by the SQL surface; '%' and '_' in a LIKE pattern are always wildcards.");
                 Advance(ref lexer);
-                ParseCollate(ref lexer); // recover past the escape character
+                if (CanStartOperand(ref lexer))
+                {
+                    ParseCollate(ref lexer); // recover past the escape character
+                }
             }
             return new SqlLikeExpression(left, pattern, notBefore, Location.Create(1, 1, pos, pos));
         }
@@ -261,7 +248,10 @@ public sealed partial class SqlQueryParser
 
             AddSyntaxDiagnostic(start, end,
                 $"The {form} DISTINCT FROM predicate is not supported by the SQL surface; only IS [NOT] NULL is.");
-            ParseAddition(ref lexer); // recover past the comparand
+            if (CanStartOperand(ref lexer))
+            {
+                ParseAddition(ref lexer); // recover past the comparand
+            }
             return;
         }
 
@@ -348,13 +338,14 @@ public sealed partial class SqlQueryParser
         return left;
     }
 
+    // The operand of a sign is itself a unary expression, so - -1 is 1, as in ISO SQL.
     private SqlExpression ParseUnary(ref TokenLexer lexer)
     {
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Minus)
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var operand = ParseCollate(ref lexer);
+            var operand = ParseUnary(ref lexer);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.Negate,
                 Location.Create(1, 1, pos, pos));
         }
@@ -363,7 +354,7 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var operand = ParseCollate(ref lexer);
+            var operand = ParseUnary(ref lexer);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.BitwiseNot,
                 Location.Create(1, 1, pos, pos));
         }
@@ -490,20 +481,14 @@ public sealed partial class SqlQueryParser
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
             {
                 var subSelect = ParseSubquery(ref lexer);
-                if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-                {
-                    Advance(ref lexer);
-                }
+                Expect(ref lexer, TokenType.RightParen, "')' after the subquery");
 
                 return new SqlSubqueryExpression(subSelect, Location.Create(1, 1, pos, pos));
             }
 
             // Parenthesized expression
             var inner = ParseExpression(ref lexer);
-            if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-            {
-                Advance(ref lexer);
-            }
+            Expect(ref lexer, TokenType.RightParen, "')'");
 
             return inner;
         }
@@ -663,10 +648,7 @@ public sealed partial class SqlQueryParser
                 "ORDER BY inside SQL aggregate functions is not supported.");
         }
 
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-        {
-            Advance(ref lexer);
-        }
+        Expect(ref lexer, TokenType.RightParen, $"')' after the {name} arguments");
 
         return new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, pos));
     }
@@ -684,14 +666,16 @@ public sealed partial class SqlQueryParser
         }
 
         var whenClauses = new List<SqlWhenClause>();
+        if (!IsKeyword(ref lexer, "WHEN"))
+        {
+            AddExpectedDiagnostic(ref lexer, "WHEN in the CASE expression");
+        }
+
         while (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "WHEN"))
         {
             Advance(ref lexer); // consume WHEN
             var condition = ParseExpression(ref lexer);
-            if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "THEN"))
-            {
-                Advance(ref lexer);
-            }
+            ExpectKeyword(ref lexer, "THEN", "THEN after the WHEN condition");
 
             var result = ParseExpression(ref lexer);
             whenClauses.Add(new SqlWhenClause(condition, result));
@@ -704,10 +688,7 @@ public sealed partial class SqlQueryParser
             elseResult = ParseExpression(ref lexer);
         }
 
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "END"))
-        {
-            Advance(ref lexer);
-        }
+        ExpectKeyword(ref lexer, "END", "END to close the CASE expression");
 
         return new SqlCaseExpression(input, whenClauses, elseResult,
             Location.Create(1, 1, pos, pos));
@@ -717,20 +698,19 @@ public sealed partial class SqlQueryParser
     {
         Advance(ref lexer); // consume EXISTS
 
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
-        {
-            Advance(ref lexer);
-        }
-
         SqlSelectExpression? subquery = null;
-        if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
+        if (Expect(ref lexer, TokenType.LeftParen, "'(' after EXISTS"))
         {
-            subquery = ParseSubquery(ref lexer);
-        }
+            if (IsKeyword(ref lexer, "SELECT"))
+            {
+                subquery = ParseSubquery(ref lexer);
+            }
+            else
+            {
+                AddExpectedDiagnostic(ref lexer, "a SELECT subquery after EXISTS (");
+            }
 
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-        {
-            Advance(ref lexer);
+            Expect(ref lexer, TokenType.RightParen, "')' after the EXISTS subquery");
         }
 
         subquery ??= new SqlSelectExpression(

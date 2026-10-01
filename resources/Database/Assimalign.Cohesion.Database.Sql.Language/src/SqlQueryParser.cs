@@ -53,6 +53,8 @@ public sealed partial class SqlQueryParser : QueryParser
         _implicitAlias = null;
         _parseDiagnostics.Clear();
 
+        RejectLexicalErrors(lexer);
+
         bool hasUnsupportedClause =
             TryFindUnsupportedClause(lexer, out string unsupportedClause, out Location unsupportedLocation) &&
             !Supports(unsupportedClause);
@@ -62,6 +64,10 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             var emptyExpr = new SqlQueryExpression(SqlQueryCommandType.Unknown, null, null);
             var emptyStmt = new SqlQueryStatement(emptyExpr);
+            foreach (var diagnostic in _parseDiagnostics)
+            {
+                emptyStmt.AddDiagnostic(diagnostic);
+            }
             emptyStmt.AddDiagnostic(new Diagnostic
             {
                 Code = "SQL0001",
@@ -133,10 +139,12 @@ public sealed partial class SqlQueryParser : QueryParser
         }
 
         // A supported expression parser may deliberately stop at a clause outside
-        // this profile, which already carries COHDBL001. Otherwise every statement
-        // kind must have consumed its whole text: a leftover token means the parse
-        // dropped part of what was written (#1068).
-        if (!hasUnsupportedClause)
+        // this profile, which already carries COHDBL001, so the text from that clause
+        // on adds no second diagnostic. Otherwise every statement kind must have
+        // consumed its whole text: a leftover token means the parse dropped part of
+        // what was written (#1068). That includes text the parser stopped at before
+        // it reached the clause, as in DELETE FROM t WHRE id = 1 RETURNING *.
+        if (!hasUnsupportedClause || lexer.Current.Position < unsupportedLocation.Start)
         {
             RejectTrailingTokens(ref lexer, expression);
         }
@@ -225,8 +233,213 @@ public sealed partial class SqlQueryParser : QueryParser
         return new SqlTransactionExpression(command, Location.Create(1, 1, start, _lastTokenEnd));
     }
 
+    /// <summary>
+    /// Reports <c>SQL0003</c> at the current token unless an error already starts there.
+    /// Recovery leaves the offending token in place, so the enclosing parsers that next
+    /// expect something at it would otherwise report the same mistake again.
+    /// </summary>
     private void AddSyntaxDiagnostic(ref TokenLexer lexer, string message)
-        => AddSyntaxDiagnostic(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length, message);
+    {
+        if (!HasErrorAt(lexer.Current.Position))
+        {
+            AddSyntaxDiagnostic(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length, message);
+        }
+    }
+
+    /// <summary>
+    /// Reports that <paramref name="what"/> was expected at the current token, naming the
+    /// token found instead.
+    /// </summary>
+    private void AddExpectedDiagnostic(ref TokenLexer lexer, string what)
+        => AddSyntaxDiagnostic(ref lexer, IsAtEnd(ref lexer)
+            ? $"Expected {what} before the end of the statement."
+            : $"Expected {what} but found {DescribeToken(ref lexer)}.");
+
+    /// <summary>
+    /// Consumes <paramref name="token"/> when it is current; otherwise reports it as
+    /// expected and leaves the current token in place. Closing tokens and keywords used
+    /// to be skipped when absent, so text such as <c>WHERE (id = 1</c> executed as written
+    /// minus its error (#1068).
+    /// </summary>
+    private bool Expect(ref TokenLexer lexer, TokenType token, string description)
+    {
+        if (lexer.Current.Type == token)
+        {
+            Advance(ref lexer);
+            return true;
+        }
+
+        AddExpectedDiagnostic(ref lexer, description);
+        return false;
+    }
+
+    /// <summary>
+    /// Requires the <c>)</c> that closes a list. When another token is current, reports it
+    /// and skips to the matching <c>)</c>, so one malformed element yields one diagnostic.
+    /// The skip never crosses <c>;</c> or a clause keyword, which it leaves for the caller.
+    /// </summary>
+    private void SkipToClosingParenthesis(ref TokenLexer lexer)
+    {
+        if (lexer.Current.Type == TokenType.RightParen)
+        {
+            Advance(ref lexer);
+            return;
+        }
+
+        AddExpectedDiagnostic(ref lexer, "')'");
+        int depth = 0;
+        while (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon &&
+               !(depth == 0 && IsStatementBoundaryKeyword(ref lexer)))
+        {
+            if (lexer.Current.Type == TokenType.LeftParen)
+            {
+                depth++;
+            }
+            else if (lexer.Current.Type == TokenType.RightParen)
+            {
+                Advance(ref lexer);
+                if (depth == 0)
+                {
+                    return;
+                }
+                depth--;
+                continue;
+            }
+
+            Advance(ref lexer);
+        }
+    }
+
+    /// <summary>Consumes <paramref name="keyword"/> when it is current; otherwise reports it as expected.</summary>
+    private bool ExpectKeyword(ref TokenLexer lexer, string keyword, string description)
+    {
+        if (IsKeyword(ref lexer, keyword))
+        {
+            Advance(ref lexer);
+            return true;
+        }
+
+        AddExpectedDiagnostic(ref lexer, description);
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the current token can name a table, index or SET column: an identifier,
+    /// a quoted identifier, or a keyword that does not start a clause. A clause keyword
+    /// in a name position means the name is missing: <c>SET a = 1, WHERE id = 1</c> once
+    /// assigned to a column named WHERE and updated every row.
+    /// </summary>
+    private static bool IsNameToken(ref TokenLexer lexer)
+        => IsIdentifierOrKeyword(ref lexer) && !IsStatementBoundaryKeyword(ref lexer);
+
+    /// <summary>
+    /// Whether the current token can start an operand, used to decide whether recovery
+    /// parses past an operand or leaves the current token for the enclosing parser.
+    /// </summary>
+    private static bool CanStartOperand(ref TokenLexer lexer)
+        => !IsAtEnd(ref lexer) &&
+           lexer.Current.Type is not (TokenType.Semicolon or TokenType.RightParen or TokenType.Comma) &&
+           !IsStatementBoundaryKeyword(ref lexer);
+
+    /// <summary>
+    /// Reports lexical errors the shared lexer passes through as ordinary tokens. A string
+    /// literal, quoted identifier or block comment without its closing delimiter runs to
+    /// the end of the text as one token, so the clause it swallowed vanished without a
+    /// diagnostic: <c>DELETE FROM t /* WHERE id = 1;</c> deleted every row (#1068). A
+    /// character outside the dialect, such as <c>#</c> or a zero-width space, lexes as a
+    /// one-character identifier that the parser would otherwise take as an alias.
+    /// </summary>
+    private void RejectLexicalErrors(TokenLexer lexer)
+    {
+        int skipPosition = -1;
+        while (lexer.MoveNext())
+        {
+            int position = lexer.Current.Position;
+            var value = lexer.Current.Value;
+            switch (lexer.Current.Type)
+            {
+                case TokenType.String when !IsTerminatedString(value):
+                    AddSyntaxDiagnostic(position, position + 1,
+                        "Unterminated string literal: the closing ' is missing, so the literal runs to the end of the text.");
+                    break;
+                case TokenType.QuotedIdentifier when value.Length < 2 || value[^1] != '"':
+                    AddSyntaxDiagnostic(position, position + 1,
+                        "Unterminated quoted identifier: the closing \" is missing, so the identifier runs to the end of the text.");
+                    break;
+                case TokenType.Comment when value.StartsWith("/*", StringComparison.Ordinal) && !IsTerminatedBlockComment(value):
+                    AddSyntaxDiagnostic(position, position + 2,
+                        "Unterminated block comment: the closing */ is missing, so the comment runs to the end of the text.");
+                    break;
+                case TokenType.Identifier when position != skipPosition && value.Length > 0 &&
+                                               !char.IsLetter(value[0]) && value[0] != '_':
+                    int end = position + value.Length;
+                    string character = $"'{value.ToString()}'";
+                    if (char.IsHighSurrogate(value[0]) && end < _sourceText.Length && char.IsLowSurrogate(_sourceText[end]))
+                    {
+                        // The lexer splits a supplementary character into two tokens; report it once.
+                        character = $"U+{char.ConvertToUtf32(value[0], _sourceText[end]):X4}";
+                        skipPosition = end;
+                        end++;
+                    }
+                    else if (char.IsControl(value[0]) || char.IsSurrogate(value[0]) ||
+                             char.GetUnicodeCategory(value[0]) is System.Globalization.UnicodeCategory.Format)
+                    {
+                        character = $"U+{(int)value[0]:X4}";
+                    }
+                    AddSyntaxDiagnostic(position, end, $"Unexpected character {character}; it is not part of the SQL dialect.");
+                    break;
+            }
+        }
+    }
+
+    // Mirrors TokenLexer.ScanString: '' is an escaped quote and a lone ' closes the literal.
+    private static bool IsTerminatedString(ReadOnlySpan<char> value)
+    {
+        int index = 1;
+        while (index < value.Length)
+        {
+            if (value[index] != '\'')
+            {
+                index++;
+            }
+            else if (index + 1 < value.Length && value[index + 1] == '\'')
+            {
+                index += 2;
+            }
+            else
+            {
+                return index == value.Length - 1;
+            }
+        }
+
+        return false;
+    }
+
+    // Mirrors TokenLexer.ScanBlockComment, which nests /* */ pairs.
+    private static bool IsTerminatedBlockComment(ReadOnlySpan<char> value)
+    {
+        int depth = 1;
+        int index = 2;
+        while (index < value.Length && depth > 0)
+        {
+            if (value[index] == '/' && index + 1 < value.Length && value[index + 1] == '*')
+            {
+                depth++;
+                index += 2;
+            }
+            else if (value[index] == '*' && index + 1 < value.Length && value[index + 1] == '/')
+            {
+                depth--;
+                index += 2;
+            }
+            else
+            {
+                index++;
+            }
+        }
+
+        return depth == 0;
+    }
 
     private void AddSyntaxDiagnostic(int start, int end, string message)
     {
@@ -242,15 +455,17 @@ public sealed partial class SqlQueryParser : QueryParser
     }
 
     /// <summary>
-    /// Whether an error already starts at <paramref name="position"/>. Error recovery
-    /// leaves the offending token in place, so the statement-level checks use this to
-    /// report one problem once rather than twice at the same offset.
+    /// Whether an error already covers <paramref name="position"/>: it starts there, or
+    /// its span includes it. Error recovery leaves the offending token in place, so the
+    /// statement-level checks use this to report one problem once rather than again at
+    /// the same token, or at the second half of a character the lexer split in two.
     /// </summary>
     private bool HasErrorAt(int position)
     {
         foreach (var diagnostic in _parseDiagnostics)
         {
-            if (diagnostic.Severity == DiagnosticSeverity.Error && diagnostic.Start == position)
+            if (diagnostic.Severity == DiagnosticSeverity.Error && diagnostic.Start is int start &&
+                start <= position && position < Math.Max(diagnostic.End ?? start, start + 1))
             {
                 return true;
             }
@@ -413,6 +628,65 @@ public sealed partial class SqlQueryParser : QueryParser
         return lexer.Current.Type == TokenType.Eof;
     }
 
+    /// <summary>
+    /// Parses the table a DML statement or JOIN names. A missing name is reported and
+    /// yields the <c>?</c> placeholder, which never executes because of that error:
+    /// <c>DELETE;</c> once deleted every row of a table quoted as <c>"?"</c>.
+    /// </summary>
+    private SqlTableReference ParseRequiredTableReference(ref TokenLexer lexer)
+    {
+        if (IsNameToken(ref lexer))
+        {
+            return ParseTableReference(ref lexer);
+        }
+
+        if (!SkipDerivedTable(ref lexer))
+        {
+            AddExpectedDiagnostic(ref lexer, "a table name");
+        }
+
+        return new SqlTableReference("?", null, null);
+    }
+
+    /// <summary>
+    /// Skips a derived table, <c>(SELECT ...) [AS] alias</c>, for recovery. The clause scan
+    /// already reports it as <c>COHDBL001</c>; skipping it keeps the statement's other
+    /// clauses in view instead of reporting its opening parenthesis as leftover text.
+    /// </summary>
+    private bool SkipDerivedTable(ref TokenLexer lexer)
+    {
+        var next = lexer;
+        if (lexer.Current.Type != TokenType.LeftParen || !AdvancePastComments(ref next) || !IsKeyword(ref next, "SELECT"))
+        {
+            return false;
+        }
+
+        int depth = 0;
+        do
+        {
+            if (lexer.Current.Type == TokenType.LeftParen)
+            {
+                depth++;
+            }
+            else if (lexer.Current.Type == TokenType.RightParen)
+            {
+                depth--;
+            }
+        }
+        while (Advance(ref lexer) && depth > 0 && lexer.Current.Type != TokenType.Semicolon);
+
+        if (IsKeyword(ref lexer, "AS"))
+        {
+            Advance(ref lexer);
+        }
+        if (IsNameToken(ref lexer))
+        {
+            Advance(ref lexer);
+        }
+
+        return true;
+    }
+
     private SqlTableReference ParseTableReference(ref TokenLexer lexer)
     {
         string firstPart = CurrentIdentifierText(ref lexer);
@@ -427,15 +701,23 @@ public sealed partial class SqlQueryParser : QueryParser
                 firstPart = CurrentIdentifierText(ref lexer);
                 Advance(ref lexer);
             }
+            else
+            {
+                AddExpectedDiagnostic(ref lexer, "a table name after '.'");
+            }
         }
 
         // Check for alias
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "AS"))
         {
-            if (Advance(ref lexer) && IsIdentifierOrKeyword(ref lexer))
+            if (Advance(ref lexer) && IsNameToken(ref lexer))
             {
                 alias = CurrentIdentifierText(ref lexer);
                 Advance(ref lexer);
+            }
+            else
+            {
+                AddExpectedDiagnostic(ref lexer, "an alias after AS");
             }
         }
         else if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer) &&
