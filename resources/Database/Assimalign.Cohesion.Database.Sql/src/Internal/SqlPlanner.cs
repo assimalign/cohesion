@@ -34,6 +34,7 @@ internal sealed partial class SqlPlanner
     internal SqlPlan Plan(SqlQueryExpression expression)
     {
         SqlSystemViews.EnsureReadOnly(expression);
+        RejectUnknownFunctions(expression);
         return expression switch
         {
             SqlSelectExpression select => PlanSelect(select),

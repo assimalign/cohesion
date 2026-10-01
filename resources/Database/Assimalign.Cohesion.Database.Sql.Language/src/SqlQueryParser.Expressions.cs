@@ -107,6 +107,10 @@ public sealed partial class SqlQueryParser
             {
                 Advance(ref lexer);
             }
+            else
+            {
+                RejectIsPredicate(ref lexer, pos, negated);
+            }
             return new SqlIsNullExpression(left, negated, Location.Create(1, 1, pos, pos));
         }
 
@@ -201,6 +205,15 @@ public sealed partial class SqlQueryParser
             var pos = lexer.Current.Position;
             Advance(ref lexer);
             var pattern = ParseCollate(ref lexer);
+            if (IsWord(ref lexer, "ESCAPE"))
+            {
+                // Without this check the escape clause was left behind, and in a select
+                // list ESCAPE even became the column alias (#1068).
+                AddSyntaxDiagnostic(ref lexer,
+                    "LIKE ... ESCAPE is not supported by the SQL surface; '%' and '_' in a LIKE pattern are always wildcards.");
+                Advance(ref lexer);
+                ParseCollate(ref lexer); // recover past the escape character
+            }
             return new SqlLikeExpression(left, pattern, notBefore, Location.Create(1, 1, pos, pos));
         }
 
@@ -215,6 +228,44 @@ public sealed partial class SqlQueryParser
         }
 
         return left;
+    }
+
+    /// <summary>
+    /// Rejects an IS predicate other than <c>IS [NOT] NULL</c>. The ISO boolean test
+    /// (<c>IS [NOT] TRUE|FALSE|UNKNOWN</c>) and distinct predicate
+    /// (<c>IS [NOT] DISTINCT FROM</c>) used to parse as <c>IS NULL</c> with their operand
+    /// left behind, so <c>DELETE ... WHERE flag IS TRUE</c> deleted the NULL rows (#1068).
+    /// The rest of the predicate is consumed for recovery.
+    /// </summary>
+    private void RejectIsPredicate(ref TokenLexer lexer, int start, bool negated)
+    {
+        string form = negated ? "IS NOT" : "IS";
+        if (IsWord(ref lexer, "TRUE") || IsWord(ref lexer, "FALSE") || IsWord(ref lexer, "UNKNOWN"))
+        {
+            string test = CurrentText(ref lexer).ToUpperInvariant();
+            AddSyntaxDiagnostic(start, lexer.Current.Position + lexer.Current.Value.Length,
+                $"The {form} {test} predicate is not supported by the SQL surface; only IS [NOT] NULL is.");
+            Advance(ref lexer);
+            return;
+        }
+
+        if (IsKeyword(ref lexer, "DISTINCT"))
+        {
+            int end = lexer.Current.Position + lexer.Current.Value.Length;
+            Advance(ref lexer);
+            if (IsKeyword(ref lexer, "FROM"))
+            {
+                end = lexer.Current.Position + lexer.Current.Value.Length;
+                Advance(ref lexer);
+            }
+
+            AddSyntaxDiagnostic(start, end,
+                $"The {form} DISTINCT FROM predicate is not supported by the SQL surface; only IS [NOT] NULL is.");
+            ParseAddition(ref lexer); // recover past the comparand
+            return;
+        }
+
+        AddSyntaxDiagnostic(ref lexer, $"Expected NULL after {form}.");
     }
 
     private static SqlBinaryOperator? GetComparisonOperator(ref TokenLexer lexer)
@@ -322,13 +373,12 @@ public sealed partial class SqlQueryParser
 
     private SqlExpression ParsePrimary(ref TokenLexer lexer)
     {
+        var pos = lexer.Current.Position;
+
         if (IsAtEnd(ref lexer))
         {
-            return new SqlLiteralExpression("NULL", SqlLiteralType.Null,
-                Location.Create(1, 1, 0, 0));
+            return MissingExpression(ref lexer, pos);
         }
-
-        var pos = lexer.Current.Position;
 
         // Preserve a signed numeric token as a literal. ORDER BY binding must
         // distinguish +1 from a larger constant expression such as +1 + 1.
@@ -472,10 +522,28 @@ public sealed partial class SqlQueryParser
             return ParseColumnRefOrFunction(ref lexer);
         }
 
-        // Fallback: consume and return a null literal
-        Advance(ref lexer);
+        return MissingExpression(ref lexer, pos);
+    }
+
+    /// <summary>
+    /// Reports a token that cannot start an expression — a ';', ')', the end of the
+    /// text, or ':' in an unsupported <c>:name</c> parameter — and returns a NULL
+    /// placeholder so parsing stays total. The token is left in place: callers resume at
+    /// it and the statement-level leftover check (#1068) finds it already reported.
+    /// Silently consuming it here once turned <c>WHERE id = :id</c> into
+    /// <c>WHERE id = NULL</c> and <c>SET a = :a</c> into an unconditional NULL write.
+    /// </summary>
+    private SqlLiteralExpression MissingExpression(ref TokenLexer lexer, int position)
+    {
+        if (!HasErrorAt(position))
+        {
+            AddSyntaxDiagnostic(ref lexer, IsAtEnd(ref lexer)
+                ? "Expected an expression before the end of the statement."
+                : $"Expected an expression but found {DescribeToken(ref lexer)}.");
+        }
+
         return new SqlLiteralExpression("NULL", SqlLiteralType.Null,
-            Location.Create(1, 1, pos, pos));
+            Location.Create(1, 1, position, position));
     }
 
     private SqlExpression ParseColumnRefOrFunction(ref TokenLexer lexer)

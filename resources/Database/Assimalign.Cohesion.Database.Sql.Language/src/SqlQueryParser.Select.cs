@@ -143,6 +143,14 @@ public sealed partial class SqlQueryParser
         {
             Advance(ref lexer);
             offset = ParsePaginationExpression(ref lexer);
+
+            // OFFSET n LIMIT m used to keep the OFFSET and drop the LIMIT (#1068).
+            if (limit is null && IsKeyword(ref lexer, "LIMIT"))
+            {
+                AddSyntaxDiagnostic(ref lexer, "LIMIT must precede OFFSET; write LIMIT <count> OFFSET <skip>.");
+                Advance(ref lexer);
+                ParsePaginationExpression(ref lexer); // recover past the count
+            }
         }
 
         // Consume trailing semicolon (don't advance past it so ParseCore picks it up)

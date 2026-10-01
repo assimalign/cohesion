@@ -3,7 +3,9 @@
 The contract for the Cohesion SQL surface that executes today. **Supported** means
 the documented subset has been measured through a live engine, including correct
 results, state changes, or intended semantic errors. Recognized clauses without
-execution support report `COHDBL001`; unknown commands report `SQL0002`. Extending
+execution support report `COHDBL001`; unknown commands report `SQL0002`; text the
+parser did not consume reports `SQL0003`, so nothing executes a truncated statement
+(see [Statement completeness](#statement-completeness-1068)). Extending
 the profile requires updating the parser, this matrix, and the engine's
 `SqlLanguageConformanceTests` execution-case table in the same change. That test
 enumerates the profile and fails if any advertised clause lacks a passing case.
@@ -65,6 +67,59 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
+
+## Statement completeness (#1068)
+
+A request carries exactly one statement, and the parser consumes all of it. One
+terminating `;` is optional, and comments may follow it. Any other text after a
+complete statement reports `SQL0003` at the first token the parser did not
+consume, and nothing executes: the text-execute seam throws
+`DatabaseParseException` (`ParseFailure` on the wire), and a typed request
+returns an error result carrying the diagnostics. Until #1068 the parser
+checked for leftover tokens only after `CREATE TABLE`, `ALTER TABLE` and
+`DROP TABLE`, so every other statement executed the prefix it understood:
+`DELETE FROM t WHRE id = 1` read `WHRE` as an alias of `t` and deleted every row.
+
+| Written | Reported as `SQL0003` | Diagnostic starts at |
+|---|---|---|
+| `DELETE FROM t WHRE id = 1` | Leftover text after the DELETE; the message adds that `WHRE` was read as an alias of table `t` | `id` |
+| `UPDATE t SET a = 1 WHRE id = 1`, `UPDATE t SET ... FROM u WHERE ...` | Leftover text after the UPDATE | `WHRE`, `FROM` |
+| `INSERT ... ON CONFLICT DO NOTHING`, `INSERT ... ON DUPLICATE KEY UPDATE ...` | Leftover text after the INSERT | `ON` |
+| `SELECT ... OFFSET 1 LIMIT 2` | `LIMIT` must precede `OFFSET` | `LIMIT` |
+| `name LIKE 'a!%' ESCAPE '!'` | `LIKE ... ESCAPE` is not supported; `%` and `_` are always wildcards | `ESCAPE` |
+| `a IS [NOT] DISTINCT FROM b`, `a IS [NOT] TRUE`, `FALSE` or `UNKNOWN` | Only `IS [NOT] NULL` is supported | `IS` |
+| `WHERE id = :id`, `SET a = :a`, `WHERE id = ;`, a statement ending in `WHERE` or `=` | Expected an expression; the NULL literal the parser used to substitute is gone | the token, or the end of the text |
+| `SELECT 1; SELECT 2`, `BEGIN; DELETE FROM t`, `COMMIT;;` | A request accepts exactly one statement | the first token after `;` |
+
+A recognized clause outside the profile keeps its `COHDBL001`, for example
+`RETURNING` or `FETCH`. The parser stops at such a clause by design, so the text
+after it adds no second diagnostic. Named `:name` parameters are not part of the
+dialect; bind `@name` or `$1`.
+
+**ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]` and
+`DROP CONSTRAINT` parse. Any other action, such as `RENAME TO`, `RENAME COLUMN`,
+`ALTER COLUMN` or `MODIFY`, reports `SQL0003` naming the action at parse time.
+The statement then carries no action node. It used to carry a placeholder
+`DROP COLUMN ?` that failed later, in the catalog. A missing action, column name
+or constraint name also reports `SQL0003`.
+
+**Unknown functions.** A call to a name outside the profile's function list fails
+at plan time with `Unknown function '<name>'.`, a `DatabaseException`
+(`ExecutionFailure` on the wire). The planner checks every expression position
+before it binds the statement or reads a row: projections, predicates, joins,
+grouping, ordering, `LIMIT`/`OFFSET`, subqueries, DML values and `CHECK`. The
+statement therefore fails the same way over an empty table as over a populated
+one; the evaluator used to find the name per row, so an empty table succeeded.
+Declared names that do not execute yet, such as `NULLIF` and `TRIM` (see
+[Builtin functions](#builtin-functions)), are not unknown. They still fail during
+evaluation; #1103 rejects them at parse time with `COHDBL001`.
+
+**Guard.** `SqlStatementCompletenessTests` (Sql.Language) holds a complete statement
+form for every profile clause and every `SqlQueryCommandType`, appends leftover
+text to each form (words, a literal, `)`, a misspelled clause, and text after
+`;`), and fails unless every combination reports an error after the form. A
+clause added to the profile without a form fails the test, as does a new
+statement kind.
 
 ## Ordering, output aliases and ordinals (#1024)
 
@@ -481,7 +536,8 @@ column references, supported function calls, simple/searched `CASE`, and
 parenthesized expressions and `CAST` within the conversion contract below.
 Uncorrelated scalar subqueries and subquery predicates execute within the contract above.
 SQL aggregates follow the grouping and aggregate contract below. `~` is parsed but not evaluated; it is outside the
-executable scalar subset.
+executable scalar subset. `IS` takes only `[NOT] NULL`, and `LIKE` has no `ESCAPE`
+clause; the other forms report `SQL0003` (see Statement completeness).
 
 ## Literals
 
@@ -591,8 +647,11 @@ The profile's function list is lexical vocabulary, not an execution claim and
 not part of the 49-clause denominator. Executable scalar functions are `COALESCE`,
 `UPPER`, `LOWER`, `LENGTH`, and `ABS`; supported aggregates are `COUNT`, `SUM`,
 `AVG`, `MIN`, and `MAX`, under the contract below.
-Other parsed calls can still fail in planning/evaluation and must not be inferred
-to work from a supported `SELECT`. Recognized names include aggregates `COUNT`,
+A call to a name outside the recognized list fails at plan time with
+`Unknown function '<name>'.`, before any row is read (#1068). A recognized name
+outside the executable set still parses and plans, then fails during evaluation,
+so it fails only when a row reaches it; #1103 rejects those names at parse time.
+Do not infer that a call works from a supported `SELECT`. Recognized names include aggregates `COUNT`,
 `SUM`, `AVG`, `MIN`, `MAX`; null handling `COALESCE`, `NULLIF`; strings `TRIM`,
 `LTRIM`, `RTRIM`, `UPPER`, `LOWER`, `SUBSTRING`, `LENGTH`, `REPLACE`, `CONCAT`;
 numeric `ABS`, `CEILING`, `FLOOR`, `ROUND`, `POWER`, `SQRT`, `MOD`; date/time
@@ -606,7 +665,7 @@ function names are lexed but not supported (see the statement matrix).
 | `COHDBL001` | Error | Recognized clause is not supported by the SQL model surface |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`, a missing expression, an `IS` form other than `[NOT] NULL`, `LIKE ... ESCAPE`, `LIMIT` after `OFFSET`, an unsupported or incomplete `ALTER TABLE` action, and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | Error | Unknown CAST target type |
 | `SQL0005` | Error | Unsupported CAST target or invalid target parameters |
 | `SQL0100` | Information | Statement does not end with `;` |
@@ -614,3 +673,7 @@ function names are lexed but not supported (see the statement matrix).
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
 carried per node.
+
+Plan-time rejections, such as `Unknown column '<name>'.` and
+`Unknown function '<name>'.`, are `DatabaseException` messages without a code
+(`ExecutionFailure` on the wire). #1103 gives planner rejections structured codes.

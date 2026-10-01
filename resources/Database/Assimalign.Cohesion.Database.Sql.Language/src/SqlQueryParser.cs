@@ -50,6 +50,7 @@ public sealed partial class SqlQueryParser : QueryParser
         _lastTokenEnd = 0;
         _subqueryDepth = 0;
         _paginationDepth = 0;
+        _implicitAlias = null;
         _parseDiagnostics.Clear();
 
         bool hasUnsupportedClause =
@@ -131,16 +132,17 @@ public sealed partial class SqlQueryParser : QueryParser
             ConsumeRemaining(ref lexer);
         }
 
-        if (!hasUnsupportedClause && !IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon &&
-            expression is SqlCreateTableExpression or SqlAlterTableExpression or SqlDropTableExpression)
+        // A supported expression parser may deliberately stop at a clause outside
+        // this profile, which already carries COHDBL001. Otherwise every statement
+        // kind must have consumed its whole text: a leftover token means the parse
+        // dropped part of what was written (#1068).
+        if (!hasUnsupportedClause)
         {
-            AddSyntaxDiagnostic(ref lexer, "Unexpected token after the DDL statement.");
-            ConsumeRemaining(ref lexer);
+            RejectTrailingTokens(ref lexer, expression);
         }
 
-        // A supported expression parser may deliberately stop at a clause outside
-        // this profile. Consume the rest only to retain terminator tracking.
-        if (hasUnsupportedClause && !IsAtEnd(ref lexer))
+        // Consume the rest only to retain terminator tracking.
+        if (!IsAtEnd(ref lexer))
         {
             ConsumeRemaining(ref lexer);
         }
@@ -196,6 +198,11 @@ public sealed partial class SqlQueryParser : QueryParser
     private string _sourceText = string.Empty;
     private readonly List<Diagnostic> _parseDiagnostics = [];
 
+    // The last implicit (AS-less) table alias and the offset of the token after it. A
+    // leftover token at that offset usually means a misspelled keyword was read as the
+    // alias, as in DELETE FROM t WHRE id = 1, and the diagnostic says so.
+    private (string Alias, string Table, int NextPosition)? _implicitAlias;
+
     private SqlTransactionExpression ParseTransaction(ref TokenLexer lexer)
     {
         int start = lexer.Current.Position;
@@ -219,17 +226,114 @@ public sealed partial class SqlQueryParser : QueryParser
     }
 
     private void AddSyntaxDiagnostic(ref TokenLexer lexer, string message)
+        => AddSyntaxDiagnostic(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length, message);
+
+    private void AddSyntaxDiagnostic(int start, int end, string message)
     {
         _parseDiagnostics.Add(new Diagnostic
         {
             Code = "SQL0003",
             Message = message,
-            Start = lexer.Current.Position,
-            End = lexer.Current.Position + lexer.Current.Value.Length,
+            Start = start,
+            End = end,
             Severity = DiagnosticSeverity.Error,
             Location = DiagnosticLocation.Absolute,
         });
     }
+
+    /// <summary>
+    /// Whether an error already starts at <paramref name="position"/>. Error recovery
+    /// leaves the offending token in place, so the statement-level checks use this to
+    /// report one problem once rather than twice at the same offset.
+    /// </summary>
+    private bool HasErrorAt(int position)
+    {
+        foreach (var diagnostic in _parseDiagnostics)
+        {
+            if (diagnostic.Severity == DiagnosticSeverity.Error && diagnostic.Start == position)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Requires the statement to end at the end of the text or at one terminating
+    /// <c>;</c>. Recursive descent returns at the first token a branch does not
+    /// understand, so anything left here was never parsed: executing what was parsed
+    /// would run a different statement from the one written, such as a DELETE whose
+    /// misspelled WHERE was dropped (#1068). Text after the terminator is a second
+    /// statement, and a request carries exactly one.
+    /// </summary>
+    private void RejectTrailingTokens(ref TokenLexer lexer, SqlQueryExpression expression)
+    {
+        if (IsAtEnd(ref lexer))
+        {
+            return;
+        }
+
+        if (lexer.Current.Type != TokenType.Semicolon)
+        {
+            if (!HasErrorAt(lexer.Current.Position))
+            {
+                AddSyntaxDiagnostic(ref lexer,
+                    $"Unexpected {DescribeToken(ref lexer)} after the end of the {StatementName(expression)} statement.{ImplicitAliasHint(ref lexer)}");
+            }
+
+            return;
+        }
+
+        if (Advance(ref lexer) && !HasErrorAt(lexer.Current.Position))
+        {
+            AddSyntaxDiagnostic(ref lexer,
+                $"Unexpected {DescribeToken(ref lexer)} after ';'. A request accepts exactly one statement.");
+        }
+    }
+
+    private string ImplicitAliasHint(ref TokenLexer lexer)
+        => _implicitAlias is { } alias && alias.NextPosition == lexer.Current.Position
+            ? $" '{alias.Alias}' was read as an alias of table '{alias.Table}'."
+            : string.Empty;
+
+    private static string DescribeToken(ref TokenLexer lexer)
+    {
+        if (IsAtEnd(ref lexer))
+        {
+            return "end of statement";
+        }
+
+        string text = CurrentText(ref lexer);
+        if (text.Length > 40)
+        {
+            text = string.Concat(text.AsSpan(0, 40), "...");
+        }
+
+        return lexer.Current.Type == TokenType.String ? $"string literal {text}" : $"'{text}'";
+    }
+
+    private static string StatementName(SqlQueryExpression expression) => expression switch
+    {
+        SqlCreateTableExpression => "CREATE TABLE",
+        SqlCreateIndexExpression => "CREATE INDEX",
+        SqlDropTableExpression => "DROP TABLE",
+        SqlDropIndexExpression => "DROP INDEX",
+        _ => expression.CommandType switch
+        {
+            SqlQueryCommandType.Select => "SELECT",
+            SqlQueryCommandType.Insert => "INSERT",
+            SqlQueryCommandType.Update => "UPDATE",
+            SqlQueryCommandType.Delete => "DELETE",
+            SqlQueryCommandType.Alter => "ALTER TABLE",
+            SqlQueryCommandType.Create => "CREATE",
+            SqlQueryCommandType.Drop => "DROP",
+            SqlQueryCommandType.Begin => "BEGIN",
+            SqlQueryCommandType.Commit => "COMMIT",
+            SqlQueryCommandType.Rollback => "ROLLBACK",
+            _ => "SQL",
+        },
+    };
 
     // ── Token navigation helpers ───────────────────────────────────────
 
@@ -278,6 +382,16 @@ public sealed partial class SqlQueryParser : QueryParser
     {
         return lexer.Current.Type == TokenType.Keyword &&
                lexer.Current.Value.Equals(keyword, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Matches an unquoted word whether or not the profile lexes it as a keyword, for
+    /// positional words such as ESCAPE and UNKNOWN. A quoted identifier never matches.
+    /// </summary>
+    private static bool IsWord(ref TokenLexer lexer, string word)
+    {
+        return lexer.Current.Type is TokenType.Identifier or TokenType.Keyword &&
+               lexer.Current.Value.Equals(word, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsKeywordOrFunction(ref TokenLexer lexer, string keyword)
@@ -329,6 +443,7 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             alias = CurrentIdentifierText(ref lexer);
             Advance(ref lexer);
+            _implicitAlias = (alias, firstPart, lexer.Current.Position);
         }
 
         return new SqlTableReference(firstPart, schemaName, alias);

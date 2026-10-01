@@ -285,7 +285,13 @@ public sealed partial class SqlQueryParser
         return new SqlColumnDefinition(columnName, dataType, isNullable, isPrimaryKey, defaultValue, constraints, collationName);
     }
 
-    private SqlAlterTableExpression ParseAlterTable(ref TokenLexer lexer)
+    /// <summary>
+    /// Parses ALTER TABLE with one ADD or DROP action. Any other action is rejected here,
+    /// naming it, and yields a bare <see cref="SqlQueryCommandType.Alter"/> expression
+    /// rather than an action node: a stub action once reached the catalog as a DROP of
+    /// column <c>?</c> (#1068).
+    /// </summary>
+    private SqlQueryExpression ParseAlterTable(ref TokenLexer lexer)
     {
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume ALTER
@@ -333,6 +339,10 @@ public sealed partial class SqlQueryParser
                 {
                     Advance(ref lexer);
                 }
+                if (!IsIdentifierOrKeyword(ref lexer))
+                {
+                    AddSyntaxDiagnostic(ref lexer, "Expected a column definition after ALTER TABLE ... ADD.");
+                }
                 action = new SqlAlterAddColumnAction(ParseColumnDefinition(ref lexer));
             }
         }
@@ -353,19 +363,54 @@ public sealed partial class SqlQueryParser
                 colName = CurrentIdentifierText(ref lexer);
                 Advance(ref lexer);
             }
+            else
+            {
+                AddSyntaxDiagnostic(ref lexer, isConstraint
+                    ? "Expected a constraint name after ALTER TABLE ... DROP CONSTRAINT."
+                    : "Expected a column name after ALTER TABLE ... DROP.");
+            }
             action = isConstraint
                 ? new SqlAlterDropConstraintAction(colName)
                 : new SqlAlterDropColumnAction(colName);
         }
         else
         {
-            // Unknown action, create a stub
-            action = new SqlAlterDropColumnAction("?");
+            RejectAlterTableAction(ref lexer);
             ConsumeRemaining(ref lexer);
+            return new SqlQueryExpression(SqlQueryCommandType.Alter, null,
+                Location.Create(1, 1, pos, _lastTokenEnd));
         }
 
         return new SqlAlterTableExpression(table, action, null,
             Location.Create(1, 1, pos, _lastTokenEnd));
+    }
+
+    /// <summary>
+    /// Reports an ALTER TABLE action outside ADD and DROP, naming it: <c>RENAME TO</c>,
+    /// <c>ALTER COLUMN</c>, <c>MODIFY</c> and the like.
+    /// </summary>
+    private void RejectAlterTableAction(ref TokenLexer lexer)
+    {
+        const string supported = "ADD [COLUMN], ADD CONSTRAINT, DROP [COLUMN] and DROP CONSTRAINT";
+        if (IsAtEnd(ref lexer) || lexer.Current.Type == TokenType.Semicolon)
+        {
+            AddSyntaxDiagnostic(ref lexer, $"ALTER TABLE requires an action: {supported}.");
+            return;
+        }
+
+        int start = lexer.Current.Position;
+        int end = start + lexer.Current.Value.Length;
+        string action = CurrentText(ref lexer).ToUpperInvariant();
+        if (lexer.Current.Type is TokenType.Identifier or TokenType.Keyword &&
+            TryPeekToken(lexer, out string next, out int nextEnd) &&
+            next.ToUpperInvariant() is "COLUMN" or "CONSTRAINT" or "TO")
+        {
+            action = $"{action} {next.ToUpperInvariant()}";
+            end = nextEnd;
+        }
+
+        AddSyntaxDiagnostic(start, end,
+            $"The ALTER TABLE action '{action}' is not supported; the supported actions are {supported}.");
     }
 
     /// <summary>
