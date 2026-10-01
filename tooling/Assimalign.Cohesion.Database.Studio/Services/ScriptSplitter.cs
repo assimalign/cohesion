@@ -5,6 +5,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Language;
+
 namespace Assimalign.Cohesion.Database.Studio;
 
 /// <summary>A statement cut out of the editor text, with its offset in that text.</summary>
@@ -13,7 +15,10 @@ internal readonly record struct ScriptStatement(string Text, int Offset);
 /// <summary>
 /// Splits editor text into statements on <c>;</c> outside quotes and comments. Every engine parses
 /// one statement per call (SQL, OQL and GQL all reject multiple statements), so the Studio runs a
-/// script statement by statement. The terminating <c>;</c> stays with its statement.
+/// script statement by statement. The terminating <c>;</c> stays with its statement. A line
+/// comment ends where the engines' shared lexer ends one (<see cref="TokenLexer.IsLineTerminator(char)"/>,
+/// #1150). The Windows editor control separates lines with CR, so a comment that ran to the next LF
+/// hid every statement after it.
 /// </summary>
 internal static class ScriptSplitter
 {
@@ -36,8 +41,7 @@ internal static class ScriptSplitter
 
             if ((c == '-' && next == '-') || (c == '/' && next == '/'))
             {
-                int end = text.IndexOf('\n', i);
-                i = end < 0 ? text.Length : end + 1;
+                i = SkipLineComment(text, i);
                 continue;
             }
 
@@ -59,6 +63,21 @@ internal static class ScriptSplitter
 
         Add(statements, text, start, text.Length);
         return statements;
+    }
+
+    /// <summary>
+    /// The index of the line terminator that ends the comment starting at <paramref name="index"/>,
+    /// or the text length when none follows. The terminator is whitespace to every caller.
+    /// </summary>
+    private static int SkipLineComment(string text, int index)
+    {
+        int i = index + 2;
+        while (i < text.Length && !TokenLexer.IsLineTerminator(text[i]))
+        {
+            i++;
+        }
+
+        return i;
     }
 
     private static int SkipQuoted(string text, int index, char quote)
@@ -120,8 +139,7 @@ internal static class ScriptSplitter
             }
             else if ((c == '-' && next == '-') || (c == '/' && next == '/'))
             {
-                int end = segment.IndexOf('\n', i);
-                i = end < 0 ? segment.Length : end + 1;
+                i = SkipLineComment(segment, i);
             }
             else if (c == '/' && next == '*')
             {
@@ -151,8 +169,7 @@ internal static class ScriptSplitter
             }
             else if ((c == '-' && next == '-') || (c == '/' && next == '/'))
             {
-                int end = statement.IndexOf('\n', i);
-                i = end < 0 ? statement.Length : end + 1;
+                i = SkipLineComment(statement, i);
             }
             else if (c == '/' && next == '*')
             {

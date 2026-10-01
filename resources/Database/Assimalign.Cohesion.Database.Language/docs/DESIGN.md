@@ -86,7 +86,52 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
 - **`--` stays a line comment in every language.** It is SQL's comment and ISO/IEC 39075's
   `<simple comment>`, so there is no per-language lexer switch. A GQL abbreviated edge written
   with `--` directly after `)` or `]` reads as a comment; the coded GQL diagnostic for that case
-  belongs to gql-label-direction.
+  belongs to gql-label-direction. Where the comment ends is the next section's rule.
+
+## Line terminators and line comments (#1150)
+
+One set of line terminators serves every language: line feed (LF, U+000A), carriage return
+(CR, U+000D), next line (NEL, U+0085), line separator (LS, U+2028) and paragraph separator
+(PS, U+2029). `TokenLexer.IsLineTerminator(char)` is that set, and nothing else defines it.
+
+- **A `--` comment ends before the first terminator.** The terminator is not part of the
+  `Comment` token; it is skipped as whitespace, so CR LF needs no special case and the next line
+  lexes as code. A comment with no terminator after it runs to the end of the input, as before.
+  The comment used to end only at LF, so the text after a lone CR, NEL, LS or PS was comment
+  text: `DELETE FROM t -- note<CR>WHERE id = 1` parsed as an unfiltered `DELETE` and removed
+  every row, and #1068's trailing-token rule could not see it, because the swallowed text was
+  part of the comment token rather than left over after the statement. PostgreSQL ends a `--`
+  comment at CR or LF, and ISO/IEC 39075's `<simple comment>` grammar ends it at either; NEL, LS
+  and PS complete the set C# uses for its own line terminators.
+- **Vertical tab and form feed are not terminators.** U+000B and U+000C are whitespace between
+  tokens but stay inside a comment, as in PostgreSQL and C#.
+- **Strings, quoted identifiers and block comments are unaffected.** A literal or a `/* */`
+  comment may span lines, so a terminator inside it ends nothing, and `--` inside a literal starts
+  no comment. The escape spelling `\r` or `\n`, written as two characters, is text everywhere.
+- **`//` is not a comment in any language.** The lexer reads `/` as the division operator, so
+  `//` is two `Slash` tokens and each parser rejects it (GQL with `GQL0002`). ISO/IEC 39075 also
+  spells a `<simple comment>` with `//`; an item that adds that form needs a per-language lexer
+  switch, because `//` must stay an error in SQL and OQL, and it ends the comment through the same
+  scan and terminator set as `--`.
+- **One line-numbering rule.** `TokenLexer.CountLineBreaks(ReadOnlySpan<char>)` counts each
+  terminator as one line break, except that CR immediately followed by LF is one break together.
+  OQL and GQL count diagnostic and expression lines with it, so a diagnostic on the token after
+  `-- note<CR>` reports the next line, the same line the lexer started. SQL diagnostics locate by
+  offset (`Sql.Language/docs/DESIGN.md`, "Positions are offsets"); a tool that maps those offsets
+  to lines counts with the same method. The Database Studio's script splitter ends its comments
+  with `IsLineTerminator` too, so it cuts a script where the engines read it.
+- **Consistency with #1101 and gql-label-direction (#1139).** Every terminator is whitespace to
+  `char.IsWhiteSpace`, so outside a comment it separates tokens and is never `Unrecognized`; the
+  stray-character rule is unchanged. The rule moves where a comment ends, never where it starts,
+  so #1139's `GQL0008`, which keys on a `--` comment beginning exactly where a node's `)` or an
+  edge's `]` ends, holds whichever terminator ends the comment.
+- **Tests.** `TokenLexerLineCommentTests` pins each terminator, CR LF, a comment at the end of
+  the input and terminator escapes in literals and comments. Each language pins the boundary in
+  its parser (`SqlLineCommentTests`, `OqlLineCommentTests`, `GqlLineCommentTests`), and
+  `SqlStatementCompletenessTests` appends a comment plus leftover text at every terminator to
+  every statement form. The SQL engine (`SqlLineCommentExecutionTests`, both session seams) and the
+  wire (`SqlLineCommentWireTests`, `SqlDatabaseServer` and `Sql.Client`) show that `DELETE` and
+  `UPDATE` with a `WHERE` after a comment change exactly one row.
 
 ## Non-goals
 
@@ -98,4 +143,6 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
 
 Profiles use copied arrays, a comparer-backed set, and direct construction. Lexer projection and
 diagnostic creation require no reflection, dynamic code generation, or dependency-injection stack.
-The recognized-unsupported tables are static arrays scanned by ordinary loops.
+The recognized-unsupported tables are static arrays scanned by ordinary loops. The line-terminator
+set is one static `SearchValues<char>` built from a literal, which needs no reflection or runtime
+code generation.

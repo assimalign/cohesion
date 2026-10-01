@@ -46,13 +46,10 @@ public sealed partial class OqlQueryParser : QueryParser
         while (lexer.MoveNext())
         {
             var token = lexer.Current;
-            while (scanned < token.Position)
-            {
-                if (_source[scanned++] == '\n')
-                {
-                    line++;
-                }
-            }
+            // Lines break where the lexer ends a line comment (#1150). Counting each gap on its
+            // own is exact: a token never starts with LF, so no CR LF straddles two gaps.
+            line += TokenLexer.CountLineBreaks(_source.AsSpan(scanned, token.Position - scanned));
+            scanned = token.Position;
 
             var item = new Lexeme(token.Type, token.Value.ToString(), token.Position,
                 token.Position + token.Value.Length, line);
@@ -78,13 +75,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 }
             }
         }
-        while (scanned < _source.Length)
-        {
-            if (_source[scanned++] == '\n')
-            {
-                line++;
-            }
-        }
+        line += TokenLexer.CountLineBreaks(_source.AsSpan(scanned));
 
         _tokens.Add(new Lexeme(TokenType.Eof, string.Empty, _source.Length, _source.Length, line));
 
@@ -376,7 +367,7 @@ public sealed partial class OqlQueryParser : QueryParser
         }
     }
     private static Location Span(Lexeme start, Lexeme end) =>
-        Location.Create(start.Line, end.Line + end.Text.AsSpan().Count('\n'), start.Start, end.End);
+        Location.Create(start.Line, end.Line + TokenLexer.CountLineBreaks(end.Text), start.Start, end.End);
 
     private string CollectionName()
     {
