@@ -287,8 +287,11 @@ any other cookie. The defaults of the two packages are chosen to compose safely:
   with this package). Signing in is something the user asked for; under a consent requirement, a
   non-essential ticket would be dropped on every request and the user could never stay signed in. That
   was the one gap: before this package nothing read `IsEssential`, so the template never set it.
-  `Http.Antiforgery` and `Web.Sessions` do not mark their cookies essential yet; their packages own that
-  decision.
+  The other cookies the stack emits follow the same reasoning, each owned by its package: the
+  antiforgery cookie token is essential by default (`HttpAntiforgeryOptions.CookieIsEssential`), because
+  without it no form post from an undecided user could pass validation; the session cookie is not
+  (`HttpSessionOptions.CookieIsEssential`, default `false`), because a session usually holds state that
+  needs consent, and an application that cannot work without its session opts in.
 - **`Secure` over HTTPS, behind a proxy too.** The handler's own floor (#1050) and the policy's
   `SameAsRequest` default both read the effective scheme, so they agree. Over HTTPS, direct or through a
   trusted TLS-terminating proxy, the ticket is `Secure`.

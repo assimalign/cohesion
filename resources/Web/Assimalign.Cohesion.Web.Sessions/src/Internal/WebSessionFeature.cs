@@ -216,6 +216,8 @@ internal sealed class WebSessionFeature : IHttpSessionFeature
             // forwarded-headers middleware vouched for. Without that middleware the effective
             // scheme is the transport-derived one.
             Secure = _context.EffectiveScheme == HttpScheme.Https,
+            // A cookie-consent policy drops a non-essential cookie until the user consents.
+            IsEssential = _options.CookieIsEssential,
             // Session-scoped: no Expires / Max-Age, so the cookie clears when the
             // browser session ends. Server-side idle timeout governs expiry.
         };

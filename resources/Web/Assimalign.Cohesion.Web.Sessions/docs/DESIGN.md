@@ -97,6 +97,11 @@ The session-id cookie is built through the hardened `Http.Cookies` model with se
 - **Session-scoped** — no `Max-Age`/`Expires`; the cookie clears when the browser session ends, and
   server-side idle timeout governs true expiry.
 - **Name / Path** — from `HttpSessionOptions.CookieName` / `CookiePath`.
+- **Not essential by default** — `HttpSessionOptions.CookieIsEssential` (default `false`) marks the
+  cookie for a cookie-consent policy (Web.CookiePolicy). Under a consent requirement a non-essential
+  session cookie is dropped until the user consents, because a session usually holds state that needs
+  consent; an application that cannot work without its session (a cart, a multi-step form) sets it to
+  `true`.
 
 ### Behind a proxy — the `Secure` decision reads the effective scheme
 

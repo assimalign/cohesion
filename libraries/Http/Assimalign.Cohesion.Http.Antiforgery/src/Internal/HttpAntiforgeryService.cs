@@ -166,6 +166,7 @@ internal sealed class HttpAntiforgeryService : IHttpAntiforgery
             Secure = _options.CookieSecure,
             SameSite = _options.CookieSameSite,
             Path = _options.CookiePath,
+            IsEssential = _options.CookieIsEssential,
         }));
     }
 

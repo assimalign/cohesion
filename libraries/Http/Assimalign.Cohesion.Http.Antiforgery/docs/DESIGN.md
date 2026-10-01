@@ -125,6 +125,11 @@ The package reads the cookie token from `request.Cookies` and writes it to
 `request.Headers[header]`. It does not re-implement cookie parsing or form
 parsing.
 
+The cookie token is marked essential by default
+(`HttpAntiforgeryOptions.CookieIsEssential`), so a cookie-consent policy
+(Web.CookiePolicy) emits it before the user consents: without it, no unsafe
+request from an undecided user could pass validation.
+
 A note on the form path: `request.Form` returns the *already-parsed* form.
 Antiforgery does not itself trigger body parsing — that is the Forms layer's
 job (a forms middleware, or an explicit `ReadFormAsync`). When the form has

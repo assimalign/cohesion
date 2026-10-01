@@ -30,6 +30,14 @@ public sealed class HttpSessionOptions
     public bool CookieHttpOnly { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets whether the session cookie is essential to the application, so a cookie-consent
+    /// policy emits it before the user has consented. Defaults to <see langword="false"/>: a session
+    /// usually holds state that needs consent. Set it to <see langword="true"/> when the application
+    /// cannot work without its session, such as a shopping cart or a multi-step form.
+    /// </summary>
+    public bool CookieIsEssential { get; set; }
+
+    /// <summary>
     /// Gets or sets the idle timeout after which an inactive session is
     /// considered expired. Defaults to 20 minutes.
     /// </summary>

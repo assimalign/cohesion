@@ -103,4 +103,12 @@ public sealed class HttpAntiforgeryOptions
     /// <c>/</c>.
     /// </summary>
     public string CookiePath { get; set; } = "/";
+
+    /// <summary>
+    /// Gets or sets whether the cookie token is essential to the application, so a cookie-consent
+    /// policy emits it before the user has consented. Defaults to <see langword="true"/>: without the
+    /// cookie no unsafe request can pass validation, so a site that asks for consent would otherwise
+    /// reject every form post from a user who has not answered yet.
+    /// </summary>
+    public bool CookieIsEssential { get; set; } = true;
 }

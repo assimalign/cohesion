@@ -198,6 +198,31 @@ public class HttpAntiforgeryTests
         await Should.NotThrowAsync(async () => await antiforgery.ValidateRequestAsync(post));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: A non-essential cookie token is not marked essential")]
+    public void GetAndStoreTokens_WhenCookieNotEssential_ShouldNotMarkCookieEssential()
+    {
+        // Arrange
+        HttpAntiforgeryOptions options = new() { CookieIsEssential = false };
+        IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options);
+        TestHttpContext context = new(HttpMethod.Get);
+
+        // Act
+        antiforgery.GetAndStoreTokens(context);
+
+        // Assert
+        bool cookieStored = false;
+        foreach (HttpCookie cookie in context.Response.Cookies)
+        {
+            if (cookie.Name == options.CookieName)
+            {
+                cookie.Options.IsEssential.ShouldBeFalse();
+                cookieStored = true;
+            }
+        }
+
+        cookieStored.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - GetAndStoreTokens: Should set the cookie token and anti-caching headers")]
     public void GetAndStoreTokens_OnNewExchange_ShouldSetCookieAndSecurityHeaders()
     {
@@ -214,6 +239,7 @@ public class HttpAntiforgeryTests
             if (cookie.Name == options.CookieName && cookie.Value == tokens.CookieToken)
             {
                 cookie.Options.HttpOnly.ShouldBeTrue();
+                cookie.Options.IsEssential.ShouldBeTrue(); // a consent policy must not drop it
                 cookieStored = true;
             }
         }
