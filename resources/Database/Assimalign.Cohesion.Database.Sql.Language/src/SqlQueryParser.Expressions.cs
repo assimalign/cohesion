@@ -31,6 +31,10 @@ public sealed partial class SqlQueryParser
     //   ParsePrimary            → literal | column_ref | param | function(...)
     //                            | (expr) | (SELECT ...) | CASE | CAST | EXISTS | *
     //                            (a ~ here, as in LIKE ~'x' or DEFAULT ~1, goes to ParseUnary)
+    //
+    // An operand a node encloses is parsed through ParseOperand, and a node built over an
+    // operand parsed before it is checked with Nest: together they bound the tree at
+    // MaximumExpressionDepth levels (SqlQueryParser.Nesting.cs, #1151).
 
     private SqlExpression ParseExpression(ref TokenLexer lexer)
     {
@@ -45,9 +49,9 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var right = ParseAnd(ref lexer);
-            left = new SqlBinaryExpression(left, SqlBinaryOperator.Or, right,
-                Location.Create(1, 1, pos, pos));
+            var right = ParseOperand(ref lexer, OperandRule.And);
+            left = Nest(ref lexer, new SqlBinaryExpression(left, SqlBinaryOperator.Or, right,
+                Location.Create(1, 1, pos, pos)));
         }
 
         return left;
@@ -61,9 +65,9 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var right = ParseNot(ref lexer);
-            left = new SqlBinaryExpression(left, SqlBinaryOperator.And, right,
-                Location.Create(1, 1, pos, pos));
+            var right = ParseOperand(ref lexer, OperandRule.Not);
+            left = Nest(ref lexer, new SqlBinaryExpression(left, SqlBinaryOperator.And, right,
+                Location.Create(1, 1, pos, pos)));
         }
 
         return left;
@@ -82,7 +86,7 @@ public sealed partial class SqlQueryParser
                 return ParseExists(ref lexer, isNegated: true, pos);
             }
 
-            var operand = ParseNot(ref lexer);
+            var operand = ParseOperand(ref lexer, OperandRule.Not);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.Not,
                 Location.Create(1, 1, pos, pos));
         }
@@ -133,7 +137,7 @@ public sealed partial class SqlQueryParser
             {
                 RejectIsPredicate(ref lexer, pos, negated);
             }
-            return new SqlIsNullExpression(left, negated, Location.Create(1, 1, pos, pos));
+            return Nest(ref lexer, new SqlIsNullExpression(left, negated, Location.Create(1, 1, pos, pos)));
         }
 
         // [NOT] BETWEEN ... AND ...
@@ -160,11 +164,11 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var low = ParseAddition(ref lexer);
+            var low = ParseOperand(ref lexer, OperandRule.Addition);
             ExpectKeyword(ref lexer, "AND", "AND between the BETWEEN bounds");
 
-            var high = ParseAddition(ref lexer);
-            return new SqlBetweenExpression(left, low, high, notBefore, Location.Create(1, 1, pos, pos));
+            var high = ParseOperand(ref lexer, OperandRule.Addition);
+            return Nest(ref lexer, new SqlBetweenExpression(left, low, high, notBefore, Location.Create(1, 1, pos, pos)));
         }
 
         // [NOT] IN (...)
@@ -182,27 +186,27 @@ public sealed partial class SqlQueryParser
                     var subquery = ParseSubquery(ref lexer);
                     Expect(ref lexer, TokenType.RightParen, "')' after the IN subquery");
 
-                    return new SqlInExpression(left, null, subquery, notBefore, Location.Create(1, 1, pos, pos));
+                    return Nest(ref lexer, new SqlInExpression(left, null, subquery, notBefore, Location.Create(1, 1, pos, pos)));
                 }
 
                 // Value list
                 var values = new List<SqlExpression>();
                 if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
                 {
-                    values.Add(ParseExpression(ref lexer));
+                    values.Add(ParseOperand(ref lexer, OperandRule.Expression));
                     while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
                     {
                         Advance(ref lexer);
-                        values.Add(ParseExpression(ref lexer));
+                        values.Add(ParseOperand(ref lexer, OperandRule.Expression));
                     }
                 }
                 Expect(ref lexer, TokenType.RightParen, "')' after the IN list");
 
-                return new SqlInExpression(left, values, null, notBefore, Location.Create(1, 1, pos, pos));
+                return Nest(ref lexer, new SqlInExpression(left, values, null, notBefore, Location.Create(1, 1, pos, pos)));
             }
 
             AddExpectedDiagnostic(ref lexer, "'(' after IN");
-            return new SqlInExpression(left, Array.Empty<SqlExpression>(), null, notBefore, Location.Create(1, 1, pos, pos));
+            return Nest(ref lexer, new SqlInExpression(left, Array.Empty<SqlExpression>(), null, notBefore, Location.Create(1, 1, pos, pos)));
         }
 
         // [NOT] LIKE pattern
@@ -210,7 +214,7 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var pattern = ParseCollate(ref lexer);
+            var pattern = ParseOperand(ref lexer, OperandRule.Collate);
             if (IsWord(ref lexer, "ESCAPE"))
             {
                 // Without this check the escape clause was left behind, and in a select
@@ -220,10 +224,10 @@ public sealed partial class SqlQueryParser
                 Advance(ref lexer);
                 if (CanStartOperand(ref lexer))
                 {
-                    ParseCollate(ref lexer); // recover past the escape character
+                    ParseOperand(ref lexer, OperandRule.Collate); // recover past the escape character
                 }
             }
-            return new SqlLikeExpression(left, pattern, notBefore, Location.Create(1, 1, pos, pos));
+            return Nest(ref lexer, new SqlLikeExpression(left, pattern, notBefore, Location.Create(1, 1, pos, pos)));
         }
 
         // Standard comparison operators
@@ -232,8 +236,8 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var right = SkipQuantifiedComparison(ref lexer) ?? ParseAddition(ref lexer);
-            return new SqlBinaryExpression(left, op.Value, right, Location.Create(1, 1, pos, pos));
+            var right = SkipQuantifiedComparison(ref lexer) ?? ParseOperand(ref lexer, OperandRule.Addition);
+            return Nest(ref lexer, new SqlBinaryExpression(left, op.Value, right, Location.Create(1, 1, pos, pos)));
         }
 
         return left;
@@ -294,7 +298,7 @@ public sealed partial class SqlQueryParser
                 $"The {form} DISTINCT FROM predicate is not supported by the SQL surface; only IS [NOT] NULL is.");
             if (CanStartOperand(ref lexer))
             {
-                ParseAddition(ref lexer); // recover past the comparand
+                ParseOperand(ref lexer, OperandRule.Addition); // recover past the comparand
             }
             return;
         }
@@ -347,8 +351,8 @@ public sealed partial class SqlQueryParser
 
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var right = ParseMultiplication(ref lexer);
-            left = new SqlBinaryExpression(left, op, right, Location.Create(1, 1, pos, pos));
+            var right = ParseOperand(ref lexer, OperandRule.Multiplication);
+            left = Nest(ref lexer, new SqlBinaryExpression(left, op, right, Location.Create(1, 1, pos, pos)));
         }
 
         return left;
@@ -380,8 +384,8 @@ public sealed partial class SqlQueryParser
 
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var right = ParseUnary(ref lexer);
-            left = new SqlBinaryExpression(left, op, right, Location.Create(1, 1, pos, pos));
+            var right = ParseOperand(ref lexer, OperandRule.Unary);
+            left = Nest(ref lexer, new SqlBinaryExpression(left, op, right, Location.Create(1, 1, pos, pos)));
         }
 
         return left;
@@ -395,7 +399,7 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var operand = ParseUnary(ref lexer);
+            var operand = ParseOperand(ref lexer, OperandRule.Unary);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.Negate,
                 Location.Create(1, 1, pos, pos));
         }
@@ -408,7 +412,7 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var operand = ParseUnary(ref lexer);
+            var operand = ParseOperand(ref lexer, OperandRule.Unary);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.Plus,
                 Location.Create(1, 1, pos, pos));
         }
@@ -429,7 +433,7 @@ public sealed partial class SqlQueryParser
 
             AddUnsupportedSurfaceDiagnostic(pos, end,
                 "The prefix ~ operator (bitwise NOT) is not supported by the SQL surface.");
-            var operand = ParseUnary(ref lexer);
+            var operand = ParseOperand(ref lexer, OperandRule.Unary);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.BitwiseNot,
                 Location.Create(1, 1, pos, pos));
         }
@@ -499,14 +503,7 @@ public sealed partial class SqlQueryParser
             $"The infix {spelling} operator ({meaning}) is not supported by the SQL surface.");
         if (CanStartOperand(ref lexer))
         {
-            if (afterPredicate)
-            {
-                ParseAddition(ref lexer);
-            }
-            else
-            {
-                ParseMultiplication(ref lexer);
-            }
+            ParseOperand(ref lexer, afterPredicate ? OperandRule.Addition : OperandRule.Multiplication);
         }
     }
 
@@ -624,7 +621,8 @@ public sealed partial class SqlQueryParser
         {
             Advance(ref lexer);
 
-            // Subquery: (SELECT ...)
+            // Subquery: (SELECT ...). Its parentheses are its syntax, not grouping: the
+            // subquery is a node, which ParseSubquery counts as a level of the tree.
             if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "SELECT"))
             {
                 var subSelect = ParseSubquery(ref lexer);
@@ -633,8 +631,14 @@ public sealed partial class SqlQueryParser
                 return new SqlSubqueryExpression(subSelect, Location.Create(1, 1, pos, pos));
             }
 
-            // Parenthesized expression
+            // Parenthesized expression: a level of recursion, though not of the tree.
+            if (!TryEnterParenthesis(ref lexer, pos))
+            {
+                return NestingPlaceholder(pos);
+            }
+
             var inner = ParseExpression(ref lexer);
+            _parenthesisDepth--;
             Expect(ref lexer, TokenType.RightParen, "')'");
 
             return inner;
@@ -787,11 +791,11 @@ public sealed partial class SqlQueryParser
             }
             else
             {
-                args.Add(ParseExpression(ref lexer));
+                args.Add(ParseOperand(ref lexer, OperandRule.Expression));
                 while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
                 {
                     Advance(ref lexer);
-                    args.Add(ParseExpression(ref lexer));
+                    args.Add(ParseOperand(ref lexer, OperandRule.Expression));
                 }
             }
         }
@@ -851,7 +855,7 @@ public sealed partial class SqlQueryParser
         SqlExpression? input = null;
         if (!IsAtEnd(ref lexer) && !IsKeyword(ref lexer, "WHEN"))
         {
-            input = ParseExpression(ref lexer);
+            input = ParseOperand(ref lexer, OperandRule.Expression);
         }
 
         var whenClauses = new List<SqlWhenClause>();
@@ -863,10 +867,10 @@ public sealed partial class SqlQueryParser
         while (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "WHEN"))
         {
             Advance(ref lexer); // consume WHEN
-            var condition = ParseExpression(ref lexer);
+            var condition = ParseOperand(ref lexer, OperandRule.Expression);
             ExpectKeyword(ref lexer, "THEN", "THEN after the WHEN condition");
 
-            var result = ParseExpression(ref lexer);
+            var result = ParseOperand(ref lexer, OperandRule.Expression);
             whenClauses.Add(new SqlWhenClause(condition, result));
         }
 
@@ -874,7 +878,7 @@ public sealed partial class SqlQueryParser
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "ELSE"))
         {
             Advance(ref lexer);
-            elseResult = ParseExpression(ref lexer);
+            elseResult = ParseOperand(ref lexer, OperandRule.Expression);
         }
 
         ExpectKeyword(ref lexer, "END", "END to close the CASE expression");

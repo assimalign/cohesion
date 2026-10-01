@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -671,6 +672,7 @@ internal sealed partial class SqlPlanExecutor
     /// </param>
     private static void ValidateCheckSyntax(SqlExpression expression, SqlCatalogTable table, bool requireBoolean, bool declaring)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression
             or SqlInExpression { Subquery: not null } || (declaring && expression is SqlCastExpression))
         {

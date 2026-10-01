@@ -52,6 +52,9 @@ public sealed partial class SqlQueryParser : QueryParser
         _lastTokenEnd = 0;
         _subqueryDepth = 0;
         _paginationDepth = 0;
+        _expressionDepth = 0;
+        _parenthesisDepth = 0;
+        _nestingDiagnostic = -1;
         _implicitAlias = null;
         _parseDiagnostics.Clear();
 
@@ -175,6 +178,15 @@ public sealed partial class SqlQueryParser : QueryParser
         // NULL placeholder for WHERE b = ?, and none of that is returned (#1101).
         if (_sawUnrecognizedCharacter)
         {
+            expression = new SqlQueryExpression(expression.CommandType, null, expression.Location);
+        }
+
+        // A statement that crossed a nesting limit was abandoned at that point (#1151): only
+        // its SQL0006 and what was reported before it describe the text, and only its command
+        // type is kept, so no consumer ever receives the partial tree.
+        if (NestingExceeded)
+        {
+            DropDiagnosticsAfterNestingLimit();
             expression = new SqlQueryExpression(expression.CommandType, null, expression.Location);
         }
 

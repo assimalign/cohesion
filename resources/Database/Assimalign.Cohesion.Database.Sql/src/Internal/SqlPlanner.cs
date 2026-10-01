@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -335,6 +336,7 @@ internal sealed partial class SqlPlanner
         SqlExpression expression,
         Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.And } conjunction)
         {
             CollectSargablePredicates(table, conjunction.Left, predicates);
@@ -498,6 +500,7 @@ internal sealed partial class SqlPlanner
 
     private static bool ReferencesAnyColumn(SqlExpression expression)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is SqlColumnReferenceExpression)
         {
             return true;
@@ -833,6 +836,7 @@ internal sealed partial class SqlPlanner
         IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries = null,
         IReadOnlyDictionary<SqlExpression, int>? boundValues = null)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (boundValues is not null && boundValues.ContainsKey(expression))
         {
             return;
@@ -891,6 +895,7 @@ internal sealed partial class SqlPlanner
     private static DatabaseType? StaticOperandType(SqlExpression expression, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries, IReadOnlyDictionary<SqlExpression, int>? boundValues)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (boundValues is not null && boundValues.ContainsKey(expression))
         {
             return null;
@@ -919,6 +924,7 @@ internal sealed partial class SqlPlanner
 
     private static bool ContainsAggregate(SqlExpression expression)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is SqlFunctionCallExpression call &&
             call.FunctionName.ToUpperInvariant() is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX")
         {
@@ -930,8 +936,22 @@ internal sealed partial class SqlPlanner
 
     /// <summary>Finds conversions even when wrapped in an unsupported DDL default expression.</summary>
     private static bool ContainsCast(SqlExpression expression)
-        => expression is SqlCastExpression || Children(expression).Any(ContainsCast);
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return expression is SqlCastExpression || Children(expression).Any(ContainsCast);
+    }
 
+    /// <summary>
+    /// The operand nodes of an expression, in source order; a subquery's own query is opaque.
+    /// </summary>
+    /// <remarks>
+    /// Every walker that recurses through these children calls
+    /// <see cref="RuntimeHelpers.EnsureSufficientExecutionStack"/> before it descends (#1151). A
+    /// parsed tree is at most <c>SqlQueryParser.MaximumExpressionDepth</c> (128) levels deep, so
+    /// the check fails only for a tree built by hand or on a thread created with a small stack,
+    /// and the statement then fails with <c>COHSQLE004</c> instead of the process overflowing the
+    /// stack. A new walker follows the same rule.
+    /// </remarks>
     internal static IEnumerable<SqlExpression> Children(SqlExpression expression)
     {
         switch (expression)

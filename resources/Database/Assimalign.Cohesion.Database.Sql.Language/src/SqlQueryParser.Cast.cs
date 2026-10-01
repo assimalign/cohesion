@@ -26,7 +26,7 @@ public sealed partial class SqlQueryParser
             AddSyntaxDiagnostic(ref lexer, "Expected '(' after CAST.");
         }
 
-        var operand = ParseExpression(ref lexer);
+        var operand = ParseOperand(ref lexer, OperandRule.Expression);
         if (IsKeyword(ref lexer, "AS"))
         {
             Advance(ref lexer);

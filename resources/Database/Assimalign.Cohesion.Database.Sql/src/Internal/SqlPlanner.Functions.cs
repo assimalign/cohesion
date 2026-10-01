@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Language;
 
@@ -116,6 +117,8 @@ internal sealed partial class SqlPlanner
 
     private static void RejectUnknownFunctions(SqlExpression? expression)
     {
+        // Subqueries recurse through here as well as children (#1151).
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (expression)
         {
             case null:

@@ -49,7 +49,31 @@ public sealed class SqlSelectExpression : SqlQueryExpression
         Limit = limit;
         Offset = offset;
         IsDistinct = isDistinct;
+
+        int depth = System.Math.Max(SqlExpression.DepthOf(where), SqlExpression.DepthOf(having));
+        depth = System.Math.Max(depth, System.Math.Max(SqlExpression.DepthOf(limit), SqlExpression.DepthOf(offset)));
+        depth = System.Math.Max(depth, SqlExpression.DepthOf(groupBy));
+        foreach (var column in columns)
+        {
+            depth = System.Math.Max(depth, column.Expression.Depth);
+        }
+        foreach (var join in joins)
+        {
+            depth = System.Math.Max(depth, SqlExpression.DepthOf(join.Condition));
+        }
+        foreach (var order in orderBy)
+        {
+            depth = System.Math.Max(depth, order.Expression.Depth);
+        }
+
+        ExpressionDepth = depth;
     }
+
+    /// <summary>
+    /// Gets the greatest <see cref="SqlExpression.Depth"/> among the query's clauses, or 0 when
+    /// it has none. A subquery node is one level deeper than the query it wraps.
+    /// </summary>
+    internal int ExpressionDepth { get; }
 
     /// <summary>
     /// Gets the columns in the SELECT list.

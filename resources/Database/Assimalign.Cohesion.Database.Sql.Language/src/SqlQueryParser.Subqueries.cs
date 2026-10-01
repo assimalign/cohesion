@@ -50,16 +50,31 @@ public sealed partial class SqlQueryParser
                 null, null, false, null, null);
         }
 
+        // The subquery node (scalar, IN or EXISTS) encloses the query's clauses, so they parse
+        // one level deeper; the expression limit spans the whole statement (#1151).
+        if (!TryEnterOperand(ref lexer))
+        {
+            return new SqlSelectExpression([], null, [], null, [], null, [],
+                null, null, false, null, null);
+        }
+
         _subqueryDepth++;
         try
         {
             var select = ParseSelect(ref lexer);
-            ValidateSubqueryReferences(select);
+
+            // An abandoned statement keeps none of its tree, so there is nothing to check.
+            if (!NestingExceeded)
+            {
+                ValidateSubqueryReferences(select);
+            }
+
             return select;
         }
         finally
         {
             _subqueryDepth--;
+            _expressionDepth--;
         }
     }
 
@@ -174,6 +189,8 @@ public sealed partial class SqlQueryParser
         }
     }
 
+    // Recursive, but bounded: it walks only trees this parser built, which nest at most
+    // MaximumExpressionDepth levels.
     private void ValidateSubqueryReference(SqlExpression? expression, HashSet<string> qualifiers)
     {
         switch (expression)

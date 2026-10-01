@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -35,6 +36,10 @@ internal static class SqlPersistedExpression
     internal const string DamagedCatalogHint =
         "The catalog is damaged or was written by an incompatible engine build; restore the database from a backup.";
 
+    // The parser's code for text within the nesting limits that the calling thread has too
+    // little stack left to parse (#1151): the same text parses on a larger stack.
+    private const string ParserOutOfStackCode = "SQL0007";
+
     /// <summary>
     /// Renders the canonical text to persist for a parsed expression and proves it reloads to
     /// the same tree.
@@ -57,7 +62,15 @@ internal static class SqlPersistedExpression
             throw new DatabaseException($"{subject} cannot be stored: {exception.Message}", exception);
         }
 
-        if (!TryParse(text, out var reloaded, out string? problem) || !AreEquivalent(expression, reloaded))
+        bool parsed = TryParse(text, out var reloaded, out string? problem, out bool outOfStack);
+        if (outOfStack)
+        {
+            // The text is within the dialect's limits; this thread cannot recurse far enough to
+            // read it back. The statement fails as too complex for the thread (COHSQLE004).
+            throw new InsufficientExecutionStackException();
+        }
+
+        if (!parsed || !AreEquivalent(expression, reloaded))
         {
             throw new DatabaseException(
                 $"{subject} cannot be stored: its canonical text '{text}' does not reproduce the declared expression" +
@@ -71,18 +84,37 @@ internal static class SqlPersistedExpression
     /// <param name="text">The persisted text.</param>
     /// <param name="subject">Names the definition for the error message.</param>
     /// <returns>The expression tree.</returns>
-    /// <exception cref="DatabaseException">The text is not one valid SQL expression.</exception>
+    /// <exception cref="DatabaseException">
+    /// The text is not one valid SQL expression, or the calling thread has too little stack left
+    /// to parse it.
+    /// </exception>
     internal static SqlExpression Load(string text, string subject)
     {
         ArgumentNullException.ThrowIfNull(text);
-        if (!TryParse(text, out var expression, out string? problem))
+        if (!TryParse(text, out var expression, out string? problem, out bool outOfStack))
         {
-            throw new DatabaseException(
-                $"{subject} cannot be loaded: its persisted definition '{text}' is not a valid SQL expression ({problem}). {DamagedCatalogHint}");
+            throw outOfStack
+                ? OutOfStack(subject)
+                : new DatabaseException(
+                    $"{subject} cannot be loaded: its persisted definition '{text}' is not a valid SQL expression ({problem}). {DamagedCatalogHint}");
         }
 
         return expression;
     }
+
+    /// <summary>
+    /// The failure to load a definition on a thread too small for it. Canonical text stays within
+    /// the dialect's nesting limits (#1151), whose deepest form the parser reads with a few
+    /// hundred KB of stack in a release build, so this happens only on a thread created with a
+    /// small maximum size or called from deep inside another recursion. The catalog is intact,
+    /// and the error must not send the operator to a backup.
+    /// </summary>
+    /// <param name="subject">Names the definition.</param>
+    /// <param name="innerException">The exhausted-stack signal a walker raised, when one did.</param>
+    /// <returns>The failure.</returns>
+    internal static DatabaseException OutOfStack(string subject, Exception? innerException = null)
+        => new($"{subject} cannot be loaded on this thread: reading its persisted definition needs more stack than the thread " +
+            "has left. The catalog is not damaged; open the database on a thread with a larger stack.", innerException);
 
     /// <summary>
     /// Parses a persisted column DEFAULT, which is the canonical text of one non-NULL literal, and
@@ -124,6 +156,7 @@ internal static class SqlPersistedExpression
     {
         ArgumentNullException.ThrowIfNull(expression);
         ArgumentNullException.ThrowIfNull(evaluator);
+        RuntimeHelpers.EnsureSufficientExecutionStack();
 
         switch (expression)
         {
@@ -147,11 +180,13 @@ internal static class SqlPersistedExpression
         }
     }
 
-    private static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SqlExpression? expression, out string? problem)
+    private static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SqlExpression? expression,
+        out string? problem, out bool outOfStack)
     {
         expression = null;
         var statement = new SqlQueryParser().Parse($"SELECT * FROM {carrierTable} WHERE {text}");
         var error = statement.Diagnostics.FirstOrDefault(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        outOfStack = error?.Code == ParserOutOfStackCode;
         if (error is not null)
         {
             problem = $"{error.Code}: {error.Message}";
@@ -188,6 +223,7 @@ internal static class SqlPersistedExpression
             return left is null && right is null;
         }
 
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (left.GetType() != right.GetType() || !SameNode(left, right))
         {
             return false;
