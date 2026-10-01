@@ -27,6 +27,24 @@ the parser implements today. Recognized clauses outside that set produce the sha
   diagnostics — never an exception. Hostile inputs are part of the conformance
   corpus. This is what lets tooling (editors, the schema compiler) reuse the
   parser on incomplete text.
+- **Total parsing never means silent parsing (#1068).** A recursive-descent branch
+  returns at the first token it does not understand, so `ParseCore` requires the
+  statement to end at the end of the text or at one terminating `;`, for every
+  statement kind. Anything left over is `SQL0003` at the first unconsumed token.
+  Required tokens (closing `)`, `THEN`, `END`, `BY`, `SET`, `=`, names) are
+  expected, not skipped when absent. Error recovery may still substitute a
+  placeholder node, such as the NULL literal for a missing expression or the `?`
+  table name, but only together with an error diagnostic, so a placeholder never
+  executes. Recovery leaves the offending token in place for the caller, and every
+  token-anchored syntax diagnostic, the leftover check included, skips a position
+  an earlier error already covers, so a mistake is reported once per position.
+  Before parsing, `ParseCore` scans the tokens for lexical errors the shared lexer
+  passes through as ordinary tokens: an unterminated string, quoted identifier or
+  block comment (each would swallow the rest of the statement), and a character
+  outside the dialect. A rejected `ALTER TABLE` action yields a bare `Alter`
+  expression, not a placeholder action. `SqlStatementCompletenessTests` enforces
+  the rule: every profile clause and statement kind needs a corpus form, and every
+  form followed by leftover text must report an error after the form.
 - **Sealed AST nodes with internal constructors.** The parser is the only
   producer; consumers pattern-match. Extending the AST is a kernel change, which
   keeps downstream planners honest (no third-party node types appearing mid-plan).

@@ -34,6 +34,7 @@ internal sealed partial class SqlPlanner
     internal SqlPlan Plan(SqlQueryExpression expression)
     {
         SqlSystemViews.EnsureReadOnly(expression);
+        RejectUnknownFunctions(expression);
         return expression switch
         {
             SqlSelectExpression select => PlanSelect(select),
@@ -759,18 +760,22 @@ internal sealed partial class SqlPlanner
         if (open >= 0)
         {
             name = dataType[..open];
-            string arguments = dataType[(open + 1)..].TrimEnd(')');
-            var parts = arguments.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            var parts = dataType[(open + 1)..].TrimEnd(')').Split(',', StringSplitOptions.TrimEntries);
 
-            if (parts.Length > 0)
+            // The parser normalizes the arguments; this guards the planner seam so a
+            // malformed argument is a statement error, never a raw FormatException that
+            // ends a wire session.
+            int parsedSecond = 0;
+            if (parts.Length > 2 ||
+                !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int parsedFirst) ||
+                (parts.Length == 2 && !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out parsedSecond)))
             {
-                first = int.Parse(parts[0], CultureInfo.InvariantCulture);
+                throw new DatabaseException(
+                    $"Column '{columnName}': type arguments in '{dataType}' must be one or two unsigned integers.");
             }
 
-            if (parts.Length > 1)
-            {
-                second = int.Parse(parts[1], CultureInfo.InvariantCulture);
-            }
+            first = parsedFirst;
+            second = parts.Length == 2 ? parsedSecond : null;
         }
 
         // A second argument is always a scale (DECIMAL(p, s)); SqlTypeNames moves a

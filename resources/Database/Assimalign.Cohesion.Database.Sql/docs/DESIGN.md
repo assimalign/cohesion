@@ -278,6 +278,15 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   shape). That promise paid out with index adoption: the IR gained exactly one
   node family (`SqlAccessPath` on the SELECT plan — scan | index seek) and the
   executor seam did not move.
+- **Unknown functions fail before binding (#1068).** `SqlPlanner.Plan` walks the
+  whole statement, subqueries, DML values and `CHECK` predicates included, and
+  rejects a call to any name outside `SqlLanguageProfile.Instance.Functions` with
+  `Unknown function '<name>'.` before it binds the catalog or reads a row. The
+  evaluator used to discover the name per row, so the same statement failed on a
+  populated table and succeeded on an empty one. A declared name that does not
+  execute yet (`NULLIF`, `TRIM`, ...) passes this check and still fails during
+  evaluation; #1103 rejects those at parse time and gives planner rejections
+  structured codes.
 - **Access-path selection (rule-based; no cost model — the MVP planner
   contract).** The planner flattens the WHERE clause's top-level `AND`
   conjuncts into per-column sargable predicates — `column op comparand` where

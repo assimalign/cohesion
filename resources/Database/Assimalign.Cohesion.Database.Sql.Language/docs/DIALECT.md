@@ -3,7 +3,9 @@
 The contract for the Cohesion SQL surface that executes today. **Supported** means
 the documented subset has been measured through a live engine, including correct
 results, state changes, or intended semantic errors. Recognized clauses without
-execution support report `COHDBL001`; unknown commands report `SQL0002`. Extending
+execution support report `COHDBL001`; unknown commands report `SQL0002`; text the
+parser did not consume reports `SQL0003`, so nothing executes a truncated statement
+(see [Statement completeness](#statement-completeness-1068)). Extending
 the profile requires updating the parser, this matrix, and the engine's
 `SqlLanguageConformanceTests` execution-case table in the same change. That test
 enumerates the profile and fails if any advertised clause lacks a passing case.
@@ -65,6 +67,104 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
 | `MERGE`, `TRUNCATE`, `GRANT` | Not in the dialect | `SQL0002` |
+
+## Statement completeness (#1068)
+
+A request carries exactly one statement, and the parser either consumes all of
+it or reports what it could not. One terminating `;` is optional, and comments
+may follow it. Any other text after a complete statement reports `SQL0003` at the
+first token the parser did not consume, and nothing executes: the text-execute
+seam throws `DatabaseParseException` (`ParseFailure` on the wire), and a typed
+request returns an error result carrying the diagnostics. Until #1068 the parser
+checked for leftover tokens only after `CREATE TABLE`, `ALTER TABLE` and
+`DROP TABLE`, so every other statement executed the prefix it understood:
+`DELETE FROM t WHRE id = 1` read `WHRE` as an alias of `t` and deleted every row.
+
+Required tokens are required. A missing closing `)`, `THEN`, `END`, the `AND` of
+`BETWEEN`, the `BY` of `ORDER BY`, the `SET` of `UPDATE`, the `=` of an
+assignment, a table, index or column name, or a `VALUES` row reports `SQL0003`
+where it was expected. A clause keyword in a name position means the name is
+missing: `SET a = 1, WHERE id = 1` reports the trailing comma instead of
+assigning `(id = 1)` to a column named `WHERE`. `IF NOT EXISTS` (CREATE) and
+`IF EXISTS` (DROP) must be complete, and a column's `NOT` must be followed by
+`NULL`. A `?` placeholder name never executes, because it is built only together
+with an error.
+
+Lexical errors are reported too. A string literal, quoted identifier or block
+comment without its closing delimiter would otherwise run to the end of the text
+as one token and swallow the clauses after it: `DELETE FROM t /* WHERE id = 1;`
+deleted every row. Each reports `SQL0003` at its opening delimiter. A character
+outside the dialect, such as `#`, a backtick or a zero-width space, reports
+`SQL0003` at the character instead of being read as an alias.
+
+| Written | Reported as `SQL0003` | Diagnostic starts at |
+|---|---|---|
+| `DELETE FROM t WHRE id = 1` | Leftover text after the DELETE; the message adds that `WHRE` was read as an alias of table `t` | `id` |
+| `UPDATE t SET a = 1 WHRE id = 1`, `UPDATE t SET ... FROM u WHERE ...` | Leftover text after the UPDATE | `WHRE`, `FROM` |
+| `INSERT ... ON CONFLICT DO NOTHING`, `INSERT ... ON DUPLICATE KEY UPDATE ...` | Leftover text after the INSERT | `ON` |
+| `SELECT ... OFFSET 1 LIMIT 2` | `LIMIT` must precede `OFFSET` | `LIMIT` |
+| `name LIKE 'a!%' ESCAPE '!'` | `LIKE ... ESCAPE` is not supported; `%` and `_` are always wildcards | `ESCAPE` |
+| `a IS [NOT] DISTINCT FROM b`, `a IS [NOT] TRUE`, `FALSE` or `UNKNOWN` | Only `IS [NOT] NULL` is supported | `IS` |
+| `a NOT NULL`, `flag NOT FALSE`, `x NOT y` | `NOT` after an operand must begin `NOT BETWEEN`, `NOT IN` or `NOT LIKE`; it used to parse as `x AND NOT y` | the token after `NOT` |
+| `WHERE id = :id`, `SET a = :a`, `WHERE id = ;`, a statement ending in `WHERE` or `=` | Expected an expression; the NULL literal the parser used to substitute is gone | the token, or the end of the text |
+| `WHERE (id = 1`, `id IN (1, 2`, `id BETWEEN 1 2`, `CASE WHEN c 'a' END`, `ORDER id`, `UPDATE t;`, `DELETE;`, `VALUES (1), ()` | The missing token, keyword, name or value | where it was expected |
+| `VARCHAR(25 5)`, `DECIMAL(10, 2, 5)`, `VARCHAR(-5)`, `VARCHAR(MAX)` | Type arguments must be one or two unsigned integer literals | the first offending token |
+| `'abc WHERE id = 1`, `"id FROM t`, `/* WHERE id = 1` | Unterminated literal, quoted identifier or comment | the opening delimiter |
+| `SELECT 1; SELECT 2`, `BEGIN; DELETE FROM t`, `COMMIT;;` | A request accepts exactly one statement | the first token after `;` |
+
+A recognized clause outside the profile keeps its `COHDBL001`, for example
+`RETURNING` or `FETCH`. The parser stops at such a clause by design, so the text
+from that clause on adds no second diagnostic. Text the parser stopped at before
+it reached the clause still reports `SQL0003`: `DELETE FROM t WHRE id = 1
+RETURNING *` reports both, so fixing `RETURNING` does not reveal a new error. A
+derived table, `(SELECT ...) alias`, is skipped as a unit after its `COHDBL001`.
+Named `:name` parameters are not part of the dialect; bind `@name` or `$1`.
+
+A syntax error is reported once per position: recovery leaves the offending
+token in place for the enclosing parser, which finds it already reported. One
+mistake can still yield two diagnostics when it breaks two independent rules, for
+example an unclosed type argument list followed by a second statement after `;`.
+
+**Signs.** The operand of `-` or `~` is itself a unary expression, so `- -1` is
+`1`; it used to parse as a negated NULL followed by leftover text. A `+` is
+accepted only directly before a numeric literal, where it is part of the literal.
+`+a` and `+(1 + 2)` report `SQL0003`: the AST has no unary plus operator.
+
+**ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]` and
+`DROP CONSTRAINT` parse. Any other action, such as `RENAME TO`, `RENAME COLUMN`,
+`ALTER COLUMN` or `MODIFY`, reports `SQL0003` naming the action at parse time.
+The statement then carries no action node. It used to carry a placeholder
+`DROP COLUMN ?` that failed later, in the catalog. A missing action, table name,
+column name or constraint name also reports `SQL0003`; `ADD` or `DROP` directly
+after `ALTER TABLE` is a missing table name. `TABLE` is required: `ALTER INDEX`,
+`ALTER VIEW` and other `ALTER <object>` forms report `SQL0003` naming the object.
+
+**Unknown functions.** A call to a name outside the profile's function list fails
+at plan time with `Unknown function '<name>'.`, a `DatabaseException`
+(`ExecutionFailure` on the wire). The planner checks every expression position
+before it binds the statement or reads a row: projections, predicates, joins,
+grouping, ordering, `LIMIT`/`OFFSET`, subqueries, DML values and `CHECK`. The
+statement therefore fails the same way over an empty table as over a populated
+one; the evaluator used to find the name per row, so an empty table succeeded.
+Declared names that do not execute yet, such as `NULLIF` and `TRIM` (see
+[Builtin functions](#builtin-functions)), are not unknown. They still fail during
+evaluation; #1103 rejects them at parse time with `COHDBL001`.
+
+**Guard.** `SqlStatementCompletenessTests` (Sql.Language) holds a complete statement
+form for every profile clause and every `SqlQueryCommandType`, appends leftover
+text to each form (words, a literal, `)`, a misspelled clause, text after `;`,
+an unterminated string or comment, and a character outside the dialect), and
+fails unless every combination reports an error after the form. A clause added to
+the profile without a form fails the test, as does a new statement kind.
+
+**Persisted CHECK text.** The engine stores a `CHECK` predicate as written and
+re-parses it when it validates written rows. A predicate the parser used to
+accept leniently inside `CHECK (...)`, such as `flag NOT FALSE` (evaluated as
+`flag AND NOT FALSE`), `a BETWEEN 1 2` or a `CASE` without `THEN` or `END`, now
+fails to parse, and writes to its table report `CHECK requires a valid scalar
+predicate.` Drop the constraint and add it again in the intended form. Forms whose
+leftover text reached the closing `)` of `CHECK`, such as `IS TRUE` or an
+unterminated string, already failed when the constraint was created.
 
 ## Ordering, output aliases and ordinals (#1024)
 
@@ -141,7 +241,10 @@ snapshot retain a missing NULL field when such an addition has no default.
 Only literal defaults execute. `DEFAULT (1 + 2)`, function calls, parameters,
 CAST, and other expressions are rejected during planning, before schema or data
 mutation, using CREATE TABLE's diagnostic:
-`Column 'extra': only literal DEFAULT values are supported.` Defaults must
+`Column 'extra': only literal DEFAULT values are supported.` A call to a name
+outside the profile's function list fails first, with `Unknown function '<name>'.`
+(see [Statement completeness](#statement-completeness-1068)), and a parameter such
+as `:x` is a parse error. Defaults must
 convert to the declared storage type and fit its bounds, including string length
 and decimal precision/scale; invalid conversions and out-of-range defaults reject
 before publication. Strings are not truncated and decimals are not rounded.
@@ -481,7 +584,8 @@ column references, supported function calls, simple/searched `CASE`, and
 parenthesized expressions and `CAST` within the conversion contract below.
 Uncorrelated scalar subqueries and subquery predicates execute within the contract above.
 SQL aggregates follow the grouping and aggregate contract below. `~` is parsed but not evaluated; it is outside the
-executable scalar subset.
+executable scalar subset. `IS` takes only `[NOT] NULL`, and `LIKE` has no `ESCAPE`
+clause; the other forms report `SQL0003` (see Statement completeness).
 
 ## Literals
 
@@ -515,6 +619,9 @@ the mapper diagnoses such retained names before emitting SQL.
 | `FLOAT`, `FLOAT8`, `DOUBLE` | `Float64` |
 | `DECIMAL[(p[,s])]`, `NUMERIC[(p[,s])]` | `Decimal` (single argument = precision) |
 | `CHAR[(n)]`, `CHARACTER[(n)]`, `VARCHAR[(n)]`, `TEXT` | `String` |
+
+In DDL, `n`, `p` and `s` are unsigned integer literals within the Int32 range;
+any other argument, or a third one, reports `SQL0003` at parse time (#1068).
 | `BINARY`, `VARBINARY`, `BLOB`, `BYTEA` | `Binary` |
 | `DATE` / `TIME` / `TIMESTAMP`, `DATETIME` / `TIMESTAMPTZ` / `INTERVAL` | `Date` / `Time` / `DateTime` / `DateTimeOffset` / `TimeSpan` |
 | `UUID`, `GUID` | `Guid` |
@@ -591,8 +698,11 @@ The profile's function list is lexical vocabulary, not an execution claim and
 not part of the 49-clause denominator. Executable scalar functions are `COALESCE`,
 `UPPER`, `LOWER`, `LENGTH`, and `ABS`; supported aggregates are `COUNT`, `SUM`,
 `AVG`, `MIN`, and `MAX`, under the contract below.
-Other parsed calls can still fail in planning/evaluation and must not be inferred
-to work from a supported `SELECT`. Recognized names include aggregates `COUNT`,
+A call to a name outside the recognized list fails at plan time with
+`Unknown function '<name>'.`, before any row is read (#1068). A recognized name
+outside the executable set still parses and plans, then fails during evaluation,
+so it fails only when a row reaches it; #1103 rejects those names at parse time.
+Do not infer that a call works from a supported `SELECT`. Recognized names include aggregates `COUNT`,
 `SUM`, `AVG`, `MIN`, `MAX`; null handling `COALESCE`, `NULLIF`; strings `TRIM`,
 `LTRIM`, `RTRIM`, `UPPER`, `LOWER`, `SUBSTRING`, `LENGTH`, `REPLACE`, `CONCAT`;
 numeric `ABS`, `CEILING`, `FLOOR`, `ROUND`, `POWER`, `SQRT`, `MOD`; date/time
@@ -606,7 +716,7 @@ function names are lexed but not supported (see the statement matrix).
 | `COHDBL001` | Error | Recognized clause is not supported by the SQL model surface |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; type arguments other than one or two unsigned integer literals; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | Error | Unknown CAST target type |
 | `SQL0005` | Error | Unsupported CAST target or invalid target parameters |
 | `SQL0100` | Information | Statement does not end with `;` |
@@ -614,3 +724,7 @@ function names are lexed but not supported (see the statement matrix).
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
 carried per node.
+
+Plan-time rejections, such as `Unknown column '<name>'.` and
+`Unknown function '<name>'.`, are `DatabaseException` messages without a code
+(`ExecutionFailure` on the wire). #1103 gives planner rejections structured codes.
