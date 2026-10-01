@@ -338,6 +338,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.RateLimiting'
     'resources/Web/Assimalign.Cohesion.Web.RequestTimeouts'
     'resources/Web/Assimalign.Cohesion.Web.Routing'
+    'resources/Web/Assimalign.Cohesion.Web.SecurityHeaders'
     'resources/Web/Assimalign.Cohesion.Web.Serialization'
     'resources/Web/Assimalign.Cohesion.Web.Sessions'
     'resources/Web/Assimalign.Cohesion.Web.StaticFiles'

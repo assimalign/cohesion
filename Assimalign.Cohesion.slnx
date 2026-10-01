@@ -2583,6 +2583,17 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Routing/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Routing/src/Assimalign.Cohesion.Web.Routing.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/src/Assimalign.Cohesion.Web.SecurityHeaders.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/tests/Assimalign.Cohesion.Web.SecurityHeaders.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Serialization/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Serialization/docs/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.Serialization/docs/DESIGN.md" />

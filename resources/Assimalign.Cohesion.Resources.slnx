@@ -1662,6 +1662,17 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Routing/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Routing/tests/Assimalign.Cohesion.Web.Routing.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.SecurityHeaders/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.SecurityHeaders/src/Assimalign.Cohesion.Web.SecurityHeaders.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.SecurityHeaders/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.SecurityHeaders/tests/Assimalign.Cohesion.Web.SecurityHeaders.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Serialization/" />
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Serialization/docs/">
 		<File Path="Web/Assimalign.Cohesion.Web.Serialization/docs/DESIGN.md" />
