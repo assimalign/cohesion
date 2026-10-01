@@ -540,9 +540,13 @@ update and at the end; both failed in each of six runs against the old extension
 `SqlConcurrentDdlStressTests` (in `Database.Sql`) run the issue's reproducer — in memory
 and file backed, columns, constraints and both, several seeds — for two seconds per case
 in CI, or as long as `COHESION_SQL_STRESS_SECONDS` says locally (60 or more for the long
-mode), and check that every committed row reads back, again after a reopen. Deterministic
-`ADD/DROP COLUMN` and `ADD/DROP CONSTRAINT` loops crash the test host on the old
-`UpdateSlot`.
+mode), and check that every committed row reads back, again after a reopen. Their table
+carries a padding CHECK that makes its catalog record about 4.4 KiB, more than half a
+page body, so no page can hold two images of it and every successful ADD meets the
+state the old relocation overflowed from; each case runs until at least three ADDs
+succeeded. Every one of these cases crashes the test host with the old `UpdateSlot`
+within seconds, as do the deterministic `ADD/DROP COLUMN` and `ADD/DROP CONSTRAINT`
+loops.
 
 **Open follow-ups.** Dead space left by relocations and deletes is not reclaimed in
 place: `Compact` is correct now, but compacting moves other records, and scans read
