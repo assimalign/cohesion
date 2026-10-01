@@ -123,9 +123,9 @@ The parser describes only the metadata subject; it never accesses or caches cata
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | Recognized construct outside the executable profile, including optional matching, procedures, functions, parameters, collection literals, quantifiers, ordering, set operations, and server/session scope |
+| `COHDBL001` | Recognized construct outside the executable profile, reported once at its own span: optional matching, procedures, functions, parameters, collection literals, quantifiers, ordering, set operations, server/session scope, label expressions, path mode and path search prefixes, `NODETACH DELETE`, and `MERGE` |
 | `GQL0001` | Empty statement |
-| `GQL0002` | Malformed supported syntax or invalid statement composition |
+| `GQL0002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, `§`, ...) |
 | `GQL0003` | Unterminated string, quoted name, or block comment |
 | `GQL0004` | Invalid or out-of-range numeric literal |
 | `GQL0005` | Pattern length, comparison count, or expression nesting limit exceeded |
@@ -137,6 +137,44 @@ Capability checks run before syntax parsing, so a recognized unsupported clause 
 into a generic error caused by its downstream syntax. Quoted text, comments, label names, and
 property keys do not trigger keyword-based capability checks. Binding and catalog diagnostics belong
 to the Graph planner, which knows the database schema.
+
+### Keyword disposition (#1101)
+
+The capability scan reads one static recognized-unsupported table, `GqlUnsupportedVocabulary`.
+Each entry has a spelling, the construct its `COHDBL001` names, and a position. Each construct is
+reported once, at its own span:
+
+| Written | Construct named | Span | Who lifts it |
+| --- | --- | --- | --- |
+| `(n:A\|B)`, `(n:A&B)`, `(n:!A)`, `(n:%)` | `LABEL DISJUNCTION`, `LABEL CONJUNCTION`, `LABEL NEGATION`, `WILDCARD LABEL` | the first operator of the label expression | gql-label-direction |
+| `(n IS A)` | `IS LABEL EXPRESSION` | `IS` | gql-label-direction |
+| `MATCH TRAIL (a)-[]->(b)`, `MATCH p = ACYCLIC (...)`, `WALK`, `SIMPLE` | `<MODE> PATH MODE` | the mode word, plus `PATH`/`PATHS` | pin |
+| `MATCH ALL SHORTEST (...)`, `MATCH ANY SHORTEST (...)` | `ALL SHORTEST`, `ANY SHORTEST` | the prefix, plus `PATH`/`PATHS` | pin |
+| `MATCH (n) NODETACH DELETE n` | `NODETACH DELETE` | both words | pin |
+| `MERGE (n)` | `MERGE` | `MERGE` | pin |
+
+The label expression and `IS` used to fail with `GQL0002` at the first operator. A path mode word
+was read as a path variable, so `MATCH TRAIL (...)` failed with "Expected '='". `ALL SHORTEST`
+reported two diagnostics, `ALL` and `SHORTEST PATH`. `NODETACH` failed with
+"MATCH requires RETURN, INSERT, CREATE, or DELETE.". `STARTS WITH` and `ENDS WITH` are one
+construct each, and a procedure's `YIELD` belongs to its `CALL`. A statement whose first word is
+unsupported, such as `SESSION SET GRAPH g` or `DROP GRAPH g`, is one construct: the scan
+reports that word and nothing after it.
+
+Path mode words and `NODETACH` are positional, not lexer keywords. Before a path pattern, or
+before `DELETE`, they name the construct. Elsewhere they are names, so `MATCH trail = (a)-[]->(b)`
+and `MATCH (nodetach) DELETE nodetach` still parse.
+`GqlKeywordDispositionTests` enumerates the profile's keywords plus the table. Every word needs a
+supported parse case or a case with exactly one `COHDBL001` naming its construct, and a word added
+without a case fails. The corpus asserts nothing about `--` or `~` edge spellings. The shared lexer
+keeps `--` as a line comment, ISO's `<simple comment>`, so `(a)-->(b)` reads as `(a)` followed by a
+comment. The coded diagnostic for that case belongs to gql-label-direction.
+
+A character GQL does not use lexes as `TokenType.Unrecognized`. It reports
+`Unexpected character '<c>'; it is not part of GQL.` (`GQL0002`) at its span during
+tokenization, and the statement is not parsed, so nothing is bound. Every statement form
+(`MATCH ... RETURN`, `INSERT`, `CREATE`, `DELETE`, `DETACH DELETE`, `SHOW`) rejects leftover
+tokens with `GQL0002`, with or without a separating `;`, and `GqlParseStrictnessTests` pins each.
 
 `GqlQueryParserTests` is the executable-subset conformance corpus, with valid and malformed cases
 and assertions on the AST, not a full ISO certification suite. Its groups map to ISO GQL graph

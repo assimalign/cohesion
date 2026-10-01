@@ -318,7 +318,7 @@ public sealed class SqlStatementCompletenessTests
     public void Parse_NestedUnaryMinus_ShouldNestTheOperators()
     {
         // Act
-        var statement = Parse("SELECT - -1, ~ -a FROM t;");
+        var statement = Parse("SELECT - -1, - -a FROM t;");
 
         // Assert
         Errors(statement).ShouldBeEmpty();
@@ -328,6 +328,9 @@ public sealed class SqlStatementCompletenessTests
         negate.Operand.ShouldBeOfType<SqlUnaryExpression>().Operator.ShouldBe(SqlUnaryOperator.Negate);
         columns[1].Expression.ShouldBeOfType<SqlUnaryExpression>().Operand.ShouldBeOfType<SqlUnaryExpression>()
             .Operator.ShouldBe(SqlUnaryOperator.Negate);
+
+        // ~ is outside the dialect since #1101; its signed operand still leaves no text behind.
+        Errors(Parse("SELECT ~ -a FROM t;")).ShouldHaveSingleItem().Code.ShouldBe("COHDBL001");
     }
 
     /// <summary>

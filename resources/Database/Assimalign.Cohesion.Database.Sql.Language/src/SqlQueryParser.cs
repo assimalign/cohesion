@@ -47,6 +47,7 @@ public sealed partial class SqlQueryParser : QueryParser
     protected override QueryStatement ParseCore(TokenLexer lexer)
     {
         _sawSemicolon = false;
+        _sawUnrecognizedCharacter = false;
         _lastTokenEnd = 0;
         _subqueryDepth = 0;
         _paginationDepth = 0;
@@ -155,6 +156,14 @@ public sealed partial class SqlQueryParser : QueryParser
             ConsumeRemaining(ref lexer);
         }
 
+        // A character outside the dialect has no meaning, so the statement keeps only its
+        // command type. Recovery may have parsed around the character, for example into a
+        // NULL placeholder for WHERE b = ?, and none of that is returned (#1101).
+        if (_sawUnrecognizedCharacter)
+        {
+            expression = new SqlQueryExpression(expression.CommandType, null, expression.Location);
+        }
+
         var statement = new SqlQueryStatement(expression);
 
         foreach (var diagnostic in _parseDiagnostics)
@@ -202,6 +211,7 @@ public sealed partial class SqlQueryParser : QueryParser
     // ── Parser state tracked across parse methods ──────────────────────
 
     private bool _sawSemicolon;
+    private bool _sawUnrecognizedCharacter;
     private int _lastTokenEnd;
     private string _sourceText = string.Empty;
     private readonly List<Diagnostic> _parseDiagnostics = [];
@@ -346,12 +356,12 @@ public sealed partial class SqlQueryParser : QueryParser
     /// literal, quoted identifier or block comment without its closing delimiter runs to
     /// the end of the text as one token, so the clause it swallowed vanished without a
     /// diagnostic: <c>DELETE FROM t /* WHERE id = 1;</c> deleted every row (#1068). A
-    /// character outside the dialect, such as <c>#</c> or a zero-width space, lexes as a
-    /// one-character identifier that the parser would otherwise take as an alias.
+    /// character outside the dialect, such as <c>?</c>, <c>#</c> or a zero-width space,
+    /// lexes as <see cref="TokenType.Unrecognized"/>. It used to lex as a one-character
+    /// identifier that the parser bound as an alias or a column (#1101).
     /// </summary>
     private void RejectLexicalErrors(TokenLexer lexer)
     {
-        int skipPosition = -1;
         while (lexer.MoveNext())
         {
             int position = lexer.Current.Position;
@@ -370,26 +380,30 @@ public sealed partial class SqlQueryParser : QueryParser
                     AddSyntaxDiagnostic(position, position + 2,
                         "Unterminated block comment: the closing */ is missing, so the comment runs to the end of the text.");
                     break;
-                case TokenType.Identifier when position != skipPosition && value.Length > 0 &&
-                                               !char.IsLetter(value[0]) && value[0] != '_':
-                    int end = position + value.Length;
-                    string character = $"'{value.ToString()}'";
-                    if (char.IsHighSurrogate(value[0]) && end < _sourceText.Length && char.IsLowSurrogate(_sourceText[end]))
-                    {
-                        // The lexer splits a supplementary character into two tokens; report it once.
-                        character = $"U+{char.ConvertToUtf32(value[0], _sourceText[end]):X4}";
-                        skipPosition = end;
-                        end++;
-                    }
-                    else if (char.IsControl(value[0]) || char.IsSurrogate(value[0]) ||
-                             char.GetUnicodeCategory(value[0]) is System.Globalization.UnicodeCategory.Format)
-                    {
-                        character = $"U+{(int)value[0]:X4}";
-                    }
-                    AddSyntaxDiagnostic(position, end, $"Unexpected character {character}; it is not part of the SQL dialect.");
+                case TokenType.Unrecognized:
+                    _sawUnrecognizedCharacter = true;
+                    AddSyntaxDiagnostic(position, position + value.Length,
+                        $"Unexpected character {DescribeCharacter(value)}; it is not part of the SQL dialect.");
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// Names a character as written, or by code point when it is invisible or is a
+    /// supplementary character (the lexer keeps a surrogate pair together as one token).
+    /// </summary>
+    private static string DescribeCharacter(ReadOnlySpan<char> value)
+    {
+        if (value.Length == 2 && char.IsSurrogatePair(value[0], value[1]))
+        {
+            return $"U+{char.ConvertToUtf32(value[0], value[1]):X4}";
+        }
+
+        return char.IsControl(value[0]) || char.IsSurrogate(value[0]) ||
+               char.GetUnicodeCategory(value[0]) is System.Globalization.UnicodeCategory.Format
+            ? $"U+{(int)value[0]:X4}"
+            : $"'{value.ToString()}'";
     }
 
     // Mirrors TokenLexer.ScanString: '' is an escaped quote and a lone ' closes the literal.
@@ -945,26 +959,7 @@ public sealed partial class SqlQueryParser : QueryParser
     }
 
     private static bool TryGetUnsupportedClause(string token, out string clause)
-    {
-        clause = token.ToUpperInvariant() switch
-        {
-            "UNION" => SqlClauses.SetOperation,
-            "INTERSECT" => SqlClauses.Intersect,
-            "EXCEPT" => SqlClauses.Except,
-            "RECURSIVE" => SqlClauses.Recursive,
-            "WINDOW" => SqlClauses.Window,
-            "FETCH" => SqlClauses.Fetch,
-            "OVER" => SqlClauses.Over,
-            "PARTITION" => SqlClauses.Partition,
-            "RETURNING" => SqlClauses.Returning,
-            "TOP" => SqlClauses.Top,
-            "NATURAL" => SqlClauses.Natural,
-            "USING" => SqlClauses.Using,
-            _ => string.Empty,
-        };
-
-        return clause.Length > 0;
-    }
+        => SqlUnsupportedVocabulary.TryGetClause(token, out clause);
 
     private static bool IsUnsupportedClauseStart(string token) =>
         token.Equals(SqlClauses.Cte, StringComparison.OrdinalIgnoreCase) ||

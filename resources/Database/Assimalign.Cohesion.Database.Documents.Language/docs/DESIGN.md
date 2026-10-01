@@ -49,6 +49,11 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `ELEMENT` | No | Singleton extraction is not planned |
 | `FLATTEN` | No | Collection expansion is not planned |
 | `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword |
+| `LIMIT`, `OFFSET` | No (pin) | SQL++ row limits; oql-limit-offset flips the pin |
+| `UPSERT` | No (pin) | SQL++ document write; oql-upsert flips the pin |
+| `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
+| `UNNEST` | No (pin) | SQL++ array expansion in `FROM`; oql-arrays flips the pin |
+| `EVERY ... SATISFIES` | No (pin) | SQL++ quantified predicate, also opened by `ANY` and `SOME`; oql-arrays flips the pin |
 
 Only `COUNT`, `SUM`, `AVG`, `MIN`, and `MAX` are callable. Each takes one expression;
 `COUNT(*)` also counts documents. Aggregate placement, grouping consistency, and value semantics
@@ -56,6 +61,36 @@ are validated by the Documents planner/executor. `DISTINCT`, `ALL`, `IN`, `EXIST
 `BETWEEN`, collection constructors/quantifiers, `ABS`, and other reserved but unimplemented
 operations produce `COHDBL001`. Unknown function calls likewise produce `COHDBL001` naming the
 function. There is no implied support for the full ODMG specification.
+
+### Keyword disposition (#1101)
+
+The capability scan reads one static recognized-unsupported table, `OqlUnsupportedVocabulary`.
+Each entry has a spelling, the construct its `COHDBL001` names, and a position. Each
+recognized-unsupported construct is reported once at the word that names it, and never bound as
+a name:
+
+- **Anywhere** (the ODMG words above): every occurrence except a path segment after a dot. All
+  are lexer keywords or functions.
+- **Clause** (statements and clauses of other languages, and the SQL++ words `LIMIT`,
+  `OFFSET`, `UPSERT`, `MERGE`, `UNNEST`): the first word of the statement, or the word directly
+  after the end of an operand. An operand ends with a name, a path segment, a literal, a
+  parameter, `)`, `]`, `NULL`/`NIL`/`TRUE`/`FALSE` or `ASC`/`DESC`. So `WHERE a = 1 LIMIT 5`,
+  `WHERE a = 'x' LIMIT 1` and `ORDER BY a DESC OFFSET 2` report `LIMIT` or `OFFSET`, where
+  they used to fall through to `OQL0002`. `FROM c UNNEST c.items` reports `UNNEST` instead of
+  binding it as the alias. These words are not lexer keywords, so `SELECT limit, merge FROM c`
+  and `SELECT a AS limit FROM c` still parse.
+- **Quantifier**: `EVERY`, `ANY` or `SOME` followed by `name IN` opens a quantified predicate.
+  It is one construct named `EVERY ... SATISFIES` (or `ANY`/`SOME`), up to its `END`. Its binding
+  `IN` is not reported as the `IN` predicate. ODMG's `FOR ALL name IN` and `EXISTS name IN` bind
+  the same way and report `FOR ALL` and `EXISTS`.
+
+A statement whose first word is unsupported, such as `UPSERT INTO c ...` or
+`MERGE INTO c ...`, is one construct: the scan reports that word and nothing after it. Each
+operand of a set operation starts its own `SELECT`, which is not reported as a subquery.
+`OqlKeywordDispositionTests` enumerates the profile's keywords plus the table. Every word needs
+a supported parse case or a case with exactly one `COHDBL001` naming its construct. A word added
+without a case fails, so oql-sqlpp-basis and the flip items add their cases in the same change.
+OQL declares no `~`, so `SELECT ~a FROM c` stays an `OQL0002` syntax error (a pin).
 
 ## Grammar, statement, and expression trees
 
@@ -114,9 +149,9 @@ disposable resources beyond those used by the shared analyzer pipeline.
 
 | Code | Meaning |
 | --- | --- |
-| `COHDBL001` | A recognized clause or operation lies outside the executable profile |
+| `COHDBL001` | A recognized clause or operation lies outside the executable profile, reported once at the word that names it (see Keyword disposition) |
 | `OQL0001` | Empty statement, including whitespace/comment-only text |
-| `OQL0002` | Syntax error, missing token, invalid identifier/path, or multiple statements |
+| `OQL0002` | Syntax error, missing token, invalid identifier/path, multiple statements or leftover tokens, or a character OQL does not use (`?`, `#`, `^`, `§`, ...) |
 | `OQL0003` | Unterminated quoted text or block comment |
 | `OQL0004` | Invalid or out-of-range numeric literal |
 | `OQL0005` | Expression nesting exceeds the supported depth |
@@ -128,6 +163,14 @@ construct receives the shared capability diagnostic instead of an accidental gen
 error. Quotes, comments, and property names after dots are not mistaken for clauses. Malformed
 index DDL produces `OQL0002` at the missing or invalid token; it does not escape the parser as an
 exception.
+
+A character OQL does not use lexes as `TokenType.Unrecognized`. It reports
+`Unexpected character '<c>'; it is not part of OQL.` (`OQL0002`) at its span during
+tokenization. The statement is then not parsed, so nothing is bound and no `NULL` literal stands
+in for the character. `SELECT * FROM people ^` and `SELECT * FROM c WHERE c.a = ?` each report
+exactly that one error (#1101). Every statement form (`SELECT`, `CREATE INDEX`, `DROP INDEX`)
+rejects leftover tokens with `OQL0002`, with or without a separating `;`, and the corpus pins
+both.
 
 ## Scope, index DDL, and mutations
 
@@ -166,7 +209,9 @@ behavior, index-DDL ownership, and aggregate/mutation semantics.
 
 `OqlQueryParserTests` and `OqlIndexDdlParserTests` contain valid and malformed query/index-DDL
 corpora plus structural AST, exact diagnostic span, precedence, nested-path/array, parameter,
-scope, and recursion-limit checks.
+scope, and recursion-limit checks. `OqlParseStrictnessTests` pins stray characters, the SQL++
+words, field names that reuse them, and trailing tokens after every statement form.
+`OqlKeywordDispositionTests` is the keyword-disposition corpus.
 Profile tests assert every supported capability and every deferred OQL clause. Existing lexer
 conformance remains unchanged, including recognition of unsupported reserved vocabulary.
 

@@ -462,11 +462,15 @@ public ref struct TokenLexer
                 return new Token(TokenType.Parameter, _source[start.._pos], start);
 
             default:
-                // Unrecognised single character – surface it so the parser can report an error.
+                // A character no language uses. It is never an identifier, so no parser can
+                // bind it as a name; each reports it with its own syntax diagnostic. A
+                // surrogate pair is one character and therefore one token.
                 _pos++;
-                return new Token(TokenType.Identifier, _source[start.._pos], start);
+                if (char.IsHighSurrogate(ch) && char.IsLowSurrogate(next))
+                {
+                    _pos++;
+                }
+                return new Token(TokenType.Unrecognized, _source[start.._pos], start);
         }
     }
-
-    
 }

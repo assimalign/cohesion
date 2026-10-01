@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
@@ -63,6 +64,12 @@ public sealed partial class GqlQueryParser : QueryParser
                 {
                     Error("GQL0003", "Unterminated quoted text.", lexeme);
                 }
+                else if (token.Type == TokenType.Unrecognized)
+                {
+                    // A character GQL does not use is never a name or an expression, so the
+                    // statement is not parsed and nothing is bound (#1101).
+                    Error("GQL0002", $"Unexpected character {DescribeCharacter(lexeme.Text)}; it is not part of GQL.", lexeme);
+                }
             }
         }
         while (scanned < _source.Length)
@@ -109,10 +116,21 @@ public sealed partial class GqlQueryParser : QueryParser
         return statement;
     }
 
+    /// <summary>
+    /// Finds every recognized construct outside the executable profile, using the
+    /// recognized-unsupported table (<see cref="GqlUnsupportedVocabulary"/>). Each construct is
+    /// reported once at its own span: a statement whose first word is unsupported reports that
+    /// word only, a label expression reports its first operator, and multi-word prefixes such
+    /// as <c>ALL SHORTEST</c> and <c>NODETACH DELETE</c> are one construct.
+    /// </summary>
     private void FindUnsupported()
     {
         int patternDepth = 0;
+        int propertyDepth = 0;
         bool inPredicateOrReturn = false;
+        bool inLabelExpression = false;
+        bool labelReported = false;
+        bool sawCall = false;
         for (int i = 0; i < _tokens.Count; i++)
         {
             var token = _tokens[i];
@@ -124,6 +142,32 @@ public sealed partial class GqlQueryParser : QueryParser
             }
             if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace) { patternDepth++; }
             if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace) { patternDepth--; }
+            if (token.Type == TokenType.LeftBrace) { propertyDepth++; }
+            if (token.Type == TokenType.RightBrace) { propertyDepth--; }
+
+            // A label expression runs from the ':' of a node or edge pattern to its property map
+            // or closing bracket. Its first operator names it; the rest belong to it.
+            bool inElementPattern = patternDepth > 0 && propertyDepth == 0 && !inPredicateOrReturn;
+            if (token.Type is TokenType.LeftBrace or TokenType.RightParen or TokenType.RightBracket)
+            {
+                inLabelExpression = false;
+            }
+            if (token.Type == TokenType.Colon && inElementPattern)
+            {
+                inLabelExpression = true;
+                labelReported = false;
+            }
+            if (token.Type is TokenType.Pipe or TokenType.Ampersand or TokenType.Bang or TokenType.Percent &&
+                inLabelExpression)
+            {
+                if (!labelReported && GqlUnsupportedVocabulary.TryFind(token.Text, out var operation))
+                {
+                    UnsupportedConstruct(operation.Construct, token, token);
+                }
+                labelReported = true;
+                continue;
+            }
+
             if (token.Type is TokenType.Asterisk or TokenType.DotDot)
             {
                 Unsupported("QUANTIFIED PATTERN OR STAR PROJECTION", token);
@@ -146,24 +190,82 @@ public sealed partial class GqlQueryParser : QueryParser
                 Unsupported($"FUNCTION {token.Text}", token);
                 continue;
             }
-            if (patternDepth != 0 && !inPredicateOrReturn) { continue; }
-            string? clause = value switch
+
+            // (n IS A) is ISO's <is label expression>, not a name.
+            if (value == "IS" && inElementPattern)
             {
-                "OPTIONAL" => GqlClauses.OptionalMatch,
-                "MANDATORY" => GqlClauses.MandatoryMatch,
-                "ORDER" => GqlClauses.OrderBy,
-                "SHORTEST" => GqlClauses.ShortestPath,
-                "WITH" or "SET" or "REMOVE" or "MERGE" or "LIMIT" or "OFFSET" or "SKIP" or
-                "LET" or "UNWIND" or "FOREACH" or "UNION" or "CASE" or "CALL" or "YIELD" or "FILTER" or
-                "DISTINCT" or "ALL" or "OR" or "NOT" or "XOR" or "IN" or "STARTS" or "ENDS" or
-                "CONTAINS" or "IS" or "EXISTS" or "ANY" or "NONE" or "SINGLE" or "LIKE" or "BETWEEN" or
-                "USE" or "SESSION" or "SHOW" or "DROP" or "ALTER" or "GRANT" or "REVOKE" or "BEGIN" or
-                "COMMIT" or "ROLLBACK" or "FINISH" or "NEXT" or "FOR" or "GROUP" or "HAVING" or
-                "DATABASE" or "GRAPH" or "SCHEMA" or "INDEX" or "CATALOG" => value,
-                _ => null,
-            };
-            if (clause is not null && !Supports(clause)) { Unsupported(clause, token); }
+                UnsupportedConstruct(GqlUnsupportedVocabulary.IsLabelExpression, token, token);
+                inLabelExpression = true;
+                labelReported = true;
+                continue;
+            }
+            if (patternDepth != 0 && !inPredicateOrReturn) { continue; }
+            if (!GqlUnsupportedVocabulary.TryFind(value, out var word)) { continue; }
+
+            bool first = i == 0;
+            var end = token;
+            string construct = word.Construct;
+            switch (word.Position)
+            {
+                case GqlWordPosition.PathMode:
+                    // TRAIL (a)... is a path mode; trail = (a)... names a path.
+                    if (patternDepth != 0 || inPredicateOrReturn || !StartsPathPattern(i + 1, ref end)) { continue; }
+                    break;
+                case GqlWordPosition.BeforeDelete:
+                    if (!IsWordAt(i + 1, "DELETE")) { continue; }
+                    end = _tokens[i + 1];
+                    break;
+                case GqlWordPosition.LabelExpression:
+                    continue;
+                default:
+                    if (value is "ALL" or "ANY" && !inPredicateOrReturn && IsWordAt(i + 1, "SHORTEST"))
+                    {
+                        // One path search prefix, not ALL (or ANY) followed by SHORTEST PATH.
+                        construct = value + " SHORTEST";
+                        end = _tokens[++i];
+                        if (IsWordAt(i + 1, "PATH") || IsWordAt(i + 1, "PATHS")) { end = _tokens[++i]; }
+                    }
+                    else if (value is "STARTS" or "ENDS" && IsWordAt(i + 1, "WITH"))
+                    {
+                        end = _tokens[++i];
+                    }
+                    else if (value == "YIELD" && sawCall)
+                    {
+                        continue; // CALL owns its YIELD.
+                    }
+                    sawCall |= value == "CALL";
+                    break;
+            }
+
+            // A statement that does not start with a supported clause is one unsupported
+            // construct; the rest of its text belongs to it (SESSION SET GRAPH g, DROP GRAPH g).
+            if (UnsupportedConstruct(construct, token, end) && first) { return; }
         }
+    }
+
+    /// <summary>
+    /// Whether a path pattern starts at <paramref name="index"/>: a <c>(</c>, optionally after
+    /// <c>PATH</c> or <c>PATHS</c>, which then extends <paramref name="end"/>.
+    /// </summary>
+    private bool StartsPathPattern(int index, ref Lexeme end)
+    {
+        if (IsWordAt(index, "PATH") || IsWordAt(index, "PATHS"))
+        {
+            end = _tokens[index];
+            index++;
+        }
+        return index < _tokens.Count && _tokens[index].Type == TokenType.LeftParen;
+    }
+
+    private bool IsWordAt(int index, string word) => index < _tokens.Count &&
+        _tokens[index].Type is TokenType.Keyword or TokenType.Identifier or TokenType.Function &&
+        string.Equals(_tokens[index].Text, word, StringComparison.OrdinalIgnoreCase);
+
+    private bool UnsupportedConstruct(string construct, Lexeme start, Lexeme end)
+    {
+        if (Supports(construct)) { return false; }
+        _diagnostics.Add(QueryDiagnostics.UnsupportedClause(construct, Profile.Language, Span(start, end)));
+        return true;
     }
 
     private GqlQueryExpression EmptyExpression() => new([], null, [], [], false, [], Span(Current, Current));
@@ -220,6 +322,21 @@ public sealed partial class GqlQueryParser : QueryParser
         Code = code, Message = message, Start = token.Start, End = token.End,
         Line = token.Line, Severity = DiagnosticSeverity.Error, Location = DiagnosticLocation.Absolute,
     });
+    /// <summary>
+    /// Names a character as written, or by code point when it is invisible or is a
+    /// supplementary character (the lexer keeps a surrogate pair together as one token).
+    /// </summary>
+    private static string DescribeCharacter(string text)
+    {
+        if (text.Length == 2 && char.IsSurrogatePair(text[0], text[1]))
+        {
+            return $"U+{char.ConvertToUtf32(text[0], text[1]):X4}";
+        }
+        return char.IsControl(text[0]) || char.IsSurrogate(text[0]) ||
+               char.GetUnicodeCategory(text[0]) is UnicodeCategory.Format
+            ? $"U+{(int)text[0]:X4}"
+            : $"'{text}'";
+    }
     private static bool IsCompleteQuoted(string text)
     {
         if (text.Length < 2) { return false; }

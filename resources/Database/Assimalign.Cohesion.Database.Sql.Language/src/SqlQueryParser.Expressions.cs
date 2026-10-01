@@ -19,8 +19,9 @@ public sealed partial class SqlQueryParser
     //                            | [NOT] IN (...)
     //                            | [NOT] LIKE ...)?
     //   ParseAddition           → ParseMultiplication ((+|-||) ParseMultiplication)*
+    //                            (an infix ~ here reports COHDBL001)
     //   ParseMultiplication     → ParseUnary ((*|/|%) ParseUnary)*
-    //   ParseUnary              → (-|~)? ParseCollate
+    //   ParseUnary              → (-|~)? ParseCollate   (a prefix ~ reports COHDBL001)
     //   ParseCollate            → ParsePrimary (COLLATE name)*
     //   ParsePrimary            → literal | column_ref | param | function(...)
     //                            | (expr) | (SELECT ...) | CASE | CAST | EXISTS | *
@@ -291,6 +292,11 @@ public sealed partial class SqlQueryParser
             {
                 op = SqlBinaryOperator.Concat;
             }
+            else if (lexer.Current.Type == TokenType.Tilde)
+            {
+                RejectInfixTilde(ref lexer);
+                continue;
+            }
             else
             {
                 break;
@@ -350,9 +356,15 @@ public sealed partial class SqlQueryParser
                 Location.Create(1, 1, pos, pos));
         }
 
+        // ~ is recognized but outside the executable scalar subset. The evaluator used to
+        // return NULL for a NULL operand and throw per row otherwise, so SELECT ~NULL and
+        // ~ over an empty table succeeded (#1101). The node is kept for recovery only; the
+        // error means it never executes.
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Tilde)
         {
             var pos = lexer.Current.Position;
+            AddUnsupportedSurfaceDiagnostic(pos, pos + 1,
+                "The prefix ~ operator (bitwise NOT) is not supported by the SQL surface.");
             Advance(ref lexer);
             var operand = ParseUnary(ref lexer);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.BitwiseNot,
@@ -360,6 +372,24 @@ public sealed partial class SqlQueryParser
         }
 
         return ParseCollate(ref lexer);
+    }
+
+    /// <summary>
+    /// Rejects an infix <c>~</c>, PostgreSQL's regular-expression match. The dialect has no
+    /// rule for it, so it used to fall to the leftover-token check with a generic message.
+    /// It is checked wherever an additive operator may follow an operand. The right operand
+    /// is parsed for recovery and no node is built (#1101).
+    /// </summary>
+    private void RejectInfixTilde(ref TokenLexer lexer)
+    {
+        int pos = lexer.Current.Position;
+        AddUnsupportedSurfaceDiagnostic(pos, pos + 1,
+            "The infix ~ operator (regular-expression match) is not supported by the SQL surface.");
+        Advance(ref lexer);
+        if (CanStartOperand(ref lexer))
+        {
+            ParseMultiplication(ref lexer);
+        }
     }
 
     private SqlExpression ParsePrimary(ref TokenLexer lexer)

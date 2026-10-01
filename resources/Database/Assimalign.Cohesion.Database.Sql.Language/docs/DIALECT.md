@@ -94,8 +94,13 @@ Lexical errors are reported too. A string literal, quoted identifier or block
 comment without its closing delimiter would otherwise run to the end of the text
 as one token and swallow the clauses after it: `DELETE FROM t /* WHERE id = 1;`
 deleted every row. Each reports `SQL0003` at its opening delimiter. A character
-outside the dialect, such as `#`, a backtick or a zero-width space, reports
-`SQL0003` at the character instead of being read as an alias.
+outside the dialect, such as `?`, `#`, `^`, `§`, a backtick or a zero-width space,
+lexes as `TokenType.Unrecognized` and reports one `SQL0003` at the character
+(#1101). It used to lex as a one-character identifier, so `SELECT * FROM t ?` bound
+`?` as an alias and ran, and `SELECT ? FROM t` returned a column named `?`. The
+statement now keeps only its command type: no alias, column or `NULL` placeholder
+is built around the character. The message that names the supported parameter
+forms for `?` and `:name` belongs to shared-parameters.
 
 | Written | Reported as `SQL0003` | Diagnostic starts at |
 |---|---|---|
@@ -110,6 +115,7 @@ outside the dialect, such as `#`, a backtick or a zero-width space, reports
 | `WHERE (id = 1`, `id IN (1, 2`, `id BETWEEN 1 2`, `CASE WHEN c 'a' END`, `ORDER id`, `UPDATE t;`, `DELETE;`, `VALUES (1), ()` | The missing token, keyword, name or value | where it was expected |
 | `VARCHAR(25 5)`, `DECIMAL(10, 2, 5)`, `VARCHAR(-5)`, `VARCHAR(MAX)` | Type arguments must be one or two unsigned integer literals | the first offending token |
 | `'abc WHERE id = 1`, `"id FROM t`, `/* WHERE id = 1` | Unterminated literal, quoted identifier or comment | the opening delimiter |
+| `SELECT * FROM t ?`, `SELECT a # b FROM t`, `WHERE b = ?` | A character outside the dialect; nothing is bound around it | the character |
 | `SELECT 1; SELECT 2`, `BEGIN; DELETE FROM t`, `COMMIT;;` | A request accepts exactly one statement | the first token after `;` |
 
 A recognized clause outside the profile keeps its `COHDBL001`, for example
@@ -125,10 +131,11 @@ token in place for the enclosing parser, which finds it already reported. One
 mistake can still yield two diagnostics when it breaks two independent rules, for
 example an unclosed type argument list followed by a second statement after `;`.
 
-**Signs.** The operand of `-` or `~` is itself a unary expression, so `- -1` is
+**Signs.** The operand of `-` is itself a unary expression, so `- -1` is
 `1`; it used to parse as a negated NULL followed by leftover text. A `+` is
 accepted only directly before a numeric literal, where it is part of the literal.
-`+a` and `+(1 + 2)` report `SQL0003`: the AST has no unary plus operator.
+`+a` and `+(1 + 2)` report `SQL0003`: the AST has no unary plus operator. `~` is
+not a sign of the dialect; see [Expressions](#expressions).
 
 **ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]` and
 `DROP CONSTRAINT` parse. Any other action, such as `RENAME TO`, `RENAME COLUMN`,
@@ -578,14 +585,24 @@ extension views are recorded in the
 
 Precedence, low to high: `OR` < `AND` < `NOT` < comparison (`=`, `<>`, `<`, `>`,
 `<=`, `>=`, `IS [NOT] NULL`, `[NOT] BETWEEN`, `[NOT] IN`, `[NOT] LIKE`) < additive
-(`+`, `-`, `||`) < multiplicative (`*`, `/`, `%`) < unary (`-`, `~`, `NOT`) <
+(`+`, `-`, `||`) < multiplicative (`*`, `/`, `%`) < unary (`-`, `NOT`) <
 primary. Executable primary forms include literals, parameters (`@name`, `$1`),
 column references, supported function calls, simple/searched `CASE`, and
 parenthesized expressions and `CAST` within the conversion contract below.
 Uncorrelated scalar subqueries and subquery predicates execute within the contract above.
-SQL aggregates follow the grouping and aggregate contract below. `~` is parsed but not evaluated; it is outside the
-executable scalar subset. `IS` takes only `[NOT] NULL`, and `LIKE` has no `ESCAPE`
-clause; the other forms report `SQL0003` (see Statement completeness).
+SQL aggregates follow the grouping and aggregate contract below. `IS` takes only
+`[NOT] NULL`, and `LIKE` has no `ESCAPE` clause; the other forms report `SQL0003`
+(see Statement completeness).
+
+`~` is recognized but not part of the dialect, and is rejected at parse time with
+one `COHDBL001` at the operator (#1101). In prefix position (`~a`, bitwise NOT)
+the message names the prefix `~` operator. In infix position (`a ~ 'x'`,
+PostgreSQL's regular-expression match) it names the infix `~` operator; the infix
+form is recognized wherever an additive operator may follow an operand. `~` used
+to parse as bitwise NOT, and the evaluator returned NULL for a NULL operand and
+threw per row otherwise. So `SELECT ~NULL;` and `~` over an empty table
+succeeded, and an infix `~` fell to the leftover-token check with a generic
+message. None of them executes now, on either session seam or over the wire.
 
 ## Literals
 
@@ -713,10 +730,10 @@ function names are lexed but not supported (see the statement matrix).
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `COHDBL001` | Error | Recognized clause is not supported by the SQL model surface |
+| `COHDBL001` | Error | Recognized clause, keyword or operator is not supported by the SQL model surface, including prefix and infix `~` (#1101); the message names the construct |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; type arguments other than one or two unsigned integer literals; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#` or `^`, which binds no alias or column (#1101); an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; type arguments other than one or two unsigned integer literals; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | Error | Unknown CAST target type |
 | `SQL0005` | Error | Unsupported CAST target or invalid target parameters |
 | `SQL0100` | Information | Statement does not end with `;` |
@@ -724,6 +741,17 @@ function names are lexed but not supported (see the statement matrix).
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
 carried per node.
+
+**Keyword disposition (#1101).** Every keyword of the profile, and every entry of
+the internal recognized-unsupported table (`SqlUnsupportedVocabulary`), either
+parses inside a supported clause or reports exactly one `COHDBL001` naming its
+construct. The table holds the clause keywords the preflight scan rejects,
+`UNION` through `USING` in the statement matrix. It also holds the spellings that
+dedicated rules reject: `WITH`, `SELECT ALL`, `CREATE`/`DROP VIEW`,
+`CREATE COLLATION`, `CREATE FULLTEXT`, `NULLS FIRST`/`LAST` and `~`.
+`SqlKeywordDispositionTests` (Sql.Language) holds one case per word. It fails when
+a keyword or table entry is added without one, so the item that adds a word adds
+its case in the same change.
 
 Plan-time rejections, such as `Unknown column '<name>'.` and
 `Unknown function '<name>'.`, are `DatabaseException` messages without a code
