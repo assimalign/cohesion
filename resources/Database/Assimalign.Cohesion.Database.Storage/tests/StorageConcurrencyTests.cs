@@ -199,9 +199,7 @@ public sealed class StorageConcurrencyTests
             AssertChain(storage, writer, models[writer]);
         }
 
-#if DEBUG
         ((StorageBufferPool)storage.BufferPool).CheckInvariants();
-#endif
 
         // On the stream: a checkpoint writes every dirty page, and each one verifies.
         storage.Checkpoint();

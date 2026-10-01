@@ -165,10 +165,9 @@ public sealed class StorageBufferPoolConcurrencyTests
         Should.NotThrow(() => PageChecksum.Verify(buffer, (PageId)0L));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: the debug invariant check detects a negative pin count")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: the invariant check detects a negative pin count")]
     public void CheckInvariants_NegativePinCount_ShouldThrow()
     {
-#if DEBUG
         // Arrange
         using var stream = new StorageStream(new SimulatedDurableFileHandle());
         stream.SetLength(Page.Size);
@@ -184,13 +183,11 @@ public sealed class StorageBufferPoolConcurrencyTests
         handle.Entry.PinCount = 1;
         handle.Dispose();
         pool.CheckInvariants();
-#endif
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: the debug invariant check detects a resident entry marked recycled")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: the invariant check detects a resident entry marked recycled")]
     public void CheckInvariants_ResidentEntryMarkedRecycled_ShouldThrow()
     {
-#if DEBUG
         // Arrange
         using var stream = new StorageStream(new SimulatedDurableFileHandle());
         stream.SetLength(Page.Size);
@@ -208,13 +205,11 @@ public sealed class StorageBufferPoolConcurrencyTests
         Should.Throw<InvalidOperationException>(() => pool.CheckInvariants()).Message.ShouldContain("recycled");
         entry.IsRecycled = false;
         pool.CheckInvariants();
-#endif
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: the debug invariant check detects an entry whose node belongs to another list")]
+    [Fact(DisplayName = "Cohesion Test [Storage] - BufferPool: the invariant check detects an entry whose node belongs to another list")]
     public void CheckInvariants_EntryNodeInAnotherList_ShouldThrow()
     {
-#if DEBUG
         // Arrange
         using var stream = new StorageStream(new SimulatedDurableFileHandle());
         stream.SetLength(Page.Size);
@@ -230,14 +225,12 @@ public sealed class StorageBufferPoolConcurrencyTests
         handle.Entry.Node = node;
         handle.Dispose();
         pool.CheckInvariants();
-#endif
     }
 
     private static void VerifyPhase(StorageBufferPool pool, StorageStream stream, int[] versions)
     {
-#if DEBUG
         pool.CheckInvariants();
-#endif
+
         // Through the pool: a resident page shows the latest version; an evicted one
         // reloads from the stream, which verifies its checksum on the way in.
         for (long pageId = 0; pageId < pageCount; pageId++)
@@ -265,9 +258,7 @@ public sealed class StorageBufferPoolConcurrencyTests
             }
         }
 
-#if DEBUG
         pool.CheckInvariants();
-#endif
     }
 
     private static void WriteVersion(IStoragePageHandle handle, long pageId, int version)

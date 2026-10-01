@@ -49,11 +49,10 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
 
     // The image a write-back stamps and writes; guarded by _syncRoot like every write-back.
     private readonly byte[] _writeBackImage = new byte[Page.Size];
-    private bool _disposed;
 
-#if DEBUG
+    // Scratch set for the structural check; guarded by _syncRoot.
     private readonly HashSet<BufferEntry> _invariantScratch = new(ReferenceEqualityComparer.Instance);
-#endif
+    private bool _disposed;
 
     /// <summary>
     /// The write-ahead gate: invoked with a page's LSN before the page is written to
@@ -294,10 +293,13 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
     /// <see cref="InvalidOperationException"/> naming the first violation: every resident
     /// entry has a non-negative pin count, is not on the recycle stack, and owns exactly
     /// one node of the access list keyed by its page; the access list holds nothing else;
-    /// every recycled entry is unpinned, detached, and not resident. Compiled into debug
-    /// builds only, where every pool operation also runs it.
+    /// every recycled entry is unpinned, detached, and not resident.
     /// </summary>
-    [Conditional("DEBUG")]
+    /// <remarks>
+    /// Compiled into every configuration, so tests can run it in the Release configuration
+    /// CI uses. Debug builds additionally run it after every pool operation; release builds
+    /// run it only when called.
+    /// </remarks>
     internal void CheckInvariants()
     {
         lock (_syncRoot)
@@ -341,7 +343,8 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         }
         else
         {
-            FailInvariantLocked($"page {entry.Node?.Value} was unpinned more times than it was pinned");
+            // Release builds ignore an over-release: the count stays at zero.
+            FailOverReleaseLocked(entry);
         }
 
         AssertInvariantsLocked();
@@ -447,6 +450,9 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         entry.MarkClean(version);
     }
 
+    // The per-operation checks below are debug-only; the structural check they share
+    // (CheckInvariantsLocked) is compiled into every configuration.
+
     [Conditional("DEBUG")]
     private void AssertInvariantsLocked() => CheckInvariantsLocked();
 
@@ -460,15 +466,18 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
     }
 
     [Conditional("DEBUG")]
-    private void FailInvariantLocked(string violation)
+    private static void FailOverReleaseLocked(BufferEntry entry)
+    {
+        FailInvariantLocked($"page {entry.Node?.Value} was unpinned more times than it was pinned");
+    }
+
+    private static void FailInvariantLocked(string violation)
     {
         throw new InvalidOperationException($"Buffer pool invariant violated: {violation}.");
     }
 
-    [Conditional("DEBUG")]
     private void CheckInvariantsLocked()
     {
-#if DEBUG
         if (_entries.Count > _capacity)
         {
             FailInvariantLocked($"{_entries.Count} resident pages exceed the capacity of {_capacity}");
@@ -532,7 +541,6 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         {
             resident.Clear();
         }
-#endif
     }
 
     /// <summary>

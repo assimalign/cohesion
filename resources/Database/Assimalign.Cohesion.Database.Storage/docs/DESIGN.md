@@ -154,13 +154,17 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
 - **Paced write-back skips pinned pages.** An unpinned page is quiescent, so the page
   writer only ever writes complete images; a pinned dirty page waits for a later pass,
   an eviction, or the checkpoint (which runs with no transaction active).
-- **Debug-only invariants.** Debug builds check the pool's structure after every
-  operation, under the lock: every resident entry has a non-negative pin count, is not
-  on the recycle stack, and owns exactly one node of the LRU list keyed by its page;
-  the LRU list holds nothing else; recycled entries are unpinned and detached; a handle
-  never releases a pin on an entry that is no longer resident; a handle's page is never
-  read after the handle was disposed. The test suites run on debug builds, so every
-  storage and engine test exercises the checks; release builds compile them out.
+- **Invariants.** The structural check (`CheckInvariants`) verifies, under the lock,
+  that every resident entry has a non-negative pin count, is not on the recycle stack,
+  and owns exactly one node of the LRU list keyed by its page; that the LRU list holds
+  nothing else; and that recycled entries are unpinned and detached. It is compiled
+  into every configuration. Debug builds also run it after every pool operation and add
+  per-operation checks: a handle never releases a pin on an entry that is no longer
+  resident, a page is never unpinned more often than it was pinned, and a handle's page
+  is never read after the handle was disposed. Release builds skip the per-operation
+  checks and ignore an over-release. CI runs the suites in Release, so the explicit
+  check, the injected-violation tests and the per-phase checks of the concurrency suites
+  run there too; the per-operation checks run in local Debug runs.
 
 ## The record layer
 
@@ -528,8 +532,9 @@ No reflection, no runtime codegen. Header structs are explicit-layout overlays r
 through pointers; encodings are hand-written span code. `AllowUnsafeBlocks` is enabled
 for the pointer overlays — the unsafe surface is confined to `Units/` and the buffer
 pool's pinned buffers. Pinned-object-heap allocation (`GC.AllocateArray(..., pinned:
-true)`) is supported by NativeAOT; the pool's debug invariants are compiled out of
-release builds (`[Conditional("DEBUG")]`).
+true)`) is supported by NativeAOT; the pool's per-operation invariant checks are
+compiled out of release builds (`[Conditional("DEBUG")]`), while the structural check
+they share stays in every build for tests to call.
 
 ## Non-goals
 
