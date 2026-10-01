@@ -317,6 +317,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.Authentication'
     'resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer'
     'resources/Web/Assimalign.Cohesion.Web.Authentication.Cookie'
+    'resources/Web/Assimalign.Cohesion.Web.Authorization'
     'resources/Web/Assimalign.Cohesion.Web.Caching'
     'resources/Web/Assimalign.Cohesion.Web.Compression'
     'resources/Web/Assimalign.Cohesion.Web.CookiePolicy'
@@ -416,9 +417,9 @@ $script:CohesionReleaseRuntimeIdentifier = @(
 # Source-less projects to ship ANYWAY, to reserve the package id on nuget.org before the
 # implementation lands. Empty by default, and the default is the safe one.
 #
-# Six projects under libraries/ and resources/ currently compile to an empty assembly - Amqp,
-# the three Dns.Client transports, Web.Authorization, Web.Cors. They are real CI citizens, and the
-# two Web ones already reach consumers inside the App.Web packs (they are listed in
+# Five projects under libraries/ and resources/ currently compile to an empty assembly - Amqp,
+# the three Dns.Client transports, Web.Cors. They are real CI citizens, and the
+# Web one already reaches consumers inside the App.Web packs (it is listed in
 # resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props), but a STANDALONE
 # `Assimalign.Cohesion.Amqp` package on nuget.org is a different artifact: a permanent,
 # unlistable-only promise of functionality the download does not contain.

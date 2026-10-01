@@ -256,8 +256,10 @@ serialization or runtime-policy surface is consumed by this package.
 - **OAuth2 / OIDC interactive login.** Authorization-code and other
   redirect-based sign-in flows are follow-ups behind the IdentityModel
   and IdentityHub epics, not part of this scheme model.
-- **Authorization.** Policy evaluation, role checks, and requirement
-  handlers live in `Assimalign.Cohesion.Web.Authorization`.
+- **Authorization.** Policy evaluation, role and claim requirements,
+  and per-endpoint scheme selection live in
+  `Assimalign.Cohesion.Web.Authorization`, which answers a failed policy
+  through this package's `ChallengeAsync`/`ForbidAsync`.
 - **Wire-level identity.** TLS client certificates, mutual-TLS
   identity, and HTTP `Authorization` header parsing remain in the
   transport / protocol layers; this package only consumes the result.
