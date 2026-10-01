@@ -185,7 +185,21 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
 
         ProtocolVersion = negotiatedVersion;
 
-        IDatabase? database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
+        IDatabase? database;
+
+        try
+        {
+            database = await ResolveDatabaseAsync(startup.Database, handshakeSource.Token).ConfigureAwait(false);
+        }
+        catch (SqlDataStorageFormatException exception)
+        {
+            // The database exists but is on a data-storage format this engine
+            // refuses (#1099). The refusal is engine-authored and actionable, so
+            // the client gets it instead of an opaque internal error; any other
+            // open failure still takes the internal-error path.
+            await TryWriteErrorAsync(ProtocolErrorCode.Unavailable, exception.Message).ConfigureAwait(false);
+            return false;
+        }
 
         if (database is null)
         {
@@ -384,6 +398,8 @@ internal sealed class SqlDatabaseServerSession : IDatabaseServerSession
     /// Resolves the startup-requested database on the server's one engine:
     /// already-open databases first, then an open attempt.
     /// </summary>
+    /// <returns>The database, or <see langword="null"/> when the engine has none by that name.</returns>
+    /// <exception cref="SqlDataStorageFormatException">The database is on a data-storage format the engine refuses.</exception>
     private async ValueTask<IDatabase?> ResolveDatabaseAsync(string name, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(name))

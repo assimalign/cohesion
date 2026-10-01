@@ -275,6 +275,19 @@ active transactions — truncating live before-images would orphan stolen writes
 checkpoints are a later feature (the record already carries the active-transaction
 set). Clean shutdown checkpoints, so a clean reopen recovers instantly.
 
+**Except when nothing was written since open.** An opened file set whose journal
+position and sequence counter are unchanged at shutdown (no transaction, no
+reservation, no checkpoint since recovery finished) closes without writing: the
+shutdown checkpoint would only restamp the header's modification time and rewrite
+the journal's checkpoint record, and under a deferred open-time checkpoint it would
+truncate records the owner never analyzed. Skipping it is crash-equivalent (as if
+the process stopped right after recovery, which the next open already handles), and
+it is what lets an engine refuse a database at open — the SQL engine's data-storage
+format gate — without writing on the way out: a cleanly closed file set stays
+byte-identical, and a crashed one keeps the journal the engine that wrote it needs.
+The open itself still runs recovery, so a crashed file set's data pages do receive
+the format-agnostic physical redo/undo before the owner can decide to refuse it.
+
 With a background checkpointer (#902) checkpoints race live transactions, so the
 emptiness check hardened from "no page write locks" to an **active-transaction count**
 taken in `BeginTransaction` under the transaction lock and released exactly once per

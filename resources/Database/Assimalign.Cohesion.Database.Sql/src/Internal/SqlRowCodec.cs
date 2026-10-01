@@ -21,15 +21,15 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal static class SqlRowCodec
 {
     /// <summary>
-    /// The current format version of the database's data storage (rows and the
-    /// index trees that share its file set), persisted in the catalog: 4 =
-    /// index keys encode the temporal identity (<see cref="ToKeyIdentity"/>);
-    /// 3 = stamped records in per-object page chains (rows live on pages tagged
-    /// with their table's object id); 2 = stamped records in the shared page
-    /// stream; 1 = the pre-MVCC unstamped layout. Older versions upgrade in place
-    /// when the database is opened — stamps first (1 → 2), then chain relocation
-    /// (2 → 3), then a rebuild of every index keyed on a TIMESTAMP or TIMESTAMPTZ
-    /// column (3 → 4). The record byte layout itself is unchanged since version 2.
+    /// The format version of the database's data storage (rows and the index
+    /// trees that share its file set) this engine reads and writes, persisted in
+    /// the catalog: 4 = stamped records in per-object page chains whose index
+    /// keys encode the temporal identity (<see cref="ToKeyIdentity"/>). Earlier
+    /// versions — 3 (the same layout with the kind and offset inside temporal
+    /// keys), 2 (records in the shared page stream) and 1 (pre-MVCC unstamped
+    /// records) — are history: a database is created on this version, and an
+    /// existing one on any other version is refused at open. There is no upgrade
+    /// path (owner decision of 2026-10-01; upgrades are #1152).
     /// </summary>
     internal const int RecordSpaceFormatVersion = 4;
 
@@ -76,19 +76,6 @@ internal static class SqlRowCodec
     /// </summary>
     internal static byte[] WithoutDeleter(ReadOnlySpan<byte> record)
         => RecordVersionStamp.WithoutDeleter(record);
-
-    /// <summary>
-    /// Prepends a zeroed stamp header to a pre-MVCC (format-version-1) record —
-    /// the in-place migration write. Writer zero reads as visible to every
-    /// snapshot (it precedes every assigned sequence) and deleter zero is "not
-    /// deleted", so migrated rows behave exactly as committed bootstrap data.
-    /// </summary>
-    internal static byte[] UpgradeUnstamped(ReadOnlySpan<byte> record)
-    {
-        var upgraded = new byte[StampHeaderSize + record.Length];
-        record.CopyTo(upgraded.AsSpan(StampHeaderSize));
-        return upgraded;
-    }
 
     /// <summary>
     /// Decodes a stamped record when it belongs to the expected table; returns

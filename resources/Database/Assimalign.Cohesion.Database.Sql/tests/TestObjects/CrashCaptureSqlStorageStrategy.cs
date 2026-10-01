@@ -34,16 +34,18 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
     }
 
     /// <summary>
-    /// Captures the durable byte image of every database this strategy has
-    /// created — the state a process crash would leave on disk — and returns a
-    /// fresh strategy that opens databases from those images.
+    /// Captures the durable byte image of every storage this strategy has created
+    /// or opened — the state a process crash would leave on disk — and returns a
+    /// fresh strategy that opens databases from those images. A storage this
+    /// strategy holds an image of but never opened carries its image forward
+    /// unchanged, as an untouched file would.
     /// </summary>
     /// <returns>A strategy over the crash images.</returns>
     public CrashCaptureSqlStorageStrategy CaptureDurableImages()
     {
         lock (_sync)
         {
-            var images = new Dictionary<string, (byte[] Data, byte[] Journal, byte[] Backup)>(StringComparer.OrdinalIgnoreCase);
+            var images = new Dictionary<string, (byte[] Data, byte[] Journal, byte[] Backup)>(_images, StringComparer.OrdinalIgnoreCase);
 
             foreach (var (name, streams) in _live)
             {
@@ -51,6 +53,30 @@ public sealed class CrashCaptureSqlStorageStrategy : ISqlStorageStrategy
             }
 
             return new CrashCaptureSqlStorageStrategy(images);
+        }
+    }
+
+    /// <summary>
+    /// Gets the current durable byte image of one storage: what an opened storage
+    /// has made durable so far, or the image a never-opened one was given.
+    /// </summary>
+    /// <param name="storageName">The storage name (a database name, or one suffixed with <c>.catalog</c>).</param>
+    /// <returns>Copies of the storage's data, journal and backup images.</returns>
+    public (byte[] Data, byte[] Journal, byte[] Backup) GetDurableImage(string storageName)
+    {
+        lock (_sync)
+        {
+            if (_live.TryGetValue(storageName, out var streams))
+            {
+                return (streams.Data.CaptureDurable(), streams.Journal.CaptureDurable(), streams.Backup.CaptureDurable());
+            }
+
+            if (_images.TryGetValue(storageName, out var image))
+            {
+                return ((byte[])image.Data.Clone(), (byte[])image.Journal.Clone(), (byte[])image.Backup.Clone());
+            }
+
+            throw new KeyNotFoundException($"Crash-capture storage for '{storageName}' does not exist.");
         }
     }
 
