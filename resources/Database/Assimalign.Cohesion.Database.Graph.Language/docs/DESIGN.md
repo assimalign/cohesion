@@ -133,6 +133,8 @@ The parser describes only the metadata subject; it never accesses or caches cata
 | `GQL0007` | `Graph catalog introspection is read-only.`: mutation composed with `SHOW` |
 
 Locations use zero-based absolute UTF-16 offsets with exclusive ends and one-based line numbers.
+A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and CR LF is one break
+(`TokenLexer.CountLineBreaks`), so lines break exactly where a `--` comment ends.
 Capability checks run before syntax parsing, so a recognized unsupported clause does not degrade
 into a generic error caused by its downstream syntax. Quoted text, comments, label names, and
 property keys do not trigger keyword-based capability checks. Binding and catalog diagnostics belong
@@ -189,6 +191,31 @@ cross-checkable in an implementer's [published GQL feature table](https://neo4j.
 Compatibility-extension cases are named by their `CREATE` spelling. Separate tests pin the exact
 profile, reject unsupported and cross-database constructs, preserve source locations, and bound
 adversarial nesting and long patterns.
+
+### Comment boundary (#1150)
+
+A `--` comment ends before the first line terminator: LF, CR, NEL (U+0085), LS (U+2028) or PS
+(U+2029), with CR LF read as one break, the rule `Database.Language/docs/DESIGN.md` records for
+every language. ISO/IEC 39075's `<simple comment>` ends at CR or LF. The shared lexer used to end it
+only at LF, so in `MATCH (a:Person) -- note<CR>WHERE a.name = 'x'<LF>DETACH DELETE a` the `WHERE`
+was comment text and every Person was deleted. (With `DETACH DELETE` on the CR line as well, the
+comment swallowed it too and the statement failed with `GQL0002`.) The `WHERE` now stays in effect
+at every terminator. `GqlLineCommentTests` pins both delete forms, the clause after a spaced
+comment (`MATCH (a) -- c<CR>RETURN a`, the ISO case gql-label-direction keeps), and diagnostic
+lines at each terminator.
+
+The rule moves only where a comment ends. The coded diagnostic gql-label-direction (#1139) will add
+keys on where a `--` comment starts, so it holds whichever terminator ends the comment. Until it
+lands, `(a)-->(b)` followed by any line terminator reads as `(a)` plus a comment:
+`MATCH (a:Person)-->(b:Person)<CR>DETACH DELETE a` is `MATCH (a:Person) DETACH DELETE a` and
+deletes every Person. Before #1150 a CR, NEL, LS or PS ending made that statement fail with
+`GQL0002`, because the comment swallowed the rest of the text; it now truncates silently, as an LF
+ending already did. gql-label-direction's cases for that diagnostic must therefore run at every
+terminator.
+
+ISO also spells a simple comment `//`. The shared lexer has no `//` comment, so
+`MATCH (a) // note` reports `GQL0002` at the first `/`. An item that adds the `//` form adds a
+per-language lexer switch and ends the comment at the same terminators.
 
 ## AOT posture and extension discipline
 

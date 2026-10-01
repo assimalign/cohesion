@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections;
 using System.Collections.Generic;
 
@@ -14,6 +15,10 @@ namespace Assimalign.Cohesion.Database.Language;
 /// </summary>
 public ref struct TokenLexer
 {
+    // The line terminators every language shares: LF, CR, NEL, LINE SEPARATOR and PARAGRAPH
+    // SEPARATOR. A line comment ends before the first of them (#1150).
+    private static readonly SearchValues<char> _lineTerminators = SearchValues.Create("\n\r\u0085\u2028\u2029");
+
     private readonly ReadOnlySpan<char> _source;
     private readonly ReadOnlySpan<string> _keywords;
     private readonly ReadOnlySpan<string> _functions;
@@ -126,6 +131,46 @@ public ref struct TokenLexer
         _current = default;
     }
 
+    /// <summary>
+    /// Determines whether a character ends a line in every query language: line feed (U+000A),
+    /// carriage return (U+000D), next line (U+0085), line separator (U+2028) or paragraph
+    /// separator (U+2029). A <c>--</c> line comment ends before the first of them.
+    /// </summary>
+    /// <remarks>
+    /// Vertical tab (U+000B) and form feed (U+000C) are whitespace but do not end a line, as in
+    /// PostgreSQL and C#. Every line terminator is also whitespace, so outside a comment one
+    /// separates tokens and is never an unrecognized character.
+    /// </remarks>
+    /// <param name="value">The character to test.</param>
+    /// <returns><see langword="true"/> when <paramref name="value"/> is a line terminator; otherwise <see langword="false"/>.</returns>
+    public static bool IsLineTerminator(char value) => _lineTerminators.Contains(value);
+
+    /// <summary>
+    /// Counts the line breaks in a span of query text. Each line terminator (see
+    /// <see cref="IsLineTerminator(char)"/>) is one break, except that a carriage return
+    /// immediately followed by a line feed is one break together. Parsers that report
+    /// one-based line numbers count with this, so a diagnostic's line agrees with where the
+    /// lexer ends a line comment.
+    /// </summary>
+    /// <param name="text">The text to scan.</param>
+    /// <returns>The number of line breaks in <paramref name="text"/>.</returns>
+    public static int CountLineBreaks(ReadOnlySpan<char> text)
+    {
+        int count = 0;
+        int index;
+        while ((index = text.IndexOfAny(_lineTerminators)) >= 0)
+        {
+            count++;
+            int next = index + 1;
+            if (text[index] == '\r' && next < text.Length && text[next] == '\n')
+            {
+                next++;
+            }
+            text = text[next..];
+        }
+        return count;
+    }
+
     // ── Private helpers ────────────────────────────────────────────────
 
     private void SkipWhitespace()
@@ -144,13 +189,15 @@ public ref struct TokenLexer
 
     // ── Comments ───────────────────────────────────────────────────────
 
+    // A line comment runs to the first line terminator, which stays outside the token and is
+    // skipped as whitespace; CR LF therefore needs no special case here. It used to end only
+    // at LF, so in DELETE FROM t -- note<CR>WHERE id = 1 the WHERE was comment text and every
+    // row was deleted (#1150).
     private Token ScanLineComment(int start)
     {
         _pos += 2; // skip --
-        while (_pos < _source.Length && _source[_pos] != '\n')
-        {
-            _pos++;
-        }
+        int length = _source[_pos..].IndexOfAny(_lineTerminators);
+        _pos = length < 0 ? _source.Length : _pos + length;
         return new Token(TokenType.Comment, _source[start.._pos], start);
     }
 

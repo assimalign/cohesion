@@ -88,10 +88,16 @@ public sealed class SqlStatementCompletenessTests
     /// Leftovers appended to every complete form: words (the first may be read as an
     /// alias), a literal, a stray parenthesis, a misspelled clause, text after the
     /// terminating ';' — including a second statement — an unterminated string or block
-    /// comment that would swallow the rest, and a character outside the dialect.
+    /// comment that would swallow the rest, a character outside the dialect, and words on
+    /// the line after a <c>--</c> comment for every line terminator, which the comment used
+    /// to swallow unless the line ended in LF (#1150).
     /// </summary>
     private static readonly string[] _leftovers =
-        [" x y", " 1", " )", " WHRE id = 1", "; x", "; DELETE FROM t", ";;", " 'x", " /* x", " # x"];
+    [
+        " x y", " 1", " )", " WHRE id = 1", "; x", "; DELETE FROM t", ";;", " 'x", " /* x", " # x",
+        " -- c\n x y", " -- c\r x y", " -- c\r\n x y", " -- c" + (char)0x0085 + " x y",
+        " -- c" + (char)0x2028 + " x y", " -- c" + (char)0x2029 + " x y",
+    ];
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Completeness: every advertised clause and statement kind has a corpus form")]
     public void Corpus_EveryClauseAndStatementKind_ShouldHaveACompleteForm()

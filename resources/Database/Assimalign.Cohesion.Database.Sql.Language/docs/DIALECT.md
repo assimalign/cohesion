@@ -126,6 +126,20 @@ reports `SQL0003` at the literal; it also used to fail only at execution.
 | `SELECT 1e FROM t`, `WHERE a = 2.5E-` | A numeric literal whose exponent has no digits | the literal |
 | `SELECT 1; SELECT 2`, `BEGIN; DELETE FROM t`, `COMMIT;;` | A request accepts exactly one statement | the first token after `;` |
 
+A `--` comment ends before the first line terminator: line feed (LF), carriage
+return (CR), next line (NEL, U+0085), line separator (LS, U+2028) or paragraph
+separator (PS, U+2029); CR LF is one line break (#1150). The terminator set is the
+one `Database.Language/docs/DESIGN.md` records for every language. The comment
+used to end only at LF, so `DELETE FROM t -- note<CR>WHERE id = 1;` parsed as an
+unfiltered `DELETE` and removed every row, and `UPDATE t SET a = 1 -- note<CR>WHERE
+id = 1;` updated every row. The leftover-text rule above could not catch either,
+because the swallowed clause was part of the comment token, not text after the
+statement. Both now affect exactly one row, on both session seams and over the
+wire, and a statement on the line after a comment is leftover text. Text on the
+comment's own line is still comment text, vertical tab and form feed do not end a
+comment, and a string literal or block comment may span lines. `//` is not a
+comment: `/` is the division operator, so `//` is a syntax error.
+
 A recognized clause outside the profile keeps its `COHDBL001`, for example
 `RETURNING` or `FETCH`. The parser stops at such a clause by design, so the text
 from that clause on adds no second diagnostic. Text the parser stopped at before
@@ -184,9 +198,10 @@ evaluation; #1103 rejects them at parse time with `COHDBL001`.
 **Guard.** `SqlStatementCompletenessTests` (Sql.Language) holds a complete statement
 form for every profile clause and every `SqlQueryCommandType`, appends leftover
 text to each form (words, a literal, `)`, a misspelled clause, text after `;`,
-an unterminated string or comment, and a character outside the dialect), and
-fails unless every combination reports an error after the form. A clause added to
-the profile without a form fails the test, as does a new statement kind.
+an unterminated string or comment, a character outside the dialect, and words on
+the line after a `--` comment for every line terminator), and fails unless every
+combination reports an error after the form. A clause added to the profile
+without a form fails the test, as does a new statement kind.
 
 ## Persisted definitions are canonical
 

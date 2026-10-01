@@ -168,11 +168,19 @@ disposable resources beyond those used by the shared analyzer pipeline.
 | `OQL0006` | Invalid aggregate argument count or star operand |
 
 Every error has an absolute start/end span and source line. End-of-input errors use the source
-length for both offsets. Capability validation precedes statement parsing so an unsupported
-construct receives the shared capability diagnostic instead of an accidental generic syntax
-error. Quotes, comments, and property names after dots are not mistaken for clauses. Malformed
-index DDL produces `OQL0002` at the missing or invalid token; it does not escape the parser as an
-exception.
+length for both offsets. A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and
+CR LF is one break (`TokenLexer.CountLineBreaks`). Capability validation precedes statement parsing
+so an unsupported construct receives the shared capability diagnostic instead of an accidental
+generic syntax error. Quotes, comments, and property names after dots are not mistaken for clauses.
+Malformed index DDL produces `OQL0002` at the missing or invalid token; it does not escape the
+parser as an exception.
+
+A `--` comment ends before the first of those line terminators, the rule
+`Database.Language/docs/DESIGN.md` records for every language, so line numbers break exactly where
+a comment ends (#1150). The shared lexer used to end a comment only at LF, so in
+`SELECT * FROM people -- note<CR>WHERE age > 1` the `WHERE` was comment text and every document
+matched. The `WHERE` now stays in effect at every terminator, and `OqlLineCommentTests` pins it
+together with the diagnostic lines. OQL has no `//` comment: `/` is the division operator.
 
 A character OQL does not use lexes as `TokenType.Unrecognized`. It reports
 `Unexpected character '<c>'; it is not part of OQL.` (`OQL0002`) at its span during

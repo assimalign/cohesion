@@ -41,8 +41,11 @@ the parser implements today. Recognized clauses outside that set produce the sha
   Before parsing, `ParseCore` scans the tokens for lexical errors the shared lexer
   passes through as ordinary tokens: an unterminated string, quoted identifier or
   block comment (each would swallow the rest of the statement), and a character
-  outside the dialect. A rejected `ALTER TABLE` action yields a bare `Alter`
-  expression, not a placeholder action. `SqlStatementCompletenessTests` enforces
+  outside the dialect. A `--` comment cannot swallow the next line: it ends at the
+  first line terminator (LF, CR, NEL, LS or PS), not only at LF, because a clause
+  hidden inside the comment token is invisible to the leftover check (#1150). A
+  rejected `ALTER TABLE` action yields a bare `Alter` expression, not a
+  placeholder action. `SqlStatementCompletenessTests` enforces
   the rule: every profile clause and statement kind needs a corpus form, and every
   form followed by leftover text must report an error after the form.
 - **Sealed AST nodes with internal constructors.** The parser is the only
@@ -51,8 +54,11 @@ the parser implements today. Recognized clauses outside that set produce the sha
 - **Positions are offsets; line/column is presentation.** Nodes carry absolute
   character offsets. Mapping offsets to line/column belongs to the tool holding
   the source text (Roslyn's model) — carrying line numbers per node would bloat
-  every node for a consumer that rarely needs them. The raw statement text is
-  stamped once on the root (`SqlQueryExpression.Text`) after parsing.
+  every node for a consumer that rarely needs them. Such a tool breaks lines by
+  the rule `TokenLexer.CountLineBreaks` applies (every `IsLineTerminator`
+  character, CR LF once), so its lines break where the lexer ends a `--`
+  comment and agree with OQL and GQL diagnostic lines. The raw statement text
+  is stamped once on the root (`SqlQueryExpression.Text`) after parsing.
 - **String literal nodes carry the value, not the lexeme** — quotes stripped,
   doubled quotes unescaped — because every consumer (executor, planner, schema
   compiler) wants the value, and exactly one component (the parser) knows the

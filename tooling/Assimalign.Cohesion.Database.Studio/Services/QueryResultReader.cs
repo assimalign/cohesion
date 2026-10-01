@@ -104,6 +104,12 @@ internal static class QueryResultReader
             position);
     }
 
+    /// <summary>
+    /// The one-based line and column of <paramref name="offset"/> in <paramref name="text"/>. Lines
+    /// break where the engines break them (<see cref="TokenLexer.CountLineBreaks"/>): at every
+    /// <see cref="TokenLexer.IsLineTerminator(char)"/> character, with CR LF one break, so the line
+    /// agrees with an OQL or GQL diagnostic's line and with where a <c>--</c> comment ends.
+    /// </summary>
     public static string LineColumn(string text, int offset)
     {
         offset = Math.Clamp(offset, 0, text.Length);
@@ -111,15 +117,17 @@ internal static class QueryResultReader
         int column = 1;
         for (int i = 0; i < offset; i++)
         {
-            // "\r\n", a lone '\r' (WinUI TextBox), and '\n' each end one line.
-            if (text[i] == '\n' || (text[i] == '\r' && (i + 1 >= text.Length || text[i + 1] != '\n')))
-            {
-                line++;
-                column = 1;
-            }
-            else if (text[i] != '\r')
+            char c = text[i];
+            if (!TokenLexer.IsLineTerminator(c))
             {
                 column++;
+            }
+            else if (c != '\r' || i + 1 >= text.Length || text[i + 1] != '\n')
+            {
+                // A lone CR (the WinUI TextBox's line break), LF, NEL, LS and PS each end a line;
+                // the CR of a CR LF does not, because its LF ends that line.
+                line++;
+                column = 1;
             }
         }
 
