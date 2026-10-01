@@ -66,3 +66,7 @@ group prefix supplies `tenant` above), then from the query string.
   `<InterceptorsNamespaces>$(InterceptorsNamespaces);Assimalign.Cohesion.Web.Api.Generated</InterceptorsNamespaces>`.
 - Body binding needs `Web.Serialization` (`AddJsonSerialization(...)`); form binding needs
   `Http.Forms`. Both are carried by the `App.Web` shared framework.
+- Form-bound endpoints require antiforgery when the application references
+  `Assimalign.Cohesion.Web.Antiforgery` (every `Sdk.Web` application does): register
+  `AddAntiforgery(...)` and `UseAntiforgery()` after `UseRouting()`, or opt an endpoint out with
+  `.DisableAntiforgery()`. Without the middleware those endpoints fail at dispatch.

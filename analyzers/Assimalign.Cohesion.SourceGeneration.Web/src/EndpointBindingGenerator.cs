@@ -29,6 +29,12 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     private const string WebNamespace = "Assimalign.Cohesion.Web";
     private const string GeneratedNamespace = "Assimalign.Cohesion.Web.Api.Generated";
 
+    // The antiforgery requirement a form-bound endpoint carries. It lives in Web.Antiforgery, which the
+    // generator does not reference: the requirement is emitted only when the consuming compilation can
+    // name it, so an application without the package is unaffected.
+    private const string antiforgeryMetadataTypeName = "Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata";
+    private const string antiforgeryRequirement = ".WithMetadata(global::" + antiforgeryMetadataTypeName + ".Required)";
+
     private static readonly SymbolDisplayFormat _fullyQualified = new(
         globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Included,
         typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
@@ -208,6 +214,10 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             return null; // body and form are mutually exclusive
         }
 
+        // A form post is the request a cross-site page can forge, so a form-bound endpoint requires
+        // antiforgery validation whenever the application can express the requirement.
+        bool requiresAntiforgery = usesForm && CanRequireAntiforgery(compilation);
+
         InterceptableLocation? location = model.GetInterceptableLocation(invocation, ct);
         if (location is null)
         {
@@ -229,7 +239,30 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             returnKind,
             new EquatableArray<ParameterBinding>(parameters.ToImmutable()),
             bodyParameterIndex,
-            usesForm);
+            usesForm,
+            requiresAntiforgery);
+    }
+
+    // True when the consuming compilation references Web.Antiforgery: its metadata type resolves, is
+    // accessible, and exposes the static Required instance the emitted code attaches. Without the package
+    // the generated route carries no requirement, so the application does not need UseAntiforgery.
+    private static bool CanRequireAntiforgery(Compilation compilation)
+    {
+        if (compilation.GetTypeByMetadataName(antiforgeryMetadataTypeName) is not INamedTypeSymbol metadataType
+            || !compilation.IsSymbolAccessibleWithin(metadataType, compilation.Assembly))
+        {
+            return false;
+        }
+
+        foreach (ISymbol member in metadataType.GetMembers("Required"))
+        {
+            if (member is IPropertySymbol { IsStatic: true, DeclaredAccessibility: Accessibility.Public })
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool TryClassify(
@@ -523,8 +556,16 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
         EmitThunkBody(builder, model, "                ");
 
-        builder.Append("            }");
-        builder.AppendLine(");");
+        builder.Append("            })");
+
+        if (model.RequiresAntiforgery)
+        {
+            // Route-level metadata, attached where the route is mapped: the caller's own chain
+            // (.DisableAntiforgery()) comes after it and still wins under last-wins resolution.
+            builder.Append(antiforgeryRequirement);
+        }
+
+        builder.AppendLine(";");
 
         builder.AppendLine("        }");
     }

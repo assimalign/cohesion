@@ -28,14 +28,22 @@ consumers (clients, proxies, edge caches) should not reference this package.
 
 ## Usage
 
-Create one service per application (it is stateless and shareable). For
-multi-instance or restart-stable deployments, set a shared `Key`.
+In a Web application, use `Assimalign.Cohesion.Web.Antiforgery` instead of
+wiring this package by hand: `AddAntiforgery` registers the service for every
+exchange (sealing tokens with a purpose-bound data-protection protector when
+given a provider), and `UseAntiforgery` validates protected endpoints.
+
+Outside the Web pipeline, create one service per application (it is stateless
+and shareable). The default protector signs with a per-process random key,
+which is for development only: tokens die on restart and instances reject each
+other's tokens. Deployed applications set `Protector` to a persisted, rotating
+key ring.
 
 ```csharp
 IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options =>
 {
-    options.Key = sharedKeyBytes;          // omit for a per-process random key
-    options.CookieSecure = true;            // production
+    options.Protector = ringBackedProtector; // omit only in development
+    options.CookieSecure = true;             // production
 });
 
 // Render path: mint + store the cookie token, hand the request token to the view.
@@ -57,13 +65,14 @@ validation.
 
 ## Token model
 
-- Cookie token: `base64url(secret ‖ HMAC(key, 0x01 ‖ secret))`
-- Request token: `base64url(nonce ‖ HMAC(key, 0x02 ‖ nonce ‖ secret))`
+- Cookie token: `base64url(Protect(0x01 ‖ secret))`
+- Request token: `base64url(Protect(0x02 ‖ nonce ‖ secret))`
 
-The request token is cryptographically bound to its cookie token and signed
-with the application key, so it cannot be forged or replayed across cookie
-tokens. See `docs/DESIGN.md` for the full rationale, the key-management
-posture, and non-goals.
+`Protect` is the configured `IHttpAntiforgeryProtector`: by default
+`payload ‖ HMAC-SHA256(key, payload)`. The request token is cryptographically
+bound to its cookie token and protected by the same protector, so it cannot be
+forged or replayed across cookie tokens. See `docs/DESIGN.md` for the full
+rationale, the key-management posture, and non-goals.
 
 ## Standards
 

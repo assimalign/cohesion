@@ -1183,6 +1183,17 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web/tests/Assimalign.Cohesion.Web.Tests.csproj" />
 	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Antiforgery/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Antiforgery/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Antiforgery/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Antiforgery/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Antiforgery/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Antiforgery/src/Assimalign.Cohesion.Web.Antiforgery.csproj" />
+	</Folder>
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Antiforgery/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Antiforgery/tests/Assimalign.Cohesion.Web.Antiforgery.Tests.csproj" />
+	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Api/" />
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Api/src/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Api/src/Assimalign.Cohesion.Web.Api.csproj" />
@@ -1709,6 +1720,7 @@
 		<Project Path="../libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/Assimalign.Cohesion.IdentityModel.Token.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Cookies/src/Assimalign.Cohesion.Http.Cookies.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Forms/src/Assimalign.Cohesion.Http.Forms.csproj" />
+		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Antiforgery/src/Assimalign.Cohesion.Http.Antiforgery.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.Forwarded/src/Assimalign.Cohesion.Http.Forwarded.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http.RequestLimits/src/Assimalign.Cohesion.Http.RequestLimits.csproj" />
 		<Project Path="../libraries/Connections/Assimalign.Cohesion.Connections.Quic/src/Assimalign.Cohesion.Connections.Quic.csproj" />

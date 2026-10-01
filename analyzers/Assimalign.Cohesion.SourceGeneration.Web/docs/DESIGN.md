@@ -58,6 +58,26 @@ Each interceptor:
 Conversions use `IParsable<T>.TryParse` / `Enum.TryParse<T>` with `InvariantCulture`, so no runtime
 binder helper is required and the emitted code carries no reflection.
 
+## Antiforgery on Form-Bound Endpoints (#1057)
+
+A call site with a `[FromForm]` parameter (`EndpointBinding.UsesForm`) is the request a cross-site page
+can forge, so its interceptor chains
+`.WithMetadata(global::Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata.Required)` onto the route
+the raw `Map` overload returns. `UseAntiforgery` then validates the endpoint's unsafe requests, and
+routing fails the endpoint at dispatch when the middleware did not process it.
+
+- **Emitted only when the application can name it.** The generator does not reference
+  `Web.Antiforgery`. The transform resolves `AntiforgeryMetadata` by metadata name in the consuming
+  compilation and records `EndpointBinding.RequiresAntiforgery` only when the type resolves, is
+  accessible, and exposes a public static `Required`. An application without the package compiles as
+  before and needs no `UseAntiforgery`; every `Sdk.Web` application has it through `App.Web`.
+- **Route-level metadata.** The requirement is attached where the route is mapped, so it is more specific
+  than any route-group declaration, and the caller's own `.DisableAntiforgery()` (chained after the
+  interceptor's return) still wins under last-wins resolution.
+- **Driven by `UsesForm`, not by the HTTP method.** A `Map(method, ...)` call site has no static method,
+  and a safe-method request passes the middleware anyway. A future form-file binding source that sets
+  `UsesForm` inherits the requirement.
+
 ## Delivery
 
 The generator is consumed exactly like the base `SourceGeneration` generator:
@@ -76,9 +96,12 @@ Consumers must allow-list the generated namespace with
 ## Testing
 
 `tests/` drives the generator with a hand-rolled `CSharpGeneratorDriver` and asserts on the emitted
-source. Runtime behavior — real requests through every binding source, the 400/415 outcomes, and
-injection — is proven end-to-end in `Assimalign.Cohesion.Web.Api/tests` against the in-memory
-`WebApplicationTestFactory`.
+source. A case models an application with or without `Web.Antiforgery` by adding or withholding that
+assembly from the compilation's references, and one case compiles the generated antiforgery requirement
+with interceptors enabled. Runtime behavior — real requests through every binding source, the 400/415
+outcomes, and injection — is proven end-to-end in `Assimalign.Cohesion.Web.Api/tests` against the
+in-memory `WebApplicationTestFactory`; the antiforgery requirement on form-bound endpoints is proven in
+`Assimalign.Cohesion.Web.Antiforgery/tests`.
 
 ## Non-Goals
 

@@ -22,6 +22,17 @@
 	<Folder Name="/Web/Assimalign.Cohesion.Web/tests/">
 		<Project Path="Assimalign.Cohesion.Web/tests/Assimalign.Cohesion.Web.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Antiforgery/" />
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Antiforgery/docs/">
+		<File Path="Assimalign.Cohesion.Web.Antiforgery/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Web.Antiforgery/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Antiforgery/src/">
+		<Project Path="Assimalign.Cohesion.Web.Antiforgery/src/Assimalign.Cohesion.Web.Antiforgery.csproj" />
+	</Folder>
+	<Folder Name="/Web/Assimalign.Cohesion.Web.Antiforgery/tests/">
+		<Project Path="Assimalign.Cohesion.Web.Antiforgery/tests/Assimalign.Cohesion.Web.Antiforgery.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Api/" />
 	<Folder Name="/Web/Assimalign.Cohesion.Web.Api/docs/">
 		<File Path="Assimalign.Cohesion.Web.Api/docs/DESIGN.md" />
@@ -584,6 +595,7 @@
 		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http.Forms/src/Assimalign.Cohesion.Http.Forms.csproj" />
+		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http.Antiforgery/src/Assimalign.Cohesion.Http.Antiforgery.csproj" />
 		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Assimalign.Cohesion.ApplicationModel.csproj" />
 		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http.Connections/src/Assimalign.Cohesion.Http.Connections.csproj" />
 		<Project Path="../../libraries/Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />

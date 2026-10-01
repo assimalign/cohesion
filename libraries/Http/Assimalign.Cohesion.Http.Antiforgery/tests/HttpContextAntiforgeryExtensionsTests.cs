@@ -37,6 +37,23 @@ public class HttpContextAntiforgeryExtensionsTests
         context.Features.Get<IHttpAntiforgeryFeature>().ShouldNotBeNull();
     }
 
+    [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - Antiforgery: Should replace a feature that occupies the contract slot")]
+    public void Antiforgery_SetOverContractSlot_ShouldReplaceTheFeature()
+    {
+        // Arrange — another installer (an application-level registration) named its feature for the
+        // contract, as IHttpAntiforgeryFeature asks.
+        IHttpContext context = new TestHttpContext();
+        context.Features.Set(new ContractSlotFeature(HttpAntiforgery.Create()));
+        IHttpAntiforgery replacement = HttpAntiforgery.Create();
+
+        // Act
+        context.Antiforgery = replacement;
+
+        // Assert — one antiforgery service per exchange.
+        context.Features.ShouldHaveSingleItem().ShouldBeAssignableTo<IHttpAntiforgeryFeature>().ShouldNotBeNull().Antiforgery.ShouldBeSameAs(replacement);
+        context.Features.Get(nameof(IHttpAntiforgeryFeature)).ShouldNotBeNull();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Http.Antiforgery] - Antiforgery: Should reject a null assignment")]
     public void Antiforgery_SetNull_ShouldThrow()
     {

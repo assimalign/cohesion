@@ -31,5 +31,8 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Api" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<!-- The antiforgery requirement a form-bound endpoint carries; cases add or withhold it to model an
+		     application with or without the package. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Antiforgery" />
 	</ItemGroup>
 </Project>

@@ -64,26 +64,29 @@ throws). The engine calls only these two operations.
   hand-distributing raw key bytes**.
 
 This package takes **no dependency** on any data-protection library. The
-adapter from `IDataProtector` to `IHttpAntiforgeryProtector` is a few lines and
-lives in the composition root (a `*.Hosting` project), keeping this package
-lean and free of key-management concerns.
+adapter from `IDataProtector` to `IHttpAntiforgeryProtector` ships in the Web
+composition layer: `AddAntiforgery(dataProtectionProvider)` in
+`Assimalign.Cohesion.Web.Antiforgery` derives a protector for its own purpose
+chain and adapts it, keeping this package lean and free of key-management
+concerns.
 
 ## Why an application key, and the default
 
 Signing requires a key. `HttpAntiforgeryOptions.Key` defaults to a fresh
 32-byte random value per `HttpAntiforgeryOptions` instance. That default is
-correct and zero-config for a single process, but it has two consequences
+zero-config and **for development only**, because it has two consequences
 that are documented on the type:
 
 - Tokens minted before a process restart will not validate afterward.
 - Multiple instances behind a load balancer reject each other's tokens.
 
-Cross-process / restart-stable deployments should set a ring-backed
-`Protector` (which supersedes `Key`) rather than hand-distributing a shared
-static `Key`. We chose a secure-by-default-but-explicit-for-scale posture over
-silently persisting a key somewhere, because key storage is a deployment
-decision the library should not make — the seam lets the host make it once, in
-the data-protection layer, for antiforgery and every other protected artifact.
+Deployed applications set a ring-backed `Protector` (which supersedes `Key`)
+rather than hand-distributing a shared static `Key`; in a Web application,
+passing a data-protection provider to `AddAntiforgery` does it. We chose a
+secure-by-default-but-explicit-for-scale posture over silently persisting a key
+somewhere, because key storage is a deployment decision the library should not
+make — the seam lets the host make it once, in the data-protection layer, for
+antiforgery and every other protected artifact.
 
 ## Service shape: stateless singleton over a passed-in context
 
@@ -95,6 +98,13 @@ interface (interface-first). The `IHttpAntiforgeryFeature` carries the shared
 service on a context so downstream handlers resolve the *same* configured
 service — and therefore the same signing key — via
 `context.Antiforgery` / `context.RequireAntiforgery`.
+
+Every `IHttpAntiforgeryFeature` reports `nameof(IHttpAntiforgeryFeature)` as its
+feature name. The feature collection is name-keyed, so an exchange carries at
+most one antiforgery service: assigning `context.Antiforgery` replaces an
+application-level registration (the feature `AddAntiforgery` in
+`Web.Antiforgery` seeds onto every exchange) instead of adding a second feature
+that type-based lookup would resolve unpredictably.
 
 ## Dependency direction
 
@@ -158,5 +168,6 @@ small and use stack buffers, so the hot paths are allocation-light.
 - **Triggering form parsing.** Reading the request token from a form relies
   on the Forms layer having parsed the body; antiforgery does not own that.
 - **Middleware.** This package provides the service, feature, and ergonomics.
-  A pipeline that auto-validates every unsafe request is a higher-layer
-  concern.
+  Pipeline enforcement is the Web layer's: `Assimalign.Cohesion.Web.Antiforgery`
+  validates the unsafe requests of endpoints that declare a requirement (and
+  reads the form for the form-token flow, which this package does not trigger).

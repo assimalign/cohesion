@@ -33,6 +33,7 @@
 
         <!-- The Web family. -->
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Antiforgery" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Api" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authentication" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Web.Authentication.Bearer" />
@@ -66,6 +67,7 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Caching.InMemory" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Antiforgery" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Connections" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Cookies" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Http.Forms" />

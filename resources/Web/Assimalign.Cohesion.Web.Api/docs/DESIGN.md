@@ -104,6 +104,17 @@ Failures are outcomes the thunk writes imperatively as RFC 9457 `application/pro
 Exceptions thrown by the **handler itself** are never caught — they propagate to the pipeline
 exception boundary (#881).
 
+## Antiforgery on form-bound endpoints (#1057)
+
+A typed endpoint with a `[FromForm]` parameter requires antiforgery validation: the generator chains
+`AntiforgeryMetadata.Required` onto the route it maps, but only when the consuming compilation
+references `Assimalign.Cohesion.Web.Antiforgery` (every `Sdk.Web` application does, through `App.Web`).
+`UseAntiforgery`, registered after `UseRouting`, validates the token and reads the form for the
+form-token flow; the thunk then binds from that cached parse. Without `UseAntiforgery` such an endpoint
+fails at dispatch rather than run unprotected; `.DisableAntiforgery()` on the endpoint opts it out. The
+requirement is route-level metadata, so a group-level opt-out does not reach it. `Web.Api` takes no
+reference to the package: the generator names the type and emits nothing when it does not resolve.
+
 ## Validation — descoped (owner decision, 2026-07-20)
 
 An opt-in per-endpoint validation seam (`IValidator`-carrying `Map*` overloads + an

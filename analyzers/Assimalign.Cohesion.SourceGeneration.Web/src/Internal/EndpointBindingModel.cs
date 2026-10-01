@@ -54,6 +54,11 @@ internal readonly record struct ParameterBinding(
     bool Required) : IEquatable<ParameterBinding>;
 
 /// <summary>A modeled typed <c>Map*</c> call site the generator intercepts.</summary>
+/// <remarks>
+/// <c>RequiresAntiforgery</c> is set for a form-bound endpoint when the consuming compilation can name
+/// the antiforgery requirement (<c>Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata</c>); the
+/// interceptor then attaches it to the mapped route.
+/// </remarks>
 internal readonly record struct EndpointBinding(
     string InterceptsAttribute,
     string ReceiverType,
@@ -63,4 +68,5 @@ internal readonly record struct EndpointBinding(
     ReturnKind Return,
     EquatableArray<ParameterBinding> Parameters,
     int BodyParameterIndex,
-    bool UsesForm) : IEquatable<EndpointBinding>;
+    bool UsesForm,
+    bool RequiresAntiforgery) : IEquatable<EndpointBinding>;

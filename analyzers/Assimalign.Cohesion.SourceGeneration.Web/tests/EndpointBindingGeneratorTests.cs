@@ -27,22 +27,42 @@ public class EndpointBindingGeneratorTests
         public sealed class Widget { public string Name { get; set; } = ""; public int Quantity { get; set; } }
         """;
 
-    private static string Run(string body)
+    // The antiforgery requirement the generator attaches to a form-bound endpoint when the application
+    // references Web.Antiforgery.
+    private const string antiforgeryRequirement = ".WithMetadata(global::Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata.Required);";
+
+    private static string Run(string body, bool referenceAntiforgery = false)
+        => Generate(body, referenceAntiforgery, out _);
+
+    private static string Generate(string body, bool referenceAntiforgery, out Compilation output)
     {
         string source = Preamble + "\n\npublic static class Endpoints\n{\n    public static void Configure(WebApplication app)\n    {\n" + body + "\n    }\n}\n";
 
-        List<MetadataReference> references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+        string antiforgeryAssembly = typeof(Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata).Assembly.Location;
+
+        // The test host's trusted platform assemblies include every assembly this project references,
+        // Web.Antiforgery among them. Exclude it unless the case models an application that references
+        // it, and add every Cohesion assembly once.
+        List<string> paths = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)
             .Where(path => path.Length > 0)
-            .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
-            .Append(MetadataReference.CreateFromFile(typeof(Assimalign.Cohesion.Http.IHttpContext).Assembly.Location))
-            .Append(MetadataReference.CreateFromFile(typeof(Assimalign.Cohesion.Web.IWebApplicationPipelineBuilder).Assembly.Location))
-            .Append(MetadataReference.CreateFromFile(typeof(Assimalign.Cohesion.Web.WebApplicationPipelineBuilderExtensions).Assembly.Location))
-            .Append(MetadataReference.CreateFromFile(typeof(Assimalign.Cohesion.Web.Hosting.WebApplication).Assembly.Location))
-            .Append(MetadataReference.CreateFromFile(typeof(Assimalign.Cohesion.Web.Routing.RouteValueDictionary).Assembly.Location))
+            .Append(typeof(Assimalign.Cohesion.Http.IHttpContext).Assembly.Location)
+            .Append(typeof(Assimalign.Cohesion.Web.IWebApplicationPipelineBuilder).Assembly.Location)
+            .Append(typeof(Assimalign.Cohesion.Web.WebApplicationPipelineBuilderExtensions).Assembly.Location)
+            .Append(typeof(Assimalign.Cohesion.Web.Hosting.WebApplication).Assembly.Location)
+            .Append(typeof(Assimalign.Cohesion.Web.Routing.RouteValueDictionary).Assembly.Location)
+            .Where(path => referenceAntiforgery || !IsSameFile(path, antiforgeryAssembly))
+            .Append(referenceAntiforgery ? antiforgeryAssembly : string.Empty)
+            .Where(path => path.Length > 0)
+            .DistinctBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        CSharpParseOptions parseOptions = new(LanguageVersion.Preview);
+        List<MetadataReference> references = paths
+            .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
+            .ToList();
+
+        CSharpParseOptions parseOptions = new CSharpParseOptions(LanguageVersion.Preview)
+            .WithFeatures([new KeyValuePair<string, string>("InterceptorsNamespaces", "Assimalign.Cohesion.Web.Api.Generated")]);
 
         CSharpCompilation compilation = CSharpCompilation.Create(
             "EndpointBindingGeneratorTests",
@@ -54,12 +74,15 @@ public class EndpointBindingGeneratorTests
             new[] { new EndpointBindingGenerator().AsSourceGenerator() },
             parseOptions: parseOptions);
 
-        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out _, out _);
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out output, out _);
 
         GeneratorDriverRunResult runResult = driver.GetRunResult();
 
         return runResult.GeneratedTrees.Length > 0 ? runResult.GeneratedTrees[0].ToString() : string.Empty;
     }
+
+    private static bool IsSameFile(string path, string other)
+        => string.Equals(Path.GetFileName(path), Path.GetFileName(other), StringComparison.OrdinalIgnoreCase);
 
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: route parameter emits an interceptor")]
     public void Generator_RouteParameter_EmitsInterceptor()
@@ -152,5 +175,103 @@ public class EndpointBindingGeneratorTests
 
         generated.ShouldContain("context.Request.Query.TryGetValue(\"q\", out var __query0) ? __query0.Value : null", Case.Sensitive);
         generated.ShouldNotContain("__routeValues0", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a form-bound endpoint requires antiforgery when the application references Web.Antiforgery")]
+    public void Generator_FormEndpointWithAntiforgeryReferenced_AttachesAntiforgeryRequirement()
+    {
+        // Act
+        string generated = Run(
+            """app.MapPost("/orders", async ([FromForm] string title, IHttpContext context) => { await Task.CompletedTask; });""",
+            referenceAntiforgery: true);
+
+        // Assert — the requirement is chained onto the route the raw Map overload returns.
+        generated.ShouldContain("await context.ReadFormAsync(context.RequestCancelled);", Case.Sensitive);
+        generated.ShouldContain("            })" + antiforgeryRequirement, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a form-bound endpoint carries no antiforgery requirement without Web.Antiforgery")]
+    public void Generator_FormEndpointWithoutAntiforgeryReferenced_EmitsNoRequirement()
+    {
+        // Act
+        string generated = Run(
+            """app.MapPost("/orders", async ([FromForm] string title, IHttpContext context) => { await Task.CompletedTask; });""",
+            referenceAntiforgery: false);
+
+        // Assert — the endpoint is still intercepted and bound; it simply requires nothing.
+        generated.ShouldContain("Intercept_0", Case.Sensitive);
+        generated.ShouldContain("await context.ReadFormAsync(context.RequestCancelled);", Case.Sensitive);
+        generated.ShouldNotContain("Antiforgery", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: an endpoint without form parameters carries no antiforgery requirement")]
+    public void Generator_NonFormEndpointWithAntiforgeryReferenced_EmitsNoRequirement()
+    {
+        // Act — query and body binding with the package referenced.
+        string generated = Run(
+            """
+            app.MapPost("/search", async (string q, IHttpContext context) => { await Task.CompletedTask; });
+            app.MapPost("/widgets", async (Widget widget, IHttpContext context) => { await Task.CompletedTask; });
+            """,
+            referenceAntiforgery: true);
+
+        // Assert
+        generated.ShouldContain("Intercept_0", Case.Sensitive);
+        generated.ShouldContain("Intercept_1", Case.Sensitive);
+        generated.ShouldNotContain("Antiforgery", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: only the form-bound endpoint among several requires antiforgery")]
+    public void Generator_MixedEndpoints_AttachesRequirementOnlyToFormEndpoint()
+    {
+        // Act
+        string generated = Run(
+            """
+            app.MapGet("/orders/{id}", async (int id, IHttpContext context) => { await Task.CompletedTask; });
+            app.MapPost("/orders", async ([FromForm] string title, [FromForm(Name = "qty")] int quantity, IHttpContext context) => { await Task.CompletedTask; });
+            """,
+            referenceAntiforgery: true);
+
+        // Assert — one requirement, on the second interceptor.
+        int first = generated.IndexOf("Intercept_0(", StringComparison.Ordinal);
+        int second = generated.IndexOf("Intercept_1(", StringComparison.Ordinal);
+        int requirement = generated.IndexOf(antiforgeryRequirement, StringComparison.Ordinal);
+
+        first.ShouldBeGreaterThanOrEqualTo(0);
+        second.ShouldBeGreaterThan(first);
+        requirement.ShouldBeGreaterThan(second);
+        generated.LastIndexOf(antiforgeryRequirement, StringComparison.Ordinal).ShouldBe(requirement);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: a form-bound route-group endpoint requires antiforgery too")]
+    public void Generator_FormGroupEndpointWithAntiforgeryReferenced_AttachesAntiforgeryRequirement()
+    {
+        // Act
+        string generated = Run(
+            """app.MapGroup("forms").MapPost("contact", async ([FromForm] string email, IHttpContext context) => { await Task.CompletedTask; });""",
+            referenceAntiforgery: true);
+
+        // Assert
+        generated.ShouldContain("(this global::Assimalign.Cohesion.Web.Routing.IRouterGroupBuilder builder", Case.Sensitive);
+        generated.ShouldContain(antiforgeryRequirement, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: the attached antiforgery requirement compiles against Web.Antiforgery")]
+    public void Generator_FormEndpointWithAntiforgeryReferenced_GeneratedCodeCompiles()
+    {
+        // Act — the caller's own opt-out chains after the generated requirement.
+        string generated = Generate(
+            """app.MapPost("/orders", async ([FromForm] string title, IHttpContext context) => { await Task.CompletedTask; }).WithMetadata(Assimalign.Cohesion.Web.Antiforgery.AntiforgeryMetadata.Disabled);""",
+            referenceAntiforgery: true,
+            out Compilation output);
+
+        // Assert — the interceptor (requirement included) is part of a compilation with no errors.
+        Diagnostic[] errors = output.GetDiagnostics()
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+
+        generated.ShouldContain(antiforgeryRequirement, Case.Sensitive);
+        output.SyntaxTrees.Count().ShouldBe(2);
+        errors.ShouldBeEmpty(string.Join(Environment.NewLine, errors.Select(error => error.ToString())));
     }
 }

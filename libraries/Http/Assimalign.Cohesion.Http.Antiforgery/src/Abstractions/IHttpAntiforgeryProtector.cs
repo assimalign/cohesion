@@ -12,13 +12,14 @@ namespace Assimalign.Cohesion.Http;
 /// <remarks>
 /// <para>
 /// The default implementation signs payloads with HMAC-SHA256 over
-/// <see cref="HttpAntiforgeryOptions.Key"/> — correct for a single process but tied to a
-/// hand-distributed static key with no rotation. Supplying an implementation backed by a
-/// persisted, rotating key ring (for example the Cohesion data-protection provider, wired in a
-/// <c>*.Hosting</c> project) lets multi-node deployments stop copying raw key bytes: the ring
-/// persists and rotates keys, and its versioned payload header selects the right key on
-/// unprotect. This package deliberately takes no dependency on any data-protection library; the
-/// composition root adapts one to this seam.
+/// <see cref="HttpAntiforgeryOptions.Key"/> — a per-process random key by default, so it is for
+/// development only, and otherwise a hand-distributed static key with no rotation. Supplying an
+/// implementation backed by a persisted, rotating key ring (the Cohesion data-protection
+/// provider, which <c>AddAntiforgery(dataProtectionProvider)</c> in
+/// <c>Assimalign.Cohesion.Web.Antiforgery</c> adapts to this seam) lets multi-node deployments
+/// stop copying raw key bytes: the ring persists and rotates keys, and its versioned payload
+/// header selects the right key on unprotect. This package deliberately takes no dependency on
+/// any data-protection library; the composition layer adapts one to this seam.
 /// </para>
 /// <para>
 /// <see cref="TryUnprotect(ReadOnlySpan{byte}, out byte[])"/> is fed untrusted request input, so

@@ -29,6 +29,7 @@ jobs:
         # Web.ApplicationModel control-plane package.
         projects: [
             'Assimalign.Cohesion.Web',
+            'Assimalign.Cohesion.Web.Antiforgery',
             'Assimalign.Cohesion.Web.ApplicationModel',
             'Assimalign.Cohesion.Web.Api',
             'Assimalign.Cohesion.Web.Authentication',

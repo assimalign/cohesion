@@ -2338,6 +2338,17 @@
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web/tests/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web/tests/Assimalign.Cohesion.Web.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Antiforgery/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Antiforgery/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Antiforgery/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Antiforgery/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Antiforgery/src/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Antiforgery/src/Assimalign.Cohesion.Web.Antiforgery.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Antiforgery/tests/">
+		<Project Path="resources/Web/Assimalign.Cohesion.Web.Antiforgery/tests/Assimalign.Cohesion.Web.Antiforgery.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Api/" />
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Api/docs/">
 		<File Path="resources/Web/Assimalign.Cohesion.Web.Api/docs/DESIGN.md" />

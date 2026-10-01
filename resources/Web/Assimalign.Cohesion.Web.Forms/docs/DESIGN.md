@@ -59,3 +59,8 @@ redesign, and is deliberately not built until a consumer needs it.
   source-generation layer.
 - Per-route form configuration — deferred until a real need appears (see the
   eager/lazy note above).
+- Antiforgery validation — that is `Assimalign.Cohesion.Web.Antiforgery`
+  (#1057). It also protects header-token requests that carry no form, so it is
+  not a form concern. For the form-token flow it reads the form through the same
+  `IHttpFormFeature` parse cache, so `UseForms()` ahead of it costs no second
+  parse.
