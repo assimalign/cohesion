@@ -464,11 +464,16 @@ data-storage format 3 (written through 10.0.0-preview.1) stored the kind and
 the offset inside index keys, and format 4 does not. The engine has no upgrade
 path. It refuses to open a database on any format but 4 — older or newer — with
 an error that names the database, the format it found and the format it
-supports, before it reads or writes the database. Recreate an older database
-with the current engine and reload its data, exporting it first with the
-engine that wrote it, which can still open it because the refused open leaves
-its files untouched. Upgrading databases across format versions is tracked by
-#1152. New databases are created on format 4.
+supports. The check reads only the database's catalog and runs before the
+engine opens the data files, so a refused open never touches them. A cleanly
+closed database is left byte-identical. A crashed one keeps its journals: the
+catalog files get only the storage layer's own crash recovery, which does not
+depend on the format. To move an older database to the current engine, export
+its data with the engine that wrote it (which can still open it), drop the
+database (`DropDatabaseAsync`), create it again and reload the data. A database
+whose creation was interrupted before its format was recorded reads as format 1
+and needs only the drop and create. Upgrading databases across format versions
+is tracked by #1152. New databases are created on format 4.
 
 From format 4 on, the catalog stores the format marker in a record that engines
 before format 4 do not recognize, so those engines refuse to open a format-4

@@ -10,7 +10,6 @@ using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
-using Assimalign.Cohesion.Database.Types;
 
 /// <summary>
 /// Internal implementation of a SQL database instance: the data storage, the
@@ -28,31 +27,40 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     private readonly SqlSchemaProvisioner _schemaProvisioner;
     private bool _disposed;
 
+    /// <summary>
+    /// Composes a database over its two file sets and the catalog the engine opened
+    /// on the catalog file set.
+    /// </summary>
+    /// <param name="name">The database name.</param>
+    /// <param name="engine">The owning engine.</param>
+    /// <param name="storage">The data file set.</param>
+    /// <param name="catalogStorage">The catalog file set.</param>
+    /// <param name="catalog">The catalog opened over <paramref name="catalogStorage"/>.</param>
+    /// <param name="recover">
+    /// <see langword="true"/> for an existing database, which must already have passed
+    /// <see cref="ThrowIfFormatIsNotCurrent"/> before its data file set was opened;
+    /// <see langword="false"/> for a new one, which is born on this engine's format.
+    /// </param>
     internal SqlDatabaseInstance(string name, IDatabaseEngine engine, SqlStorage storage, SqlStorage catalogStorage,
-        bool recover = false, Collation? defaultCollation = null)
+        ISqlCatalog catalog, bool recover)
     {
         Name = name;
         Engine = engine;
         _storage = storage;
         _catalogStorage = catalogStorage;
-        _catalog = defaultCollation is null
-            ? SqlCatalog.Open(catalogStorage)
-            : SqlCatalog.Open(catalogStorage, defaultCollation);
+        _catalog = catalog;
 
-        // The data-storage format gate, before any engine component touches the
-        // data file set: an existing database must be on exactly this engine's
-        // format (recovery's scrub, index purge and checkpoint below would
-        // otherwise run with the wrong key encoding), and a new one is born on it.
         if (recover)
         {
-            ThrowIfFormatIsNotCurrent();
+            // The engine gates the catalog before it opens the data file set; the
+            // re-check keeps the invariant local to the instance, because
+            // recovery's scrub, index purge and checkpoint below would otherwise
+            // run with the wrong key encoding.
+            ThrowIfFormatIsNotCurrent(Name, _catalog);
         }
         else
         {
-            // Synchronous over the ValueTask by design: catalog writes complete
-            // synchronously and instance construction is a synchronous path.
-            _catalog.SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion)
-                .AsTask().GetAwaiter().GetResult();
+            StampNewCatalog();
         }
 
         _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new SqlTransactionRecordSpace(storage));
@@ -93,18 +101,23 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     }
 
     /// <summary>
-    /// Refuses an existing data storage on any format but this engine's own. The
-    /// engine has no upgrade path (owner decision of 2026-10-01; upgrades are
-    /// #1152): an older database must be recreated, and a newer one belongs to
-    /// the engine that wrote it. Runs as soon as the catalog is open, before the
-    /// transaction coordinator, the index manager or recovery read or write the
-    /// data file set, so a refused database is left exactly as it was found and
-    /// the engine that wrote it can still open it.
+    /// Refuses an existing database on any data-storage format but this engine's
+    /// own. The engine has no upgrade path (owner decision of 2026-10-01; upgrades
+    /// are #1152): an older database must be dropped and recreated, and a newer one
+    /// belongs to the engine that wrote it. The engine calls this on the catalog
+    /// alone, before it opens the data file set, so a refused open never touches
+    /// the data files. The catalog file set gets only what opening any storage
+    /// does: a cleanly closed one is left byte-identical, and a crashed one gets
+    /// the storage layer's format-agnostic physical recovery and keeps its journal
+    /// (an untouched storage closes without writing), so the engine that wrote the
+    /// database can still open it.
     /// </summary>
-    /// <exception cref="DatabaseException">The data-storage format is not <see cref="SqlRowCodec.RecordSpaceFormatVersion"/>.</exception>
-    private void ThrowIfFormatIsNotCurrent()
+    /// <param name="name">The database name, for the message.</param>
+    /// <param name="catalog">The database's catalog, opened on its catalog file set.</param>
+    /// <exception cref="SqlDataStorageFormatException">The data-storage format is not <see cref="SqlRowCodec.RecordSpaceFormatVersion"/>.</exception>
+    internal static void ThrowIfFormatIsNotCurrent(string name, ISqlCatalog catalog)
     {
-        int version = _catalog.RecordSpaceFormatVersion;
+        int version = catalog.RecordSpaceFormatVersion;
         int current = SqlRowCodec.RecordSpaceFormatVersion;
 
         if (version == current)
@@ -112,14 +125,49 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
             return;
         }
 
-        string remedy = version < current
-            ? "This engine does not upgrade databases written in an older format: recreate the database with this " +
-              "engine and reload its data, exporting it first with the engine that wrote it " +
-              "(on-disk format upgrades are tracked by assimalign/cohesion#1152)."
-            : "The database was written by a newer engine; open it with that engine.";
+        // Version 1 is what a catalog without a marker reads as. Every released
+        // engine stamped one when it created a database, so a missing marker
+        // means a creation that stopped before the stamp or a pre-release build.
+        string remedy = version switch
+        {
+            1 => "It has no format marker: its creation was interrupted, or it predates format markers. " +
+                 "This engine does not upgrade or repair databases: drop the database (DropDatabaseAsync) and " +
+                 "create it again, exporting any data first with the engine that wrote it " +
+                 "(on-disk format upgrades are tracked by assimalign/cohesion#1152).",
+            _ when version < current =>
+                 "This engine does not upgrade databases written in an older format: export its data with the " +
+                 "engine that wrote it, drop the database (DropDatabaseAsync) and create it again with this engine, " +
+                 "then reload the data (on-disk format upgrades are tracked by assimalign/cohesion#1152).",
+            _ => "The database was written by a newer engine; open it with that engine.",
+        };
 
-        throw new DatabaseException(
-            $"Database '{Name}' uses data-storage format {version}, but this engine supports only format {current}. {remedy}");
+        throw new SqlDataStorageFormatException(
+            $"Database '{name}' uses data-storage format {version}, but this engine supports only format {current}. {remedy}");
+    }
+
+    /// <summary>
+    /// Writes this engine's format marker into a new database's catalog. The
+    /// storage strategy contract makes a created catalog empty
+    /// (<see cref="ISqlStorageStrategy.CreateStorage"/> throws when storage
+    /// already exists); the check enforces it here too, because stamping an
+    /// existing catalog would declare its older index keys current — the silent
+    /// corruption the format gate exists to prevent.
+    /// </summary>
+    /// <exception cref="DatabaseException">The catalog already holds a format marker or tables.</exception>
+    private void StampNewCatalog()
+    {
+        if (_catalog.RecordSpaceFormatVersion != 1 || _catalog.Tables.Count != 0)
+        {
+            throw new DatabaseException(
+                $"Database '{Name}' cannot be created: its catalog storage already holds data-storage format " +
+                $"{_catalog.RecordSpaceFormatVersion} and {_catalog.Tables.Count} table(s). " +
+                "ISqlStorageStrategy.CreateStorage must return new, empty storage.");
+        }
+
+        // Synchronous over the ValueTask by design: catalog writes complete
+        // synchronously and instance construction is a synchronous path.
+        _catalog.SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion)
+            .AsTask().GetAwaiter().GetResult();
     }
 
     /// <inheritdoc />

@@ -9,6 +9,7 @@ using Assimalign.Cohesion.Database.Sql.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql;
 
+using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Types;
 
@@ -192,7 +193,8 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                 catalogStorage = _strategy.CreateStorage(name + CatalogSuffix);
                 ConfigureStorage(catalogStorage, name + CatalogSuffix);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
-                var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, defaultCollation: defaultCollation);
+                var catalog = SqlCatalog.Open(catalogStorage, defaultCollation);
+                var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, catalog, recover: false);
                 _databases[name] = database;
                 return new ValueTask<IDatabase>(database);
             }
@@ -243,26 +245,36 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             // creating) any file.
             if (!_strategy.StorageExists(name + CatalogSuffix))
             {
-                throw new DatabaseException(
+                throw new SqlDataStorageFormatException(
                     $"Database '{name}' has no catalog storage, so it has no data-storage format this engine can open: " +
                     "its creation was interrupted, or it was written before the catalog had its own file set. " +
-                    "This engine does not upgrade or repair databases: drop the database and recreate it " +
-                    "(on-disk format upgrades are tracked by assimalign/cohesion#1152).");
+                    "This engine does not upgrade or repair databases: drop the database (DropDatabaseAsync) and " +
+                    "create it again (on-disk format upgrades are tracked by assimalign/cohesion#1152).");
             }
 
-            var storage = _strategy.OpenStorage(name);
-            SqlStorage? catalogStorage = null;
+            // The catalog file set opens first and alone: the format gate reads
+            // only the catalog, so a refused database's data file set is never
+            // opened — no recovery replay, no created journal or backup file, no
+            // close. Opening the catalog writes nothing beyond what opening any
+            // storage does (crash recovery of the catalog file set itself), and
+            // an untouched storage closes without writing.
+            var catalogStorage = _strategy.OpenStorage(name + CatalogSuffix);
+            SqlStorage? storage = null;
 
             // See CreateDatabaseAsync: instance construction commits (recovery
             // scrub and checkpoint), so the flush worker must see the storages
-            // first under grouped durability.
+            // first under grouped durability. Loading the catalog commits
+            // nothing, so it may run before the snapshot is published.
             try
             {
-                ConfigureStorage(storage, name);
-                catalogStorage = _strategy.OpenStorage(name + CatalogSuffix);
                 ConfigureStorage(catalogStorage, name + CatalogSuffix);
+                var catalog = SqlCatalog.Open(catalogStorage);
+                SqlDatabaseInstance.ThrowIfFormatIsNotCurrent(name, catalog);
+
+                storage = _strategy.OpenStorage(name);
+                ConfigureStorage(storage, name);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
-                var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, recover: true);
+                var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, catalog, recover: true);
                 _databases[name] = database;
                 return new ValueTask<IDatabase>(database);
             }
@@ -270,11 +282,11 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
             {
                 try
                 {
-                    storage.Dispose();
+                    storage?.Dispose();
                 }
                 finally
                 {
-                    catalogStorage?.Dispose();
+                    catalogStorage.Dispose();
                 }
                 throw;
             }

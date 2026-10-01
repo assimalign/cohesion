@@ -358,19 +358,33 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   1 = the pre-MVCC unstamped layout, 2 = stamped rows in the shared page stream,
   3 = per-object chains with the `DateTimeKind` and offset inside temporal keys
   (written through 10.0.0-preview.1). `CreateDatabaseAsync` writes the format-4
-  marker as soon as the catalog opens. `OpenDatabaseAsync` refuses a database on
-  any other version, older or newer, with a `DatabaseException` that names the
-  database, the version found and the version supported, and tells the user to
-  recreate an older database. The check runs as soon as the catalog is open,
-  before the transaction coordinator, the index manager, recovery's scrub and
-  checkpoint, or any statement read or write the data file set. A database
-  without a catalog storage (an interrupted creation, or one older than the
-  catalog's own file set) is refused before any file is opened, never adopted
-  with an empty catalog. The refused open leaves the files byte-identical,
-  because a storage closed with nothing written through it writes nothing
-  (Storage DESIGN.md). That matters because the old engine must still be able
-  to open the database to export its data, including running its own
-  transaction recovery over a journal the refused open did not truncate.
+  marker as soon as the catalog opens, and first checks that the catalog is new
+  (no marker, no tables): `ISqlStorageStrategy.CreateStorage` must refuse
+  existing storage, and a strategy that reopened it instead would otherwise get
+  an older catalog declared current. `OpenDatabaseAsync` refuses a database on
+  any other version, older or newer, with a `DatabaseException` (the internal
+  `SqlDataStorageFormatException`) that names the database, the version found
+  and the version supported. For an older database it says to export the data
+  with the engine that wrote it, drop the database and create it again (create
+  refuses a name whose storage exists). Version 1 means no marker: every
+  released engine stamped one at creation, so an unmarked catalog is a creation
+  interrupted before the stamp (or a pre-release database), and the message says
+  so. **The gate reads the catalog alone.** `OpenDatabaseAsync` opens the
+  catalog file set, loads the catalog and checks the marker before it opens the
+  data file set, so a refused open never opens the data files: no crash replay
+  into them, no journal or backup file created, no close. A database without a
+  catalog storage (an interrupted creation, or one older than the catalog's own
+  file set) is refused before any file is opened, never adopted with an empty
+  catalog. The catalog file set itself gets only what opening any storage does.
+  Cleanly closed, it is left byte-identical, because a storage closed with
+  nothing written through it writes nothing (Storage DESIGN.md). Crashed, it
+  gets the storage layer's physical redo/undo, which is format-agnostic and
+  idempotent, and keeps its journal. That matters because the old engine must
+  still be able to open the database to export its data, including running its
+  own transaction recovery over journals the refused open did not touch.
+  `SqlDataStorageFormatTests` pins both cases: clean images stay byte-identical,
+  and a crashed format-3 image keeps its data files and catalog journal and
+  still recovers (its uncommitted writer scrubbed) once its own engine opens it.
   **Decision (owner, 2026-10-01): no upgrade path while the line is
   pre-release.** #1099's first implementation rebuilt temporal indexes on open
   and carried UNIQUE duplicates the new identity exposed; it was withdrawn
@@ -732,8 +746,12 @@ record moves with the machinery):
   no per-minor branching yet).
 - **Database binding** resolves on the server's one engine: already-open
   databases first (`TryGetDatabase`), then an open attempt; an exact
-  `DatabaseNotFoundException` → wire `DatabaseNotFound` and close. Other open
-  failures propagate to the handshake's internal-error path. (The pre-per-model
+  `DatabaseNotFoundException` → wire `DatabaseNotFound` and close. A database
+  the format gate refuses (`SqlDataStorageFormatException`, #1099) → wire
+  `Unavailable` carrying the engine's refusal message and close, so a remote
+  client learns the format found, the format supported and the remedy; the
+  message is engine-authored and names only the database the client asked for.
+  Other open failures propagate to the handshake's internal-error path. (The pre-per-model
   server probed a *list* of engines in registration order; one engine per server
   removed that ambiguity.)
 - **Authenticate exchange (MVP):** the challenge frame carries no payload (the
@@ -1001,7 +1019,9 @@ table and safe offending value. Parse failures
 the root's `DatabaseParseException` so callers — the wire-protocol server in
 particular — can distinguish fix-the-text errors (`ParseFailure` on the wire)
 from execution errors without model knowledge. Opening a database absent from the
-storage strategy throws the root's `DatabaseNotFoundException`; other open failures
+storage strategy throws the root's `DatabaseNotFoundException`; opening one the
+data-storage format gate refuses throws the internal `SqlDataStorageFormatException`
+(a `DatabaseException`, format rule above); other open failures
 retain their own error type. `SqlCatalogException` (a `DatabaseException`) surfaces
 catalog violations unchanged. Arithmetic faults throw the internal
 `SqlEvaluationException` (a `DatabaseException`) whose message leads with

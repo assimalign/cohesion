@@ -86,7 +86,8 @@ uses those same transforms for uniqueness enforcement.
   is catalog metadata. The engine writes its version (4) when it creates a
   database and refuses to open one whose marker reads anything else; it has no
   upgrade path (owner decision of 2026-10-01; upgrades are #1152). Absent marker
-  reads as version 1 (pre-marker databases).
+  reads as version 1 (pre-marker databases, or a creation interrupted before the
+  engine stamped the marker).
 - **From version 4 the marker is a kind-8 record (downgrade fence, #1099).**
   Catalogs before format 4 (through 10.0.0-preview.1) load kinds 1–7 and throw
   `SqlCatalogException` on any other kind, but their engines did not refuse a
