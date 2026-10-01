@@ -2,11 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
@@ -22,9 +23,16 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// The expression nesting limit against the live engine (#1151). A 200,000-term expression used
 /// to overflow the stack, which .NET cannot catch: one statement ended the process, and over the
 /// wire every session of the server with it. Text deeper than 128 levels is now a parse failure,
-/// a tree deeper than any the parser builds (only a hand-built one can be) fails its statement
-/// with <c>COHSQLE004</c>, and in every case the session, and the server, keep serving.
+/// a walk that runs out of stack fails its statement with <c>COHSQLE004</c>, and in every case the
+/// session, and the server, keep serving.
 /// </summary>
+/// <remarks>
+/// A tree deeper than the parser builds needs the language package's internal constructors,
+/// which this assembly does not reach. The stack checks are proven instead by running a tree at
+/// the limit with almost no stack left (<see cref="NearStackLimit"/>): a walker that checks as
+/// it descends throws long before the tree ends, and one that does not check would complete
+/// inside the runtime's reserve, failing the test instead of the process.
+/// </remarks>
 public sealed class SqlExpressionDepthExecutionTests : IDisposable
 {
     private const int Limit = 128;
@@ -117,50 +125,55 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>
-    /// A tree deeper than the parser builds can only be built by hand. Every recursive walker
-    /// checks the stack, so the statement fails with COHSQLE004 instead of the process: a
-    /// SELECT in the session's system-relation scan, a DELETE in the planner.
+    /// A statement whose walk runs out of stack fails as that statement, with COHSQLE004 and the
+    /// exhausted-stack signal inside, and none of it takes effect; the same statement then runs
+    /// with ample stack. Every stack check leads here: a deeply backtracking LIKE, a tree deeper
+    /// than the parser builds, or a statement run on a thread created with a small stack.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a hand-built 200,000-level tree fails its statement with COHSQLE004")]
-    public async Task ExecuteAsync_HandBuiltTree_ShouldFailWithStatementTooComplex()
+    /// <param name="sql">A statement whose predicate nests exactly 128 levels once <c>{0}</c> is filled.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a statement that runs out of stack fails with COHSQLE004 and keeps the session")]
+    [InlineData("SELECT COUNT(*) FROM t WHERE id < {0}")]
+    [InlineData("UPDATE t SET name = 'z' WHERE id < {0}")]
+    [InlineData("DELETE FROM t WHERE id < {0}")]
+    public async Task ExecuteAsync_StackExhausted_ShouldFailWithStatementTooComplex(string sql)
     {
-        // Arrange
+        // Arrange: 127 terms under a comparison, 128 levels.
         await using var engine = CreateEngine();
         await using var session = await SeedAsync(engine);
-        var deep = HandBuilt.Chain(Hostile);
-        var select = HandBuilt.Select(deep, where: null, limit: null);
-        var limit = HandBuilt.Select(HandBuilt.Column("id"), where: null, limit: deep);
-        var delete = HandBuilt.Delete(HandBuilt.Equal(HandBuilt.Column("id"), deep));
+        var request = Request(sql.Replace("{0}", Chain("1", " + ", Limit - 1), StringComparison.Ordinal));
 
         // Act
-        var failures = new List<DatabaseException>();
-        foreach (var statement in new SqlQueryExpression[] { select, limit, delete })
-        {
-            failures.Add(await Should.ThrowAsync<DatabaseException>(() =>
-                session.ExecuteAsync(new SqlQueryRequest(new SqlQueryStatement(statement))).AsTask()));
-        }
+        var outcome = NearStackLimit.Run(() => session.ExecuteAsync(request).AsTask());
+        var failure = await Should.ThrowAsync<DatabaseException>(() => outcome.Result.ShouldNotBeNull());
 
-        // Assert
-        foreach (var failure in failures)
+        // Assert: nothing of the statement happened, and with ample stack it runs.
+        AssertStatementTooComplex(failure);
+        (await ScalarAsync(session, "SELECT name FROM t")).ShouldBe("a");
+        var result = await session.ExecuteAsync(request);
+        if (result is QueryResultSet)
         {
-            AssertStatementTooComplex(failure);
+            (await ReadScalarAsync(result)).ShouldBe(1L);
         }
-        (await ScalarAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe(1L);
+        else
+        {
+            result.AffectedCount.ShouldBe(1);
+        }
     }
 
     /// <summary>Inside BEGIN the failure follows the rule for any failed statement: the transaction stays open.</summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: COHSQLE004 inside a transaction keeps it open for COMMIT")]
-    public async Task ExecuteAsync_HandBuiltTreeInTransaction_ShouldKeepTransactionOpen()
+    public async Task ExecuteAsync_StackExhaustedInTransaction_ShouldKeepTransactionOpen()
     {
         // Arrange
         await using var engine = CreateEngine();
         await using var session = await SeedAsync(engine);
         await session.ExecuteAsync("BEGIN");
         await session.ExecuteAsync("INSERT INTO t VALUES (2, 'b')");
+        var delete = Request($"DELETE FROM t WHERE id < {Chain("1", " + ", Limit - 1)}");
 
         // Act
-        var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(new SqlQueryRequest(
-            new SqlQueryStatement(HandBuilt.Delete(HandBuilt.Equal(HandBuilt.Column("id"), HandBuilt.Chain(Hostile)))))).AsTask());
+        var outcome = NearStackLimit.Run(() => session.ExecuteAsync(delete).AsTask());
+        var failure = await Should.ThrowAsync<DatabaseException>(() => outcome.Result.ShouldNotBeNull());
 
         // Assert
         AssertStatementTooComplex(failure);
@@ -169,28 +182,59 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         (await ScalarAsync(session, "SELECT COUNT(*) FROM t")).ShouldBe(2L);
     }
 
-    /// <summary>
-    /// The walkers a statement reaches only after another one has walked the same tree check the
-    /// stack themselves, so none of them depends on running second.
-    /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: every expression walker checks the stack before it recurses")]
-    public void Walkers_HandBuiltTree_ShouldThrowInsufficientStackInsteadOfOverflowing()
+    /// <summary>A CHECK whose DDL runs out of stack creates nothing; with ample stack the same DDL creates it.</summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a DDL that runs out of stack fails with COHSQLE004 and changes nothing")]
+    public async Task ExecuteAsync_StackExhaustedDdl_ShouldChangeNothing()
     {
-        // Arrange
-        var deep = HandBuilt.Chain(Hostile);
+        // Arrange: 126 signs over a column, compared: 128 levels.
+        await using var engine = CreateEngine();
+        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var create = Request($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({string.Concat(Enumerable.Repeat("- ", Limit - 2))}qty > 0))");
+
+        // Act
+        var outcome = NearStackLimit.Run(() => session.ExecuteAsync(create).AsTask());
+        var failure = await Should.ThrowAsync<DatabaseException>(() => outcome.Result.ShouldNotBeNull());
+
+        // Assert
+        AssertStatementTooComplex(failure);
+        Table(database, "c", exists: false);
+        await session.ExecuteAsync(create);
+        Table(database, "c").Constraints.ShouldContain(constraint => constraint.Name == "ck");
+    }
+
+    /// <summary>
+    /// Every expression walker checks the stack as it descends, not only on entry, so none of them
+    /// depends on another walker having checked the same tree first. With ample stack each walk
+    /// of the deepest chain the parser accepts completes; with a few KB left each one throws.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: every expression walker checks the stack as it recurses")]
+    public void Walkers_NearStackLimit_ShouldThrowInsufficientStack()
+    {
+        // Arrange: two separately parsed trees, so equivalence walks both.
+        var deep = Projection(Chain("1", " + ", Limit));
+        var twin = Projection(Chain("1", " + ", Limit));
         var columns = new[] { new SqlCatalogColumn("id", new DatabaseTypeInfo(DatabaseType.Int32)) };
         var evaluator = new SqlExpressionEvaluator(columns, null);
+        var walkers = new (string Name, Func<object?> Walk)[]
+        {
+            ("Evaluate", () => evaluator.Evaluate(deep, [1])),
+            ("ResolveCollation", () => evaluator.ResolveCollation(deep)),
+            ("ValidateExpression", () => { SqlPlanner.ValidateExpression(deep, evaluator); return null; }),
+            ("Bind", () => { SqlPersistedExpression.Bind(deep, evaluator); return null; }),
+            ("AreEquivalent", () => SqlPersistedExpression.AreEquivalent(deep, twin)),
+            ("Canonicalize", () => SqlPersistedExpression.Canonicalize(deep, "CHECK constraint 'ck'")),
+        };
 
-        // Act / Assert
-        Should.Throw<InsufficientExecutionStackException>(() => evaluator.Evaluate(deep, [1]));
-        Should.Throw<InsufficientExecutionStackException>(() => evaluator.ResolveCollation(deep));
-        Should.Throw<InsufficientExecutionStackException>(() => SqlPlanner.ValidateExpression(deep, evaluator));
-        Should.Throw<InsufficientExecutionStackException>(() => SqlPersistedExpression.Bind(deep, evaluator));
-        Should.Throw<InsufficientExecutionStackException>(() => SqlPersistedExpression.AreEquivalent(deep, deep));
+        foreach (var (name, walk) in walkers)
+        {
+            // Act: the ample-stack run also compiles and initializes everything the walk touches.
+            Should.NotThrow(walk, name);
+            var outcome = NearStackLimit.Run(walk);
 
-        // The renderer refuses a tree the parser could not read back before it walks it.
-        Should.Throw<DatabaseException>(() => SqlPersistedExpression.Canonicalize(deep, "CHECK constraint 'ck'"))
-            .Message.ShouldContain("nests 200000 levels deep", Case.Sensitive);
+            // Assert
+            outcome.Failure.ShouldBeOfType<InsufficientExecutionStackException>(name);
+        }
     }
 
     /// <summary>
@@ -226,12 +270,14 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     [InlineData("invariant", "_")]
     public void LikeMatches_DeeperThanStack_ShouldThrowInsufficientStack(string collation, string step)
     {
-        // Arrange: a small stack makes the check fail long before the value is exhausted.
+        // Arrange: with a few KB of stack left the check fails long before the value is exhausted.
+        var effective = Collation.FromName(collation);
         string value = new('a', 10_000);
         string pattern = string.Concat(Enumerable.Repeat(step, 10_000));
+        SqlExpressionEvaluator.LikeMatches("abc", step + "%", effective).ShouldBeTrue();
 
         // Act
-        var outcome = RunOnThread(256, () => SqlExpressionEvaluator.LikeMatches(value, pattern, Collation.FromName(collation)));
+        var outcome = NearStackLimit.Run(() => SqlExpressionEvaluator.LikeMatches(value, pattern, effective));
 
         // Assert
         outcome.Failure.ShouldBeOfType<InsufficientExecutionStackException>();
@@ -288,9 +334,9 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         string canonical = string.Concat(Enumerable.Repeat("-(", Limit - 3)) + "-qty" + new string(')', Limit - 3) + " > 0";
         const string subject = "CHECK constraint 'ck' on table 'dbo.c'";
 
-        // Act
-        // The stack check keeps about 128 KB in reserve, so a 160 KB thread cannot recurse far.
-        var small = RunOnThread(160, () => SqlPersistedExpression.Load(canonical, subject));
+        // Act: reading the deepest text back costs the parser a few hundred KB of stack, more
+        // than a default thread spares in a debug build, so the ample run gets 8 MB.
+        var small = NearStackLimit.Run(() => SqlPersistedExpression.Load(canonical, subject));
         var large = RunOnThread(8 * 1024, () => SqlPersistedExpression.Load(canonical, subject));
 
         // Assert
@@ -409,18 +455,32 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     private static async Task<object?> ScalarAsync(IDatabaseSession session, string sql)
+        => await ReadScalarAsync(await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None));
+
+    private static async Task<object?> ReadScalarAsync(QueryResult result)
     {
-        await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var rows = result.ShouldBeAssignableTo<QueryResultSet>();
         object? value = null;
-        int rows = 0;
-        await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+        int count = 0;
+        await foreach (var row in rows.GetRowsAsync(CancellationToken.None))
         {
             value = row.GetValue(0);
-            rows++;
+            count++;
         }
-        rows.ShouldBe(1);
+        count.ShouldBe(1);
         return value;
     }
+
+    // Parsed here, with ample stack, so only the statement's execution runs short of it.
+    private static SqlQueryRequest Request(string sql)
+    {
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse(sql);
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        return new SqlQueryRequest(statement);
+    }
+
+    private static SqlExpression Projection(string expression)
+        => Request($"SELECT {expression} FROM t").Statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns.Single().Expression;
 
     private static async Task<object?> ScalarAsync(ProtocolTestClient client, string sql)
     {
@@ -442,50 +502,74 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
     }
 
     /// <summary>
-    /// Builds trees the parser never would, through the language package's internal constructors:
-    /// the only way a tree deeper than the limit can reach the engine.
+    /// Runs work on a dedicated thread after using up its stack to a few KB above the point where
+    /// <see cref="RuntimeHelpers.EnsureSufficientExecutionStack"/> starts to throw. The point is
+    /// measured on that thread with the runtime's own check, so it holds whatever the thread's
+    /// size, the platform, the build configuration or the reserve the runtime keeps below it.
     /// </summary>
-    private static class HandBuilt
+    /// <remarks>
+    /// The headroom, about three frames of padding, is more than a walker spends before its first
+    /// check and far less than a walk of a 128-level tree, so a walker that checks as it descends
+    /// throws within the first levels. One that did not check would carry on into the runtime's
+    /// reserve, which a 128-level walk fits inside, and complete: the test fails, not the process.
+    /// </remarks>
+    private static class NearStackLimit
     {
-        private const BindingFlags NonPublicInstance = BindingFlags.Instance | BindingFlags.NonPublic;
+        private const int FrameBytes = 1024;
+        private const int HeadroomFrames = 3;
 
-        private static readonly ConstructorInfo _literal = typeof(SqlLiteralExpression).GetConstructors(NonPublicInstance).Single();
-        private static readonly ConstructorInfo _column = typeof(SqlColumnReferenceExpression).GetConstructors(NonPublicInstance).Single();
-        private static readonly ConstructorInfo _binary = typeof(SqlBinaryExpression).GetConstructors(NonPublicInstance).Single();
-        private static readonly ConstructorInfo _selectColumn = typeof(SqlSelectColumn).GetConstructors(NonPublicInstance).Single();
-        private static readonly ConstructorInfo _table = typeof(SqlTableReference).GetConstructors(NonPublicInstance).Single();
-        private static readonly ConstructorInfo _select = typeof(SqlSelectExpression).GetConstructors(NonPublicInstance).Single();
-        private static readonly ConstructorInfo _delete = typeof(SqlDeleteExpression).GetConstructors(NonPublicInstance).Single();
-
-        /// <summary><c>1 + 1 + ...</c>, <paramref name="depth"/> levels deep.</summary>
-        internal static SqlExpression Chain(int depth)
+        /// <summary>Runs <paramref name="work"/> with a few KB of stack left before the check fails.</summary>
+        /// <param name="work">The work.</param>
+        /// <returns>Its result, or the exception it threw.</returns>
+        internal static (T? Result, Exception? Failure) Run<T>(Func<T> work)
         {
-            var tree = One();
-            for (int level = 1; level < depth; level++)
+            T? result = default;
+            Exception? failure = null;
+            var thread = new Thread(() =>
             {
-                tree = Binary(tree, SqlBinaryOperator.Add, One());
-            }
-            return tree;
+                int frames = Descend(0, null);
+                Descend(Math.Max(0, frames - HeadroomFrames), () =>
+                {
+                    try
+                    {
+                        result = work();
+                    }
+                    catch (Exception exception)
+                    {
+                        failure = exception;
+                    }
+                });
+            });
+            thread.Start();
+            thread.Join();
+            return (result, failure);
         }
 
-        internal static SqlExpression Column(string name) => (SqlExpression)_column.Invoke([name, null, null, null]);
+        // One method measures (work is null: how many more frames still pass the check) and
+        // descends (framesLeft frames, then work), so every frame of both is the same size;
+        // AggressiveOptimization keeps tiering from changing that size between the two.
+        [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+        private static int Descend(int framesLeft, Action? work)
+        {
+            Span<byte> frame = stackalloc byte[FrameBytes];
+            frame[^1] = 1;
+            int depth;
+            if (work is null)
+            {
+                depth = RuntimeHelpers.TryEnsureSufficientExecutionStack() ? Descend(0, null) + 1 : 0;
+            }
+            else if (framesLeft > 0)
+            {
+                depth = Descend(framesLeft - 1, work);
+            }
+            else
+            {
+                work();
+                depth = 0;
+            }
 
-        internal static SqlExpression Equal(SqlExpression left, SqlExpression right) => Binary(left, SqlBinaryOperator.Equal, right);
-
-        internal static SqlSelectExpression Select(SqlExpression projection, SqlExpression? where, SqlExpression? limit)
-            => (SqlSelectExpression)_select.Invoke(
-            [
-                new[] { (SqlSelectColumn)_selectColumn.Invoke([projection, null]) }, Table(), Array.Empty<SqlJoinClause>(),
-                where, Array.Empty<SqlExpression>(), null, Array.Empty<SqlOrderByColumn>(), limit, null, false, null, null,
-            ]);
-
-        internal static SqlDeleteExpression Delete(SqlExpression where) => (SqlDeleteExpression)_delete.Invoke([Table(), where, null, null]);
-
-        private static SqlExpression One() => (SqlExpression)_literal.Invoke(["1", SqlLiteralType.Integer, null]);
-
-        private static SqlExpression Binary(SqlExpression left, SqlBinaryOperator op, SqlExpression right)
-            => (SqlExpression)_binary.Invoke([left, op, right, null]);
-
-        private static SqlTableReference Table() => (SqlTableReference)_table.Invoke(["t", null, null]);
+            // Read after the call, so the frame stays allocated across it.
+            return depth + frame[^1] - 1;
+        }
     }
 }

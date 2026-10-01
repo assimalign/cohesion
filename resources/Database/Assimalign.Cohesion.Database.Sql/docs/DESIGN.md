@@ -472,6 +472,14 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   `SqlEvaluationException` with `COHSQLE004` (ISO SQLSTATE 54001, statement too
   complex), so it takes the ordinary failure path above instead of ending the
   process; over the wire it is an `ExecutionFailure` and the session stays ready.
+  The tests prove the checks without a tree deeper than the limit, which only those
+  internal constructors could build and which this engine's tests do not reach:
+  `SqlExpressionDepthExecutionTests` runs a walk of a 128-level tree with a few KB of
+  stack left before the check would fail, measured on that thread with
+  `RuntimeHelpers.TryEnsureSufficientExecutionStack`. A walker that checks as it
+  descends throws within its first levels; one that did not check would carry on
+  into the runtime's reserve, which a 128-level walk fits inside, and complete, so a
+  missing check fails the test rather than the test process.
 - **Signs require numbers; unary plus is the identity (#1068 follow-up).** The
   evaluator returns a unary-plus operand unchanged (value and CLR type; NULL
   propagates), while negation still widens exact integers to BIGINT, and
