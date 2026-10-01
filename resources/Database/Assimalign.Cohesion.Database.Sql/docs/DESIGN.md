@@ -426,11 +426,36 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   while preserving version stamps. DDL is self-committing and refused in explicit
   transactions. Schema-owned tables retain their existing live-session DDL guard.
 - **Expression evaluation** is interpretive with SQL null propagation (nulls
-  reject predicates, comparisons with null are null, `AND`/`OR` are three-valued),
-  numeric promotion to decimal, ordinal string comparison, hand-rolled `LIKE`
+  reject predicates, comparisons with null are null, `AND`/`OR` are three-valued
+  and skip the right operand once `FALSE AND` or `TRUE OR` decides the result),
+  overflow-checked BIGINT arithmetic for exact integers and promotion to decimal
+  otherwise, ordinal string comparison, hand-rolled `LIKE`
   (`%`/`_`), `CASE`, `BETWEEN`, `IN` (lists), `IS NULL`, parameters (`@name`
   bound by bare name), and a small builtin set (`COALESCE`, `UPPER`, `LOWER`,
   `LENGTH`, `ABS`). Compiled expression plans are a later optimization.
+- **Arithmetic faults are coded statement failures (#1069).** Division or
+  modulo by zero raises `SqlEvaluationException` with `COHSQLE001`; a result,
+  operand, literal, aggregate or CASE/COALESCE value outside its numeric type
+  raises it with `COHSQLE002` (the dialect's arithmetic fault contract). Each
+  operator, negation and `ABS` codes its own fault at the source. The evaluator's
+  entry point, `Evaluate`, then converts any remaining `ArithmeticException`
+  from the expression tree (an oversized literal, for example), so no raw runtime
+  fault leaves evaluation. Recursion runs through `EvaluateCore`, below that
+  boundary, so `CAST` still reports an operand it cannot represent as a
+  conversion failure. Aggregate accumulation, the result-type normalization of
+  projected values, and store assignment into an integer or `DECIMAL` column
+  (`CoerceForColumn`) code their own overflow the same way. A nonzero REAL or
+  DOUBLE divisor that converts to Decimal zero is out of range, not a division
+  by zero, because zero is judged on the operand as supplied. `SortRows` unwraps
+  the `InvalidOperationException` the runtime sort puts around a throwing
+  comparer, so incomparable `ORDER BY` keys fail the statement with the
+  comparer's own `DatabaseException` instead of ending a wire session. The
+  exception is an internal `DatabaseException` whose message leads with the code, the convention
+  Graph's `COHDBG` codes use, until the area root grows a structured diagnostics
+  carrier. Evaluation runs in a write statement's first phase, before any
+  physical bracket opens, so a fault writes nothing. The session's ordinary
+  failure path then applies: auto-commit rolls back, and an explicit transaction
+  stays active.
 - **SELECT materializes.** Sorting and `DISTINCT` need the full result anyway at
   this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
   rows. Streaming operators arrive with the planner build-out.
@@ -746,7 +771,12 @@ record moves with the machinery):
 - **Error taxonomy per exchange:** statement-level failures keep the session in
   Ready — `DatabaseParseException` → `ParseFailure`, any other
   `DatabaseException` → `ExecutionFailure` (an execution error is not a protocol
-  violation). Framing/order violations (`ProtocolException`, malformed parameter
+  violation). Evaluation faults (division by zero, numeric overflow) are
+  `DatabaseException`s carrying a `COHSQLE` code, so they take this path and
+  the session stays ready (#1069; before that fix a raw `DivideByZeroException`
+  reached the `Internal` catch-all and closed the session, and so did the
+  `InvalidOperationException` the runtime sort wraps around an `ORDER BY` key
+  comparison that fails). Framing/order violations (`ProtocolException`, malformed parameter
   components) → `ProtocolViolation` **and close**; anything unexpected →
   `Internal` and close. A child-root exception that escapes raw (for example a
   `StorageException` the engine failed to wrap) reaches the wire as `Internal`
@@ -997,7 +1027,11 @@ particular — can distinguish fix-the-text errors (`ParseFailure` on the wire)
 from execution errors without model knowledge. Opening a database absent from the
 storage strategy throws the root's `DatabaseNotFoundException`; other open failures
 retain their own error type. `SqlCatalogException` (a `DatabaseException`) surfaces
-catalog violations unchanged.
+catalog violations unchanged. Arithmetic faults throw the internal
+`SqlEvaluationException` (a `DatabaseException`) whose message leads with
+`COHSQLE001` (division by zero) or `COHSQLE002` (numeric value out of range);
+the codes are published in the dialect's diagnostics table. No runtime
+`ArithmeticException` escapes expression evaluation.
 
 ## The MVCC integration (scoped under #862)
 
