@@ -1113,7 +1113,8 @@ catalog violations unchanged. Arithmetic faults throw the internal
 `SqlEvaluationException` (a `DatabaseException`) whose message leads with
 `COHSQLE001` (division by zero) or `COHSQLE002` (numeric value out of range);
 a sign over a non-numeric operand throws it with `COHSQLE003`, from planning when
-the operand's type is known there. The codes are published in the dialect's
+the operand's type is known there or the operand is a parameter whose bound value
+is not a number. The codes are published in the dialect's
 diagnostics table. A persisted CHECK or DEFAULT that does not load fails the open
 with a `DatabaseException` naming the database, table and constraint or column. No runtime
 `ArithmeticException` escapes expression evaluation.

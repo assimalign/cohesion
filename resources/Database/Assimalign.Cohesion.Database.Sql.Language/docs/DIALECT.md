@@ -152,9 +152,12 @@ string, Boolean, date/time or other non-numeric column, a predicate, `||`,
 `UPPER`/`LOWER`, a CAST to a non-numeric type, or a scalar subquery of such a
 type), the statement fails before it reads a row, with `COHSQLE003` (see the
 [arithmetic contract](#arithmetic-and-numeric-faults-1069)): `+'abc'`, `+TRUE`
-and `-name` fail over an empty table exactly as over a populated one. An operand
-whose type only its value reveals, such as a parameter bound to a string, fails
-with the same code when the row is evaluated. `+a` and `+(1 + 2)` reported
+and `-name` fail over an empty table exactly as over a populated one. A sign
+directly over a parameter is checked against the value the statement binds, also
+before any row is read: `+@p` with `@p = 'abc'` fails with `COHSQLE003` whether or
+not the table has rows, and a NULL value propagates. An operand whose type only a
+row's value reveals, such as a `CASE` that returns a string, fails with the same
+code when the row is evaluated. `+a` and `+(1 + 2)` reported
 `SQL0003` before unary plus existed. `~` is not a sign of the dialect; see
 [Expressions](#expressions).
 
@@ -585,7 +588,7 @@ same kind, with its own code:
 |---|---|---|
 | `COHSQLE001` | 22012, division by zero | The right operand of `/` or `%` is zero: integer, decimal, or approximate (either signed zero), whether it is a literal, column, computed value, or bound parameter. |
 | `COHSQLE002` | 22003, numeric value out of range | A BIGINT result leaves -9223372036854775808..9223372036854775807, including `-x`, `ABS(x)`, and `x / -1` for the minimum; a Decimal result exceeds `System.Decimal`; a REAL or DOUBLE operand is NaN, infinite, or beyond Decimal's range, or is a nonzero divisor below Decimal's smallest step; a numeric literal does not fit its type (see Literals); `SUM` or `AVG` overflows or meets a non-finite value; a value does not fit the common type of `CASE`/`COALESCE` branches; or a value does not fit the integer or `DECIMAL` column it is stored into. |
-| `COHSQLE003` | 42804, datatype mismatch | The operand of unary `+` or `-` is not a number: `+'abc'`, `-TRUE`, `+name` on a string column. Raised while planning when the operand's type is already known, so it fails over an empty table too, and while evaluating when only the value reveals it, such as a parameter bound to a string. See Signs under [Statement completeness](#statement-completeness-1068). |
+| `COHSQLE003` | 42804, datatype mismatch | The operand of unary `+` or `-` is not a number: `+'abc'`, `-TRUE`, `+name` on a string column. Raised while planning when the operand's type is already known or the operand is a parameter bound to a non-number, so it fails over an empty table too, and while evaluating when only a row's value reveals it. See Signs under [Statement completeness](#statement-completeness-1068). |
 
 The code leads the message, for example
 `COHSQLE001: Division by zero: the right operand of '/' is zero.` In process the
@@ -607,7 +610,8 @@ the value order cannot compare (`Cannot compare values of types ...`).
 - **Evaluation point:** faults are raised where an expression is evaluated. A
   predicate over an empty table evaluates nothing and raises nothing. The one
   exception is `COHSQLE003` for a sign whose operand type the plan already knows,
-  which is raised while planning. A constant
+  or whose operand is a parameter bound to a non-number, which is raised while
+  planning. A constant
   comparand that faults during index-seek planning is not used for the seek, and
   the scan faults on the first row that evaluates it. `LIMIT` and `OFFSET`
   expressions are evaluated during planning and fault there.

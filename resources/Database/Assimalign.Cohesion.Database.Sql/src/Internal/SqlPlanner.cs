@@ -856,9 +856,16 @@ internal sealed partial class SqlPlanner
                 when StaticOperandType(sign.Operand, evaluator, boundSubqueries, boundValues) is { } type && !IsNumeric(type):
                 // A sign over a value the plan already knows is not a number fails here, the same
                 // over an empty table as over a populated one; the evaluator raises the same code
-                // for an operand only its value reveals, such as a parameter.
+                // for an operand only a row's value reveals.
                 throw SqlEvaluationException.InvalidOperandType(
                     sign.Operator == SqlUnaryOperator.Plus ? "+" : "-", type.ToString());
+            case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus, Operand: SqlParameterExpression parameter } sign
+                when evaluator.TryGetParameterValue(parameter, out object? value) && value is not null &&
+                    !SqlExpressionEvaluator.IsSignOperand(sign.Operator, value):
+                // A parameter's value is known before any row is read, so its type is checked here
+                // too: the statement fails whether or not the table has rows.
+                throw SqlEvaluationException.InvalidOperandType(
+                    sign.Operator == SqlUnaryOperator.Plus ? "+" : "-", SqlExpressionEvaluator.OperandTypeName(value));
         }
 
         // A bound subquery is its own scope, already planned and validated on its own terms.
@@ -877,7 +884,8 @@ internal sealed partial class SqlPlanner
     /// The type a sign's operand has whatever row it is evaluated on, when the plan can tell:
     /// a string or Boolean literal, a column, a COLLATE or CAST, a predicate, a concatenation,
     /// <c>UPPER</c>/<c>LOWER</c>, or a bound scalar subquery. Null when only the value can tell —
-    /// a parameter, arithmetic, other calls, CASE, NULL — or when the node is an ORDER BY value
+    /// a parameter (which <see cref="ValidateExpression"/> checks against its supplied value
+    /// instead), arithmetic, other calls, CASE, NULL — or when the node is an ORDER BY value
     /// bound to an output column.
     /// </summary>
     private static DatabaseType? StaticOperandType(SqlExpression expression, SqlExpressionEvaluator evaluator,

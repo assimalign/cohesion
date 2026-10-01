@@ -102,16 +102,23 @@ public sealed class SqlUnaryPlusExecutionTests
         session.State.ShouldBe(SessionState.Open);
     }
 
-    /// <summary>A parameter's type is known only from its value, so the same code is raised when the row is evaluated.</summary>
+    /// <summary>
+    /// A parameter's type is known from its supplied value before any row is read, so a sign over
+    /// a non-numeric parameter fails planning with the same code — over an empty table exactly as
+    /// over a populated one. A NULL parameter propagates.
+    /// </summary>
     /// <param name="sign">The sign under test.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Unary plus: a non-numeric parameter is a coded execution error")]
-    [InlineData("+")]
-    [InlineData("-")]
-    public async Task Select_NonNumericSignParameter_ShouldFailWhenEvaluated(string sign)
+    /// <param name="withRow">Whether the table has a row.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Unary plus: a non-numeric parameter is a type error before execution")]
+    [InlineData("+", false)]
+    [InlineData("-", false)]
+    [InlineData("+", true)]
+    [InlineData("-", true)]
+    public async Task Select_NonNumericSignParameter_ShouldFailBeforeExecution(string sign, bool withRow)
     {
         // Arrange
         await using var engine = CreateEngine();
-        await using var session = await SeedAsync(engine, withRow: true);
+        await using var session = await SeedAsync(engine, withRow);
         var parameters = new Dictionary<string, object?> { ["p"] = "abc" };
 
         // Act
@@ -121,7 +128,9 @@ public sealed class SqlUnaryPlusExecutionTests
         // Assert
         failure.ShouldBeOfType<SqlEvaluationException>().Code.ShouldBe(InvalidOperandType);
         failure.Message.ShouldBe($"{InvalidOperandType}: Invalid operand type: unary '{sign}' requires a numeric operand, but the operand is String.");
-        (await RowsAsync(session, "SELECT COUNT(*) FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L });
+        (await RowsAsync(session, "SELECT COUNT(*) FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { withRow ? 1L : 0L });
+        (await RowsAsync(session, $"SELECT {sign}@p FROM v", new Dictionary<string, object?> { ["p"] = null }))
+            .Select(row => row[0]).ShouldAllBe(value => value == null);
     }
 
     /// <summary>A CHECK whose sign operand is not numeric is rejected when it is declared, before anything is stored.</summary>
@@ -186,9 +195,9 @@ public sealed class SqlUnaryPlusExecutionTests
         return session;
     }
 
-    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql)
+    private static async Task<List<object?[]>> RowsAsync(IDatabaseSession session, string sql, IReadOnlyDictionary<string, object?>? parameters = null)
     {
-        await using var result = (await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
+        await using var result = (await session.ExecuteAsync(sql, parameters, CancellationToken.None)).ShouldBeAssignableTo<QueryResultSet>();
         return await ReadRowsAsync(result);
     }
 

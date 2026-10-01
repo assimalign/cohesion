@@ -64,7 +64,7 @@ public sealed class SqlUnaryPlusWireTests
         scores.Select(row => (row["id"], row["score"])).ShouldBe([(1, 100L), (2, 200L)]);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Unary plus: a non-numeric bound parameter fails when the row is evaluated")]
+    [Fact(DisplayName = "Cohesion Test [Database.Sql.Client] - Unary plus: a non-numeric bound parameter fails before any row is read")]
     public async Task QueryAsync_NonNumericParameter_ShouldFailWithCode()
     {
         // Arrange
@@ -72,9 +72,9 @@ public sealed class SqlUnaryPlusWireTests
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         var parameters = new Dictionary<string, object?> { ["p"] = "abc" };
 
-        // Act
+        // Act: no row matches, so only planning can raise the error.
         SqlClientException failure = await Should.ThrowAsync<SqlClientException>(async () =>
-            await connection.QueryAsync("SELECT +@p FROM users", parameters, SqlClientTestHarness.Timeout()));
+            await connection.QueryAsync("SELECT +@p FROM users WHERE id < 0", parameters, SqlClientTestHarness.Timeout()));
 
         // Assert
         failure.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
