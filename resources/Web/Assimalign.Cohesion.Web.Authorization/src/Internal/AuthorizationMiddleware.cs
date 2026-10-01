@@ -78,9 +78,9 @@ internal sealed class AuthorizationMiddleware : IWebApplicationMiddleware
             : AuthorizeAsync(context, endpoint, policy, next);
     }
 
-    // Acknowledges every endpoint the middleware processed, with or without a policy of its own: routing
-    // checks the last authorization item of the endpoint, which may require the middleware even when an
-    // earlier AllowAnonymous makes the endpoint anonymous.
+    // Acknowledges every endpoint the middleware processed, with or without a policy of its own. Routing
+    // checks the acknowledgment only when the endpoint's last authorization item is a requirement, and
+    // such an endpoint always has a policy here; acknowledging the others is harmless.
     private static Task ContinueAsync(IHttpContext context, IRouteMatchFeature? endpoint, WebApplicationMiddleware next)
     {
         if (endpoint is not null)
@@ -140,9 +140,13 @@ internal sealed class AuthorizationMiddleware : IWebApplicationMiddleware
         return policy;
     }
 
-    // Combines every authorization item on the endpoint, outer group first. AllowAnonymous anywhere wins;
-    // otherwise each item contributes its named policy, inline policy and roles (or the default policy
-    // when it names none of those) and its schemes, and the request must satisfy all of them.
+    // Combines the endpoint's authorization items, outer group first, starting after the most specific
+    // AllowAnonymous. An AllowAnonymous clears every requirement declared before it (by the groups above
+    // it, or earlier on its own builder); a requirement declared after it still applies, so a route that
+    // requires authorization inside an anonymous group stays protected. Each applying item contributes its
+    // named policy, inline policy and roles (or the default policy when it names none of those) and its
+    // schemes, and the request must satisfy all of them. When the last item is AllowAnonymous, nothing
+    // applies, the fallback policy included.
     private AuthorizationPolicy? ComputeEndpointPolicy(IRouterRouteMetadataCollection metadata)
     {
         IReadOnlyList<AuthorizationMetadata> items = metadata.GetOrderedMetadata<AuthorizationMetadata>();
@@ -152,17 +156,25 @@ internal sealed class AuthorizationMiddleware : IWebApplicationMiddleware
             return _options.FallbackPolicy;
         }
 
-        for (int i = 0; i < items.Count; i++)
+        int first = 0;
+
+        for (int i = items.Count - 1; i >= 0; i--)
         {
             if (items[i].AllowsAnonymous)
             {
-                return null;
+                first = i + 1;
+                break;
             }
+        }
+
+        if (first == items.Count)
+        {
+            return null;
         }
 
         AuthorizationPolicyBuilder builder = new();
 
-        for (int i = 0; i < items.Count; i++)
+        for (int i = first; i < items.Count; i++)
         {
             AuthorizationMetadata item = items[i];
             bool requiresDefaultPolicy = true;

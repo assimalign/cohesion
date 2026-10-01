@@ -346,25 +346,85 @@ public class AuthorizationEndToEndTests
         privateResponse.StatusCode.ShouldBe(NetHttpStatusCode.Unauthorized);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - E2E: A group's AllowAnonymous should win over a route's requirement")]
-    public async Task AllowAnonymous_OnGroupWithProtectedRoute_ShouldWin()
+    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - E2E: A route's requirement should still apply inside a group that allows anonymous access")]
+    public async Task RequireAuthorization_OnRouteInAnonymousGroup_ShouldStillApply()
     {
-        // Arrange — AllowAnonymous anywhere on the endpoint wins, whatever the level or call order.
+        // Arrange — the most specific item wins: the group's AllowAnonymous, although called after the
+        // route was mapped, composes ahead of the route's requirement and so does not clear it.
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = CreateFactory(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")));
 
         IRouterBuilder routes = UseAuthorizedRouting(factory);
         IRouterGroupBuilder open = routes.MapGroup("/open");
         open.Map(CohesionHttpMethod.Get, "admin", TestEndpoints.Ok()).RequireAuthorization("admins");
+        open.Map(CohesionHttpMethod.Get, "about", TestEndpoints.Ok());
         open.AllowAnonymous();
+
+        using HttpClient client = factory.CreateClient();
+        using HttpRequestMessage admin = TestEndpoints.Get("/open/admin", TestEndpoints.Primary, "alice;role=admin");
+
+        // Act
+        using HttpResponseMessage anonymousResponse = await client.GetAsync("/open/admin", cancellation.Token);
+        using HttpResponseMessage adminResponse = await client.SendAsync(admin, cancellation.Token);
+        using HttpResponseMessage aboutResponse = await client.GetAsync("/open/about", cancellation.Token);
+
+        // Assert
+        anonymousResponse.StatusCode.ShouldBe(NetHttpStatusCode.Unauthorized);
+        adminResponse.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        aboutResponse.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - E2E: A nested group's AllowAnonymous should clear only the requirements above it")]
+    public async Task AllowAnonymous_OnNestedGroup_ShouldClearOnlyRequirementsAboveIt()
+    {
+        // Arrange — the outer group requires a sales claim; the nested group opens its routes; one route
+        // then requires the admin role. An admin outside sales passes only if the outer claim was cleared.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = CreateFactory();
+
+        IRouterBuilder routes = UseAuthorizedRouting(factory);
+        IRouterGroupBuilder sales = routes.MapGroup("/sales").RequireAuthorization(policy => policy.RequireClaim("department", "sales"));
+        IRouterGroupBuilder open = sales.MapGroup("/open").AllowAnonymous();
+        open.Map(CohesionHttpMethod.Get, "prices", TestEndpoints.Ok());
+        open.Map(CohesionHttpMethod.Get, "settings", TestEndpoints.Ok()).RequireAuthorization(policy => policy.RequireRole("admin"));
+
+        using HttpClient client = factory.CreateClient();
+        using HttpRequestMessage outsideAdmin = TestEndpoints.Get("/sales/open/settings", TestEndpoints.Primary, "bob;role=admin");
+        using HttpRequestMessage salesUser = TestEndpoints.Get("/sales/open/settings", TestEndpoints.Primary, "carol;claim=department:sales");
+
+        // Act
+        using HttpResponseMessage pricesResponse = await client.GetAsync("/sales/open/prices", cancellation.Token);
+        using HttpResponseMessage anonymousSettings = await client.GetAsync("/sales/open/settings", cancellation.Token);
+        using HttpResponseMessage outsideAdminResponse = await client.SendAsync(outsideAdmin, cancellation.Token);
+        using HttpResponseMessage salesUserResponse = await client.SendAsync(salesUser, cancellation.Token);
+
+        // Assert
+        pricesResponse.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        anonymousSettings.StatusCode.ShouldBe(NetHttpStatusCode.Unauthorized);
+        outsideAdminResponse.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        salesUserResponse.StatusCode.ShouldBe(NetHttpStatusCode.Forbidden);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - E2E: On one builder the later of AllowAnonymous and a requirement should win")]
+    public async Task AllowAnonymous_AndRequirementOnOneRoute_ShouldFollowCallOrder()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = CreateFactory();
+
+        IRouterBuilder routes = UseAuthorizedRouting(factory);
+        routes.Map(CohesionHttpMethod.Get, "/opened", TestEndpoints.Ok()).RequireAuthorization().AllowAnonymous();
+        routes.Map(CohesionHttpMethod.Get, "/closed", TestEndpoints.Ok()).AllowAnonymous().RequireAuthorization();
 
         using HttpClient client = factory.CreateClient();
 
         // Act
-        using HttpResponseMessage response = await client.GetAsync("/open/admin", cancellation.Token);
+        using HttpResponseMessage openedResponse = await client.GetAsync("/opened", cancellation.Token);
+        using HttpResponseMessage closedResponse = await client.GetAsync("/closed", cancellation.Token);
 
         // Assert
-        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        openedResponse.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        closedResponse.StatusCode.ShouldBe(NetHttpStatusCode.Unauthorized);
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Authorization] - E2E: An anonymous endpoint should keep the default scheme's principal")]
@@ -585,6 +645,30 @@ public class AuthorizationEndToEndTests
         publicResponse.StatusCode.ShouldBe(NetHttpStatusCode.OK);
         publicFailure.ShouldBeNull();
         privateResponse.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        dispatchFailure.Value.ShouldNotBeNull().Message.ShouldContain("UseAuthorization()", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Authorization] - E2E: Without UseAuthorization a protected route in an anonymous group should fail at dispatch")]
+    public async Task RequireAuthorization_OnRouteInAnonymousGroupWithoutMiddleware_ShouldFailAtDispatch()
+    {
+        // Arrange — the route's requirement is the last item, so dispatch and evaluation agree: protected.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = CreateFactory();
+        StrongBox<int> invocations = new();
+        StrongBox<InvalidOperationException?> dispatchFailure = ObserveDispatchFailures(factory);
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        IRouterGroupBuilder open = routes.MapGroup("/open").AllowAnonymous();
+        open.Map(CohesionHttpMethod.Get, "settings", TestEndpoints.Ok(invocations)).RequireAuthorization();
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/open/settings", cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        invocations.Value.ShouldBe(0);
         dispatchFailure.Value.ShouldNotBeNull().Message.ShouldContain("UseAuthorization()", Case.Sensitive);
     }
 

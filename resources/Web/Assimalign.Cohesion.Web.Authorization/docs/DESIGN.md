@@ -128,7 +128,10 @@ The middleware reads every authorization item on the endpoint, outer group first
 | an item with `Roles` | the role requirement (the default policy is not added) |
 | group `RequireAuthorization(employee)`, route `RequireAuthorization("admins")` | both: the request must satisfy each |
 | items that name schemes | their union, in order |
-| `AllowAnonymous()` on the route or any of its groups | no authorization at all; the fallback policy does not apply |
+| route `AllowAnonymous()` inside a protected group | no authorization at all; the fallback policy does not apply |
+| group `AllowAnonymous()`, route `RequireAuthorization("admins")` | the `admins` policy: a requirement declared after `AllowAnonymous` still applies |
+| outer group requirement, nested group `AllowAnonymous()`, route requirement | the route's requirement only: `AllowAnonymous` cleared the outer group's |
+| `RequireAuthorization().AllowAnonymous()` on one builder | no authorization: on one builder the later call wins |
 
 **Why items combine.** Rate limits, timeouts and caching are settings, and there the most specific
 item replaces the broader one. Authorization items are constraints. A route that adds
@@ -136,12 +139,24 @@ item replaces the broader one. Authorization items are constraints. A route that
 last-wins would silently drop the group's constraint, turning the refinement into a hole. ASP.NET Core
 combines the same way.
 
-**Why `AllowAnonymous` wins anywhere.** It is the explicit opt-out, it is ASP.NET Core's rule, and
-"anonymous means anonymous" is the easiest rule to audit. Its failure mode is the one open-ended
-case in this table: a group's `AllowAnonymous` overrides a requirement a route in the group declares.
-Put `AllowAnonymous` on routes, or on groups whose routes are all public. The alternative, letting
-the most specific of `AllowAnonymous` and a requirement win, was rejected for parity and for that
-simpler audit rule; it is recorded here because a reviewer may prefer it.
+**Why the most specific `AllowAnonymous` wins (owner decision, 2026-10-01).** The middleware
+combines the items that follow the last `AllowAnonymous`: an `AllowAnonymous` clears every
+requirement declared before it, in the groups above it or earlier on its own builder, and a
+requirement declared after it still applies. When the last item is `AllowAnonymous`, nothing applies.
+Two reasons:
+
+- **It fails closed.** A route that declares `RequireAuthorization("admins")` inside a public group
+  is protected. Under the rejected rule it ran anonymously, and nothing in the route's own code said
+  so.
+- **It matches the dispatch check.** Routing decides whether an endpoint needs `UseAuthorization` from
+  its last authorization item (next section). With this rule the same item decides whether the
+  endpoint is authorized, so the two never disagree.
+
+The rejected alternative was ASP.NET Core's rule: `AllowAnonymous` anywhere on the endpoint wins.
+It is the simpler sentence to audit, but its one open-ended case, a group's `AllowAnonymous`
+silently overriding a route's requirement, opens a route its author protected. The cost of this rule
+is one difference from ASP.NET Core that an application ported from it must check: a requirement on
+a route inside an `AllowAnonymous` group now applies.
 
 ### Fail closed: one runtime type
 
@@ -159,13 +174,12 @@ its own:
 | --- | --- | --- |
 | route requirement | protected | fails at dispatch |
 | group requirement, route `AllowAnonymous` | anonymous | runs: the last item requires nothing |
-| group `AllowAnonymous`, route requirement | anonymous | fails at dispatch: the last item still names `UseAuthorization` |
+| group `AllowAnonymous`, route requirement | protected | fails at dispatch: the last item names `UseAuthorization` |
 
-The third row is stricter than the semantics need, in the safe direction: a route that declares a
-requirement in an application that never registered `UseAuthorization` is misconfigured anyway. The
-rejected alternative, a separate `AllowAnonymousMetadata` type, gets the second row wrong: the group's
-requirement would stay the last item of its type, and every route that opts out of its group's
-requirement would fail at dispatch in an application without `UseAuthorization`.
+The last item decides both columns, which is what the most-specific rule buys (see "Combination
+rules"). The rejected alternative, a separate `AllowAnonymousMetadata` type, gets the second row wrong:
+the group's requirement would stay the last item of its type, and every route that opts out of its
+group's requirement would fail at dispatch in an application without `UseAuthorization`.
 
 The middleware acknowledges every non-preflight endpoint it processes, with or without a policy, so the
 check passes whenever the middleware ran.
@@ -345,10 +359,11 @@ the allow-anonymous marker shares the requirement's runtime type.
 `tests/AuthorizationEndToEndTests.cs` drives the real pipeline over `WebApplicationTestFactory` with two
 header-driven test schemes (`tests/TestObjects/TestAuthenticationHandler.cs`): challenge and forbid, role,
 claim and delegate requirements, the default, named and fallback policies (including unmatched requests
-and `405`s), `AllowAnonymous` on routes and groups, group-and-route combination, per-endpoint scheme
+and `405`s), `AllowAnonymous` on routes and groups and the most specific one winning (nested groups,
+call order on one builder), group-and-route combination, per-endpoint scheme
 selection and the combined principal, challenges and forbids through every scheme a policy names,
 `UseAuthorization` missing or registered ahead of `UseRouting`, a route that opts out of its group's
-requirement without the middleware, CORS preflights, an unregistered policy name, and a missing
+requirement without the middleware and a protected route in an anonymous group without it, CORS preflights, an unregistered policy name, and a missing
 `AddAuthorization`. `tests/AuthorizationChallengeTests.cs` repeats the challenge and forbid paths through
 the shipped handlers: JWT Bearer `401`/`403 insufficient_scope`, Cookie redirects for a browser endpoint
 and a bare `401` for an API endpoint, and a Bearer-only endpoint that ignores the cookie the default

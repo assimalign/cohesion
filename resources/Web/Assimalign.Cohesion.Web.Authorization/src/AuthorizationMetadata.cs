@@ -23,8 +23,11 @@ namespace Assimalign.Cohesion.Web.Authorization;
 /// <b>Combination.</b> <c>UseAuthorization</c> reads every item on the endpoint, outer group first
 /// (<c>GetOrderedMetadata</c>), not only the last one: a group's requirement and a route's requirement
 /// both apply, and the request must satisfy all of them. Their authentication schemes are combined
-/// (a union, in order). <see cref="AllowAnonymous"/> anywhere on the endpoint, at any level, wins over
-/// every requirement: the endpoint is not authorized at all.
+/// (a union, in order). The most specific <see cref="AllowAnonymous"/> wins over everything declared
+/// before it: it clears the requirements of the groups above it and of earlier items on its own builder,
+/// while a requirement declared after it still applies. A route's <see cref="AllowAnonymous"/> therefore
+/// opens that route inside a protected group, and a route's requirement inside an anonymous group stays
+/// in force. When the last item is <see cref="AllowAnonymous"/>, the endpoint is not authorized at all.
 /// </para>
 /// <para>
 /// <b>Fail closed.</b> Authorization applies only when <c>UseAuthorization</c> runs between
@@ -33,11 +36,11 @@ namespace Assimalign.Cohesion.Web.Authorization;
 /// <see cref="InvalidOperationException"/> when it is dispatched without <c>UseAuthorization</c>
 /// having processed it (the middleware is missing, or registered ahead of <c>UseRouting</c>), instead
 /// of running unauthorized. Routing checks only the last item of each runtime type, so the
-/// allow-anonymous marker is an instance of this type rather than a type of its own: when a route's
-/// <see cref="AllowAnonymous"/> follows its group's requirement, the last item requires nothing and
-/// the route runs with or without <c>UseAuthorization</c>. In the reverse order (an outer
-/// <see cref="AllowAnonymous"/>, then a route requirement) the endpoint is anonymous, but the last item
-/// still names <c>UseAuthorization</c>, so the route fails closed until the middleware is registered.
+/// allow-anonymous marker is an instance of this type rather than a type of its own, and the last item
+/// decides both questions the same way: when a route's <see cref="AllowAnonymous"/> follows its group's
+/// requirement, the route is anonymous and runs with or without <c>UseAuthorization</c>; in the reverse
+/// order (an outer <see cref="AllowAnonymous"/>, then a route requirement) the route is protected and
+/// fails closed until the middleware is registered.
 /// </para>
 /// <para>
 /// This sealed carrier <em>is</em> the metadata contract; there is deliberately no
@@ -88,9 +91,10 @@ public sealed class AuthorizationMetadata : IRouteMiddlewareMetadata
     }
 
     /// <summary>
-    /// Gets the shared metadata that allows anonymous access to the endpoint it is attached to. It wins
-    /// over every authorization requirement on the endpoint, including a group's and the fallback
-    /// policy, and places no requirement on the pipeline.
+    /// Gets the shared metadata that allows anonymous access to the endpoint it is attached to. It clears
+    /// every authorization requirement declared before it (a group's, or an earlier one on the same
+    /// builder) and keeps the fallback policy from applying, but a requirement declared after it, by a
+    /// nested group or the route, still applies. It places no requirement on the pipeline.
     /// </summary>
     public static AuthorizationMetadata AllowAnonymous { get; } = new(policyName: null, policy: null, allowsAnonymous: true);
 

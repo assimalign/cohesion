@@ -15,8 +15,8 @@ with a challenge or a forbid through `Web.Authentication`. It evaluates over the
   (an authenticated user), an optional fallback policy for requests without authorization metadata,
   and named policies. They become read-only once registered.
 - **Endpoint metadata** (`AuthorizationMetadata`, attached with `RequireAuthorization(...)` and
-  `AllowAnonymous()` on routes and groups). Every authorization item on an endpoint applies;
-  `AllowAnonymous` anywhere wins.
+  `AllowAnonymous()` on routes and groups). Every authorization item on an endpoint applies, except
+  those declared before the most specific `AllowAnonymous`, which clears them.
 - **The middleware** (`UseAuthorization`), after `UseRouting` and `UseAuthentication`: it computes the
   endpoint's effective policy, authenticates the policy's own schemes when it names any (per-endpoint
   scheme selection), evaluates the policy, and challenges an anonymous caller or forbids an

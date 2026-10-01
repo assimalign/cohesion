@@ -14,8 +14,9 @@ namespace Assimalign.Cohesion.Web.Authorization;
 /// <see cref="IRouterConventionBuilder.WithMetadata"/>, composed when the route table is built (outer
 /// group first, then the route). Unlike most endpoint policies, authorization items do not override
 /// each other: every <c>RequireAuthorization</c> on the endpoint applies, and the request must satisfy
-/// all of them. <c>AllowAnonymous</c> anywhere on the endpoint wins over every requirement, whatever
-/// the order or level of the calls.
+/// all of them. <c>AllowAnonymous</c> clears the requirements declared before it, in the groups above
+/// it or earlier on its own builder; a requirement declared after it, by a nested group or the route,
+/// still applies.
 /// </para>
 /// <para>
 /// A requirement applies only where <c>UseAuthorization</c> is registered after <c>UseRouting</c>; an
@@ -99,8 +100,9 @@ public static class AuthorizationRouteConventionExtensions
         }
 
         /// <summary>
-        /// Allows anonymous access to the route, or to every route of the group, overriding every
-        /// authorization requirement on it (a group's included) and the fallback policy.
+        /// Allows anonymous access to the route, or to every route of the group, overriding the
+        /// authorization requirements declared above it (an enclosing group's included) and the fallback
+        /// policy. A requirement declared after it, by a nested group or the route, still applies.
         /// </summary>
         /// <returns>The same builder, for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
