@@ -1,8 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Web.Cors</RootNamespace>
+		<Description>Cross-origin resource sharing for the Cohesion Web pipeline, per the Fetch standard's CORS protocol. UseCors answers CORS preflights (204 with Access-Control-Allow-Origin, -Methods, -Headers, -Credentials and -Max-Age, or no CORS headers at all when the policy denies the request) and stamps actual responses with the allowed origin, credentials and exposed headers, plus Vary: Origin whenever the answer depends on the origin. Policies are immutable and validated when built: origins must be serialized origins (exact list, any origin, or an AOT-safe predicate), any-origin cannot carry credentials, and methods and request headers follow Fetch matching (byte-case-sensitive methods with the CORS-safelisted ones always allowed, case-insensitive header names). Policies are selected per endpoint from sealed routing metadata (RequireCors, DisableCors) published by UseRouting, falling back to a default policy.</Description>
 	</PropertyGroup>
 	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 	</ItemGroup>
 </Project>

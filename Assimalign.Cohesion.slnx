@@ -2433,6 +2433,10 @@
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.CookiePolicy/tests/Assimalign.Cohesion.Web.CookiePolicy.Tests.csproj" />
 	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Cors/" />
+	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Cors/docs/">
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Cors/docs/DESIGN.md" />
+		<File Path="resources/Web/Assimalign.Cohesion.Web.Cors/docs/OVERVIEW.md" />
+	</Folder>
 	<Folder Name="/cohesion/resources/Web/Assimalign.Cohesion.Web.Cors/src/">
 		<Project Path="resources/Web/Assimalign.Cohesion.Web.Cors/src/Assimalign.Cohesion.Web.Cors.csproj" />
 	</Folder>
