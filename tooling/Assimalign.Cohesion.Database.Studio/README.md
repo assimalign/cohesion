@@ -42,7 +42,9 @@ Documents is **embedded only**: there is no Documents server, and `Documents.Cli
 ## Pages
 
 - **SQL / Documents (OQL) / Graph (GQL)**: editor (F5 or Ctrl+Enter runs the selection, or
-  everything), statement-by-statement execution, result grid (tap a row for full values, Copy TSV),
+  everything), statement-by-statement execution (the script is cut at each `;` the engines' shared
+  `TokenLexer` reads, so comments and quotes end where the engines end them, and the text is sent as
+  typed, CR line breaks included), result grid (tap a row for full values, Copy TSV),
   Messages with status, affected count, elapsed ms and every diagnostic (click one to select it in the
   editor), catalog explorer (click a highlighted entry to insert a query), session history, Samples.
   Diagnostics come from the engine and from a local parse with the language package, because

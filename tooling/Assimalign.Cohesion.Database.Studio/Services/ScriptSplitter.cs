@@ -1,9 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Language;
 
@@ -13,94 +9,78 @@ namespace Assimalign.Cohesion.Database.Studio;
 internal readonly record struct ScriptStatement(string Text, int Offset);
 
 /// <summary>
-/// Splits editor text into statements on <c>;</c> outside quotes and comments. Every engine parses
-/// one statement per call (SQL, OQL and GQL all reject multiple statements), so the Studio runs a
-/// script statement by statement. The terminating <c>;</c> stays with its statement. A line
-/// comment ends where the engines' shared lexer ends one (<see cref="TokenLexer.IsLineTerminator(char)"/>,
-/// #1150). The Windows editor control separates lines with CR, so a comment that ran to the next LF
-/// hid every statement after it.
+/// Splits editor text into statements at every <c>;</c> the engines' shared <see cref="TokenLexer"/>
+/// reads as a semicolon token. Every engine parses one statement per call (SQL, OQL and GQL all
+/// reject multiple statements), so the Studio runs a script statement by statement. The
+/// terminating <c>;</c> stays with its statement.
 /// </summary>
+/// <remarks>
+/// The splitter lexes rather than scanning for quotes and comments itself, so a statement ends
+/// exactly where the engines read one: a <c>--</c> comment ends at any line terminator (#1150),
+/// block comments nest, and <c>&lt;--</c> is an arrow followed by a minus sign. A character
+/// scanner used to end a block comment at its first <c>*/</c>, so
+/// <c>/* a /* b */ ; DELETE FROM t; */</c> ran a DELETE every engine reads as a comment. There is
+/// no <c>//</c> comment in any language, so a <c>//</c> line reaches the engine, which rejects it,
+/// instead of being skipped as blank.
+/// </remarks>
 internal static class ScriptSplitter
 {
     public static List<ScriptStatement> Split(string text)
     {
         var statements = new List<ScriptStatement>();
         int start = 0;
-        int i = 0;
 
-        while (i < text.Length)
+        TokenLexer lexer = Lex(text);
+        while (lexer.MoveNext())
         {
-            char c = text[i];
-            char next = i + 1 < text.Length ? text[i + 1] : '\0';
-
-            if (c is '\'' or '"' or '`')
+            Token token = lexer.Current;
+            if (token.Type == TokenType.Semicolon)
             {
-                i = SkipQuoted(text, i, c);
-                continue;
+                int end = token.Position + token.Value.Length;
+                Add(statements, text, start, end);
+                start = end;
             }
-
-            if ((c == '-' && next == '-') || (c == '/' && next == '/'))
-            {
-                i = SkipLineComment(text, i);
-                continue;
-            }
-
-            if (c == '/' && next == '*')
-            {
-                int end = text.IndexOf("*/", i + 2, StringComparison.Ordinal);
-                i = end < 0 ? text.Length : end + 2;
-                continue;
-            }
-
-            if (c == ';')
-            {
-                Add(statements, text, start, i + 1);
-                start = i + 1;
-            }
-
-            i++;
         }
 
         Add(statements, text, start, text.Length);
         return statements;
     }
 
-    /// <summary>
-    /// The index of the line terminator that ends the comment starting at <paramref name="index"/>,
-    /// or the text length when none follows. The terminator is whitespace to every caller.
-    /// </summary>
-    private static int SkipLineComment(string text, int index)
+    /// <summary>True when the text holds nothing but whitespace, comments and semicolons.</summary>
+    public static bool IsBlank(string segment)
     {
-        int i = index + 2;
-        while (i < text.Length && !TokenLexer.IsLineTerminator(text[i]))
+        TokenLexer lexer = Lex(segment);
+        while (lexer.MoveNext())
         {
-            i++;
+            if (lexer.Current.Type is not (TokenType.Comment or TokenType.Semicolon))
+            {
+                return false;
+            }
         }
 
-        return i;
+        return true;
     }
 
-    private static int SkipQuoted(string text, int index, char quote)
+    /// <summary>
+    /// The first word of a statement, skipping comments and opening parentheses (upper-case), or
+    /// an empty string when the statement starts with anything else.
+    /// </summary>
+    public static string FirstKeyword(string statement)
     {
-        int i = index + 1;
-        while (i < text.Length)
+        TokenLexer lexer = Lex(statement);
+        while (lexer.MoveNext())
         {
-            if (text[i] == quote)
+            Token token = lexer.Current;
+            if (token.Type is TokenType.Comment or TokenType.LeftParen)
             {
-                // A doubled quote is an escaped quote in every Cohesion dialect.
-                if (i + 1 < text.Length && text[i + 1] == quote)
-                {
-                    i += 2;
-                    continue;
-                }
-
-                return i + 1;
+                continue;
             }
 
-            i++;
+            // No keyword list is passed to the lexer, so every word is an Identifier.
+            return token.Type == TokenType.Identifier ? token.Value.ToString().ToUpperInvariant() : string.Empty;
         }
 
-        return text.Length;
+        return string.Empty;
     }
 
     private static void Add(List<ScriptStatement> statements, string text, int start, int end)
@@ -125,69 +105,7 @@ internal static class ScriptSplitter
         statements.Add(new ScriptStatement(segment.Trim(), start + leading));
     }
 
-    /// <summary>True when the text holds nothing but whitespace, comments and semicolons.</summary>
-    public static bool IsBlank(string segment)
-    {
-        int i = 0;
-        while (i < segment.Length)
-        {
-            char c = segment[i];
-            char next = i + 1 < segment.Length ? segment[i + 1] : '\0';
-            if (char.IsWhiteSpace(c) || c == ';')
-            {
-                i++;
-            }
-            else if ((c == '-' && next == '-') || (c == '/' && next == '/'))
-            {
-                i = SkipLineComment(segment, i);
-            }
-            else if (c == '/' && next == '*')
-            {
-                int end = segment.IndexOf("*/", i + 2, StringComparison.Ordinal);
-                i = end < 0 ? segment.Length : end + 2;
-            }
-            else
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>The first keyword of a statement, skipping comments and parentheses (upper-case).</summary>
-    public static string FirstKeyword(string statement)
-    {
-        int i = 0;
-        while (i < statement.Length)
-        {
-            char c = statement[i];
-            char next = i + 1 < statement.Length ? statement[i + 1] : '\0';
-            if (char.IsWhiteSpace(c) || c == '(')
-            {
-                i++;
-            }
-            else if ((c == '-' && next == '-') || (c == '/' && next == '/'))
-            {
-                i = SkipLineComment(statement, i);
-            }
-            else if (c == '/' && next == '*')
-            {
-                int end = statement.IndexOf("*/", i + 2, StringComparison.Ordinal);
-                i = end < 0 ? statement.Length : end + 2;
-            }
-            else
-            {
-                int start = i;
-                while (i < statement.Length && (char.IsLetter(statement[i]) || statement[i] == '_'))
-                {
-                    i++;
-                }
-
-                return statement[start..i].ToUpperInvariant();
-            }
-        }
-
-        return string.Empty;
-    }
+    // Splitting needs only token boundaries, never a word's role, so no language's keywords are
+    // passed: the lexer treats comments, literals and punctuation the same in every language.
+    private static TokenLexer Lex(string text) => new(text, new TokenLexerOptions { Keywords = ReadOnlySpan<string>.Empty });
 }

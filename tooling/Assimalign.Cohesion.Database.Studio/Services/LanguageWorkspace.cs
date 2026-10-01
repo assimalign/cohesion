@@ -52,9 +52,9 @@ internal abstract class LanguageWorkspace : ModelWorkspace
         {
             RequireDatabase();
 
-            // WinUI's TextBox stores line breaks as a lone '\r'. Lexers end '--' comments at '\n', so
-            // map every '\r' to '\n': length-preserving, so offsets still match the editor text.
-            string script = editorText.Substring(start, length).Replace('\r', '\n');
+            // WinUI's TextBox stores line breaks as a lone '\r'. The text goes to the engines as typed:
+            // they end '--' comments at CR as well as LF (#1150), as the splitter does.
+            string script = editorText.Substring(start, length);
             var outcomes = new List<StatementOutcome>();
             bool failed = false;
 
