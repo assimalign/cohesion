@@ -48,6 +48,9 @@ internal static class SqlPersistedExpression
     /// <param name="subject">Names the definition, for example <c>CHECK constraint 'ck' on table 'dbo.t'</c>.</param>
     /// <returns>The canonical text.</returns>
     /// <exception cref="DatabaseException">The expression has no canonical text that reproduces it.</exception>
+    /// <exception cref="InsufficientExecutionStackException">
+    /// The calling thread has too little stack left to render the expression or read its text back.
+    /// </exception>
     internal static string Canonicalize(SqlExpression expression, string subject)
     {
         ArgumentNullException.ThrowIfNull(expression);
@@ -67,7 +70,8 @@ internal static class SqlPersistedExpression
         {
             // The text is within the dialect's limits; this thread cannot recurse far enough to
             // read it back. The statement fails as too complex for the thread (COHSQLE004).
-            throw new InsufficientExecutionStackException();
+            throw new InsufficientExecutionStackException(
+                $"{subject} cannot be stored on this thread: reading its canonical text back needs more stack than the thread has left.");
         }
 
         if (!parsed || !AreEquivalent(expression, reloaded))
@@ -84,37 +88,47 @@ internal static class SqlPersistedExpression
     /// <param name="text">The persisted text.</param>
     /// <param name="subject">Names the definition for the error message.</param>
     /// <returns>The expression tree.</returns>
-    /// <exception cref="DatabaseException">
-    /// The text is not one valid SQL expression, or the calling thread has too little stack left
-    /// to parse it.
+    /// <exception cref="DatabaseException">The text is not one valid SQL expression.</exception>
+    /// <exception cref="InsufficientExecutionStackException">
+    /// The calling thread has too little stack left to parse the text (<see cref="OutOfStack"/>).
     /// </exception>
     internal static SqlExpression Load(string text, string subject)
     {
         ArgumentNullException.ThrowIfNull(text);
         if (!TryParse(text, out var expression, out string? problem, out bool outOfStack))
         {
-            throw outOfStack
-                ? OutOfStack(subject)
-                : new DatabaseException(
-                    $"{subject} cannot be loaded: its persisted definition '{text}' is not a valid SQL expression ({problem}). {DamagedCatalogHint}");
+            if (outOfStack)
+            {
+                throw OutOfStack(subject);
+            }
+
+            throw new DatabaseException(
+                $"{subject} cannot be loaded: its persisted definition '{text}' is not a valid SQL expression ({problem}). {DamagedCatalogHint}");
         }
 
         return expression;
     }
 
     /// <summary>
-    /// The failure to load a definition on a thread too small for it. Canonical text stays within
-    /// the dialect's nesting limits (#1151), whose deepest form the parser reads with a few
-    /// hundred KB of stack in a release build, so this happens only on a thread created with a
-    /// small maximum size or called from deep inside another recursion. The catalog is intact,
-    /// and the error must not send the operator to a backup.
+    /// The failure to read a definition back on a thread too small for it. Canonical text stays
+    /// within the dialect's nesting limits (#1151), whose deepest form the parser reads with a
+    /// few hundred KB of stack in a release build, so this happens only on a thread created with
+    /// a small maximum size or called from deep inside another recursion. The catalog is intact,
+    /// so the message must not send the operator to a backup.
     /// </summary>
+    /// <remarks>
+    /// It stays an exhausted-stack signal rather than a <see cref="DatabaseException"/>, because
+    /// what to do about it depends on who was reading: a definition bound on first use inside a
+    /// statement fails that statement with <c>COHSQLE004</c> like any other walk out of stack,
+    /// and <see cref="SqlBoundTableCache.BindCatalog"/> fails the open with advice to open the
+    /// database on a thread with a larger stack.
+    /// </remarks>
     /// <param name="subject">Names the definition.</param>
     /// <param name="innerException">The exhausted-stack signal a walker raised, when one did.</param>
     /// <returns>The failure.</returns>
-    internal static DatabaseException OutOfStack(string subject, Exception? innerException = null)
+    internal static InsufficientExecutionStackException OutOfStack(string subject, Exception? innerException = null)
         => new($"{subject} cannot be loaded on this thread: reading its persisted definition needs more stack than the thread " +
-            "has left. The catalog is not damaged; open the database on a thread with a larger stack.", innerException);
+            "has left. The catalog is not damaged.", innerException);
 
     /// <summary>
     /// Parses a persisted column DEFAULT, which is the canonical text of one non-NULL literal, and
@@ -124,6 +138,9 @@ internal static class SqlPersistedExpression
     /// <param name="subject">Names the definition for the error message.</param>
     /// <returns>The literal's value text.</returns>
     /// <exception cref="DatabaseException">The text is not one non-NULL literal.</exception>
+    /// <exception cref="InsufficientExecutionStackException">
+    /// The calling thread has too little stack left to parse the text (<see cref="OutOfStack"/>).
+    /// </exception>
     internal static string LoadDefaultValue(string text, string subject)
     {
         if (Load(text, subject) is not SqlLiteralExpression { LiteralType: not SqlLiteralType.Null } literal)

@@ -134,7 +134,8 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
             // evaluation, CHECK validation) checks the stack before it descends (#1151). The
             // parser bounds every tree it builds well inside a normal thread's stack, so what
             // gets here is a tree built by hand, a LIKE match backtracking through more
-            // wildcards than the stack holds, or a statement run on a thread too small for it.
+            // wildcards than the stack holds, or a statement run on a thread too small for it,
+            // including a stored CHECK or DEFAULT the statement reads back on first use.
             // It fails as this statement's error: the auto-commit context has rolled back, an
             // explicit transaction stays active, and the session stays usable.
             throw SqlEvaluationException.StatementTooComplex(exception);

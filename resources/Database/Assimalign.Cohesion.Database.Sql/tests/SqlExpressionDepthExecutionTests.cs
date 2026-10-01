@@ -324,8 +324,8 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
 
     /// <summary>
     /// Canonical text within the limits that a thread is too small to read back is not catalog
-    /// damage: the error says so instead of sending the operator to a backup, and the same text
-    /// loads on a thread with more stack.
+    /// damage: the signal names the definition and says so instead of sending the operator to a
+    /// backup, and the same text loads on a thread with more stack.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: a definition read on a thread too small for it is not reported as catalog damage")]
     public void Load_OnSmallStack_ShouldNotReportDamage()
@@ -340,12 +340,46 @@ public sealed class SqlExpressionDepthExecutionTests : IDisposable
         var large = RunOnThread(8 * 1024, () => SqlPersistedExpression.Load(canonical, subject));
 
         // Assert
-        var failure = small.Failure.ShouldBeOfType<DatabaseException>();
+        var failure = small.Failure.ShouldBeOfType<InsufficientExecutionStackException>();
         failure.Message.ShouldStartWith(subject + " cannot be loaded on this thread", Case.Sensitive);
         failure.Message.ShouldContain("The catalog is not damaged", Case.Sensitive);
         failure.Message.ShouldNotContain("backup");
         large.Failure.ShouldBeNull();
         SqlExpressionRenderer.Render(large.Result.ShouldNotBeNull()).ShouldBe(canonical);
+    }
+
+    /// <summary>
+    /// Binding a table version on a thread too small for its CHECK fails differently for the two
+    /// callers (#1151 review): the open says to open the database on a thread with a larger stack,
+    /// while binding on first use, which runs inside a statement, raises the exhausted-stack
+    /// signal itself, which the session reports as COHSQLE004 like any walk out of stack (see
+    /// the statement tests above), never advice about opening the database.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Nesting: binding out of stack fails the open with advice and a statement with COHSQLE004")]
+    public async Task Bind_OnSmallStack_ShouldAdviseOnlyTheOpen()
+    {
+        // Arrange: a stored CHECK at the limit.
+        await using var engine = CreateEngine();
+        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        await using (var session = await database.CreateSessionAsync(CancellationToken.None))
+        {
+            await session.ExecuteAsync($"CREATE TABLE c (qty INT, CONSTRAINT ck CHECK ({string.Concat(Enumerable.Repeat("- ", Limit - 2))}qty > 0))");
+        }
+        var table = Table(database, "c");
+        RunOnThread(8 * 1024, () => new SqlBoundTableCache(database.Catalog).Get(table)).Failure.ShouldBeNull();
+
+        // Act
+        var open = NearStackLimit.Run(() => { new SqlBoundTableCache(database.Catalog).BindCatalog(); return true; });
+        var firstUse = NearStackLimit.Run(() => new SqlBoundTableCache(database.Catalog).Get(table));
+
+        // Assert
+        var openFailure = open.Failure.ShouldBeOfType<DatabaseException>();
+        openFailure.Message.ShouldStartWith("CHECK constraint 'ck' on table 'dbo.c' cannot be loaded on this thread", Case.Sensitive);
+        openFailure.Message.ShouldEndWith("The catalog is not damaged. Open the database on a thread with a larger stack.", Case.Sensitive);
+        openFailure.InnerException.ShouldBeOfType<InsufficientExecutionStackException>();
+        var firstUseFailure = firstUse.Failure.ShouldBeOfType<InsufficientExecutionStackException>();
+        firstUseFailure.Message.ShouldStartWith("CHECK constraint 'ck' on table 'dbo.c' cannot be loaded on this thread", Case.Sensitive);
+        firstUseFailure.Message.ShouldNotContain("Open the database");
     }
 
     /// <summary>

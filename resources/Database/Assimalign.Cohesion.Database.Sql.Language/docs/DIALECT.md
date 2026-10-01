@@ -813,7 +813,9 @@ DDL stores always parses again when the database opens. `SqlExpressionRenderer`
 refuses a tree deeper than the limit with `NotSupportedException`, because no text
 of it would parse. A database opened on a thread too small to read its deepest
 definition back fails to open with an error that says so, that the catalog is not
-damaged, and to open it on a thread with a larger stack.
+damaged, and to open it on a thread with a larger stack. A statement that reads a
+definition back on such a thread, such as a DDL proving its canonical text,
+fails with `COHSQLE004` instead.
 
 **The engine checks its stack too.** Every recursive walk over a statement (the
 session's system-relation scan, planning, evaluation, CHECK validation, and
@@ -1073,7 +1075,7 @@ function names are lexed but not supported (see the statement matrix).
 | `SQL0100` | Information | Statement does not end with `;` |
 | `COHSQLE001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
 | `COHSQLE002` | Error | Numeric value out of range during evaluation or store assignment (ISO SQLSTATE 22003) |
-| `COHSQLE004` | Error | Statement too complex: a walk over it needs more stack than the engine has, which only a hand-built tree, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
+| `COHSQLE004` | Error | Statement too complex: a walk over it needs more stack than the executing thread has left, which only a hand-built tree, a deeply backtracking `LIKE` match or a thread created with a small stack can reach (ISO SQLSTATE 54001, #1151) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not

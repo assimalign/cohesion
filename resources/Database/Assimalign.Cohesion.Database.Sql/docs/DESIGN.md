@@ -1104,10 +1104,13 @@ and add it again" as the only remedy.
   Format 4 is unreleased, so no stored definition predates the limit. Reading the
   deepest definition back needs a few hundred KB of stack (the parser's cost is in
   the Sql.Language design); on a thread with less, the parser reports `SQL0007`
-  rather than `SQL0006`, and `Load` and the bind fail the open with an error that
-  says the thread is too small and the catalog is not damaged, never the
-  restore-from-backup hint. In a DDL statement the same condition while re-parsing
-  canonical text fails the statement with `COHSQLE004`.
+  rather than `SQL0006`. `Load` and the bind then raise an
+  `InsufficientExecutionStackException` that names the definition and says the
+  catalog is not damaged, never the restore-from-backup hint, and the caller decides
+  what it means: `BindCatalog` fails the open, adding that the database should be
+  opened on a thread with a larger stack, while inside a statement (a DDL
+  re-parsing canonical text, or a table version bound on first use) the session
+  fails the statement with `COHSQLE004` like any other walk out of stack.
 - **When binding happens.** `SqlDatabaseInstance` binds every table right after
   the catalog opens and the format checks pass, before recovery or the index
   manager touch the data file set. Each DDL binds the version it publishes before

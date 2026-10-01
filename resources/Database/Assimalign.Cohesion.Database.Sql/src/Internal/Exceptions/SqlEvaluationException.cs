@@ -37,8 +37,9 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// statement too complex): an expression tree deeper than any the parser accepts, which only
     /// a tree built by hand can be, a <c>LIKE</c> match that backtracks through more wildcards
     /// than the stack holds, or a statement within the limits run on a thread created with too
-    /// small a stack. Every recursive walk checks the stack before it descends, so the statement
-    /// fails instead of the process (#1151).
+    /// small a stack, including a stored definition the statement reads back on first use. Every
+    /// recursive walk checks the stack before it descends, so the statement fails instead of the
+    /// process (#1151).
     /// </summary>
     internal const string StatementTooComplexCode = "COHSQLE004";
 
@@ -73,12 +74,15 @@ internal sealed class SqlEvaluationException : DatabaseException
         => new(InvalidOperandTypeCode, $"Invalid operand type: unary '{operatorText}' requires a numeric operand, but the operand is {operandType}.", null);
 
     /// <summary>Creates the failure for a statement whose walk ran out of stack.</summary>
-    /// <param name="innerException">The exhausted-stack signal a recursive walk raised.</param>
+    /// <param name="innerException">
+    /// The exhausted-stack signal a recursive walk raised; when a stored definition was being read
+    /// back, its message names the definition.
+    /// </param>
     /// <returns>The coded failure.</returns>
     internal static SqlEvaluationException StatementTooComplex(InsufficientExecutionStackException innerException)
         => new(StatementTooComplexCode,
-            "Statement too complex: running it needs more stack than the engine has available. " +
-            "Reduce the nesting of its expressions, or the number of wildcards in a LIKE pattern.",
+            "Statement too complex: running it needs more stack than the executing thread has left. " +
+            "Reduce the nesting of its expressions or the number of wildcards in a LIKE pattern, or run it on a thread with a larger stack.",
             innerException);
 
     /// <summary>

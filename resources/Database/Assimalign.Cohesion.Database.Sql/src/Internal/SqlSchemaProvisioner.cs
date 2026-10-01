@@ -310,6 +310,8 @@ internal sealed class SqlSchemaProvisioner
         }
         catch (DatabaseException)
         {
+            // A thread out of stack is not text that does not parse: its
+            // InsufficientExecutionStackException propagates instead of reading as a changed predicate.
             return null;
         }
     }
