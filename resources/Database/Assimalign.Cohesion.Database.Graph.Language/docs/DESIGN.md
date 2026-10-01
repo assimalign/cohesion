@@ -197,14 +197,25 @@ adversarial nesting and long patterns.
 A `--` comment ends before the first line terminator: LF, CR, NEL (U+0085), LS (U+2028) or PS
 (U+2029), with CR LF read as one break, the rule `Database.Language/docs/DESIGN.md` records for
 every language. ISO/IEC 39075's `<simple comment>` ends at CR or LF. The shared lexer used to end it
-only at LF, so `MATCH (a:Person) -- note<CR>WHERE a.name = 'x' DETACH DELETE a` read the `WHERE` as
-comment text and deleted every Person; the `WHERE` now stays in effect at every terminator.
-`GqlLineCommentTests` pins that, the clause after a spaced comment (`MATCH (a) -- c<CR>RETURN a`, the
-ISO case gql-label-direction keeps), and diagnostic lines at each terminator. The rule moves only
-where a comment ends. gql-label-direction's `GQL0008` keys on where a `--` comment starts, so it
-holds whichever terminator ends the comment. ISO also spells a simple comment `//`. The shared
-lexer has no `//` comment, so `MATCH (a) // note` reports `GQL0002` at the first `/`. An item that
-adds the `//` form adds a per-language lexer switch and ends the comment at the same terminators.
+only at LF, so in `MATCH (a:Person) -- note<CR>WHERE a.name = 'x'<LF>DETACH DELETE a` the `WHERE`
+was comment text and every Person was deleted. (With `DETACH DELETE` on the CR line as well, the
+comment swallowed it too and the statement failed with `GQL0002`.) The `WHERE` now stays in effect
+at every terminator. `GqlLineCommentTests` pins both delete forms, the clause after a spaced
+comment (`MATCH (a) -- c<CR>RETURN a`, the ISO case gql-label-direction keeps), and diagnostic
+lines at each terminator.
+
+The rule moves only where a comment ends. The coded diagnostic gql-label-direction (#1139) will add
+keys on where a `--` comment starts, so it holds whichever terminator ends the comment. Until it
+lands, `(a)-->(b)` followed by any line terminator reads as `(a)` plus a comment:
+`MATCH (a:Person)-->(b:Person)<CR>DETACH DELETE a` is `MATCH (a:Person) DETACH DELETE a` and
+deletes every Person. Before #1150 a CR, NEL, LS or PS ending made that statement fail with
+`GQL0002`, because the comment swallowed the rest of the text; it now truncates silently, as an LF
+ending already did. gql-label-direction's cases for that diagnostic must therefore run at every
+terminator.
+
+ISO also spells a simple comment `//`. The shared lexer has no `//` comment, so
+`MATCH (a) // note` reports `GQL0002` at the first `/`. An item that adds the `//` form adds a
+per-language lexer switch and ends the comment at the same terminators.
 
 ## AOT posture and extension discipline
 

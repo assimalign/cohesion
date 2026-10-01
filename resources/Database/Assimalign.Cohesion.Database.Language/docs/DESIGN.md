@@ -92,7 +92,9 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
 
 One set of line terminators serves every language: line feed (LF, U+000A), carriage return
 (CR, U+000D), next line (NEL, U+0085), line separator (LS, U+2028) and paragraph separator
-(PS, U+2029). `TokenLexer.IsLineTerminator(char)` is that set, and nothing else defines it.
+(PS, U+2029). `TokenLexer.IsLineTerminator(char)` is that set. The lexer and
+`TokenLexer.CountLineBreaks` read it from the same static field, and code outside the lexer that
+needs the same boundary calls `IsLineTerminator` instead of keeping its own list.
 
 - **A `--` comment ends before the first terminator.** The terminator is not part of the
   `Comment` token; it is skipped as whitespace, so CR LF needs no special case and the next line
@@ -117,17 +119,25 @@ One set of line terminators serves every language: line feed (LF, U+000A), carri
   terminator as one line break, except that CR immediately followed by LF is one break together.
   OQL and GQL count diagnostic and expression lines with it, so a diagnostic on the token after
   `-- note<CR>` reports the next line, the same line the lexer started. SQL diagnostics locate by
-  offset (`Sql.Language/docs/DESIGN.md`, "Positions are offsets"); a tool that maps those offsets
-  to lines counts with the same method. The Database Studio's script splitter ends its comments
-  with `IsLineTerminator` too, so it cuts a script where the engines read it.
+  offset (`Sql.Language/docs/DESIGN.md`, "Positions are offsets"). A tool that maps those offsets
+  to lines must break lines by the same rule, and a tool that cuts a script into statements must
+  lex it with `TokenLexer` rather than scan for comments itself. Otherwise its lines disagree with
+  the engines' diagnostics, or it cuts inside text an engine reads as a comment.
 - **Consistency with #1101 and gql-label-direction (#1139).** Every terminator is whitespace to
   `char.IsWhiteSpace`, so outside a comment it separates tokens and is never `Unrecognized`; the
   stray-character rule is unchanged. The rule moves where a comment ends, never where it starts,
-  so #1139's `GQL0008`, which keys on a `--` comment beginning exactly where a node's `)` or an
-  edge's `]` ends, holds whichever terminator ends the comment.
+  so the coded diagnostic #1139 will add, keyed on a `--` comment beginning exactly where a node's
+  `)` or an edge's `]` ends, holds whichever terminator ends the comment. Until it lands,
+  `(a)-->(b)` followed by any line terminator reads as `(a)` plus a comment. Before #1150 a CR,
+  NEL, LS or PS ending made such a GQL statement fail with `GQL0002`, because the comment swallowed
+  the rest of the text; it now truncates silently, as an LF ending already did, so
+  `MATCH (a:Person)-->(b:Person)<CR>DETACH DELETE a` deletes every Person
+  (`Graph.Language/docs/DESIGN.md`, "Comment boundary"). #1139's cases must run at every
+  terminator.
 - **Tests.** `TokenLexerLineCommentTests` pins each terminator, CR LF, a comment at the end of
-  the input and terminator escapes in literals and comments. Each language pins the boundary in
-  its parser (`SqlLineCommentTests`, `OqlLineCommentTests`, `GqlLineCommentTests`), and
+  the input, terminator escapes in literals and comments, and terminators inside string literals,
+  quoted identifiers and block comments. Each language pins the boundary in its parser
+  (`SqlLineCommentTests`, `OqlLineCommentTests`, `GqlLineCommentTests`), and
   `SqlStatementCompletenessTests` appends a comment plus leftover text at every terminator to
   every statement form. The SQL engine (`SqlLineCommentExecutionTests`, both session seams) and the
   wire (`SqlLineCommentWireTests`, `SqlDatabaseServer` and `Sql.Client`) show that `DELETE` and

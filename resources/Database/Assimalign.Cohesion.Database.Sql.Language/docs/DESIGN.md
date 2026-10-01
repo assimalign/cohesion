@@ -54,10 +54,11 @@ the parser implements today. Recognized clauses outside that set produce the sha
 - **Positions are offsets; line/column is presentation.** Nodes carry absolute
   character offsets. Mapping offsets to line/column belongs to the tool holding
   the source text (Roslyn's model) — carrying line numbers per node would bloat
-  every node for a consumer that rarely needs them. Such a tool counts lines with
-  `TokenLexer.CountLineBreaks`, so its lines break where the lexer ends a `--`
-  comment (CR LF is one break). The raw statement text is stamped once on the
-  root (`SqlQueryExpression.Text`) after parsing.
+  every node for a consumer that rarely needs them. Such a tool breaks lines by
+  the rule `TokenLexer.CountLineBreaks` applies (every `IsLineTerminator`
+  character, CR LF once), so its lines break where the lexer ends a `--`
+  comment and agree with OQL and GQL diagnostic lines. The raw statement text
+  is stamped once on the root (`SqlQueryExpression.Text`) after parsing.
 - **String literal nodes carry the value, not the lexeme** — quotes stripped,
   doubled quotes unescaped — because every consumer (executor, planner, schema
   compiler) wants the value, and exactly one component (the parser) knows the
