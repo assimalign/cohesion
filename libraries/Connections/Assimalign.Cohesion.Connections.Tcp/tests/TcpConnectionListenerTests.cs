@@ -216,4 +216,83 @@ public class TcpConnectionListenerTests
         server.ConnectionClosed.IsCancellationRequested.ShouldBeTrue();
         server.State.ShouldBe(ConnectionState.Closed);
     }
+
+    [Fact(DisplayName = "Cohesion Test [Connections.Tcp] - Dispose: A client connecting while an accept is cancelled is never left connected to nothing")]
+    public async Task DisposeAsync_WhileClientConnectsDuringCancelledAccept_ShouldCloseTheClient()
+    {
+        // Arrange — the shutdown race (#1093): the accept is cancelled and the listener disposed while a
+        // client connects. On Windows the OS can already have attached that client to the accept's
+        // socket; unless that socket is closed, the client waits on a connection nobody owns.
+        const int iterations = 100;
+        int leftOpen = 0;
+
+        for (int i = 0; i < iterations; i++)
+        {
+            TcpConnectionListener listener = TcpConnectionListener.Create(
+                options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0));
+            await listener.BindAsync();
+
+            using CancellationTokenSource acceptCancellation = new();
+            Task<Connection> accept = listener.AcceptAsync(acceptCancellation.Token).AsTask();
+
+            using Socket client = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            Task connect = client.ConnectAsync(listener.EndPoint);
+
+            if (i % 2 == 0)
+            {
+                await Task.Yield();
+            }
+
+            // Act
+            acceptCancellation.Cancel();
+            await listener.DisposeAsync();
+
+            try
+            {
+                await connect;
+            }
+            catch (SocketException)
+            {
+                continue; // Refused after the listener closed: nothing to leak.
+            }
+
+            try
+            {
+                await using Connection connection = await accept;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+
+            if (!await ClosesWithinAsync(client, TimeSpan.FromSeconds(2)))
+            {
+                leftOpen++;
+            }
+        }
+
+        // Assert
+        leftOpen.ShouldBe(0, "a client stayed connected to a socket the listener no longer owned");
+    }
+
+    private static async Task<bool> ClosesWithinAsync(Socket client, TimeSpan budget)
+    {
+        using CancellationTokenSource timeout = new(budget);
+
+        try
+        {
+            await client.ReceiveAsync(new byte[16], SocketFlags.None, timeout.Token);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (SocketException)
+        {
+            return true;
+        }
+    }
 }
