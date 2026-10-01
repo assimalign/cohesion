@@ -141,7 +141,6 @@ public sealed class SqlComparisonWireTests
                 "INSERT INTO indexed VALUES (9, @v)", new Dictionary<string, object?> { ["v"] = rows[equal] }, TestTimeout.Token()));
         }
 
-        harness.Engine.TryGetDatabase(ServerTestHarness.DatabaseName, out var database).ShouldBeTrue();
         string[] predicates = ["ts = @p", "ts >= @p", "ts > @p", "ts <= @p", "ts < @p", "ts BETWEEN @p AND @q"];
 
         foreach (object probe in probes)
@@ -150,11 +149,15 @@ public sealed class SqlComparisonWireTests
             foreach (string predicate in predicates)
             {
                 var expected = await IdsAsync(connection, $"SELECT id FROM scanned WHERE {predicate} ORDER BY id", parameters);
+                ServerAccessPath(harness).ShouldBe("scan");
                 foreach (string table in new[] { "duplicated", "indexed" })
                 {
                     string sql = $"SELECT id FROM {table} WHERE {predicate} ORDER BY id";
-                    PlanOf(database, sql, parameters).Access.ShouldBeOfType<SqlIndexSeekPath>();
                     var actual = await IdsAsync(connection, sql, parameters);
+
+                    // The server itself sought the index, with the parameters it
+                    // decoded off the wire.
+                    ServerAccessPath(harness).ShouldStartWith("seek:", customMessage: $"{table}: {predicate} with {probe}");
                     actual.ShouldBe(table == "indexed" ? expected.Where(id => id is 1 or 4 or 5).ToArray() : expected,
                         $"{table}: {predicate} with {probe}");
                 }
@@ -167,9 +170,17 @@ public sealed class SqlComparisonWireTests
     private static async Task<object?[]> IdsAsync(ISqlConnection connection, string sql, Dictionary<string, object?> parameters)
         => (await connection.QueryAsync(sql, parameters, TestTimeout.Token())).Select(row => row["id"]).ToArray();
 
-    private static SqlSelectPlan PlanOf(IDatabase database, string sql, IReadOnlyDictionary<string, object?> parameters)
-        => new SqlPlanner(((SqlDatabaseInstance)database).Catalog, parameters)
-            .Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression).ShouldBeOfType<SqlSelectPlan>();
+    /// <summary>
+    /// The access path of the last statement the server executed for the test's
+    /// single client connection: the server session's own metrics, not a plan
+    /// rebuilt in the test process.
+    /// </summary>
+    private static string ServerAccessPath(ServerTestHarness harness)
+    {
+        var session = harness.Server.GetSessionsSnapshot().ShouldHaveSingleItem().ShouldBeOfType<SqlDatabaseServerSession>();
+        var databaseSession = session.DatabaseSession.ShouldBeOfType<SqlDatabaseSession>();
+        return databaseSession.LastStatementMetrics.ShouldNotBeNull().AccessPath;
+    }
 
     private static ISqlClient CreateClient(ServerTestHarness harness)
         => SqlClient.Create(new SqlClientOptions
