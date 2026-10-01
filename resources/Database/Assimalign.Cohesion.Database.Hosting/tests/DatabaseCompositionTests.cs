@@ -435,7 +435,7 @@ public sealed class DatabaseCompositionTests
 
         protected override void OnEventSourceCreated(EventSource eventSource)
         {
-            if (eventSource.Name == "Assimalign-Cohesion-DependencyInjection")
+            if (eventSource.Name == "Assimalign.Cohesion.DependencyInjection")
             {
                 EnableEvents(eventSource, EventLevel.Verbose, EventKeywords.All);
             }

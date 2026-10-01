@@ -1,31 +1,54 @@
-﻿using System;
-using System.Text;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.Tracing;
-using System.Diagnostics.CodeAnalysis;
-
+using System.Text;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
-using Assimalign.Cohesion.DependencyInjection.Internal;
-
-
-[EventSource(Name = "Assimalign-Cohesion-DependencyInjection")]
+/// <summary>
+/// The container's diagnostics: provider lifecycle, call-site construction, resolution, scope
+/// disposal, and resolver compilation.
+/// </summary>
+/// <remarks>
+/// Internal by the repository's EventSource convention (<c>.claude/rules/event-source.md</c>). Tools
+/// enable it by its assembly name, <c>Assimalign.Cohesion.DependencyInjection</c>; applications forward
+/// it into their logging with <c>Assimalign.Cohesion.Logging.EventSource</c>. Only the provider-built
+/// summary is <see cref="EventLevel.Informational"/>; everything else is <see cref="EventLevel.Verbose"/>
+/// detail, apart from the error a failed background compilation reports.
+/// </remarks>
+[EventSource(Name = "Assimalign.Cohesion.DependencyInjection")]
 internal sealed class ServiceEventSource : EventSource
 {
-    public static readonly ServiceEventSource Log = new ServiceEventSource();
+    public static readonly ServiceEventSource Log = new();
+
     public static class Keywords
     {
         public const EventKeywords ServiceProviderInitialized = (EventKeywords)0x1;
     }
 
     // Event source doesn't support large payloads so we chunk large payloads like formatted call site tree and descriptors
-    private const int MaxChunkSize = 10 * 1024;
+    private const int maxChunkSize = 10 * 1024;
 
+    // Providers built and not yet disposed, so a listener that attaches later still receives their
+    // summaries. A provider that is never disposed leaves a dead reference behind; those are pruned
+    // when the list has doubled since the last pruning, which bounds it by twice the live providers.
     private readonly List<WeakReference<ServiceProvider>> _providers = new();
+    private int? _survivingProviders;
 
-    private ServiceEventSource() : base(EventSourceSettings.EtwSelfDescribingEventFormat)
+    private ServiceEventSource()
     {
+    }
+
+    /// <summary>The providers currently tracked for late listeners, dead references included.</summary>
+    internal int TrackedProviderCount
+    {
+        get
+        {
+            lock (_providers)
+            {
+                return _providers.Count;
+            }
+        }
     }
 
     // NOTE
@@ -36,104 +59,66 @@ internal sealed class ServiceEventSource : EventSource
     // - A stop event's event id must be next one after its start event.
     // - Avoid renaming methods or parameters marked with EventAttribute. EventSource uses these to form the event object.
 
-    [UnconditionalSuppressMessage(
-        category: "ReflectionAnalysis", 
-        checkId: "IL2026:RequiresUnreferencedCode",
-        Justification = "Parameters to this method are primitive and are trimmer safe.")]
-    [Event(1, Level = EventLevel.Verbose)]
-    private void CallSiteBuilt(string serviceType, string callSite, int chunkIndex, int chunkCount, int serviceProviderHashCode)
-    {
-        WriteEvent(1, serviceType, callSite, chunkIndex, chunkCount, serviceProviderHashCode);
-    }
-
-    [Event(2, Level = EventLevel.Verbose)]
-    public void ServiceResolved(string serviceType, int serviceProviderHashCode)
-    {
-        WriteEvent(2, serviceType, serviceProviderHashCode);
-    }
-
-    [Event(3, Level = EventLevel.Verbose)]
-    public void ExpressionTreeGenerated(string serviceType, int nodeCount, int serviceProviderHashCode)
-    {
-        WriteEvent(3, serviceType, nodeCount, serviceProviderHashCode);
-    }
-
-    [Event(4, Level = EventLevel.Verbose)]
-    public void DynamicMethodBuilt(string serviceType, int methodSize, int serviceProviderHashCode)
-    {
-        WriteEvent(4, serviceType, methodSize, serviceProviderHashCode);
-    }
-
-    [Event(5, Level = EventLevel.Verbose)]
-    public void ScopeDisposed(int serviceProviderHashCode, int scopedServicesResolved, int disposableServices)
-    {
-        WriteEvent(5, serviceProviderHashCode, scopedServicesResolved, disposableServices);
-    }
-
-    [Event(6, Level = EventLevel.Error)]
-    public void ServiceRealizationFailed(string? exceptionMessage, int serviceProviderHashCode)
-    {
-        WriteEvent(6, exceptionMessage, serviceProviderHashCode);
-    }
-
-    [UnconditionalSuppressMessage("ReflectionAnalysis", "IL2026:RequiresUnreferencedCode",
-        Justification = "Parameters to this method are primitive and are trimmer safe.")]
-    [Event(7, Level = EventLevel.Informational, Keywords = Keywords.ServiceProviderInitialized)]
-    private void ServiceProviderBuilt(int serviceProviderHashCode, int singletonServices, int scopedServices, int transientServices, int closedGenericsServices, int openGenericsServices)
-    {
-        WriteEvent(7, serviceProviderHashCode, singletonServices, scopedServices, transientServices, closedGenericsServices, openGenericsServices);
-    }
-
-    [UnconditionalSuppressMessage("ReflectionAnalysis", "IL2026:RequiresUnreferencedCode",
-        Justification = "Parameters to this method are primitive and are trimmer safe.")]
-    [Event(8, Level = EventLevel.Informational, Keywords = Keywords.ServiceProviderInitialized)]
-    private void ServiceProviderDescriptors(int serviceProviderHashCode, string descriptors, int chunkIndex, int chunkCount)
-    {
-        WriteEvent(8, serviceProviderHashCode, descriptors, chunkIndex, chunkCount);
-    }
-
-    [NonEvent]
-    public void ServiceResolved(ServiceProvider provider, Type serviceType)
-    {
-        if (IsEnabled(EventLevel.Verbose, EventKeywords.All))
-        {
-            ServiceResolved(serviceType.ToString(), provider.GetHashCode());
-        }
-    }
-
     [NonEvent]
     public void CallSiteBuilt(ServiceProvider provider, Type serviceType, CallSiteService callSite)
     {
-        if (IsEnabled(EventLevel.Verbose, EventKeywords.All))
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
-            var format = CallSiteJsonFormatterVisitor.Instance.Format(callSite);
-            var chunkCount = format.Length / MaxChunkSize + (format.Length % MaxChunkSize > 0 ? 1 : 0);
-            var providerHashCode = provider.GetHashCode();
+            string format = CallSiteJsonFormatterVisitor.Instance.Format(callSite);
+            int chunkCount = format.Length / maxChunkSize + (format.Length % maxChunkSize > 0 ? 1 : 0);
+            int providerHashCode = provider.GetHashCode();
             for (int i = 0; i < chunkCount; i++)
             {
                 CallSiteBuilt(
                     serviceType.ToString(),
-                    format.Substring(i * MaxChunkSize, Math.Min(MaxChunkSize, format.Length - i * MaxChunkSize)), i, chunkCount,
+                    format.Substring(i * maxChunkSize, Math.Min(maxChunkSize, format.Length - i * maxChunkSize)), i, chunkCount,
                     providerHashCode);
             }
         }
     }
 
     [NonEvent]
+    public void ServiceResolved(ServiceProvider provider, Type serviceType)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            ServiceResolved(serviceType.ToString(), provider.GetHashCode());
+        }
+    }
+
+    [NonEvent]
+    public void ExpressionTreeGenerated(ServiceProvider provider, Type serviceType, int nodeCount)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        {
+            ExpressionTreeGenerated(serviceType.ToString(), nodeCount, provider.GetHashCode());
+        }
+    }
+
+    [NonEvent]
     public void DynamicMethodBuilt(ServiceProvider provider, Type serviceType, int methodSize)
     {
-        if (IsEnabled(EventLevel.Verbose, EventKeywords.All))
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
             DynamicMethodBuilt(serviceType.ToString(), methodSize, provider.GetHashCode());
         }
     }
 
     [NonEvent]
-    public void ServiceRealizationFailed(Exception exception, int serviceProviderHashCode)
+    public void ScopeDisposed(ServiceProvider provider, int scopedServicesResolved, int disposableServices)
     {
-        if (IsEnabled(EventLevel.Error, EventKeywords.All))
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
         {
-            ServiceRealizationFailed(exception.ToString(), serviceProviderHashCode);
+            ScopeDisposed(provider.GetHashCode(), scopedServicesResolved, disposableServices);
+        }
+    }
+
+    [NonEvent]
+    public void ServiceRealizationFailed(ServiceProvider provider, Exception exception)
+    {
+        if (IsEnabled(EventLevel.Error, EventKeywords.None))
+        {
+            ServiceRealizationFailed(exception.GetType().FullName ?? exception.GetType().Name, exception.Message, provider.GetHashCode());
         }
     }
 
@@ -142,6 +127,16 @@ internal sealed class ServiceEventSource : EventSource
     {
         lock (_providers)
         {
+            int providers = _providers.Count;
+            if (providers > 0 &&
+                (_survivingProviders is int surviving
+                    ? (uint)providers >= 2 * (uint)surviving
+                    : providers == _providers.Capacity))
+            {
+                _providers.RemoveAll(static reference => !reference.TryGetTarget(out _));
+                _survivingProviders = _providers.Count;
+            }
+
             _providers.Add(new WeakReference<ServiceProvider>(provider));
         }
 
@@ -155,81 +150,134 @@ internal sealed class ServiceEventSource : EventSource
         {
             for (int i = _providers.Count - 1; i >= 0; i--)
             {
-                // remove the provider, along with any stale references
+                // remove the provider, along with any stale references found before it
                 WeakReference<ServiceProvider> reference = _providers[i];
-                if (!reference.TryGetTarget(out ServiceProvider target) || target == provider)
+                if (!reference.TryGetTarget(out ServiceProvider? target) || target == provider)
                 {
                     _providers.RemoveAt(i);
+
+                    if (target is not null)
+                    {
+                        break;
+                    }
                 }
             }
         }
     }
 
+    [Event(1, Level = EventLevel.Verbose, Message = "Call site built for {0} in provider {4}, chunk {2} of {3}: {1}")]
+    private void CallSiteBuilt(string serviceType, string callSite, int chunkIndex, int chunkCount, int serviceProviderHashCode)
+        => WriteEvent(1, serviceType, callSite, chunkIndex, chunkCount, serviceProviderHashCode);
+
+    [Event(2, Level = EventLevel.Verbose, Message = "Resolved {0} from provider {1}")]
+    private void ServiceResolved(string serviceType, int serviceProviderHashCode)
+        => WriteEvent(2, serviceType, serviceProviderHashCode);
+
+    // Written only by the expression-tree resolver, which is compiled but not selected while the IL
+    // resolver is built in. Kept, like event 4, as the observable proof that a provider generated
+    // code: the dynamic-code tests assert that neither event fires when EnableDynamicCode is false.
+    [Event(3, Level = EventLevel.Verbose, Message = "Compiled an expression-tree resolver for {0} in provider {2}: {1} nodes")]
+    private void ExpressionTreeGenerated(string serviceType, int nodeCount, int serviceProviderHashCode)
+        => WriteEvent(3, serviceType, nodeCount, serviceProviderHashCode);
+
+    // Never written under NativeAOT, which has no runtime code generation.
+    [Event(4, Level = EventLevel.Verbose, Message = "Emitted an IL resolver for {0} in provider {2}: {1} bytes")]
+    private void DynamicMethodBuilt(string serviceType, int methodSize, int serviceProviderHashCode)
+        => WriteEvent(4, serviceType, methodSize, serviceProviderHashCode);
+
+    [Event(5, Level = EventLevel.Verbose, Message = "Scope of provider {0} disposed after resolving {1} scoped services and capturing {2} disposable ones")]
+    private void ScopeDisposed(int serviceProviderHashCode, int scopedServicesResolved, int disposableServices)
+        => WriteEvent(5, serviceProviderHashCode, scopedServicesResolved, disposableServices);
+
+    [Event(6, Level = EventLevel.Error, Message = "Compiling a resolver in provider {2} failed: {0}: {1}")]
+    private void ServiceRealizationFailed(string exceptionType, string exceptionMessage, int serviceProviderHashCode)
+        => WriteEvent(6, exceptionType, exceptionMessage, serviceProviderHashCode);
+
+    [Event(7, Level = EventLevel.Informational, Keywords = Keywords.ServiceProviderInitialized,
+        Message = "Provider {0} built: {1} singleton, {2} scoped and {3} transient registrations, {4} closed and {5} open generic")]
+    private void ServiceProviderBuilt(int serviceProviderHashCode, int singletonServices, int scopedServices, int transientServices, int closedGenericsServices, int openGenericsServices)
+        => WriteEvent(7, serviceProviderHashCode, singletonServices, scopedServices, transientServices, closedGenericsServices, openGenericsServices);
+
+    [Event(8, Level = EventLevel.Verbose, Keywords = Keywords.ServiceProviderInitialized,
+        Message = "Provider {0} descriptors, chunk {2} of {3}: {1}")]
+    private void ServiceProviderDescriptors(int serviceProviderHashCode, string descriptors, int chunkIndex, int chunkCount)
+        => WriteEvent(8, serviceProviderHashCode, descriptors, chunkIndex, chunkCount);
+
     [NonEvent]
     private void WriteServiceProviderBuilt(ServiceProvider provider)
     {
-        if (IsEnabled(EventLevel.Informational, Keywords.ServiceProviderInitialized))
+        if (!IsEnabled(EventLevel.Informational, Keywords.ServiceProviderInitialized))
         {
-            int singletonServices = 0;
-            int scopedServices = 0;
-            int transientServices = 0;
-            int closedGenericsServices = 0;
-            int openGenericsServices = 0;
+            return;
+        }
 
-            StringBuilder descriptorBuilder = new StringBuilder("{ \"descriptors\":[ ");
-            bool firstDescriptor = true;
-            foreach (ServiceDescriptor descriptor in provider.CallSiteFactory.Descriptors)
+        int singletonServices = 0;
+        int scopedServices = 0;
+        int transientServices = 0;
+        int closedGenericsServices = 0;
+        int openGenericsServices = 0;
+
+        // The descriptor dump is Verbose detail, so the summary alone does not pay for building it.
+        StringBuilder? descriptorBuilder = IsEnabled(EventLevel.Verbose, Keywords.ServiceProviderInitialized)
+            ? new StringBuilder("{ \"descriptors\":[ ")
+            : null;
+        bool firstDescriptor = true;
+        foreach (ServiceDescriptor descriptor in provider.CallSiteFactory.Descriptors)
+        {
+            if (descriptorBuilder is not null)
             {
-                if (firstDescriptor)
-                {
-                    firstDescriptor = false;
-                }
-                else
+                if (!firstDescriptor)
                 {
                     descriptorBuilder.Append(", ");
                 }
 
+                firstDescriptor = false;
                 AppendServiceDescriptor(descriptorBuilder, descriptor);
-
-                switch (descriptor.Lifetime)
-                {
-                    case ServiceLifetime.Singleton:
-                        singletonServices++;
-                        break;
-                    case ServiceLifetime.Scoped:
-                        scopedServices++;
-                        break;
-                    case ServiceLifetime.Transient:
-                        transientServices++;
-                        break;
-                }
-
-                if (descriptor.ServiceType.IsGenericType)
-                {
-                    if (descriptor.ServiceType.IsConstructedGenericType)
-                    {
-                        closedGenericsServices++;
-                    }
-                    else
-                    {
-                        openGenericsServices++;
-                    }
-                }
             }
-            descriptorBuilder.Append(" ] }");
 
-            int providerHashCode = provider.GetHashCode();
-            ServiceProviderBuilt(providerHashCode, singletonServices, scopedServices, transientServices, closedGenericsServices, openGenericsServices);
-
-            string descriptorString = descriptorBuilder.ToString();
-            int chunkCount = descriptorString.Length / MaxChunkSize + (descriptorString.Length % MaxChunkSize > 0 ? 1 : 0);
-
-            for (int i = 0; i < chunkCount; i++)
+            switch (descriptor.Lifetime)
             {
-                ServiceProviderDescriptors(
-                    providerHashCode,
-                    descriptorString.Substring(i * MaxChunkSize, Math.Min(MaxChunkSize, descriptorString.Length - i * MaxChunkSize)), i, chunkCount);
+                case ServiceLifetime.Singleton:
+                    singletonServices++;
+                    break;
+                case ServiceLifetime.Scoped:
+                    scopedServices++;
+                    break;
+                case ServiceLifetime.Transient:
+                    transientServices++;
+                    break;
             }
+
+            if (descriptor.ServiceType.IsGenericType)
+            {
+                if (descriptor.ServiceType.IsConstructedGenericType)
+                {
+                    closedGenericsServices++;
+                }
+                else
+                {
+                    openGenericsServices++;
+                }
+            }
+        }
+
+        int providerHashCode = provider.GetHashCode();
+        ServiceProviderBuilt(providerHashCode, singletonServices, scopedServices, transientServices, closedGenericsServices, openGenericsServices);
+
+        if (descriptorBuilder is null)
+        {
+            return;
+        }
+
+        descriptorBuilder.Append(" ] }");
+        string descriptorString = descriptorBuilder.ToString();
+        int chunkCount = descriptorString.Length / maxChunkSize + (descriptorString.Length % maxChunkSize > 0 ? 1 : 0);
+
+        for (int i = 0; i < chunkCount; i++)
+        {
+            ServiceProviderDescriptors(
+                providerHashCode,
+                descriptorString.Substring(i * maxChunkSize, Math.Min(maxChunkSize, descriptorString.Length - i * maxChunkSize)), i, chunkCount);
         }
     }
 
@@ -266,6 +314,7 @@ internal sealed class ServiceEventSource : EventSource
         builder.Append("\" }");
     }
 
+    /// <inheritdoc />
     protected override void OnEventCommand(EventCommandEventArgs command)
     {
         if (command.Command == EventCommand.Enable)
@@ -278,7 +327,7 @@ internal sealed class ServiceEventSource : EventSource
             {
                 foreach (WeakReference<ServiceProvider> reference in _providers)
                 {
-                    if (reference.TryGetTarget(out ServiceProvider provider))
+                    if (reference.TryGetTarget(out ServiceProvider? provider))
                     {
                         WriteServiceProviderBuilt(provider);
                     }
@@ -287,4 +336,3 @@ internal sealed class ServiceEventSource : EventSource
         }
     }
 }
-

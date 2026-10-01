@@ -34,7 +34,7 @@ internal sealed class DynamicServiceProviderEngine : CompiledServiceProviderEngi
                     }
                     catch (Exception ex)
                     {
-                        ServiceEventSource.Log.ServiceRealizationFailed(ex, _serviceProvider.GetHashCode());
+                        ServiceEventSource.Log.ServiceRealizationFailed(_serviceProvider, ex);
 
                         Debug.Fail($"We should never get exceptions from the background compilation.{Environment.NewLine}{ex}");
                     }

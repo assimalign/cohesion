@@ -1,7 +1,8 @@
 ﻿using System;
 using System.Threading;
 using System.Reflection;
-using System.Collections.Generic;
+
+using Assimalign.Cohesion.DependencyInjection.Properties;
 
 namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
@@ -30,7 +31,6 @@ internal sealed class CallSiteRuntimeResolverVisitor : CallSiteVisitor<CallSiteR
     {
         bool lockTaken = false;
         object sync = serviceProviderEngine.Sync;
-        Dictionary<CallSiteServiceCacheKey, object> resolvedServices = serviceProviderEngine.ResolvedServices;
         // Taking locks only once allows us to fork resolution process
         // on another thread without causing the deadlock because we
         // always know that we are going to wait the other thread to finish before
@@ -44,19 +44,33 @@ internal sealed class CallSiteRuntimeResolverVisitor : CallSiteVisitor<CallSiteR
         {
             // Note: This method has already taken lock by the caller for resolution and access synchronization.
             // For scoped: takes a dictionary as both a resolution lock and a dictionary access lock.
-            if (resolvedServices.TryGetValue(callSite.Cache.Key, out object resolved))
+            // Throws when this scope is already creating the service: a cycle through a factory.
+            CallSiteServiceCacheKey key = callSite.Cache.Key;
+            if (serviceProviderEngine.TryGetOrReserveScopedService(key, out object? resolved))
             {
                 return resolved;
             }
 
-            resolved = VisitCallSiteMain(callSite, new CallSiteRuntimeResolverContext
+            bool stored = false;
+            try
             {
-                Scope = serviceProviderEngine,
-                AcquiredLocks = context.AcquiredLocks | lockType
-            });
-            serviceProviderEngine.CaptureDisposable(resolved);
-            resolvedServices.Add(callSite.Cache.Key, resolved);
-            return resolved;
+                resolved = VisitCallSiteMain(callSite, new CallSiteRuntimeResolverContext
+                {
+                    Scope = serviceProviderEngine,
+                    AcquiredLocks = context.AcquiredLocks | lockType
+                });
+                serviceProviderEngine.CaptureDisposable(resolved);
+                serviceProviderEngine.StoreScopedService(key, resolved);
+                stored = true;
+                return resolved;
+            }
+            finally
+            {
+                if (!stored)
+                {
+                    serviceProviderEngine.ReleaseScopedServiceReservation(key);
+                }
+            }
         }
         finally
         {
@@ -109,14 +123,33 @@ internal sealed class CallSiteRuntimeResolverVisitor : CallSiteVisitor<CallSiteR
                 return resolved;
             }
 
-            resolved = VisitCallSiteMain(callSite, new CallSiteRuntimeResolverContext
+            // Only the thread holding the lock can see the flag set, so seeing it means this thread
+            // re-entered the call site while creating it: a cycle through a factory, which call-site
+            // construction cannot see. The lock is re-entrant, so without this check the recursion
+            // runs until the stack guard moves it to another thread, which then waits on this lock
+            // forever.
+            if (callSite.IsResolving)
             {
-                Scope = serviceProviderEngine,
-                AcquiredLocks = context.AcquiredLocks | lockType
-            });
-            serviceProviderEngine.CaptureDisposable(resolved);
-            callSite.Value = resolved;
-            return resolved;
+                throw new InvalidOperationException(
+                    Resources.GetCircularDependencyExceptionMessage(TypeNameHelper.GetTypeDisplayName(callSite.ServiceType)));
+            }
+
+            callSite.IsResolving = true;
+            try
+            {
+                resolved = VisitCallSiteMain(callSite, new CallSiteRuntimeResolverContext
+                {
+                    Scope = serviceProviderEngine,
+                    AcquiredLocks = context.AcquiredLocks | lockType
+                });
+                serviceProviderEngine.CaptureDisposable(resolved);
+                callSite.Value = resolved;
+                return resolved;
+            }
+            finally
+            {
+                callSite.IsResolving = false;
+            }
         }
     }
     protected override object VisitScopeCache(CallSiteService callSite, CallSiteRuntimeResolverContext context)

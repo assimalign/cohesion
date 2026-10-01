@@ -238,74 +238,105 @@ internal sealed class CallSiteFactory : IServiceLookup
         {
             callSiteChain.Add(serviceType);
 
-            if (serviceType.IsConstructedGenericType &&
-                serviceType.GetGenericTypeDefinition() == typeof(IEnumerable<>))
+            if (!serviceType.IsConstructedGenericType ||
+                serviceType.GetGenericTypeDefinition() != typeof(IEnumerable<>))
             {
-                Type itemType = serviceType.GenericTypeArguments[0];
-                if (ServiceProvider.VerifyAotCompatibility && itemType.IsValueType)
-                {
-                    // Without dynamic code there is no guarantee the code for ValueType[] (and the
-                    // IEnumerable<ValueType> over it) was generated, so fail here, at call-site
-                    // construction, rather than at an arbitrary resolution later.
-                    throw new InvalidOperationException(
-                        $"Unable to create an enumerable of '{itemType}' because it is a value type. Native code for enumerables of value-type services might not be available with NativeAOT.");
-                }
-
-                CallSiteResultCacheLocation cacheLocation = CallSiteResultCacheLocation.Root;
-
-                var callSites = new List<CallSiteService>();
-
-                // If item type is not generic we can safely use descriptor cache
-                if (!itemType.IsConstructedGenericType &&
-                    _descriptorLookup.TryGetValue(itemType, out ServiceDescriptorCacheItem descriptors))
-                {
-                    for (int i = 0; i < descriptors.Count; i++)
-                    {
-                        ServiceDescriptor descriptor = descriptors[i];
-
-                        // Last service should get slot 0
-                        int slot = descriptors.Count - i - 1;
-                        // There may not be any open generics here
-                        CallSiteService callSite = TryCreateExact(descriptor, itemType, callSiteChain, slot);
-                        Debug.Assert(callSite != null);
-
-                        cacheLocation = GetCommonCacheLocation(cacheLocation, callSite.Cache.Location);
-                        callSites.Add(callSite);
-                    }
-                }
-                else
-                {
-                    int slot = 0;
-                    // We are going in reverse so the last service in descriptor list gets slot 0
-                    for (int i = this._descriptors.Length - 1; i >= 0; i--)
-                    {
-                        ServiceDescriptor descriptor = this._descriptors[i];
-                        CallSiteService callSite = TryCreateExact(descriptor, itemType, callSiteChain, slot) ??
-                                       TryCreateOpenGeneric(descriptor, itemType, callSiteChain, slot, false);
-
-                        if (callSite != null)
-                        {
-                            slot++;
-
-                            cacheLocation = GetCommonCacheLocation(cacheLocation, callSite.Cache.Location);
-                            callSites.Add(callSite);
-                        }
-                    }
-
-                    callSites.Reverse();
-                }
-
-
-                CallSiteResultCache resultCache = CallSiteResultCache.None;
-                if (cacheLocation == CallSiteResultCacheLocation.Scope || cacheLocation == CallSiteResultCacheLocation.Root)
-                {
-                    resultCache = new CallSiteResultCache(cacheLocation, callSiteKey);
-                }
-
-                return _callSiteCache[callSiteKey] = new EnumerableCallSite(resultCache, itemType, callSites.ToArray());
+                return null;
             }
 
-            return null;
+            Type itemType = serviceType.GenericTypeArguments[0];
+            if (ServiceProvider.VerifyAotCompatibility && itemType.IsValueType)
+            {
+                // Without dynamic code there is no guarantee the code for ValueType[] (and the
+                // IEnumerable<ValueType> over it) was generated, so fail here, at call-site
+                // construction, rather than at an arbitrary resolution later.
+                throw new InvalidOperationException(
+                    $"Unable to create an enumerable of '{itemType}' because it is a value type. Native code for enumerables of value-type services might not be available with NativeAOT.");
+            }
+
+            CallSiteResultCacheLocation cacheLocation = CallSiteResultCacheLocation.Root;
+            CallSiteService[] callSites;
+
+            // If item type is not generic we can safely use descriptor cache
+            if (!itemType.IsConstructedGenericType &&
+                _descriptorLookup.TryGetValue(itemType, out ServiceDescriptorCacheItem descriptors))
+            {
+                callSites = new CallSiteService[descriptors.Count];
+                for (int i = 0; i < descriptors.Count; i++)
+                {
+                    // Last service should get slot 0. There are no open generics here, so every
+                    // descriptor is an exact match.
+                    int slot = descriptors.Count - i - 1;
+                    CallSiteService callSite = CreateExact(descriptors[i], itemType, callSiteChain, slot);
+
+                    cacheLocation = GetCommonCacheLocation(cacheLocation, callSite.Cache.Location);
+                    callSites[i] = callSite;
+                }
+            }
+            else
+            {
+                // The result lists matches in declaration order, but slots are handed out in reverse
+                // declaration order with every exact match ahead of every open-generic match. Single
+                // resolution prefers an exact registration over an open generic one, so its slot-0
+                // call site is the last exact match; interleaving the two kinds gave an open generic
+                // slot 0, and GetService and GetServices then read each other's call site through the
+                // shared cache key.
+                var callSitesByIndex = new List<KeyValuePair<int, CallSiteService>>();
+                int slot = 0;
+
+                for (int i = _descriptors.Length - 1; i >= 0; i--)
+                {
+                    ServiceDescriptor descriptor = _descriptors[i];
+                    if (ShouldCreateExact(descriptor.ServiceType, itemType))
+                    {
+                        CallSiteService callSite = CreateExact(descriptor, itemType, callSiteChain, slot++);
+
+                        cacheLocation = GetCommonCacheLocation(cacheLocation, callSite.Cache.Location);
+                        callSitesByIndex.Add(new KeyValuePair<int, CallSiteService>(i, callSite));
+                    }
+                }
+
+                for (int i = _descriptors.Length - 1; i >= 0; i--)
+                {
+                    ServiceDescriptor descriptor = _descriptors[i];
+                    if (!ShouldCreateOpenGeneric(descriptor.ServiceType, itemType))
+                    {
+                        continue;
+                    }
+
+                    // An open generic whose constraints the item type does not satisfy is skipped.
+                    CallSiteService callSite = CreateOpenGeneric(descriptor, itemType, callSiteChain, slot, throwOnConstraintViolation: false);
+                    if (callSite != null)
+                    {
+                        slot++;
+
+                        cacheLocation = GetCommonCacheLocation(cacheLocation, callSite.Cache.Location);
+                        callSitesByIndex.Add(new KeyValuePair<int, CallSiteService>(i, callSite));
+                    }
+                    else if (slot == 0)
+                    {
+                        // The last registration cannot close over the item type, yet it still owns
+                        // slot 0: single resolution keeps "last wins" and reports the constraint
+                        // violation instead of finding an earlier registration cached under slot 0.
+                        slot++;
+                    }
+                }
+
+                callSitesByIndex.Sort(static (a, b) => a.Key.CompareTo(b.Key));
+                callSites = new CallSiteService[callSitesByIndex.Count];
+                for (int i = 0; i < callSites.Length; i++)
+                {
+                    callSites[i] = callSitesByIndex[i].Value;
+                }
+            }
+
+            // An uncached enumerable still carries its own key so the scope validator can memoize it.
+            CallSiteResultCache resultCache =
+                cacheLocation == CallSiteResultCacheLocation.Scope || cacheLocation == CallSiteResultCacheLocation.Root
+                    ? new CallSiteResultCache(cacheLocation, callSiteKey)
+                    : new CallSiteResultCache(CallSiteResultCacheLocation.None, callSiteKey);
+
+            return _callSiteCache[callSiteKey] = new EnumerableCallSite(resultCache, itemType, callSites);
         }
         finally
         {
@@ -318,40 +349,52 @@ internal sealed class CallSiteFactory : IServiceLookup
         return (CallSiteResultCacheLocation)Math.Max((int)locationA, (int)locationB);
     }
 
-    private CallSiteService TryCreateExact(ServiceDescriptor descriptor, Type serviceType, CallSiteChain callSiteChain, int slot)
+    private CallSiteService TryCreateExact(ServiceDescriptor descriptor, Type serviceType, CallSiteChain callSiteChain, int slot) =>
+        ShouldCreateExact(descriptor.ServiceType, serviceType)
+            ? CreateExact(descriptor, serviceType, callSiteChain, slot)
+            : null;
+
+    private static bool ShouldCreateExact(Type descriptorType, Type serviceType) =>
+        descriptorType == serviceType;
+
+    private CallSiteService CreateExact(ServiceDescriptor descriptor, Type serviceType, CallSiteChain callSiteChain, int slot)
     {
-        if (serviceType == descriptor.ServiceType)
+        CallSiteServiceCacheKey callSiteKey = new CallSiteServiceCacheKey(serviceType, slot);
+        if (_callSiteCache.TryGetValue(callSiteKey, out CallSiteService serviceCallSite))
         {
-            CallSiteServiceCacheKey callSiteKey = new CallSiteServiceCacheKey(serviceType, slot);
-            if (_callSiteCache.TryGetValue(callSiteKey, out CallSiteService serviceCallSite))
-            {
-                return serviceCallSite;
-            }
-
-            CallSiteService callSite;
-            var lifetime = new CallSiteResultCache(descriptor.Lifetime, serviceType, slot);
-            if (descriptor.ImplementationInstance != null)
-            {
-                callSite = new ConstantCallSite(descriptor.ServiceType, descriptor.ImplementationInstance);
-            }
-            else if (descriptor.ImplementationFactory != null)
-            {
-                callSite = new FactoryCallSite(lifetime, descriptor.ServiceType, descriptor.ImplementationFactory);
-            }
-            else if (descriptor.ImplementationType != null)
-            {
-                callSite = CreateConstructorCallSite(lifetime, descriptor.ServiceType, descriptor.ImplementationType, callSiteChain);
-            }
-            else
-            {
-                throw new InvalidOperationException(Resources.InvalidServiceDescriptor);
-            }
-
-            return _callSiteCache[callSiteKey] = callSite;
+            return serviceCallSite;
         }
 
-        return null;
+        CallSiteService callSite;
+        var lifetime = new CallSiteResultCache(descriptor.Lifetime, serviceType, slot);
+        if (descriptor.ImplementationInstance != null)
+        {
+            callSite = new ConstantCallSite(descriptor.ServiceType, descriptor.ImplementationInstance, slot);
+        }
+        else if (descriptor.ImplementationFactory != null)
+        {
+            callSite = new FactoryCallSite(lifetime, descriptor.ServiceType, descriptor.ImplementationFactory);
+        }
+        else if (descriptor.ImplementationType != null)
+        {
+            callSite = CreateConstructorCallSite(lifetime, descriptor.ServiceType, descriptor.ImplementationType, callSiteChain);
+        }
+        else
+        {
+            throw new InvalidOperationException(Resources.InvalidServiceDescriptor);
+        }
+
+        return _callSiteCache[callSiteKey] = callSite;
     }
+
+    private CallSiteService TryCreateOpenGeneric(ServiceDescriptor descriptor, Type serviceType, CallSiteChain callSiteChain, int slot, bool throwOnConstraintViolation) =>
+        ShouldCreateOpenGeneric(descriptor.ServiceType, serviceType)
+            ? CreateOpenGeneric(descriptor, serviceType, callSiteChain, slot, throwOnConstraintViolation)
+            : null;
+
+    private static bool ShouldCreateOpenGeneric(Type descriptorType, Type serviceType) =>
+        serviceType.IsConstructedGenericType &&
+        serviceType.GetGenericTypeDefinition() == descriptorType;
 
     [UnconditionalSuppressMessage("ReflectionAnalysis", "IL2055:MakeGenericType",
         Justification = "MakeGenericType here is used to create a closed generic implementation type given the closed service type. " +
@@ -361,44 +404,38 @@ internal sealed class CallSiteFactory : IServiceLookup
         Justification = "When ServiceProvider.VerifyAotCompatibility is true, which it is whenever dynamic code is unsupported (NativeAOT), " +
         "VerifyOpenGenericAotCompatibility throws before MakeGenericType if any generic argument is a value type, so only " +
         "reference-type instantiations, which share canonical code, are ever created.")]
-    private CallSiteService TryCreateOpenGeneric(ServiceDescriptor descriptor, Type serviceType, CallSiteChain callSiteChain, int slot, bool throwOnConstraintViolation)
+    private CallSiteService CreateOpenGeneric(ServiceDescriptor descriptor, Type serviceType, CallSiteChain callSiteChain, int slot, bool throwOnConstraintViolation)
     {
-        if (serviceType.IsConstructedGenericType &&
-            serviceType.GetGenericTypeDefinition() == descriptor.ServiceType)
+        CallSiteServiceCacheKey callSiteKey = new CallSiteServiceCacheKey(serviceType, slot);
+        if (_callSiteCache.TryGetValue(callSiteKey, out CallSiteService serviceCallSite))
         {
-            CallSiteServiceCacheKey callSiteKey = new CallSiteServiceCacheKey(serviceType, slot);
-            if (_callSiteCache.TryGetValue(callSiteKey, out CallSiteService serviceCallSite))
-            {
-                return serviceCallSite;
-            }
-
-            Debug.Assert(descriptor.ImplementationType != null, "descriptor.ImplementationType != null");
-            var lifetime = new CallSiteResultCache(descriptor.Lifetime, serviceType, slot);
-            Type closedType;
-            try
-            {
-                Type[] genericTypeArguments = serviceType.GenericTypeArguments;
-                if (ServiceProvider.VerifyAotCompatibility)
-                {
-                    VerifyOpenGenericAotCompatibility(serviceType, genericTypeArguments);
-                }
-
-                closedType = descriptor.ImplementationType.MakeGenericType(genericTypeArguments);
-            }
-            catch (ArgumentException)
-            {
-                if (throwOnConstraintViolation)
-                {
-                    throw;
-                }
-
-                return null;
-            }
-
-            return _callSiteCache[callSiteKey] = CreateConstructorCallSite(lifetime, serviceType, closedType, callSiteChain);
+            return serviceCallSite;
         }
 
-        return null;
+        Debug.Assert(descriptor.ImplementationType != null, "descriptor.ImplementationType != null");
+        var lifetime = new CallSiteResultCache(descriptor.Lifetime, serviceType, slot);
+        Type closedType;
+        try
+        {
+            Type[] genericTypeArguments = serviceType.GenericTypeArguments;
+            if (ServiceProvider.VerifyAotCompatibility)
+            {
+                VerifyOpenGenericAotCompatibility(serviceType, genericTypeArguments);
+            }
+
+            closedType = descriptor.ImplementationType.MakeGenericType(genericTypeArguments);
+        }
+        catch (ArgumentException)
+        {
+            if (throwOnConstraintViolation)
+            {
+                throw;
+            }
+
+            return null;
+        }
+
+        return _callSiteCache[callSiteKey] = CreateConstructorCallSite(lifetime, serviceType, closedType, callSiteChain);
     }
 
     private static void VerifyOpenGenericAotCompatibility(Type serviceType, Type[] genericTypeArguments)

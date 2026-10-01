@@ -9,9 +9,6 @@ namespace Assimalign.Cohesion.DependencyInjection.Internal;
 
 internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResolverBuilderContext, object>
 {
-    private static readonly MethodInfo _resolvedServicesGetter = typeof(ServiceProviderEngineScope).GetProperty(
-        nameof(ServiceProviderEngineScope.ResolvedServices), BindingFlags.Instance | BindingFlags.NonPublic).GetMethod;
-
     private static readonly MethodInfo _scopeLockGetter = typeof(ServiceProviderEngineScope).GetProperty(
         nameof(ServiceProviderEngineScope.Sync), BindingFlags.Instance | BindingFlags.NonPublic).GetMethod;
 
@@ -292,16 +289,28 @@ internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResol
         // object sync;
         // bool lockTaken;
         // object result;
+        // bool stored;
         // try
         // {
-        //    var resolvedServices = scope.ResolvedServices;
         //    sync = scope.Sync;
         //    Monitor.Enter(sync, ref lockTaken);
-        //    if (!resolvedServices.TryGetValue(cacheKey, out result)
+        //    // Throws when this scope is already creating the service: a cycle through a factory.
+        //    if (!scope.TryGetOrReserveScopedService(cacheKey, out result))
         //    {
-        //       result = [createvalue];
-        //       CaptureDisposable(result);
-        //       resolvedServices.Add(cacheKey, result);
+        //       try
+        //       {
+        //          result = [createvalue];
+        //          CaptureDisposable(result);
+        //          scope.StoreScopedService(cacheKey, result);
+        //          stored = true;
+        //       }
+        //       finally
+        //       {
+        //          if (!stored)
+        //          {
+        //             scope.ReleaseScopedServiceReservation(cacheKey);
+        //          }
+        //       }
         //    }
         // }
         // finally
@@ -316,14 +325,15 @@ internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResol
         if (callSite.Cache.Location == CallSiteResultCacheLocation.Scope)
         {
             LocalBuilder cacheKeyLocal = context.Generator.DeclareLocal(typeof(CallSiteServiceCacheKey));
-            LocalBuilder resolvedServicesLocal = context.Generator.DeclareLocal(typeof(IDictionary<CallSiteServiceCacheKey, object>));
             LocalBuilder syncLocal = context.Generator.DeclareLocal(typeof(object));
             LocalBuilder lockTakenLocal = context.Generator.DeclareLocal(typeof(bool));
             LocalBuilder resultLocal = context.Generator.DeclareLocal(typeof(object));
+            LocalBuilder storedLocal = context.Generator.DeclareLocal(typeof(bool));
 
             Label skipCreationLabel = context.Generator.DefineLabel();
             Label returnLabel = context.Generator.DefineLabel();
             Label defaultLabel = context.Generator.DefineLabel();
+            Label reservationKeptLabel = context.Generator.DefineLabel();
 
             // Check if scope IsRootScope
             context.Generator.Emit(OpCodes.Ldarg_1);
@@ -346,13 +356,6 @@ internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResol
 
             // scope
             context.Generator.Emit(OpCodes.Ldarg_1);
-            // .ResolvedServices
-            context.Generator.Emit(OpCodes.Callvirt, _resolvedServicesGetter);
-            // Store resolved services
-            context.Generator.Emit(OpCodes.Stloc, resolvedServicesLocal);
-
-            // scope
-            context.Generator.Emit(OpCodes.Ldarg_1);
             // .Sync
             context.Generator.Emit(OpCodes.Callvirt, _scopeLockGetter);
             // Store syncLocal
@@ -365,17 +368,19 @@ internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResol
             // Monitor.Enter
             context.Generator.Emit(OpCodes.Call, ServiceLookupHelpers.MonitorEnterMethodInfo);
 
-            // Load resolved services
-            context.Generator.Emit(OpCodes.Ldloc, resolvedServicesLocal);
+            // scope
+            context.Generator.Emit(OpCodes.Ldarg_1);
             // Load cache key
             context.Generator.Emit(OpCodes.Ldloc, cacheKeyLocal);
             // Load address of result local
             context.Generator.Emit(OpCodes.Ldloca, resultLocal);
-            // .TryGetValue
-            context.Generator.Emit(OpCodes.Callvirt, ServiceLookupHelpers.TryGetValueMethodInfo);
+            // .TryGetOrReserveScopedService
+            context.Generator.Emit(OpCodes.Callvirt, ServiceLookupHelpers.TryGetOrReserveScopedServiceMethodInfo);
 
             // Jump to the end if already in cache
             context.Generator.Emit(OpCodes.Brtrue, skipCreationLabel);
+
+            context.Generator.BeginExceptionBlock();
 
             // Create value
             VisitCallSiteMain(callSite, context);
@@ -390,14 +395,33 @@ internal sealed class ILEmitResolverBuilderVisitor : CallSiteVisitor<ILEmitResol
                 generator.Emit(OpCodes.Pop);
             }
 
-            // load resolvedServices
-            context.Generator.Emit(OpCodes.Ldloc, resolvedServicesLocal);
+            // scope
+            context.Generator.Emit(OpCodes.Ldarg_1);
             // load cache key
             context.Generator.Emit(OpCodes.Ldloc, cacheKeyLocal);
             // load value
             context.Generator.Emit(OpCodes.Ldloc, resultLocal);
-            // .Add
-            context.Generator.Emit(OpCodes.Callvirt, ServiceLookupHelpers.AddMethodInfo);
+            // .StoreScopedService
+            context.Generator.Emit(OpCodes.Callvirt, ServiceLookupHelpers.StoreScopedServiceMethodInfo);
+            // stored = true
+            context.Generator.Emit(OpCodes.Ldc_I4_1);
+            context.Generator.Emit(OpCodes.Stloc, storedLocal);
+
+            context.Generator.BeginFinallyBlock();
+
+            // Keep the reservation only if the value was stored in it
+            context.Generator.Emit(OpCodes.Ldloc, storedLocal);
+            context.Generator.Emit(OpCodes.Brtrue, reservationKeptLabel);
+            // scope
+            context.Generator.Emit(OpCodes.Ldarg_1);
+            // load cache key
+            context.Generator.Emit(OpCodes.Ldloc, cacheKeyLocal);
+            // .ReleaseScopedServiceReservation
+            context.Generator.Emit(OpCodes.Callvirt, ServiceLookupHelpers.ReleaseScopedServiceReservationMethodInfo);
+
+            context.Generator.MarkLabel(reservationKeptLabel);
+
+            context.Generator.EndExceptionBlock();
 
             context.Generator.MarkLabel(skipCreationLabel);
 
