@@ -53,7 +53,13 @@ uses those same transforms for uniqueness enforcement.
 - **One record per table.** Columns and the primary key fold into the table's
   record: schema changes rewrite one record (in place when it fits, relocating —
   delete + insert — when it grows). Per-column records would buy nothing at this
-  scale and cost multi-record consistency.
+  scale and cost multi-record consistency. A record lives in one slotted-page slot,
+  so a table definition, an index description or the registration set is limited to
+  `SlottedPage.MaxRecordSize` (8,092 bytes) encoded. The encoders check that limit
+  before storage is touched and throw `SqlCatalogException` naming the object and both
+  sizes; the definition in memory and on disk stays the last one that fit (#1157
+  review — it used to surface as a raw `SlottedPageException` from the relocation's
+  insert). Definitions larger than a page wait for overflow records.
 - **Object identities are catalog-assigned `ulong`s** persisted with a counter
   record, monotonic across reopen (the loader also raises the counter past every
   loaded table, so a torn counter update can never recycle an id). Data rows,

@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog.Internal;
@@ -773,7 +774,32 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
 
     // ── Record codec (shared self-describing tuple encoding) ──────────
 
+    /// <summary>
+    /// Refuses a catalog record that cannot be stored. Every catalog record lives in one
+    /// slotted-page slot, so a definition encoded past <see cref="SlottedPage.MaxRecordSize"/>
+    /// can never be written. Failing here, before the storage is touched, reports the
+    /// definition that outgrew a page as a catalog error rather than letting a storage
+    /// failure reach the client half-way through a relocation.
+    /// </summary>
+    /// <param name="record">The encoded record.</param>
+    /// <param name="description">What the record describes, for the message.</param>
+    /// <returns><paramref name="record"/>.</returns>
+    /// <exception cref="SqlCatalogException">The record exceeds the maximum record size.</exception>
+    private static byte[] EnsureStorable(byte[] record, string description)
+    {
+        if (record.Length > SlottedPage.MaxRecordSize)
+        {
+            throw new SqlCatalogException(
+                $"The definition of {description} encodes to {record.Length} bytes, more than the {SlottedPage.MaxRecordSize} bytes a catalog record can hold.");
+        }
+
+        return record;
+    }
+
     private static byte[] EncodeTable(SqlCatalogTable table)
+        => EnsureStorable(EncodeTableRecord(table), $"table '{table.Schema}.{table.Name}'");
+
+    private static byte[] EncodeTableRecord(SqlCatalogTable table)
     {
         var writer = new DatabaseKeyWriter();
         writer.AppendInt32(tableRecordKind)
@@ -940,6 +966,9 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     }
 
     private static byte[] EncodeIndex(SqlCatalogIndex index)
+        => EnsureStorable(EncodeIndexRecord(index), $"index '{index.Name}'");
+
+    private static byte[] EncodeIndexRecord(SqlCatalogIndex index)
     {
         var writer = new DatabaseKeyWriter();
         writer.AppendInt32(indexRecordKind)
@@ -1238,7 +1267,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                   .AppendInt64(registration.RootPageId);
         }
 
-        return writer.ToArray();
+        return EnsureStorable(writer.ToArray(), $"the database's {registrations.Count} index registrations");
     }
 
     private static IReadOnlyList<BTreeIndexRegistration> DecodeRegistrations(ref DatabaseKeyReader reader)
