@@ -405,8 +405,8 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   by zero, because zero is judged on the operand as supplied. `SortRows` unwraps
   the `InvalidOperationException` the runtime sort puts around a throwing
   comparer, so incomparable `ORDER BY` keys fail the statement with the
-  comparer's own `DatabaseException` instead of ending a wire session. The exception is an
-  internal `DatabaseException` whose message leads with the code, the convention
+  comparer's own `DatabaseException` instead of ending a wire session. The
+  exception is an internal `DatabaseException` whose message leads with the code, the convention
   Graph's `COHDBG` codes use, until the area root grows a structured diagnostics
   carrier. Evaluation runs in a write statement's first phase, before any
   physical bracket opens, so a fault writes nothing. The session's ordinary

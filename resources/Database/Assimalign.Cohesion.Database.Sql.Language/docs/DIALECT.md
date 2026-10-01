@@ -358,8 +358,9 @@ the value order cannot compare (`Cannot compare values of types ...`).
   right one when the left decides the result (`FALSE AND x`, `TRUE OR x`). A guard
   such as `d <> 0 AND x / d > 1` therefore never divides by zero; a guard written
   after the division, or a left operand that is NULL, does not protect it. `CASE`
-  evaluates only the selected branch and `COALESCE` stops at the first non-NULL
-  argument. Every other operator and function evaluates all of its operands.
+  evaluates only the selected branch, `COALESCE` stops at the first non-NULL
+  argument, and `IN` stops at the first list value that matches. Every other
+  operator and function evaluates all of its operands.
 - **Store assignment:** a value an integer or `DECIMAL` column cannot hold, such as
   `UPDATE t SET i = i + 1` on an `INT` at 2147483647, reports `COHSQLE002`
   (`value '2147483648' does not fit column 'i' of type Int32.`). A value that is not
@@ -577,9 +578,9 @@ hold reports `COHSQLE002` and names itself, for example
 9223372036854775807 (write `12345678901234567890.0` for a larger exact value), or
 a fractional literal Decimal cannot hold exactly, with more than 28 decimal places
 or beyond Decimal's range (`1e-30`, `1e40`), even when it is stored into a REAL or
-DOUBLE column. Bind such approximate values as parameters. A negated integer literal is read as one signed literal, so
-`-9223372036854775808` is the BIGINT minimum. Inside `CAST` an unrepresentable
-literal stays a CAST failure.
+DOUBLE column. Bind such approximate values as parameters. A negated integer
+literal is read as one signed literal, so `-9223372036854775808` is the BIGINT
+minimum. Inside `CAST` an unrepresentable literal stays a CAST failure.
 
 ## Type names (the `SqlTypeNames` table)
 
