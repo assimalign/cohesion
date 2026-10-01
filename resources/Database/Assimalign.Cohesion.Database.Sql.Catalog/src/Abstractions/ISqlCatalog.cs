@@ -158,11 +158,14 @@ public interface ISqlCatalog
     IReadOnlyList<BTreeIndexRegistration> GetIndexRegistrations();
 
     /// <summary>
-    /// Gets the record-space format version of the database's data storage: 1 =
-    /// the pre-MVCC unstamped row layout (the value reported when no marker is
-    /// persisted), 2 = MVCC-stamped records. The catalog is the marker's home
-    /// because rows are not self-describing across format changes — the engine
-    /// reads this at open and upgrades a version-1 record space in place.
+    /// Gets the record-space format version of the database's data storage (its
+    /// rows and the index trees that share its file set): 1 = the pre-MVCC
+    /// unstamped row layout (the value reported when no marker is persisted),
+    /// 2 = MVCC-stamped records, 3 = per-object page chains, 4 = index keys that
+    /// encode TIMESTAMP and TIMESTAMPTZ values by their SQL identity. The catalog
+    /// is the marker's home because rows and keys are not self-describing across
+    /// format changes — the engine reads this at open and upgrades an older data
+    /// storage in place.
     /// </summary>
     int RecordSpaceFormatVersion { get; }
 

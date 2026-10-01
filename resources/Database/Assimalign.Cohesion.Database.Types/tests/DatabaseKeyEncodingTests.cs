@@ -153,6 +153,51 @@ public class DatabaseKeyEncodingTests
             value => Encode(w => w.AppendTimeSpan(value)));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Database.Types] - Encoding: temporal identity forms encode SQL-equal values identically (#1099)")]
+    public void AppendTemporalIdentityForms_EqualValues_ShouldEncodeIdentically()
+    {
+        // The value encoding keeps the kind and the offset, so values that SQL
+        // equality joins still encode apart — the reason identity keys normalize.
+        var noon = new DateTime(2026, 9, 30, 12, 0, 0, DateTimeKind.Unspecified);
+        DateTime[] kinds = [noon, DateTime.SpecifyKind(noon, DateTimeKind.Utc), DateTime.SpecifyKind(noon, DateTimeKind.Local)];
+        kinds.Select(value => Convert.ToHexString(Encode(w => w.AppendDateTime(value)))).Distinct().Count().ShouldBe(3);
+
+        var instant = new DateTimeOffset(2026, 9, 30, 12, 0, 0, TimeSpan.Zero);
+        DateTimeOffset[] offsets = [instant, instant.ToOffset(TimeSpan.FromHours(3)), instant.ToOffset(TimeSpan.FromHours(-5.5))];
+        offsets.Select(value => Convert.ToHexString(Encode(w => w.AppendDateTimeOffset(value)))).Distinct().Count().ShouldBe(3);
+
+        // The identity forms — kind Unspecified, offset zero — encode one key per
+        // equality class, and that key decodes to the identity form.
+        byte[] timestampKey = Encode(w => w.AppendDateTime(noon));
+        foreach (var value in kinds)
+        {
+            Encode(w => w.AppendDateTime(DateTime.SpecifyKind(value, DateTimeKind.Unspecified))).ShouldBe(timestampKey);
+        }
+
+        byte[] instantKey = Encode(w => w.AppendDateTimeOffset(instant));
+        foreach (var value in offsets)
+        {
+            Encode(w => w.AppendDateTimeOffset(value.ToUniversalTime())).ShouldBe(instantKey);
+        }
+
+        var reader = new DatabaseKeyReader(instantKey);
+        reader.ReadDateTimeOffset().Offset.ShouldBe(TimeSpan.Zero);
+
+        // Identity forms keep the chronological order: by ticks, and by instant
+        // even where local wall-clock time disagrees (12:00+01:00 is 11:00Z).
+        AssertStrictlyAscending(
+            new[]
+            {
+                new DateTimeOffset(2026, 9, 30, 12, 0, 0, TimeSpan.FromHours(1)),
+                instant.ToOffset(TimeSpan.FromHours(-5.5)),
+                new DateTimeOffset(2026, 9, 30, 5, 0, 0, TimeSpan.FromHours(-8)),
+            },
+            value => Encode(w => w.AppendDateTimeOffset(value.ToUniversalTime())));
+        AssertStrictlyAscending(
+            new[] { DateTime.SpecifyKind(noon.AddTicks(-1), DateTimeKind.Utc), noon, DateTime.SpecifyKind(noon.AddTicks(1), DateTimeKind.Local) },
+            value => Encode(w => w.AppendDateTime(DateTime.SpecifyKind(value, DateTimeKind.Unspecified))));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Types] - Encoding: null orders before every value and composite keys order by significance")]
     public void CompositeKeys_NullsAndComponents_ShouldOrderBySignificance()
     {

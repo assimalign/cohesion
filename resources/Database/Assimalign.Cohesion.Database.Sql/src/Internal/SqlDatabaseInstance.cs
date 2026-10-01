@@ -78,19 +78,29 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     }
 
     /// <summary>
-    /// Upgrades an older record space in place, at open, before any session
-    /// exists: a pre-MVCC (version-1) space first gains version stamps, and a
-    /// pre-chain (version-2) space is relocated into per-object page chains; the
-    /// catalog then persists the current format version. Each stage rides one
-    /// data-storage transaction (all-or-nothing) and is idempotent across the
-    /// two-storage crash window, because the marker write is last: a crash after
-    /// a stage's commit re-runs a provably-detectable no-op (see each stage).
+    /// Upgrades an older data storage in place, at open, before any session
+    /// exists: a pre-MVCC (version-1) space first gains version stamps, a
+    /// pre-chain (version-2) space is relocated into per-object page chains, and
+    /// a version-3 space rebuilds the indexes whose keys carry temporal
+    /// components under the identity encoding; the catalog then persists the
+    /// current format version. Each stage commits all-or-nothing and is
+    /// idempotent across the two-storage crash window, because the marker write
+    /// is last: a crash after a stage's commit re-runs it safely (see each stage).
+    /// A version newer than this engine writes is refused rather than read with
+    /// an older key encoding.
     /// </summary>
     private void UpgradeRecordSpaceIfNeeded()
     {
         int version = _catalog.RecordSpaceFormatVersion;
 
-        if (version >= SqlRowCodec.RecordSpaceFormatVersion)
+        if (version > SqlRowCodec.RecordSpaceFormatVersion)
+        {
+            throw new DatabaseException(
+                $"Database '{Name}' uses data-storage format version {version}, newer than this engine understands " +
+                $"({SqlRowCodec.RecordSpaceFormatVersion}).");
+        }
+
+        if (version == SqlRowCodec.RecordSpaceFormatVersion)
         {
             return;
         }
@@ -100,12 +110,96 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
             UpgradeUnstampedRecords();
         }
 
-        RelocateRecordsToOwnerChains();
+        if (version < 3)
+        {
+            RelocateRecordsToOwnerChains();
+        }
+
+        RebuildTemporalKeyIndexes();
 
         // Marker last. Synchronous over the ValueTask by design: catalog writes
         // complete synchronously and instance open is a synchronous path.
         _catalog.SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion)
             .AsTask().GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// The version-3 → version-4 stage (#1099): version-3 index keys carried a
+    /// TIMESTAMP's <see cref="DateTimeKind"/> and a TIMESTAMPTZ's offset, so
+    /// values SQL calls equal could sit under different keys — seeks missed rows
+    /// and UNIQUE admitted the same instant twice. Every index with a TIMESTAMP or
+    /// TIMESTAMPTZ key column is rebuilt from the stored row versions under the
+    /// identity encoding (<see cref="SqlRowCodec.ToKeyIdentity"/>); indexes over
+    /// other types encode identical bytes under both versions and are left alone.
+    /// The new trees commit durably first, then one catalog self-commit swaps the
+    /// registrations, then the marker moves. Idempotent: a crash before the
+    /// registration swap re-attaches the untouched old trees, a crash after it
+    /// re-attaches the new ones, and either way the stage rebuilds again from the
+    /// rows on the next open (only unreachable tree pages leak, as after DROP INDEX).
+    /// </summary>
+    private void RebuildTemporalKeyIndexes()
+    {
+        var targets = new List<(SqlCatalogTable Table, SqlCatalogIndex Index)>();
+
+        foreach (var table in _catalog.Tables)
+        {
+            foreach (var index in _catalog.GetIndexes(table.ObjectId))
+            {
+                if (HasTemporalKeyColumn(table, index))
+                {
+                    targets.Add((table, index));
+                }
+            }
+        }
+
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, parameters: null);
+        var context = _coordinator.BeginAsync(IsolationLevel.Snapshot).AsTask().GetAwaiter().GetResult();
+
+        try
+        {
+            _coordinator.ApplyStatementAsync(context, async bracket =>
+            {
+                foreach (var (table, index) in targets)
+                {
+                    await executor.RebuildIndexAsync(context, bracket, table, index, CancellationToken.None).ConfigureAwait(false);
+                }
+
+                return true;
+            }, durable: true).AsTask().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            _coordinator.RollbackAsync(context).AsTask().GetAwaiter().GetResult();
+            throw;
+        }
+
+        _coordinator.CommitAsync(context).AsTask().GetAwaiter().GetResult();
+
+        // One catalog self-commit points every rebuilt index at its new root.
+        _catalog.SaveIndexRegistrationsAsync(((IIndexRegistry)_indexManager).ExportRegistrations())
+            .AsTask().GetAwaiter().GetResult();
+
+        static bool HasTemporalKeyColumn(SqlCatalogTable table, SqlCatalogIndex index)
+        {
+            foreach (string name in index.ColumnNames)
+            {
+                foreach (var column in table.Columns)
+                {
+                    if (string.Equals(column.Name, name, StringComparison.OrdinalIgnoreCase)
+                        && column.Type.Type is DatabaseType.DateTime or DatabaseType.DateTimeOffset)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
     }
 
     /// <summary>

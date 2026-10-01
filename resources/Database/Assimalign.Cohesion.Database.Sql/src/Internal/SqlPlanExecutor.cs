@@ -533,8 +533,9 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>
     /// Builds an index key from a row's values: one order-preserving component
-    /// per key column, transformed under the column's effective collation
-    /// (null components participate — nulls sort first and count as key values).
+    /// per key column, transformed under the column's effective collation and
+    /// temporal identity (null components participate — nulls sort first and
+    /// count as key values).
     /// </summary>
     private IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
     {
@@ -542,7 +543,7 @@ internal sealed partial class SqlPlanExecutor
 
         foreach (int ordinal in keyOrdinals)
         {
-            SqlRowCodec.AppendValue(writer, table.Columns[ordinal].Type.Type, values[ordinal],
+            SqlRowCodec.AppendKeyValue(writer, table.Columns[ordinal].Type.Type, values[ordinal],
                 table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
         }
 
@@ -1159,10 +1160,11 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>
     /// Encodes the seek's key range: the equality prefix (encoded exactly like
-    /// the maintenance path encodes keys), extended by the optional range bounds
-    /// on the next key column. Prefix semantics ride the codec's
-    /// order-preservation: every composite key starting with prefix P sorts in
-    /// [P, successor(P)), where successor increments the last non-0xFF byte.
+    /// the maintenance path encodes keys, temporal identity included), extended
+    /// by the optional range bounds on the next key column. Prefix semantics
+    /// ride the codec's order-preservation: every composite key starting with
+    /// prefix P sorts in [P, successor(P)), where successor increments the last
+    /// non-0xFF byte.
     /// </summary>
     private IndexKeyRange BuildSeekRange(SqlCatalogTable table, SqlIndexSeekPath seek)
     {
@@ -1171,7 +1173,7 @@ internal sealed partial class SqlPlanExecutor
         for (int i = 0; i < seek.EqualityValues.Count; i++)
         {
             int ordinal = FindColumnOrdinal(table, seek.Index.ColumnNames[i]);
-            SqlRowCodec.AppendValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i],
+            SqlRowCodec.AppendKeyValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i],
                 table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
         }
 
@@ -1225,7 +1227,7 @@ internal sealed partial class SqlPlanExecutor
     private static byte[] AppendComponent(byte[] prefix, DatabaseType type, object? value, Collation collation)
     {
         var writer = new DatabaseKeyWriter();
-        SqlRowCodec.AppendValue(writer, type, value, collation);
+        SqlRowCodec.AppendKeyValue(writer, type, value, collation);
         byte[] component = writer.ToArray();
 
         var combined = new byte[prefix.Length + component.Length];
