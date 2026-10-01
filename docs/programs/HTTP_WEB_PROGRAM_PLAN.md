@@ -189,7 +189,7 @@ The audit behind these stages is §7. Within each stage, rows are in the recomme
 
 ### Stage 5 — Make what ships safe and honest
 
-**Status:** delivered 2026-09-30 on the Phase 2 branch and awaiting owner review. Commits and follow-ups are in §5.
+**Status:** delivered and approved 2026-09-30; the Phase 2 branch was published at `b11b6927`. Commits and follow-ups are in §5.
 
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
@@ -207,6 +207,8 @@ The audit behind these stages is §7. Within each stage, rows are in the recomme
 | #699 | B | Replace the AttachContext wire-up with an HttpContext back-reference | serialize with #1048, #1066 and #937 (same transport files) |
 
 ### Stage 6 — Endpoint-aware pipeline (fan-out seam)
+
+**Status:** delivered 2026-09-30 on the Phase 2 branch and awaiting owner review. Commits, behavior changes and follow-ups are in §5.
 
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
@@ -280,7 +282,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
 - **Batch 5 merged (2026-07-20):** #928 ([PR #932](https://github.com/assimalign/cohesion/pull/932)), #895 ([#933](https://github.com/assimalign/cohesion/pull/933)), #890 ([#934](https://github.com/assimalign/cohesion/pull/934)), #796 ([#936](https://github.com/assimalign/cohesion/pull/936)). §4 drained except the two decision gates (#782, #765).
 - **Project #13 inventory (2026-09-29):** closed #25, #28 and #142–#145 as delivered, #153 as not planned, #154 and #380–#382 as duplicates; added "Scope update" notes to #27, #29, #146, #147, #152 and #155.
 - **Phase 2 opened (2026-09-30):** a code-read audit of `main` found that §4 never scheduled the May-filed security and API items (CORS #3/#109–#111, authorization #155, cookie policy #156, OpenAPI #152, host lifecycle #146/#147), and that shipped code carries security, conformance and DX defects. Snapshot, defects and decisions are in §7. The owner approved the lineup the same day; it was filed as #1045–#1066 and added to §4 as Stages 5–10. By owner instruction, Phase 2 runs on one branch (`claude/http-web-program-inventory-798a2d`) with at least one commit per stage and an owner review before each next stage starts, in place of §1's one-issue-per-branch protocol.
-- **Stage 5 delivered (2026-09-30), awaiting owner review.** One commit per issue on the Phase 2 branch, not pushed:
+- **Stage 5 delivered and approved (2026-09-30).** One commit per issue on the Phase 2 branch, published at `b11b6927`:
   - #1046 `cd47f0d0`, #1045 `656233d3`, #1047 `5da6d7dc`, #1053 `8cfffc11`, #1050 `23a2874c`
   - #1052 `e190ca7b` (DI call-site factory made AOT-clean) and `f4b509d5` (guard and CI job)
   - #1048 `10def15e`, #937 `fdd4f232` (HTTP/2) and `7667fb7e` (HTTP/3), #1051 `a4401268`, #1049 `db758492`
@@ -289,6 +291,8 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - `2ac5c565` regenerated `docs/DEPENDENCIES.md`; `70f2ad34` fixed the §7.5 docs drift.
 
   Verification: every touched suite passes, including Http.Connections 520, Http 1231, Web.Hosting 136 and Web.Testing 19. The Web NativeAOT guard publishes and passes 7/7 smoke checks. The `cohesion-web` and `cohesion-spa` template run tests pass against a locally packed SDK.
+
+  CI on `b11b6927`: every workflow passed except Web. There, `Web.Hosting.Resources` timed out on Windows in the control-plane stop handshake (tracked in #1093), and fail-fast cancelled the remaining matrix jobs. The Linux NativeAOT guard job passed.
 
   #1047 had a second root cause: plain resource executables were framework-dependent on frameworks that ship only as runtime packs. The base SDK now defaults every resource executable to self-contained.
 
@@ -302,6 +306,28 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - A Content-Digest mismatch on HTTP/3 surfaces at the terminal read instead of a pre-dispatch 400.
 
   Scope-creep filed: #1071–#1076 and #1077–#1085. #1080 records that real-QUIC resets carry the driver's default error code until the Connections contract can carry one.
+- **Stage 6 delivered (2026-09-30), awaiting owner review.** On the Phase 2 branch:
+  - #1054 `523049c6` (match/dispatch split, preflight candidates, fail-closed endpoint middleware); consumers moved onto the published endpoint in `99732edf` (RateLimiting), `71e11b7e` (RequestTimeouts), `2dce79d5` (Caching) and `2811f201` (Diagnostics); ordering docs `0cf65e02`; last-wins requirement check `e7818dd2`
+  - #1055 `08619d7d` (convention builders, group metadata composed at build, route-or-query binding) and `7b80e2ac` (`RequireRateLimiting`, `WithRequestTimeout`, `CacheOutput`, `WithHttpLogging` and their opt-outs)
+  - #1056 `9ba64fc9`
+  - `85d71c2e` extends the NativeAOT guard to groups, policy verbs, branching and the fallback
+
+  Verification: 27 Web suites and the generator suite pass, 1,236 tests in all (Routing 344, Web.Hosting 136, StaticFiles 94). The Authorization, CookiePolicy and Cors suites are still empty placeholders. The guard publishes NativeAOT locally for win-arm64 with no trim or AOT diagnostics and passes 11/11 smoke checks.
+
+  Behavior changes for the review:
+  - `UseRouting()` publishes the endpoint and calls `next`; the pipeline terminal runs it and answers 405. Middleware after `UseRouting()` now runs for matched requests and for 405s (owner decision 2).
+  - An endpoint whose rate limit or timeout no middleware applied (missing, or registered ahead of `UseRouting()`) fails at dispatch with `InvalidOperationException` instead of running unprotected.
+  - Policy middleware goes after `UseRouting()`: rate limiting, request timeouts and output caching, and response compression in an application that caches. Endpoint rate-limit policies can now queue, and an endpoint timeout starts when `UseRequestTimeouts` runs.
+  - `Map*` returns `IRouterRouteBuilder` instead of the pipeline builder, so `app.MapGet(...).MapGet(...)` chains no longer compile.
+  - Group metadata composes at route-table build in any call order; parameter policies still freeze.
+  - A typed endpoint in a group, or with a non-literal pattern, binds a scalar the pattern does not place from the route, then the query.
+  - An omitted `{**catchAll}` segment now matches.
+  - `Map(path)` publishes an effective path and path base and leaves `IHttpRequest.Path` alone; rewriting waits on #782. Branches hold middleware only, which the compiler enforces.
+  - A CORS preflight publishes its candidate endpoint (`IsPreflight`) without running it; access logging records it with the configured fields.
+
+  Scope-creep filed:
+  - #1092: the `cohesion-spa` template should map `MapFallbackToFile`. Deferred because it needs the packed-SDK template run tests.
+  - #1093 (P001): a pre-existing process crash. A pipe continuation runs with the wrong state on `Connections.Tcp`'s `SocketPipeScheduler`. It aborted `Web.Hosting.Resources` in CI on two branches, and the Web matrix's default `fail-fast` then cancelled every other Web job.
 - **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
 | Date | Issue | PR | Notes |
@@ -395,7 +421,7 @@ What works end to end:
 
 | Capability | Status | Tracking |
 |---|---|---|
-| Endpoint-aware pipeline (middleware between route match and handler) | Absent. `UseRouting` matches and dispatches in one terminal step, and RateLimiting, RequestTimeouts, Caching and Diagnostics each work around that differently. Typed `Map*` endpoints can't carry metadata. A CORS preflight (`OPTIONS`) resolves to 405 with no endpoint. | #1054, #1055; gates CORS, authorization, antiforgery and OpenAPI |
+| Endpoint-aware pipeline (middleware between route match and handler) | Delivered in Stage 6. `UseRouting` publishes the endpoint and the pipeline terminal runs it; RateLimiting, RequestTimeouts, Caching and Diagnostics read the published endpoint, and their workarounds are gone. Every `Map*`, typed ones included, returns a convention builder, and groups compose metadata at route-table build. A CORS preflight publishes its candidate endpoint. | #1054, #1055; unblocks CORS, authorization, antiforgery and OpenAPI |
 | CORS | Absent (empty project) | #3, #109–#111 |
 | Authorization (policies, `RequireAuthorization`, `UseAuthorization`) | Absent (empty project) | #155 |
 | Cookie-policy enforcement | No-op | #156 |
@@ -404,7 +430,7 @@ What works end to end:
 | Handler return values (`Task<T>`); generator diagnostics | Only `void`/`Task`/`ValueTask`. Unsupported handler shapes compile and then throw at runtime | #1059 |
 | Validation problem responses | Absent (descoped from #796) | #1060 |
 | File binding (`IHttpFormFile`); file and stream results | Absent | #1061 |
-| Pipeline branching (`Map(path)`, `MapWhen`, `UseWhen`, `Run`); fallback routes (`MapFallbackToFile`) | Absent | #1056 |
+| Pipeline branching (`Map(path)`, `MapWhen`, `UseWhen`, `Run`); fallback routes (`MapFallbackToFile`) | Delivered in Stage 6. A path branch publishes an effective path and path base instead of rewriting the request, which stays gated on #782 | #1056 |
 | Server telemetry (`ActivitySource`, `Meter`, `traceparent`, request ID) | Absent in both Web and Http | #1064 |
 | Hosting diagnostics; lame-duck drain | Absent | #147; #146 |
 | mTLS (client certificates visible to handlers); multi-protocol ALPN endpoints; config for HTTP/3, limits and the connection cap | Absent | #1065; #1063 |
