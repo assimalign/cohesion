@@ -59,6 +59,11 @@ public abstract class Storage : IStorage
     private Name _name;
     private bool _disposed;
 
+    // The journal position and sequence counter an existing file set opened at,
+    // once recovery finished; null for a file set this instance created. Shutdown
+    // compares against it to recognize a storage nothing was written through.
+    private (long Lsn, long Sequence)? _openedAt;
+
     /// <summary>
     /// Initializes the storage with the specified backing streams for data, journal, and backup.
     /// </summary>
@@ -360,6 +365,8 @@ public abstract class Storage : IStorage
         {
             Checkpoint();
         }
+
+        _openedAt = (_journal.LastLsn, _nextTransactionSequence);
     }
 
     /// <inheritdoc />
@@ -984,9 +991,22 @@ public abstract class Storage : IStorage
     /// of any stolen page, so recovery undoes abandoned transactions in available
     /// backing bytes. Non-durable mode makes no promise that those bytes survive.
     /// </summary>
+    /// <remarks>
+    /// An opened file set that nothing was written through writes nothing on
+    /// shutdown: the files stay byte-identical, and a journal whose open-time
+    /// checkpoint the owner deferred (to analyze it first) is not truncated
+    /// unanalyzed — closing then is equivalent to a crash right after recovery,
+    /// which the next open already handles. That is what lets an engine refuse a
+    /// database at open (an unsupported format, say) without touching its files.
+    /// </remarks>
     private void ShutdownFlush()
     {
         if (_pageManager is null || _journal is null)
+        {
+            return;
+        }
+
+        if (IsUnwrittenSinceOpen())
         {
             return;
         }
@@ -1008,6 +1028,31 @@ public abstract class Storage : IStorage
             Data.Flush(durable: RequiresDurableFlush);
             _journal.Flush(forceDurable: RequiresDurableFlush);
         }
+    }
+
+    /// <summary>
+    /// Whether nothing has been written through this opened file set: every
+    /// transaction appends its begin record and every checkpoint its checkpoint
+    /// record, so an unchanged journal position, an unchanged sequence counter (no
+    /// reservation either) and no active transaction mean no page was dirtied and
+    /// no header field moved since recovery finished.
+    /// </summary>
+    private bool IsUnwrittenSinceOpen()
+    {
+        if (_openedAt is not { } openedAt)
+        {
+            return false;
+        }
+
+        lock (_transactionLock)
+        {
+            if (_activeTransactionCount > 0 || _nextTransactionSequence != openedAt.Sequence)
+            {
+                return false;
+            }
+        }
+
+        return _journal!.LastLsn == openedAt.Lsn;
     }
 
     private bool RequiresDurableFlush => CommitDurability != StorageCommitDurability.None;
