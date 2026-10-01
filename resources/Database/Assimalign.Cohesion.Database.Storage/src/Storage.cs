@@ -997,7 +997,8 @@ public abstract class Storage : IStorage
     /// checkpoint the owner deferred (to analyze it first) is not truncated
     /// unanalyzed — closing then is equivalent to a crash right after recovery,
     /// which the next open already handles. That is what lets an engine refuse a
-    /// database at open (an unsupported format, say) without touching its files.
+    /// database at open (an unsupported format, say) without writing to it on the
+    /// way out; the open's own recovery has still run.
     /// </remarks>
     private void ShutdownFlush()
     {

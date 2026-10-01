@@ -283,7 +283,10 @@ the journal's checkpoint record, and under a deferred open-time checkpoint it wo
 truncate records the owner never analyzed. Skipping it is crash-equivalent (as if
 the process stopped right after recovery, which the next open already handles), and
 it is what lets an engine refuse a database at open — the SQL engine's data-storage
-format gate — while leaving its files byte-identical for the engine that wrote them.
+format gate — without writing on the way out: a cleanly closed file set stays
+byte-identical, and a crashed one keeps the journal the engine that wrote it needs.
+The open itself still runs recovery, so a crashed file set's data pages do receive
+the format-agnostic physical redo/undo before the owner can decide to refuse it.
 
 With a background checkpointer (#902) checkpoints race live transactions, so the
 emptiness check hardened from "no page write locks" to an **active-transaction count**
