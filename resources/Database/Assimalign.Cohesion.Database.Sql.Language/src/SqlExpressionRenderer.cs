@@ -47,6 +47,12 @@ public static class SqlExpressionRenderer
     // in some position: the LIKE escape clause, IS UNKNOWN, and NULLS FIRST/LAST.
     private static readonly string[] _positionalWords = ["ESCAPE", "UNKNOWN", "NULLS"];
 
+    // Builtin window functions. The parser rejects a bare call to one as an unsupported window
+    // function, so a call that parsed without error named a user function delimited, and is
+    // rendered delimited.
+    private static readonly string[] _windowFunctions =
+        ["ROW_NUMBER", "RANK", "DENSE_RANK", "LEAD", "LAG", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE", "NTILE"];
+
     /// <summary>
     /// Renders a scalar expression as canonical SQL.
     /// </summary>
@@ -91,7 +97,7 @@ public static class SqlExpressionRenderer
         SqlLikeExpression like => Operand(like.Operand, additiveLevel) + (like.IsNegated ? " NOT LIKE " : " LIKE ") +
             Operand(like.Pattern, collateLevel),
         SqlCollateExpression collate => Operand(collate.Operand, collateLevel) + " COLLATE " + collate.CollationName,
-        SqlFunctionCallExpression function => FunctionName(function.FunctionName) + "(" + List(function.Arguments) + ")",
+        SqlFunctionCallExpression function => FunctionName(function.FunctionName) + "(" + Arguments(function.Arguments) + ")",
         SqlCaseExpression caseExpression => Case(caseExpression),
         SqlCastExpression cast => "CAST(" + Expression(cast.Operand) + " AS " + CastTarget(cast.TargetType) + ")",
         SqlExistsExpression exists => (exists.IsNegated ? "NOT EXISTS (" : "EXISTS (") + Select(exists.Subquery) + ")",
@@ -371,14 +377,40 @@ public static class SqlExpressionRenderer
     /// <summary>
     /// Spells a function name bare when the bare word parses as a call to it: a builtin
     /// function, or a plain identifier. <c>CAST</c> and every other keyword are delimited,
-    /// because the bare keyword starts its own construct.
+    /// because the bare keyword starts its own construct, and so are the window function names,
+    /// whose bare call the parser rejects.
     /// </summary>
     private static string FunctionName(string name)
     {
         ThrowIfUndelimitable(name);
         bool bare = IsRegularIdentifier(name) && !name.Equals("CAST", StringComparison.OrdinalIgnoreCase) &&
+            !Contains(_windowFunctions, name) &&
             (Contains(SqlLanguageProfile.Instance.Functions, name) || !IsReservedWord(name));
         return bare ? name : "\"" + name + "\"";
+    }
+
+    /// <summary>
+    /// Renders call arguments. A leading <c>*</c> right after the open parenthesis is read as the
+    /// <c>COUNT(*)</c> star argument, so a first argument that is not the star itself but whose
+    /// text starts with one, such as <c>(*) = 1</c>, is parenthesized.
+    /// </summary>
+    private static string Arguments(IReadOnlyList<SqlExpression> arguments)
+    {
+        var builder = new StringBuilder();
+        for (int index = 0; index < arguments.Count; index++)
+        {
+            string text = Expression(arguments[index]);
+            if (index > 0)
+            {
+                builder.Append(", ");
+            }
+            else if (arguments[index] is not SqlStarExpression && text.StartsWith('*'))
+            {
+                text = "(" + text + ")";
+            }
+            builder.Append(text);
+        }
+        return builder.ToString();
     }
 
     private static void ThrowIfUndelimitable(string name)

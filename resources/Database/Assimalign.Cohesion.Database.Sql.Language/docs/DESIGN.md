@@ -146,15 +146,21 @@ output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonic
   renderer assigns each node the rung `SqlQueryParser.Expressions.cs` parses it at
   and parenthesizes an operand only when its position parses a tighter rung, with
   left associativity for logical and arithmetic operators and none for comparisons.
-  Three spellings are special because the lexer or parser folds them: a sign
+  Four spellings are special because the lexer or parser folds them: a sign
   applied to a sign is parenthesized (`--` would start a comment), `+(1)` keeps its
-  parentheses (`+1` is the literal `1`), and `NOT` before a plain `EXISTS` is
-  parenthesized (`NOT EXISTS` is one construct).
+  parentheses (`+1` is the literal `1`), `NOT` before a plain `EXISTS` is
+  parenthesized (`NOT EXISTS` is one construct), and a call's first argument whose
+  text starts with `*` but is not the star itself is parenthesized (`f((* = 1))`,
+  because `f(*` is read as the `COUNT(*)` star argument).
 - **Identifiers are delimited only when needed**, mirroring the lexer's identifier
   scan: a keyword, builtin function name, unsupported-vocabulary or positional word,
   or a name the lexer would not read as one word is quoted; a name containing `"`
   cannot be delimited and is refused with `NotSupportedException`, as is a node type
-  the parser does not produce.
+  the parser does not produce. A called function name is bare when it is a builtin
+  or a plain word, except `CAST` and the nine window function names (`ROW_NUMBER`,
+  `RANK`, ...): a bare call to one of those parses as the window function, which the
+  dialect rejects, so an error-free tree that calls one named a delimited user
+  function and keeps the quotes (`"rank"(x)`).
 - **The invariant is tested, not assumed.** `SqlExpressionRendererTests` pins the
   canonical spelling of every form a CHECK accepts, proves that parsing the output
   yields the same tree (positions aside; a CAST target's whitespace is normalized)

@@ -213,7 +213,8 @@ the tree alone:
   name, a word with a positional meaning such as `escape`, a name with spaces,
   punctuation or a combining mark, or a name starting with a digit. `"qty"`
   becomes `qty`, while `"order"` and `"my qty"` keep their quotes; unicode words
-  such as `größe` stay bare. Function names keep their spelling (`lower(name)`).
+  such as `größe` stay bare. Function names keep their spelling (`lower(name)`); a
+  user function named like a window function stays delimited (`"rank"(x)`).
 
 For example, `CHECK (QTY>0   and /* upper */ qty<100)` is stored, and reported in
 `INFORMATION_SCHEMA.CHECK_CONSTRAINTS.CHECK_CLAUSE`, as `QTY > 0 AND qty < 100`,
