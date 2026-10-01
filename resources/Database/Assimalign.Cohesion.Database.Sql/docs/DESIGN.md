@@ -321,8 +321,8 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   proof surface — the planner suite asserts an indexed equality seek examines
   O(matches) records while the equivalent scan examines O(table).
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
-  chains (record-space format version 3).** Every data record is
-  `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
+  chains (since record-space format version 3; the current format is 4).**
+  Every data record is `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
   B+Tree leaf-entry design adopted for the record space — followed by the
   shared tuple codec payload (#854): the owning table's object id, then one
   self-describing component per column. Why a fixed binary prefix and not
@@ -337,7 +337,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   pages** — O(table), not O(database) — and `DROP TABLE` releases the
   table's whole chain back to the allocator (transactionally, inside the
   statement bracket; the record-byte layout is unchanged from version 2, and
-  the object-id prefix stays as defense in depth and upgrade detection).
+  the object-id prefix stays as defense in depth).
 - **Scans are snapshot-visible.** Every scan filters through the statement's
   snapshot: a version is visible when `IsVisible(writer)` and its deleter — when
   stamped — is *not* admitted (a visible tombstone reads as absence). Updates
@@ -349,61 +349,37 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   images. Deletes tombstone (older snapshots keep the row until the purge
   worker reclaims below every live horizon). DDL row rewrites (DROP COLUMN)
   walk *every* stored version, visible or not, preserving stamps.
-- **Migration rule (record-space format version, catalog-persisted).** The
-  catalog stores the record-space format version (a kind-4 record for versions
-  1–3, a kind-8 record from version 4) — the format
-  of the whole data file set, rows and the index trees that ride it: 1 = the
-  pre-MVCC unstamped layout, 2 = stamped rows in the shared page stream, 3 =
-  stamped rows in per-object page chains, 4 = index keys in the temporal
-  identity encoding (#1099, below). A version newer than the engine is refused
-  at open, as soon as the catalog is open and before recovery's scrub, index
-  purge and checkpoint run over the data file set. Engines before format 4
-  (through 10.0.0-preview.1) never compared the marker against a newer version,
-  so the format-4 marker moved to a record kind those catalogs refuse to load:
-  they fail the open instead of writing format-3 keys into rebuilt trees, which
-  the newer engine would then trust under its unchanged marker. Downgrade is
-  unsupported. Older databases upgrade in place at
-  open, stage by stage, marker written after every stage so each is
-  idempotent across the two-storage crash window: (1 → 2) every record gains
-  a zeroed stamp header (writer 0 = committed bootstrap data, visible to
-  every snapshot) under one storage transaction — idempotent because a
-  version-1 record always begins with the tuple codec's nonzero Int64 tag
-  byte, so an already-stamped record is provably upgraded and skipped on
-  replay; (2 → 3) rows relocate from the shared (owner-zero) pages into their
-  table's chain, stamps preserved verbatim (visibility unchanged), the
-  emptied shared pages released, and rows whose object id no longer exists in
-  the catalog (residue of pre-chain DROP TABLEs) dropped rather than moved —
-  idempotent because the stage reads only owner-zero pages and a moved record
-  lives on an owner-tagged page. Relocation changes row locations, which is
-  safe at upgrade time: nothing persistent references locations (the
-  version-store ledger dies with the process; index entries reference
-  locations only from format 3 onward, and a version-2 database cannot have
-  SQL indexes); (3 → 4) every index with a `TIMESTAMP` or `TIMESTAMPTZ` key
-  column is rebuilt from the stored row versions under the temporal identity
-  encoding (format-3 keys carried the `DateTimeKind` and the offset, so seeks
-  missed rows SQL called equal and UNIQUE admitted one instant twice). The
-  rebuild reuses the CREATE INDEX build — every version, original stamps — into
-  a new tree inside one durable bracket of an upgrade transaction; one catalog
-  self-commit then swaps the registrations, and the marker moves last. The old
-  tree only leaves the directory (pages await vacuum, as after DROP INDEX), so a
-  crash before the swap re-attaches it untouched and a crash after it attaches
-  the new tree; either way the stage re-runs from the rows. Indexes over other
-  types keep their trees (their key bytes are identical under both formats).
-  **Decision: a rebuild never fails the open.** Rows that the old keys kept
-  apart in a UNIQUE index but the identity makes equal are carried into the new
-  tree as they are (no duplicate check, unlike CREATE UNIQUE INDEX): failing the
-  open would leave the data unreachable, while the carried tree still rejects
-  every further equal value and the duplicates can be deleted or changed. The
-  cost lands on those rows until they are resolved: an UPDATE re-inserts every
-  index entry of the row, so any UPDATE that leaves a duplicate on the shared
-  key fails with a UNIQUE violation, including one of non-key columns only; and
-  foreign keys find children by value, so ON DELETE RESTRICT refuses to delete
-  either duplicate parent while a child references the value, and ON DELETE
-  CASCADE deletes those children with either duplicate, although the remaining
-  duplicate still matches them. DIALECT.md documents the resolution (delete or
-  re-key all but one row of each set, children first). The
-  rejected alternative — a versioned key format read side by side with the new
-  one — would have kept two key identities alive in every seek and unique check.
+- **Format rule (data-storage format version, catalog-persisted): exactly one
+  format, no upgrade path.** The catalog stores the format version of the whole
+  data file set, rows and the index trees that ride it (a kind-4 record for
+  versions 1–3, a kind-8 record from version 4). The engine reads and writes
+  format 4 only: stamped rows in per-object page chains whose index keys use the
+  temporal identity encoding (#1099, below). The earlier versions are history —
+  1 = the pre-MVCC unstamped layout, 2 = stamped rows in the shared page stream,
+  3 = per-object chains with the `DateTimeKind` and offset inside temporal keys
+  (written through 10.0.0-preview.1). `CreateDatabaseAsync` writes the format-4
+  marker as soon as the catalog opens. `OpenDatabaseAsync` refuses a database on
+  any other version, older or newer, with a `DatabaseException` that names the
+  database, the version found and the version supported, and tells the user to
+  recreate an older database. The check runs as soon as the catalog is open,
+  before the transaction coordinator, the index manager, recovery's scrub and
+  checkpoint, or any statement read or write the data file set. A database
+  without a catalog storage (an interrupted creation, or one older than the
+  catalog's own file set) is refused before any file is opened, never adopted
+  with an empty catalog. The refused open leaves the files byte-identical,
+  because a storage closed with nothing written through it writes nothing
+  (Storage DESIGN.md). That matters because the old engine must still be able
+  to open the database to export its data, including running its own
+  transaction recovery over a journal the refused open did not truncate.
+  **Decision (owner, 2026-10-01): no upgrade path while the line is
+  pre-release.** #1099's first implementation rebuilt temporal indexes on open
+  and carried UNIQUE duplicates the new identity exposed; it was withdrawn
+  together with the earlier in-place stages (1 → 2 stamping, 2 → 3 chain
+  relocation), and upgrades are designed fresh in #1152 (in-place or offline,
+  duplicate handling, crash safety, progress). **Downgrade fence:** engines
+  before format 4 never compared the marker against a newer version, so the
+  format-4 marker is a record kind their catalogs refuse to load; they fail the
+  open instead of writing format-3 keys into a format-4 database.
 - **Schema evolution (#1023):** `ADD COLUMN` validates the literal default and
   current rows under the exclusive object lock before publishing the complete
   replacement definition in one catalog transaction. Backfill is resolved at
@@ -492,13 +468,13 @@ declared dialect and retain their existing unsupported-clause diagnostics.
 - **Shared record-space composition (#918).** `SqlTransactionRecordSpace`
   supplies row reads, transactional updates/deletes, and the existing packed
   location codec to `RecordSpaceVersionStore` in `Database.Transactions`.
-  `SqlRowCodec` retains SQL tuple encoding and legacy-format migration, while
+  `SqlRowCodec` retains SQL tuple encoding, while
   its stamp operations delegate to the shared `RecordVersionStamp` contract
   ([layout](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#record-stamp-prefix-the-16-byte-contract)).
   `RecordVersionIndex` in Indexing binds each live secondary index to the
-  shared undo ledger. Recovery ordering is unchanged: re-attach indexes,
-  analyze and scrub records, scrub indexes with the same classification, then
-  complete the deferred checkpoint before the existing format upgrades.
+  shared undo ledger. Recovery ordering is unchanged: check the data-storage
+  format, re-attach indexes, analyze and scrub records, scrub indexes with the
+  same classification, then complete the deferred checkpoint.
 - **Write statements execute in two phases; the physical bracket is per
   statement (§3.8's migration path).** Phase one — no physical bracket: scan
   through the statement snapshot, collect targets, acquire an IntentExclusive
@@ -1060,7 +1036,7 @@ four independently shippable steps:
    visibility is correct by construction, no stable row identity is needed
    (the rejected copy-out design required one to key chains across record
    relocation), and the purge worker reclaims dead versions where they lie.
-   See "Row format" and "Migration rule" under the execution model.
+   See "Row format" and "Format rule" under the execution model.
 3. **Row-grain write conflicts — delivered (#909):** exclusive row locks via
    `ILockManager` (the B+Tree uniqueness-lock precedent) replaced page
    conflicts as the user-visible surface — concurrent writers to disjoint rows
@@ -1173,6 +1149,7 @@ seek prefixes and range bounds, unique-key locks, and build/backfill duplicate
 detection. The key is the Types identity form (`SpecifyKind(Unspecified)`,
 `ToUniversalTime()`), so the component layout and decoding are unchanged; rows
 keep the round-trip value encoding. Because key equality now equals evaluator
-equality for both types, they are range-sargable and join-seekable. Format-3
-indexes are rebuilt at open (migration rule above); the dialect contract is
-DIALECT.md "Temporal value identity".
+equality for both types, they are range-sargable and join-seekable. The rule
+changed the on-disk key format to data-storage format 4, and a format-3
+database is refused at open rather than rebuilt (format rule above; upgrades
+are #1152); the dialect contract is DIALECT.md "Temporal value identity".

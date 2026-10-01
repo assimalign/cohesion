@@ -237,18 +237,29 @@ public sealed class SqlDatabaseEngine : IDatabaseEngine
                 throw new DatabaseNotFoundException($"Database '{name}' does not exist.");
             }
 
+            // The catalog holds the data-storage format marker. Without it the
+            // database cannot pass the format gate, and this engine neither
+            // upgrades nor repairs databases, so refuse before opening (or
+            // creating) any file.
+            if (!_strategy.StorageExists(name + CatalogSuffix))
+            {
+                throw new DatabaseException(
+                    $"Database '{name}' has no catalog storage, so it has no data-storage format this engine can open: " +
+                    "its creation was interrupted, or it was written before the catalog had its own file set. " +
+                    "This engine does not upgrade or repair databases: drop the database and recreate it " +
+                    "(on-disk format upgrades are tracked by assimalign/cohesion#1152).");
+            }
+
             var storage = _strategy.OpenStorage(name);
             SqlStorage? catalogStorage = null;
 
             // See CreateDatabaseAsync: instance construction commits (recovery
-            // checkpoint, record-space upgrade), so the flush worker must see the
-            // storages first under grouped durability.
+            // scrub and checkpoint), so the flush worker must see the storages
+            // first under grouped durability.
             try
             {
                 ConfigureStorage(storage, name);
-                catalogStorage = _strategy.StorageExists(name + CatalogSuffix)
-                    ? _strategy.OpenStorage(name + CatalogSuffix)
-                    : _strategy.CreateStorage(name + CatalogSuffix);
+                catalogStorage = _strategy.OpenStorage(name + CatalogSuffix);
                 ConfigureStorage(catalogStorage, name + CatalogSuffix);
                 PublishStorageSnapshotLocked(storage, catalogStorage);
                 var database = new SqlDatabaseInstance(name, this, storage, catalogStorage, recover: true);

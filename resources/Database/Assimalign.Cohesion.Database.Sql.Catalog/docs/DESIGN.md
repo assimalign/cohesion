@@ -83,21 +83,21 @@ uses those same transforms for uniqueness enforcement.
   stream vs per-object page chains) is a page-placement property no record
   carries, and version 3 vs 4 (index keys with or without the temporal kind and
   offset, #1099) is a property of the index trees — so the database-grain marker
-  is catalog metadata, read by the engine at open to decide which in-place
-  upgrade stages to run. Absent marker reads as version 1 (pre-marker
-  databases); the engine writes the current version (4) after upgrading (or at
-  creation, when the space is born on the current format).
+  is catalog metadata. The engine writes its version (4) when it creates a
+  database and refuses to open one whose marker reads anything else; it has no
+  upgrade path (owner decision of 2026-10-01; upgrades are #1152). Absent marker
+  reads as version 1 (pre-marker databases).
 - **From version 4 the marker is a kind-8 record (downgrade fence, #1099).**
   Catalogs before format 4 (through 10.0.0-preview.1) load kinds 1–7 and throw
   `SqlCatalogException` on any other kind, but their engines did not refuse a
   marker newer than they understood. Left at kind 4, a format-4 marker would
   let such an engine open the database and write format-3 temporal keys into
-  the rebuilt trees, and the newer engine would trust those trees because the
-  marker still reads 4. `SetRecordSpaceFormatVersionAsync` therefore rewrites
-  the single marker record in place as kind 8 for any version of 4 or more (and
-  as kind 4 below that); `Load` reads either kind. An older engine now fails the
-  open with "Malformed catalog record of kind 8" instead of corrupting the
-  indexes; downgrade is unsupported.
+  it, and the newer engine would trust those keys because the marker still
+  reads 4. `SetRecordSpaceFormatVersionAsync` therefore rewrites the single
+  marker record in place as kind 8 for any version of 4 or more (and as kind 4
+  below that); `Load` reads either kind. An older engine now fails the open
+  with "Malformed catalog record of kind 8" instead of corrupting the indexes;
+  downgrade is unsupported.
 - **The applied compiled-schema state lives here** (kind-6 records). The catalog
   stores the lowercase content hash together with the complete canonical schema
   document. Documents are strict UTF-8 and chunked into bounded records; replacing

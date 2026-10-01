@@ -88,9 +88,11 @@ references makes cross-model ordering a compile-time fact rather than a conventi
   The component layout is unchanged, so identity keys decode with the ordinary
   reader (as `Unspecified` and `+00:00`), and keys of values already in identity
   form keep their prior bytes. The normalization lives with the consumer that
-  defines the equality — the SQL engine applies it on every key path and
-  rebuilds indexes written before it (Sql DESIGN.md, migration rule) — not in
-  the writer, because rows and the wire protocol need the round-trip bytes.
+  defines the equality — the SQL engine applies it on every key path and, since
+  keys written before it differ, refuses databases on the older data-storage
+  format instead of rebuilding them (Sql DESIGN.md, format rule; upgrades are
+  #1152) — not in the writer, because rows and the wire protocol need the
+  round-trip bytes.
   Documents, Graph and KeyValuePair key no temporal values today.
 - `Guid` orders by RFC 4122 big-endian bytes (not SQL Server's segment order).
 - **JSON kinds are not key components.** `DatabaseType.Json`/`JsonBinary` exist as

@@ -39,10 +39,21 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
             ? SqlCatalog.Open(catalogStorage)
             : SqlCatalog.Open(catalogStorage, defaultCollation);
 
-        // Refuse a newer data-storage format before any engine component reads
-        // the data file set: recovery's scrub, index purge and checkpoint below
-        // would otherwise run with this engine's older semantics.
-        ThrowIfFormatIsNewer();
+        // The data-storage format gate, before any engine component touches the
+        // data file set: an existing database must be on exactly this engine's
+        // format (recovery's scrub, index purge and checkpoint below would
+        // otherwise run with the wrong key encoding), and a new one is born on it.
+        if (recover)
+        {
+            ThrowIfFormatIsNotCurrent();
+        }
+        else
+        {
+            // Synchronous over the ValueTask by design: catalog writes complete
+            // synchronously and instance construction is a synchronous path.
+            _catalog.SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion)
+                .AsTask().GetAwaiter().GetResult();
+        }
 
         _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new SqlTransactionRecordSpace(storage));
 
@@ -79,268 +90,36 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
 
             _coordinator.CompleteRecovery();
         }
-
-        UpgradeRecordSpaceIfNeeded();
     }
 
     /// <summary>
-    /// Refuses a data storage on a format newer than this engine writes, rather
-    /// than reading it with an older key encoding. Runs as soon as the catalog is
-    /// open, before the transaction coordinator, the index manager or recovery
-    /// touch the data file set.
+    /// Refuses an existing data storage on any format but this engine's own. The
+    /// engine has no upgrade path (owner decision of 2026-10-01; upgrades are
+    /// #1152): an older database must be recreated, and a newer one belongs to
+    /// the engine that wrote it. Runs as soon as the catalog is open, before the
+    /// transaction coordinator, the index manager or recovery read or write the
+    /// data file set, so a refused database is left exactly as it was found and
+    /// the engine that wrote it can still open it.
     /// </summary>
-    private void ThrowIfFormatIsNewer()
+    /// <exception cref="DatabaseException">The data-storage format is not <see cref="SqlRowCodec.RecordSpaceFormatVersion"/>.</exception>
+    private void ThrowIfFormatIsNotCurrent()
     {
         int version = _catalog.RecordSpaceFormatVersion;
+        int current = SqlRowCodec.RecordSpaceFormatVersion;
 
-        if (version > SqlRowCodec.RecordSpaceFormatVersion)
-        {
-            throw new DatabaseException(
-                $"Database '{Name}' uses data-storage format version {version}, newer than this engine understands " +
-                $"({SqlRowCodec.RecordSpaceFormatVersion}).");
-        }
-    }
-
-    /// <summary>
-    /// Upgrades an older data storage in place, at open, before any session
-    /// exists: a pre-MVCC (version-1) space first gains version stamps, a
-    /// pre-chain (version-2) space is relocated into per-object page chains, and
-    /// a version-3 space rebuilds the indexes whose keys carry temporal
-    /// components under the identity encoding; the catalog then persists the
-    /// current format version. Each stage commits all-or-nothing and is
-    /// idempotent across the two-storage crash window, because the marker write
-    /// is last: a crash after a stage's commit re-runs it safely (see each stage).
-    /// A version newer than this engine writes never gets here: the constructor
-    /// refuses it first (<see cref="ThrowIfFormatIsNewer"/>).
-    /// </summary>
-    private void UpgradeRecordSpaceIfNeeded()
-    {
-        int version = _catalog.RecordSpaceFormatVersion;
-
-        if (version >= SqlRowCodec.RecordSpaceFormatVersion)
+        if (version == current)
         {
             return;
         }
 
-        if (version < 2)
-        {
-            UpgradeUnstampedRecords();
-        }
+        string remedy = version < current
+            ? "This engine does not upgrade databases written in an older format: recreate the database with this " +
+              "engine and reload its data, exporting it first with the engine that wrote it " +
+              "(on-disk format upgrades are tracked by assimalign/cohesion#1152)."
+            : "The database was written by a newer engine; open it with that engine.";
 
-        if (version < 3)
-        {
-            RelocateRecordsToOwnerChains();
-        }
-
-        RebuildTemporalKeyIndexes();
-
-        // Marker last. Synchronous over the ValueTask by design: catalog writes
-        // complete synchronously and instance open is a synchronous path.
-        _catalog.SetRecordSpaceFormatVersionAsync(SqlRowCodec.RecordSpaceFormatVersion)
-            .AsTask().GetAwaiter().GetResult();
-    }
-
-    /// <summary>
-    /// The version-3 → version-4 stage (#1099): version-3 index keys carried a
-    /// TIMESTAMP's <see cref="DateTimeKind"/> and a TIMESTAMPTZ's offset, so
-    /// values SQL calls equal could sit under different keys — seeks missed rows
-    /// and UNIQUE admitted the same instant twice. Every index with a TIMESTAMP or
-    /// TIMESTAMPTZ key column is rebuilt from the stored row versions under the
-    /// identity encoding (<see cref="SqlRowCodec.ToKeyIdentity"/>); indexes over
-    /// other types encode identical bytes under both versions and are left alone.
-    /// The new trees commit durably first, then one catalog self-commit swaps the
-    /// registrations, then the marker moves. Idempotent: a crash before the
-    /// registration swap re-attaches the untouched old trees, a crash after it
-    /// re-attaches the new ones, and either way the stage rebuilds again from the
-    /// rows on the next open (only unreachable tree pages leak, as after DROP INDEX).
-    /// </summary>
-    private void RebuildTemporalKeyIndexes()
-    {
-        var targets = new List<(SqlCatalogTable Table, SqlCatalogIndex Index)>();
-
-        foreach (var table in _catalog.Tables)
-        {
-            foreach (var index in _catalog.GetIndexes(table.ObjectId))
-            {
-                if (HasTemporalKeyColumn(table, index))
-                {
-                    targets.Add((table, index));
-                }
-            }
-        }
-
-        if (targets.Count == 0)
-        {
-            return;
-        }
-
-        var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, parameters: null);
-        var context = _coordinator.BeginAsync(IsolationLevel.Snapshot).AsTask().GetAwaiter().GetResult();
-
-        try
-        {
-            _coordinator.ApplyStatementAsync(context, async bracket =>
-            {
-                foreach (var (table, index) in targets)
-                {
-                    await executor.RebuildIndexAsync(context, bracket, table, index, CancellationToken.None).ConfigureAwait(false);
-                }
-
-                return true;
-            }, durable: true).AsTask().GetAwaiter().GetResult();
-        }
-        catch
-        {
-            _coordinator.RollbackAsync(context).AsTask().GetAwaiter().GetResult();
-            throw;
-        }
-
-        _coordinator.CommitAsync(context).AsTask().GetAwaiter().GetResult();
-
-        // One catalog self-commit points every rebuilt index at its new root.
-        _catalog.SaveIndexRegistrationsAsync(((IIndexRegistry)_indexManager).ExportRegistrations())
-            .AsTask().GetAwaiter().GetResult();
-
-        static bool HasTemporalKeyColumn(SqlCatalogTable table, SqlCatalogIndex index)
-        {
-            foreach (string name in index.ColumnNames)
-            {
-                foreach (var column in table.Columns)
-                {
-                    if (string.Equals(column.Name, name, StringComparison.OrdinalIgnoreCase)
-                        && column.Type.Type is DatabaseType.DateTime or DatabaseType.DateTimeOffset)
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// The version-1 → version-2 stage: every data record gains a zeroed 16-byte
-    /// version-stamp header (writer zero reads as committed bootstrap data,
-    /// visible to every snapshot). Idempotent: a version-1 record always begins
-    /// with the tuple codec's nonzero <c>Int64</c> tag byte, so a record already
-    /// carrying a zeroed stamp header is provably upgraded and skipped when a
-    /// crash replays the stage on the next open.
-    /// </summary>
-    private void UpgradeUnstampedRecords()
-    {
-        var records = new List<(PageId PageId, int SlotIndex, byte[] Data)>();
-
-        using (var iterator = _storage.GetUnitIterator())
-        {
-            while (iterator.MoveNext())
-            {
-                var unit = iterator.Current;
-
-                if (!IsUpgraded(unit.Data.Span))
-                {
-                    records.Add((unit.PageId, unit.SlotIndex, unit.Data.ToArray()));
-                }
-            }
-        }
-
-        if (records.Count > 0)
-        {
-            using var transaction = _storage.BeginTransaction();
-
-            foreach (var (pageId, slotIndex, data) in records)
-            {
-                byte[] upgraded = SqlRowCodec.UpgradeUnstamped(data);
-
-                try
-                {
-                    _storage.UpdateRow(transaction, pageId, slotIndex, upgraded);
-                }
-                catch (SlottedPageException)
-                {
-                    // The stamp header outgrew the slot: relocate.
-                    _storage.DeleteRow(transaction, pageId, slotIndex);
-                    _storage.InsertRow(transaction, upgraded);
-                }
-            }
-
-            transaction.Commit();
-        }
-
-        static bool IsUpgraded(ReadOnlySpan<byte> record)
-        {
-            // A version-1 record starts with the tuple codec's Int64 tag byte
-            // (never zero); an upgraded-but-unmarked record starts with the
-            // zeroed bootstrap stamp header.
-            if (record.Length < SqlRowCodec.StampHeaderSize)
-            {
-                return false;
-            }
-
-            return !record.Slice(0, SqlRowCodec.StampHeaderSize).ContainsAnyExcept((byte)0);
-        }
-    }
-
-    /// <summary>
-    /// The version-2 → version-3 stage: rows move out of the shared (owner-zero)
-    /// page stream into their table's per-object page chain, stamps preserved
-    /// verbatim (visibility is unchanged by the move), and the emptied shared
-    /// pages are released. Rows whose object id no longer exists in the catalog —
-    /// residue of tables dropped before chains existed — are dropped rather than
-    /// moved (the catalog is the schema authority; such rows are unreachable).
-    /// Idempotent: the stage reads only owner-zero pages, and a moved record
-    /// lives on an owner-tagged page, so a crash between the relocation commit
-    /// and the marker write re-runs an empty pass.
-    /// </summary>
-    private void RelocateRecordsToOwnerChains()
-    {
-        var knownObjects = new HashSet<ulong>();
-        foreach (var table in _catalog.Tables)
-        {
-            knownObjects.Add(table.ObjectId);
-        }
-
-        var moves = new List<(PageId PageId, int SlotIndex, ulong ObjectId, byte[] Data)>();
-
-        using (var iterator = _storage.GetUnitIterator(0))
-        {
-            while (iterator.MoveNext())
-            {
-                var unit = iterator.Current;
-
-                if (unit.Data.Length <= SqlRowCodec.StampHeaderSize)
-                {
-                    continue;
-                }
-
-                var reader = new DatabaseKeyReader(unit.Data.Span[SqlRowCodec.StampHeaderSize..]);
-                ulong objectId = (ulong)reader.ReadInt64();
-
-                moves.Add((unit.PageId, unit.SlotIndex, objectId, unit.Data.ToArray()));
-            }
-        }
-
-        if (moves.Count == 0 && _storage.GetOwnerPages(0).Count == 0)
-        {
-            return;
-        }
-
-        using var relocation = _storage.BeginTransaction();
-
-        foreach (var (pageId, slotIndex, objectId, data) in moves)
-        {
-            _storage.DeleteRow(relocation, pageId, slotIndex);
-
-            if (knownObjects.Contains(objectId))
-            {
-                _storage.InsertRow(relocation, objectId, data);
-            }
-        }
-
-        // The shared pages are empty now — release the whole owner-zero chain so
-        // the space returns to the allocator.
-        _storage.FreeOwnerPages(relocation, 0);
-        relocation.Commit();
+        throw new DatabaseException(
+            $"Database '{Name}' uses data-storage format {version}, but this engine supports only format {current}. {remedy}");
     }
 
     /// <inheritdoc />
