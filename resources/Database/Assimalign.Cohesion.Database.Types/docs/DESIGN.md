@@ -69,10 +69,30 @@ references makes cross-model ordering a compile-time fact rather than a conventi
 - **Zero-escaping for variable-length payloads** (`0x00` → `0x00 0xFF`, terminator
   `0x00 0x00`): keeps escaped-byte order identical to raw-byte order while making
   component boundaries unambiguous — the standard tuple-encoding scheme.
-- **Time semantics:** `DateTime` orders by ticks with the kind preserved but
-  non-ordering (store UTC when kinds could mix — documented on the API);
-  `DateTimeOffset` orders by UTC instant with the offset preserved and tie-breaking;
-  `Guid` orders by RFC 4122 big-endian bytes (not SQL Server's segment order).
+- **Time semantics — one encoding for values, one normalization for identity
+  (#1099).** `DateTime` encodes its ticks, then its `DateTimeKind` byte;
+  `DateTimeOffset` encodes its UTC instant, then its offset in minutes. Both
+  trailing parts exist so rows and wire parameters round-trip exactly, and both
+  break ties: values that differ only in kind, or one instant at two offsets,
+  encode as different keys. That is the *value* encoding. A key whose byte
+  equality must equal SQL equality — an index key, a seek bound, a unique-key
+  lock — appends the value's **identity form** instead:
+  - `TIMESTAMP` (`DateTime`): identity is the wall-clock ticks alone. The identity
+    form is `DateTime.SpecifyKind(value, DateTimeKind.Unspecified)`; no time-zone
+    conversion happens (a `Local` 12:00 and a `Utc` 12:00 are the same key, as
+    `DateTime.CompareTo` says they are equal).
+  - `TIMESTAMPTZ` (`DateTimeOffset`): identity is the instant alone, ordered and
+    compared by UTC ticks. The identity form is `value.ToUniversalTime()`
+    (offset zero), so the same instant at any offset is one key.
+
+  The component layout is unchanged, so identity keys decode with the ordinary
+  reader (as `Unspecified` and `+00:00`), and keys of values already in identity
+  form keep their prior bytes. The normalization lives with the consumer that
+  defines the equality — the SQL engine applies it on every key path and
+  rebuilds indexes written before it (Sql DESIGN.md, migration rule) — not in
+  the writer, because rows and the wire protocol need the round-trip bytes.
+  Documents, Graph and KeyValuePair key no temporal values today.
+- `Guid` orders by RFC 4122 big-endian bytes (not SQL Server's segment order).
 - **JSON kinds are not key components.** `DatabaseType.Json`/`JsonBinary` exist as
   identities for storage/coercion, but ordering JSON is a model-level semantic; the
   writer exposes no append for them.

@@ -258,9 +258,10 @@ public sealed class SqlPerObjectChainTests : IDisposable
         var instance = new SqlDatabaseInstance("legacy", engine: null!, storage, catalogStorage, recover: true);
         await using var _ = instance;
 
-        // Assert: the marker moved, rows live in the table's chain, the shared
-        // space is empty, and everything is still visible with stamps preserved.
-        instance.Catalog.RecordSpaceFormatVersion.ShouldBe(3);
+        // Assert: the marker moved (through every later stage to the current
+        // version), rows live in the table's chain, the shared space is empty,
+        // and everything is still visible with stamps preserved.
+        instance.Catalog.RecordSpaceFormatVersion.ShouldBe(SqlRowCodec.RecordSpaceFormatVersion);
         instance.DataStorage.GetOwnerPages(objectId).ShouldNotBeEmpty();
         instance.DataStorage.GetOwnerPages(0).ShouldBeEmpty();
 
@@ -314,8 +315,8 @@ public sealed class SqlPerObjectChainTests : IDisposable
         var reopened = new SqlDatabaseInstance("legacy", engine: null!, reopenedStorage, reopenedCatalogStorage, recover: true);
         await using var _ = reopened;
 
-        // Assert: no duplication, marker restored to 3.
-        reopened.Catalog.RecordSpaceFormatVersion.ShouldBe(3);
+        // Assert: no duplication, marker restored to the current version.
+        reopened.Catalog.RecordSpaceFormatVersion.ShouldBe(SqlRowCodec.RecordSpaceFormatVersion);
         await using var session = await reopened.CreateSessionAsync();
         (await Rows(session, "SELECT COUNT(*) FROM legacy")).Single()[0].ShouldBe(25L);
     }

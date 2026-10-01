@@ -21,14 +21,17 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal static class SqlRowCodec
 {
     /// <summary>
-    /// The current record-space format version, persisted in the catalog: 3 =
-    /// stamped records in per-object page chains (rows live on pages tagged with
-    /// their table's object id); 2 = stamped records in the shared page stream;
-    /// 1 = the pre-MVCC unstamped layout. Older versions upgrade in place when the
-    /// database is opened — stamps first (1 → 2), then chain relocation (2 → 3).
-    /// The record byte layout itself is unchanged since version 2.
+    /// The current format version of the database's data storage (rows and the
+    /// index trees that share its file set), persisted in the catalog: 4 =
+    /// index keys encode the temporal identity (<see cref="ToKeyIdentity"/>);
+    /// 3 = stamped records in per-object page chains (rows live on pages tagged
+    /// with their table's object id); 2 = stamped records in the shared page
+    /// stream; 1 = the pre-MVCC unstamped layout. Older versions upgrade in place
+    /// when the database is opened — stamps first (1 → 2), then chain relocation
+    /// (2 → 3), then a rebuild of every index keyed on a TIMESTAMP or TIMESTAMPTZ
+    /// column (3 → 4). The record byte layout itself is unchanged since version 2.
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 3;
+    internal const int RecordSpaceFormatVersion = 4;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.
@@ -138,9 +141,43 @@ internal static class SqlRowCodec
     }
 
     /// <summary>
+    /// Appends one typed value as an index-key component: the identity encoding
+    /// every key path shares (maintenance, seek bounds, unique-key locks and build
+    /// duplicate detection). Strings encode under the column's effective
+    /// collation and temporal values encode their <see cref="ToKeyIdentity"/>
+    /// form, so for every key type except floating point two keys are byte-equal
+    /// exactly when <see cref="SqlValueComparer"/> calls their values equal.
+    /// Floating keys keep the IEEE bytes, so positive and negative zero stay
+    /// distinct keys although SQL calls them equal; that is why the planner never
+    /// seeks a signed-zero equality or a floating range, and joins never seek
+    /// floating keys.
+    /// </summary>
+    internal static void AppendKeyValue(DatabaseKeyWriter writer, DatabaseType type, object? value, Collation collation)
+        => AppendValue(writer, type, ToKeyIdentity(value), collation);
+
+    /// <summary>
+    /// Maps a value to the canonical member of its SQL equality class for key
+    /// encoding (#1099). A <c>TIMESTAMP</c> keeps its ticks and drops its
+    /// <see cref="DateTimeKind"/> (encoded as <see cref="DateTimeKind.Unspecified"/>;
+    /// no time-zone conversion happens, matching the comparer); a
+    /// <c>TIMESTAMPTZ</c> becomes the same instant at offset zero. Every other
+    /// value is returned unchanged. Rows never pass through this mapping — they
+    /// keep the written kind and offset.
+    /// </summary>
+    internal static object? ToKeyIdentity(object? value) => value switch
+    {
+        DateTime timestamp when timestamp.Kind != DateTimeKind.Unspecified
+            => DateTime.SpecifyKind(timestamp, DateTimeKind.Unspecified),
+        DateTimeOffset instant when instant.Offset != TimeSpan.Zero
+            => instant.ToUniversalTime(),
+        _ => value,
+    };
+
+    /// <summary>
     /// Appends one typed value as a self-describing, order-preserving component —
-    /// shared by row and index encoding. Rows preserve original strings under
-    /// Binary; index callers supply the column's effective collation.
+    /// the row encoding, which round-trips the written value exactly (original
+    /// strings under Binary, DateTime kinds and DateTimeOffset offsets). Index
+    /// keys go through <see cref="AppendKeyValue"/> instead.
     /// </summary>
     internal static void AppendValue(DatabaseKeyWriter writer, DatabaseType type, object? value, Collation? collation = null)
     {
