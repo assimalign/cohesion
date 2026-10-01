@@ -228,6 +228,8 @@ internal sealed partial class SqlPlanner
             _ => call.Arguments.Count > 0 ? GroupExpressionType(call.Arguments[0], columns, evaluator) : DatabaseType.Null,
         },
         SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
+        // Unary plus returns its operand unchanged; only negation widens exact integers.
+        SqlUnaryExpression { Operator: SqlUnaryOperator.Plus } plus => GroupExpressionType(plus.Operand, columns, evaluator),
         SqlUnaryExpression unary => GroupExpressionType(unary.Operand, columns, evaluator) switch
         {
             DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64 => DatabaseType.Int64,

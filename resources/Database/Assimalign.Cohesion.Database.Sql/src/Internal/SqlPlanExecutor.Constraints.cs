@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
-using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
@@ -305,21 +304,6 @@ internal sealed partial class SqlPlanExecutor
     private static bool SameConstraintColumns(IReadOnlyList<string> left, IReadOnlyList<string> right)
         => left.Count == right.Count && left.All(column => right.Contains(column, StringComparer.OrdinalIgnoreCase));
 
-    private static IEnumerable<string> CheckColumns(SqlExpression expression)
-    {
-        if (expression is SqlColumnReferenceExpression column)
-        {
-            yield return column.ColumnName;
-        }
-        foreach (var child in SqlPlanner.Children(expression))
-        {
-            foreach (string name in CheckColumns(child))
-            {
-                yield return name;
-            }
-        }
-    }
-
     private static bool ValuesEqual(object? left, object? right, Collation? collation = null)
         => left is null || right is null ? left is null && right is null : SqlExpressionEvaluator.Compare(left, right, collation) == 0;
 
@@ -348,24 +332,27 @@ internal sealed partial class SqlPlanExecutor
     private void ValidateRows(SqlCatalogTable table, IReadOnlyList<object?[]> rows, SqlStatementContext statement,
         CancellationToken cancellationToken, bool current = false, List<SqlParentReference>? references = null)
     {
+        // The table version's CHECK predicates were parsed and bound once, when the catalog
+        // loaded or the DDL that produced this version ran; a write only evaluates them.
+        var bound = _definitions.Get(table);
+        SqlExpressionEvaluator? evaluator = null;
         foreach (var constraint in table.Constraints)
         {
             if (constraint.Kind == SqlCatalogConstraintKind.Check)
             {
-                var expression = ParseCheck(constraint.CheckExpression!);
-                var evaluator = new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+                var check = bound.GetCheck(constraint);
+                evaluator ??= new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation);
                 foreach (var row in rows)
                 {
                     // SQL UNKNOWN satisfies CHECK; only FALSE rejects a row.
-                    object? result = evaluator.Evaluate(expression, row);
+                    object? result = evaluator.Evaluate(check.Predicate, row);
                     if (result is not null and not bool)
                     {
                         throw new DatabaseException($"CHECK '{constraint.Name}' must evaluate to BOOLEAN.");
                     }
                     if (result is false)
                     {
-                        throw Violation(table, constraint, CheckColumns(expression).Distinct(StringComparer.OrdinalIgnoreCase)
-                            .Select(column => row[FindColumnOrdinal(table, column)]).ToArray());
+                        throw Violation(table, constraint, check.ColumnOrdinals.Select(ordinal => row[ordinal]).ToArray());
                     }
                 }
                 continue;
@@ -542,16 +529,19 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private static SqlExpression ParseCheck(string text)
+    /// <summary>
+    /// Binds a CHECK predicate to a table version: every column and collation must resolve, and
+    /// the predicate must be a deterministic Boolean row expression. DDL runs it on the declared
+    /// predicate, and the bound-table cache on the persisted one when it loads.
+    /// </summary>
+    /// <param name="expression">The predicate.</param>
+    /// <param name="table">The table version the predicate constrains.</param>
+    /// <param name="defaultCollation">The database default collation.</param>
+    /// <exception cref="DatabaseException">The predicate does not bind or is not a valid CHECK.</exception>
+    internal static void ValidateCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation)
     {
-        var parsed = new SqlQueryParser().Parse($"SELECT * FROM __constraint WHERE {text}");
-        if (parsed.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error) ||
-            parsed is not SqlQueryStatement { SqlExpression: SqlSelectExpression { Where: { } expression } })
-        {
-            throw new DatabaseException("CHECK requires a valid scalar predicate.");
-        }
-
-        return expression;
+        SqlPlanner.ValidateExpression(expression, new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation));
+        ValidateCheckSyntax(expression, table, requireBoolean: true);
     }
 
     private static string ConstraintName(SqlCatalogTable table, SqlConstraintDefinition definition, int ordinal)
@@ -587,11 +577,17 @@ internal sealed partial class SqlPlanExecutor
 
             if (definition.Kind == SqlConstraintKind.Check)
             {
-                var expression = definition.CheckExpression ?? ParseCheck(definition.CheckExpressionText!);
-                SqlPlanner.ValidateExpression(expression, new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues));
-                ValidateCheckSyntax(expression, table, requireBoolean: true);
+                var expression = definition.CheckExpression
+                    ?? throw new DatabaseException("CHECK requires a valid scalar predicate.");
+                ValidateCheck(expression, table, _catalog.DefaultCollation);
+
+                // The catalog stores the canonical text of the parsed predicate, not the text as
+                // written: no spelling, and no leniency an older parser had for it, reaches
+                // storage, and the text is proven to reload to this tree before it is kept.
+                string canonical = SqlPersistedExpression.Canonicalize(expression,
+                    $"CHECK constraint '{name}' on table '{table.Schema}.{table.Name}'");
                 result.Add(new SqlCatalogConstraint(name, SqlCatalogConstraintKind.Check, definition.Columns,
-                    checkExpression: definition.CheckExpressionText));
+                    checkExpression: canonical));
                 continue;
             }
             var referenced = definition.ReferencedTable!;

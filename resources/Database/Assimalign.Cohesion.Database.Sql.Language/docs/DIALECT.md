@@ -62,7 +62,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `WITH` / `WITH RECURSIVE` (CTEs) | Recognized, not supported | rejected with `COHDBL001` |
 | Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `COHDBL001` |
 | `CREATE VIEW` / `DROP VIEW` | Recognized, not supported | rejected with `COHDBL001` |
-| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the supported scalar functions; parameters and aggregates are excluded. |
+| `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the supported scalar functions; parameters and aggregates are excluded. CHECK predicates and DEFAULT literals are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `ON DELETE RESTRICT` | Supported | omitted deletion action defaults to `RESTRICT`; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `COHDBL001` |
 | `BEGIN [TRANSACTION]` / `COMMIT [TRANSACTION]` / `ROLLBACK [TRANSACTION]` | Supported | session-scoped transactions through the existing MVCC coordinator; `TRANSACTION` alone is not a statement |
@@ -139,11 +139,24 @@ token in place for the enclosing parser, which finds it already reported. One
 mistake can still yield two diagnostics when it breaks two independent rules, for
 example an unclosed type argument list followed by a second statement after `;`.
 
-**Signs.** The operand of `-` is itself a unary expression, so `- -1` is
-`1`; it used to parse as a negated NULL followed by leftover text. A `+` is
-accepted only directly before a numeric literal, where it is part of the literal.
-`+a` and `+(1 + 2)` report `SQL0003`: the AST has no unary plus operator. `~` is
-not a sign of the dialect; see [Expressions](#expressions).
+**Signs.** The operand of a sign is itself a unary expression, so `- -1` is
+`1`; it used to parse as a negated NULL followed by leftover text. `+` is ISO
+unary plus on any operand: `+a`, `+(1 + 2)` and `+@p` parse to a unary-plus node
+(`SqlUnaryOperator.Plus`). Directly before a numeric literal the `+` stays part of
+the literal, so `+1` is the literal `1` and `ORDER BY +1` remains an ordinal; `+(1)`
+is unary plus applied to `1`. Unary plus returns a numeric operand with its value
+and type unchanged (`+tiny` is still `TINYINT`, unlike `-tiny`, which computes in
+BIGINT) and propagates NULL. Both signs require a numeric operand. When the plan
+already knows the operand is not a number (a string or Boolean literal, a
+string, Boolean, date/time or other non-numeric column, a predicate, `||`,
+`UPPER`/`LOWER`, a CAST to a non-numeric type, or a scalar subquery of such a
+type), the statement fails before it reads a row, with `COHSQLE003` (see the
+[arithmetic contract](#arithmetic-and-numeric-faults-1069)): `+'abc'`, `+TRUE`
+and `-name` fail over an empty table exactly as over a populated one. An operand
+whose type only its value reveals, such as a parameter bound to a string, fails
+with the same code when the row is evaluated. `+a` and `+(1 + 2)` reported
+`SQL0003` before unary plus existed. `~` is not a sign of the dialect; see
+[Expressions](#expressions).
 
 **ALTER TABLE actions.** `ADD [COLUMN]`, `ADD CONSTRAINT`, `DROP [COLUMN]` and
 `DROP CONSTRAINT` parse. Any other action, such as `RENAME TO`, `RENAME COLUMN`,
@@ -172,14 +185,61 @@ an unterminated string or comment, and a character outside the dialect), and
 fails unless every combination reports an error after the form. A clause added to
 the profile without a form fails the test, as does a new statement kind.
 
-**Persisted CHECK text.** The engine stores a `CHECK` predicate as written and
-re-parses it when it validates written rows. A predicate the parser used to
-accept leniently inside `CHECK (...)`, such as `flag NOT FALSE` (evaluated as
-`flag AND NOT FALSE`), `a BETWEEN 1 2` or a `CASE` without `THEN` or `END`, now
-fails to parse, and writes to its table report `CHECK requires a valid scalar
-predicate.` Drop the constraint and add it again in the intended form. Forms whose
-leftover text reached the closing `)` of `CHECK`, such as `IS TRUE` or an
-unterminated string, already failed when the constraint was created.
+## Persisted definitions are canonical
+
+Every SQL expression the catalog persists is stored as **canonical SQL rendered
+from its parsed tree**, never as the text the user wrote: a `CHECK` predicate, a
+literal column `DEFAULT`, and — when they arrive — expression defaults (#1121) and
+view queries (#1124), which must use the same path. `SqlExpressionRenderer` (this
+package) produces the canonical text; the engine's one persistence helper renders
+it, proves before anything is stored that the text parses back to the declared
+tree, and is the only code that reads it back. The canonical form is a function of
+the tree alone:
+
+- Keywords are upper case (`AND`, `IS NOT NULL`, `NOT BETWEEN ... AND ...`,
+  `CASE ... END`, `TRUE`, `NULL`); collation names are lower case, as the parser
+  normalizes them.
+- Binary operators, `AND`/`OR` and list separators take single spaces; `!=` is
+  written `<>`. Comments and line breaks are dropped.
+- Parentheses appear only where precedence needs them: `(qty + 1) * 2` keeps
+  them, `((qty - 1) - 2)` becomes `qty - 1 - 2`, `qty - (1 - 2)` keeps them. A sign
+  applied to a sign is parenthesized (`- -1` becomes `-(-1)`, never a `--`
+  comment), and `+(1)` keeps its parentheses so it stays unary plus.
+- Literals keep their value: strings double embedded quotes (`'O''Brien'`),
+  numbers keep their digits as written (`007`, `1.5e3`, `.5`), and a `+` that was
+  part of a numeric literal is gone (`+5` is `5`).
+- Names keep their spelling. An identifier is delimited with `"` only when the
+  lexer would not read it back as one plain word: a keyword, a builtin function
+  name, a word with a positional meaning such as `escape`, a name with spaces,
+  punctuation or a combining mark, or a name starting with a digit. `"qty"`
+  becomes `qty`, while `"order"` and `"my qty"` keep their quotes; unicode words
+  such as `größe` stay bare. Function names keep their spelling (`lower(name)`).
+
+For example, `CHECK (QTY>0   and /* upper */ qty<100)` is stored, and reported in
+`INFORMATION_SCHEMA.CHECK_CONSTRAINTS.CHECK_CLAUSE`, as `QTY > 0 AND qty < 100`,
+and `DEFAULT +5` as `5`. The renderer's corpus and a randomized round-trip test
+(`SqlExpressionRendererTests`) pin both the canonical spelling of every form a
+CHECK accepts and the invariant that parsing the rendered text yields the same
+tree. A CHECK supplied by a compiled schema keeps its author's spelling in the
+schema document; the engine compares it with the catalog by canonical form, so
+reapplying an unchanged schema stays a no-op.
+
+**Parsed once.** The engine parses and binds a table's persisted CHECK and DEFAULT
+definitions once per table version — when the database opens, and when a DDL
+statement (`CREATE TABLE`, `ALTER TABLE ADD/DROP CONSTRAINT`, `ADD/DROP COLUMN`)
+publishes a new version — and caches the result. Validated writes evaluate the
+cached predicate; no statement parses catalog text. A dropped, re-created or
+altered table is a new version, so no write is ever checked against a stale
+definition.
+
+**Fails at open.** Because canonical text always reloads, a persisted definition
+that does not parse, is more than one expression, or no longer binds to its table
+means the catalog is damaged or came from an incompatible engine build. Opening
+the database then fails with `Database '<name>' cannot be opened.`, naming the
+table and the constraint or column (`CHECK constraint 'ck_qty' on table
+'dbo.orders' cannot be loaded: ...`). It never surfaces later as a failure of
+every write to that table. Canonical storage is part of data-storage format 4;
+text from earlier formats is not migrated.
 
 ## Ordering, output aliases and ordinals (#1024)
 
@@ -517,12 +577,14 @@ like any other digit the conversion drops, so `@tiny + 1` is `1`. As a divisor
 it has no Decimal quotient and reports `COHSQLE002`, not a division by zero.
 
 An arithmetic fault fails the statement. No operator result wraps, saturates, or
-becomes NULL:
+becomes NULL. A sign applied to a value that is not a number is a fault of the
+same kind, with its own code:
 
 | Code | ISO SQLSTATE | Raised when |
 |---|---|---|
 | `COHSQLE001` | 22012, division by zero | The right operand of `/` or `%` is zero: integer, decimal, or approximate (either signed zero), whether it is a literal, column, computed value, or bound parameter. |
 | `COHSQLE002` | 22003, numeric value out of range | A BIGINT result leaves -9223372036854775808..9223372036854775807, including `-x`, `ABS(x)`, and `x / -1` for the minimum; a Decimal result exceeds `System.Decimal`; a REAL or DOUBLE operand is NaN, infinite, or beyond Decimal's range, or is a nonzero divisor below Decimal's smallest step; a numeric literal does not fit its type (see Literals); `SUM` or `AVG` overflows or meets a non-finite value; a value does not fit the common type of `CASE`/`COALESCE` branches; or a value does not fit the integer or `DECIMAL` column it is stored into. |
+| `COHSQLE003` | 42804, datatype mismatch | The operand of unary `+` or `-` is not a number: `+'abc'`, `-TRUE`, `+name` on a string column. Raised while planning when the operand's type is already known, so it fails over an empty table too, and while evaluating when only the value reveals it, such as a parameter bound to a string. See Signs under [Statement completeness](#statement-completeness-1068). |
 
 The code leads the message, for example
 `COHSQLE001: Division by zero: the right operand of '/' is zero.` In process the
@@ -542,7 +604,9 @@ the value order cannot compare (`Cannot compare values of types ...`).
   follows the rule for any failed statement: the transaction stays active with its
   earlier statements' work, and both `COMMIT` and `ROLLBACK` remain available.
 - **Evaluation point:** faults are raised where an expression is evaluated. A
-  predicate over an empty table evaluates nothing and raises nothing. A constant
+  predicate over an empty table evaluates nothing and raises nothing. The one
+  exception is `COHSQLE003` for a sign whose operand type the plan already knows,
+  which is raised while planning. A constant
   comparand that faults during index-seek planning is not used for the seek, and
   the scan faults on the first row that evaluates it. `LIMIT` and `OFFSET`
   expressions are evaluated during planning and fault there.
@@ -687,7 +751,7 @@ conventions, not the complete ISO view layouts. Columns below are listed in
 | `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`, `IS_DEFERRABLE`, `INITIALLY_DEFERRED` | Primary keys, unique indexes/constraints, foreign keys, and explicit checks; both deferral fields are `NO` |
 | `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION` | One row per primary, unique, or foreign-key column, in constraint order |
 | `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `UNIQUE_CONSTRAINT_CATALOG`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`, `MATCH_OPTION`, `UPDATE_RULE`, `DELETE_RULE` | Foreign keys with the referenced key identity; `MATCH_OPTION = 'NONE'`, `UPDATE_RULE = 'RESTRICT'`, delete rule `RESTRICT` or `CASCADE` |
-| `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `CHECK_CLAUSE` | Persisted explicit check expressions |
+| `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `CHECK_CLAUSE` | Explicit checks; `CHECK_CLAUSE` is the persisted canonical predicate (see [Persisted definitions are canonical](#persisted-definitions-are-canonical)) |
 | `COHESION_SCHEMA.INDEXES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `INDEX_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `IS_UNIQUE`, `IS_PRIMARY_KEY` | Cohesion extension: one row per index key column |
 | `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | Cohesion extension: one row per table or index; `OWNER` is `Adhoc` or `Schema` |
 
@@ -708,8 +772,9 @@ the original alias spelling. For example, `INT`/`INTEGER` report `INTEGER`,
 `TIME`, `TIMESTAMP`, `TIMESTAMP WITH TIME ZONE`, `INTERVAL`, `UUID`, `JSON`, and
 `JSONB`. Type parameters appear separately where catalog metadata retains them.
 Unknown or inapplicable values are null; `CHARACTER_OCTET_LENGTH` is null because
-the catalog stores no character-set byte bound. `COLUMN_DEFAULT` is SQL literal
-text, including escaped quotes for string defaults, or null when absent.
+the catalog stores no character-set byte bound. `COLUMN_DEFAULT` is the persisted
+canonical literal as declared, including escaped quotes for string defaults (`DEFAULT
+'it''s'` reports `'it''s'`, `DEFAULT +5` reports `5`), or null when absent.
 
 Projection, aliases, parameters, `WHERE`, `ORDER BY`, `DISTINCT`, aggregation,
 `LIMIT`, and `OFFSET` follow the engine's existing SELECT surface.
@@ -735,13 +800,14 @@ extension views are recorded in the
 
 Precedence, low to high: `OR` < `AND` < `NOT` < comparison (`=`, `<>`, `<`, `>`,
 `<=`, `>=`, `IS [NOT] NULL`, `[NOT] BETWEEN`, `[NOT] IN`, `[NOT] LIKE`) < additive
-(`+`, `-`, `||`) < multiplicative (`*`, `/`, `%`) < unary (`-`, `NOT`) <
-primary. Executable primary forms include literals, parameters (`@name`, `$1`),
+(`+`, `-`, `||`) < multiplicative (`*`, `/`, `%`) < unary signs (`-`, `+`) <
+`COLLATE` < primary. Executable primary forms include literals, parameters (`@name`, `$1`),
 column references, supported function calls, simple/searched `CASE`, and
 parenthesized expressions and `CAST` within the conversion contract below.
 Uncorrelated scalar subqueries and subquery predicates execute within the contract above.
 SQL aggregates follow the grouping and aggregate contract below. Arithmetic result
-types and the `COHSQLE001`/`COHSQLE002` faults follow the arithmetic contract above.
+types and the `COHSQLE001`/`COHSQLE002`/`COHSQLE003` faults follow the arithmetic
+contract above.
 `IS` takes only `[NOT] NULL`, and `LIKE` has no `ESCAPE` clause; the other forms
 report `SQL0003` (see Statement completeness).
 

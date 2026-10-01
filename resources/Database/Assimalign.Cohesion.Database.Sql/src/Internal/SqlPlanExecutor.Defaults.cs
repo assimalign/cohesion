@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
@@ -13,7 +14,12 @@ internal sealed partial class SqlPlanExecutor
     /// Resolves only physically absent trailing fields from the statement's bound
     /// column metadata. Stored NULLs and the original MVCC stamps are preserved.
     /// </summary>
-    private static object?[]? DecodeRow(ReadOnlySpan<byte> record, SqlCatalogTable table,
+    /// <param name="record">The stored record.</param>
+    /// <param name="table">The table version the statement is bound to.</param>
+    /// <param name="defaultValues">That version's bound DEFAULT values, by ordinal.</param>
+    /// <param name="writer">The record's writer stamp.</param>
+    /// <param name="deleter">The record's deleter stamp.</param>
+    private static object?[]? DecodeRow(ReadOnlySpan<byte> record, SqlCatalogTable table, IReadOnlyList<string?> defaultValues,
         out TransactionSequence writer, out TransactionSequence deleter)
     {
         var values = SqlRowCodec.TryDecode(record, table.ObjectId, table.Columns.Count,
@@ -22,24 +28,28 @@ internal sealed partial class SqlPlanExecutor
         {
             for (int ordinal = storedColumnCount; ordinal < values.Length; ordinal++)
             {
-                var column = table.Columns[ordinal];
                 // A deleted historical version can predate a NOT NULL addition
                 // to a currently empty table. Nullability validates live rows at
                 // DDL/DML time, never changes the visibility of historical rows.
-                values[ordinal] = column.DefaultLiteral is null ? null : ResolveDefault(column);
+                values[ordinal] = defaultValues[ordinal] is string value ? ResolveDefault(table.Columns[ordinal], value) : null;
             }
         }
         return values;
     }
 
     /// <summary>
-    /// Converts the persisted literal using the same rules for backfill and omitted
+    /// Converts a column's DEFAULT value using the same rules for backfill and omitted
     /// INSERT values. Rejects string truncation, decimal rounding, nonfinite
     /// floats, and nonzero floating values that underflow to zero.
     /// </summary>
-    private static object? ResolveDefault(SqlCatalogColumn column)
+    /// <param name="column">The column.</param>
+    /// <param name="defaultValue">
+    /// The value text of the column's DEFAULT literal, from the bound table version
+    /// (<see cref="SqlBoundTable.DefaultValues"/>), or null when the column declares none.
+    /// </param>
+    private static object? ResolveDefault(SqlCatalogColumn column, string? defaultValue)
     {
-        if (column.DefaultLiteral is null)
+        if (defaultValue is null)
         {
             if (!column.IsNullable)
             {
@@ -51,8 +61,8 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             object? value = column.Type.Type == DatabaseType.Decimal
-                ? SqlCastConverter.ParseNumericLiteral(column.DefaultLiteral)
-                : CoerceForColumn(column.DefaultLiteral, column);
+                ? SqlCastConverter.ParseNumericLiteral(defaultValue)
+                : CoerceForColumn(defaultValue, column);
             if (value is string text && column.Type.MaxLength is int length && text.Length > length)
             {
                 throw new DatabaseException($"String length exceeds {length}; truncation is not supported.");
@@ -63,7 +73,7 @@ internal sealed partial class SqlPlanExecutor
             }
             if (value is float and 0f or double and 0d)
             {
-                ReadOnlySpan<char> mantissa = column.DefaultLiteral.AsSpan();
+                ReadOnlySpan<char> mantissa = defaultValue.AsSpan();
                 int exponent = mantissa.IndexOfAny('e', 'E');
                 if (exponent >= 0)
                 {

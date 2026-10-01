@@ -29,6 +29,7 @@ internal sealed partial class SqlPlanExecutor
     private readonly SqlStorage _storage;
     private readonly ISqlCatalog _catalog;
     private readonly IIndexManager _indexManager;
+    private readonly SqlBoundTableCache _definitions;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
     /// <summary>
@@ -37,11 +38,22 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private IReadOnlyDictionary<SqlExpression, SqlExpression[]>? _subqueryValues;
 
-    internal SqlPlanExecutor(SqlStorage storage, ISqlCatalog catalog, IIndexManager indexManager, IReadOnlyDictionary<string, object?>? parameters)
+    /// <summary>Initializes an executor for one statement.</summary>
+    /// <param name="storage">The database's data storage.</param>
+    /// <param name="catalog">The database's catalog.</param>
+    /// <param name="indexManager">The database's index manager.</param>
+    /// <param name="definitions">
+    /// The database's bound table versions: the parsed CHECK predicates and DEFAULT values every
+    /// write and every read of a missing trailing field use.
+    /// </param>
+    /// <param name="parameters">The statement's bound parameter values.</param>
+    internal SqlPlanExecutor(SqlStorage storage, ISqlCatalog catalog, IIndexManager indexManager, SqlBoundTableCache definitions,
+        IReadOnlyDictionary<string, object?>? parameters)
     {
         _storage = storage;
         _catalog = catalog;
         _indexManager = indexManager;
+        _definitions = definitions;
         _parameters = parameters;
     }
 
@@ -767,6 +779,7 @@ internal sealed partial class SqlPlanExecutor
         }
 
         var updated = await _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken).ConfigureAwait(false);
+        _definitions.Get(updated);
 
         return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
         {
@@ -1116,6 +1129,7 @@ internal sealed partial class SqlPlanExecutor
     {
         var range = BuildSeekRange(table, seek);
         var snapshot = snapshotOverride ?? statement.Snapshot;
+        var defaults = _definitions.Get(table).DefaultValues;
 
         // The cursor materializes under the tree's read latch; synchronous
         // drain is the in-process fast path.
@@ -1143,7 +1157,7 @@ internal sealed partial class SqlPlanExecutor
                     continue;
                 }
 
-                var values = DecodeRow(record.Span, table, out var writer, out var deleter);
+                var values = DecodeRow(record.Span, table, defaults, out var writer, out var deleter);
 
                 if (values is null)
                 {
@@ -1313,6 +1327,7 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken,
         SqlStatementMetrics? metrics = null)
     {
+        var defaults = _definitions.Get(table).DefaultValues;
         using var iterator = _storage.GetUnitIterator(table.ObjectId);
 
         while (iterator.MoveNext())
@@ -1320,7 +1335,7 @@ internal sealed partial class SqlPlanExecutor
             cancellationToken.ThrowIfCancellationRequested();
 
             var unit = iterator.Current;
-            var values = DecodeRow(unit.Data.Span, table, out var writer, out var deleter);
+            var values = DecodeRow(unit.Data.Span, table, defaults, out var writer, out var deleter);
 
             if (values is not null)
             {

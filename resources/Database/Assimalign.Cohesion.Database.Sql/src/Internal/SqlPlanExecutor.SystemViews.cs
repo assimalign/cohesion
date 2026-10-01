@@ -221,21 +221,9 @@ internal sealed partial class SqlPlanExecutor
     private static string SystemOwner(DatabaseObjectOwner owner)
         => owner == DatabaseObjectOwner.Schema ? "Schema" : "Adhoc";
 
-    private static string? SystemColumnDefault(SqlCatalogColumn column)
-    {
-        if (column.DefaultLiteral is not string literal)
-        {
-            return null;
-        }
-        return column.Type.Type switch
-        {
-            DatabaseType.String or DatabaseType.Json or DatabaseType.Date or DatabaseType.Time or
-                DatabaseType.DateTime or DatabaseType.DateTimeOffset or DatabaseType.TimeSpan or DatabaseType.Guid
-                => "'" + literal.Replace("'", "''", StringComparison.Ordinal) + "'",
-            DatabaseType.Boolean when bool.TryParse(literal, out bool value) => value ? "TRUE" : "FALSE",
-            _ => literal,
-        };
-    }
+    // The catalog stores a DEFAULT as the canonical SQL text of its literal, which is the
+    // default clause ISO's COLUMN_DEFAULT reports.
+    private static string? SystemColumnDefault(SqlCatalogColumn column) => column.DefaultLiteral;
 
     // The catalog retains shared type identities rather than lexical SQL
     // aliases. Report a canonical SQL name; size and precision have ISO columns.

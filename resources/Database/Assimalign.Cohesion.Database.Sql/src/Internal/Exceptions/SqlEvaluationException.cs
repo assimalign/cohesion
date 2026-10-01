@@ -6,7 +6,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// A data exception raised while evaluating a scalar expression or aggregate, or while
 /// storing a numeric value into a column: the statement fails with a stable engine
 /// code, and the session and any open transaction stay usable, exactly as for any
-/// other statement failure.
+/// other statement failure. An operand-type fault the planner can already see is raised
+/// while planning, with the same code, so it does not depend on whether rows exist.
 /// </summary>
 /// <remarks>
 /// The code leads the message (<c>COHSQLE001: ...</c>), the engine-code convention
@@ -22,6 +23,13 @@ internal sealed class SqlEvaluationException : DatabaseException
 
     /// <summary>A numeric result or operand is outside its type's range (ISO SQLSTATE 22003).</summary>
     internal const string NumericValueOutOfRangeCode = "COHSQLE002";
+
+    /// <summary>
+    /// A unary <c>+</c> or <c>-</c> operand is not a number (ISO SQLSTATE 42804, datatype
+    /// mismatch). Raised during planning when the operand's type is known there, and during
+    /// evaluation when only the value reveals it.
+    /// </summary>
+    internal const string InvalidOperandTypeCode = "COHSQLE003";
 
     private SqlEvaluationException(string code, string detail, Exception? innerException)
         : base($"{code}: {detail}", innerException)
@@ -45,6 +53,13 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// <returns>The coded failure.</returns>
     internal static SqlEvaluationException NumericValueOutOfRange(string detail, Exception? innerException = null)
         => new(NumericValueOutOfRangeCode, $"Numeric value out of range: {detail}", innerException);
+
+    /// <summary>Creates the failure for a unary sign applied to a value that is not a number.</summary>
+    /// <param name="operatorText">The sign, <c>+</c> or <c>-</c>.</param>
+    /// <param name="operandType">The operand's type, as the dialect names it.</param>
+    /// <returns>The coded failure.</returns>
+    internal static SqlEvaluationException InvalidOperandType(string operatorText, string operandType)
+        => new(InvalidOperandTypeCode, $"Invalid operand type: unary '{operatorText}' requires a numeric operand, but the operand is {operandType}.", null);
 
     /// <summary>
     /// Codes a runtime arithmetic fault that no evaluation site coded at its source,

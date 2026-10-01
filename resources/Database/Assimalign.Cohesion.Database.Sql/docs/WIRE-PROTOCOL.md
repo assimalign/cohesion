@@ -23,9 +23,9 @@ one statement at a time. Result-bearing statements return a header, zero or more
 rows, and completion. Other statements return completion alone. Error ends the
 current exchange without completion. ParseFailure and ExecutionFailure leave the
 session ready; malformed payloads, unknown messages, and bad ordering close it.
-Evaluation faults are ExecutionFailure: division by zero and numeric overflow carry
-messages that begin with `COHSQLE001:` and `COHSQLE002:` (see the dialect's
-diagnostics table).
+Evaluation faults are ExecutionFailure: division by zero, numeric overflow and a
+sign over a non-numeric operand carry messages that begin with `COHSQLE001:`,
+`COHSQLE002:` and `COHSQLE003:` (see the dialect's diagnostics table).
 There is no pipelining or multiplexing. Terminate closes; Ping receives Pong while ready.
 
 The model-owned exchange has this order.
