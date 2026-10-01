@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Web.AotGuard;
 using Assimalign.Cohesion.Web.Authentication;
 using Assimalign.Cohesion.Web.Authentication.Bearer;
 using Assimalign.Cohesion.Web.Authentication.Cookie;
+using Assimalign.Cohesion.Web.Authorization;
 using Assimalign.Cohesion.Web.Compression;
 using Assimalign.Cohesion.Web.ErrorHandling;
 using Assimalign.Cohesion.Web.Hosting;
@@ -43,6 +44,7 @@ builder.AddAuthentication(options => options.DefaultScheme = JwtBearerDefaults.A
         options.ValidIssuers.Add(GuardSmoke.Issuer);
         options.ValidAudiences.Add(GuardSmoke.Audience);
     });
+builder.AddAuthorization(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")));
 
 await using WebApplication application = builder.Build();
 
@@ -62,6 +64,7 @@ application.Map("/branch", branch => branch.Run(async context =>
 application.UseRouting();
 
 // Endpoint policy middleware reads the endpoint UseRouting published, so it follows it.
+application.UseAuthorization();
 application.UseRequestTimeouts(TimeSpan.FromSeconds(30));
 application.UseRateLimiting(options => options.GlobalPolicy = RateLimitingPolicy.Create(
     static (IHttpContext _) => "global",
@@ -101,6 +104,13 @@ application.MapGet("/me", async (IHttpContext context) =>
     context.Response.StatusCode = HttpStatusCode.Ok;
     await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(identity.Name ?? string.Empty), context.RequestCancelled);
 });
+
+// A named role policy: UseAuthorization challenges, forbids or admits before the endpoint runs.
+application.MapGet("/admin", async (IHttpContext context) =>
+{
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(context.User.Identity?.Name ?? string.Empty), context.RequestCancelled);
+}).RequireAuthorization("admins");
 
 application.MapGet("/boom", async (IHttpContext context) =>
 {

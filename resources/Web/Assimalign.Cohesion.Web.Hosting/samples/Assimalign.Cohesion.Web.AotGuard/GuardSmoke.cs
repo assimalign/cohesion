@@ -80,6 +80,29 @@ internal static class GuardSmoke
             return response.StatusCode == HttpStatusCode.OK && body == "aot-guard-user";
         });
 
+        failures += await CheckAsync("authorization challenges an anonymous request", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("admin", cancellationToken);
+            return response.StatusCode == HttpStatusCode.Unauthorized;
+        });
+
+        failures += await CheckAsync("authorization forbids a token without the required role", async () =>
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "admin");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken(signingKey));
+            using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
+            return response.StatusCode == HttpStatusCode.Forbidden;
+        });
+
+        failures += await CheckAsync("authorization admits a token in the required role", async () =>
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "admin");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", CreateToken(signingKey, role: "admin"));
+            using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response.StatusCode == HttpStatusCode.OK && body == "aot-guard-user";
+        });
+
         failures += await CheckAsync("error handling answers a fault with problem details", async () =>
         {
             using HttpResponseMessage response = await client.GetAsync("boom", cancellationToken);
@@ -133,12 +156,13 @@ internal static class GuardSmoke
         }
     }
 
-    private static string CreateToken(byte[] signingKey)
+    private static string CreateToken(byte[] signingKey, string? role = null)
     {
         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        string roles = role is null ? string.Empty : $",\"roles\":[\"{role}\"]";
         string header = Base64Url.EncodeToString("{\"alg\":\"HS256\",\"typ\":\"JWT\"}"u8);
         string payload = Base64Url.EncodeToString(Encoding.UTF8.GetBytes(
-            $"{{\"iss\":\"{Issuer}\",\"aud\":\"{Audience}\",\"sub\":\"guard\",\"name\":\"aot-guard-user\",\"iat\":{now},\"nbf\":{now},\"exp\":{now + 300}}}"));
+            $"{{\"iss\":\"{Issuer}\",\"aud\":\"{Audience}\",\"sub\":\"guard\",\"name\":\"aot-guard-user\"{roles},\"iat\":{now},\"nbf\":{now},\"exp\":{now + 300}}}"));
         byte[] signature = HMACSHA256.HashData(signingKey, Encoding.ASCII.GetBytes(header + "." + payload));
         return header + "." + payload + "." + Base64Url.EncodeToString(signature);
     }
