@@ -403,6 +403,51 @@ public sealed class IdentityHubProtocolTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [IdentityHub.Hosting] - Security headers: the approval page and the JSON endpoints carry one strict policy")]
+    public async Task SecurityHeaders_OnApprovalPageAndDiscovery_ShouldCarryTheStrictPolicy()
+    {
+        // Arrange
+        using var data = new TemporaryDirectory();
+        Uri endpoint = IdentityHubTestHost.GetEndpoint();
+        await using IdentityHubApplication application = CreateConfiguredBuilder(data.Path, endpoint).Build();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await ((IHost)application).StartAsync(timeout.Token);
+
+        try
+        {
+            using var client = new HttpClient();
+
+            // Act
+            using HttpResponseMessage approval = await client.GetAsync(
+                new Uri(endpoint, "/oauth2/device"),
+                timeout.Token);
+            using HttpResponseMessage discovery = await client.GetAsync(
+                new Uri(endpoint, "/.well-known/openid-configuration"),
+                timeout.Token);
+
+            // Assert — the values the approval page used to set by hand, now on every response.
+            approval.StatusCode.ShouldBe(HttpStatusCode.OK);
+            approval.Content.Headers.ContentType!.MediaType.ShouldBe("text/html");
+            approval.Headers.CacheControl!.NoStore.ShouldBeTrue();
+            discovery.StatusCode.ShouldBe(HttpStatusCode.OK);
+            foreach (HttpResponseMessage response in new[] { approval, discovery })
+            {
+                Header(response, "Content-Security-Policy")
+                    .ShouldBe("default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+                Header(response, "Referrer-Policy").ShouldBe("no-referrer");
+                Header(response, "X-Frame-Options").ShouldBe("DENY");
+                Header(response, "X-Content-Type-Options").ShouldBe("nosniff");
+            }
+        }
+        finally
+        {
+            await ((IHost)application).StopAsync(timeout.Token);
+        }
+    }
+
+    private static string? Header(HttpResponseMessage response, string name)
+        => response.Headers.TryGetValues(name, out IEnumerable<string>? values) ? string.Join(", ", values) : null;
+
     private static IdentityHubApplicationBuilder CreateConfiguredBuilder(string dataPath, Uri endpoint)
     {
         IdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(dataPath, endpoint);
