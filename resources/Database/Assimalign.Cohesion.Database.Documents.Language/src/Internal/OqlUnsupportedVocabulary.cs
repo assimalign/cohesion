@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Database.Documents.Language;
+namespace Assimalign.Cohesion.Database.Documents.Language.Internal;
 
 /// <summary>
 /// The OQL recognized-unsupported table (#1101): every word the capability scan recognizes
@@ -9,7 +9,8 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// lexer, so a field named <c>limit</c> or <c>merge</c> still parses; their
 /// <see cref="OqlWordPosition"/> says where the scan treats them as a construct instead. An
 /// item that adds an entry adds its case to the keyword-disposition corpus in the same
-/// change, or <c>OqlKeywordDispositionTests</c> fails.
+/// change, or <c>OqlKeywordDispositionTests</c> fails. The corpus also checks that each
+/// entry's diagnostic names the entry's construct.
 /// </remarks>
 internal static class OqlUnsupportedVocabulary
 {
@@ -62,11 +63,11 @@ internal static class OqlUnsupportedVocabulary
         // SQL++ words. oql-limit-offset, oql-upsert and oql-arrays flip these pins; MERGE stays.
         new("LIMIT", "LIMIT", OqlWordPosition.Clause),
         new("OFFSET", "OFFSET", OqlWordPosition.Clause),
-        new("UPSERT", "UPSERT", OqlWordPosition.Clause),
-        new("MERGE", "MERGE", OqlWordPosition.Clause),
+        new("UPSERT", "UPSERT", OqlWordPosition.Statement),
+        new("MERGE", "MERGE", OqlWordPosition.Statement),
         new("UNNEST", "UNNEST", OqlWordPosition.Clause),
         new("EVERY", "EVERY ... SATISFIES", OqlWordPosition.Quantifier),
-        new("SATISFIES", "SATISFIES", OqlWordPosition.Clause),
+        new("SATISFIES", "SATISFIES", OqlWordPosition.Quantifier),
     ];
 
     /// <summary>Finds the entry for an unquoted word, compared case-insensitively.</summary>
@@ -104,12 +105,22 @@ internal enum OqlWordPosition
     /// <summary>
     /// As the first word of the statement, or directly after the end of an operand (a name,
     /// literal, parameter, closing bracket, or <c>ASC</c>/<c>DESC</c>). Elsewhere it is a name.
+    /// So a <see cref="Clause"/> word cannot be an AS-less <c>FROM</c> alias; <c>AS</c> keeps it
+    /// a name.
     /// </summary>
     Clause,
 
     /// <summary>
-    /// Opening a quantified predicate, <c>EVERY x IN ... SATISFIES ... END</c>, and otherwise
-    /// as <see cref="Clause"/>. <c>ANY</c> and <c>SOME</c> open the same predicate.
+    /// Only as the first word of the statement, where it is a statement verb of another
+    /// language (<c>UPSERT INTO c ...</c>). Elsewhere, including an AS-less <c>FROM</c> alias, it
+    /// is a name.
+    /// </summary>
+    Statement,
+
+    /// <summary>
+    /// Only as part of a quantified predicate, <c>EVERY x IN ... SATISFIES ... END</c>, which the
+    /// scan recognizes by its <c>name IN</c> binding and reports once at the quantifier.
+    /// <c>ANY</c> and <c>SOME</c> open the same predicate. Elsewhere it is a name.
     /// </summary>
     Quantifier,
 }

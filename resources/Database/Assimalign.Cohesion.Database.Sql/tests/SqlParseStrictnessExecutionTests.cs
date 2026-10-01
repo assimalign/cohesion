@@ -40,6 +40,17 @@ public sealed class SqlParseStrictnessExecutionTests
     [InlineData("UPDATE t SET a = ? WHERE id = 1;")]
     [InlineData("UPDATE t § SET a = 0;")]
     [InlineData("INSERT INTO t VALUES (3, ?, 300);")]
+    // A non-ASCII decimal digit used to lex as an Integer, parse cleanly and then throw a raw
+    // FormatException at execution.
+    [InlineData("SELECT ٣ FROM t;")]
+    [InlineData("DELETE FROM t WHERE id = ١;")]
+    [InlineData("UPDATE t SET a = ٥ WHERE id = 1;")]
+    [InlineData("INSERT INTO t VALUES (٣, 1, 1);")]
+    // So did an exponent marker without digits.
+    [InlineData("SELECT 1e FROM t;")]
+    [InlineData("DELETE FROM t WHERE a = 1e+;")]
+    // A stray character before the statement, such as a byte order mark.
+    [InlineData("﻿DELETE FROM t;")]
     public async Task ExecuteAsync_StrayCharacter_ShouldReportSyntaxErrorWithoutExecuting(string sql)
         => await AssertRejectedAsync(sql, "SQL0003");
 
@@ -56,6 +67,11 @@ public sealed class SqlParseStrictnessExecutionTests
     [InlineData("SELECT a FROM t WHERE ~a = 1;")]
     [InlineData("UPDATE t SET a = ~a;")]
     [InlineData("DELETE FROM t WHERE a ~ '1';")]
+    [InlineData("DELETE FROM t WHERE a IS NOT NULL ~ '1';")]
+    [InlineData("DELETE FROM t WHERE a IN (10, 20) ~ '1';")]
+    [InlineData("DELETE FROM t WHERE a !~ '1';")]
+    [InlineData("UPDATE t SET a = 1 WHERE b ~* 'x';")]
+    [InlineData("SELECT a FROM t WHERE a = ~ ~a;")]
     public async Task ExecuteAsync_Tilde_ShouldReportUnsupportedOperatorWithoutExecuting(string sql)
         => await AssertRejectedAsync(sql, "COHDBL001");
 

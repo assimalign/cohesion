@@ -5,6 +5,7 @@ using System.Linq;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Graph.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
@@ -59,9 +60,9 @@ public sealed class GqlKeywordDispositionTests
         ["FOREACH"] = Rejects("MATCH (a) FOREACH (x IN [1] | SET a.y = x)", "FOREACH"),
         ["UNION"] = Rejects("MATCH (a) RETURN a UNION MATCH (b) RETURN b", "UNION"),
         ["DISTINCT"] = Rejects("MATCH (a) RETURN DISTINCT a", "DISTINCT"),
-        ["ALL"] = Rejects("MATCH ALL (a)-[]->(b) RETURN a", "ALL"),
-        ["ANY"] = Rejects("MATCH ANY (a)-[]->(b) RETURN a", "ANY"),
-        ["SHORTEST"] = Rejects("MATCH ALL SHORTEST (a)-[]->(b) RETURN a", "ALL SHORTEST"),
+        ["ALL"] = Rejects("MATCH ALL (a)-[]->(b) RETURN a", "ALL PATH SEARCH"),
+        ["ANY"] = Rejects("MATCH ANY (a)-[]->(b) RETURN a", "ANY PATH SEARCH"),
+        ["SHORTEST"] = Rejects("MATCH SHORTEST 2 (a)-[]->(b) RETURN a", GqlClauses.ShortestPath),
         ["OR"] = Rejects("MATCH (a) WHERE a.x = 1 OR a.y = 2 RETURN a", "OR"),
         ["NOT"] = Rejects("MATCH (a) WHERE NOT a.x = 1 RETURN a", "NOT"),
         ["XOR"] = Rejects("MATCH (a) WHERE a.x = 1 XOR a.y = 2 RETURN a", "XOR"),
@@ -82,7 +83,7 @@ public sealed class GqlKeywordDispositionTests
         ["END"] = Rejects(CaseExpression, "CASE"),
         ["GRAPH"] = Rejects("CREATE GRAPH g", "GRAPH"),
         ["CALL"] = Rejects("CALL db.labels() YIELD label", "CALL"),
-        ["YIELD"] = Rejects("MATCH (a) CALL db.labels() YIELD label RETURN label", "CALL"),
+        ["YIELD"] = Rejects("MATCH (a)-[]->(b) YIELD a RETURN a", "YIELD"),
         ["FILTER"] = Rejects("MATCH (a) FILTER a.x = 1 RETURN a", "FILTER"),
         // Server, session, catalog and transaction scope
         ["USE"] = Rejects("USE g MATCH (a) RETURN a", "USE"),
@@ -166,6 +167,11 @@ public sealed class GqlKeywordDispositionTests
                      errors[0].Message?.Contains($"The {keywordCase.Construct} clause", StringComparison.Ordinal) != true)
             {
                 failures.Add($"{word}: expected one COHDBL001 naming '{keywordCase.Construct}' for '{keywordCase.Gql}' but found {found}");
+            }
+            else if (GqlUnsupportedVocabulary.TryFind(word.ToUpperInvariant(), out var entry) &&
+                     !errors[0].Message!.Contains(entry.Construct, StringComparison.Ordinal))
+            {
+                failures.Add($"{word}: the diagnostic does not name the table's construct '{entry.Construct}': {found}");
             }
         }
 

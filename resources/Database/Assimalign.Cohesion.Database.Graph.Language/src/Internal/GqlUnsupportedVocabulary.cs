@@ -1,4 +1,4 @@
-namespace Assimalign.Cohesion.Database.Graph.Language;
+namespace Assimalign.Cohesion.Database.Graph.Language.Internal;
 
 /// <summary>
 /// The GQL recognized-unsupported table (#1101): every word and label-expression operator the

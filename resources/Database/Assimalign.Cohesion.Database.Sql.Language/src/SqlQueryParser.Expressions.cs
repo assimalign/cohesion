@@ -13,18 +13,22 @@ public sealed partial class SqlQueryParser
     //   ParseOr                 → ParseAnd (OR ParseAnd)*
     //   ParseAnd                → ParseNot (AND ParseNot)*
     //   ParseNot                → NOT? ParseComparison
-    //   ParseComparison         → ParseAddition ((=|<>|<|>|<=|>=) ParseAddition
+    //   ParseComparison         → ParseComparisonCore
+    //                            (an infix ~ after IS NULL, IN, LIKE or BETWEEN reports COHDBL001)
+    //   ParseComparisonCore     → ParseAddition ((=|<>|<|>|<=|>=) ParseAddition
     //                            | IS [NOT] NULL
     //                            | [NOT] BETWEEN ... AND ...
     //                            | [NOT] IN (...)
     //                            | [NOT] LIKE ...)?
+    //                            (op ANY|SOME|ALL (...) reports COHDBL001 and is skipped)
     //   ParseAddition           → ParseMultiplication ((+|-||) ParseMultiplication)*
-    //                            (an infix ~ here reports COHDBL001)
+    //                            (an infix ~, ~*, ~~, !~ ... here reports COHDBL001)
     //   ParseMultiplication     → ParseUnary ((*|/|%) ParseUnary)*
     //   ParseUnary              → (-|~)? ParseCollate   (a prefix ~ reports COHDBL001)
     //   ParseCollate            → ParsePrimary (COLLATE name)*
     //   ParsePrimary            → literal | column_ref | param | function(...)
     //                            | (expr) | (SELECT ...) | CASE | CAST | EXISTS | *
+    //                            (a ~ here, as in LIKE ~'x' or DEFAULT ~1, goes to ParseUnary)
 
     private SqlExpression ParseExpression(ref TokenLexer lexer)
     {
@@ -85,6 +89,21 @@ public sealed partial class SqlQueryParser
     }
 
     private SqlExpression ParseComparison(ref TokenLexer lexer)
+    {
+        var result = ParseComparisonCore(ref lexer);
+
+        // IS NULL, IN (...), LIKE and BETWEEN complete without returning to the additive
+        // loop, so an infix ~ after them fell to the leftover-token check with a generic
+        // SQL0003 instead of naming the operator (#1101).
+        while (IsInfixTilde(ref lexer))
+        {
+            RejectInfixTilde(ref lexer, afterPredicate: true);
+        }
+
+        return result;
+    }
+
+    private SqlExpression ParseComparisonCore(ref TokenLexer lexer)
     {
         var left = ParseAddition(ref lexer);
 
@@ -211,11 +230,33 @@ public sealed partial class SqlQueryParser
         {
             var pos = lexer.Current.Position;
             Advance(ref lexer);
-            var right = ParseAddition(ref lexer);
+            var right = SkipQuantifiedComparison(ref lexer) ?? ParseAddition(ref lexer);
             return new SqlBinaryExpression(left, op.Value, right, Location.Create(1, 1, pos, pos));
         }
 
         return left;
+    }
+
+    /// <summary>
+    /// Skips the quantified operand of <c>op ANY|SOME|ALL (subquery)</c> after reporting the
+    /// construct once. It used to parse as a call to a function named ANY whose argument was a
+    /// SELECT, so it also reported "Expected ')' after the ANY arguments" (#1101).
+    /// </summary>
+    /// <returns>A placeholder that never executes, or <see langword="null"/> when no quantifier is current.</returns>
+    private SqlLiteralExpression? SkipQuantifiedComparison(ref TokenLexer lexer)
+    {
+        if (!(IsWord(ref lexer, "ANY") || IsWord(ref lexer, "SOME") || IsWord(ref lexer, "ALL")) ||
+            !TryPeekToken(lexer, out string next, out _) || next != "(")
+        {
+            return null;
+        }
+
+        int start = lexer.Current.Position;
+        string quantifier = CurrentText(ref lexer).ToUpperInvariant();
+        RequireSkippedConstruct(start, start + quantifier.Length, $"{quantifier} quantified comparison");
+        Advance(ref lexer);
+        SkipParenthesized(ref lexer);
+        return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, start, start));
     }
 
     /// <summary>
@@ -292,9 +333,9 @@ public sealed partial class SqlQueryParser
             {
                 op = SqlBinaryOperator.Concat;
             }
-            else if (lexer.Current.Type == TokenType.Tilde)
+            else if (IsInfixTilde(ref lexer))
             {
-                RejectInfixTilde(ref lexer);
+                RejectInfixTilde(ref lexer, afterPredicate: false);
                 continue;
             }
             else
@@ -362,10 +403,16 @@ public sealed partial class SqlQueryParser
         // error means it never executes.
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Tilde)
         {
+            // A run of prefix operators, ~ ~a, is one construct and one diagnostic.
             var pos = lexer.Current.Position;
-            AddUnsupportedSurfaceDiagnostic(pos, pos + 1,
+            int end = pos + 1;
+            while (Advance(ref lexer) && lexer.Current.Type == TokenType.Tilde)
+            {
+                end = lexer.Current.Position + 1;
+            }
+
+            AddUnsupportedSurfaceDiagnostic(pos, end,
                 "The prefix ~ operator (bitwise NOT) is not supported by the SQL surface.");
-            Advance(ref lexer);
             var operand = ParseUnary(ref lexer);
             return new SqlUnaryExpression(operand, SqlUnaryOperator.BitwiseNot,
                 Location.Create(1, 1, pos, pos));
@@ -375,20 +422,66 @@ public sealed partial class SqlQueryParser
     }
 
     /// <summary>
-    /// Rejects an infix <c>~</c>, PostgreSQL's regular-expression match. The dialect has no
-    /// rule for it, so it used to fall to the leftover-token check with a generic message.
-    /// It is checked wherever an additive operator may follow an operand. The right operand
-    /// is parsed for recovery and no node is built (#1101).
+    /// Whether an infix <c>~</c> operator starts at the current token: <c>~</c> itself, or
+    /// <c>!</c> directly followed by <c>~</c> (PostgreSQL's negated <c>!~</c> forms).
     /// </summary>
-    private void RejectInfixTilde(ref TokenLexer lexer)
+    private static bool IsInfixTilde(ref TokenLexer lexer)
     {
-        int pos = lexer.Current.Position;
-        AddUnsupportedSurfaceDiagnostic(pos, pos + 1,
-            "The infix ~ operator (regular-expression match) is not supported by the SQL surface.");
+        if (lexer.Current.Type == TokenType.Tilde)
+        {
+            return true;
+        }
+
+        var next = lexer;
+        return lexer.Current.Type == TokenType.Bang && next.MoveNext() &&
+               next.Current.Type == TokenType.Tilde && next.Current.Position == lexer.Current.Position + 1;
+    }
+
+    /// <summary>
+    /// Rejects an infix <c>~</c>, PostgreSQL's regular-expression match, and its family
+    /// <c>~*</c>, <c>!~</c>, <c>!~*</c> and the LIKE forms <c>~~</c>, <c>~~*</c>, <c>!~~</c>,
+    /// <c>!~~*</c>, each as one operator. The dialect has no rule for them, so they used to
+    /// fall to the leftover-token check with a generic message, or report twice. It is checked
+    /// wherever an additive operator may follow an operand, and after a comparison predicate.
+    /// The right operand is parsed for recovery and no node is built (#1101).
+    /// </summary>
+    /// <param name="lexer">The lexer, at the operator.</param>
+    /// <param name="afterPredicate">Whether the operator follows a whole comparison predicate.</param>
+    private void RejectInfixTilde(ref TokenLexer lexer, bool afterPredicate)
+    {
+        int start = lexer.Current.Position;
+        if (lexer.Current.Type == TokenType.Bang)
+        {
+            Advance(ref lexer); // to the adjacent ~
+        }
+
+        int end = lexer.Current.Position + 1;
         Advance(ref lexer);
+        if (lexer.Current.Type == TokenType.Tilde && lexer.Current.Position == end)
+        {
+            end++;
+            Advance(ref lexer);
+        }
+        if (lexer.Current.Type == TokenType.Asterisk && lexer.Current.Position == end)
+        {
+            end++;
+            Advance(ref lexer);
+        }
+
+        string spelling = _sourceText.Substring(start, end - start);
+        string meaning = spelling.Contains("~~", StringComparison.Ordinal) ? "LIKE match" : "regular-expression match";
+        AddUnsupportedSurfaceDiagnostic(start, end,
+            $"The infix {spelling} operator ({meaning}) is not supported by the SQL surface.");
         if (CanStartOperand(ref lexer))
         {
-            ParseMultiplication(ref lexer);
+            if (afterPredicate)
+            {
+                ParseAddition(ref lexer);
+            }
+            else
+            {
+                ParseMultiplication(ref lexer);
+            }
         }
     }
 
@@ -537,6 +630,13 @@ public sealed partial class SqlQueryParser
             return ParseColumnRefOrFunction(ref lexer);
         }
 
+        // Rules that take a primary directly, such as the LIKE pattern or a column DEFAULT,
+        // reported ~ as a missing expression instead of naming the operator (#1101).
+        if (lexer.Current.Type == TokenType.Tilde)
+        {
+            return ParseUnary(ref lexer);
+        }
+
         return MissingExpression(ref lexer, pos);
     }
 
@@ -679,8 +779,43 @@ public sealed partial class SqlQueryParser
         }
 
         Expect(ref lexer, TokenType.RightParen, $"')' after the {name} arguments");
+        SkipCallExtensions(ref lexer);
 
         return new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, pos));
+    }
+
+    /// <summary>
+    /// Skips <c>WITHIN GROUP (...)</c> and <c>FILTER (...)</c> after a call, reporting each once.
+    /// <c>WITHIN</c> used to become the column alias and <c>GROUP (ORDER BY ...)</c> a malformed
+    /// GROUP BY, so the construct also reported two SQL0003 diagnostics (#1101).
+    /// </summary>
+    private void SkipCallExtensions(ref TokenLexer lexer)
+    {
+        while (true)
+        {
+            int start = lexer.Current.Position;
+            if (IsWord(ref lexer, "WITHIN") && TryPeekToken(lexer, out string group, out int groupEnd) &&
+                group.Equals("GROUP", StringComparison.OrdinalIgnoreCase))
+            {
+                RequireSkippedConstruct(start, groupEnd, "WITHIN GROUP");
+                Advance(ref lexer);
+                Advance(ref lexer);
+            }
+            else if (IsWord(ref lexer, "FILTER") && TryPeekToken(lexer, out string next, out _) && next == "(")
+            {
+                RequireSkippedConstruct(start, start + lexer.Current.Value.Length, "FILTER");
+                Advance(ref lexer);
+            }
+            else
+            {
+                return;
+            }
+
+            if (lexer.Current.Type == TokenType.LeftParen)
+            {
+                SkipParenthesized(ref lexer);
+            }
+        }
     }
 
     private SqlExpression ParseCase(ref TokenLexer lexer)

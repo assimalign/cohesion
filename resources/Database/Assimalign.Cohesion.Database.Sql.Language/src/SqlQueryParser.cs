@@ -4,6 +4,7 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 
 /// <summary>
 /// Parses SQL statements into a rich AST with full clause-level structure.
@@ -59,6 +60,7 @@ public sealed partial class SqlQueryParser : QueryParser
         bool hasUnsupportedClause =
             TryFindUnsupportedClause(lexer, out string unsupportedClause, out Location unsupportedLocation) &&
             !Supports(unsupportedClause);
+        _preflightClauseStart = hasUnsupportedClause ? unsupportedLocation.Start : -1;
 
         // Advance to the first non-comment token
         if (!AdvancePastComments(ref lexer))
@@ -81,9 +83,21 @@ public sealed partial class SqlQueryParser : QueryParser
             return emptyStmt;
         }
 
+        // A stray character before the statement, such as a byte order mark that was not
+        // stripped, is already reported by RejectLexicalErrors. Dispatching on it reported an
+        // unknown command and a bogus "SUBQUERY in ?" clause as well (#1101).
+        TrackToken(ref lexer);
+        bool skippedStrayCharacter = false;
+        while (lexer.Current.Type == TokenType.Unrecognized)
+        {
+            skippedStrayCharacter = true;
+            Advance(ref lexer);
+        }
+
+        bool onlyStrayCharacters = skippedStrayCharacter &&
+            (IsAtEnd(ref lexer) || lexer.Current.Type == TokenType.Semicolon);
         int firstTokenPosition = lexer.Current.Position;
         string firstToken = CurrentText(ref lexer);
-        TrackToken(ref lexer);
         SqlQueryExpression expression;
 
         if (lexer.Current.Type == TokenType.Keyword)
@@ -176,8 +190,8 @@ public sealed partial class SqlQueryParser : QueryParser
             RequireClause(statement, unsupportedClause, unsupportedLocation);
         }
 
-        // Check for unknown command
-        if (expression.CommandType == SqlQueryCommandType.Unknown &&
+        // Check for unknown command. Text made only of stray characters has none to name.
+        if (expression.CommandType == SqlQueryCommandType.Unknown && !onlyStrayCharacters &&
             (!hasUnsupportedClause || !IsUnsupportedClauseStart(firstToken)))
         {
             statement.AddDiagnostic(new Diagnostic
@@ -213,6 +227,11 @@ public sealed partial class SqlQueryParser : QueryParser
     private bool _sawSemicolon;
     private bool _sawUnrecognizedCharacter;
     private int _lastTokenEnd;
+
+    // Where the clause the preflight scan reports starts, or -1. The scan reports only the
+    // first unsupported clause; a construct the parser skips for recovery is reported by the
+    // parser unless it is that clause (#1101).
+    private int _preflightClauseStart = -1;
     private string _sourceText = string.Empty;
     private readonly List<Diagnostic> _parseDiagnostics = [];
 
@@ -384,6 +403,13 @@ public sealed partial class SqlQueryParser : QueryParser
                     _sawUnrecognizedCharacter = true;
                     AddSyntaxDiagnostic(position, position + value.Length,
                         $"Unexpected character {DescribeCharacter(value)}; it is not part of the SQL dialect.");
+                    break;
+                case TokenType.Float when value[^1] is 'e' or 'E' or '+' or '-':
+                    // The lexer takes an exponent marker without digits into the literal, so
+                    // SELECT 1e FROM t parsed and then failed at execution with a raw
+                    // FormatException naming no code or span (#1101).
+                    AddSyntaxDiagnostic(position, position + value.Length,
+                        $"Malformed numeric literal '{value.ToString()}': the exponent has no digits.");
                     break;
             }
         }
@@ -649,6 +675,18 @@ public sealed partial class SqlQueryParser : QueryParser
     /// </summary>
     private SqlTableReference ParseRequiredTableReference(ref TokenLexer lexer)
     {
+        // LATERAL (SELECT ...) alias used to bind LATERAL as the table name, so the JOIN it
+        // followed also reported a missing ON predicate (#1101).
+        if (IsWord(ref lexer, "LATERAL") && TryPeekToken(lexer, out string next, out _) && next == "(")
+        {
+            int start = lexer.Current.Position;
+            RequireSkippedConstruct(start, start + lexer.Current.Value.Length, "LATERAL subquery");
+            Advance(ref lexer);
+            SkipParenthesized(ref lexer);
+            SkipTableAlias(ref lexer);
+            return new SqlTableReference("?", null, null);
+        }
+
         if (IsNameToken(ref lexer))
         {
             return ParseTableReference(ref lexer);
@@ -675,6 +713,18 @@ public sealed partial class SqlQueryParser : QueryParser
             return false;
         }
 
+        SkipParenthesized(ref lexer);
+        SkipTableAlias(ref lexer);
+        return true;
+    }
+
+    /// <summary>
+    /// Skips a parenthesized operand from its <c>(</c> through the matching <c>)</c>, for
+    /// recovery past a construct already reported. An unbalanced operand is skipped to the
+    /// <c>;</c> or the end of the text.
+    /// </summary>
+    private void SkipParenthesized(ref TokenLexer lexer)
+    {
         int depth = 0;
         do
         {
@@ -688,7 +738,11 @@ public sealed partial class SqlQueryParser : QueryParser
             }
         }
         while (Advance(ref lexer) && depth > 0 && lexer.Current.Type != TokenType.Semicolon);
+    }
 
+    /// <summary>Skips a <c>[AS] alias</c> after a skipped table expression.</summary>
+    private void SkipTableAlias(ref TokenLexer lexer)
+    {
         if (IsKeyword(ref lexer, "AS"))
         {
             Advance(ref lexer);
@@ -697,8 +751,20 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             Advance(ref lexer);
         }
+    }
 
-        return true;
+    /// <summary>
+    /// Reports a construct the parser recognizes and skips for recovery, unless the preflight
+    /// clause scan already reports it at <paramref name="start"/>. The scan reports only the
+    /// first unsupported clause, so a construct after another one is reported here, once.
+    /// </summary>
+    private void RequireSkippedConstruct(int start, int end, string construct)
+    {
+        if (start != _preflightClauseStart && !Supports(construct))
+        {
+            _parseDiagnostics.Add(QueryDiagnostics.UnsupportedClause(construct, Profile.Language,
+                Location.Create(1, 1, start, end)));
+        }
     }
 
     private SqlTableReference ParseTableReference(ref TokenLexer lexer)
@@ -799,7 +865,9 @@ public sealed partial class SqlQueryParser : QueryParser
 
         while (lexer.MoveNext())
         {
-            if (lexer.Current.Type == TokenType.Comment)
+            // A stray character is reported as a lexical error. As the first token it became
+            // the statement's command, as in "SUBQUERY in ?" for ? SELECT * FROM t (#1101).
+            if (lexer.Current.Type is TokenType.Comment or TokenType.Unrecognized)
             {
                 continue;
             }

@@ -24,6 +24,8 @@ public sealed class OqlParseStrictnessTests
     [InlineData("SELECT a «§» b FROM people")]
     [InlineData("CREATE INDEX ix ON people («?»)")]
     [InlineData("SELECT * FROM people «\U0001F643»")]
+    [InlineData("SELECT * FROM c WHERE c.a = «٣»")]
+    [InlineData("«﻿»SELECT * FROM c")]
     public void Parse_StrayCharacter_ShouldReportOneSyntaxErrorAndBindNothing(string marked)
     {
         // Arrange
@@ -81,6 +83,14 @@ public sealed class OqlParseStrictnessTests
     [InlineData("SELECT * FROM c WHERE «ANY» x IN c.items SATISFIES x > 1 END", "ANY ... SATISFIES")]
     [InlineData("SELECT * FROM c WHERE a = 1 AND «EVERY» x IN c.items SATISFIES x IN [1, 2] END", "EVERY ... SATISFIES")]
     [InlineData("SELECT * FROM c WHERE «EVERY» x IN c.items SATISFIES ANY y IN x.tags SATISFIES y = 1 END END", "EVERY ... SATISFIES")]
+    // A Clause word directly after the collection is a construct, never an AS-less alias.
+    [InlineData("SELECT * FROM c «unnest»", "UNNEST")]
+    [InlineData("SELECT * FROM c «limit»", "LIMIT")]
+    // A set operation and its ALL or DISTINCT are one construct.
+    [InlineData("SELECT * FROM c «UNION ALL» SELECT * FROM d", "UNION")]
+    [InlineData("SELECT * FROM c «EXCEPT DISTINCT» SELECT * FROM d", "EXCEPT")]
+    // ODMG's FOR ALL owns its SATISFIES, which is not reported again.
+    [InlineData("SELECT * FROM c WHERE «FOR» ALL x IN c.items SATISFIES x > 1", "FOR ALL")]
     public void Parse_UnsupportedWord_ShouldReportOneCapabilityDiagnostic(string marked, string construct)
     {
         // Arrange
@@ -110,6 +120,15 @@ public sealed class OqlParseStrictnessTests
     [InlineData("SELECT * FROM c WHERE limit = 1 AND merge = 2")]
     [InlineData("SELECT * FROM c ORDER BY limit DESC")]
     [InlineData("SELECT c.limit FROM c WHERE c.every.satisfies = 1")]
+    // A statement verb or quantifier word is a construct only in its own position, so an
+    // AS-less FROM alias of that name still parses, as it did before #1101.
+    [InlineData("SELECT merge.a FROM c merge")]
+    [InlineData("SELECT upsert.a FROM c upsert")]
+    [InlineData("SELECT every.a FROM c every")]
+    [InlineData("SELECT satisfies.a FROM c satisfies")]
+    // AS keeps a Clause word a name.
+    [InlineData("SELECT unnest.a FROM c AS unnest")]
+    [InlineData("SELECT merge.a FROM c AS merge WHERE merge.b = 1")]
     public void Parse_WordAsName_ShouldStillParse(string oql)
     {
         // Act
@@ -126,10 +145,11 @@ public sealed class OqlParseStrictnessTests
         // Act
         var diagnostics = Parse("SELECT ~a FROM c").Diagnostics.ToArray();
 
-        // Assert
-        diagnostics.ShouldNotBeEmpty();
-        diagnostics.ShouldAllBe(diagnostic => diagnostic.Code == "OQL0002");
-        diagnostics[0].Start.ShouldBe("SELECT ".Length);
+        // Assert: recovery reached the ~ from three rules and used to report it three times.
+        var diagnostic = diagnostics.ShouldHaveSingleItem();
+        diagnostic.Code.ShouldBe("OQL0002");
+        diagnostic.Start.ShouldBe("SELECT ".Length);
+        diagnostic.End.ShouldBe("SELECT ~".Length);
     }
 
     /// <summary>

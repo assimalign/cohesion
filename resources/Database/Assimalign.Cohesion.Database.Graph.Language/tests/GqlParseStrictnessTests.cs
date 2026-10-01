@@ -22,6 +22,8 @@ public sealed class GqlParseStrictnessTests
     [InlineData("MATCH («^») RETURN a")]
     [InlineData("INSERT (a:Person {name: «§»})")]
     [InlineData("MATCH (a) RETURN a «\U0001F643»")]
+    [InlineData("INSERT (a:Person {age: «٣»})")]
+    [InlineData("«﻿»MATCH (a) RETURN a")]
     public void Parse_StrayCharacter_ShouldReportOneSyntaxErrorAndBindNothing(string marked)
     {
         // Arrange
@@ -58,8 +60,12 @@ public sealed class GqlParseStrictnessTests
     [InlineData("MATCH (n «IS» A) RETURN n", "IS LABEL EXPRESSION")]
     [InlineData("MATCH (n:A«|»B|C) RETURN n", "LABEL DISJUNCTION")]
     [InlineData("MATCH (n «IS» A|B) RETURN n", "IS LABEL EXPRESSION")]
+    // IS before a token that cannot start a label is not a label expression; the IS that
+    // RETURN names is the one construct, as before #1101.
+    [InlineData("MATCH (is) RETURN «is»", "IS")]
     [InlineData("MATCH (a)-[r:A«|»B]->(b) RETURN r", "LABEL DISJUNCTION")]
     [InlineData("MATCH (n:A«&»B {name: 'x'}) RETURN n", "LABEL CONJUNCTION")]
+    [InlineData("MATCH (a)-[:A«|»:B|:C]->(b) RETURN a", "LABEL DISJUNCTION")]
     // Path mode prefixes (pins)
     [InlineData("MATCH «TRAIL» (a)-[]->(b)", "TRAIL PATH MODE")]
     [InlineData("MATCH p = «ACYCLIC» (a)-[]->(b)", "ACYCLIC PATH MODE")]
@@ -70,6 +76,15 @@ public sealed class GqlParseStrictnessTests
     [InlineData("MATCH «ALL SHORTEST» (a)-[]->(b)", "ALL SHORTEST")]
     [InlineData("MATCH «ANY SHORTEST» (a)-[]->(b)", "ANY SHORTEST")]
     [InlineData("MATCH p = «ANY SHORTEST PATHS» (a)-[]->(b) RETURN p", "ANY SHORTEST")]
+    // A path search prefix owns its path mode and PATH/PATHS (ISO/IEC 39075 <path search prefix>)
+    [InlineData("MATCH «ANY SHORTEST TRAIL» (a)-[]->(b) RETURN a", "ANY SHORTEST")]
+    [InlineData("MATCH «ALL TRAIL» (a)-[]->(b) RETURN a", "ALL PATH SEARCH")]
+    [InlineData("MATCH «ALL» (a)-[]->(b) RETURN a", "ALL PATH SEARCH")]
+    [InlineData("MATCH «ANY» (a)-[]->(b) RETURN a", "ANY PATH SEARCH")]
+    [InlineData("MATCH «ANY 2 WALK PATHS» (a)-[]->(b) RETURN a", "ANY PATH SEARCH")]
+    [InlineData("MATCH «SHORTEST 2 GROUPS» (a)-[]->(b) RETURN a", "SHORTEST PATH")]
+    // A procedure's YIELD belongs to its CALL
+    [InlineData("MATCH (a) «CALL» db.labels() YIELD label RETURN label", "CALL")]
     // Delete without detaching (pin)
     [InlineData("MATCH (n) «NODETACH DELETE» n", "NODETACH DELETE")]
     // MERGE (pin; already COHDBL001 before #1101)

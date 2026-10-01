@@ -72,25 +72,35 @@ a name:
 - **Anywhere** (the ODMG words above): every occurrence except a path segment after a dot. All
   are lexer keywords or functions.
 - **Clause** (statements and clauses of other languages, and the SQL++ words `LIMIT`,
-  `OFFSET`, `UPSERT`, `MERGE`, `UNNEST`): the first word of the statement, or the word directly
-  after the end of an operand. An operand ends with a name, a path segment, a literal, a
-  parameter, `)`, `]`, `NULL`/`NIL`/`TRUE`/`FALSE` or `ASC`/`DESC`. So `WHERE a = 1 LIMIT 5`,
-  `WHERE a = 'x' LIMIT 1` and `ORDER BY a DESC OFFSET 2` report `LIMIT` or `OFFSET`, where
-  they used to fall through to `OQL0002`. `FROM c UNNEST c.items` reports `UNNEST` instead of
-  binding it as the alias. These words are not lexer keywords, so `SELECT limit, merge FROM c`
-  and `SELECT a AS limit FROM c` still parse.
+  `OFFSET` and `UNNEST`): the first word of the statement, or the word directly after the end
+  of an operand. An operand ends with a name, a path segment, a literal, a parameter, `)`, `]`,
+  `NULL`/`NIL`/`TRUE`/`FALSE` or `ASC`/`DESC`. So `WHERE a = 1 LIMIT 5`, `WHERE a = 'x' LIMIT 1`
+  and `ORDER BY a DESC OFFSET 2` report `LIMIT` or `OFFSET`, where they used to fall through to
+  `OQL0002`. `FROM c UNNEST c.items` reports `UNNEST` instead of binding it as the alias. These
+  words are not lexer keywords, so `SELECT limit, merge FROM c` and `SELECT a AS limit FROM c`
+  still parse. Because the collection name ends an operand, a Clause word cannot be an AS-less
+  `FROM` alias: `FROM c unnest` reports `UNNEST`, while `FROM c AS unnest` keeps it a name.
+- **Statement** (the SQL++ statement verbs `UPSERT` and `MERGE`): only the first word of the
+  statement. Elsewhere they are names, so an AS-less alias such as `FROM c merge` still parses,
+  as it did before #1101.
 - **Quantifier**: `EVERY`, `ANY` or `SOME` followed by `name IN` opens a quantified predicate.
   It is one construct named `EVERY ... SATISFIES` (or `ANY`/`SOME`), up to its `END`. Its binding
   `IN` is not reported as the `IN` predicate. ODMG's `FOR ALL name IN` and `EXISTS name IN` bind
-  the same way and report `FOR ALL` and `EXISTS`.
+  the same way and report `FOR ALL` and `EXISTS`; the `SATISFIES` after them is not reported
+  again. `EVERY` and `SATISFIES` name the construct only there, so an alias such as
+  `FROM c every` still parses.
 
 A statement whose first word is unsupported, such as `UPSERT INTO c ...` or
 `MERGE INTO c ...`, is one construct: the scan reports that word and nothing after it. Each
-operand of a set operation starts its own `SELECT`, which is not reported as a subquery.
+operand of a set operation starts its own `SELECT`, which is not reported as a subquery, and a
+set operation with `ALL` or `DISTINCT` (`UNION ALL`) is one construct spanning both words.
 `OqlKeywordDispositionTests` enumerates the profile's keywords plus the table. Every word needs
-a supported parse case or a case with exactly one `COHDBL001` naming its construct. A word added
+a supported parse case or a case with exactly one `COHDBL001` naming its construct, and for a
+table entry that diagnostic must also name the construct the table records. A word added
 without a case fails, so oql-sqlpp-basis and the flip items add their cases in the same change.
-OQL declares no `~`, so `SELECT ~a FROM c` stays an `OQL0002` syntax error (a pin).
+OQL declares no `~`, so `SELECT ~a FROM c` stays an `OQL0002` syntax error (a pin). It is one
+error: a second error with the same code at the same span is dropped, so recovery that reaches
+one bad token from several rules no longer reports it three times.
 
 ## Grammar, statement, and expression trees
 

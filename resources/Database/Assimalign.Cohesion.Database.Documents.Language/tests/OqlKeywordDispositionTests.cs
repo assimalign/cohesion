@@ -5,6 +5,7 @@ using System.Linq;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Documents.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
@@ -141,6 +142,11 @@ public sealed class OqlKeywordDispositionTests
                      errors[0].Message?.Contains($"The {keywordCase.Construct} clause", StringComparison.Ordinal) != true)
             {
                 failures.Add($"{word}: expected one COHDBL001 naming '{keywordCase.Construct}' for '{keywordCase.Oql}' but found {found}");
+            }
+            else if (OqlUnsupportedVocabulary.TryFind(word.ToUpperInvariant(), out var entry) &&
+                     !errors[0].Message!.Contains(entry.Construct, StringComparison.Ordinal))
+            {
+                failures.Add($"{word}: the diagnostic does not name the table's construct '{entry.Construct}': {found}");
             }
         }
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using Assimalign.Cohesion.Database.Graph.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
@@ -154,8 +155,9 @@ public sealed partial class GqlQueryParser : QueryParser
             }
             if (token.Type == TokenType.Colon && inElementPattern)
             {
+                // A ':' inside a label expression (:A|:B) continues it; only a new one resets.
+                if (!inLabelExpression) { labelReported = false; }
                 inLabelExpression = true;
-                labelReported = false;
             }
             if (token.Type is TokenType.Pipe or TokenType.Ampersand or TokenType.Bang or TokenType.Percent &&
                 inLabelExpression)
@@ -191,8 +193,9 @@ public sealed partial class GqlQueryParser : QueryParser
                 continue;
             }
 
-            // (n IS A) is ISO's <is label expression>, not a name.
-            if (value == "IS" && inElementPattern)
+            // (n IS A) is ISO's <is label expression>, not a name. IS followed by a token that
+            // cannot start a label, as in (is), is a variable named is.
+            if (value == "IS" && inElementPattern && StartsLabelExpression(i + 1))
             {
                 UnsupportedConstruct(GqlUnsupportedVocabulary.IsLabelExpression, token, token);
                 inLabelExpression = true;
@@ -218,12 +221,14 @@ public sealed partial class GqlQueryParser : QueryParser
                 case GqlWordPosition.LabelExpression:
                     continue;
                 default:
-                    if (value is "ALL" or "ANY" && !inPredicateOrReturn && IsWordAt(i + 1, "SHORTEST"))
+                    if (value is "ALL" or "ANY" or "SHORTEST" && !inPredicateOrReturn &&
+                        TryPathSearchPrefix(i, out string prefix, out int last))
                     {
-                        // One path search prefix, not ALL (or ANY) followed by SHORTEST PATH.
-                        construct = value + " SHORTEST";
-                        end = _tokens[++i];
-                        if (IsWordAt(i + 1, "PATH") || IsWordAt(i + 1, "PATHS")) { end = _tokens[++i]; }
+                        // One path search prefix, with its path mode and PATH/PATHS, not ALL
+                        // (or ANY) followed by SHORTEST PATH or a separate path mode.
+                        construct = prefix;
+                        i = last;
+                        end = _tokens[last];
                     }
                     else if (value is "STARTS" or "ENDS" && IsWordAt(i + 1, "WITH"))
                     {
@@ -256,6 +261,52 @@ public sealed partial class GqlQueryParser : QueryParser
         }
         return index < _tokens.Count && _tokens[index].Type == TokenType.LeftParen;
     }
+
+    /// <summary>
+    /// Reads an ISO/IEC 39075 path search prefix at <paramref name="index"/>: <c>ALL SHORTEST</c>,
+    /// <c>ANY SHORTEST</c> or <c>SHORTEST [k]</c>, or <c>ALL</c> or <c>ANY [k]</c> directly before
+    /// a path pattern. Each takes an optional path mode and <c>PATH</c>/<c>PATHS</c>, and
+    /// <c>SHORTEST</c> takes <c>GROUP</c>/<c>GROUPS</c> instead; all of it is one construct.
+    /// </summary>
+    /// <param name="index">The index of <c>ALL</c>, <c>ANY</c> or <c>SHORTEST</c>.</param>
+    /// <param name="construct">The construct the prefix names.</param>
+    /// <param name="last">The index of the prefix's last token.</param>
+    /// <returns><see langword="true"/> when a prefix starts at <paramref name="index"/>.</returns>
+    private bool TryPathSearchPrefix(int index, out string construct, out int last)
+    {
+        string head = _tokens[index].Text.ToUpperInvariant();
+        int next = index + 1;
+        bool shortest = head == "SHORTEST" || IsWordAt(next, "SHORTEST");
+        if (head != "SHORTEST" && shortest) { next++; }
+        if (head != "ALL" && next < _tokens.Count && _tokens[next].Type == TokenType.Integer) { next++; }
+
+        if (next < _tokens.Count && _tokens[next].Type is TokenType.Identifier or TokenType.Keyword &&
+            GqlUnsupportedVocabulary.TryFind(_tokens[next].Text.ToUpperInvariant(), out var mode) &&
+            mode.Position == GqlWordPosition.PathMode)
+        {
+            next++;
+        }
+        if (IsWordAt(next, "PATH") || IsWordAt(next, "PATHS") ||
+            head == "SHORTEST" && (IsWordAt(next, "GROUP") || IsWordAt(next, "GROUPS")))
+        {
+            next++;
+        }
+
+        last = next - 1;
+        if (shortest)
+        {
+            construct = head == "SHORTEST" ? GqlClauses.ShortestPath : head + " SHORTEST";
+            return true;
+        }
+
+        construct = head + " PATH SEARCH";
+        return next < _tokens.Count && _tokens[next].Type == TokenType.LeftParen;
+    }
+
+    /// <summary>Whether the token at <paramref name="index"/> can start a label expression.</summary>
+    private bool StartsLabelExpression(int index) => index < _tokens.Count && _tokens[index].Type is
+        TokenType.Identifier or TokenType.Keyword or TokenType.Function or TokenType.QuotedIdentifier or
+        TokenType.Bang or TokenType.Percent or TokenType.LeftParen;
 
     private bool IsWordAt(int index, string word) => index < _tokens.Count &&
         _tokens[index].Type is TokenType.Keyword or TokenType.Identifier or TokenType.Function &&

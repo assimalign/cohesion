@@ -100,7 +100,14 @@ lexes as `TokenType.Unrecognized` and reports one `SQL0003` at the character
 `?` as an alias and ran, and `SELECT ? FROM t` returned a column named `?`. The
 statement now keeps only its command type: no alias, column or `NULL` placeholder
 is built around the character. The message that names the supported parameter
-forms for `?` and `:name` belongs to shared-parameters.
+forms for `?` and `:name` belongs to shared-parameters. A non-ASCII decimal digit,
+such as Arabic-Indic `٣` or fullwidth `１`, is a character outside the dialect too:
+only ASCII digits make a numeric literal. It used to lex as an integer, parse
+cleanly and then fail at execution with an uncoded `FormatException`. A stray
+character before the statement, such as a byte order mark that was not stripped,
+is reported once, and the statement after it is not reported as an unknown
+command. A numeric literal whose exponent has no digits, such as `1e` or `2.5E-`,
+reports `SQL0003` at the literal; it also used to fail only at execution.
 
 | Written | Reported as `SQL0003` | Diagnostic starts at |
 |---|---|---|
@@ -115,7 +122,8 @@ forms for `?` and `:name` belongs to shared-parameters.
 | `WHERE (id = 1`, `id IN (1, 2`, `id BETWEEN 1 2`, `CASE WHEN c 'a' END`, `ORDER id`, `UPDATE t;`, `DELETE;`, `VALUES (1), ()` | The missing token, keyword, name or value | where it was expected |
 | `VARCHAR(25 5)`, `DECIMAL(10, 2, 5)`, `VARCHAR(-5)`, `VARCHAR(MAX)` | Type arguments must be one or two unsigned integer literals | the first offending token |
 | `'abc WHERE id = 1`, `"id FROM t`, `/* WHERE id = 1` | Unterminated literal, quoted identifier or comment | the opening delimiter |
-| `SELECT * FROM t ?`, `SELECT a # b FROM t`, `WHERE b = ?` | A character outside the dialect; nothing is bound around it | the character |
+| `SELECT * FROM t ?`, `SELECT a # b FROM t`, `WHERE b = ?`, `WHERE id = ١` | A character outside the dialect; nothing is bound around it | the character |
+| `SELECT 1e FROM t`, `WHERE a = 2.5E-` | A numeric literal whose exponent has no digits | the literal |
 | `SELECT 1; SELECT 2`, `BEGIN; DELETE FROM t`, `COMMIT;;` | A request accepts exactly one statement | the first token after `;` |
 
 A recognized clause outside the profile keeps its `COHDBL001`, for example
@@ -596,13 +604,20 @@ SQL aggregates follow the grouping and aggregate contract below. `IS` takes only
 
 `~` is recognized but not part of the dialect, and is rejected at parse time with
 one `COHDBL001` at the operator (#1101). In prefix position (`~a`, bitwise NOT)
-the message names the prefix `~` operator. In infix position (`a ~ 'x'`,
-PostgreSQL's regular-expression match) it names the infix `~` operator; the infix
-form is recognized wherever an additive operator may follow an operand. `~` used
-to parse as bitwise NOT, and the evaluator returned NULL for a NULL operand and
-threw per row otherwise. So `SELECT ~NULL;` and `~` over an empty table
-succeeded, and an infix `~` fell to the leftover-token check with a generic
-message. None of them executes now, on either session seam or over the wire.
+the message names the prefix `~` operator. That covers every operand position,
+including a rule that takes a primary directly, such as a `LIKE` pattern
+(`LIKE ~'x'`) or a column `DEFAULT ~1`, and a run of prefix operators (`~ ~a`) is
+one diagnostic. In infix position (`a ~ 'x'`, PostgreSQL's regular-expression
+match) it names the infix operator as written. The infix form is recognized
+wherever an additive operator may follow an operand, and after a predicate that
+completes on its own (`a IS NULL ~ 'x'`, `a IN (1, 2) ~ 'x'`, `a LIKE 'x' ~ 'y'`,
+`BETWEEN 1 AND 2 ~ 3`). PostgreSQL's operators built on `~` are one operator each:
+`~*`, `!~` and `!~*` (regular-expression match) and `~~`, `~~*`, `!~~` and `!~~*`
+(LIKE match). `~` used to parse as bitwise NOT, and the evaluator returned NULL
+for a NULL operand and threw per row otherwise. So `SELECT ~NULL;` and `~` over an
+empty table succeeded, and an infix `~` fell to the leftover-token check with a
+generic message. None of them executes now, on either session seam or over the
+wire.
 
 ## Literals
 
@@ -733,7 +748,7 @@ function names are lexed but not supported (see the statement matrix).
 | `COHDBL001` | Error | Recognized clause, keyword or operator is not supported by the SQL model surface, including prefix and infix `~` (#1101); the message names the construct |
 | `SQL0001` | Error | Empty query text |
 | `SQL0002` | Error | Unknown command (recognized unsupported clauses use `COHDBL001`) |
-| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#` or `^`, which binds no alias or column (#1101); an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; type arguments other than one or two unsigned integer literals; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
+| `SQL0003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an `IS` form other than `[NOT] NULL`; `NOT` after an operand without `BETWEEN`, `IN` or `LIKE`; `LIKE ... ESCAPE`; `LIMIT` after `OFFSET`; type arguments other than one or two unsigned integer literals; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unsupported or incomplete `ALTER TABLE` action; and malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `SQL0004` | Error | Unknown CAST target type |
 | `SQL0005` | Error | Unsupported CAST target or invalid target parameters |
 | `SQL0100` | Information | Statement does not end with `;` |
@@ -746,12 +761,22 @@ carried per node.
 the internal recognized-unsupported table (`SqlUnsupportedVocabulary`), either
 parses inside a supported clause or reports exactly one `COHDBL001` naming its
 construct. The table holds the clause keywords the preflight scan rejects,
-`UNION` through `USING` in the statement matrix. It also holds the spellings that
-dedicated rules reject: `WITH`, `SELECT ALL`, `CREATE`/`DROP VIEW`,
-`CREATE COLLATION`, `CREATE FULLTEXT`, `NULLS FIRST`/`LAST` and `~`.
-`SqlKeywordDispositionTests` (Sql.Language) holds one case per word. It fails when
-a keyword or table entry is added without one, so the item that adds a word adds
-its case in the same change.
+`UNION` through `USING` in the statement matrix. It also holds every other word or
+operator outside the profile's keywords that a dedicated rule recognizes and
+rejects with `COHDBL001`: `WITH`, `SELECT ALL`, `CREATE`/`DROP VIEW`,
+`CREATE COLLATION`, `CREATE FULLTEXT`, `NULLS FIRST`/`LAST`, `GROUPING SETS` and
+the `GROUPING`, `ROLLUP`, `CUBE` and `GROUPING_ID` calls, `FILTER (...)` and
+`WITHIN GROUP` after a call, the `ANY`/`SOME` (and `ALL`) quantified comparisons,
+`LATERAL`, and `~`. Profile keywords that start an unsupported form by another
+rule, such as `LEFT` or `CROSS`, need no entry, and function names such as the
+window functions are not entries: shared-diagnostics extends the table with them.
+A recognized construct is skipped once it is reported, so the text after it adds
+no second diagnostic: `= ANY (SELECT ...)` no longer parses as a call to a
+function named `ANY`, `LATERAL` is no longer bound as a table name, and `WITHIN`
+is no longer read as a column alias. `SqlKeywordDispositionTests` (Sql.Language)
+holds one case per word. It fails when a keyword or table entry is added without
+one, so the item that adds a word adds its case in the same change. It also fails
+when an entry's diagnostic does not name the construct the table records for it.
 
 Plan-time rejections, such as `Unknown column '<name>'.` and
 `Unknown function '<name>'.`, are `DatabaseException` messages without a code

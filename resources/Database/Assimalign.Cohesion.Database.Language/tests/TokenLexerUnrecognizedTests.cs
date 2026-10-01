@@ -21,6 +21,9 @@ public sealed class TokenLexerUnrecognizedTests
     [InlineData("`")]
     [InlineData("\\")]
     [InlineData("​")]
+    [InlineData("٣")] // ARABIC-INDIC DIGIT THREE
+    [InlineData("１")] // FULLWIDTH DIGIT ONE
+    [InlineData("३")] // DEVANAGARI DIGIT THREE
     public void MoveNext_StrayCharacter_ShouldLexAsOneUnrecognizedToken(string character)
     {
         // Act
@@ -49,6 +52,29 @@ public sealed class TokenLexerUnrecognizedTests
             (TokenType.Unrecognized, "#", 2),
             (TokenType.Unrecognized, "^", 3),
             (TokenType.Unrecognized, "§", 4),
+        ]);
+    }
+
+    /// <summary>
+    /// <c>char.IsDigit</c> accepted every Unicode decimal digit, so <c>٣</c> lexed as an Integer
+    /// that SQL parsed cleanly and the engine could not convert. Only ASCII digits make a
+    /// number; a non-ASCII digit inside a name stays part of the identifier.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Language] - Lexer: only ASCII digits make a numeric literal")]
+    public void MoveNext_NonAsciiDigits_ShouldNotLexAsNumbers()
+    {
+        // Act
+        var tokens = Lex("1٣ a٣ .٣ 12.5e3");
+
+        // Assert
+        tokens.ShouldBe(
+        [
+            (TokenType.Integer, "1", 0),
+            (TokenType.Unrecognized, "٣", 1),
+            (TokenType.Identifier, "a٣", 3),
+            (TokenType.Dot, ".", 6),
+            (TokenType.Unrecognized, "٣", 7),
+            (TokenType.Float, "12.5e3", 9),
         ]);
     }
 

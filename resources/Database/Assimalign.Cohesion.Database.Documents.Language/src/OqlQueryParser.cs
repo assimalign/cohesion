@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using Assimalign.Cohesion.Database.Documents.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
@@ -243,13 +244,33 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             // Words of other languages are not reserved field names: they name a construct
-            // only where a clause can start, so mixed-shape fields such as limit still parse.
-            if (word.Position != OqlWordPosition.Anywhere && index > 0 && !EndsOperand(index - 1))
+            // only where it can start, so mixed-shape fields such as limit still parse. A
+            // statement verb names one only as the first word, so an AS-less FROM alias named
+            // merge or upsert still parses, and a quantifier word only through the binding
+            // path above, so an alias named every or satisfies does too.
+            bool constructPosition = word.Position switch
+            {
+                OqlWordPosition.Anywhere => true,
+                OqlWordPosition.Clause => index == 0 || EndsOperand(index - 1),
+                OqlWordPosition.Statement => index == 0,
+                _ => false,
+            };
+            if (!constructPosition)
             {
                 continue;
             }
 
-            result.Add((word.Construct, token));
+            // UNION ALL and UNION DISTINCT are one set operation, not a set operation plus the
+            // ALL or DISTINCT word.
+            var reported = token;
+            if (value is "UNION" or "INTERSECT" or "EXCEPT" && index + 1 < _tokens.Count &&
+                (IsWord(_tokens[index + 1], "ALL") || IsWord(_tokens[index + 1], "DISTINCT")))
+            {
+                var modifier = _tokens[++index];
+                reported = new Lexeme(token.Type, token.Text, token.Start, modifier.End, token.Line);
+            }
+
+            result.Add((word.Construct, reported));
 
             // A statement that does not start as OQL is one unsupported construct; the rest of
             // its text belongs to it (UPDATE c SET ..., MERGE INTO c USING ...).
@@ -392,11 +413,24 @@ public sealed partial class OqlQueryParser : QueryParser
         return string.Empty;
     }
 
-    private void Error(string code, string message, Lexeme token) => _diagnostics.Add(new Diagnostic
+    private void Error(string code, string message, Lexeme token)
     {
-        Code = code, Message = message, Start = token.Start, End = token.End,
-        Line = token.Line, Severity = DiagnosticSeverity.Error, Location = DiagnosticLocation.Absolute,
-    });
+        // Recovery can reach one bad token from several rules, as with SELECT ~a FROM c. It is
+        // one mistake, so a second error with the same code at the same span is dropped (#1101).
+        foreach (var existing in _diagnostics)
+        {
+            if (existing.Code == code && existing.Start == token.Start && existing.End == token.End)
+            {
+                return;
+            }
+        }
+
+        _diagnostics.Add(new Diagnostic
+        {
+            Code = code, Message = message, Start = token.Start, End = token.End,
+            Line = token.Line, Severity = DiagnosticSeverity.Error, Location = DiagnosticLocation.Absolute,
+        });
+    }
 
     /// <summary>
     /// Names a character as written, or by code point when it is invisible or is a

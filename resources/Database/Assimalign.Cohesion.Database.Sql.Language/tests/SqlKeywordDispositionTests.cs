@@ -6,6 +6,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 
 namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
@@ -39,7 +40,7 @@ public sealed class SqlKeywordDispositionTests
         ["ADD"] = Parses("ALTER TABLE t ADD COLUMN c INT"),
         ["COLUMN"] = Parses("ALTER TABLE t ADD COLUMN c INT"),
         ["INDEX"] = Parses("CREATE INDEX ix ON t (a)"),
-        ["VIEW"] = Rejects("CREATE VIEW v AS SELECT a FROM t", SqlClauses.CreateView),
+        ["VIEW"] = Rejects("DROP VIEW v", SqlClauses.DropView),
         ["PRIMARY"] = Parses("CREATE TABLE t (a INT PRIMARY KEY)"),
         ["KEY"] = Parses("CREATE TABLE t (a INT PRIMARY KEY)"),
         ["FOREIGN"] = Parses("CREATE TABLE c (p INT, FOREIGN KEY (p) REFERENCES t (id))"),
@@ -64,11 +65,18 @@ public sealed class SqlKeywordDispositionTests
         ["CROSS"] = Rejects("SELECT * FROM t CROSS JOIN u", "CROSS JOIN"),
         ["NATURAL"] = Rejects("SELECT * FROM t NATURAL JOIN u", SqlClauses.Natural),
         ["USING"] = Rejects("SELECT * FROM t JOIN u USING (id)", SqlClauses.Using),
+        ["LATERAL"] = Rejects("SELECT * FROM t JOIN LATERAL (SELECT b FROM u) x ON TRUE", "LATERAL subquery"),
         // Clauses and modifiers
         ["AS"] = Parses("SELECT a AS b FROM t"),
         ["GROUP"] = Parses("SELECT a FROM t GROUP BY a"),
         ["BY"] = Parses("SELECT a FROM t GROUP BY a"),
         ["HAVING"] = Parses("SELECT a FROM t GROUP BY a HAVING COUNT(*) > 1"),
+        ["GROUPING"] = Rejects("SELECT a FROM t GROUP BY GROUPING SETS ((a), ())", "GROUPING SETS"),
+        ["ROLLUP"] = Rejects("SELECT a FROM t GROUP BY ROLLUP (a)", "ROLLUP"),
+        ["CUBE"] = Rejects("SELECT a FROM t GROUP BY CUBE (a)", "CUBE"),
+        ["GROUPING_ID"] = Rejects("SELECT GROUPING_ID(a) FROM t GROUP BY a", "GROUPING_ID"),
+        ["FILTER"] = Rejects("SELECT COUNT(*) FILTER (WHERE a > 1) FROM t", "FILTER"),
+        ["WITHIN"] = Rejects("SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY a) FROM t", "WITHIN GROUP"),
         ["ORDER"] = Parses("SELECT a FROM t ORDER BY a"),
         ["ASC"] = Parses("SELECT a FROM t ORDER BY a ASC"),
         ["DESC"] = Parses("SELECT a FROM t ORDER BY a DESC"),
@@ -95,7 +103,9 @@ public sealed class SqlKeywordDispositionTests
         ["BETWEEN"] = Parses("SELECT a FROM t WHERE a BETWEEN 1 AND 2"),
         ["LIKE"] = Parses("SELECT a FROM t WHERE a LIKE 'x%'"),
         ["IS"] = Parses("SELECT a FROM t WHERE a IS NULL"),
-        ["~"] = Rejects("SELECT ~a FROM t", "~ operator"),
+        ["ANY"] = Rejects("SELECT a FROM t WHERE a = ANY (SELECT b FROM u)", "ANY quantified comparison"),
+        ["SOME"] = Rejects("SELECT a FROM t WHERE a = SOME (SELECT b FROM u)", "SOME quantified comparison"),
+        ["~"] = Rejects("SELECT ~a FROM t", "prefix ~ operator"),
         // Literals
         ["NULL"] = Parses("SELECT a FROM t WHERE a IS NULL"),
         ["TRUE"] = Parses("SELECT a FROM t WHERE b = TRUE"),
@@ -175,11 +185,22 @@ public sealed class SqlKeywordDispositionTests
             {
                 failures.Add($"{word}: expected one COHDBL001 naming '{keywordCase.Construct}' for '{keywordCase.Sql}' but found {found}");
             }
+            else if (TableConstruct(word) is { } construct &&
+                     !errors[0].Message!.Contains(construct, StringComparison.Ordinal))
+            {
+                failures.Add($"{word}: the diagnostic does not name the table's construct '{construct}': {found}");
+            }
         }
 
         // Assert
         failures.ShouldBeEmpty();
     }
+
+    private static string? TableConstruct(string word)
+        => SqlUnsupportedVocabulary.Words
+            .Where(entry => entry.Spelling.Equals(word, StringComparison.OrdinalIgnoreCase))
+            .Select(entry => entry.Construct)
+            .FirstOrDefault();
 
     private static void RequireCoverage(IEnumerable<string> words, IReadOnlyDictionary<string, KeywordCase> corpus)
         => words.Where(word => !corpus.ContainsKey(word))

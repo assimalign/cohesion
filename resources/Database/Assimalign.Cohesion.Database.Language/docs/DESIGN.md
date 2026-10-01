@@ -39,9 +39,10 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
 - **One recognized-unsupported table per language.** Each language package keeps one static
   table, `SqlUnsupportedVocabulary`, `OqlUnsupportedVocabulary` or `GqlUnsupportedVocabulary`.
   Each entry pairs a spelling with the construct its diagnostic names and the position where
-  the parser treats it as that construct. The tables are internal arrays. Each language's test
-  project reaches them through `InternalsVisibleTo`, and nothing else does. Later items extend the
-  tables: shared-diagnostics adds function names, and oql-sqlpp-basis adds the ODMG words.
+  the parser treats it as that construct. The tables are internal arrays in each package's
+  `Internal` namespace (`src/Internal/`). Each language's test project reaches them through
+  `InternalsVisibleTo`, and nothing else does. Later items extend the tables: shared-diagnostics
+  adds function names, and oql-sqlpp-basis adds the ODMG words.
 - **Recognized-but-unsupported words stay positional.** A word such as OQL `LIMIT` or `MERGE`, or
   GQL `TRAIL` or `NODETACH`, is not added to the profile's keyword list. The lexer keeps it an
   identifier, so a field or variable of that name still parses. The table's position rule decides
@@ -50,12 +51,17 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
 - **`COHDBL001` is for recognized constructs.** That covers a clause, a statement, a multi-word
   prefix such as GQL `ALL SHORTEST`, a quantified predicate, a label-expression operator, or an
   operator such as SQL `~`. A statement whose first word is unsupported is one construct; the
-  scan reports that word and nothing after it.
+  scan reports that word and nothing after it. A construct owns its modifiers and its operand:
+  GQL `ALL TRAIL PATHS` and OQL `UNION ALL` are one construct each, and SQL skips the text of
+  `= ANY (SELECT ...)`, `LATERAL (...)` or `WITHIN GROUP (...)` once it is reported, so that text
+  adds no second diagnostic.
 - **Each table has a corpus.** `SqlKeywordDispositionTests`, `OqlKeywordDispositionTests` and
   `GqlKeywordDispositionTests` enumerate the profile's keywords plus the table. They fail unless
   every word has a positive case inside a supported clause, or a case with exactly one
-  `COHDBL001` naming its construct. A self-test proves that a word added without a case fails.
-  So an item that adds a keyword or a table entry adds its corpus case in the same change.
+  `COHDBL001` naming its construct. For a table entry, that diagnostic must also name the
+  construct the table records, so the table's construct cannot drift from the parser's message.
+  A self-test proves that a word added without a case fails. So an item that adds a keyword or a
+  table entry adds its corpus case in the same change.
 - **Pins, and who flips them.** These stay `COHDBL001`, with no T1 item lifting them: GQL path
   modes, GQL shortest-path prefixes, GQL `MERGE`, GQL `NODETACH DELETE`, and OQL `MERGE`. #1101
   owns the OQL `MERGE` pin, so oql-upsert does not re-pin it. Each of these items depends on #1101
@@ -64,12 +70,17 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
   gql-label-direction (label-expression operators and `IS`).
 - **A stray character is `TokenType.Unrecognized`.** The lexer reports a character outside every
   language as `Unrecognized`, never as `Identifier`. Examples are `?`, `#`, `^`, `§`, a
-  backtick, or a zero-width space. A surrogate pair is one token. `Unrecognized` is appended after
-  `Eof`, so every existing member keeps its value. Each parser reports the character with its own
+  backtick, or a zero-width space. A surrogate pair is one token. Only ASCII digits make a numeric
+  literal, so a Unicode decimal digit outside a name, such as Arabic-Indic `٣` or fullwidth `１`,
+  is `Unrecognized` too; `char.IsDigit` used to lex it as an integer that the engines could not
+  convert. Inside a name such a digit stays part of the identifier. `Unrecognized` is appended
+  after `Eof`, so every existing member keeps its value. Each parser reports the character with its own
   syntax code at the character's span: `SQL0003`, `OQL0002` or `GQL0002`. The message is
   `Unexpected character '<c>'`, or `U+<hex>` for an invisible or supplementary character. The
   statement then binds nothing. OQL and GQL stop before syntax parsing. SQL parses on so that it
-  can still report its other errors, then keeps only the command type. `?` is a stray character
+  can still report its other errors, then keeps only the command type; a stray character before
+  the statement, such as an unstripped byte order mark, does not become its command, so it is
+  the only error, as in OQL and GQL. `?` is a stray character
   like any other here; the message that names the supported parameter forms is
   shared-parameters'.
 - **`--` stays a line comment in every language.** It is SQL's comment and ISO/IEC 39075's

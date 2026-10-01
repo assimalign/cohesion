@@ -146,16 +146,20 @@ reported once, at its own span:
 
 | Written | Construct named | Span | Who lifts it |
 | --- | --- | --- | --- |
-| `(n:A\|B)`, `(n:A&B)`, `(n:!A)`, `(n:%)` | `LABEL DISJUNCTION`, `LABEL CONJUNCTION`, `LABEL NEGATION`, `WILDCARD LABEL` | the first operator of the label expression | gql-label-direction |
-| `(n IS A)` | `IS LABEL EXPRESSION` | `IS` | gql-label-direction |
+| `(n:A\|B)`, `(n:A&B)`, `(n:!A)`, `(n:%)`, `[:A\|:B\|:C]` | `LABEL DISJUNCTION`, `LABEL CONJUNCTION`, `LABEL NEGATION`, `WILDCARD LABEL` | the first operator of the label expression; a later `:` inside it continues the same expression | gql-label-direction |
+| `(n IS A)` | `IS LABEL EXPRESSION` | `IS`, when a label follows it; `(is)` is a variable | gql-label-direction |
 | `MATCH TRAIL (a)-[]->(b)`, `MATCH p = ACYCLIC (...)`, `WALK`, `SIMPLE` | `<MODE> PATH MODE` | the mode word, plus `PATH`/`PATHS` | pin |
-| `MATCH ALL SHORTEST (...)`, `MATCH ANY SHORTEST (...)` | `ALL SHORTEST`, `ANY SHORTEST` | the prefix, plus `PATH`/`PATHS` | pin |
+| `MATCH ALL SHORTEST (...)`, `MATCH ANY SHORTEST (...)` | `ALL SHORTEST`, `ANY SHORTEST` | the prefix, plus its path mode and `PATH`/`PATHS` | pin |
+| `MATCH SHORTEST 2 (...)`, `SHORTEST 2 GROUPS` | `SHORTEST PATH` | the prefix, plus its count, path mode and `PATH`/`PATHS` or `GROUP`/`GROUPS` | pin |
+| `MATCH ALL (...)`, `MATCH ALL TRAIL (...)`, `MATCH ANY 2 (...)` | `ALL PATH SEARCH`, `ANY PATH SEARCH` | the prefix, plus its count, path mode and `PATH`/`PATHS` | pin |
 | `MATCH (n) NODETACH DELETE n` | `NODETACH DELETE` | both words | pin |
 | `MERGE (n)` | `MERGE` | `MERGE` | pin |
 
 The label expression and `IS` used to fail with `GQL0002` at the first operator. A path mode word
 was read as a path variable, so `MATCH TRAIL (...)` failed with "Expected '='". `ALL SHORTEST`
-reported two diagnostics, `ALL` and `SHORTEST PATH`. `NODETACH` failed with
+reported two diagnostics, `ALL` and `SHORTEST PATH`, and a path mode after a path search prefix
+(`ALL TRAIL`, `ANY SHORTEST TRAIL`) was a second construct; ISO/IEC 39075 makes the whole
+`<path search prefix>` one. `NODETACH` failed with
 "MATCH requires RETURN, INSERT, CREATE, or DELETE.". `STARTS WITH` and `ENDS WITH` are one
 construct each, and a procedure's `YIELD` belongs to its `CALL`. A statement whose first word is
 unsupported, such as `SESSION SET GRAPH g` or `DROP GRAPH g`, is one construct: the scan
@@ -165,8 +169,9 @@ Path mode words and `NODETACH` are positional, not lexer keywords. Before a path
 before `DELETE`, they name the construct. Elsewhere they are names, so `MATCH trail = (a)-[]->(b)`
 and `MATCH (nodetach) DELETE nodetach` still parse.
 `GqlKeywordDispositionTests` enumerates the profile's keywords plus the table. Every word needs a
-supported parse case or a case with exactly one `COHDBL001` naming its construct, and a word added
-without a case fails. The corpus asserts nothing about `--` or `~` edge spellings. The shared lexer
+supported parse case or a case with exactly one `COHDBL001` naming its construct, and for a table
+entry that diagnostic must also name the construct the table records. A word added without a case
+fails. The corpus asserts nothing about `--` or `~` edge spellings. The shared lexer
 keeps `--` as a line comment, ISO's `<simple comment>`, so `(a)-->(b)` reads as `(a)` followed by a
 comment. The coded diagnostic for that case belongs to gql-label-direction.
 

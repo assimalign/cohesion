@@ -87,8 +87,12 @@ public ref struct TokenLexer
             return true;
         }
 
-        // Numeric literal (including .5 style floats)
-        if (char.IsDigit(ch) || (ch == '.' && char.IsDigit(Peek(1))))
+        // Numeric literal (including .5 style floats). Only ASCII digits: char.IsDigit also
+        // accepts every Unicode decimal digit, such as Arabic-Indic or fullwidth digits, which
+        // no language's literal grammar takes and the engines cannot parse. Such a digit
+        // standing alone now lexes as Unrecognized (#1101); inside a name it stays part of
+        // the identifier.
+        if (char.IsAsciiDigit(ch) || (ch == '.' && char.IsAsciiDigit(Peek(1))))
         {
             _current = ScanNumber(start);
             return true;
@@ -227,7 +231,7 @@ public ref struct TokenLexer
         }
 
         // Consume integer digits
-        while (_pos < _source.Length && char.IsDigit(_source[_pos]))
+        while (_pos < _source.Length && char.IsAsciiDigit(_source[_pos]))
         {
             _pos++;
         }
@@ -238,11 +242,11 @@ public ref struct TokenLexer
             _pos < _source.Length &&
             _source[_pos] == '.' &&
             Peek(1) != '.' &&
-            char.IsDigit(Peek(1)))
+            char.IsAsciiDigit(Peek(1)))
         {
             type = TokenType.Float;
             _pos++; // consume .
-            while (_pos < _source.Length && char.IsDigit(_source[_pos]))
+            while (_pos < _source.Length && char.IsAsciiDigit(_source[_pos]))
             {
                 _pos++;
             }
@@ -257,7 +261,7 @@ public ref struct TokenLexer
             {
                 _pos++;
             }
-            while (_pos < _source.Length && char.IsDigit(_source[_pos]))
+            while (_pos < _source.Length && char.IsAsciiDigit(_source[_pos]))
             {
                 _pos++;
             }
