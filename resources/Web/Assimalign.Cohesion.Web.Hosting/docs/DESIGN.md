@@ -194,10 +194,9 @@ carries each request on its own QUIC stream and writes each response to it. So t
 server hands each multiplexed exchange to `MultiplexedExchangeTracker.Start` and goes
 straight back for the next. Before #1049 the loop awaited each exchange's pipeline and
 send before taking the next, so a slow request, a long poll, or a server-sent-events
-stream held up every other stream on its connection. One HTTP/3 limit remains below
-this layer until the incremental request-stream work (#1066) lands: the HTTP/3
-receive loop reads each request body to its end before it yields the exchange, so a
-slowly uploading stream still delays the acceptance of the streams behind it.
+stream held up every other stream on its connection. Since #1066 the HTTP/3 transport
+yields each exchange once its request stream's HEADERS frame decodes and streams the
+body afterwards, so a slowly uploading stream no longer delays the streams behind it.
 
 - **How the server tells.** `IHttpContext.Version` is `Http20` or `Http30` for a
   multiplexed exchange. That is all the dispatch reads about the protocol; everything
@@ -755,12 +754,11 @@ max-request-body-size interceptor, which occupies slot 0 of the interceptor
 order so every request carries the typed `IHttpMaxRequestBodySizeFeature` and
 user-registered interceptors' `AfterRequestHead` hooks can observe it. As of #819 the seam is
 invoked on **all three** parse paths — HTTP/1.1, HTTP/2, and HTTP/3 — so the
-feature is attached uniformly regardless of protocol. Cap *enforcement* (the
-413) is still HTTP/1.1-only: h2 bounds body buffering via flow-control
-backpressure and h3 via QUIC flow control, so a lowered cap changes the
-reported feature value but does not reject the body there yet (the hard cap is
-tracked in the transport's protocol-coverage notes and on
-`HttpConnectionListenerLimits.MaxRequestBodySize`).
+feature is attached uniformly regardless of protocol. The cap is *enforced*
+with 413 on all three: HTTP/1.1 inline in its parser, HTTP/2 against the value
+the interceptor pipeline freezes (#1048), and HTTP/3 in its incrementally read
+body (#1066). Http.RequestLimits' DESIGN, "Protocol coverage (honest gaps)", has the detail;
+the transport-wide default is `HttpConnectionListenerLimits.MaxRequestBodySize`.
 
 ### Why default-on, and why here
 
