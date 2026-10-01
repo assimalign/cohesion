@@ -65,4 +65,15 @@ public enum TokenType
 
     // ── End of Input ───────────────────────────────────────
     Eof,
+
+    // ── Lexical Errors ─────────────────────────────────────
+    // Appended after Eof so every existing member keeps its value.
+
+    /// <summary>
+    /// A character no supported language uses, such as <c>?</c>, <c>#</c>, <c>^</c> or <c>§</c>.
+    /// It is never an identifier: each parser reports it with its own syntax diagnostic at the
+    /// character's span and never binds it as a name. A supplementary character (a surrogate
+    /// pair) is one token.
+    /// </summary>
+    Unrecognized,
 }

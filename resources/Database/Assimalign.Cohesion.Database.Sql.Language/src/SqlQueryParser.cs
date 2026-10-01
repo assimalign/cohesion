@@ -4,6 +4,7 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
 
 /// <summary>
 /// Parses SQL statements into a rich AST with full clause-level structure.
@@ -47,6 +48,7 @@ public sealed partial class SqlQueryParser : QueryParser
     protected override QueryStatement ParseCore(TokenLexer lexer)
     {
         _sawSemicolon = false;
+        _sawUnrecognizedCharacter = false;
         _lastTokenEnd = 0;
         _subqueryDepth = 0;
         _paginationDepth = 0;
@@ -58,6 +60,7 @@ public sealed partial class SqlQueryParser : QueryParser
         bool hasUnsupportedClause =
             TryFindUnsupportedClause(lexer, out string unsupportedClause, out Location unsupportedLocation) &&
             !Supports(unsupportedClause);
+        _preflightClauseStart = hasUnsupportedClause ? unsupportedLocation.Start : -1;
 
         // Advance to the first non-comment token
         if (!AdvancePastComments(ref lexer))
@@ -80,9 +83,21 @@ public sealed partial class SqlQueryParser : QueryParser
             return emptyStmt;
         }
 
+        // A stray character before the statement, such as a byte order mark that was not
+        // stripped, is already reported by RejectLexicalErrors. Dispatching on it reported an
+        // unknown command and a bogus "SUBQUERY in ?" clause as well (#1101).
+        TrackToken(ref lexer);
+        bool skippedStrayCharacter = false;
+        while (lexer.Current.Type == TokenType.Unrecognized)
+        {
+            skippedStrayCharacter = true;
+            Advance(ref lexer);
+        }
+
+        bool onlyStrayCharacters = skippedStrayCharacter &&
+            (IsAtEnd(ref lexer) || lexer.Current.Type == TokenType.Semicolon);
         int firstTokenPosition = lexer.Current.Position;
         string firstToken = CurrentText(ref lexer);
-        TrackToken(ref lexer);
         SqlQueryExpression expression;
 
         if (lexer.Current.Type == TokenType.Keyword)
@@ -155,6 +170,14 @@ public sealed partial class SqlQueryParser : QueryParser
             ConsumeRemaining(ref lexer);
         }
 
+        // A character outside the dialect has no meaning, so the statement keeps only its
+        // command type. Recovery may have parsed around the character, for example into a
+        // NULL placeholder for WHERE b = ?, and none of that is returned (#1101).
+        if (_sawUnrecognizedCharacter)
+        {
+            expression = new SqlQueryExpression(expression.CommandType, null, expression.Location);
+        }
+
         var statement = new SqlQueryStatement(expression);
 
         foreach (var diagnostic in _parseDiagnostics)
@@ -167,8 +190,8 @@ public sealed partial class SqlQueryParser : QueryParser
             RequireClause(statement, unsupportedClause, unsupportedLocation);
         }
 
-        // Check for unknown command
-        if (expression.CommandType == SqlQueryCommandType.Unknown &&
+        // Check for unknown command. Text made only of stray characters has none to name.
+        if (expression.CommandType == SqlQueryCommandType.Unknown && !onlyStrayCharacters &&
             (!hasUnsupportedClause || !IsUnsupportedClauseStart(firstToken)))
         {
             statement.AddDiagnostic(new Diagnostic
@@ -202,7 +225,13 @@ public sealed partial class SqlQueryParser : QueryParser
     // ── Parser state tracked across parse methods ──────────────────────
 
     private bool _sawSemicolon;
+    private bool _sawUnrecognizedCharacter;
     private int _lastTokenEnd;
+
+    // Where the clause the preflight scan reports starts, or -1. The scan reports only the
+    // first unsupported clause; a construct the parser skips for recovery is reported by the
+    // parser unless it is that clause (#1101).
+    private int _preflightClauseStart = -1;
     private string _sourceText = string.Empty;
     private readonly List<Diagnostic> _parseDiagnostics = [];
 
@@ -346,12 +375,12 @@ public sealed partial class SqlQueryParser : QueryParser
     /// literal, quoted identifier or block comment without its closing delimiter runs to
     /// the end of the text as one token, so the clause it swallowed vanished without a
     /// diagnostic: <c>DELETE FROM t /* WHERE id = 1;</c> deleted every row (#1068). A
-    /// character outside the dialect, such as <c>#</c> or a zero-width space, lexes as a
-    /// one-character identifier that the parser would otherwise take as an alias.
+    /// character outside the dialect, such as <c>?</c>, <c>#</c> or a zero-width space,
+    /// lexes as <see cref="TokenType.Unrecognized"/>. It used to lex as a one-character
+    /// identifier that the parser bound as an alias or a column (#1101).
     /// </summary>
     private void RejectLexicalErrors(TokenLexer lexer)
     {
-        int skipPosition = -1;
         while (lexer.MoveNext())
         {
             int position = lexer.Current.Position;
@@ -370,26 +399,37 @@ public sealed partial class SqlQueryParser : QueryParser
                     AddSyntaxDiagnostic(position, position + 2,
                         "Unterminated block comment: the closing */ is missing, so the comment runs to the end of the text.");
                     break;
-                case TokenType.Identifier when position != skipPosition && value.Length > 0 &&
-                                               !char.IsLetter(value[0]) && value[0] != '_':
-                    int end = position + value.Length;
-                    string character = $"'{value.ToString()}'";
-                    if (char.IsHighSurrogate(value[0]) && end < _sourceText.Length && char.IsLowSurrogate(_sourceText[end]))
-                    {
-                        // The lexer splits a supplementary character into two tokens; report it once.
-                        character = $"U+{char.ConvertToUtf32(value[0], _sourceText[end]):X4}";
-                        skipPosition = end;
-                        end++;
-                    }
-                    else if (char.IsControl(value[0]) || char.IsSurrogate(value[0]) ||
-                             char.GetUnicodeCategory(value[0]) is System.Globalization.UnicodeCategory.Format)
-                    {
-                        character = $"U+{(int)value[0]:X4}";
-                    }
-                    AddSyntaxDiagnostic(position, end, $"Unexpected character {character}; it is not part of the SQL dialect.");
+                case TokenType.Unrecognized:
+                    _sawUnrecognizedCharacter = true;
+                    AddSyntaxDiagnostic(position, position + value.Length,
+                        $"Unexpected character {DescribeCharacter(value)}; it is not part of the SQL dialect.");
+                    break;
+                case TokenType.Float when value[^1] is 'e' or 'E' or '+' or '-':
+                    // The lexer takes an exponent marker without digits into the literal, so
+                    // SELECT 1e FROM t parsed and then failed at execution with a raw
+                    // FormatException naming no code or span (#1101).
+                    AddSyntaxDiagnostic(position, position + value.Length,
+                        $"Malformed numeric literal '{value.ToString()}': the exponent has no digits.");
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// Names a character as written, or by code point when it is invisible or is a
+    /// supplementary character (the lexer keeps a surrogate pair together as one token).
+    /// </summary>
+    private static string DescribeCharacter(ReadOnlySpan<char> value)
+    {
+        if (value.Length == 2 && char.IsSurrogatePair(value[0], value[1]))
+        {
+            return $"U+{char.ConvertToUtf32(value[0], value[1]):X4}";
+        }
+
+        return char.IsControl(value[0]) || char.IsSurrogate(value[0]) ||
+               char.GetUnicodeCategory(value[0]) is System.Globalization.UnicodeCategory.Format
+            ? $"U+{(int)value[0]:X4}"
+            : $"'{value.ToString()}'";
     }
 
     // Mirrors TokenLexer.ScanString: '' is an escaped quote and a lone ' closes the literal.
@@ -635,6 +675,18 @@ public sealed partial class SqlQueryParser : QueryParser
     /// </summary>
     private SqlTableReference ParseRequiredTableReference(ref TokenLexer lexer)
     {
+        // LATERAL (SELECT ...) alias used to bind LATERAL as the table name, so the JOIN it
+        // followed also reported a missing ON predicate (#1101).
+        if (IsWord(ref lexer, "LATERAL") && TryPeekToken(lexer, out string next, out _) && next == "(")
+        {
+            int start = lexer.Current.Position;
+            RequireSkippedConstruct(start, start + lexer.Current.Value.Length, "LATERAL subquery");
+            Advance(ref lexer);
+            SkipParenthesized(ref lexer);
+            SkipTableAlias(ref lexer);
+            return new SqlTableReference("?", null, null);
+        }
+
         if (IsNameToken(ref lexer))
         {
             return ParseTableReference(ref lexer);
@@ -661,6 +713,18 @@ public sealed partial class SqlQueryParser : QueryParser
             return false;
         }
 
+        SkipParenthesized(ref lexer);
+        SkipTableAlias(ref lexer);
+        return true;
+    }
+
+    /// <summary>
+    /// Skips a parenthesized operand from its <c>(</c> through the matching <c>)</c>, for
+    /// recovery past a construct already reported. An unbalanced operand is skipped to the
+    /// <c>;</c> or the end of the text.
+    /// </summary>
+    private void SkipParenthesized(ref TokenLexer lexer)
+    {
         int depth = 0;
         do
         {
@@ -674,7 +738,11 @@ public sealed partial class SqlQueryParser : QueryParser
             }
         }
         while (Advance(ref lexer) && depth > 0 && lexer.Current.Type != TokenType.Semicolon);
+    }
 
+    /// <summary>Skips a <c>[AS] alias</c> after a skipped table expression.</summary>
+    private void SkipTableAlias(ref TokenLexer lexer)
+    {
         if (IsKeyword(ref lexer, "AS"))
         {
             Advance(ref lexer);
@@ -683,8 +751,20 @@ public sealed partial class SqlQueryParser : QueryParser
         {
             Advance(ref lexer);
         }
+    }
 
-        return true;
+    /// <summary>
+    /// Reports a construct the parser recognizes and skips for recovery, unless the preflight
+    /// clause scan already reports it at <paramref name="start"/>. The scan reports only the
+    /// first unsupported clause, so a construct after another one is reported here, once.
+    /// </summary>
+    private void RequireSkippedConstruct(int start, int end, string construct)
+    {
+        if (start != _preflightClauseStart && !Supports(construct))
+        {
+            _parseDiagnostics.Add(QueryDiagnostics.UnsupportedClause(construct, Profile.Language,
+                Location.Create(1, 1, start, end)));
+        }
     }
 
     private SqlTableReference ParseTableReference(ref TokenLexer lexer)
@@ -785,7 +865,9 @@ public sealed partial class SqlQueryParser : QueryParser
 
         while (lexer.MoveNext())
         {
-            if (lexer.Current.Type == TokenType.Comment)
+            // A stray character is reported as a lexical error. As the first token it became
+            // the statement's command, as in "SUBQUERY in ?" for ? SELECT * FROM t (#1101).
+            if (lexer.Current.Type is TokenType.Comment or TokenType.Unrecognized)
             {
                 continue;
             }
@@ -945,26 +1027,7 @@ public sealed partial class SqlQueryParser : QueryParser
     }
 
     private static bool TryGetUnsupportedClause(string token, out string clause)
-    {
-        clause = token.ToUpperInvariant() switch
-        {
-            "UNION" => SqlClauses.SetOperation,
-            "INTERSECT" => SqlClauses.Intersect,
-            "EXCEPT" => SqlClauses.Except,
-            "RECURSIVE" => SqlClauses.Recursive,
-            "WINDOW" => SqlClauses.Window,
-            "FETCH" => SqlClauses.Fetch,
-            "OVER" => SqlClauses.Over,
-            "PARTITION" => SqlClauses.Partition,
-            "RETURNING" => SqlClauses.Returning,
-            "TOP" => SqlClauses.Top,
-            "NATURAL" => SqlClauses.Natural,
-            "USING" => SqlClauses.Using,
-            _ => string.Empty,
-        };
-
-        return clause.Length > 0;
-    }
+        => SqlUnsupportedVocabulary.TryGetClause(token, out clause);
 
     private static bool IsUnsupportedClauseStart(string token) =>
         token.Equals(SqlClauses.Cte, StringComparison.OrdinalIgnoreCase) ||
