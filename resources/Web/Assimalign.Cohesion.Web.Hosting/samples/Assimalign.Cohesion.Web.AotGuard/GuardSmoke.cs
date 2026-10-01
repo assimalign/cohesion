@@ -164,6 +164,40 @@ internal static class GuardSmoke
             return response.StatusCode == HttpStatusCode.NotFound;
         });
 
+        failures += await CheckAsync("security headers apply their safe defaults", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("items/7", cancellationToken);
+            return Header(response, "X-Content-Type-Options") == "nosniff"
+                && Header(response, "X-Frame-Options") == "DENY"
+                && Header(response, "Referrer-Policy") == "strict-origin-when-cross-origin";
+        });
+
+        failures += await CheckAsync("cookie policy upgrades a SameSite=None cookie to Secure", async () =>
+        {
+            using HttpResponseMessage response = await client.GetAsync("cookies", cancellationToken);
+            return response.Headers.TryGetValues("Set-Cookie", out var cookies)
+                && string.Join("; ", cookies).Contains("guard-tracking=1", StringComparison.Ordinal)
+                && string.Join("; ", cookies).Contains("secure", StringComparison.OrdinalIgnoreCase);
+        });
+
+        failures += await CheckAsync("antiforgery rejects a protected post without a token", async () =>
+        {
+            using HttpResponseMessage response = await client.PostAsync("antiforgery/submit", content: null, cancellationToken);
+            return response.StatusCode == HttpStatusCode.BadRequest
+                && response.Content.Headers.ContentType?.MediaType == "application/problem+json";
+        });
+
+        failures += await CheckAsync("antiforgery accepts the cookie and header token pair", async () =>
+        {
+            // The handler keeps the cookie token the render path sets and sends it back.
+            string requestToken = await client.GetStringAsync("antiforgery/token", cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Post, "antiforgery/submit");
+            request.Headers.Add("X-CSRF-TOKEN", requestToken);
+            using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
+            return response.StatusCode == HttpStatusCode.OK
+                && await response.Content.ReadAsStringAsync(cancellationToken) == "accepted";
+        });
+
         Console.WriteLine(failures == 0 ? "AOT guard smoke: all checks passed." : $"AOT guard smoke: {failures} check(s) failed.");
         return failures == 0 ? 0 : 1;
     }

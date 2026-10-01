@@ -7,18 +7,21 @@ using System.Threading.RateLimiting;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web;
+using Assimalign.Cohesion.Web.Antiforgery;
 using Assimalign.Cohesion.Web.AotGuard;
 using Assimalign.Cohesion.Web.Authentication;
 using Assimalign.Cohesion.Web.Authentication.Bearer;
 using Assimalign.Cohesion.Web.Authentication.Cookie;
 using Assimalign.Cohesion.Web.Authorization;
 using Assimalign.Cohesion.Web.Compression;
+using Assimalign.Cohesion.Web.CookiePolicy;
 using Assimalign.Cohesion.Web.Cors;
 using Assimalign.Cohesion.Web.ErrorHandling;
 using Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Web.RateLimiting;
 using Assimalign.Cohesion.Web.RequestTimeouts;
 using Assimalign.Cohesion.Web.Routing;
+using Assimalign.Cohesion.Web.SecurityHeaders;
 using Assimalign.Cohesion.Web.Serialization;
 using Assimalign.Cohesion.Web.StaticFiles;
 
@@ -46,10 +49,14 @@ builder.AddAuthentication(options => options.DefaultScheme = JwtBearerDefaults.A
         options.ValidAudiences.Add(GuardSmoke.Audience);
     });
 builder.AddAuthorization(options => options.AddPolicy("admins", policy => policy.RequireRole("admin")));
+builder.AddAntiforgery();
 
 await using WebApplication application = builder.Build();
 
+// Outermost, ahead of the exception boundary, so error pages carry the headers too.
+application.UseSecurityHeaders();
 application.UseErrorHandling();
+application.UseCookiePolicy();
 application.UseResponseCompression();
 application.UseRequestDecompression();
 application.UseStaticFiles();
@@ -78,6 +85,7 @@ application.UseRateLimiting(options => options.GlobalPolicy = RateLimitingPolicy
         PermitLimit = 1000,
         Window = TimeSpan.FromMinutes(1),
     })));
+application.UseAntiforgery();
 
 application.MapGet("/items/{id:int}", async (int id, IHttpContext context) =>
 {
@@ -141,6 +149,27 @@ tenants.MapGet("orders/{id:int}", async (string tenant, int id, IHttpContext con
             PermitLimit = 1000,
             Window = TimeSpan.FromMinutes(1),
         })));
+
+// Antiforgery: the render path mints the token pair; the protected post requires it.
+application.MapGet("/antiforgery/token", async (IHttpContext context) =>
+{
+    HttpAntiforgeryTokenSet tokens = context.RequireAntiforgery.GetAndStoreTokens(context);
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(tokens.RequestToken ?? string.Empty), context.RequestCancelled);
+});
+application.Map(HttpMethod.Post, "/antiforgery/submit", async (IHttpContext context) =>
+{
+    context.Response.StatusCode = HttpStatusCode.Ok;
+    await context.Response.Body.WriteAsync("accepted"u8.ToArray(), context.RequestCancelled);
+}).RequireAntiforgery();
+
+// The cookie policy judges cookies as they are appended: SameSite=None without Secure is upgraded.
+application.MapGet("/cookies", (IHttpContext context) =>
+{
+    context.Response.Cookies.Add(new HttpCookie("guard-tracking", "1", new HttpCookieOptions { SameSite = HttpCookieSameSiteMode.None }));
+    context.Response.StatusCode = HttpStatusCode.NoContent;
+    return Task.CompletedTask;
+});
 
 // A single-page application's client routes; a path that names a file is never answered with it.
 application.MapFallbackToFile("index.html");
