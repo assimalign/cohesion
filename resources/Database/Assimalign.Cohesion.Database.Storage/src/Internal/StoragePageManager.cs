@@ -15,7 +15,6 @@ internal sealed class StoragePageManager : IStoragePageManager
     private readonly StorageStream _stream;
     private readonly StorageBufferPool _bufferPool;
     private readonly StorageFreeSpaceMap _freeSpaceMap;
-    private readonly object _extendLock = new();
 
     internal StoragePageManager(StorageStream stream, StorageBufferPool bufferPool, StorageFreeSpaceMap freeSpaceMap)
     {
@@ -39,17 +38,12 @@ internal sealed class StoragePageManager : IStoragePageManager
         // since the page doesn't exist in the stream yet)
         var handle = _bufferPool.Pin(pageId, _stream);
 
-        // Now extend the stream to accommodate the new page. Grow only, under a lock:
-        // a concurrent allocation of a higher page may already have extended it, and
-        // setting a shorter length would cut that page off the end of the file.
-        long requiredLength = ((long)pageId + 1) * Page.Size;
-        lock (_extendLock)
-        {
-            if (_stream.Length < requiredLength)
-            {
-                _stream.SetLength(requiredLength);
-            }
-        }
+        // Now extend the stream to accommodate the new page. Grow only, and under the pool
+        // lock that every page read and write-back holds: a concurrent allocation of a
+        // higher page may already have extended it (a shorter length would cut that page
+        // off), and an in-memory stream replaces its array when it grows, which would drop
+        // a write-back landing in the old array.
+        _bufferPool.EnsureLength(_stream, ((long)pageId + 1) * Page.Size);
 
         // Initialize the fresh page (local copy shares the same pointer). The clear spans
         // the pool buffer's fixed size, never a length read from the page's own header.

@@ -132,7 +132,20 @@ are `unsafe` overlays — the pool guarantees pointer stability for the handle's
   are zeroed on reuse so recycled buffers never leak prior content.
 - **Failed loads never poison the cache**: a page that fails checksum verification is
   not cached; its buffer goes straight back to the recycle stack and the exception
-  propagates.
+  propagates. The same holds for a page whose header claims an overflow area that does
+  not fit the 8 KiB buffer (`StorageCorruptionException`): `Page.AsSpan()` and
+  `AsBodySpan()` size their spans from that header, nothing writes overflow pages yet,
+  and an unstamped page (checksum zero) is never verified, so the header alone would
+  otherwise hand the B-tree a writable span past the buffer.
+- **Extension runs under the pool lock.** Allocating a page past the end of the data
+  stream grows the stream through `EnsureLength`, under the same lock every page read
+  and write-back holds, and only ever grows it. An in-memory stream copies its array
+  into a new one when it grows; a write-back that landed in the old array after its
+  region was copied was lost while the pool recorded the page clean, so a later eviction
+  dropped the change and the reload was stale or all zeros (#1157 review). The
+  `StorageStream` adapter over a plain `Stream` also routes `Length` and `SetLength`
+  through the gate that serializes its page reads and writes, so the stream is safe on
+  its own, not only under the pool.
 - **One lock.** All pool state is guarded by a single monitor. Page *content* access is
   the caller's concern (a handle hands out a raw pointer); the transaction layer above
   provides content-level isolation. Sharding the lock is a measured-need optimization,
@@ -204,7 +217,9 @@ instead of dereferencing it:
   dead space from relocations is not reclaimed in place (see the #1157 follow-up below).
 - **Clears span the buffer, not the header.** Freeing and allocating a page clear a
   fixed `Page.Size` (or body) span; `Page.AsSpan()` honors the reserved overflow size in
-  the header, and a header is page content that a corrupt page controls.
+  the header, and a header is page content that a corrupt page controls. The pool refuses
+  to load a page whose overflow header does not fit its buffer (above), so a span taken
+  from a pooled page stays inside it.
 
 ### Per-owner record chains
 
@@ -489,23 +504,43 @@ for #1157 failed on three further defects, each independent of the ALTER crash:
   allocation checks run on different threads; an unsynchronized allocator can hand one
   page to two transactions, and a `HashSet` read during a write can throw or answer
   wrongly. Every member now takes the map's lock.
-- *File extension could shrink the file.* Two allocations extending the stream at once
-  could set the shorter length last and cut the other page off; extension now only
-  grows, under a lock.
+- *Extending the data stream raced page I/O.* Two allocations extending the stream at
+  once could set the shorter length last and cut the other page off. Worse, extension
+  ran outside both the pool lock and the gate that serializes the stream's page reads
+  and writes (`StorageStream.SetLength` went straight to the inner stream). When an
+  in-memory stream grows past its capacity it copies its array into a new one; a
+  write-back that landed in the old array after its region was copied was lost while
+  the pool recorded the page clean, so a later eviction dropped the change and the
+  reload was stale or all zeros. This was the in-memory engines' default path, and the
+  SQL engine lost index entries for committed rows under a fast page writer. Extension
+  now only grows, through `EnsureLength` under the pool lock, and `StorageStream` routes
+  `Length` and `SetLength` through its handle's gate (buffer-pool rules above). File
+  handles were not affected by the array copy, but share the grow-only, locked path.
 
 The pinned-object-heap buffers close the remaining lifecycle hazard (a disposed pool
-freeing pins under live pointers), and the debug invariants keep the pool's structure
-checked under every test.
+freeing pins under live pointers), and the invariant check keeps the pool's structure
+verified under every test.
+
+The review also closed two neighbouring holes in the same class: the pool refuses a
+page whose overflow header does not fit its buffer (otherwise `Page.AsSpan()` would size
+a span past the buffer from page content), and the SQL catalog refuses a table, index or
+registration definition that encodes past `SlottedPage.MaxRecordSize` with a
+`SqlCatalogException` before touching storage, where it used to fail half-way through a
+relocation with a raw `SlottedPageException`.
 
 **Tests.** `SlottedPageTests` reproduce the overflow deterministically between guard
 regions and cover each geometry check; `StorageBufferPoolConcurrencyTests` and
 `StorageConcurrencyTests` pin, unpin, evict, write back and commit from several threads
 against pools of six and eight pages, verifying contents, checksums, the pool
-invariants and a reopen after every phase; `SqlConcurrentDdlStressTests` (in
-`Database.Sql`) run the issue's reproducer — in memory and file backed, columns,
-constraints and both, several seeds — for two seconds per case in CI, or as long as
-`COHESION_SQL_STRESS_SECONDS` says locally (60 or more for the long mode), and check
-that every committed row reads back, again after a reopen. Deterministic
+invariants and a reopen after every phase. `StorageStreamTests` grow an in-memory
+stream across eight capacity doublings while another thread writes pages, and
+`StorageConcurrencyTests` updates records in place over the production in-memory stream
+while inserts extend it and the page writer runs, re-reading every row before each
+update and at the end; both failed in each of six runs against the old extension path.
+`SqlConcurrentDdlStressTests` (in `Database.Sql`) run the issue's reproducer — in memory
+and file backed, columns, constraints and both, several seeds — for two seconds per case
+in CI, or as long as `COHESION_SQL_STRESS_SECONDS` says locally (60 or more for the long
+mode), and check that every committed row reads back, again after a reopen. Deterministic
 `ADD/DROP COLUMN` and `ADD/DROP CONSTRAINT` loops crash the test host on the old
 `UpdateSlot`.
 
@@ -517,6 +552,9 @@ to another page, and the dead space stays until its page holds no live record.
 Separately, the SQL index seek and the version store treat any
 `StorageException` from a record read as "reclaimed" and skip the record; that now
 includes `StorageCorruptionException`, which deserves to surface rather than hide a row.
+Overflow pages themselves remain unimplemented: until they are, `Page.AsSpan()` trusts
+the header only because the pool refuses an oversized one at load, and a `Page` built
+over caller memory carries no such check. Each follow-up needs its own work item.
 
 ## Error model
 

@@ -33,6 +33,12 @@ public interface IStoragePageHandle : IDisposable
     /// <summary>
     /// Gets the underlying <see cref="Units.Page"/> struct providing direct access to the page buffer.
     /// </summary>
+    /// <remarks>
+    /// Valid only while the handle is undisposed: once the pin is released the pool may
+    /// load another page into the same buffer. Debug builds of the shared pool throw
+    /// <see cref="ObjectDisposedException"/> when the page is read through a disposed
+    /// handle; release builds do not check.
+    /// </remarks>
     Page Page { get; }
 
     /// <summary>

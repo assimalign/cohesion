@@ -115,6 +115,7 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
                 {
                     stream.ReadPage(pageId, entry.Buffer);
                     PageChecksum.Verify(entry.Buffer, pageId);
+                    VerifyFitsBuffer(entry.Page, pageId);
                 }
                 catch
                 {
@@ -247,6 +248,31 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
             if (_entries.TryGetValue((long)pageId, out var entry) && entry.IsDirty)
             {
                 WriteBack(stream, pageId, entry);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Grows the stream to at least <paramref name="requiredLength"/> bytes; never shrinks it.
+    /// </summary>
+    /// <remarks>
+    /// Runs under the pool lock, which every page read and write-back of the pool also
+    /// holds, so the length check and the growth are one step with respect to page I/O: an
+    /// extension can neither cut off a page another allocation just covered nor replace the
+    /// stream's storage under a write-back (an in-memory stream copies its array when it
+    /// grows, and a write into the old array would be lost while the page is recorded clean).
+    /// </remarks>
+    /// <param name="stream">The stream to extend.</param>
+    /// <param name="requiredLength">The minimum length the stream must have.</param>
+    internal void EnsureLength(StorageStream stream, long requiredLength)
+    {
+        lock (_syncRoot)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            if (stream.Length < requiredLength)
+            {
+                stream.SetLength(requiredLength);
             }
         }
     }
@@ -414,6 +440,30 @@ internal sealed unsafe class StorageBufferPool : IStorageBufferPool
         entry.Node = null;
         entry.IsRecycled = true;
         _recycled.Push(entry);
+    }
+
+    /// <summary>
+    /// Refuses a loaded page whose header describes bytes past the end of its buffer.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Page.AsSpan"/> and <see cref="Page.AsBodySpan"/> size their spans from
+    /// the header's overflow flag and size, and every pool buffer holds exactly
+    /// <see cref="Page.Size"/> bytes. Nothing writes overflow pages yet, and a page whose
+    /// stored checksum is zero is not verified, so without this check a damaged or crafted
+    /// header would hand the B-tree and every other span user a writable span past the
+    /// buffer — the out-of-bounds write #1157 was about, reached through the header.
+    /// </remarks>
+    /// <param name="page">The page just read into a pool buffer.</param>
+    /// <param name="pageId">The page identifier, for the exception.</param>
+    /// <exception cref="StorageCorruptionException">The header's overflow area does not fit the buffer.</exception>
+    private static void VerifyFitsBuffer(Page page, PageId pageId)
+    {
+        if (page.IsOverflow && (page.OverflowSize < 0 || page.OverflowSize > Page.Size - Page.HeaderSize))
+        {
+            throw new StorageCorruptionException(
+                pageId,
+                $"Page {(long)pageId} declares an overflow area of {page.OverflowSize} bytes, which does not fit its {Page.Size}-byte buffer.");
+        }
     }
 
     /// <summary>
