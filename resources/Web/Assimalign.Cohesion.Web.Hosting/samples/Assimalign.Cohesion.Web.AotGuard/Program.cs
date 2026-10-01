@@ -13,6 +13,7 @@ using Assimalign.Cohesion.Web.Authentication.Bearer;
 using Assimalign.Cohesion.Web.Authentication.Cookie;
 using Assimalign.Cohesion.Web.Authorization;
 using Assimalign.Cohesion.Web.Compression;
+using Assimalign.Cohesion.Web.Cors;
 using Assimalign.Cohesion.Web.ErrorHandling;
 using Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Web.RateLimiting;
@@ -63,7 +64,11 @@ application.Map("/branch", branch => branch.Run(async context =>
 }));
 application.UseRouting();
 
-// Endpoint policy middleware reads the endpoint UseRouting published, so it follows it.
+// Endpoint policy middleware reads the endpoint UseRouting published, so it follows it. CORS goes
+// first: it answers preflights before anything that could reject one.
+application.UseCors(options => options
+    .AddDefaultPolicy(policy => policy.WithOrigins(GuardSmoke.TrustedOrigin))
+    .AddPolicy("json-clients", policy => policy.WithOrigins(GuardSmoke.TrustedOrigin).WithHeaders("Content-Type")));
 application.UseAuthorization();
 application.UseRequestTimeouts(TimeSpan.FromSeconds(30));
 application.UseRateLimiting(options => options.GlobalPolicy = RateLimitingPolicy.Create(
@@ -84,7 +89,8 @@ application.MapPost("/items", async (GuardItem item, IHttpContext context) =>
 {
     context.Response.StatusCode = HttpStatusCode.Ok;
     await context.Response.WriteContentAsync(item with { Name = item.Name + "-echo" }, context.RequestCancelled);
-});
+})
+    .RequireCors("json-clients");
 
 application.MapGet("/large", async (IHttpContext context) =>
 {

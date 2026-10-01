@@ -19,6 +19,7 @@ internal static class GuardSmoke
 {
     public const string Issuer = "https://aot-guard.cohesion.local";
     public const string Audience = "aot-guard";
+    public const string TrustedOrigin = "https://aot-guard-client.cohesion.local";
 
     public static int GetFreeTcpPort()
     {
@@ -55,6 +56,32 @@ internal static class GuardSmoke
             using HttpResponseMessage response = await client.PostAsync("items", content, cancellationToken);
             string body = await response.Content.ReadAsStringAsync(cancellationToken);
             return response.StatusCode == HttpStatusCode.OK && body.Contains("posted-echo", StringComparison.Ordinal);
+        });
+
+        failures += await CheckAsync("CORS answers a JSON preflight from its candidate endpoint's policy", async () =>
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Options, "items");
+            request.Headers.TryAddWithoutValidation("Origin", TrustedOrigin);
+            request.Headers.TryAddWithoutValidation("Access-Control-Request-Method", "POST");
+            request.Headers.TryAddWithoutValidation("Access-Control-Request-Headers", "content-type");
+            using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
+            return response.StatusCode == HttpStatusCode.NoContent
+                && Header(response, "Access-Control-Allow-Origin") == TrustedOrigin
+                && Header(response, "Access-Control-Allow-Headers") == "Content-Type";
+        });
+
+        failures += await CheckAsync("CORS stamps an allowed origin and withholds a denied one", async () =>
+        {
+            using var allowed = new HttpRequestMessage(HttpMethod.Get, "items/7");
+            allowed.Headers.TryAddWithoutValidation("Origin", TrustedOrigin);
+            using var denied = new HttpRequestMessage(HttpMethod.Get, "items/7");
+            denied.Headers.TryAddWithoutValidation("Origin", "https://untrusted.cohesion.local");
+            using HttpResponseMessage allowedResponse = await client.SendAsync(allowed, cancellationToken);
+            using HttpResponseMessage deniedResponse = await client.SendAsync(denied, cancellationToken);
+            return allowedResponse.StatusCode == HttpStatusCode.OK
+                && Header(allowedResponse, "Access-Control-Allow-Origin") == TrustedOrigin
+                && deniedResponse.StatusCode == HttpStatusCode.OK
+                && Header(deniedResponse, "Access-Control-Allow-Origin") is null;
         });
 
         failures += await CheckAsync("response compression negotiates gzip", async () =>
@@ -155,6 +182,9 @@ internal static class GuardSmoke
             return 1;
         }
     }
+
+    private static string? Header(HttpResponseMessage response, string name)
+        => response.Headers.TryGetValues(name, out var values) ? string.Join(", ", values) : null;
 
     private static string CreateToken(byte[] signingKey, string? role = null)
     {

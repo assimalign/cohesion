@@ -6,7 +6,7 @@
         (route groups, endpoint policy verbs, the static-file fallback), pipeline branching,
         source-generated typed binding, source-generated JSON, error handling, Cookie and JWT Bearer
         authentication, authorization, static files, response compression, request decompression,
-        rate limiting and request timeouts. Two layers:
+        CORS, rate limiting and request timeouts. Two layers:
 
         (1) build: the trim/AOT analyzer diagnostics are errors for this project's own code;
         (2) publish: ILC's per-assembly summaries (IL2104 trim, IL3053 AOT) are errors too, so a
@@ -32,6 +32,7 @@
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication.Cookie" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Authorization" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Compression" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.Web.Cors" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.ErrorHandling" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
     <CohesionProjectReference Include="Assimalign.Cohesion.Web.RateLimiting" />
