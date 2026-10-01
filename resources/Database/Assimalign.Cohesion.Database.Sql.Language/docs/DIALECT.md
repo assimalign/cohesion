@@ -345,12 +345,34 @@ a scan therefore return the same rows for every predicate.
 kind and the offset inside index keys. On first open, the engine rebuilds every
 index with a `TIMESTAMP` or `TIMESTAMPTZ` key column from the stored rows and
 moves the database to format version 4; other indexes are left alone, and the
-rebuild repeats safely if the open is interrupted. If a `UNIQUE` or `PRIMARY
-KEY` index already holds rows that the old keys kept apart but this rule makes
-equal, the open still succeeds and keeps those rows reachable; the index rejects
-every further equal value, and deleting or changing the duplicates restores a
-duplicate-free key. A database on a newer format than the engine is refused at
-open.
+rebuild repeats safely if the open is interrupted.
+
+If a `UNIQUE` or `PRIMARY KEY` index already holds rows that the old keys kept
+apart but this rule makes equal, the open still succeeds and keeps those rows
+reachable, and the index rejects every further equal value. Until the
+duplicates are resolved, those rows can only be deleted or moved to a new value:
+
+- An `UPDATE` that leaves one of them on the shared value fails with a `UNIQUE`
+  violation, even when it changes only non-key columns, because the other
+  duplicate already holds the key. Only an `UPDATE` that moves the row to a
+  value no other row holds succeeds.
+- Foreign keys find children by value, so `ON DELETE RESTRICT` refuses to delete
+  either duplicate while a child references the value, and `ON DELETE CASCADE`
+  deletes those children with either duplicate, although the remaining
+  duplicate still matches them.
+
+Find the duplicates with a grouping query such as
+`SELECT col, COUNT(*) FROM t GROUP BY col HAVING COUNT(*) > 1` (grouping uses
+the same identity), then delete all but one row of each set or give them
+distinct values. Repoint or remove referencing children first. Once one row
+of a set remains, it behaves like any other row.
+
+A database on a newer format than the engine is refused at open. From format 4
+on, the catalog stores the format marker in a record that engines before format
+4 (through 10.0.0-preview.1) do not recognize, so those engines also refuse to
+open the database. Without that, they would have opened it without checking the
+marker and written index keys that this rule's seeks and `UNIQUE` checks miss.
+Opening a format-4 database with an older engine is not supported.
 
 This closes the key-identity gap behind the mapper's `COHMAP003` key exclusion;
 the mapper's own review stays with #1008. No external conformance suite applies;

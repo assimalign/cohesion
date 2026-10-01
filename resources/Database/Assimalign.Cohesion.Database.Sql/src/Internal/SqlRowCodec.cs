@@ -145,8 +145,12 @@ internal static class SqlRowCodec
     /// every key path shares (maintenance, seek bounds, unique-key locks and build
     /// duplicate detection). Strings encode under the column's effective
     /// collation and temporal values encode their <see cref="ToKeyIdentity"/>
-    /// form, so two keys are byte-equal exactly when
-    /// <see cref="SqlValueComparer"/> calls their values equal.
+    /// form, so for every key type except floating point two keys are byte-equal
+    /// exactly when <see cref="SqlValueComparer"/> calls their values equal.
+    /// Floating keys keep the IEEE bytes, so positive and negative zero stay
+    /// distinct keys although SQL calls them equal; that is why the planner never
+    /// seeks a signed-zero equality or a floating range, and joins never seek
+    /// floating keys.
     /// </summary>
     internal static void AppendKeyValue(DatabaseKeyWriter writer, DatabaseType type, object? value, Collation collation)
         => AppendValue(writer, type, ToKeyIdentity(value), collation);

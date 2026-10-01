@@ -420,18 +420,86 @@ public sealed class SqlTemporalKeyIdentityTests
         {
             await using var session = await reopened.Instance.CreateSessionAsync();
 
-            // Assert: both rows are reachable through the rebuilt tree...
+            // Assert: both rows are reachable through the rebuilt tree, and the
+            // documented duplicate query finds the pair...
             (await IdsAsync(session, "SELECT id FROM unique_at WHERE at = @p ORDER BY id", P(At(Instant, -5.5)))).ShouldBe([1, 2]);
             Metrics(session).AccessPath.ShouldStartWith("seek:");
+            var duplicates = await RowsAsync(session, "SELECT at, COUNT(*) FROM unique_at GROUP BY at HAVING COUNT(*) > 1");
+            duplicates.Single()[1].ShouldBe(2L);
 
-            // ...and no third equal value gets in until both are gone.
+            // ...no third equal value gets in until both are gone...
             await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO unique_at VALUES (4, @p)", P(At(Instant, 1))));
             await ExecuteAsync(session, "INSERT INTO unique_at VALUES (5, @p)", P(Instant.AddMinutes(1)));
-            await ExecuteAsync(session, "DELETE FROM unique_at WHERE id = 2");
+
+            // ...and while both stand, neither row can stay on the instant through
+            // an UPDATE, not even one of a non-key column: an UPDATE re-inserts
+            // every index entry of the row, and the other duplicate's live entry
+            // already holds the key.
+            await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "UPDATE unique_at SET id = 10 WHERE id = 1"));
+            await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "UPDATE unique_at SET id = 20 WHERE id = 2"));
+            await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "UPDATE unique_at SET at = @p WHERE id = 2", P(At(Instant, 9))));
+
+            // Moving one duplicate to a value no other row holds resolves the set:
+            // the other becomes an ordinary row, updatable and still the only
+            // holder of the instant.
+            await ExecuteAsync(session, "UPDATE unique_at SET at = @p WHERE id = 2", P(Instant.AddMinutes(2)));
+            (await RowsAsync(session, "SELECT at, COUNT(*) FROM unique_at GROUP BY at HAVING COUNT(*) > 1")).ShouldBeEmpty();
+            await ExecuteAsync(session, "UPDATE unique_at SET id = 10 WHERE id = 1");
             await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "INSERT INTO unique_at VALUES (6, @p)", P(At(Instant, 2))));
-            await ExecuteAsync(session, "DELETE FROM unique_at WHERE id = 1");
+            await ExecuteAsync(session, "DELETE FROM unique_at WHERE id = 10");
             await ExecuteAsync(session, "INSERT INTO unique_at VALUES (7, @p)", P(At(Instant, 2)));
             (await IdsAsync(session, "SELECT id FROM unique_at WHERE at = @p ORDER BY id", P(Instant))).ShouldBe([7]);
+        }
+        finally
+        {
+            await reopened.CloseAsync();
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Temporal keys: deleting one carried format-3 duplicate parent acts on every equal child (#1099)")]
+    public async Task Reopen_LegacyDuplicateParents_DeleteShouldActOnEveryEqualChild()
+    {
+        // Arrange: equal ticks in two kinds, which the format-3 encoding admitted
+        // into a TIMESTAMP primary key; one parent table per delete rule.
+        var host = ImageHost.Create();
+        await using (var session = await host.Instance.CreateSessionAsync())
+        {
+            await ExecuteAsync(session, "CREATE TABLE restrict_parent (ts TIMESTAMP PRIMARY KEY, id INT)");
+            await ExecuteAsync(session, "CREATE TABLE cascade_parent (ts TIMESTAMP PRIMARY KEY, id INT)");
+        }
+        object?[][] parents = [[Noon, 1], [Utc(Noon), 2]];
+        await InjectLegacyRowsAsync(host.Instance, "restrict_parent", parents);
+        await InjectLegacyRowsAsync(host.Instance, "cascade_parent", parents);
+        await host.Instance.Catalog.SetRecordSpaceFormatVersionAsync(3);
+        var image = await host.CloseAsync();
+
+        var reopened = ImageHost.Open(image);
+        try
+        {
+            await using var session = await reopened.Instance.CreateSessionAsync();
+            await ExecuteAsync(session, "CREATE TABLE restrict_child (id INT, ts TIMESTAMP REFERENCES restrict_parent(ts) ON DELETE RESTRICT)");
+            await ExecuteAsync(session, "CREATE TABLE cascade_child (id INT, ts TIMESTAMP REFERENCES cascade_parent(ts) ON DELETE CASCADE)");
+            await ExecuteAsync(session, "INSERT INTO restrict_child VALUES (1, @p)", P(Local(Noon)));
+            await ExecuteAsync(session, "INSERT INTO cascade_child VALUES (1, @p)", P(Local(Noon)));
+
+            // Act + Assert: children are found by value, so deleting one duplicate
+            // acts on the child although the other duplicate still satisfies it.
+            // RESTRICT refuses the delete...
+            await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "DELETE FROM restrict_parent WHERE id = 2"));
+            (await IdsAsync(session, "SELECT id FROM restrict_parent ORDER BY id")).ShouldBe([1, 2]);
+
+            // ...CASCADE removes the child with it...
+            await ExecuteAsync(session, "DELETE FROM cascade_parent WHERE id = 2");
+            (await IdsAsync(session, "SELECT id FROM cascade_parent ORDER BY id")).ShouldBe([1]);
+            (await IdsAsync(session, "SELECT id FROM cascade_child ORDER BY id")).ShouldBeEmpty();
+
+            // ...and once the child is removed (or repointed), the duplicate goes,
+            // leaving an ordinary, updatable parent.
+            await ExecuteAsync(session, "DELETE FROM restrict_child WHERE id = 1");
+            await Should.ThrowAsync<SqlConstraintViolationException>(() => ExecuteAsync(session, "UPDATE restrict_parent SET id = 10 WHERE id = 1"));
+            await ExecuteAsync(session, "DELETE FROM restrict_parent WHERE id = 2");
+            await ExecuteAsync(session, "UPDATE restrict_parent SET id = 10 WHERE id = 1");
+            (await IdsAsync(session, "SELECT id FROM restrict_parent ORDER BY id")).ShouldBe([10]);
         }
         finally
         {

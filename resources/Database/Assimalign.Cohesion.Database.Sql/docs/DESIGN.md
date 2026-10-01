@@ -341,12 +341,19 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   worker reclaims below every live horizon). DDL row rewrites (DROP COLUMN)
   walk *every* stored version, visible or not, preserving stamps.
 - **Migration rule (record-space format version, catalog-persisted).** The
-  catalog stores the record-space format version (kind-4 record) — the format
+  catalog stores the record-space format version (a kind-4 record for versions
+  1–3, a kind-8 record from version 4) — the format
   of the whole data file set, rows and the index trees that ride it: 1 = the
   pre-MVCC unstamped layout, 2 = stamped rows in the shared page stream, 3 =
   stamped rows in per-object page chains, 4 = index keys in the temporal
   identity encoding (#1099, below). A version newer than the engine is refused
-  at open. Older databases upgrade in place at
+  at open, as soon as the catalog is open and before recovery's scrub, index
+  purge and checkpoint run over the data file set. Engines before format 4
+  (through 10.0.0-preview.1) never compared the marker against a newer version,
+  so the format-4 marker moved to a record kind those catalogs refuse to load:
+  they fail the open instead of writing format-3 keys into rebuilt trees, which
+  the newer engine would then trust under its unchanged marker. Downgrade is
+  unsupported. Older databases upgrade in place at
   open, stage by stage, marker written after every stage so each is
   idempotent across the two-storage crash window: (1 → 2) every record gains
   a zeroed stamp header (writer 0 = committed bootstrap data, visible to
@@ -378,6 +385,14 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   tree as they are (no duplicate check, unlike CREATE UNIQUE INDEX): failing the
   open would leave the data unreachable, while the carried tree still rejects
   every further equal value and the duplicates can be deleted or changed. The
+  cost lands on those rows until they are resolved: an UPDATE re-inserts every
+  index entry of the row, so any UPDATE that leaves a duplicate on the shared
+  key fails with a UNIQUE violation, including one of non-key columns only; and
+  foreign keys find children by value, so ON DELETE RESTRICT refuses to delete
+  either duplicate parent while a child references the value, and ON DELETE
+  CASCADE deletes those children with either duplicate, although the remaining
+  duplicate still matches them. DIALECT.md documents the resolution (delete or
+  re-key all but one row of each set, children first). The
   rejected alternative — a versioned key format read side by side with the new
   one — would have kept two key identities alive in every seek and unique check.
 - **Schema evolution (#1023):** `ADD COLUMN` validates the literal default and
