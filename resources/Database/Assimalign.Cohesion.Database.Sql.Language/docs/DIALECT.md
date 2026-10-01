@@ -304,6 +304,57 @@ Nonzero floating equality may still seek; joins retain their conservative
 approximate-numeric scan policy. Mapper restrictions and key exclusions remain
 deferred with #1007/#1008.
 
+## Arithmetic and numeric faults (#1069)
+
+`+`, `-`, `*`, `/`, and `%` propagate NULL. For non-null operands the operand
+families choose the computation:
+
+| Operands | Computation | Result type |
+|---|---|---|
+| Both exact signed integers (`TINYINT`, `SMALLINT`, `INT`, `BIGINT`, integer literals) | 64-bit signed, overflow-checked | `Int64` |
+| Any `DECIMAL`, `REAL`, or `DOUBLE` operand | Both operands promoted to `System.Decimal` | `Decimal` |
+
+Integer `/` truncates toward zero and `%` takes the dividend's sign
+(`-7 / 2 = -3`, `-7 % 3 = -1`). Narrower integers compute in BIGINT, so
+`2147483647 + 1` is the exact BIGINT `2147483648`, not a fault. `x % -1` is 0
+for every integer, including the BIGINT minimum. Approximate operands enter
+Decimal arithmetic through the runtime floating-point conversion, as before
+(about 7 significant digits for REAL and 15 for DOUBLE).
+
+A fault fails the statement. Nothing wraps, saturates, or becomes NULL:
+
+| Code | ISO SQLSTATE | Raised when |
+|---|---|---|
+| `COHSQLE001` | 22012, division by zero | The right operand of `/` or `%` is zero: integer, decimal, or approximate, whether it is a literal, column, computed value, or bound parameter. |
+| `COHSQLE002` | 22003, numeric value out of range | A BIGINT result leaves -9223372036854775808..9223372036854775807, including `-x`, `ABS(x)`, and `x / -1` for the minimum; a Decimal result exceeds `System.Decimal`; a REAL or DOUBLE operand is NaN, infinite, or beyond Decimal's range; a numeric literal does not fit its type; `SUM` or `AVG` overflows or meets a non-finite value; or a value does not fit the common type of `CASE`/`COALESCE` branches. |
+
+The code leads the message, for example
+`COHSQLE001: Division by zero: the right operand of '/' is zero.` In process the
+statement throws a `DatabaseException` with that message. Over the wire the server
+reports `ExecutionFailure` with the same text, and the SQL client raises
+`SqlClientException` with `Kind = ExecutionFailure` and `ConnectionUsable = true`.
+An evaluation fault never terminates a session.
+
+- **Atomicity:** every expression of a DML statement, including CHECK
+  constraints, is evaluated before its first write, so a faulting `INSERT`,
+  `UPDATE`, `DELETE`, or `INSERT ... SELECT` applies nothing, not even rows
+  evaluated before the faulting one. `ALTER TABLE ... ADD CONSTRAINT ... CHECK`
+  that faults on an existing row publishes no constraint.
+- **Transactions:** an auto-commit statement rolls back. Inside `BEGIN`, the fault
+  follows the rule for any failed statement: the transaction stays active with its
+  earlier statements' work, and both `COMMIT` and `ROLLBACK` remain available.
+- **Evaluation point:** faults are raised where an expression is evaluated. A
+  predicate over an empty table evaluates nothing and raises nothing. A constant
+  comparand that faults during index-seek planning is not used for the seek, and
+  the scan faults on the first row that evaluates it. `LIMIT` and `OFFSET`
+  expressions are evaluated during planning and fault there.
+- **CAST:** arithmetic inside a CAST operand keeps its own code
+  (`CAST(1 / 0 AS INT)` reports `COHSQLE001`). A value or literal the target cannot
+  represent remains a CAST failure under the conversion contract below.
+- **Not coded here:** storing an in-range BIGINT or Decimal result into a narrower
+  column is destination coercion and keeps its `Cannot convert value ...` error;
+  CAST range failures keep their `CAST ... failed` message.
+
 ## Grouping and aggregate functions (#1020)
 
 Grouping is a separate execution stage over a stored table, a virtual system
@@ -342,7 +393,8 @@ original spelling in the result.
 `SUM` and `AVG` accept signed integers, Decimal, Float32, and Float64. Numeric
 arguments are converted to `System.Decimal` before accumulation; approximate
 inputs follow the runtime floating-point-to-Decimal conversion. Non-numeric
-arguments, non-finite approximate values, and numeric overflow are errors.
+arguments, non-finite approximate values, and numeric overflow are errors;
+the last two report `COHSQLE002` (see the arithmetic fault contract above).
 `SUM` always returns Decimal. `AVG` divides the Decimal sum by the non-NULL
 Int64 count using `System.Decimal` division: the nearest representable Decimal,
 with midpoint ties rounded to even and up to 28 fractional digits. Thus integer
@@ -480,8 +532,9 @@ primary. Executable primary forms include literals, parameters (`@name`, `$1`),
 column references, supported function calls, simple/searched `CASE`, and
 parenthesized expressions and `CAST` within the conversion contract below.
 Uncorrelated scalar subqueries and subquery predicates execute within the contract above.
-SQL aggregates follow the grouping and aggregate contract below. `~` is parsed but not evaluated; it is outside the
-executable scalar subset.
+SQL aggregates follow the grouping and aggregate contract below. Arithmetic result
+types and the `COHSQLE001`/`COHSQLE002` faults follow the arithmetic contract above.
+`~` is parsed but not evaluated; it is outside the executable scalar subset.
 
 ## Literals
 
@@ -590,7 +643,10 @@ storage coercion; nested arithmetic therefore sees the converted numeric value.
 The profile's function list is lexical vocabulary, not an execution claim and
 not part of the 49-clause denominator. Executable scalar functions are `COALESCE`,
 `UPPER`, `LOWER`, `LENGTH`, and `ABS`; supported aggregates are `COUNT`, `SUM`,
-`AVG`, `MIN`, and `MAX`, under the contract below.
+`AVG`, `MIN`, and `MAX`, under the contract below. `ABS` accepts every numeric
+storage type: integer arguments return BIGINT (so `ABS` of the INT minimum is
+exact), REAL returns REAL, DOUBLE returns DOUBLE, and DECIMAL returns DECIMAL.
+`ABS` of the BIGINT minimum reports `COHSQLE002`.
 Other parsed calls can still fail in planning/evaluation and must not be inferred
 to work from a supported `SELECT`. Recognized names include aggregates `COUNT`,
 `SUM`, `AVG`, `MIN`, `MAX`; null handling `COALESCE`, `NULLIF`; strings `TRIM`,
@@ -610,7 +666,15 @@ function names are lexed but not supported (see the statement matrix).
 | `SQL0004` | Error | Unknown CAST target type |
 | `SQL0005` | Error | Unsupported CAST target or invalid target parameters |
 | `SQL0100` | Information | Statement does not end with `;` |
+| `COHSQLE001` | Error | Division by zero during evaluation (ISO SQLSTATE 22012) |
+| `COHSQLE002` | Error | Numeric value out of range during evaluation (ISO SQLSTATE 22003) |
 
 Positions are absolute character offsets into the statement text; line/column
 presentation is computed by tooling from the source (offset → line mapping), not
 carried per node.
+
+The `COHSQLE` codes are engine execution diagnostics, not parser diagnostics, and
+carry no position. They lead the `DatabaseException` message in process and the
+`ExecutionFailure` message on the wire; the arithmetic fault contract above
+defines when each is raised. The engine's transaction-state codes,
+`COHSQLT001`–`COHSQLT003`, are documented in the SQL engine design.

@@ -164,7 +164,8 @@ internal sealed partial class SqlPlanExecutor
             }
             catch (OverflowException exception)
             {
-                throw new DatabaseException($"{_function} overflow: the aggregate cannot be represented as a decimal or count.", exception);
+                throw SqlEvaluationException.NumericValueOutOfRange(
+                    $"{_function} overflowed; the aggregate cannot be represented as a decimal or count.", exception);
             }
         }
 
@@ -219,17 +220,36 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    /// <summary>Alternative numeric CASE/COALESCE branches share the declared output type.</summary>
+    /// <summary>
+    /// Alternative numeric CASE/COALESCE branches share the declared output type. A
+    /// value that does not fit that type (an approximate branch beyond Decimal's range,
+    /// for example) fails the statement as out of range rather than escaping raw.
+    /// </summary>
     private static object? NormalizeGroupValue(object? value, DatabaseType type)
-        => value is not (sbyte or short or int or long or float or double or decimal) ? value : type switch
+    {
+        if (value is not (sbyte or short or int or long or float or double or decimal))
         {
-            DatabaseType.Int8 => Convert.ToSByte(value, CultureInfo.InvariantCulture),
-            DatabaseType.Int16 => Convert.ToInt16(value, CultureInfo.InvariantCulture),
-            DatabaseType.Int32 => Convert.ToInt32(value, CultureInfo.InvariantCulture),
-            DatabaseType.Int64 => Convert.ToInt64(value, CultureInfo.InvariantCulture),
-            DatabaseType.Float32 => Convert.ToSingle(value, CultureInfo.InvariantCulture),
-            DatabaseType.Float64 => Convert.ToDouble(value, CultureInfo.InvariantCulture),
-            DatabaseType.Decimal => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
-            _ => value,
-        };
+            return value;
+        }
+
+        try
+        {
+            return type switch
+            {
+                DatabaseType.Int8 => Convert.ToSByte(value, CultureInfo.InvariantCulture),
+                DatabaseType.Int16 => Convert.ToInt16(value, CultureInfo.InvariantCulture),
+                DatabaseType.Int32 => Convert.ToInt32(value, CultureInfo.InvariantCulture),
+                DatabaseType.Int64 => Convert.ToInt64(value, CultureInfo.InvariantCulture),
+                DatabaseType.Float32 => Convert.ToSingle(value, CultureInfo.InvariantCulture),
+                DatabaseType.Float64 => Convert.ToDouble(value, CultureInfo.InvariantCulture),
+                DatabaseType.Decimal => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
+                _ => value,
+            };
+        }
+        catch (OverflowException exception)
+        {
+            throw SqlEvaluationException.NumericValueOutOfRange(
+                $"{Convert.ToString(value, CultureInfo.InvariantCulture)} does not fit the {type} result type.", exception);
+        }
+    }
 }

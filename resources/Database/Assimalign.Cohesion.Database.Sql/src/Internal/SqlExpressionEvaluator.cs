@@ -83,7 +83,29 @@ internal sealed class SqlExpressionEvaluator
         return Evaluate(predicate, row) is true;
     }
 
+    /// <summary>
+    /// Evaluates a scalar expression against a row. An arithmetic fault anywhere in
+    /// the tree fails the statement with a coded <see cref="SqlEvaluationException"/>;
+    /// a raw runtime <see cref="ArithmeticException"/> never escapes evaluation.
+    /// </summary>
+    /// <exception cref="SqlEvaluationException">Division by zero or a numeric value out of range.</exception>
+    /// <exception cref="DatabaseException">Any other evaluation error.</exception>
     internal object? Evaluate(SqlExpression expression, object?[] row)
+    {
+        try
+        {
+            return EvaluateCore(expression, row);
+        }
+        catch (ArithmeticException exception)
+        {
+            // Operators, functions and negation code their faults at the source; this
+            // boundary codes the remainder (an oversized numeric literal, for example)
+            // so no evaluation fault can surface as a non-database exception.
+            throw SqlEvaluationException.FromArithmetic(exception);
+        }
+    }
+
+    private object? EvaluateCore(SqlExpression expression, object?[] row)
     {
         // A grouping plan binds complete key expressions and aggregate calls
         // to result slots; scalar expressions compose over those values.
@@ -95,7 +117,7 @@ internal sealed class SqlExpressionEvaluator
         return expression switch
         {
             SqlConstantExpression constant => constant.Value,
-            SqlSubqueryExpression or SqlExistsExpression => Evaluate(ResolveSubquery(expression)[0], row),
+            SqlSubqueryExpression or SqlExistsExpression => EvaluateCore(ResolveSubquery(expression)[0], row),
             SqlLiteralExpression literal => EvaluateLiteral(literal),
             SqlColumnReferenceExpression column => row[ResolveColumn(column)],
             SqlParameterExpression parameter => ResolveParameter(parameter),
@@ -108,7 +130,7 @@ internal sealed class SqlExpressionEvaluator
             SqlCaseExpression caseExpression => EvaluateCase(caseExpression, row),
             SqlFunctionCallExpression function => EvaluateFunction(function, row),
             SqlCastExpression cast => EvaluateCast(cast, row),
-            SqlCollateExpression collate => Evaluate(collate.Operand, row),
+            SqlCollateExpression collate => EvaluateCore(collate.Operand, row),
             _ => throw new DatabaseException($"Expression '{expression.GetType().Name}' is not supported by the executor yet."),
         };
     }
@@ -249,12 +271,16 @@ internal sealed class SqlExpressionEvaluator
         };
     }
 
-    /// <summary>Reports operand range/precision errors in the context of the requested conversion.</summary>
+    /// <summary>
+    /// Reports operand range/precision errors in the context of the requested conversion.
+    /// Arithmetic inside the operand keeps its own coded fault: a division by zero or an
+    /// overflowing operator is not a conversion failure.
+    /// </summary>
     private object? EvaluateCast(SqlCastExpression cast, object?[] row)
     {
         try
         {
-            return SqlCastConverter.Convert(Evaluate(cast.Operand, row), cast);
+            return SqlCastConverter.Convert(EvaluateCore(cast.Operand, row), cast);
         }
         catch (Exception exception) when (exception is FormatException or OverflowException)
         {
@@ -281,8 +307,8 @@ internal sealed class SqlExpressionEvaluator
         // Logical operators get SQL three-valued treatment over nullable booleans.
         if (binary.Operator is SqlBinaryOperator.And or SqlBinaryOperator.Or)
         {
-            bool? left = Evaluate(binary.Left, row) as bool?;
-            bool? right = Evaluate(binary.Right, row) as bool?;
+            bool? left = EvaluateCore(binary.Left, row) as bool?;
+            bool? right = EvaluateCore(binary.Right, row) as bool?;
 
             return binary.Operator == SqlBinaryOperator.And
                 ? (left, right) switch
@@ -299,8 +325,8 @@ internal sealed class SqlExpressionEvaluator
                 };
         }
 
-        object? leftValue = Evaluate(binary.Left, row);
-        object? rightValue = Evaluate(binary.Right, row);
+        object? leftValue = EvaluateCore(binary.Left, row);
+        object? rightValue = EvaluateCore(binary.Right, row);
 
         if (leftValue is null || rightValue is null)
         {
@@ -317,11 +343,8 @@ internal sealed class SqlExpressionEvaluator
             SqlBinaryOperator.GreaterThan => Compare(leftValue, rightValue, collation) > 0,
             SqlBinaryOperator.LessOrEqual => Compare(leftValue, rightValue, collation) <= 0,
             SqlBinaryOperator.GreaterOrEqual => Compare(leftValue, rightValue, collation) >= 0,
-            SqlBinaryOperator.Add => Arithmetic(leftValue, rightValue, static (a, b) => a + b, static (a, b) => a + b),
-            SqlBinaryOperator.Subtract => Arithmetic(leftValue, rightValue, static (a, b) => a - b, static (a, b) => a - b),
-            SqlBinaryOperator.Multiply => Arithmetic(leftValue, rightValue, static (a, b) => a * b, static (a, b) => a * b),
-            SqlBinaryOperator.Divide => Arithmetic(leftValue, rightValue, static (a, b) => a / b, static (a, b) => a / b),
-            SqlBinaryOperator.Modulo => Arithmetic(leftValue, rightValue, static (a, b) => a % b, static (a, b) => a % b),
+            SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
+                or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo => Arithmetic(binary.Operator, leftValue, rightValue),
             SqlBinaryOperator.Concat => Convert.ToString(leftValue, CultureInfo.InvariantCulture) + Convert.ToString(rightValue, CultureInfo.InvariantCulture),
             _ => throw new DatabaseException($"Operator {binary.Operator} is not supported by the executor yet."),
         };
@@ -329,7 +352,7 @@ internal sealed class SqlExpressionEvaluator
 
     private object? EvaluateUnary(SqlUnaryExpression unary, object?[] row)
     {
-        object? operand = Evaluate(unary.Operand, row);
+        object? operand = EvaluateCore(unary.Operand, row);
 
         if (operand is null)
         {
@@ -342,8 +365,11 @@ internal sealed class SqlExpressionEvaluator
             {
                 sbyte value => -(long)value,
                 short value => -(long)value,
-                long value => -value,
                 int value => -(long)value,
+                // Two's complement has no positive counterpart for the minimum BIGINT.
+                long value => value == long.MinValue
+                    ? throw SqlEvaluationException.NumericValueOutOfRange($"negating BIGINT {value.ToString(CultureInfo.InvariantCulture)} overflowed.")
+                    : -value,
                 double value => -value,
                 float value => -(double)value,
                 decimal value => -value,
@@ -356,15 +382,15 @@ internal sealed class SqlExpressionEvaluator
 
     private object? EvaluateIsNull(SqlIsNullExpression expression, object?[] row)
     {
-        bool isNull = Evaluate(expression.Operand, row) is null;
+        bool isNull = EvaluateCore(expression.Operand, row) is null;
         return expression.IsNegated ? !isNull : isNull;
     }
 
     private object? EvaluateBetween(SqlBetweenExpression expression, object?[] row)
     {
-        object? value = Evaluate(expression.Operand, row);
-        object? lower = Evaluate(expression.Low, row);
-        object? upper = Evaluate(expression.High, row);
+        object? value = EvaluateCore(expression.Operand, row);
+        object? lower = EvaluateCore(expression.Low, row);
+        object? upper = EvaluateCore(expression.High, row);
 
         if (value is null || lower is null || upper is null)
         {
@@ -405,7 +431,7 @@ internal sealed class SqlExpressionEvaluator
             return expression.IsNegated;
         }
 
-        object? value = Evaluate(expression.Operand, row);
+        object? value = EvaluateCore(expression.Operand, row);
 
         if (value is null)
         {
@@ -415,7 +441,7 @@ internal sealed class SqlExpressionEvaluator
         bool hasUnknown = false;
         foreach (var candidate in candidates)
         {
-            object? candidateValue = Evaluate(candidate, row);
+            object? candidateValue = EvaluateCore(candidate, row);
 
             if (candidateValue is null)
             {
@@ -434,8 +460,8 @@ internal sealed class SqlExpressionEvaluator
 
     private object? EvaluateLike(SqlLikeExpression expression, object?[] row)
     {
-        object? value = Evaluate(expression.Operand, row);
-        object? pattern = Evaluate(expression.Pattern, row);
+        object? value = EvaluateCore(expression.Operand, row);
+        object? pattern = EvaluateCore(expression.Pattern, row);
 
         if (value is null || pattern is null)
         {
@@ -452,30 +478,30 @@ internal sealed class SqlExpressionEvaluator
 
     private object? EvaluateCase(SqlCaseExpression expression, object?[] row)
     {
-        object? input = expression.Input is null ? null : Evaluate(expression.Input, row);
+        object? input = expression.Input is null ? null : EvaluateCore(expression.Input, row);
 
         foreach (var when in expression.WhenClauses)
         {
             if (expression.Input is null)
             {
-                if (Evaluate(when.Condition, row) is true)
+                if (EvaluateCore(when.Condition, row) is true)
                 {
-                    return Evaluate(when.Result, row);
+                    return EvaluateCore(when.Result, row);
                 }
             }
             else
             {
-                object? candidate = Evaluate(when.Condition, row);
+                object? candidate = EvaluateCore(when.Condition, row);
 
                 if (input is not null && candidate is not null && Compare(input, candidate,
                     ResolveCollation(expression.Input, when.Condition)) == 0)
                 {
-                    return Evaluate(when.Result, row);
+                    return EvaluateCore(when.Result, row);
                 }
             }
         }
 
-        return expression.ElseResult is null ? null : Evaluate(expression.ElseResult, row);
+        return expression.ElseResult is null ? null : EvaluateCore(expression.ElseResult, row);
     }
 
     private object? EvaluateFunction(SqlFunctionCallExpression function, object?[] row)
@@ -486,7 +512,7 @@ internal sealed class SqlExpressionEvaluator
         {
             foreach (var argument in function.Arguments)
             {
-                object? value = Evaluate(argument, row);
+                object? value = EvaluateCore(argument, row);
 
                 if (value is not null)
                 {
@@ -497,20 +523,26 @@ internal sealed class SqlExpressionEvaluator
             return null;
         }
 
-        object? single = function.Arguments.Count == 1 ? Evaluate(function.Arguments[0], row) : null;
+        object? single = function.Arguments.Count == 1 ? EvaluateCore(function.Arguments[0], row) : null;
 
         return name switch
         {
             "UPPER" => (single as string)?.ToUpperInvariant() ?? single,
             "LOWER" => (single as string)?.ToLowerInvariant() ?? single,
             "LENGTH" => single is null ? null : (long)(Convert.ToString(single, CultureInfo.InvariantCulture)?.Length ?? 0),
+            // Every numeric storage type: exact integers widen to BIGINT before the
+            // magnitude is taken (so INT's minimum is representable), approximate and
+            // decimal values keep their own type.
             "ABS" => single switch
             {
                 null => null,
                 sbyte value => Math.Abs((long)value),
                 short value => Math.Abs((long)value),
-                long value => Math.Abs(value),
-                int value => (long)Math.Abs(value),
+                int value => Math.Abs((long)value),
+                long value => value == long.MinValue
+                    ? throw SqlEvaluationException.NumericValueOutOfRange($"ABS of BIGINT {value.ToString(CultureInfo.InvariantCulture)} overflowed.")
+                    : Math.Abs(value),
+                float value => Math.Abs(value),
                 double value => Math.Abs(value),
                 decimal value => Math.Abs(value),
                 _ => throw new DatabaseException("ABS requires a numeric argument."),
@@ -525,42 +557,116 @@ internal sealed class SqlExpressionEvaluator
     internal static int Compare(object left, object right, Collation? collation = null)
         => SqlValueComparer.Compare(left, right, collation);
 
-    /// <summary>Retains decimal arithmetic conversion independently of value comparison.</summary>
-    private static bool TryToArithmeticNumber(object value, out decimal number)
+    /// <summary>
+    /// Retains decimal arithmetic conversion independently of value comparison. An
+    /// approximate operand outside Decimal's range, or a NaN or infinity, cannot take
+    /// part in Decimal arithmetic and fails the statement as out of range.
+    /// </summary>
+    private static decimal ToArithmeticNumber(object value)
     {
-        switch (value)
+        try
         {
-            case sbyte v: number = v; return true;
-            case short v: number = v; return true;
-            case int v: number = v; return true;
-            case long v: number = v; return true;
-            case float v: number = Convert.ToDecimal(v); return true;
-            case double v: number = Convert.ToDecimal(v); return true;
-            case decimal v: number = v; return true;
-            default: number = 0; return false;
+            return value switch
+            {
+                sbyte v => v,
+                short v => v,
+                int v => v,
+                long v => v,
+                float v => Convert.ToDecimal(v),
+                double v => Convert.ToDecimal(v),
+                decimal v => v,
+                _ => throw new DatabaseException("Arithmetic requires numeric operands."),
+            };
+        }
+        catch (OverflowException exception)
+        {
+            string text = value is float single
+                ? single.ToString("R", CultureInfo.InvariantCulture)
+                : ((double)value).ToString("R", CultureInfo.InvariantCulture);
+            throw SqlEvaluationException.NumericValueOutOfRange(
+                $"approximate operand {text} cannot be represented as DECIMAL for arithmetic.", exception);
         }
     }
 
-    private static object? Arithmetic(
-        object left,
-        object right,
-        Func<decimal, decimal, decimal> decimalOperation,
-        Func<long, long, long> integerOperation)
-    {
-        bool integers = left is sbyte or short or int or long && right is sbyte or short or int or long;
+    private static bool IsArithmeticNumber(object value)
+        => value is sbyte or short or int or long or float or double or decimal;
 
-        if (!TryToArithmeticNumber(left, out decimal a) || !TryToArithmeticNumber(right, out decimal b))
+    private static bool IsExactInteger(object value) => value is sbyte or short or int or long;
+
+    /// <summary>
+    /// Applies a binary arithmetic operator. Exact integer operands compute in BIGINT
+    /// with overflow checking; any approximate or decimal operand promotes both sides
+    /// to Decimal. A zero divisor and a result outside the computed type fail the
+    /// statement with their coded diagnostics; nothing wraps or saturates.
+    /// </summary>
+    private static object Arithmetic(SqlBinaryOperator op, object left, object right)
+    {
+        if (!IsArithmeticNumber(left) || !IsArithmeticNumber(right))
         {
             throw new DatabaseException("Arithmetic requires numeric operands.");
         }
 
-        if (integers)
+        if (IsExactInteger(left) && IsExactInteger(right))
         {
-            return integerOperation(Convert.ToInt64(left, CultureInfo.InvariantCulture), Convert.ToInt64(right, CultureInfo.InvariantCulture));
+            long a = Convert.ToInt64(left, CultureInfo.InvariantCulture);
+            long b = Convert.ToInt64(right, CultureInfo.InvariantCulture);
+            if (b == 0 && op is SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo)
+            {
+                throw SqlEvaluationException.DivisionByZero(OperatorText(op));
+            }
+
+            try
+            {
+                return op switch
+                {
+                    SqlBinaryOperator.Add => checked(a + b),
+                    SqlBinaryOperator.Subtract => checked(a - b),
+                    SqlBinaryOperator.Multiply => checked(a * b),
+                    // The minimum BIGINT divided by -1 has no BIGINT quotient.
+                    SqlBinaryOperator.Divide => checked(a / b),
+                    // Every integer is divisible by -1; computing it would trap on the
+                    // minimum BIGINT, whose remainder is still zero.
+                    _ => b == -1 ? 0L : a % b,
+                };
+            }
+            catch (OverflowException exception)
+            {
+                throw SqlEvaluationException.NumericValueOutOfRange($"BIGINT '{OperatorText(op)}' overflowed.", exception);
+            }
         }
 
-        return decimalOperation(a, b);
+        decimal x = ToArithmeticNumber(left);
+        decimal y = ToArithmeticNumber(right);
+        if (y == 0m && op is SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo)
+        {
+            throw SqlEvaluationException.DivisionByZero(OperatorText(op));
+        }
+
+        try
+        {
+            return op switch
+            {
+                SqlBinaryOperator.Add => x + y,
+                SqlBinaryOperator.Subtract => x - y,
+                SqlBinaryOperator.Multiply => x * y,
+                SqlBinaryOperator.Divide => x / y,
+                _ => x % y,
+            };
+        }
+        catch (OverflowException exception)
+        {
+            throw SqlEvaluationException.NumericValueOutOfRange($"DECIMAL '{OperatorText(op)}' overflowed.", exception);
+        }
     }
+
+    private static string OperatorText(SqlBinaryOperator op) => op switch
+    {
+        SqlBinaryOperator.Add => "+",
+        SqlBinaryOperator.Subtract => "-",
+        SqlBinaryOperator.Multiply => "*",
+        SqlBinaryOperator.Divide => "/",
+        _ => "%",
+    };
 
     /// <summary>
     /// SQL LIKE with <c>%</c> (any run) and <c>_</c> (any one character), using the effective collation.
