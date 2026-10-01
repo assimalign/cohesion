@@ -218,7 +218,7 @@ The audit behind these stages is §7. Within each stage, rows are in the recomme
 
 ### Stage 7 — Security and browser interop
 
-**Status:** delivered 2026-10-01 on the Phase 2 branch and awaiting owner review. Commits, behavior changes and follow-ups are in §5.
+**Status:** delivered 2026-10-01 on the Phase 2 branch and in owner review; the review's two decisions are applied. Commits, behavior changes and follow-ups are in §5.
 
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
@@ -359,11 +359,17 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
 
   Behavior changes for the review:
   - An endpoint that requires authorization, CORS or antiforgery fails at dispatch when that middleware is missing or registered ahead of `UseRouting()`. That includes `DisableCors()`: a `UseCors` registered ahead of routing would apply the default policy to an endpoint that opted out.
-  - Every authorization item on an endpoint applies, outer group first, and `AllowAnonymous` anywhere wins (§7.4, decision 7). The fallback policy also covers requests that match no endpoint, so an anonymous caller is challenged on an unknown path.
+  - Every authorization item on an endpoint applies, outer group first, except the ones declared before the most specific `AllowAnonymous`, which clears them (§7.4, decision 7). Unlike ASP.NET Core, a route that requires authorization inside an `AllowAnonymous` group stays protected. The fallback policy also covers requests that match no endpoint, so an anonymous caller is challenged on an unknown path.
+  - The antiforgery cookie token is `Secure` whenever the request's effective scheme is HTTPS, as the session and authentication cookies already were.
   - `[FromForm]` typed endpoints require antiforgery. An application with them calls `AddAntiforgery()` and `UseAntiforgery()` after `UseRouting()`, or opts each such endpoint out with `DisableAntiforgery()`.
   - Http.Antiforgery joins App.Web. Without a data-protection provider its tokens still die on restart.
   - `UseCookiePolicy` now enforces its policy instead of passing every cookie through, and its namespace is now `Assimalign.Cohesion.Web.CookiePolicy`. The Cookie authentication ticket and the antiforgery cookie are essential by default; the session cookie is not. Under a consent requirement a session therefore starts only after consent, unless `HttpSessionOptions.CookieIsEssential` is set.
   - IdentityHub sends its strict CSP, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and `nosniff` on every response, not only the approval page.
+
+  Review decisions applied (2026-10-01):
+  - `e451032b`: the most specific `AllowAnonymous` wins (decision 7). Web.Authorization has 69 tests.
+  - `d086cda1`: the antiforgery cookie token is `Secure` whenever the effective scheme is HTTPS, through the same floor Cookie authentication uses. `CookieSecure` still forces the flag on plaintext requests. Http.Antiforgery now references Http.Forwarded and has 31 tests.
+  - The five Stage 7 agent worktrees and their branches were removed.
 
   Scope-creep filed:
   - #1153: cookie `Path` and `Domain` values are not validated.
@@ -489,7 +495,7 @@ What works end to end:
 
 ### 7.4 Owner decisions
 
-Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decisions 5 and 7 are open.
+Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 7 was adopted in the Stage 7 review on 2026-10-01. Decision 5 is open.
 
 1. **Which claim model authorization runs on.**
    - Web: authenticates onto BCL `ClaimsPrincipal` by a recorded decision (`Web.Authentication/docs/DESIGN.md:157-167`).
@@ -500,9 +506,9 @@ Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved t
 4. **Security-headers middleware in v1?** Recommendation: yes; it is small, P3.
 5. **The Web v1 date.** `DELIVERY_ROADMAP.md` ends L3.1 on 2026-10-15, and Stages 5–7 alone are about 20 items. Either move the date or cut v1 at the end of Stage 7.
 6. **Standing gates, open since July:** the WebSockets ADR (#765) and the request-mutation seam for rewrite (#782).
-7. **How authorization combines `AllowAnonymous` with requirements (raised by Stage 7).**
-   - Stage 7 ships ASP.NET Core's rule: `AllowAnonymous` anywhere on an endpoint wins. A route that requires authorization inside an anonymous group therefore runs anonymously. Routing's last-wins dispatch check already treats that route as protected and demands `UseAuthorization`, which then lets the anonymous caller in.
-   - Recommendation: the most specific item wins, so `AllowAnonymous` clears only the requirements declared above it. That fails closed for the inner requirement and matches the dispatch check.
+7. **How authorization combines `AllowAnonymous` with requirements (raised by Stage 7, adopted 2026-10-01).**
+   - Stage 7 first shipped ASP.NET Core's rule: `AllowAnonymous` anywhere on an endpoint wins. A route that required authorization inside an anonymous group therefore ran anonymously, while routing's last-wins dispatch check still treated it as protected and demanded `UseAuthorization`.
+   - Adopted: the most specific item wins, so `AllowAnonymous` clears only the requirements declared before it. That fails closed for the inner requirement and matches the dispatch check (`e451032b`).
 
 ### 7.5 Lineup
 
