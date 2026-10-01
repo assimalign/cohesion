@@ -53,6 +53,11 @@ internal sealed class SqlBoundTableCache
     /// <param name="table">The table version.</param>
     /// <returns>The bound table version.</returns>
     /// <exception cref="DatabaseException">A persisted definition of the table does not load.</exception>
+    /// <exception cref="InsufficientExecutionStackException">
+    /// The calling thread has too little stack left to read a definition back
+    /// (<see cref="SqlPersistedExpression.OutOfStack"/>); inside a statement the session reports it
+    /// as <c>COHSQLE004</c>.
+    /// </exception>
     internal SqlBoundTable Get(SqlCatalogTable table)
     {
         ArgumentNullException.ThrowIfNull(table);
@@ -134,12 +139,24 @@ internal sealed class SqlBoundTableCache
     }
 
     /// <summary>Binds every table the catalog holds; called when the database opens.</summary>
-    /// <exception cref="DatabaseException">A persisted definition does not load.</exception>
+    /// <exception cref="DatabaseException">
+    /// A persisted definition does not load, or the opening thread has too little stack left to
+    /// read one back.
+    /// </exception>
     internal void BindCatalog()
     {
         foreach (var table in _catalog.Tables)
         {
-            Get(table);
+            try
+            {
+                Get(table);
+            }
+            catch (InsufficientExecutionStackException exception)
+            {
+                // Only the open knows that a larger stack is the remedy (#1151); the message
+                // already names the definition and says the catalog is not damaged.
+                throw new DatabaseException($"{exception.Message} Open the database on a thread with a larger stack.", exception);
+            }
         }
     }
 
@@ -158,10 +175,12 @@ internal sealed class SqlBoundTableCache
 
             string subject = $"CHECK constraint '{constraint.Name}' on table '{tableName}'";
             var predicate = SqlPersistedExpression.Load(constraint.CheckExpression!, subject);
+            int[] ordinals;
             try
             {
                 // Binding, not the DDL's acceptance rules: see SqlPersistedExpression.Bind.
                 SqlPlanExecutor.BindPersistedCheck(predicate, table, _catalog.DefaultCollation);
+                ordinals = ColumnOrdinals(table, predicate);
             }
             catch (DatabaseException exception)
             {
@@ -170,8 +189,15 @@ internal sealed class SqlBoundTableCache
                     $"({exception.Message}). {SqlPersistedExpression.DamagedCatalogHint}",
                     exception);
             }
+            catch (InsufficientExecutionStackException exception)
+            {
+                // The walkers check the stack (#1151); a thread too small for the definition is
+                // not a damaged catalog. The signal stays an exhausted stack, now naming the
+                // definition, so whichever caller asked, the open or a statement, handles it.
+                throw SqlPersistedExpression.OutOfStack(subject, exception);
+            }
 
-            checks.Add(new SqlBoundCheck(constraint, predicate, ColumnOrdinals(table, predicate)));
+            checks.Add(new SqlBoundCheck(constraint, predicate, ordinals));
         }
 
         var defaults = new string?[table.Columns.Count];
@@ -196,6 +222,7 @@ internal sealed class SqlBoundTableCache
 
         void Collect(SqlExpression expression)
         {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
             if (expression is SqlColumnReferenceExpression column)
             {
                 for (int ordinal = 0; ordinal < table.Columns.Count; ordinal++)

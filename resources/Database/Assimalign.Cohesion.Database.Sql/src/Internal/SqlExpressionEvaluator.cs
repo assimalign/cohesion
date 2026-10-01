@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -107,6 +108,10 @@ internal sealed class SqlExpressionEvaluator
 
     private object? EvaluateCore(SqlExpression expression, object?[] row)
     {
+        // Every operator recurses through here. A parsed tree is at most 128 levels deep; a
+        // deeper one built by hand fails the statement instead of overflowing the stack (#1151).
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         // A grouping plan binds complete key expressions and aggregate calls
         // to result slots; scalar expressions compose over those values.
         if (_valueOrdinals is not null && _valueOrdinals.TryGetValue(expression, out int ordinal))
@@ -201,6 +206,8 @@ internal sealed class SqlExpressionEvaluator
 
     private (Collation? Collation, int Priority) FindCollation(SqlExpression? expression)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+
         // A materialized subquery carries its child column's collation on each value.
         if (expression is SqlSubqueryExpression or SqlExistsExpression or SqlInExpression { Subquery: not null }
             && _subqueryValues is not null && _subqueryValues.TryGetValue(expression, out var materialized)
@@ -784,6 +791,14 @@ internal sealed class SqlExpressionEvaluator
     /// <summary>
     /// SQL LIKE with <c>%</c> (any run) and <c>_</c> (any one character), using the effective collation.
     /// </summary>
+    /// <remarks>
+    /// Matching recurses once per <c>%</c> it backtracks through (and, for the compatibility
+    /// collation, once per character), so its depth follows the values, not the statement: a
+    /// pattern of 100,000 <c>%a</c> segments over a long enough value nested that deep and
+    /// overflowed the stack. Each step checks the stack first, so such a match fails its
+    /// statement with <c>COHSQLE004</c> instead (#1151).
+    /// </remarks>
+    /// <exception cref="InsufficientExecutionStackException">The match needs more stack than the thread has left.</exception>
     internal static bool LikeMatches(string input, string pattern, Collation? collation = null)
     {
         collation ??= Collation.Binary;
@@ -797,6 +812,7 @@ internal sealed class SqlExpressionEvaluator
 
         static bool Matches(ReadOnlySpan<char> input, ReadOnlySpan<char> pattern)
         {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
             while (!pattern.IsEmpty)
             {
                 char token = pattern[0];
@@ -849,6 +865,7 @@ internal sealed class SqlExpressionEvaluator
     /// <summary>Compatibility matching uses comparisons, never index keys, for legacy linguistic ordering.</summary>
     private static bool LikeMatchesLegacy(string input, string pattern, Collation collation)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (pattern.Length == 0)
         {
             return input.Length == 0;

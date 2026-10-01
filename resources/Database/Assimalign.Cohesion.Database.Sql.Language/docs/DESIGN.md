@@ -175,6 +175,71 @@ output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonic
   would read stored canonical text differently fails that suite. The engine also
   re-parses each canonical text when it is first rendered and refuses to store a
   definition that does not reproduce its tree.
+- **A tree deeper than the nesting limit has no canonical text** (#1151): `Render`
+  refuses it with `NotSupportedException` before walking it, because the parser
+  would not read the text back. That check is constant-time, and it keeps the walk's
+  own recursion within the limit; the walk also checks the stack at every node, so a
+  thread with little stack left gets `InsufficientExecutionStackException`, never an
+  overflow.
+
+## Expression nesting limit (#1151)
+
+Recursive descent recurses once per level of the text, and every consumer walks
+the tree it builds recursively too. Nothing bounded either, so `1 + 1 + ...` with
+200,000 terms, or 200,000 nested parentheses, overflowed the stack. .NET cannot
+catch a `StackOverflowException`: the parse, or the planner or evaluator after it,
+ended the process, and on the server one statement ended every session. The parser
+now bounds nesting at `SqlQueryParser.MaximumExpressionDepth` (128, as OQL and GQL),
+reported as `SQL0006`; the user-facing rule is in
+[DIALECT.md](DIALECT.md#expression-nesting-limit-1151).
+
+- **Depth is a property of the tree.** Every `SqlExpression` carries an internal
+  `Depth`, the node count of its longest path to a leaf, computed by its internal
+  constructor from its children (and from `SqlSelectExpression.ExpressionDepth` for
+  a subquery), so reading it is constant-time for a tree of any size. Measuring the
+  tree, not the recursion, is what makes a left-associative chain count: the parser
+  builds `1 + 1 + ...` in a loop, but the result is as deep as it is long, and every
+  later walker recurses through it.
+- **Two checks make the bound exact.** Before the parser recurses into an operand
+  that the node it is building will enclose (`ParseOperand`), it counts that node
+  in `_expressionDepth` and rejects the statement if the node and a leaf under it
+  would already exceed the limit. Whenever it builds a node over an operand parsed
+  before the node existed (each link of a chain, a comparison, `IS NULL`, `BETWEEN`,
+  `IN`, `LIKE`, `COLLATE`), `Nest` adds the node's `Depth` to the enclosing count.
+  Every other node is bounded by the checks its operands passed on the way down, so
+  a statement is rejected exactly when its tree is deeper than 128 levels, counting
+  subqueries, whose clauses parse one level below the subquery node.
+- **Parentheses are bounded apart from the tree.** They are not nodes, so they do
+  not change `Depth`, but each pair is a level of recursion, so `_parenthesisDepth`
+  caps them at 128 too. Folding them into the tree count would break persisted
+  definitions: the renderer parenthesizes a sign applied to a sign (`- -1` is stored
+  as `-(-1)`), so stored text can carry more parentheses than the declaration did.
+  It adds at most one pair per node, so the stored text nests its parentheses no
+  deeper than its tree, which is the declared tree, and it always parses back.
+- **Recursion is bounded by construction.** Every cycle through the expression
+  rules passes `ParseOperand` (or `ParseSubquery`, which enters the subquery node
+  the same way) or a parenthesis, so the parser recurses at most 128 node levels
+  plus 128 parenthesis levels. Each entry also calls
+  `RuntimeHelpers.TryEnsureSufficientExecutionStack`. A parenthesis or call level
+  runs the whole precedence ladder, about 2 KB of stack in a release build (about
+  6 KB in a debug build), so the deepest text the limits accept, 128 parentheses
+  around 127 nested calls, needs about 0.7 MB, measured. A thread with less left
+  reports `SQL0007` rather than overflowing. It is a separate code from the limit's
+  `SQL0006` because the text is within the dialect and parses on a bigger stack;
+  the engine relies on the difference to tell a thread too small for a stored
+  definition apart from a damaged catalog. Collapsing the binary rungs into one
+  precedence-climbing loop would cut the cost per level roughly in half, should
+  smaller threads ever need to accept the deepest text.
+- **Crossing the limit abandons the statement.** The parser reports `SQL0006` (or
+  `SQL0007`) once, consumes the rest of the text, and every rule still on the stack
+  meets the end and returns. What those rules report on the way out describes the
+  abandoned text, not the statement, so `ParseCore` drops every diagnostic after it and keeps
+  only the statement's command type, as it does for a character outside the dialect.
+  The scans that run over the whole text before parsing (lexical errors and the
+  unsupported-clause preflight) are unaffected and keep their diagnostics.
+  Recovering past the deep operand instead would mean parsing it, or skipping it by
+  matching parentheses and `CASE ... END` without parsing; abandoning keeps the
+  error single and the partial tree out of every consumer's hands.
 
 ## Unary plus
 

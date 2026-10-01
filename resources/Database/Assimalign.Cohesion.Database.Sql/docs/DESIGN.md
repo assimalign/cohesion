@@ -450,6 +450,36 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   physical bracket opens, so a fault writes nothing. The session's ordinary
   failure path then applies: auto-commit rolls back, and an explicit transaction
   stays active.
+- **Every recursive walk checks the stack (#1151).** The parser bounds a statement
+  at 128 levels of expression nesting, but the engine also accepts typed requests,
+  whose trees the language package's internal constructors could build to any
+  depth. So every walker that recurses over an expression tree calls
+  `RuntimeHelpers.EnsureSufficientExecutionStack()` before it descends: the
+  session's system-relation scan (`UsesSystemView`), the planner's validators and
+  binders (`RejectUnknownFunctions`, `ValidateExpression`, `StaticOperandType`,
+  `ContainsAggregate`, `ContainsCast`, `ReferencesAnyColumn`, the sargable and join
+  equality collectors, ordering alias binding, grouping binding, `SameGroupExpression`,
+  `GroupExpressionType`, the subquery source walk and `PlanSubqueries`), the
+  evaluator (`EvaluateCore`, `FindCollation`), CHECK validation
+  (`ValidateCheckSyntax`), and persisted-definition binding and comparison
+  (`SqlPersistedExpression.Bind`, `AreEquivalent`, `SqlBoundTableCache`'s column
+  collector). `SqlPlanner.Children` documents the rule for the next walker.
+  `LIKE` matching recurses once per `%` it backtracks through, so its depth follows
+  the values, and both matchers check too. The check costs a stack-pointer
+  comparison per node; a parsed tree trips it only on a thread created with a small
+  stack. `SqlDatabaseSession.ExecuteAsync`
+  turns the resulting `InsufficientExecutionStackException` into
+  `SqlEvaluationException` with `COHSQLE004` (ISO SQLSTATE 54001, statement too
+  complex), so it takes the ordinary failure path above instead of ending the
+  process; over the wire it is an `ExecutionFailure` and the session stays ready.
+  The tests prove the checks without a tree deeper than the limit, which only those
+  internal constructors could build and which this engine's tests do not reach:
+  `SqlExpressionDepthExecutionTests` runs a walk of a 128-level tree with a few KB of
+  stack left before the check would fail, measured on that thread with
+  `RuntimeHelpers.TryEnsureSufficientExecutionStack`. A walker that checks as it
+  descends throws within its first levels; one that did not check would carry on
+  into the runtime's reserve, which a 128-level walk fits inside, and complete, so a
+  missing check fails the test rather than the test process.
 - **Signs require numbers; unary plus is the identity (#1068 follow-up).** The
   evaluator returns a unary-plus operand unchanged (value and CLR type; NULL
   propagates), while negation still widens exact integers to BIGINT, and
@@ -785,7 +815,10 @@ record moves with the machinery):
   the session stays ready (#1069; before that fix a raw `DivideByZeroException`
   reached the `Internal` catch-all and closed the session, and so did the
   `InvalidOperationException` the runtime sort wraps around an `ORDER BY` key
-  comparison that fails). Framing/order violations (`ProtocolException`, malformed parameter
+  comparison that fails). A statement nested deeper than the dialect's 128-level
+  expression limit is a `ParseFailure` (`SQL0006`); before #1151 a 200,000-term
+  expression overflowed the stack and ended the server process, every session with
+  it. Framing/order violations (`ProtocolException`, malformed parameter
   components) → `ProtocolViolation` **and close**; anything unexpected →
   `Internal` and close. A child-root exception that escapes raw (for example a
   `StorageException` the engine failed to wrap) reaches the wire as `Internal`
@@ -1057,7 +1090,27 @@ and add it again" as the only remedy.
   Boolean one, which doubled the work per AND/OR level: once binding moved to open,
   a 24-term AND took 22 s to open, and a 40-term one did not finish its DDL in 100 s.
   `Check_LongConjunction_ShouldDeclareOpenAndEnforceInLinearTime` declares, reopens
-  and enforces a 128-term AND.
+  and enforces a 127-term AND, the longest flat conjunction the 128-level
+  expression nesting limit (#1151) accepts.
+- **The nesting limit cannot strand a definition (#1151).** The DDL parses with the
+  dialect's 128-level expression limit, and `Canonicalize` re-parses the canonical
+  text with the same parser before storing it. The canonical text has the declared
+  tree, and `SqlExpressionRenderer` adds at most one pair of parentheses around a
+  node, so its parentheses nest no deeper than that tree, which the DDL already
+  held to 128 levels; a definition the DDL accepted therefore always loads at open,
+  even where the renderer adds parentheses the declaration did not have. A CHECK of
+  126 signs over a column, which the renderer stores with 125 nested parentheses,
+  declares, reopens and is enforced (`Check_AtLimit_ShouldPersistReopenAndEnforce`).
+  Format 4 is unreleased, so no stored definition predates the limit. Reading the
+  deepest definition back needs a few hundred KB of stack (the parser's cost is in
+  the Sql.Language design); on a thread with less, the parser reports `SQL0007`
+  rather than `SQL0006`. `Load` and the bind then raise an
+  `InsufficientExecutionStackException` that names the definition and says the
+  catalog is not damaged, never the restore-from-backup hint, and the caller decides
+  what it means: `BindCatalog` fails the open, adding that the database should be
+  opened on a thread with a larger stack, while inside a statement (a DDL
+  re-parsing canonical text, or a table version bound on first use) the session
+  fails the statement with `COHSQLE004` like any other walk out of stack.
 - **When binding happens.** `SqlDatabaseInstance` binds every table right after
   the catalog opens and the format checks pass, before recovery or the index
   manager touch the data file set. Each DDL binds the version it publishes before
@@ -1153,7 +1206,8 @@ catalog violations unchanged. Arithmetic faults throw the internal
 `COHSQLE001` (division by zero) or `COHSQLE002` (numeric value out of range);
 a sign over a non-numeric operand throws it with `COHSQLE003`, from planning when
 the operand's type is known there or the operand is a parameter whose bound value
-is not a number. The codes are published in the dialect's
+is not a number, and a statement whose walk runs out of stack throws it with
+`COHSQLE004` (#1151). The codes are published in the dialect's
 diagnostics table. A persisted CHECK or DEFAULT that does not load fails the open
 with a `DatabaseException` naming the database, table and constraint or column. No runtime
 `ArithmeticException` escapes expression evaluation.

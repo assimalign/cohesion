@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 using Assimalign.Cohesion.Database.Language;
@@ -61,11 +62,17 @@ public static class SqlExpressionRenderer
     /// <exception cref="ArgumentNullException"><paramref name="expression"/> is null.</exception>
     /// <exception cref="NotSupportedException">
     /// The tree contains a node the dialect cannot spell: a node type the parser does not
-    /// produce, or a name containing a double quote, which the dialect cannot delimit.
+    /// produce, or a name containing a double quote, which the dialect cannot delimit. Or the tree
+    /// nests deeper than the dialect's expression limit of 128 levels, so no text of it would
+    /// parse.
+    /// </exception>
+    /// <exception cref="InsufficientExecutionStackException">
+    /// The calling thread has too little stack left to walk the tree.
     /// </exception>
     public static string Render(SqlExpression expression)
     {
         ArgumentNullException.ThrowIfNull(expression);
+        ThrowIfTooDeep(expression.Depth);
         return Expression(expression);
     }
 
@@ -75,14 +82,43 @@ public static class SqlExpressionRenderer
     /// <param name="query">A query produced by <see cref="SqlQueryParser"/>.</param>
     /// <returns>The canonical SQL text of <paramref name="query"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="query"/> is null.</exception>
-    /// <exception cref="NotSupportedException">The query contains a node the dialect cannot spell.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The query contains a node the dialect cannot spell, or nests deeper than the dialect's
+    /// expression limit of 128 levels.
+    /// </exception>
+    /// <exception cref="InsufficientExecutionStackException">
+    /// The calling thread has too little stack left to walk the query.
+    /// </exception>
     public static string Render(SqlSelectExpression query)
     {
         ArgumentNullException.ThrowIfNull(query);
+        ThrowIfTooDeep(query.ExpressionDepth);
         return Select(query);
     }
 
-    private static string Expression(SqlExpression expression) => expression switch
+    /// <summary>
+    /// Refuses a tree deeper than the parser accepts (#1151). Its text would not parse back, so it
+    /// has no canonical form; and refusing it before the walk keeps the walk's recursion within
+    /// the limit. The renderer adds at most one pair of parentheses per node, so the text of a
+    /// tree within the limit also nests its parentheses within it.
+    /// </summary>
+    private static void ThrowIfTooDeep(int depth)
+    {
+        if (depth > SqlQueryParser.MaximumExpressionDepth)
+        {
+            throw new NotSupportedException(
+                $"The expression nests {depth} levels deep; the SQL dialect allows at most {SqlQueryParser.MaximumExpressionDepth}, so its text would not parse.");
+        }
+    }
+
+    private static string Expression(SqlExpression expression)
+    {
+        // Every recursive step of the walk passes here, including the clauses of a subquery.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return Node(expression);
+    }
+
+    private static string Node(SqlExpression expression) => expression switch
     {
         SqlBinaryExpression binary => Binary(binary),
         SqlUnaryExpression unary => Unary(unary),

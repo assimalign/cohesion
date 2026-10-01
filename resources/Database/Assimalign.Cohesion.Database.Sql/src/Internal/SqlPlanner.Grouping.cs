@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -67,6 +68,7 @@ internal sealed partial class SqlPlanner
 
         void Bind(SqlExpression expression, IReadOnlyDictionary<SqlExpression, int>? outputSlots = null)
         {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
             if (outputSlots is not null && outputSlots.ContainsKey(expression))
             {
                 return;
@@ -131,7 +133,10 @@ internal sealed partial class SqlPlanner
             }
 
             bool ContainsOutput(SqlExpression candidate)
-                => outputSlots is not null && (outputSlots.ContainsKey(candidate) || Children(candidate).Any(ContainsOutput));
+            {
+                RuntimeHelpers.EnsureSufficientExecutionStack();
+                return outputSlots is not null && (outputSlots.ContainsKey(candidate) || Children(candidate).Any(ContainsOutput));
+            }
         }
     }
 
@@ -145,6 +150,7 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private bool SameGroupExpression(SqlExpression left, SqlExpression right, SqlExpressionEvaluator evaluator)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         bool same = (left, right) switch
         {
             // Two subqueries are the same group key only when they are the same node;
@@ -195,6 +201,13 @@ internal sealed partial class SqlPlanner
 
     /// <summary>Declares aggregate result types even when no source rows exist.</summary>
     private DatabaseType GroupExpressionType(SqlExpression expression, IReadOnlyList<SqlCatalogColumn> columns,
+        SqlExpressionEvaluator evaluator)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return GroupExpressionTypeCore(expression, columns, evaluator);
+    }
+
+    private DatabaseType GroupExpressionTypeCore(SqlExpression expression, IReadOnlyList<SqlCatalogColumn> columns,
         SqlExpressionEvaluator evaluator) => expression switch
     {
         SqlColumnReferenceExpression column => columns[evaluator.ResolveColumn(column)].Type.Type,

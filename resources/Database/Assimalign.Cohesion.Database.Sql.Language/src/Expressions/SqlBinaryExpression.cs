@@ -20,6 +20,7 @@ public sealed class SqlBinaryExpression : SqlExpression
         Left = left;
         Operator = op;
         Right = right;
+        Depth = 1 + System.Math.Max(left.Depth, right.Depth);
     }
 
     /// <summary>

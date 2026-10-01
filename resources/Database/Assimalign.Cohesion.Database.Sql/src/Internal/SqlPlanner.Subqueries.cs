@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
@@ -24,6 +25,7 @@ internal sealed partial class SqlPlanner
     /// </summary>
     private SqlPlan PlanSubqueries(SqlSelectExpression select)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         var queries = new List<SqlSubqueryBinding>();
         foreach (var expression in SubquerySources(select))
         {
@@ -133,6 +135,8 @@ internal sealed partial class SqlPlanner
 
         static IEnumerable<SqlExpression> Walk(SqlExpression expression)
         {
+            // Each level is a nested iterator, so the stack grows with the tree (#1151).
+            RuntimeHelpers.EnsureSufficientExecutionStack();
             yield return expression;
 
             // Children treats a subquery as opaque, which is what keeps a child scope's

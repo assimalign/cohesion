@@ -7,7 +7,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// storing a numeric value into a column: the statement fails with a stable engine
 /// code, and the session and any open transaction stay usable, exactly as for any
 /// other statement failure. An operand-type fault the planner can already see is raised
-/// while planning, with the same code, so it does not depend on whether rows exist.
+/// while planning, with the same code, so it does not depend on whether rows exist, and a
+/// statement too complex to walk fails wherever its walk runs out of stack.
 /// </summary>
 /// <remarks>
 /// The code leads the message (<c>COHSQLE001: ...</c>), the engine-code convention
@@ -30,6 +31,17 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// evaluation when only the value reveals it.
     /// </summary>
     internal const string InvalidOperandTypeCode = "COHSQLE003";
+
+    /// <summary>
+    /// Running the statement needs more stack than the thread has left (ISO SQLSTATE 54001,
+    /// statement too complex): an expression tree deeper than any the parser accepts, which only
+    /// a tree built by hand can be, a <c>LIKE</c> match that backtracks through more wildcards
+    /// than the stack holds, or a statement within the limits run on a thread created with too
+    /// small a stack, including a stored definition the statement reads back on first use. Every
+    /// recursive walk checks the stack before it descends, so the statement fails instead of the
+    /// process (#1151).
+    /// </summary>
+    internal const string StatementTooComplexCode = "COHSQLE004";
 
     private SqlEvaluationException(string code, string detail, Exception? innerException)
         : base($"{code}: {detail}", innerException)
@@ -60,6 +72,18 @@ internal sealed class SqlEvaluationException : DatabaseException
     /// <returns>The coded failure.</returns>
     internal static SqlEvaluationException InvalidOperandType(string operatorText, string operandType)
         => new(InvalidOperandTypeCode, $"Invalid operand type: unary '{operatorText}' requires a numeric operand, but the operand is {operandType}.", null);
+
+    /// <summary>Creates the failure for a statement whose walk ran out of stack.</summary>
+    /// <param name="innerException">
+    /// The exhausted-stack signal a recursive walk raised; when a stored definition was being read
+    /// back, its message names the definition.
+    /// </param>
+    /// <returns>The coded failure.</returns>
+    internal static SqlEvaluationException StatementTooComplex(InsufficientExecutionStackException innerException)
+        => new(StatementTooComplexCode,
+            "Statement too complex: running it needs more stack than the executing thread has left. " +
+            "Reduce the nesting of its expressions or the number of wildcards in a LIKE pattern, or run it on a thread with a larger stack.",
+            innerException);
 
     /// <summary>
     /// Codes a runtime arithmetic fault that no evaluation site coded at its source,

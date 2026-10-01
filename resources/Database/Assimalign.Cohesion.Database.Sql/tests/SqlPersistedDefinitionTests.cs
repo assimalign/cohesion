@@ -299,13 +299,14 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
     /// <summary>
     /// The CHECK validator visits every node once, so a long AND chain is declared, bound again at
     /// open, and enforced in linear time. It used to walk each AND/OR operand twice, doubling the
-    /// work per term: 24 terms took seconds to open and 40 never finished declaring.
+    /// work per term: 24 terms took seconds to open and 40 never finished declaring. The chain
+    /// is the longest the dialect accepts (#1151): 127 comparisons under 126 ANDs nest 128 levels.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Persisted definitions: a long AND chain declares, opens and enforces in linear time")]
     public async Task Check_LongConjunction_ShouldDeclareOpenAndEnforceInLinearTime()
     {
         // Arrange
-        const int terms = 128;
+        const int terms = 127;
         string predicate = string.Join(" AND ", Enumerable.Range(1, terms).Select(term => $"qty <> {term.ToString(CultureInfo.InvariantCulture)}"));
         var elapsed = Stopwatch.StartNew();
 

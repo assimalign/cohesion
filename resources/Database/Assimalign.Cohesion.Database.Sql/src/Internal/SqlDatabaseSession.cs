@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -123,6 +124,26 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
+        try
+        {
+            return await ExecuteCoreAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InsufficientExecutionStackException exception)
+        {
+            // Every recursive walk over a statement (the system-relation scan, planning,
+            // evaluation, CHECK validation) checks the stack before it descends (#1151). The
+            // parser bounds every tree it builds well inside a normal thread's stack, so what
+            // gets here is a tree built by hand, a LIKE match backtracking through more
+            // wildcards than the stack holds, or a statement run on a thread too small for it,
+            // including a stored CHECK or DEFAULT the statement reads back on first use.
+            // It fails as this statement's error: the auto-commit context has rolled back, an
+            // explicit transaction stays active, and the session stays usable.
+            throw SqlEvaluationException.StatementTooComplex(exception);
+        }
+    }
+
+    private async ValueTask<QueryResult> ExecuteCoreAsync(QueryRequest request, CancellationToken cancellationToken)
+    {
         // Typed requests may be constructed directly from a parser result rather
         // than FromSql. Never execute an error-recovery AST (notably ROLLBACK TO
         // must not become a full ROLLBACK while savepoints remain unsupported).
@@ -303,6 +324,7 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
     /// <summary>Captures metadata once for nested SELECTs and INSERT sources as well as the outer relation.</summary>
     private static bool UsesSystemView(SqlQueryExpression query)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (query is SqlInsertExpression { SelectSource: not null } insert)
         {
             return UsesSystemView(insert.SelectSource);
@@ -318,14 +340,18 @@ internal sealed class SqlDatabaseSession : IDatabaseSession
             || UsesSystemViewExpression(select.Having) || select.OrderBy.Any(order => UsesSystemViewExpression(order.Expression));
     }
 
-    private static bool UsesSystemViewExpression(SqlExpression? expression) => expression switch
+    private static bool UsesSystemViewExpression(SqlExpression? expression)
     {
-        null => false,
-        SqlSubqueryExpression scalar => UsesSystemView(scalar.Select),
-        SqlExistsExpression exists => UsesSystemView(exists.Subquery),
-        SqlInExpression { Subquery: not null } member => UsesSystemView(member.Subquery) || UsesSystemViewExpression(member.Operand),
-        _ => SqlPlanner.Children(expression).Any(UsesSystemViewExpression),
-    };
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return expression switch
+        {
+            null => false,
+            SqlSubqueryExpression scalar => UsesSystemView(scalar.Select),
+            SqlExistsExpression exists => UsesSystemView(exists.Subquery),
+            SqlInExpression { Subquery: not null } member => UsesSystemView(member.Subquery) || UsesSystemViewExpression(member.Operand),
+            _ => SqlPlanner.Children(expression).Any(UsesSystemViewExpression),
+        };
+    }
 
     private sealed record SqlTransactionScope(
         SqlDatabaseTransaction Transaction, IsolationLevel IsolationLevel, ISqlCatalogSnapshot? CatalogSnapshot);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -105,6 +106,7 @@ internal sealed partial class SqlPlanner
     private static void CollectJoinEqualities(SqlExpression expression, SqlExpressionEvaluator evaluator,
         List<(int Left, int Right, Collation Collation)> equalities)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.And } conjunction)
         {
             CollectJoinEqualities(conjunction.Left, evaluator, equalities);

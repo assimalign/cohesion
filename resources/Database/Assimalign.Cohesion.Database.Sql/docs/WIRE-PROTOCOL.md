@@ -25,7 +25,12 @@ current exchange without completion. ParseFailure and ExecutionFailure leave the
 session ready; malformed payloads, unknown messages, and bad ordering close it.
 Evaluation faults are ExecutionFailure: division by zero, numeric overflow and a
 sign over a non-numeric operand carry messages that begin with `COHSQLE001:`,
-`COHSQLE002:` and `COHSQLE003:` (see the dialect's diagnostics table).
+`COHSQLE002:` and `COHSQLE003:`, and a statement whose walk needs more stack than
+the server's thread has left, such as a `LIKE` match that backtracks through more
+wildcards than the stack holds, carries `COHSQLE004:` (see the dialect's
+diagnostics table). A statement nested deeper than the dialect's 128-level
+expression limit is a ParseFailure whose message carries `SQL0006`; it is refused
+before anything executes (see the dialect's expression nesting limit, #1151).
 There is no pipelining or multiplexing. Terminate closes; Ping receives Pong while ready.
 
 The model-owned exchange has this order.
