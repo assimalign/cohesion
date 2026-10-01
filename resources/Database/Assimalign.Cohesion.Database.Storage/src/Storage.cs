@@ -665,7 +665,7 @@ public abstract class Storage : IStorage
         // the complete before-image and leaves its owner directory intact.
         var page = handle.Page;
         ulong pageOwner = page.OwnerId;
-        page.AsBodySpan().Clear();
+        ClearBody(page);
         page.Type = PageType.Free;
         page.OwnerId = 0;
         slotted.Initialize();
@@ -777,7 +777,7 @@ public abstract class Storage : IStorage
             // scan rebuilds both the free-space map and the directory accordingly.
             using var handle = TouchPage(owner, (PageId)pageId);
             var page = handle.Page;
-            page.AsBodySpan().Clear();
+            ClearBody(page);
             page.Type = PageType.Free;
             page.OwnerId = 0;
 
@@ -1176,6 +1176,14 @@ public abstract class Storage : IStorage
         var page = handle.Page;
         page.Lsn = lsn;
     }
+
+    /// <summary>
+    /// Zeroes a pooled page's body. The length is the pool buffer's fixed size, never the
+    /// overflow size recorded in the page's own header: a header is page content, and a
+    /// corrupt one must not decide how far past the buffer a clear runs.
+    /// </summary>
+    private static unsafe void ClearBody(Page page)
+        => new Span<byte>(page.Pointer + Page.HeaderSize, Page.Size - Page.HeaderSize).Clear();
 
     private void ReleasePageWriteLocks(StorageTransaction transaction)
     {

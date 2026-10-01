@@ -15,6 +15,7 @@ internal sealed class StoragePageManager : IStoragePageManager
     private readonly StorageStream _stream;
     private readonly StorageBufferPool _bufferPool;
     private readonly StorageFreeSpaceMap _freeSpaceMap;
+    private readonly object _extendLock = new();
 
     internal StoragePageManager(StorageStream stream, StorageBufferPool bufferPool, StorageFreeSpaceMap freeSpaceMap)
     {
@@ -38,16 +39,22 @@ internal sealed class StoragePageManager : IStoragePageManager
         // since the page doesn't exist in the stream yet)
         var handle = _bufferPool.Pin(pageId, _stream);
 
-        // Now extend the stream to accommodate the new page
+        // Now extend the stream to accommodate the new page. Grow only, under a lock:
+        // a concurrent allocation of a higher page may already have extended it, and
+        // setting a shorter length would cut that page off the end of the file.
         long requiredLength = ((long)pageId + 1) * Page.Size;
-        if (_stream.Length < requiredLength)
+        lock (_extendLock)
         {
-            _stream.SetLength(requiredLength);
+            if (_stream.Length < requiredLength)
+            {
+                _stream.SetLength(requiredLength);
+            }
         }
 
-        // Initialize the fresh page (local copy shares the same pointer)
+        // Initialize the fresh page (local copy shares the same pointer). The clear spans
+        // the pool buffer's fixed size, never a length read from the page's own header.
         var page = handle.Page;
-        page.AsSpan().Clear();
+        new Span<byte>(page.Pointer, Page.Size).Clear();
         page.Id = (long)pageId;
         page.Type = type;
         handle.MarkDirty();
@@ -63,7 +70,7 @@ internal sealed class StoragePageManager : IStoragePageManager
         using (var handle = _bufferPool.Pin(pageId, _stream))
         {
             var page = handle.Page;
-            page.AsSpan().Clear();
+            new Span<byte>(page.Pointer, Page.Size).Clear();
             page.Id = (long)pageId;
             page.Type = PageType.Free;
             handle.MarkDirty();
