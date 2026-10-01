@@ -4,6 +4,7 @@ using System.Linq;
 
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -100,6 +101,50 @@ internal static class SqlPersistedExpression
         }
 
         return literal.Value;
+    }
+
+    /// <summary>
+    /// Binds a loaded expression to the row shape it is evaluated over: every column and
+    /// collation must resolve, and the expression must be a row expression — no parameter,
+    /// subquery, <c>*</c>, aggregate, or unresolved CAST target, none of which has a value
+    /// against one row.
+    /// </summary>
+    /// <remarks>
+    /// Binding checks only what evaluation needs. The rules a statement or DDL applies when it
+    /// accepts an expression — operand typing such as a sign over a non-numeric operand, or a
+    /// construct a CHECK may not declare — are not applied again: the engine that stored the
+    /// definition accepted it, so tightening such a rule never makes an existing database
+    /// refuse to open (or an unrelated DDL fail). A row the evaluator cannot evaluate fails its
+    /// own statement with the evaluator's coded error, as for any other expression.
+    /// </remarks>
+    /// <param name="expression">The loaded expression.</param>
+    /// <param name="evaluator">The evaluator over the row shape the expression binds to.</param>
+    /// <exception cref="DatabaseException">A column or collation does not resolve, or the expression is not a row expression.</exception>
+    internal static void Bind(SqlExpression expression, SqlExpressionEvaluator evaluator)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        ArgumentNullException.ThrowIfNull(evaluator);
+
+        switch (expression)
+        {
+            case SqlColumnReferenceExpression column:
+                evaluator.ResolveColumn(column);
+                break;
+            case SqlCollateExpression collate:
+                Collation.FromName(collate.CollationName);
+                break;
+            case SqlCastExpression { TargetTypeInfo: null } cast:
+                throw new DatabaseException($"CAST target '{cast.TargetType}' has not been resolved.");
+            case SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression or SqlInExpression { Values: null }:
+                throw new DatabaseException("Parameters, subqueries and * have no value in a persisted row expression.");
+            case SqlFunctionCallExpression call when call.FunctionName.ToUpperInvariant() is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX":
+                throw new DatabaseException($"Aggregate function '{call.FunctionName}' has no value in a persisted row expression.");
+        }
+
+        foreach (var child in SqlPlanner.Children(expression))
+        {
+            Bind(child, evaluator);
+        }
     }
 
     private static bool TryParse(string text, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SqlExpression? expression, out string? problem)

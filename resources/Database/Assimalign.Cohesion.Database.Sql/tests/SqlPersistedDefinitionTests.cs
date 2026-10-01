@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -292,6 +294,152 @@ public sealed class SqlPersistedDefinitionTests : IDisposable
         failure.Message.ShouldContain(named, Case.Sensitive);
         failure.Message.ShouldContain("cannot be loaded", Case.Sensitive);
         failure.Message.ShouldContain("restore the database from a backup", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// The CHECK validator visits every node once, so a long AND chain is declared, bound again at
+    /// open, and enforced in linear time. It used to walk each AND/OR operand twice, doubling the
+    /// work per term: 24 terms took seconds to open and 40 never finished declaring.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Persisted definitions: a long AND chain declares, opens and enforces in linear time")]
+    public async Task Check_LongConjunction_ShouldDeclareOpenAndEnforceInLinearTime()
+    {
+        // Arrange
+        const int terms = 128;
+        string predicate = string.Join(" AND ", Enumerable.Range(1, terms).Select(term => $"qty <> {term.ToString(CultureInfo.InvariantCulture)}"));
+        var elapsed = Stopwatch.StartNew();
+
+        // Act
+        await using (var engine = CreateEngine("persisted-long-check", _rootPath))
+        {
+            var database = await engine.CreateDatabaseAsync("db");
+            await using var session = await database.CreateSessionAsync(CancellationToken.None);
+            await session.ExecuteAsync($"CREATE TABLE t (qty INT, CONSTRAINT ck CHECK ({predicate}))");
+        }
+
+        await using var reopenedEngine = CreateEngine("persisted-long-check", _rootPath);
+        var reopened = (SqlDatabaseInstance)await reopenedEngine.OpenDatabaseAsync("db");
+        await using var reopenedSession = await reopened.CreateSessionAsync(CancellationToken.None);
+        await WriteFailsAsync(reopened, reopenedSession, $"INSERT INTO t VALUES ({terms.ToString(CultureInfo.InvariantCulture)})");
+        await WriteAsync(reopened, reopenedSession, $"INSERT INTO t VALUES ({(terms + 1).ToString(CultureInfo.InvariantCulture)})");
+        elapsed.Stop();
+
+        // Assert: linear work finishes in milliseconds; the bound only absorbs a slow agent.
+        reopened.Definitions.BindCount.ShouldBe(1);
+        elapsed.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(30));
+    }
+
+    /// <summary>
+    /// Opening binds a stored CHECK — columns, collations, a Boolean row predicate the evaluator
+    /// can run — without re-applying the rules DDL uses to accept one. A predicate an earlier
+    /// engine accepted but today's DDL would refuse (a sign over a TEXT column, a CAST) still
+    /// opens and is enforced, and an unrelated DROP COLUMN still succeeds, so tightening a
+    /// declaration rule can never lock a database out.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Persisted definitions: open binds stored CHECKs without re-applying declaration rules")]
+    public async Task Open_CheckOutsideTodaysDeclarationRules_ShouldOpenAndEnforce()
+    {
+        // Arrange: predicates the current DDL rejects, written straight to the catalog.
+        await using (var engine = CreateEngine("persisted-rules", _rootPath))
+        {
+            var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+            await using var session = await database.CreateSessionAsync(CancellationToken.None);
+            await session.ExecuteAsync("CREATE TABLE t (id INT, label TEXT, qty INT, extra INT)");
+            (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("ALTER TABLE t ADD CONSTRAINT signed CHECK (-label IS NULL)")))
+                .Message.ShouldStartWith("COHSQLE003", Case.Sensitive);
+            (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("ALTER TABLE t ADD CONSTRAINT via_cast CHECK (CAST(qty AS VARCHAR(5)) <> '13')")))
+                .Message.ShouldContain("casts", Case.Sensitive);
+
+            var table = Table(database, "t");
+            var stored = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, table.Columns.ToArray(), table.PrimaryKeyColumns,
+                table.Owner, table.OwningSchema,
+                [
+                    new SqlCatalogConstraint("signed", SqlCatalogConstraintKind.Check, [], checkExpression: "-label IS NULL"),
+                    new SqlCatalogConstraint("via_cast", SqlCatalogConstraintKind.Check, [], checkExpression: "CAST(qty AS VARCHAR(5)) <> '13'"),
+                ]);
+            await SqlCatalog.PublishTableAsync(database.Catalog, stored, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
+        }
+
+        // Act
+        await using var reopenedEngine = CreateEngine("persisted-rules", _rootPath);
+        var reopened = (SqlDatabaseInstance)await reopenedEngine.OpenDatabaseAsync("db");
+        await using var reopenedSession = await reopened.CreateSessionAsync(CancellationToken.None);
+
+        // Assert: both predicates are enforced as stored.
+        await WriteAsync(reopened, reopenedSession, "INSERT INTO t (id, qty) VALUES (1, 1)");
+        await WriteFailsAsync(reopened, reopenedSession, "INSERT INTO t (id, qty) VALUES (2, 13)");
+        var typeError = await Should.ThrowAsync<DatabaseException>(async () =>
+            await reopenedSession.ExecuteAsync("INSERT INTO t (id, label) VALUES (3, 'x')"));
+        typeError.Message.ShouldStartWith("COHSQLE003", Case.Sensitive);
+        await DdlAsync(reopened, reopenedSession, "ALTER TABLE t DROP COLUMN extra");
+        (await RowsAsync(reopenedSession, "SELECT id, label, qty FROM t")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1, null, 1 });
+    }
+
+    /// <summary>
+    /// A database on a data-storage format before 4 holds its definitions as they were written,
+    /// not as canonical text, and they are not migrated. The open refuses it with a format error
+    /// before binding could misread a bare DEFAULT — <c>true</c> as the Boolean literal
+    /// <c>TRUE</c>, <c>abc</c> as a column reference reported as catalog damage.
+    /// </summary>
+    /// <param name="storedDefault">The DEFAULT text an older engine stored: the literal's bare value.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Persisted definitions: an older-format database with definitions fails the open with a format error")]
+    [InlineData("abc")]
+    [InlineData("true")]
+    [InlineData("+5")]
+    public async Task Open_OlderFormatWithDefinitions_ShouldFailWithFormatError(string storedDefault)
+    {
+        // Arrange
+        await using (var engine = CreateEngine("persisted-format", _rootPath))
+        {
+            var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("legacy");
+            await using var session = await database.CreateSessionAsync(CancellationToken.None);
+            await session.ExecuteAsync("CREATE TABLE notes (id INT, body TEXT DEFAULT 'x')");
+
+            var table = Table(database, "notes");
+            var columns = table.Columns.ToArray();
+            columns[1] = new SqlCatalogColumn("body", columns[1].Type, columns[1].IsNullable, storedDefault);
+            var legacy = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, table.PrimaryKeyColumns,
+                table.Owner, table.OwningSchema, table.Constraints);
+            await SqlCatalog.PublishTableAsync(database.Catalog, legacy, [], database.Catalog.GetIndexRegistrations(), replaceExisting: true);
+            await database.Catalog.SetRecordSpaceFormatVersionAsync(3);
+        }
+
+        // Act
+        await using var reopenedEngine = CreateEngine("persisted-format", _rootPath);
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await reopenedEngine.OpenDatabaseAsync("legacy"));
+
+        // Assert
+        failure.Message.ShouldStartWith("Database 'legacy' uses data-storage format 3", Case.Sensitive);
+        failure.Message.ShouldContain("table 'dbo.notes'", Case.Sensitive);
+        failure.Message.ShouldContain("does not migrate", Case.Sensitive);
+        failure.Message.ShouldNotContain("damaged", Case.Insensitive);
+    }
+
+    /// <summary>
+    /// CREATE TABLE converts every DEFAULT to its column before anything is published, as ADD
+    /// COLUMN does, so a default the column cannot store fails the DDL rather than every later
+    /// INSERT that omits the column.
+    /// </summary>
+    /// <param name="ddl">A CREATE TABLE with an unusable DEFAULT.</param>
+    /// <param name="column">The column the error names.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Persisted definitions: CREATE TABLE rejects a DEFAULT its column cannot store")]
+    [InlineData("CREATE TABLE t (id INT, amount INT DEFAULT 'abc')", "amount")]
+    [InlineData("CREATE TABLE t (id INT, label VARCHAR(2) DEFAULT 'long')", "label")]
+    [InlineData("CREATE TABLE t (id INT, price DECIMAL(5, 2) DEFAULT 1.234)", "price")]
+    public async Task CreateTable_DefaultTheColumnCannotStore_ShouldFailTheDdl(string ddl, string column)
+    {
+        // Arrange
+        await using var engine = CreateEngine("persisted-default-check");
+        var database = (SqlDatabaseInstance)await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(ddl));
+
+        // Assert
+        failure.Message.ShouldStartWith($"Column '{column}': DEFAULT value cannot be stored as", Case.Sensitive);
+        database.Catalog.TryGetTable("dbo", "t", out _).ShouldBeFalse();
+        (await session.ExecuteAsync("CREATE TABLE t (id INT, amount INT DEFAULT '7')")).Status.ShouldBe(QueryResultStatus.Success);
     }
 
     /// <summary>

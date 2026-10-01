@@ -908,8 +908,12 @@ updates are restricted while referenced. `ON UPDATE` is unsupported and returns
 
 Checks require Boolean predicates made from supported deterministic row
 expressions. Parameters, subqueries, aggregates, unsupported functions and casts
-are rejected during binding (`SqlPlanExecutor.ValidateCheck`, which the load path
-reuses). Multiple unnamed constraints receive distinct generated names. Cascades are collected before restriction checks; a child
+are rejected when the DDL declares the check (`SqlPlanExecutor.ValidateCheck`); the
+load path binds a stored predicate with `BindPersistedCheck`, which does not apply
+the declaration rules again (see
+[Persisted definitions](#persisted-definitions-canonical-text-parsed-once)). The
+CHECK shape walk visits each node once, so its cost is linear in the predicate.
+Multiple unnamed constraints receive distinct generated names. Cascades are collected before restriction checks; a child
 already in the complete statement deletion set does not prevent that deletion,
 so physical row order and declaration order do not change the result.
 
@@ -1013,11 +1017,15 @@ and add it again" as the only remedy.
   writing a definition that would not reload. `Load` parses persisted text as the
   predicate of a carrier query and requires it to be exactly one expression — a
   trailing clause or a second statement is damage, not a definition.
-  `LoadDefaultValue` additionally requires one non-NULL literal. BindConstraints
-  canonicalizes CHECK; the planner canonicalizes literal DEFAULTs, so
-  `DEFAULT 'it''s'` stores `'it''s'` and `DEFAULT +5` stores `5`. The DEFAULT's
+  `LoadDefaultValue` additionally requires one non-NULL literal. `Bind` resolves a
+  loaded expression against the row shape it is evaluated over (below).
+  BindConstraints canonicalizes CHECK; the planner canonicalizes literal DEFAULTs,
+  so `DEFAULT 'it''s'` stores `'it''s'` and `DEFAULT +5` stores `5`. The DEFAULT's
   runtime meaning is unchanged: the literal's value text is coerced to the column
-  type exactly as before.
+  type exactly as before, and CREATE TABLE now proves that coercion succeeds for
+  every column before it reserves the table, as ADD COLUMN already did, so a
+  DEFAULT the column cannot store fails its DDL rather than every later INSERT
+  that omits the column.
 - **Parse once per table version (`SqlBoundTableCache`).** The database owns one
   cache keyed by the `SqlCatalogTable` instance in a `ConditionalWeakTable`. A
   catalog table description is immutable and every change publishes a new
@@ -1030,8 +1038,34 @@ and add it again" as the only remedy.
   from the cached values, and `EnsureCanDropColumn` re-binds the cached predicates
   against the remaining columns. No write, read or DML statement parses catalog
   text; `BindCount` lets tests prove it.
+- **Binding is not re-validation.** DDL accepts a CHECK through
+  `SqlPlanExecutor.ValidateCheck`: binding, plus the declaration rules (no casts,
+  no sign over an operand the plan types as non-numeric). Loading binds it through
+  `BindPersistedCheck`: columns and collations resolve (`SqlPersistedExpression.Bind`),
+  the predicate is a row expression (no parameter, subquery, `*` or aggregate) and a
+  Boolean predicate over the functions the evaluator implements — what evaluating
+  it needs, and nothing more. The engine that stored a predicate accepted it, so a
+  later release that tightens a declaration rule must not turn the predicate into
+  an open failure, as #1068's parser tightening would have done to stored text.
+  `CHECK (-label IS NULL)` on a TEXT column, which DDL now rejects with
+  `COHSQLE003`, still opens and is enforced as stored; a row it cannot evaluate
+  fails its own statement with the evaluator's coded error. The rule for future
+  changes: **a rule that narrows what DDL accepts goes in `ValidateCheck` only; a
+  change that removes the engine's ability to evaluate a construct a stored
+  definition may hold (an evaluator function, an operator) is a catalog-format
+  change** and needs a format version and a migration, never a silent open failure.
+  `EnsureCanDropColumn` binds the same way, so a tightened rule cannot block an
+  unrelated DROP COLUMN.
+- **Linear validation.** `ValidateCheckSyntax` visits each node of a predicate once,
+  passing each child the Boolean requirement its position imposes (AND/OR/NOT
+  operands, and COALESCE arguments and CASE results when the call or CASE must be
+  Boolean). It used to walk a Boolean operand once as a plain child and again as a
+  Boolean one, which doubled the work per AND/OR level: once binding moved to open,
+  a 24-term AND took 22 s to open, and a 40-term one did not finish its DDL in 100 s.
+  `Check_LongConjunction_ShouldDeclareOpenAndEnforceInLinearTime` declares, reopens
+  and enforces a 128-term AND.
 - **When binding happens.** `SqlDatabaseInstance` binds every table right after
-  the catalog opens and the format check passes, before recovery or the index
+  the catalog opens and the format checks pass, before recovery or the index
   manager touch the data file set. Each DDL binds the version it publishes before
   the statement returns — CREATE TABLE before publishing it, ADD CONSTRAINT and
   constrained ADD COLUMN through the backfill's validation of the replacement it
@@ -1050,6 +1084,17 @@ and add it again" as the only remedy.
   component. Canonical storage is part of data-storage format 4, which is
   unreleased, so there is no further version bump and earlier text is not
   migrated.
+- **Earlier formats are refused before binding.** A format 1–3 catalog holds
+  definitions as written — a DEFAULT as the literal's bare value — which binding
+  would misread: `true` reloads as the Boolean literal `TRUE` (silently changing a
+  TEXT default, even for old rows that lack the field), `+5` as `5`, and `abc` as
+  a column reference reported as catalog damage. So the constructor runs
+  `ThrowIfDefinitionsPredateCanonicalStorage` after `ThrowIfFormatIsNewer` and
+  before `BindCatalog`: an earlier-format database whose catalog holds any CHECK or
+  DEFAULT fails with a format error that names the table and says the engine does
+  not migrate definitions. The parallel rework that refuses every database not on
+  format 4 subsumes this check; when the two meet, `BindCatalog` must stay after
+  that format gate (and after the format marker of a new database).
 - **Compiled schemas.** A compiled CHECK keeps its author's spelling in the
   schema document and hash. `SqlSchemaProvisioner` compares it with the catalog
   by canonical form (`CanonicalCheck`), so reapplying an unchanged schema stays a

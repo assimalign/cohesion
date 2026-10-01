@@ -160,7 +160,8 @@ internal sealed class SqlBoundTableCache
             var predicate = SqlPersistedExpression.Load(constraint.CheckExpression!, subject);
             try
             {
-                SqlPlanExecutor.ValidateCheck(predicate, table, _catalog.DefaultCollation);
+                // Binding, not the DDL's acceptance rules: see SqlPersistedExpression.Bind.
+                SqlPlanExecutor.BindPersistedCheck(predicate, table, _catalog.DefaultCollation);
             }
             catch (DatabaseException exception)
             {

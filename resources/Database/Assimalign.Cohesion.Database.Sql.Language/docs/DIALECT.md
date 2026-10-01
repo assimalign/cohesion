@@ -243,7 +243,17 @@ the database then fails with `Database '<name>' cannot be opened.`, naming the
 table and the constraint or column (`CHECK constraint 'ck_qty' on table
 'dbo.orders' cannot be loaded: ...`). It never surfaces later as a failure of
 every write to that table. Canonical storage is part of data-storage format 4;
-text from earlier formats is not migrated.
+text from earlier formats is not migrated, and a database on an earlier format
+whose catalog holds a CHECK or DEFAULT fails the open with a format error that
+says so.
+
+**Binding is not re-validation.** Opening a database binds each stored CHECK —
+its columns and collations resolve, and it is a Boolean row predicate the engine
+can evaluate — but does not apply again the rules `CREATE TABLE` and `ALTER TABLE`
+use to accept one, such as the sign operand check or the ban on `CAST`. Those
+rules may tighten in a later release; a predicate an earlier release accepted
+keeps opening and is enforced as stored, and a row it cannot evaluate fails its
+own statement with the evaluator's coded error.
 
 ## Ordering, output aliases and ordinals (#1024)
 
@@ -326,7 +336,10 @@ outside the profile's function list fails first, with `Unknown function '<name>'
 as `:x` is a parse error. Defaults must
 convert to the declared storage type and fit its bounds, including string length
 and decimal precision/scale; invalid conversions and out-of-range defaults reject
-before publication. Strings are not truncated and decimals are not rounded.
+before publication. `CREATE TABLE` applies the same check to every column
+`DEFAULT` before it publishes the table (`INT DEFAULT 'abc'` fails the DDL, not
+each later INSERT that omits the column). Strings are not truncated and decimals
+are not rounded.
 Approximate floating-point defaults use normal IEEE conversion rounding, but
 nonfinite results and nonzero values that underflow to zero are rejected.
 `COLLATE` on an added string column preserves the literal's

@@ -194,8 +194,12 @@ publishing a definition, and when it opens a database it parses and binds every
 stored check and default once per table version, before any statement runs. A stored
 definition that does not load fails that open, naming the table and the constraint or
 column, instead of failing a later write; DDL inside the engine never stores text
-that would not reload. Canonical storage is part of data-storage format 4, so it needed
-no further format bump, and text stored by earlier formats is not migrated. The
+that would not reload. Opening binds a stored definition (its columns resolve, and it
+is something the engine can evaluate) without re-applying the rules DDL uses to accept
+one, so a later release that narrows those rules never makes a stored definition fail
+the open. Canonical storage is part of data-storage format 4, so it needed no further
+format bump; text stored by earlier formats is not migrated, and the engine refuses an
+earlier-format database whose catalog holds a check or default with a format error. The
 engine's [persisted-definition design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#persisted-definitions-canonical-text-parsed-once)
 has the details.
 

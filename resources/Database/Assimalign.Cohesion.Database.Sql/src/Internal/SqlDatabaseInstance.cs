@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -44,6 +45,10 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         // the data file set: recovery's scrub, index purge and checkpoint below
         // would otherwise run with this engine's older semantics.
         ThrowIfFormatIsNewer();
+
+        // Definitions stored before format 4 are source text, not canonical text, and are not
+        // migrated: refuse them with a format error before binding could misread them.
+        ThrowIfDefinitionsPredateCanonicalStorage();
 
         // Parse and bind every persisted CHECK and DEFAULT now, once, before anything else
         // touches the database: a definition that does not load fails the open, naming its
@@ -112,6 +117,41 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
             throw new DatabaseException(
                 $"Database '{Name}' uses data-storage format version {version}, newer than this engine understands " +
                 $"({SqlRowCodec.RecordSpaceFormatVersion}).");
+        }
+    }
+
+    /// <summary>
+    /// Refuses a database on a data-storage format older than
+    /// <see cref="SqlRowCodec.RecordSpaceFormatVersion"/> whose catalog persists a CHECK or a
+    /// column DEFAULT. Canonical definition storage is part of format 4 and older definitions
+    /// are not migrated: they hold the text as it was written (a DEFAULT as the bare literal
+    /// value), which binding would misread — <c>true</c> would reload as a Boolean literal and
+    /// <c>abc</c> as a column reference — so the database gets this format error rather than a
+    /// silently changed default or a damaged-catalog diagnosis. Runs before
+    /// <see cref="SqlBoundTableCache.BindCatalog"/>; once every database not on format 4 is
+    /// refused at open, that general gate subsumes this one.
+    /// </summary>
+    /// <exception cref="DatabaseException">An older-format catalog persists a CHECK or DEFAULT.</exception>
+    private void ThrowIfDefinitionsPredateCanonicalStorage()
+    {
+        int version = _catalog.RecordSpaceFormatVersion;
+        if (version >= SqlRowCodec.RecordSpaceFormatVersion)
+        {
+            return;
+        }
+
+        foreach (var table in _catalog.Tables)
+        {
+            if (table.Constraints.Any(constraint => constraint.Kind == SqlCatalogConstraintKind.Check) ||
+                table.Columns.Any(column => column.DefaultLiteral is not null))
+            {
+                throw new DatabaseException(
+                    $"Database '{Name}' uses data-storage format {version}, and table '{table.Schema}.{table.Name}' stores " +
+                    $"CHECK or DEFAULT definitions in that format's source text; this engine reads definitions only from " +
+                    $"format {SqlRowCodec.RecordSpaceFormatVersion}, which stores them as canonical SQL, and does not migrate " +
+                    "older ones. Export the data with the engine that wrote the database, drop the database " +
+                    "(DropDatabaseAsync), create it again with this engine and reload the data.");
+            }
         }
     }
 

@@ -530,18 +530,36 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>
-    /// Binds a CHECK predicate to a table version: every column and collation must resolve, and
-    /// the predicate must be a deterministic Boolean row expression. DDL runs it on the declared
-    /// predicate, and the bound-table cache on the persisted one when it loads.
+    /// Accepts a CHECK predicate a DDL statement declares: every column and collation must
+    /// resolve, the predicate must be a deterministic Boolean row expression the evaluator can
+    /// run, and it must pass the declaration rules — no casts, and no sign over an operand the
+    /// plan types as non-numeric.
     /// </summary>
-    /// <param name="expression">The predicate.</param>
+    /// <param name="expression">The declared predicate.</param>
     /// <param name="table">The table version the predicate constrains.</param>
     /// <param name="defaultCollation">The database default collation.</param>
     /// <exception cref="DatabaseException">The predicate does not bind or is not a valid CHECK.</exception>
     internal static void ValidateCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation)
     {
         SqlPlanner.ValidateExpression(expression, new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation));
-        ValidateCheckSyntax(expression, table, requireBoolean: true);
+        ValidateCheckSyntax(expression, table, requireBoolean: true, declaring: true);
+    }
+
+    /// <summary>
+    /// Binds a CHECK predicate the catalog persisted to a table version: every column and
+    /// collation must resolve, and the predicate must be a Boolean row expression the evaluator
+    /// can run. The declaration rules <see cref="ValidateCheck"/> adds are not applied again: the
+    /// engine that stored the predicate accepted it, and a later engine tightening what DDL
+    /// accepts must not make an existing database refuse to open.
+    /// </summary>
+    /// <param name="expression">The persisted predicate, parsed.</param>
+    /// <param name="table">The table version the predicate constrains.</param>
+    /// <param name="defaultCollation">The database default collation.</param>
+    /// <exception cref="DatabaseException">The predicate cannot be evaluated against the table's rows.</exception>
+    internal static void BindPersistedCheck(SqlExpression expression, SqlCatalogTable table, Collation defaultCollation)
+    {
+        SqlPersistedExpression.Bind(expression, new SqlExpressionEvaluator(table.Columns, null, defaultCollation: defaultCollation));
+        ValidateCheckSyntax(expression, table, requireBoolean: true, declaring: false);
     }
 
     private static string ConstraintName(SqlCatalogTable table, SqlConstraintDefinition definition, int ordinal)
@@ -636,30 +654,77 @@ internal sealed partial class SqlPlanExecutor
         }
         return result;
     }
-    private static void ValidateCheckSyntax(SqlExpression expression, SqlCatalogTable table, bool requireBoolean)
+
+    /// <summary>
+    /// Checks the shape of a CHECK predicate in one pass that visits every node exactly once, so
+    /// its cost is linear in the size of the predicate however deeply AND, OR, NOT, COALESCE and
+    /// CASE nest. (Walking a Boolean operand once as a plain child and again as a Boolean one
+    /// doubled the work at every AND/OR level: a 24-term AND took seconds, and binding at open
+    /// ran it for every such table.)
+    /// </summary>
+    /// <param name="expression">The node to check.</param>
+    /// <param name="table">The table version the predicate constrains.</param>
+    /// <param name="requireBoolean">Whether the node's position requires a Boolean value.</param>
+    /// <param name="declaring">
+    /// <see langword="true"/> when DDL accepts the predicate, which also applies the declaration
+    /// rule against casts; <see langword="false"/> when the catalog's persisted predicate binds.
+    /// </param>
+    private static void ValidateCheckSyntax(SqlExpression expression, SqlCatalogTable table, bool requireBoolean, bool declaring)
     {
-        if (expression is SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlCastExpression or SqlStarExpression
-            or SqlInExpression { Subquery: not null })
+        if (expression is SqlParameterExpression or SqlSubqueryExpression or SqlExistsExpression or SqlStarExpression
+            or SqlInExpression { Subquery: not null } || (declaring && expression is SqlCastExpression))
         {
             throw new DatabaseException("CHECK requires deterministic row expressions without parameters, subqueries, or casts.");
         }
+
+        // The functions the row evaluator implements; any other call cannot be evaluated.
         if (expression is SqlFunctionCallExpression function && function.FunctionName.ToUpperInvariant() is not ("COALESCE" or "UPPER" or "LOWER" or "LENGTH" or "ABS"))
         {
             throw new DatabaseException($"Function '{function.FunctionName}' is not supported in CHECK.");
         }
-        foreach (var child in SqlPlanner.Children(expression))
+
+        // Each child is visited once, with the requirement its position puts on it: the operands
+        // of AND, OR and NOT are Boolean, and so are COALESCE's arguments and a CASE's results
+        // (and a searched CASE's conditions) when the call or CASE itself must be Boolean.
+        switch (expression)
         {
-            ValidateCheckSyntax(child, table, requireBoolean: false);
+            case SqlBinaryExpression { Operator: SqlBinaryOperator.And or SqlBinaryOperator.Or } logical:
+                ValidateCheckSyntax(logical.Left, table, requireBoolean: true, declaring);
+                ValidateCheckSyntax(logical.Right, table, requireBoolean: true, declaring);
+                break;
+            case SqlUnaryExpression { Operator: SqlUnaryOperator.Not } negation:
+                ValidateCheckSyntax(negation.Operand, table, requireBoolean: true, declaring);
+                break;
+            case SqlFunctionCallExpression call:
+                bool booleanArguments = requireBoolean && string.Equals(call.FunctionName, "COALESCE", StringComparison.OrdinalIgnoreCase);
+                foreach (var argument in call.Arguments)
+                {
+                    ValidateCheckSyntax(argument, table, booleanArguments, declaring);
+                }
+                break;
+            case SqlCaseExpression caseExpression:
+                if (caseExpression.Input is not null)
+                {
+                    ValidateCheckSyntax(caseExpression.Input, table, requireBoolean: false, declaring);
+                }
+                foreach (var branch in caseExpression.WhenClauses)
+                {
+                    ValidateCheckSyntax(branch.Condition, table, requireBoolean && caseExpression.Input is null, declaring);
+                    ValidateCheckSyntax(branch.Result, table, requireBoolean, declaring);
+                }
+                if (caseExpression.ElseResult is not null)
+                {
+                    ValidateCheckSyntax(caseExpression.ElseResult, table, requireBoolean, declaring);
+                }
+                break;
+            default:
+                foreach (var child in SqlPlanner.Children(expression))
+                {
+                    ValidateCheckSyntax(child, table, requireBoolean: false, declaring);
+                }
+                break;
         }
-        if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.And or SqlBinaryOperator.Or } logical)
-        {
-            ValidateCheckSyntax(logical.Left, table, requireBoolean: true);
-            ValidateCheckSyntax(logical.Right, table, requireBoolean: true);
-        }
-        if (expression is SqlUnaryExpression { Operator: SqlUnaryOperator.Not } negation)
-        {
-            ValidateCheckSyntax(negation.Operand, table, requireBoolean: true);
-        }
+
         if (!requireBoolean)
         {
             return;
@@ -678,28 +743,6 @@ internal sealed partial class SqlPlanExecutor
         if (!boolean)
         {
             throw new DatabaseException("CHECK requires a BOOLEAN predicate.");
-        }
-        if (expression is SqlFunctionCallExpression coalesce)
-        {
-            foreach (var argument in coalesce.Arguments)
-            {
-                ValidateCheckSyntax(argument, table, requireBoolean: true);
-            }
-        }
-        if (expression is SqlCaseExpression caseExpression)
-        {
-            foreach (var branch in caseExpression.WhenClauses)
-            {
-                if (caseExpression.Input is null)
-                {
-                    ValidateCheckSyntax(branch.Condition, table, requireBoolean: true);
-                }
-                ValidateCheckSyntax(branch.Result, table, requireBoolean: true);
-            }
-            if (caseExpression.ElseResult is not null)
-            {
-                ValidateCheckSyntax(caseExpression.ElseResult, table, requireBoolean: true);
-            }
         }
     }
 

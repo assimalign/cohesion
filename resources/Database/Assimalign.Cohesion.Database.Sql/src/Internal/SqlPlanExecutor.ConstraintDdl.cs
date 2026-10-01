@@ -16,6 +16,18 @@ internal sealed partial class SqlPlanExecutor
 {
     private async Task CreateConstrainedTableAsync(SqlCreateTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        // Every DEFAULT must convert to its column before anything is reserved, as ADD COLUMN
+        // requires: a default the column cannot store would otherwise be published and fail
+        // every later INSERT that omits the column.
+        foreach (var column in plan.Columns)
+        {
+            if (column.DefaultLiteral is not null)
+            {
+                ResolveDefault(column, SqlPersistedExpression.LoadDefaultValue(column.DefaultLiteral,
+                    $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'"));
+            }
+        }
+
         var provisional = new SqlCatalogTable(0, plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey);
         var constraints = BindConstraints(provisional, plan.Constraints);
         await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
@@ -273,11 +285,12 @@ internal sealed partial class SqlPlanExecutor
         }
 
         // A table-level CHECK lists no columns, so a check that reads the column is found by
-        // binding its predicate against the remaining ones.
+        // binding its predicate against the remaining ones — binding only, as at load, so a
+        // declaration rule tightened since the check was stored cannot block an unrelated drop.
         var columns = table.Columns.Where(column => !string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)).ToArray();
         foreach (var check in _definitions.Get(table).Checks)
         {
-            SqlPlanner.ValidateExpression(check.Predicate, new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation));
+            SqlPersistedExpression.Bind(check.Predicate, new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation));
         }
     }
 }
