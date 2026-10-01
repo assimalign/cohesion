@@ -141,9 +141,10 @@ remain internal and are used only by catalog tests.
 Table records now append a versioned constraint extension after ownership: version
 `1`, constraint count, and each immutable foreign-key/check definition. A reference
 stores its ordered local and target columns, target SQL namespace/table, and
-`RESTRICT` or `CASCADE` delete action. A check stores its SQL expression. Records
-ending after the original primary keys or ownership suffix still load with no
-constraints. Unknown extension versions and malformed definitions fail closed.
+`RESTRICT` or `CASCADE` delete action. A check stores its predicate as canonical
+SQL text (below). Records ending after the original primary keys or ownership
+suffix still load with no constraints. Unknown extension versions and malformed
+definitions fail closed.
 Column changes retain constraints, and add/drop constraint rewrites use the same
 WAL-backed, self-committing record replacement as existing catalog metadata.
 
@@ -173,6 +174,35 @@ Index records have their own version-`1` trailing extension carrying `IsPrimaryK
 This identifies the physical index enforcing primary-key metadata, allowing schema
 reconciliation to distinguish it from a separately declared unique index on the
 same columns. Older index records have no marker and load as ordinary indexes.
+
+## Persisted SQL expressions are canonical text
+
+Every SQL expression this catalog stores — `SqlCatalogConstraint.CheckExpression`
+and `SqlCatalogColumn.DefaultLiteral` today, and any expression default or view
+query added later — is **canonical SQL that the engine rendered from the parsed
+tree** (`SqlExpressionRenderer`, Sql.Language), never the text a user wrote. A check
+declared as `QTY>0   and qty<100` is stored as `QTY > 0 AND qty < 100`; a default
+declared as `'it''s'` or `+5` is stored as `'it''s'` or `5`, the SQL literal rather
+than its bare value. New persisted expressions must follow the same rule; storing
+source text is not an option, because a stored definition must mean the same thing
+under every later parser.
+
+The catalog itself stays SQL-agnostic: it has no reference to the language package,
+stores the text as an opaque string in the same tuple fields as before, and validates
+only shape (a check needs non-blank text; a reference needs its columns). The SQL
+engine owns the rule end to end. It renders and verifies the canonical text before
+publishing a definition, and when it opens a database it parses and binds every
+stored check and default once per table version, before any statement runs. A stored
+definition that does not load fails that open, naming the table and the constraint or
+column, instead of failing a later write; DDL inside the engine never stores text
+that would not reload. Opening binds a stored definition (its columns resolve, and it
+is something the engine can evaluate) without re-applying the rules DDL uses to accept
+one, so a later release that narrows those rules never makes a stored definition fail
+the open. Canonical storage is part of data-storage format 4, so it needed no further
+format bump; text stored by earlier formats is not migrated, and the engine refuses an
+earlier-format database whose catalog holds a check or default with a format error. The
+engine's [persisted-definition design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#persisted-definitions-canonical-text-parsed-once)
+has the details.
 
 ## Single source for SQL system views (C1)
 

@@ -403,7 +403,7 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("SELECT id FROM t WHERE id =;", "Expected an expression but found ';'.", ";")]
     [InlineData("UPDATE t SET a =", "Expected an expression before the end of the statement.", "")]
     [InlineData("DELETE FROM t WHERE", "Expected an expression before the end of the statement.", "")]
-    [InlineData("SELECT +a FROM t;", "Expected an expression but found '+'.", "+")]
+    [InlineData("SELECT +", "Expected an expression before the end of the statement.", "")]
     [InlineData("SELECT id FROM t WHERE a IS;", "Expected NULL after IS.", ";")]
     public void Parse_MissingExpression_ShouldReportSyntaxError(string sql, string message, string located)
     {

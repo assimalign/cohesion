@@ -267,7 +267,7 @@ public sealed class SqlSubqueryExecutionTests
             var request = SqlQueryRequest.FromSql(
                 "SELECT id, (SELECT id FROM choices) FROM candidates WHERE id IN (SELECT id FROM choices) " +
                 "AND EXISTS (SELECT id FROM choices WHERE id IN (SELECT id FROM candidates));");
-            var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager);
+            var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
 
             // Act: change both outer and nested inputs after the ReadCommitted statement captured its view.
             var update = await writer.BeginTransactionAsync(cancellationToken: CancellationToken.None);

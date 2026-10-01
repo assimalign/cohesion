@@ -65,7 +65,12 @@ the SQL language and catalog. A unique index supplies both enforcement and looku
 so a second constraint kind would duplicate its identity and persistence rules.
 Foreign keys and checks remain `CompiledSchemaConstraint` values. For a check,
 `Expression.CanonicalText` is SQL scalar-expression text, for example `qty > 0`;
-the SQL parser and evaluator validate it at provisioning. Its optional `Columns`
+the SQL parser and evaluator validate it at provisioning. "Canonical" here means
+the schema document's canonical JSON, not SQL spelling: the text stays as the
+author wrote it and feeds the hash. The SQL engine stores its own canonical SQL
+rendering of the parsed predicate in the catalog and compares the live catalog with
+a schema by that rendering, so reapplying an unchanged schema is a no-op whatever
+the predicate's spelling. Its optional `Columns`
 list is advisory and is not part of check equivalence, because table-level SQL
 checks derive their dependencies from the expression. Function and trigger bodies
 retain their separate compiler-produced expression representation. The frozen

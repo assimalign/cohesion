@@ -54,6 +54,7 @@ internal sealed partial class SqlPlanExecutor
             LockMode.IntentExclusive, cancellationToken).ConfigureAwait(false);
         EnsureCurrentDefinition(table);
         var indexes = GetLiveIndexes(table);
+        var defaults = _definitions.Get(table).DefaultValues;
         var rows = new List<(byte[] Record, object?[] Values)>(sourceRows.Count);
         foreach (var sourceRow in sourceRows)
         {
@@ -75,7 +76,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 if (!assigned[ordinal])
                 {
-                    values[ordinal] = ResolveDefault(table.Columns[ordinal]);
+                    values[ordinal] = ResolveDefault(table.Columns[ordinal], defaults[ordinal]);
                 }
             }
             rows.Add((SqlRowCodec.Encode(table.ObjectId, table.Columns, values, statement.Transaction.Sequence), values));

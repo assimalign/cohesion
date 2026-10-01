@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -25,6 +26,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     private readonly TransactionCoordinator _coordinator;
     private readonly IIndexManager _indexManager;
     private readonly SqlSchemaProvisioner _schemaProvisioner;
+    private readonly SqlBoundTableCache _definitions;
     private bool _disposed;
 
     /// <summary>
@@ -61,6 +63,22 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         else
         {
             StampNewCatalog();
+        }
+
+        // Every database that reaches this point is on format 4, which stores CHECK and DEFAULT
+        // definitions as canonical SQL; older formats were refused above, so no definition
+        // here predates canonical storage.
+        // Parse and bind every persisted CHECK and DEFAULT now, once, before anything else
+        // touches the database: a definition that does not load fails the open, naming its
+        // table, instead of failing an arbitrary later write. Writes reuse these bindings.
+        _definitions = new SqlBoundTableCache(_catalog);
+        try
+        {
+            _definitions.BindCatalog();
+        }
+        catch (DatabaseException exception)
+        {
+            throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
         }
 
         _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new SqlTransactionRecordSpace(storage));
@@ -199,6 +217,12 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     internal IIndexManager IndexManager => _indexManager;
 
     /// <summary>
+    /// Gets the database's bound table versions — every persisted CHECK and DEFAULT, parsed
+    /// once — for the executor and tests.
+    /// </summary>
+    internal SqlBoundTableCache Definitions => _definitions;
+
+    /// <summary>
     /// Persists the index manager's current registrations when they drifted from
     /// the stored set — root page ids change on splits, so this runs at the
     /// engine's persistence points (checkpoint passes and disposal) in addition
@@ -272,7 +296,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
 
-        var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager);
+        var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager, _definitions);
         var session = new SqlDatabaseSession(this, _coordinator, executor);
 
         return new ValueTask<IDatabaseSession>(session);
@@ -286,7 +310,7 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager);
+        var executor = new SqlQueryExecutor(_storage, _catalog, _indexManager, _definitions);
         return new SqlDatabaseSession(this, _coordinator, executor, provisioningSchema);
     }
 

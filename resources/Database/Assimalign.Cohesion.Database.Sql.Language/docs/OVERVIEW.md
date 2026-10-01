@@ -23,6 +23,11 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
 - **Types and builtins** — `SqlTypeNames` resolves declared type names (with
   length/precision/scale) to `DatabaseType` identities; builtin function names are
   declared in the lexer tables and the dialect doc.
+- **Canonical rendering** — `SqlExpressionRenderer` turns a parsed expression or
+  `SELECT` back into canonical SQL text that parses to the same tree. It is the
+  form in which the engine persists every stored definition (CHECK, DEFAULT, and
+  later expression defaults and views); see
+  [DIALECT.md](DIALECT.md#persisted-definitions-are-canonical).
 
 ## Dependencies
 
@@ -37,6 +42,9 @@ var parser = new SqlQueryParser();
 var statement = (SqlQueryStatement)parser.Parse("SELECT id FROM users WHERE age >= 21;");
 
 var select = (SqlSelectExpression)statement.SqlExpression;
+
+// Canonical text: "age >= 21"
+string canonical = SqlExpressionRenderer.Render(select.Where!);
 ```
 
 See [DESIGN.md](DESIGN.md) for the parser's shape and the decisions behind it.

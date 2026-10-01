@@ -177,6 +177,17 @@ internal sealed class SqlExpressionEvaluator
         throw new DatabaseException($"Unknown column '{column.ColumnName}'.");
     }
 
+    /// <summary>
+    /// Resolves a column reference to its declared type, or null when the evaluator's scope
+    /// carries no column metadata for it.
+    /// </summary>
+    /// <exception cref="DatabaseException">The column is unknown or ambiguous.</exception>
+    internal DatabaseType? ResolveColumnType(SqlColumnReferenceExpression column)
+    {
+        int ordinal = ResolveColumn(column);
+        return ordinal >= 0 && ordinal < _columns.Count ? _columns[ordinal].Type.Type : null;
+    }
+
     /// <summary>Resolves explicit expression, column, then database collation in that order.</summary>
     internal Collation ResolveCollation(SqlExpression? expression, SqlExpression? other = null)
     {
@@ -321,18 +332,36 @@ internal sealed class SqlExpressionEvaluator
     }
 
     private object? ResolveParameter(SqlParameterExpression parameter)
+        => TryGetParameterValue(parameter, out object? value)
+            ? value
+            : throw new DatabaseException($"No value was supplied for parameter '{parameter.ParameterName.TrimStart('@', '$')}'.");
+
+    /// <summary>
+    /// Gets the value the statement supplied for a parameter, which lets the planner check what
+    /// the value alone decides — such as a sign's operand type — before any row is read.
+    /// </summary>
+    /// <param name="parameter">The parameter reference.</param>
+    /// <param name="value">The supplied value, which may be null.</param>
+    /// <returns><see langword="true"/> when the statement supplied a value for the parameter.</returns>
+    internal bool TryGetParameterValue(SqlParameterExpression parameter, out object? value)
     {
         // The AST keeps the sigil ('@name' / '$1'); callers bind by bare name.
         string name = parameter.ParameterName.TrimStart('@', '$');
-
-        if (_parameters is not null &&
-            (_parameters.TryGetValue(name, out var value) || _parameters.TryGetValue(parameter.ParameterName, out value)))
-        {
-            return value;
-        }
-
-        throw new DatabaseException($"No value was supplied for parameter '{name}'.");
+        value = null;
+        return _parameters is not null &&
+            (_parameters.TryGetValue(name, out value) || _parameters.TryGetValue(parameter.ParameterName, out value));
     }
+
+    /// <summary>
+    /// Whether a sign accepts a non-null value: unary minus negates the signed numeric types, and
+    /// unary plus returns any numeric value unchanged.
+    /// </summary>
+    /// <param name="sign"><see cref="SqlUnaryOperator.Negate"/> or <see cref="SqlUnaryOperator.Plus"/>.</param>
+    /// <param name="value">The operand value.</param>
+    /// <returns><see langword="true"/> when the sign evaluates over the value.</returns>
+    internal static bool IsSignOperand(SqlUnaryOperator sign, object value) => sign == SqlUnaryOperator.Plus
+        ? value is sbyte or byte or short or ushort or int or uint or long or ulong or float or double or decimal
+        : value is sbyte or short or int or long or float or double or decimal;
 
     private object? EvaluateBinary(SqlBinaryExpression binary, object?[] row)
     {
@@ -425,12 +454,31 @@ internal sealed class SqlExpressionEvaluator
                 double value => -value,
                 float value => -(double)value,
                 decimal value => -value,
-                _ => throw new DatabaseException($"Cannot negate a value of type {operand.GetType().Name}."),
+                _ => throw SqlEvaluationException.InvalidOperandType("-", OperandTypeName(operand)),
             },
+            // ISO unary plus: a number passes through with its type unchanged.
+            SqlUnaryOperator.Plus => IsSignOperand(SqlUnaryOperator.Plus, operand)
+                ? operand
+                : throw SqlEvaluationException.InvalidOperandType("+", OperandTypeName(operand)),
             SqlUnaryOperator.Not => operand is bool flag ? !flag : throw new DatabaseException("NOT requires a boolean operand."),
             _ => throw new DatabaseException($"Unary operator {unary.Operator} is not supported."),
         };
     }
+
+    /// <summary>Names a runtime value's type the way the dialect's types are named.</summary>
+    internal static string OperandTypeName(object value) => value switch
+    {
+        string => nameof(DatabaseType.String),
+        bool => nameof(DatabaseType.Boolean),
+        byte[] => nameof(DatabaseType.Binary),
+        DateOnly => nameof(DatabaseType.Date),
+        TimeOnly => nameof(DatabaseType.Time),
+        DateTime => nameof(DatabaseType.DateTime),
+        DateTimeOffset => nameof(DatabaseType.DateTimeOffset),
+        TimeSpan => nameof(DatabaseType.TimeSpan),
+        Guid => nameof(DatabaseType.Guid),
+        _ => value.GetType().Name,
+    };
 
     private object? EvaluateIsNull(SqlIsNullExpression expression, object?[] row)
     {

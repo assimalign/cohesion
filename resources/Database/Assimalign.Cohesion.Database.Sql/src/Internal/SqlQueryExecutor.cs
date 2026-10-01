@@ -22,12 +22,14 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
     private readonly SqlStorage _storage;
     private readonly ISqlCatalog _catalog;
     private readonly IIndexManager _indexManager;
+    private readonly SqlBoundTableCache _definitions;
 
-    internal SqlQueryExecutor(SqlStorage storage, ISqlCatalog catalog, IIndexManager indexManager)
+    internal SqlQueryExecutor(SqlStorage storage, ISqlCatalog catalog, IIndexManager indexManager, SqlBoundTableCache definitions)
     {
         _storage = storage;
         _catalog = catalog;
         _indexManager = indexManager;
+        _definitions = definitions;
     }
 
     internal ISqlCatalogSnapshot CaptureCatalogSnapshot() => SqlCatalog.CaptureSnapshot(_catalog);
@@ -69,7 +71,7 @@ internal sealed class SqlQueryExecutor : IQueryExecutor
                 [new Diagnostic { Code = "COHDBL001", Message = exception.Message, Severity = DiagnosticSeverity.Error }]));
         }
 
-        var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, sqlRequest.Parameters);
+        var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, _definitions, sqlRequest.Parameters);
         return executor.ExecuteAsync(plan, statement, cancellationToken);
     }
 }

@@ -16,6 +16,18 @@ internal sealed partial class SqlPlanExecutor
 {
     private async Task CreateConstrainedTableAsync(SqlCreateTablePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        // Every DEFAULT must convert to its column before anything is reserved, as ADD COLUMN
+        // requires: a default the column cannot store would otherwise be published and fail
+        // every later INSERT that omits the column.
+        foreach (var column in plan.Columns)
+        {
+            if (column.DefaultLiteral is not null)
+            {
+                ResolveDefault(column, SqlPersistedExpression.LoadDefaultValue(column.DefaultLiteral,
+                    $"DEFAULT of column '{column.Name}' on table '{plan.Schema}.{plan.Name}'"));
+            }
+        }
+
         var provisional = new SqlCatalogTable(0, plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey);
         var constraints = BindConstraints(provisional, plan.Constraints);
         await LockReferencedTablesAsync(constraints, statement, cancellationToken).ConfigureAwait(false);
@@ -24,6 +36,10 @@ internal sealed partial class SqlPlanExecutor
         var table = await SqlCatalog.ReserveTableAsync(_catalog, plan.Schema, plan.Name, plan.Columns, plan.PrimaryKey, constraints,
             statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
             statement.ProvisioningSchema, cancellationToken).ConfigureAwait(false);
+
+        // Bind the persisted definitions of the version about to be published, from their
+        // stored text, so no write to the new table ever parses them.
+        _definitions.Get(table);
         await PublishConstrainedTableAsync(table, plan.Constraints, statement, cancellationToken, replaceExisting: false).ConfigureAwait(false);
     }
 
@@ -166,6 +182,7 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
+        // The backfill binds the replacement version, which is the instance published below.
         ValidateRows(replacement, rows, statement, cancellationToken, current: true);
         await PublishConstrainedTableAsync(replacement, [plan.Constraint], statement, cancellationToken, replaceExisting: true).ConfigureAwait(false);
         return new SqlQueryResult(QueryResultStatus.Success, affectedCount: 0);
@@ -185,7 +202,8 @@ internal sealed partial class SqlPlanExecutor
         // until every default and existing-row constraint has been checked.
         if (plan.Column.DefaultLiteral is not null)
         {
-            ResolveDefault(plan.Column);
+            ResolveDefault(plan.Column, SqlPersistedExpression.LoadDefaultValue(plan.Column.DefaultLiteral,
+                $"DEFAULT of column '{plan.Column.Name}' on table '{plan.Schema}.{plan.Name}'"));
         }
 
         var columns = table.Columns.Append(plan.Column).ToArray();
@@ -214,7 +232,10 @@ internal sealed partial class SqlPlanExecutor
         ValidateRows(replacement, rows, statement, cancellationToken, current: true);
         if (plan.Constraints.Count == 0)
         {
-            await _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken).ConfigureAwait(false);
+            // The catalog publishes its own copy of the replacement definition, built from the
+            // same column and constraint instances, so it adopts the replacement's bindings.
+            _definitions.Adopt(await _catalog.AddColumnAsync(plan.Schema, plan.Name, plan.Column, cancellationToken).ConfigureAwait(false),
+                replacement);
         }
         else
         {
@@ -229,7 +250,10 @@ internal sealed partial class SqlPlanExecutor
         EnsureCurrentDefinition(plan.Table);
         if (plan.Table.Constraints.Any(c => string.Equals(c.Name, plan.ConstraintName, StringComparison.OrdinalIgnoreCase)))
         {
-            await SqlCatalog.DropConstraintAsync(_catalog, plan.Table.Schema, plan.Table.Name, plan.ConstraintName, cancellationToken).ConfigureAwait(false);
+            // The new version no longer carries the constraint, so the dropped predicate is
+            // never evaluated again; it keeps the other bindings of the version it came from.
+            _definitions.Adopt(await SqlCatalog.DropConstraintAsync(_catalog, plan.Table.Schema, plan.Table.Name, plan.ConstraintName,
+                cancellationToken).ConfigureAwait(false), plan.Table);
         }
         else if (_catalog.TryGetIndex(plan.Table.ObjectId, plan.ConstraintName, out var index) && index.IsUnique)
         {
@@ -260,10 +284,13 @@ internal sealed partial class SqlPlanExecutor
             throw new DatabaseException($"Column '{columnName}' participates in a constraint and cannot be dropped.");
         }
 
+        // A table-level CHECK lists no columns, so a check that reads the column is found by
+        // binding its predicate against the remaining ones — binding only, as at load, so a
+        // declaration rule tightened since the check was stored cannot block an unrelated drop.
         var columns = table.Columns.Where(column => !string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)).ToArray();
-        foreach (var check in table.Constraints.Where(c => c.Kind == SqlCatalogConstraintKind.Check))
+        foreach (var check in _definitions.Get(table).Checks)
         {
-            SqlPlanner.ValidateExpression(ParseCheck(check.CheckExpression!), new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues));
+            SqlPersistedExpression.Bind(check.Predicate, new SqlExpressionEvaluator(columns, null, defaultCollation: _catalog.DefaultCollation));
         }
     }
 }

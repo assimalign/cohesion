@@ -596,7 +596,7 @@ internal sealed partial class SqlPlanner
         {
             var typeInfo = ResolveTypeName(definition.DataType, definition.ColumnName);
 
-            string? defaultLiteral = ResolveDefaultLiteral(definition);
+            string? defaultLiteral = ResolveDefaultLiteral(definition, $"{schema}.{create.Table.TableName}");
 
             // PRIMARY KEY columns are implicitly NOT NULL.
             bool nullable = definition.IsNullable && !definition.IsPrimaryKey;
@@ -630,11 +630,19 @@ internal sealed partial class SqlPlanner
         return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists, create.Constraints);
     }
 
-    /// <summary>Rejects unevaluated schema expressions before a DDL plan can mutate the catalog.</summary>
-    private static string? ResolveDefaultLiteral(SqlColumnDefinition definition) => definition.DefaultValue switch
+    /// <summary>
+    /// Rejects unevaluated schema expressions before a DDL plan can mutate the catalog, and
+    /// renders a literal DEFAULT as the canonical SQL text the catalog stores.
+    /// </summary>
+    /// <param name="definition">The parsed column definition.</param>
+    /// <param name="table">The schema-qualified table name, for diagnostics.</param>
+    /// <returns>The canonical DEFAULT text, or null when the column declares none (or <c>DEFAULT NULL</c>).</returns>
+    private static string? ResolveDefaultLiteral(SqlColumnDefinition definition, string table) => definition.DefaultValue switch
     {
         null => null,
-        SqlLiteralExpression literal => literal.LiteralType == SqlLiteralType.Null ? null : literal.Value,
+        SqlLiteralExpression literal => literal.LiteralType == SqlLiteralType.Null
+            ? null
+            : SqlPersistedExpression.Canonicalize(literal, $"DEFAULT of column '{definition.ColumnName}' on table '{table}'"),
         _ => throw new DatabaseException(
             $"Column '{definition.ColumnName}': only literal DEFAULT values are supported."),
     };
@@ -711,7 +719,7 @@ internal sealed partial class SqlPlanner
                     add.Column.ColumnName,
                     ResolveTypeName(add.Column.DataType, add.Column.ColumnName),
                     add.Column.IsNullable && !add.Column.IsPrimaryKey,
-                    ResolveDefaultLiteral(add.Column),
+                    ResolveDefaultLiteral(add.Column, $"{schema}.{alter.Table.TableName}"),
                     ResolveColumnCollation(add.Column, ResolveTypeName(add.Column.DataType, add.Column.ColumnName))),
                 add.Column.Constraints),
             SqlAlterDropColumnAction drop => new SqlDropColumnPlan(schema, alter.Table.TableName, drop.ColumnName),
@@ -844,6 +852,20 @@ internal sealed partial class SqlPlanner
                 break;
             case SqlInExpression { Values: null } when !isBound:
                 throw new DatabaseException("COHDBL001: IN subqueries are supported only in SELECT expressions and INSERT ... SELECT.");
+            case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } sign
+                when StaticOperandType(sign.Operand, evaluator, boundSubqueries, boundValues) is { } type && !IsNumeric(type):
+                // A sign over a value the plan already knows is not a number fails here, the same
+                // over an empty table as over a populated one; the evaluator raises the same code
+                // for an operand only a row's value reveals.
+                throw SqlEvaluationException.InvalidOperandType(
+                    sign.Operator == SqlUnaryOperator.Plus ? "+" : "-", type.ToString());
+            case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus, Operand: SqlParameterExpression parameter } sign
+                when evaluator.TryGetParameterValue(parameter, out object? value) && value is not null &&
+                    !SqlExpressionEvaluator.IsSignOperand(sign.Operator, value):
+                // A parameter's value is known before any row is read, so its type is checked here
+                // too: the statement fails whether or not the table has rows.
+                throw SqlEvaluationException.InvalidOperandType(
+                    sign.Operator == SqlUnaryOperator.Plus ? "+" : "-", SqlExpressionEvaluator.OperandTypeName(value));
         }
 
         // A bound subquery is its own scope, already planned and validated on its own terms.
@@ -857,6 +879,43 @@ internal sealed partial class SqlPlanner
             ValidateExpression(child, evaluator, boundSubqueries, boundValues);
         }
     }
+
+    /// <summary>
+    /// The type a sign's operand has whatever row it is evaluated on, when the plan can tell:
+    /// a string or Boolean literal, a column, a COLLATE or CAST, a predicate, a concatenation,
+    /// <c>UPPER</c>/<c>LOWER</c>, or a bound scalar subquery. Null when only the value can tell —
+    /// a parameter (which <see cref="ValidateExpression"/> checks against its supplied value
+    /// instead), arithmetic, other calls, CASE, NULL — or when the node is an ORDER BY value
+    /// bound to an output column.
+    /// </summary>
+    private static DatabaseType? StaticOperandType(SqlExpression expression, SqlExpressionEvaluator evaluator,
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries, IReadOnlyDictionary<SqlExpression, int>? boundValues)
+    {
+        if (boundValues is not null && boundValues.ContainsKey(expression))
+        {
+            return null;
+        }
+
+        return expression switch
+        {
+            SqlLiteralExpression { LiteralType: SqlLiteralType.String } => DatabaseType.String,
+            SqlLiteralExpression { LiteralType: SqlLiteralType.Boolean } => DatabaseType.Boolean,
+            SqlColumnReferenceExpression column => evaluator.ResolveColumnType(column),
+            SqlCollateExpression collate => StaticOperandType(collate.Operand, evaluator, boundSubqueries, boundValues),
+            SqlCastExpression { TargetTypeInfo: { } target } => target.Type,
+            SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
+            SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => DatabaseType.String,
+            SqlBinaryExpression { Operator: not (SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
+                or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo) } => DatabaseType.Boolean,
+            SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
+            SqlSubqueryExpression when boundSubqueries is not null && boundSubqueries.TryGetValue(expression, out var type) => type,
+            SqlFunctionCallExpression call when call.FunctionName.ToUpperInvariant() is "UPPER" or "LOWER" => DatabaseType.String,
+            _ => null,
+        };
+    }
+
+    private static bool IsNumeric(DatabaseType type) => type is DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32
+        or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal or DatabaseType.Null;
 
     private static bool ContainsAggregate(SqlExpression expression)
     {

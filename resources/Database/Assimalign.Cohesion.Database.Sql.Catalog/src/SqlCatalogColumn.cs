@@ -16,7 +16,10 @@ public sealed class SqlCatalogColumn
     /// <param name="name">The column name, unique within its table.</param>
     /// <param name="type">The shared type identity and constraints.</param>
     /// <param name="isNullable">Whether the column accepts nulls.</param>
-    /// <param name="defaultLiteral">The default value literal text, when declared.</param>
+    /// <param name="defaultLiteral">
+    /// The default value as the canonical SQL literal the engine renders (for example
+    /// <c>'it''s'</c>, <c>5</c> or <c>TRUE</c>), when declared.
+    /// </param>
     /// <param name="collation">The string collation override; null inherits the database default.</param>
     public SqlCatalogColumn(string name, DatabaseTypeInfo type, bool isNullable = true, string? defaultLiteral = null, Collation? collation = null)
     {
@@ -50,7 +53,9 @@ public sealed class SqlCatalogColumn
     public bool IsNullable { get; }
 
     /// <summary>
-    /// Gets the default value literal text, when one was declared.
+    /// Gets the default value literal, when one was declared: the canonical SQL literal the
+    /// engine rendered from the declaration (a string default keeps its quotes, so
+    /// <c>DEFAULT 'it''s'</c> is <c>'it''s'</c>), never the text as written.
     /// </summary>
     public string? DefaultLiteral { get; }
 

@@ -75,7 +75,7 @@ public sealed class SqlConstraintRaceTests
             // Execute actual DDL under the held context, avoiding timing sleeps
             // and production hooks. This exercises the same planner/apply/catalog
             // path as the session's auto-commit bracket.
-            var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager);
+            var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
             await executor.ExecuteAsync(SqlQueryRequest.FromSql(ddl),
                 new SqlStatementContext(ddlContext, coordinator), TestTimeout.Token());
             await coordinator.CommitAsync(ddlContext, TestTimeout.Token());

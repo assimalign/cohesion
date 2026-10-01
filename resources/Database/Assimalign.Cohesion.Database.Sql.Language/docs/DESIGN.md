@@ -114,10 +114,12 @@ same shape: optional name, ordered key columns, foreign-key target and deletion
 action, or a check predicate. `SqlCreateTableExpression.Constraints` contains all
 constraints; column definitions also retain their own constraints so `ALTER TABLE
 ADD COLUMN` carries the same information. The executor consumes the normalized
-table list once. `CHECK` retains both its expression tree and exact predicate
-source; the catalog persists source and reparses it after restart without
-reflection or a second expression codec. New constraint syntax follows the DDL
-parser's diagnostic recovery discipline and emits `SQL0003` on malformed input.
+table list once. `CHECK` retains both its expression tree and the predicate source
+as written (`CheckExpressionText`, for tooling); the engine never persists that
+source. It persists the canonical text `SqlExpressionRenderer` renders from the
+tree (below), so no spelling — and no leniency an older parser had for a spelling —
+reaches storage. New constraint syntax follows the DDL parser's diagnostic recovery
+discipline and emits `SQL0003` on malformed input.
 
 **`UNIQUE` is a unique index, not a new compiled-schema constraint kind.** The
 syntax still has a `Unique` AST kind so it can preserve the declaration and name,
@@ -127,6 +129,53 @@ SQL DDL, persistence, and concurrent uniqueness enforcement on one path.
 Foreign keys and checks remain constraint catalog records. Only `ON DELETE
 CASCADE` and `ON DELETE RESTRICT` are accepted; `ON UPDATE` stays outside the
 profile and reports `COHDBL001`.
+
+## Canonical rendering (`SqlExpressionRenderer`)
+
+`SqlExpressionRenderer.Render(SqlExpression)` and `Render(SqlSelectExpression)` turn
+a parsed tree back into SQL text. It is the one AST-to-SQL renderer: every
+definition the engine persists — CHECK predicates and literal DEFAULTs today,
+expression defaults (#1121) and view queries (#1124) next — is stored as its
+output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonical)).
+
+- **The text is a function of the tree.** Keywords upper case, single spaces,
+  `<>` for inequality, comments dropped, names and literal values as the tree holds
+  them. Two spellings of one predicate store the same text, which is what lets the
+  engine compare a compiled schema's CHECK with the catalog by canonical form.
+- **Parentheses follow the parser's precedence ladder, not the source.** The
+  renderer assigns each node the rung `SqlQueryParser.Expressions.cs` parses it at
+  and parenthesizes an operand only when its position parses a tighter rung, with
+  left associativity for logical and arithmetic operators and none for comparisons.
+  Four spellings are special because the lexer or parser folds them: a sign
+  applied to a sign is parenthesized (`--` would start a comment), `+(1)` keeps its
+  parentheses (`+1` is the literal `1`), `NOT` before a plain `EXISTS` is
+  parenthesized (`NOT EXISTS` is one construct), and a call's first argument whose
+  text starts with `*` but is not the star itself is parenthesized (`f((* = 1))`,
+  because `f(*` is read as the `COUNT(*)` star argument).
+- **Identifiers are delimited only when needed**, mirroring the lexer's identifier
+  scan: a keyword, builtin function name, unsupported-vocabulary or positional word,
+  or a name the lexer would not read as one word is quoted; a name containing `"`
+  cannot be delimited and is refused with `NotSupportedException`, as is a node type
+  the parser does not produce. A called function name is bare when it is a builtin
+  or a plain word, except `CAST` and the nine window function names (`ROW_NUMBER`,
+  `RANK`, ...): a bare call to one of those parses as the window function, which the
+  dialect rejects, so an error-free tree that calls one named a delimited user
+  function and keeps the quotes (`"rank"(x)`).
+- **The invariant is tested, not assumed.** `SqlExpressionRendererTests` pins the
+  canonical spelling of every form a CHECK accepts, proves that parsing the output
+  yields the same tree (positions aside; a CAST target's whitespace is normalized)
+  and that the output is a fixed point, and runs thousands of randomized
+  expressions over the whole grammar through the same checks. A parser change that
+  would read stored canonical text differently fails that suite. The engine also
+  re-parses each canonical text when it is first rendered and refuses to store a
+  definition that does not reproduce its tree.
+
+## Unary plus
+
+ISO unary plus is `SqlUnaryOperator.Plus`, parsed on the unary rung beside `-`.
+Directly before a numeric literal the sign stays part of the literal, so `+1` and
+`1` are the same tree and `ORDER BY +1` keeps its ordinal meaning; `+a`, `+(1 + 2)`
+and `+@p` build a unary-plus node. Typing and evaluation belong to the engine.
 
 ## AOT posture
 
