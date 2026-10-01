@@ -7,16 +7,21 @@ namespace Assimalign.Cohesion.Http;
 /// <para>
 /// The protocol core deliberately omits a <c>Cookies</c> property on
 /// <see cref="IHttpResponse"/> &#8211; the cookie collection is a typed
-/// convenience that the transport layer drains into <c>Set-Cookie</c>
-/// headers at response-flush time. The
-/// <c>Assimalign.Cohesion.Http.Cookies</c> package layers response-cookie
-/// state on top of the protocol core by attaching this feature to
-/// <see cref="IHttpContext.Features"/>. Consumers prefer the
-/// <see cref="HttpResponseCookieExtensions.Cookies"/> extension property
-/// on <see cref="IHttpResponse"/>; middleware that needs a richer feature
-/// implementation (signed cookies, encrypted cookies, custom serialization)
-/// can install one directly via
-/// <c>context.Features.Set&lt;IHttpResponseCookieFeature&gt;(...)</c>.
+/// convenience that the <c>Assimalign.Cohesion.Http.Cookies</c> package
+/// layers on top of the protocol core by attaching this feature to
+/// <see cref="IHttpContext.Features"/>. The collection writes every change
+/// through to the response's <c>Set-Cookie</c> header, one value per cookie,
+/// and the transports serialize that header like any other field. Consumers
+/// prefer the <see cref="HttpResponseCookieExtensions.Cookies"/> extension
+/// property on <see cref="IHttpResponse"/>.
+/// </para>
+/// <para>
+/// A replacement feature (signed cookies, encrypted cookies, a cookie policy)
+/// must keep that header in sync, typically by queuing into the collection of
+/// the feature it replaces. The feature collection is keyed by name, so remove
+/// the existing feature by its <see cref="IHttpFeature.Name"/> before calling
+/// <c>context.Features.Set&lt;IHttpResponseCookieFeature&gt;(...)</c>;
+/// otherwise both features stay installed and type lookups resolve the first.
 /// </para>
 /// </remarks>
 public interface IHttpResponseCookieFeature : IHttpFeature

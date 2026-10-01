@@ -145,7 +145,8 @@ Middleware ordering is positional. Some features carry hard ordering contracts â
 example `Web.ForwardedHeaders` must be registered before anything that consumes client
 identity â€” and each feature package documents its own. Formal, enforceable ordering
 rules are the open #26/#145 work; the root intentionally ships no enforcement mechanism
-ahead of them.
+ahead of them. The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) merges the packages' contracts into one
+reference order.
 
 ## AOT posture
 

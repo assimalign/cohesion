@@ -30,7 +30,11 @@ public static class ErrorHandlingPipelineExtensions
         /// <see cref="IHttpExceptionFeature"/>, resets an unstarted response (aborting the exchange
         /// instead when the response has already started), and produces the error response through
         /// the application's <c>OnError</c> chain, falling back to a safe problem+json terminal.
-        /// Register it first so it wraps every middleware that follows.
+        /// Register it near the front so it wraps every middleware that follows. Only
+        /// <c>UseHttpLogging</c>, <c>UseSecurityHeaders</c>, <c>UseForwardedHeaders</c>,
+        /// <c>UseHostFiltering</c>, <c>UseHttpsRedirection</c>, and <c>UseHsts</c> belong ahead of it:
+        /// logging, security headers, and HSTS act on its error responses, and the others establish or
+        /// check the request's identity before anything else runs.
         /// </summary>
         /// <param name="configure">
         /// An optional callback to configure the boundary — the developer-detail toggle, the

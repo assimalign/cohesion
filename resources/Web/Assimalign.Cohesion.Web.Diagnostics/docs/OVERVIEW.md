@@ -39,7 +39,8 @@ application
 ```
 
 Register `UseHttpLogging` **first** — ahead of authentication, CORS, and routing — so rejected
-exchanges are logged too. Behind a proxy, `UseForwardedHeaders` goes directly after it: the entry
+exchanges are logged too. Behind a proxy, `UseForwardedHeaders` follows it, after
+`UseSecurityHeaders` when that is registered (the area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md)): the entry
 records the effective (forwarded) client address, scheme, and host, and keeps the transport peer
 beside them under `network.peer.address`.
 

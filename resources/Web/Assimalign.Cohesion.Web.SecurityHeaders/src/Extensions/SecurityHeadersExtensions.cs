@@ -28,8 +28,10 @@ public static class SecurityHeadersExtensions
         /// <exception cref="ArgumentOutOfRangeException">An enumeration property of the policy holds an undefined value.</exception>
         /// <remarks>
         /// <para>
-        /// <b>Register it first</b>, ahead of the exception boundary (<c>UseErrorHandling</c>), static
-        /// files, and <c>UseRouting</c>. A response a middleware ahead of it writes never passes through it,
+        /// <b>Register it at the front</b>, after <c>UseHttpLogging</c> and ahead of the exception boundary
+        /// (<c>UseErrorHandling</c>), static files, and <c>UseRouting</c>; it reads no client identity, so it
+        /// may also precede <c>UseForwardedHeaders</c>. A response a middleware ahead of it writes never
+        /// passes through it,
         /// and the headers are staged when the response head is about to commit, after an inner exception
         /// boundary has reset the response, so error pages carry them. Endpoint overrides
         /// (<see cref="SecurityHeadersMetadata"/>) still apply from that position, because the endpoint is

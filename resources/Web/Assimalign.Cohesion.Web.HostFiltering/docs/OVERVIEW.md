@@ -11,8 +11,12 @@ enabled by default.
 
 - `UseHostFiltering(Action<HostFilteringOptions> configure)` — a pipeline verb
   on `IWebApplicationPipelineBuilder` that registers the validation middleware.
-  **Register it first**: registration order is pipeline order, and a request
-  whose host fails validation should be rejected before anything else sees it.
+  **Register it at the front**: registration order is pipeline order, and a
+  request whose host fails validation should be rejected before anything else
+  does work for it. Behind a proxy it goes directly after `UseForwardedHeaders`,
+  because it validates the effective host. Only `UseHttpLogging` and
+  `UseSecurityHeaders`, which read no client identity on the way in, run ahead
+  of both (the area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md)).
 - `HostFilteringOptions` — the allowlist (`AllowedHosts`) plus the explicit
   RFC 9112 §3.2 empty/missing-Host policy (`AllowEmptyHost`, default
   `false` = reject).

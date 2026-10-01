@@ -543,8 +543,11 @@ Middleware that applies endpoint policies reads the published endpoint through
 supported order is:
 
 ```
-UseRouting → UseRateLimiting / UseRequestTimeouts / UseOutputCache → (endpoint)
+UseRouting → UseCors → UseAuthorization → UseRequestTimeouts → UseRateLimiting → UseAntiforgery
+           → UseOutputCache → (endpoint)
 ```
+
+The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) places these and the middleware ahead of `UseRouting`.
 
 Before #1054, routing was terminal, and these consumers intercepted `Features.Set(IRouteMatchFeature)`
 through a feature-collection wrapper (or, for output caching, matched a second time). That only

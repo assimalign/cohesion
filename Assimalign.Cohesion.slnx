@@ -120,6 +120,7 @@
 	</Folder>
 	<Folder Name="/cohesion/docs/resources/Web/">
 		<File Path="docs/resources/Web/DESIGN.md" />
+		<File Path="docs/resources/Web/MIDDLEWARE_ORDER.md" />
 		<File Path="docs/resources/Web/OVERVIEW.md" />
 	</Folder>
 	<Folder Name="/cohesion/docs/versioning/">

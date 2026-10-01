@@ -31,7 +31,8 @@ Web.HostFiltering project" note is superseded by that direction.
 
 The consequence is the composition model changing from *hosting-guaranteed*
 first position to a **registration-order contract**: `UseHostFiltering` is
-documented (and tested) as *register it first*. This follows the Web area's
+documented (and tested) as *register it at the front*; the area's
+[middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) gives its exact place. This follows the Web area's
 middleware-first direction — the application owns its pipeline order — and it
 resolves the forwarded-headers ordering question by putting the decision where
 it belongs (see below). What was kept from the first iteration:
@@ -146,7 +147,7 @@ only. No reflection, no configuration binding, no service location.
 
 - **No hosting integration.** The package must not (and cannot, per the
   build-enforced hosting-isolation rule) be referenced by `Web.Hosting`;
-  first-position placement is the application's registration-order
+  front-of-pipeline placement is the application's registration-order
   responsibility, not a hosting guarantee.
 - **No port-aware allowlisting** — host validation is host-identity; which
   ports are served is a listener/binding concern.

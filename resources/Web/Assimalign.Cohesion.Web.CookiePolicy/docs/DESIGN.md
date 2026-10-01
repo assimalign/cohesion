@@ -270,8 +270,8 @@ The design tolerates other placements, but early is still the recommendation:
 
 - The `Secure` decision reads the effective scheme **when a cookie is appended,** not when the policy
   installs itself. A handler's cookies see the forwarded scheme wherever `UseForwardedHeaders` sits.
-  Registering it first follows its own first-position contract and covers cookies queued before the
-  policy.
+  Registering `UseForwardedHeaders` ahead of the policy, as its ordering contract asks, also covers
+  cookies queued before the policy.
 - Cookies queued before the policy took over are judged when it takes over, and the feature stays
   installed for writes on the way out. Registering the policy late therefore does not open a bypass for
   a writer that reads `response.Cookies` when it writes. It does mean those cookies are judged later,

@@ -186,7 +186,8 @@ rewrites the request — and leaves every trust decision to `Web.ForwardedHeader
 
 `UseHttpLogging` belongs **first** in the pipeline — before authentication, CORS, host
 filtering, and routing — so rejected and unrouted exchanges are still logged. Behind a proxy,
-`UseForwardedHeaders` goes directly after it: the entry reads the effective identity after the
+`UseForwardedHeaders` follows it, after `UseSecurityHeaders` when that is registered (the area's
+[middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md)): the entry reads the effective identity after the
 pipeline unwinds (see "Behind a proxy"). Per-endpoint overrides are read at the same point, so
 they need no position relative to `UseRouting`. Two consequences to be aware of:
 

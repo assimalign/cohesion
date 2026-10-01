@@ -258,8 +258,9 @@ free of scheme work and its principal predictable.
 
 ## Ordering
 
-`UseForwardedHeaders` → `UseRouting` → `UseCors` → `UseAuthentication` → `UseAuthorization` →
-`UseRateLimiting` / `UseRequestTimeouts` / `UseOutputCache` → endpoint.
+`UseForwardedHeaders` → `UseAuthentication` → `UseRouting` → `UseCors` → `UseAuthorization` →
+`UseRequestTimeouts` → `UseRateLimiting` → `UseOutputCache` → endpoint. The area's
+[middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) places the rest.
 
 - **After `UseRouting`**, so the endpoint and its metadata are known. Ahead of it, the middleware sees
   no endpoint (only the fallback policy applies) and a protected endpoint fails at dispatch.

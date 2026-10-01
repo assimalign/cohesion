@@ -550,7 +550,7 @@ pins concurrency over a real QUIC connection where the platform supports it.
   isolation stay in `Http.Connections` and are never duplicated here.
 - **Host filtering.** Allowed-hosts enforcement ships as the
   `Assimalign.Cohesion.Web.HostFiltering` feature package (`UseHostFiltering`,
-  registered first by the application). The runtime module deliberately has no
+  registered at the front of the application's pipeline). The runtime module deliberately has no
   knowledge of it — the hosting-isolation rule forbids the reference, and
   pipeline composition is the application's, not the host's.
 The Web resource's composition root: the `WebApplicationBuilder` /

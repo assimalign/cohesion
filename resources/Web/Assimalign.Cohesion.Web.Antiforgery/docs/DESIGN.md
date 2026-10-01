@@ -245,7 +245,8 @@ package keeps the engine's in-memory key and says plainly that it is for develop
 
 ## Ordering
 
-`UseForwardedHeaders` → `UseRouting` → `UseRateLimiting` → `UseRequestTimeouts` → `UseAntiforgery` → endpoint.
+`UseForwardedHeaders` → `UseRouting` → `UseRequestTimeouts` → `UseRateLimiting` → `UseAntiforgery` → endpoint.
+The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) places the rest.
 
 - **After `UseRouting`** (required): the endpoint and its metadata are published when the middleware runs.
   Ahead of it, protected endpoints fail at dispatch.

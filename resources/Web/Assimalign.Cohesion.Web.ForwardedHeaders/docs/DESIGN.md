@@ -107,16 +107,18 @@ wire truth is never destroyed, "what did the transport actually see" stays answe
 (no `X-Original-*` header shuffling), and the resolution is observable
 (`TrustedHopCount`) rather than implicit.
 
-## Ordering contract — first position
+## Ordering contract — ahead of every identity consumer
 
 Forwarded-headers resolution must run **before anything that consumes client
 identity on the way in**: host filtering, HTTPS redirection, CORS, authentication,
 cookie policy, redirect-generating middleware, rate limiting. Middleware execution
-follows registration order, so `UseForwardedHeaders(...)` must be the first `Use` call
-on the pipeline (or the second, directly after `UseHttpLogging`, which reads on the
-way out — see below). Until the repo-wide middleware-ordering rules land (#26/#145),
+follows registration order, so `UseForwardedHeaders(...)` must run ahead of every such
+consumer. Only middleware that reads no client identity on the way in may precede it:
+`UseHttpLogging`, which reads on the way out (see below), and `UseSecurityHeaders`,
+which reads none. The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) gives the full sequence.
+Until the repo-wide middleware-ordering rules land (#26/#145),
 this contract is documentation + XML docs on the verb; when those rules introduce
-enforceable ordering constraints, this middleware is the canonical "must be first" case
+enforceable ordering constraints, this middleware is the canonical "must precede its consumers" case
 and should be annotated accordingly.
 (Sequenced behind #26/#145 by design — do not invent a one-off enforcement mechanism
 here.)

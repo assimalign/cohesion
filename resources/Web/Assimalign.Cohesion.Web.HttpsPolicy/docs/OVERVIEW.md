@@ -37,7 +37,8 @@ WebApplication app = builder.Build();
 // so redirection recognizes the proxy's https instead of redirecting in a loop.
 app.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
 
-// Earliest after that: upgrade insecure requests before anything else runs.
+// Next, after UseHostFiltering when that is registered: upgrade insecure requests before
+// anything else runs.
 app.UseHttpsRedirection(options =>
 {
     options.HttpsPort = 8443;                       // default 443 (omitted from Location)

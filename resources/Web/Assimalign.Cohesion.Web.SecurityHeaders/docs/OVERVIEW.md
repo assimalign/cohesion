@@ -42,8 +42,9 @@ WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 builder.AddRouting();
 WebApplication app = builder.Build();
 
-// First in the pipeline, ahead of the exception boundary: every response passes through it, and the
-// fields are staged after the boundary has written an error page.
+// At the front of the pipeline (only UseHttpLogging goes ahead of it) and ahead of the exception
+// boundary: every response passes through it, and the fields are staged after the boundary has
+// written an error page.
 app.UseSecurityHeaders(policy =>
 {
     policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp

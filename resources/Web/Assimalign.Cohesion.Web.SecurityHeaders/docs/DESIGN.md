@@ -105,7 +105,8 @@ flowchart TD
 ### What does not get the fields
 
 - **A response a middleware ahead of `UseSecurityHeaders` writes.** It never passes through the
-  middleware. That is why the documented position is first in the pipeline.
+  middleware. That is why the documented position is the front of the pipeline, behind only
+  `UseHttpLogging`, which writes no response.
 - **A head committed some other way.** The middleware only stages an uncommitted head. If a middleware
   ahead of it started the response, or a handler replaced the streaming feature with one that does not
   delegate to the decorator, the fields are not added.
@@ -239,11 +240,13 @@ optional `*.` subdomain wildcard). The four forms map to `Disable` (`()`), `Allo
 
 ## Ordering
 
-`UseSecurityHeaders` → `UseForwardedHeaders` / `UseHostFiltering` / `UseHttpsRedirection` / `UseHsts`
-→ `UseErrorHandling` → `UseStaticFiles` → `UseRouting` → policy middleware → endpoint.
+`UseHttpLogging` → `UseSecurityHeaders` → `UseForwardedHeaders` → `UseHostFiltering` →
+`UseHttpsRedirection` → `UseHsts` → `UseErrorHandling` → `UseStaticFiles` → `UseRouting` → policy
+middleware → endpoint. The area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) places every Web middleware.
 
-- **First**, so every response that passes through the pipeline gets the fields, the rejections of the
-  middleware after it included.
+- **At the front**, so every response that passes through the pipeline gets the fields, the rejections
+  of the middleware after it included. Only `UseHttpLogging`, which writes no response, goes ahead of
+  it, and since this middleware reads no client identity it can precede `UseForwardedHeaders`.
 - **Ahead of `UseErrorHandling`**, so the boundary's error page is written before the fields are
   staged. Registered after the boundary, the middleware's own turn ends with the fault propagating and
   the boundary then clears the response.

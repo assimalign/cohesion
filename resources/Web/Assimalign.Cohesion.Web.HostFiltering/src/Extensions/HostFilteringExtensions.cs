@@ -27,10 +27,11 @@ public static class HostFilteringExtensions
         /// </exception>
         /// <remarks>
         /// <para>
-        /// Register this middleware <em>first</em>: a host that fails validation should be
-        /// rejected before any other middleware observes the request. Registration order is
-        /// the pipeline order. The one middleware that belongs ahead of it is
-        /// <c>UseForwardedHeaders</c>, when the application runs behind a trusted proxy.
+        /// Register this middleware at the front: a host that fails validation should be
+        /// rejected before any other middleware does work for the request. Registration order is
+        /// the pipeline order. Ahead of it belong <c>UseForwardedHeaders</c>, when the application
+        /// runs behind a trusted proxy, and the two middleware that read no client identity on the
+        /// way in, <c>UseHttpLogging</c> and <c>UseSecurityHeaders</c>.
         /// </para>
         /// <para>
         /// The host validated is the <em>effective</em> host
