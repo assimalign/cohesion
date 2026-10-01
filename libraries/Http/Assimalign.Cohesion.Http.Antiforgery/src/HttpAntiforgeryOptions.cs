@@ -86,10 +86,19 @@ public sealed class HttpAntiforgeryOptions
     public bool CookieHttpOnly { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets whether the cookie token is marked <c>Secure</c>.
-    /// Defaults to <see langword="false"/> so the cookie flows over plain HTTP
-    /// in development; set to <see langword="true"/> in production.
+    /// Gets or sets whether the cookie token is marked <c>Secure</c> on every
+    /// request, plain HTTP included. Defaults to <see langword="false"/>, which
+    /// marks it <c>Secure</c> only when the request's effective scheme is HTTPS.
     /// </summary>
+    /// <remarks>
+    /// The effective scheme is <c>context.EffectiveScheme</c> from
+    /// <c>Assimalign.Cohesion.Http.Forwarded</c>: the scheme a trusted
+    /// TLS-terminating proxy forwarded when the forwarded-headers middleware ran
+    /// before the token was stored, and the transport's scheme otherwise. So the
+    /// default suits development over plain HTTP and production over HTTPS alike;
+    /// set this to <see langword="true"/> only to force the flag where the scheme
+    /// cannot tell, for example behind a proxy the application does not trust.
+    /// </remarks>
     public bool CookieSecure { get; set; }
 
     /// <summary>

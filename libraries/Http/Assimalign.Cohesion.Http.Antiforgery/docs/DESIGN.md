@@ -108,15 +108,18 @@ that type-based lookup would resolve unpredictably.
 
 ## Dependency direction
 
-```
-Assimalign.Cohesion.Http              (protocol core: request/response/headers)
-        ▲
-        │
-Assimalign.Cohesion.Http.Cookies      (cookie-token storage: request/response cookies)
-Assimalign.Cohesion.Http.Forms        (form-field request-token extraction)
-        ▲
-        │
-Assimalign.Cohesion.Http.Antiforgery  (this package)
+The package references the protocol core and three Http-family packages, each of which references
+only the core:
+
+```mermaid
+flowchart LR
+    Antiforgery["Http.Antiforgery — this package"] --> Cookies["Http.Cookies — cookie-token storage"]
+    Antiforgery --> Forms["Http.Forms — form-field request-token extraction"]
+    Antiforgery --> Forwarded["Http.Forwarded — the effective scheme behind a trusted proxy"]
+    Antiforgery --> Http["Assimalign.Cohesion.Http — protocol core"]
+    Cookies --> Http
+    Forms --> Http
+    Forwarded --> Http
 ```
 
 The package reads the cookie token from `request.Cookies` and writes it to
@@ -129,6 +132,19 @@ The cookie token is marked essential by default
 (`HttpAntiforgeryOptions.CookieIsEssential`), so a cookie-consent policy
 (Web.CookiePolicy) emits it before the user consents: without it, no unsafe
 request from an undecided user could pass validation.
+
+The cookie token is marked `Secure` whenever the request's effective scheme is
+HTTPS (`context.EffectiveScheme`, Forwarded package): the client reached the
+application over HTTPS, directly or through a trusted TLS-terminating proxy that
+the forwarded-headers middleware vouched for, which therefore has to run before
+a handler stores the token. `HttpAntiforgeryOptions.CookieSecure` forces the flag
+on plaintext requests too. Web.Sessions and Cookie authentication follow the same
+rule (#1050). Until 2026-10-01 the flag followed `CookieSecure` alone, which
+defaulted to off, so a deployment that forgot to set it issued the token over
+HTTPS without `Secure`, and the browser would send it back over any later
+plaintext request to the host. A three-way policy (same as request, always,
+never) was not added here: that is a default for every cookie, which
+Web.CookiePolicy owns as `CookiePolicyOptions.Secure`.
 
 A note on the form path: `request.Form` returns the *already-parsed* form.
 Antiforgery does not itself trigger body parsing — that is the Forms layer's

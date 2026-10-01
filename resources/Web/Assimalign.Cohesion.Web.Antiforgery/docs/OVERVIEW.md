@@ -61,8 +61,8 @@ IDataProtectionProvider dataProtection = DataProtectionProvider.Create(
     KeyRepository.CreateFileSystem("/var/lib/app/keys"));
 
 builder.AddRouting();
-builder.AddAntiforgery(dataProtection, options => options.CookieSecure = true);
-// builder.AddAntiforgery();   // development only: a per-process random key
+builder.AddAntiforgery(dataProtection);  // the cookie token is Secure on every HTTPS request
+// builder.AddAntiforgery();             // development only: a per-process random key
 
 WebApplication app = builder.Build();
 

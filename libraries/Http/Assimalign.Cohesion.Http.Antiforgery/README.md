@@ -10,8 +10,10 @@ token model built on BCL cryptography (HMAC-SHA256) — no
 The HTTP protocol core (`Assimalign.Cohesion.Http`) deliberately knows
 nothing about CSRF. Antiforgery is a server-side application concern that
 needs cookies and form parsing, so it layers on top of the protocol core via
-`Assimalign.Cohesion.Http.Cookies` (cookie-token storage) and
-`Assimalign.Cohesion.Http.Forms` (form-field token extraction). Protocol-only
+`Assimalign.Cohesion.Http.Cookies` (cookie-token storage),
+`Assimalign.Cohesion.Http.Forms` (form-field token extraction) and
+`Assimalign.Cohesion.Http.Forwarded` (the effective scheme that decides whether
+the cookie token is `Secure`). Protocol-only
 consumers (clients, proxies, edge caches) should not reference this package.
 
 ## Surface
@@ -43,7 +45,8 @@ key ring.
 IHttpAntiforgery antiforgery = HttpAntiforgery.Create(options =>
 {
     options.Protector = ringBackedProtector; // omit only in development
-    options.CookieSecure = true;             // production
+    // The cookie token is Secure on every HTTPS request; CookieSecure = true
+    // forces it on plaintext requests too.
 });
 
 // Render path: mint + store the cookie token, hand the request token to the view.

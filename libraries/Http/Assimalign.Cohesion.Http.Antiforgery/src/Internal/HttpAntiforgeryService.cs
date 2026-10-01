@@ -163,7 +163,10 @@ internal sealed class HttpAntiforgeryService : IHttpAntiforgery
         cookies.Add(new HttpCookie(_options.CookieName, token, new HttpCookieOptions
         {
             HttpOnly = _options.CookieHttpOnly,
-            Secure = _options.CookieSecure,
+            // Secure whenever the client reached the application over HTTPS, directly or through a
+            // trusted TLS-terminating proxy the forwarded-headers middleware vouched for, so a token
+            // issued over HTTPS is never sent back over plaintext. CookieSecure forces it everywhere.
+            Secure = _options.CookieSecure || httpContext.EffectiveScheme == HttpScheme.Https,
             SameSite = _options.CookieSameSite,
             Path = _options.CookiePath,
             IsEssential = _options.CookieIsEssential,
