@@ -341,10 +341,13 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   worker reclaims below every live horizon). DDL row rewrites (DROP COLUMN)
   walk *every* stored version, visible or not, preserving stamps.
 - **Migration rule (record-space format version, catalog-persisted).** The
-  catalog stores the record-space format version (kind-4 record): 1 = the
+  catalog stores the record-space format version (kind-4 record) — the format
+  of the whole data file set, rows and the index trees that ride it: 1 = the
   pre-MVCC unstamped layout, 2 = stamped rows in the shared page stream, 3 =
-  stamped rows in per-object page chains. Older databases upgrade in place at
-  open, stage by stage, marker written after both stages so each is
+  stamped rows in per-object page chains, 4 = index keys in the temporal
+  identity encoding (#1099, below). A version newer than the engine is refused
+  at open. Older databases upgrade in place at
+  open, stage by stage, marker written after every stage so each is
   idempotent across the two-storage crash window: (1 → 2) every record gains
   a zeroed stamp header (writer 0 = committed bootstrap data, visible to
   every snapshot) under one storage transaction — idempotent because a
@@ -359,7 +362,24 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   safe at upgrade time: nothing persistent references locations (the
   version-store ledger dies with the process; index entries reference
   locations only from format 3 onward, and a version-2 database cannot have
-  SQL indexes).
+  SQL indexes); (3 → 4) every index with a `TIMESTAMP` or `TIMESTAMPTZ` key
+  column is rebuilt from the stored row versions under the temporal identity
+  encoding (format-3 keys carried the `DateTimeKind` and the offset, so seeks
+  missed rows SQL called equal and UNIQUE admitted one instant twice). The
+  rebuild reuses the CREATE INDEX build — every version, original stamps — into
+  a new tree inside one durable bracket of an upgrade transaction; one catalog
+  self-commit then swaps the registrations, and the marker moves last. The old
+  tree only leaves the directory (pages await vacuum, as after DROP INDEX), so a
+  crash before the swap re-attaches it untouched and a crash after it attaches
+  the new tree; either way the stage re-runs from the rows. Indexes over other
+  types keep their trees (their key bytes are identical under both formats).
+  **Decision: a rebuild never fails the open.** Rows that the old keys kept
+  apart in a UNIQUE index but the identity makes equal are carried into the new
+  tree as they are (no duplicate check, unlike CREATE UNIQUE INDEX): failing the
+  open would leave the data unreachable, while the carried tree still rejects
+  every further equal value and the duplicates can be deleted or changed. The
+  rejected alternative — a versioned key format read side by side with the new
+  one — would have kept two key identities alive in every seek and unique check.
 - **Schema evolution (#1023):** `ADD COLUMN` validates the literal default and
   current rows under the exclusive object lock before publishing the complete
   replacement definition in one catalog transaction. Backfill is resolved at
@@ -1083,3 +1103,18 @@ Foreign-key string columns require equal effective collations so forward and rev
 checks agree. Default changes after table creation reject until index rebuild support
 exists. Other model defaults are unaffected. See the design for the legacy
 CompareInfo compatibility escalation and #1026 linguistic-collation boundary.
+
+## Temporal key identity (#1099)
+
+`TIMESTAMP` keys are wall-clock ticks without the `DateTimeKind`; `TIMESTAMPTZ`
+keys are instants without the offset — the identity `SqlValueComparer` compares
+by (explicit `DateTime.Ticks`/`DateTimeOffset.UtcTicks` branches, with matching
+hashes for grouping and DISTINCT). Like collation, the rule is applied once, in
+`SqlRowCodec.AppendKeyValue`, which every key path shares: B+Tree maintenance,
+seek prefixes and range bounds, unique-key locks, and build/backfill duplicate
+detection. The key is the Types identity form (`SpecifyKind(Unspecified)`,
+`ToUniversalTime()`), so the component layout and decoding are unchanged; rows
+keep the round-trip value encoding. Because key equality now equals evaluator
+equality for both types, they are range-sargable and join-seekable. Format-3
+indexes are rebuilt at open (migration rule above); the dialect contract is
+DIALECT.md "Temporal value identity".

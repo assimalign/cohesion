@@ -238,10 +238,12 @@ The planner uses a secondary index on either input when mandatory `ON` equalitie
 between columns bind a leading index-key prefix. It prefers the longest prefix,
 then a unique index, then index name, then the right input. It still evaluates
 the complete `ON` predicate after fetching snapshot-visible candidate rows.
-Compatible Boolean, String, Json, Date, Time, TimeSpan, Guid and exact signed
-integer/Decimal key comparisons can use this path. Approximate numeric,
-DateTime, and DateTimeOffset comparisons retain scanning because their evaluator
-equality can be broader than their encoded index keys. Predicates without a
+Compatible Boolean, String, Json, Date, Time, `TIMESTAMP` (DateTime),
+`TIMESTAMPTZ` (DateTimeOffset), TimeSpan, Guid and exact signed integer/Decimal
+key comparisons can use this path; temporal keys encode the identity described
+under "Temporal value identity" below. Approximate numeric comparisons retain
+scanning because their evaluator equality can be broader than their encoded
+index keys. Predicates without a
 usable mandatory column equality, including computed keys, keys reachable only
 through disjunctions, and inequalities, use the scan fallback, as do joins
 without an applicable index.
@@ -286,6 +288,9 @@ grouping combines NULL keys and ascending ordering places NULL first.
   equal. Positive and negative zero are equal in predicates and form one
   DISTINCT/grouping class. NaN is a value, not NULL. These deliberate rules
   apply to Float32, Float64, and mixed numeric comparisons.
+- **Temporal values:** `TIMESTAMP` compares wall-clock ticks and ignores the
+  host `DateTimeKind`; `TIMESTAMPTZ` compares instants and ignores the offset.
+  See "Temporal value identity" below.
 - **Other values:** strings use the effective collation; Boolean orders FALSE
   before TRUE. Supported same-type comparable values retain their runtime
   ordering. Incompatible type families raise a query error.
@@ -303,6 +308,53 @@ safe index predicate.
 Nonzero floating equality may still seek; joins retain their conservative
 approximate-numeric scan policy. Mapper restrictions and key exclusions remain
 deferred with #1007/#1008.
+
+## Temporal value identity (#1099)
+
+`TIMESTAMP` and `TIMESTAMPTZ` each have exactly one normalization rule.
+Comparison (predicates, join conditions, `ORDER BY`, `DISTINCT`, `GROUP BY`,
+`MIN`/`MAX`), index keys, seek bounds, and `UNIQUE`/`PRIMARY KEY` enforcement
+with its key locks all follow it. A secondary-index seek, a primary-key seek and
+a scan therefore return the same rows for every predicate.
+
+| Type | Identity (compared, ordered and keyed by) | Not part of identity | Stored and returned |
+|---|---|---|---|
+| `TIMESTAMP` (`DateTime`) | Wall-clock ticks | `DateTimeKind` (`Unspecified`, `Utc`, `Local`) | The written kind |
+| `TIMESTAMPTZ` (`DateTimeOffset`) | Instant (UTC ticks) | Offset | The written offset |
+
+- `TIMESTAMP` is a timestamp without time zone. Values with equal ticks are equal
+  whatever their kind, and no time-zone conversion happens: a `Local` 12:00, a
+  `Utc` 12:00 and an `Unspecified` 12:00 are one value, ordered by those ticks.
+  A `UNIQUE` or `PRIMARY KEY` column rejects equal ticks that differ only in
+  kind.
+- `TIMESTAMPTZ` compares by instant, as ISO/IEC 9075 specifies for `TIMESTAMP
+  WITH TIME ZONE`: `12:00+00:00`, `15:00+03:00` and `06:30-05:30` are one value,
+  and values order by instant, never by local wall-clock time. A `UNIQUE` or
+  `PRIMARY KEY` column rejects the same instant at another offset.
+- Rows keep what was written: a read returns the kind or offset the row was
+  inserted or last updated with. Index keys hold only the identity, so updating a
+  row to an equal value in another kind or offset does not collide with itself.
+- `=`, `<`, `<=`, `>`, `>=` and `BETWEEN` on either type seek an applicable
+  index (alone, or after an equality prefix of a composite key), and two-table
+  joins on equal temporal types can use index assistance.
+- Parameters keep their kind and offset across the wire protocol, so these
+  rules hold identically in-process and through `SqlDatabaseServer` and
+  `Sql.Client`.
+
+**Indexes written before this rule.** Data-storage format version 3 stored the
+kind and the offset inside index keys. On first open, the engine rebuilds every
+index with a `TIMESTAMP` or `TIMESTAMPTZ` key column from the stored rows and
+moves the database to format version 4; other indexes are left alone, and the
+rebuild repeats safely if the open is interrupted. If a `UNIQUE` or `PRIMARY
+KEY` index already holds rows that the old keys kept apart but this rule makes
+equal, the open still succeeds and keeps those rows reachable; the index rejects
+every further equal value, and deleting or changing the duplicates restores a
+duplicate-free key. A database on a newer format than the engine is refused at
+open.
+
+This closes the key-identity gap behind the mapper's `COHMAP003` key exclusion;
+the mapper's own review stays with #1008. No external conformance suite applies;
+the rule is the declared dialect contract above.
 
 ## Grouping and aggregate functions (#1020)
 
