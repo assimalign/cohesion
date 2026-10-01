@@ -208,7 +208,7 @@ The audit behind these stages is §7. Within each stage, rows are in the recomme
 
 ### Stage 6 — Endpoint-aware pipeline (fan-out seam)
 
-**Status:** delivered 2026-09-30 on the Phase 2 branch and awaiting owner review. Commits, behavior changes and follow-ups are in §5.
+**Status:** delivered 2026-09-30. The owner published the branch, moved on to Stage 7 and is reviewing Phase 2 as [PR #1094](https://github.com/assimalign/cohesion/pull/1094). Commits, behavior changes and follow-ups are in §5.
 
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
@@ -217,6 +217,8 @@ The audit behind these stages is §7. Within each stage, rows are in the recomme
 | #1056 | D/F | Pipeline branching (`Map`, `MapWhen`, `UseWhen`, `Run`) and fallback routes | #1054 |
 
 ### Stage 7 — Security and browser interop
+
+**Status:** delivered 2026-10-01 on the Phase 2 branch and awaiting owner review. Commits, behavior changes and follow-ups are in §5.
 
 | Issue | Lane | Title | Blocked by |
 |---|---|---|---|
@@ -306,7 +308,7 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   - A Content-Digest mismatch on HTTP/3 surfaces at the terminal read instead of a pre-dispatch 400.
 
   Scope-creep filed: #1071–#1076 and #1077–#1085. #1080 records that real-QUIC resets carry the driver's default error code until the Connections contract can carry one.
-- **Stage 6 delivered (2026-09-30), awaiting owner review.** On the Phase 2 branch:
+- **Stage 6 delivered (2026-09-30).** On the Phase 2 branch:
   - #1054 `523049c6` (match/dispatch split, preflight candidates, fail-closed endpoint middleware); consumers moved onto the published endpoint in `99732edf` (RateLimiting), `71e11b7e` (RequestTimeouts), `2dce79d5` (Caching) and `2811f201` (Diagnostics); ordering docs `0cf65e02`; last-wins requirement check `e7818dd2`
   - #1055 `08619d7d` (convention builders, group metadata composed at build, route-or-query binding) and `7b80e2ac` (`RequireRateLimiting`, `WithRequestTimeout`, `CacheOutput`, `WithHttpLogging` and their opt-outs)
   - #1056 `9ba64fc9`
@@ -328,6 +330,46 @@ The orchestrator maintains this table by reconciling merged PRs from GitHub; ses
   Scope-creep filed:
   - #1092: the `cohesion-spa` template should map `MapFallbackToFile`. Deferred because it needs the packed-SDK template run tests.
   - #1093 (P001): a pre-existing process crash. A pipe continuation runs with the wrong state on `Connections.Tcp`'s `SocketPipeScheduler`. It aborted `Web.Hosting.Resources` in CI on two branches, and the Web matrix's default `fail-fast` then cancelled every other Web job.
+- **Between Stages 6 and 7 (2026-09-30 to 2026-10-01).** The owner published the branch and opened it for review as [PR #1094](https://github.com/assimalign/cohesion/pull/1094).
+  - `d001aa9e` sets `fail-fast: false` on the Web build and HTTPS-sample matrices, so one failing leg no longer cancels the rest.
+  - `0cdbe27f` merges `main` and re-applies the Stage 5 AOT checks onto #1044's restructured DI `CallSiteFactory`. `01822ceb` corrects two Web.Hosting design statements that Stage 5 made stale.
+  - #1093 is fixed in `6ca7ae2a`. It had two root causes in `Connections.Tcp`. `SocketPipeAsyncArgs` could run a continuation before its state was published, which crashed the process ("An unexpected state object was encountered"). On Windows, a cancelled accept leaked the socket AcceptEx had already connected, so the client hung. Each cause has a regression test that failed before the fix.
+- **Stage 7 delivered (2026-10-01), awaiting owner review.** Five agent sessions built it in parallel; it was integrated on the Phase 2 branch:
+  - #155 `f72af3eb`: Web.Authorization, with policies over `ClaimsPrincipal`, `RequireAuthorization`/`AllowAnonymous`, `UseAuthorization` and per-endpoint schemes.
+  - #1057 `d9d23980`: the new Web.Antiforgery, with `AddAntiforgery` (including a data-protection overload), `UseAntiforgery`, and a requirement the generator adds to `[FromForm]` endpoints.
+  - #3 with #109–#111 `707ee50a`: Web.Cors, with a policy engine, preflights answered from the candidate endpoint, and `RequireCors`/`DisableCors`.
+  - #156:
+    - `51eab54b` makes the Cookie authentication ticket essential by default.
+    - `af650441` makes Web.CookiePolicy enforce consent, attribute floors, cookie prefixes and the 400-day cap.
+    - `6aa7dc7c` corrects the Http.Cookies docs.
+  - #1058:
+    - `08ef6913` adds the header names.
+    - `78c7544a` adds the new Web.SecurityHeaders.
+    - `8fc2e436` makes IdentityHub take its headers from it.
+  - `6c36109e` makes the antiforgery cookie essential by default and lets sessions opt in, so a consent requirement no longer breaks form posts.
+  - NativeAOT guard: `30054f1a` covers authorization, `15cd4e29` CORS, and `34d78dd6` antiforgery, cookie policy and security headers.
+  - `5908d834` adds the area's middleware order (`docs/resources/Web/MIDDLEWARE_ORDER.md`) and fixes six packages whose docs each told the reader to register them first.
+
+  Verification:
+  - The 32 Web suites pass (1,758 tests).
+  - So do nine outside suites (1,491 tests): Http (1,241), Http.Cookies, Http.Antiforgery, Http.Forwarded, Http.Sessions, IdentityHub.Hosting, the endpoint generator, App.Runtime's framework closure tests and Connections.Tcp.
+  - Both App.Web producers pack.
+  - The guard publishes NativeAOT for win-arm64 and passes 20/20 smoke checks.
+  - `CodeFixes.WebTests` does not build, because the project resolves to `netstandard2.0`. That predates the program, and no workflow runs it.
+
+  Behavior changes for the review:
+  - An endpoint that requires authorization, CORS or antiforgery fails at dispatch when that middleware is missing or registered ahead of `UseRouting()`. That includes `DisableCors()`: a `UseCors` registered ahead of routing would apply the default policy to an endpoint that opted out.
+  - Every authorization item on an endpoint applies, outer group first, and `AllowAnonymous` anywhere wins (§7.4, decision 7). The fallback policy also covers requests that match no endpoint, so an anonymous caller is challenged on an unknown path.
+  - `[FromForm]` typed endpoints require antiforgery. An application with them calls `AddAntiforgery()` and `UseAntiforgery()` after `UseRouting()`, or opts each such endpoint out with `DisableAntiforgery()`.
+  - Http.Antiforgery joins App.Web. Without a data-protection provider its tokens still die on restart.
+  - `UseCookiePolicy` now enforces its policy instead of passing every cookie through, and its namespace is now `Assimalign.Cohesion.Web.CookiePolicy`. The Cookie authentication ticket and the antiforgery cookie are essential by default; the session cookie is not. Under a consent requirement a session therefore starts only after consent, unless `HttpSessionOptions.CookieIsEssential` is set.
+  - IdentityHub sends its strict CSP, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and `nosniff` on every response, not only the approval page.
+
+  Scope-creep filed:
+  - #1153: cookie `Path` and `Domain` values are not validated.
+  - #1154: a `101` upgrade response sends each `Set-Cookie` twice.
+  - #1155: an unknown key id reloads the whole key ring, with no throttle.
+  - #1156: a response-starting hook for the Web pipeline, which would remove the CORS trade-off.
 - **Direction change (2026-07-10, owner decision):** the Web API surface is **middleware-first** — composition via fluent `.Use(...)` / `IWebApplicationMiddleware`, not a return-value result model. The #864 IResult implementation was withdrawn from PR #887 before merge (Cohesion has no return-value handler seam; the abstraction was premature ahead of #796/#151 — and #151 is now set aside entirely). What survived: the RFC 9457 payload as **`Web.ProblemDetails`** (model + AOT-safe writer + `WriteProblemDetailsAsync`), plus PR #887's Web-area hosting-isolation rule (build-enforced, `build/Targets/Build.Rules.targets`) and App.Web framework delivery. **#864 is re-scoped** to the *content-serialization registry + `OnError` hook* design: builder-time registration of request/response formatting (media-type-keyed, AOT via resolver registration) and a fault hook through which applications own error responses (overridable default renders problem+json). #149 negotiates over that registry; #881 builds the boundary on the hook; #777's #864 edge dropped. `Web.Api.Controllers` and `Web.Functions` projects were removed; #151 closed as set-aside.
 
 | Date | Issue | PR | Notes |
@@ -417,15 +459,19 @@ What works end to end:
   - D12 → Stage 10, #806–#808.
   - D11's placeholder half: the empty `Web.Cors` and `Web.Authorization` and the no-op `Web.CookiePolicy` still ship in App.Web until Stage 7 fills them (#3, #155, #156).
 
+**After Stage 7 (2026-10-01):**
+- Fixed: D11's placeholder half. `Web.Cors`, `Web.Authorization` and `Web.CookiePolicy` are real.
+- D12, in part: `AddAntiforgery(dataProtectionProvider)` makes antiforgery tokens survive restarts and validate on every instance that shares the key repository. Without a provider the per-process key is still the default, now documented as development-only, and the key ring's default location is unchanged (#806–#808).
+
 ### 7.3 Missing capabilities
 
 | Capability | Status | Tracking |
 |---|---|---|
 | Endpoint-aware pipeline (middleware between route match and handler) | Delivered in Stage 6. `UseRouting` publishes the endpoint and the pipeline terminal runs it; RateLimiting, RequestTimeouts, Caching and Diagnostics read the published endpoint, and their workarounds are gone. Every `Map*`, typed ones included, returns a convention builder, and groups compose metadata at route-table build. A CORS preflight publishes its candidate endpoint. | #1054, #1055; unblocks CORS, authorization, antiforgery and OpenAPI |
-| CORS | Absent (empty project) | #3, #109–#111 |
-| Authorization (policies, `RequireAuthorization`, `UseAuthorization`) | Absent (empty project) | #155 |
-| Cookie-policy enforcement | No-op | #156 |
-| Antiforgery in the pipeline | `Http.Antiforgery` ships but nothing wires it in; there is no DataProtection adapter | #1057 |
+| CORS | Delivered in Stage 7 (`Web.Cors`): policies validated at startup, preflights answered from the candidate endpoint's policy, `RequireCors`/`DisableCors` on routes and groups | #3, #109–#111 |
+| Authorization (policies, `RequireAuthorization`, `UseAuthorization`) | Delivered in Stage 7 (`Web.Authorization`): policies over `ClaimsPrincipal`, `RequireAuthorization`/`AllowAnonymous`, a fallback policy, per-endpoint schemes | #155; the #828 adapter later |
+| Cookie-policy enforcement | Delivered in Stage 7 (`Web.CookiePolicy`): consent, `Secure`/`HttpOnly`/`SameSite` floors, the `__Host-` and `__Secure-` prefixes, the 400-day cap | #156 |
+| Antiforgery in the pipeline | Delivered in Stage 7 (`Web.Antiforgery`): enforced per endpoint and automatically on `[FromForm]` endpoints; tokens are sealed with data protection when a provider is passed | #1057 |
 | OpenAPI for Web endpoints | Absent. OpenApi.Attributes, Generation, Integration and Versioning are unreleased and excluded from CI, and the release rule blocks an adapter that depends on them | #152, #1062 |
 | Handler return values (`Task<T>`); generator diagnostics | Only `void`/`Task`/`ValueTask`. Unsupported handler shapes compile and then throw at runtime | #1059 |
 | Validation problem responses | Absent (descoped from #796) | #1060 |
@@ -435,7 +481,7 @@ What works end to end:
 | Hosting diagnostics; lame-duck drain | Absent | #147; #146 |
 | mTLS (client certificates visible to handlers); multi-protocol ALPN endpoints; config for HTTP/3, limits and the connection cap | Absent | #1065; #1063 |
 | HTTP/2 and HTTP/3 request-body cap (413); HTTP/2 timeouts; trailers | Body cap delivered in Stage 5 on both protocols (#1048, #1066). HTTP/3 now surfaces request trailers. HTTP/2 and HTTP/3 timeouts and data rates are still absent. | #1085; HTTP/2 request trailers deferred along with gRPC |
-| Security headers (CSP, nosniff, Referrer-Policy, frame-ancestors) | Absent | #1058 |
+| Security headers (CSP, nosniff, Referrer-Policy, frame-ancestors) | Delivered in Stage 7 (`Web.SecurityHeaders`): safe defaults on every response; opt-in CSP with per-request nonces, Permissions-Policy and the cross-origin isolation fields; per-endpoint overrides | #1058 |
 | A representative Web app AOT-published in CI | Delivered in Stage 5: `Web.AotGuard` is published NativeAOT and smoke-tested by the `resource-web.yml` `aot-guard` job | #1052 |
 | OIDC handler; JWT Bearer authority/JWKS discovery | Absent | blocked on IdentityModel #829/#830 |
 | WebSockets | Absent. The HTTP/1.1 Upgrade and extended CONNECT bootstrap exist | #765 (needs an ADR) |
@@ -443,7 +489,7 @@ What works end to end:
 
 ### 7.4 Owner decisions
 
-Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decision 5 is still open.
+Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved the suggested stages, which rest on these recommendations. Decisions 5 and 7 are open.
 
 1. **Which claim model authorization runs on.**
    - Web: authenticates onto BCL `ClaimsPrincipal` by a recorded decision (`Web.Authentication/docs/DESIGN.md:157-167`).
@@ -454,6 +500,9 @@ Decisions 1–4 were adopted with the lineup on 2026-09-30: the owner approved t
 4. **Security-headers middleware in v1?** Recommendation: yes; it is small, P3.
 5. **The Web v1 date.** `DELIVERY_ROADMAP.md` ends L3.1 on 2026-10-15, and Stages 5–7 alone are about 20 items. Either move the date or cut v1 at the end of Stage 7.
 6. **Standing gates, open since July:** the WebSockets ADR (#765) and the request-mutation seam for rewrite (#782).
+7. **How authorization combines `AllowAnonymous` with requirements (raised by Stage 7).**
+   - Stage 7 ships ASP.NET Core's rule: `AllowAnonymous` anywhere on an endpoint wins. A route that requires authorization inside an anonymous group therefore runs anonymously. Routing's last-wins dispatch check already treats that route as protected and demands `UseAuthorization`, which then lets the anonymous caller in.
+   - Recommendation: the most specific item wins, so `AllowAnonymous` clears only the requirements declared above it. That fails closed for the inner requirement and matches the dispatch check.
 
 ### 7.5 Lineup
 
