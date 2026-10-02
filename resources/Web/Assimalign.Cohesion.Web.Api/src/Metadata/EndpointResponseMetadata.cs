@@ -21,8 +21,10 @@ namespace Assimalign.Cohesion.Web;
 /// the content-serialization registry negotiates the media type from the request's <c>Accept</c>;
 /// </item>
 /// <item>
-/// a <c>204 No Content</c> response with no <see cref="Type"/>, when the handler's declared result can be
-/// <see langword="null"/> (a nullable-annotated or oblivious reference type, or a <c>Nullable&lt;T&gt;</c>).
+/// a <c>204 No Content</c> response with no <see cref="Type"/>, when the compiler's nullability analysis says
+/// the result may be <see langword="null"/>: a nullable-annotated declared return, a <c>Nullable&lt;T&gt;</c>,
+/// or, for an implicitly typed lambda, a returned value whose null-state is maybe-null. Nullable-oblivious
+/// code lists no <c>204</c>, though the thunk still answers <c>204</c> for a <see langword="null"/> at run time.
 /// </item>
 /// </list>
 /// <para>

@@ -19,7 +19,8 @@ namespace Assimalign.Cohesion.Web.OpenApi.Internal;
 /// The route table is closed once the application starts, so the document cannot change afterwards. The
 /// first request builds and serializes it; every later request is served those bytes. A failed build is
 /// not cached: the exception reaches the pipeline's exception boundary and the next request tries again,
-/// so a fixed composition error does not need a restart to clear the cached failure.
+/// so a failure that does not recur (a document transformer that throws once) does not leave the endpoint
+/// failing until a restart. A composition error recurs on every attempt until the application is fixed.
 /// </para>
 /// <para>
 /// The representation carries a strong entity tag, the SHA-256 of its bytes, and a matching

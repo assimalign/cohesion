@@ -203,9 +203,10 @@ The rules, and why:
   writer resolves the contract before it touches the response, so the failed response carries no
   partial body and no `Content-Type`. The generator cannot check coverage at compile time, because the
   registered resolver is a run-time choice and may come from another assembly.
-- **Streams are not values.** A handler that returns a `Stream` is a compile error (COHWEB0002): copy
-  the stream to `context.Response.Body` and return `Task`. File and stream response helpers arrive
-  with #1061. A `byte[]` is an ordinary value, serialized as base64 JSON, not a raw body.
+- **Streams are not values.** A handler that returns a `Stream` is a compile error (COHWEB0002): write
+  it with Web.StaticFiles' `context.Response.WriteStreamAsync(...)`, or a file with `SendFileAsync(...)`
+  (#1061, with conditional requests and ranges), or copy it to `context.Response.Body`, and return
+  `Task`. A `byte[]` is an ordinary value, serialized as base64 JSON, not a raw body.
 
 ## Failure Semantics
 
@@ -391,7 +392,8 @@ body reader and the negotiated writer, and COHWEB0007 reports an application tha
   which negotiates media types only (no `Accept-Charset` or `Accept-Language`).
 - Whole-object binding from form fields (form binding is per-field scalar via `[FromForm]`, plus
   uploaded files).
-- Stream and file return values: a handler writes a file or a stream itself. The file and stream
-  response helpers of #1061 are delivered separately from its file binding.
+- Stream and file return values: a handler writes a file or a stream itself, through the response
+  helpers Web.StaticFiles ships (`SendFileAsync`, `WriteStreamAsync`, #1061), so `Web.Api` takes no
+  file-system dependency.
 - Per-endpoint form limits (`HttpFormOptions` as endpoint metadata). The limits are the exchange's form
   feature's, set by installing one ahead of the endpoint.

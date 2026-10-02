@@ -60,8 +60,8 @@ The OpenApi family never learns that Web exists; the dependency points one way, 
 ## Packaging: a NuGet package, not an App.Web member
 
 `Web.OpenApi` ships as its own package and is **not** listed in the `App.Web` shared framework
-(`resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props`, where OpenApi stays a
-commented-out candidate). An application that serves a document references the package; one that
+(`resources/Web/Assimalign.Cohesion.Web.Runtime/Directory.Build.props`, which lists it among the
+framework's exclusions). An application that serves a document references the package; one that
 does not carries none of the OpenApi family (the model, serialization with its YAML engine,
 validation, versioning, generation), which is about a dozen assemblies an `Sdk.Web` application would
 otherwise ship and, under NativeAOT, compile. That is how ASP.NET Core ships its OpenAPI support

@@ -24,8 +24,11 @@ rather than from runtime reflection, so the same document is produced under Nati
   `Web.Serialization` (the JSON writer's contracts), `Web.Authorization` (the registered options and each
   endpoint's effective policy), `Web.Authentication` (the default authenticate scheme),
   `Web.ProblemDetails`.
-- OpenApi: `OpenApi.Integration` (contract, provider, exporter), `OpenApi.Attributes` (metadata),
-  and through them the model, generation, serialization, versioning and validation.
+- Http: the root (status codes and media types) and `Http.Forms` (the uploaded-file types a file
+  parameter is matched against).
+- OpenApi: the `OpenApi` root (the document model), `OpenApi.Integration` (contract, provider,
+  exporter), `OpenApi.Attributes` (metadata), and through them generation, serialization, versioning
+  and validation.
 - Shipped as a NuGet package, not as a member of the `App.Web` shared framework: an application that
   documents its API references it; one that does not carries none of the OpenApi family.
 

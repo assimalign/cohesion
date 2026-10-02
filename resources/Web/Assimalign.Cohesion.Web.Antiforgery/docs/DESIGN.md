@@ -90,7 +90,8 @@ flowchart TD
     Header -->|"no, and a form body"| Form["Read and cache the form"]
     Header -->|"otherwise"| Validate["Validate the cookie and request tokens"]
     Form -->|"parsed"| Validate
-    Form -->|"unreadable"| Reject["400 problem+json; the endpoint does not run"]
+    Form -->|"over an Http.Forms limit"| TooLarge["413 problem+json; the endpoint does not run"]
+    Form -->|"malformed"| Reject["400 problem+json; the endpoint does not run"]
     Validate -->|"invalid"| Reject
     Validate -->|"valid"| Ack
 ```

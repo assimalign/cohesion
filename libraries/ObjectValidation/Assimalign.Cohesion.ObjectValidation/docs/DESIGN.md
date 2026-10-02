@@ -63,7 +63,7 @@ flowchart TD
 - **`ThrowExceptionOnFailure`** changes nothing that is evaluated. The validator throws after evaluating,
   when the context holds an error.
 
-**Evaluation order is newest first, a known constraint.** `ValidationItemQueue` and `ValidationRuleQueue`
+**Evaluation order is newest first, a known constraint (#1221).** `ValidationItemQueue` and `ValidationRuleQueue`
 enumerate from the top of their stacks, so the items of a profile run from the last declared member to the
 first, and a chain from its last chained rule to its first. "First" above means first in that order: with
 the defaults, a member whose chain has two failing rules reports the later-declared rule's error, and
