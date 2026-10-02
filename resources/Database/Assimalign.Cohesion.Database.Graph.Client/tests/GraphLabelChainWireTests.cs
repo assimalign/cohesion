@@ -16,13 +16,15 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 /// Graph.Client over Connections.InMemory: 10,000-name chains in MATCH, WHERE and INSERT return the
 /// expected rows, and a statement nested deeper than the server thread's stack is a COHDBG007
 /// execution failure that keeps the pooled session, where Neo4j reports its transient
-/// StackOverFlowError and keeps the connection.
+/// StackOverFlowError and keeps the connection. An insertion past the 8,092-byte graph record is a
+/// COHDBG008 execution failure that keeps the session the same way.
 /// </summary>
 public sealed class GraphLabelChainWireTests
 {
     private const int chainLength = 10_000;
 
     private static readonly string[] labels = Enumerable.Range(0, 100).Select(i => "L" + i.ToString(CultureInfo.InvariantCulture)).ToArray();
+    private static readonly string[] types = Enumerable.Range(0, 10).Select(i => "T" + i.ToString(CultureInfo.InvariantCulture)).ToArray();
 
     [Fact(DisplayName = "Cohesion Test [Graph.Client] - Label chains: 10,000-name chains in MATCH, WHERE and INSERT return the expected rows")]
     public async Task QueryAsync_TenThousandNameChains_ShouldReturnExpectedRows()
@@ -32,17 +34,24 @@ public sealed class GraphLabelChainWireTests
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
         await connection.ExecuteAsync("CREATE (:" + string.Join("&", labels) + " {name: 'all'}), (:L0 {name: 'one'}), (:X {name: 'x'})",
             cancellationToken: harness.Token);
+        await connection.ExecuteAsync("MATCH (a), (b) WHERE a.name = 'all' AND b.name = 'one' INSERT " +
+            string.Join(", ", types.Select(type => "(a)-[:" + type + " {name: '" + type.ToLowerInvariant() + "'}]->(b)")),
+            cancellationToken: harness.Token);
 
         // Act
         long colons = await connection.ExecuteAsync("INSERT (:" + Chain(":") + " {name: 'colons'})", cancellationToken: harness.Token);
         long ampersands = await connection.ExecuteAsync("INSERT (:" + Chain("&") + " {name: 'ampersands'})", cancellationToken: harness.Token);
         var any = await connection.QueryAsync("MATCH (n:" + Chain("|") + ") RETURN n.name AS name", cancellationToken: harness.Token);
         var every = await connection.QueryAsync("MATCH (n:" + Chain("&") + ") RETURN n.name", cancellationToken: harness.Token);
+        var colonMatch = await connection.QueryAsync("MATCH (n:" + Chain(":") + ") RETURN n.name", cancellationToken: harness.Token);
+        var labeledEvery = await connection.QueryAsync("MATCH (n) WHERE n IS LABELED " + Chain("&") + " RETURN n.name",
+            cancellationToken: harness.Token);
         var labeled = await connection.QueryAsync("MATCH (n) WHERE n IS NOT LABELED " + Chain("|") + " RETURN n.name",
             cancellationToken: harness.Token);
         var predicates = await connection.QueryAsync("MATCH (n) WHERE " +
             string.Join(" AND ", Enumerable.Range(0, chainLength).Select(i => "n:" + labels[i % labels.Length])) + " RETURN n.name",
             cancellationToken: harness.Token);
+        var edges = await connection.QueryAsync("MATCH (a)-[r:" + Chain(types, "|") + "]->(b) RETURN r.name", cancellationToken: harness.Token);
 
         // Assert
         colons.ShouldBe(1);
@@ -50,10 +59,50 @@ public sealed class GraphLabelChainWireTests
         any.Columns.Select(column => column.Name).ShouldBe(["name"]);
         any.Select(row => (string?)row[0]).ShouldBe(["all", "one", "colons", "ampersands"]);
         every.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"]);
+        colonMatch.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"]);
+        labeledEvery.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"]);
         labeled.ShouldHaveSingleItem()[0].ShouldBe("x");
         predicates.Select(row => (string?)row[0]).ShouldBe(["all", "colons", "ampersands"]);
+        edges.Select(row => (string?)row[0]).ShouldBe(types.Select(type => type.ToLowerInvariant()));
         connection.IsOpen.ShouldBeTrue();
     }
+
+    /// <summary>
+    /// With no label cap, a long conjunction can outgrow the one graph record a node's labels and
+    /// properties share, as a long property always could. The store refuses the record, and the
+    /// server reports the COHDBG008 execution failure, where the uncoded storage error used to end
+    /// the session; the same pooled session serves the next query.
+    /// </summary>
+    /// <param name="gql">An insertion whose record exceeds 8,092 bytes.</param>
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Element size: a record past 8,092 bytes is a COHDBG008 execution failure that keeps the session")]
+    [MemberData(nameof(OversizedInsertions))]
+    public async Task ExecuteAsync_OversizedRecord_ShouldFailAsCohdbg008AndKeepSession(string gql)
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync();
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.ExecuteAsync("CREATE (:L0 {name: 'one'})", cancellationToken: harness.Token);
+        Guid sessionId = harness.Server.Context.Sessions.ShouldHaveSingleItem().Id;
+
+        // Act
+        var error = await Should.ThrowAsync<GraphClientException>(async () =>
+            await connection.ExecuteAsync(gql, cancellationToken: harness.Token));
+
+        // Assert
+        error.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+        error.Message.ShouldContain("COHDBG008", Case.Sensitive);
+        connection.IsOpen.ShouldBeTrue();
+        (await connection.QueryAsync("MATCH (n) RETURN n.name", cancellationToken: harness.Token))
+            .ShouldHaveSingleItem()[0].ShouldBe("one");
+        harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
+    }
+
+    /// <summary>300 labels of 33 characters, and a 9,000-character property.</summary>
+    public static TheoryData<string> OversizedInsertions => new()
+    {
+        "INSERT (:" + string.Join("&", Enumerable.Range(0, 300).Select(i => "Label_with_a_fairly_long_name_" + i.ToString("D3", CultureInfo.InvariantCulture))) + ")",
+        "INSERT (:L0 {s: '" + new string('s', 9_000) + "'})",
+    };
 
     /// <summary>
     /// A 10,000-name INSERT disjunction cannot label a node: a coded execution failure, with a
@@ -119,6 +168,8 @@ public sealed class GraphLabelChainWireTests
         harness.Server.Context.Sessions.ShouldHaveSingleItem().Id.ShouldBe(sessionId);
     }
 
-    private static string Chain(string separator)
-        => string.Join(separator, Enumerable.Range(0, chainLength).Select(i => labels[i % labels.Length]));
+    private static string Chain(string separator) => Chain(labels, separator);
+
+    private static string Chain(string[] names, string separator)
+        => string.Join(separator, Enumerable.Range(0, chainLength).Select(i => names[i % names.Length]));
 }

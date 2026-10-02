@@ -406,13 +406,15 @@ Cohesion now does the same:
 - **Insertion.** An inserted node takes a conjunction of any length and receives each label once, in
   first-mention order (`:A&A` labels it `A`). Unlike Neo4j's spill to dynamic label records, a node's
   labels and properties share one graph record of at most 8,092 bytes, so the number of distinct
-  labels one node can carry is bounded by their encoded size, not by the language (Graph engine
+  labels one node can carry is bounded by their encoded size, not by the language; an insertion past
+  it fails with the engine's `COHDBG008`, element too large, and the session stays open (Graph engine
   design, "Planning, execution and bounds").
 
 `GqlLabelChainParserTests` pins 10,000-name chains of every operator in every position, the merge
 rule, precedence after flattening, the renderer round trip, 10,000 nested groups on a large stack and
 `GQL0009` on a small one. The engine's `GqlLabelChainExecutionTests` and Graph.Client's
-`GraphLabelChainWireTests` pin execution, insertion and `COHDBG007` in process and over the wire.
+`GraphLabelChainWireTests` pin execution, insertion, `COHDBG007` and `COHDBG008` in process and over
+the wire.
 
 ## AOT posture and extension discipline
 

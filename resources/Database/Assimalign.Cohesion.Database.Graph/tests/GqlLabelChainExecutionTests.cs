@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -9,7 +11,10 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Language;
+using Assimalign.Cohesion.Database.Graph.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
@@ -17,8 +22,10 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 /// Label expressions and predicates have no fixed length or nesting limit (#1139 follow-up, owner
 /// decision 2026-10-02: "do what Neo4j does"). 10,000-name chains of every operator plan and run in
 /// node patterns, edge patterns, labeled predicates and insertions; flattening keeps
-/// <c>!</c> &gt; <c>&amp;</c> &gt; <c>|</c>; and a statement nested deeper than the executing thread's
-/// stack fails with <c>COHDBG007</c> while the session keeps serving.
+/// <c>!</c> &gt; <c>&amp;</c> &gt; <c>|</c>; a statement nested deeper than the executing thread's
+/// stack fails with <c>COHDBG007</c> while the session keeps serving; an element whose labels and
+/// properties outgrow its storage record fails with <c>COHDBG008</c> the same way; and index-anchor
+/// selection stays linear however many labels, equalities and indexes meet.
 /// </summary>
 public sealed class GqlLabelChainExecutionTests
 {
@@ -338,6 +345,174 @@ public sealed class GqlLabelChainExecutionTests
         }
     }
 
+    /// <summary>
+    /// With no label cap, a long conjunction can outgrow the one graph record a node's labels and
+    /// properties share, as a long property always could. The store refuses the record before it
+    /// writes it, and the engine reports <c>COHDBG008</c>: the statement fails like any other,
+    /// rolling back the explicit transaction it ran in (catalog labels it defined included), and the
+    /// session serves the next transaction.
+    /// </summary>
+    /// <param name="gql">An insertion whose record exceeds 8,092 bytes.</param>
+    [Theory(DisplayName = "Cohesion Test [Graph] - Element size: a record past 8,092 bytes is COHDBG008 and the session survives")]
+    [MemberData(nameof(OversizedInsertions))]
+    public async Task Execute_OversizedRecord_ShouldFailWithCohdbg008Async(string gql)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        await using var session = await SeedAsync(engine);
+        int labelCount = (await RowsAsync(session, "SHOW LABELS")).Count;
+        var transaction = await session.BeginTransactionAsync(CancellationToken.None);
+        await session.ExecuteAsync("INSERT (:Kept {name: 'kept'})", cancellationToken: CancellationToken.None);
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync(gql, cancellationToken: CancellationToken.None));
+
+        // Assert
+        error.Message.ShouldStartWith("COHDBG008: ", Case.Sensitive);
+        error.Message.ShouldContain("8092 bytes one graph record can hold", Case.Sensitive);
+        error.InnerException.ShouldBeOfType<GraphElementTooLargeException>();
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        (await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(CancellationToken.None)))
+            .Message.ShouldBe("The transaction is RolledBack.");
+        await transaction.DisposeAsync();
+        (await RowsAsync(session, "SHOW LABELS")).Count.ShouldBe(labelCount);
+        await using (var next = await session.BeginTransactionAsync(CancellationToken.None))
+        {
+            await session.ExecuteAsync("INSERT (:Kept {name: 'next'})", cancellationToken: CancellationToken.None);
+            await next.CommitAsync(CancellationToken.None);
+        }
+        (await ColumnAsync(session, "MATCH (n:Kept) RETURN n.name")).ShouldBe(["next"]);
+        (await ColumnAsync(session, "MATCH (n:X) RETURN n.name")).ShouldBe(["x"]);
+    }
+
+    /// <summary>
+    /// Insertions past the record limit: 300 labels of 33 characters, a 9,000-character node
+    /// property, and a 9,000-character relationship property.
+    /// </summary>
+    public static TheoryData<string> OversizedInsertions => new()
+    {
+        "INSERT (:" + string.Join("&", Enumerable.Range(0, 300).Select(i => "Label_with_a_fairly_long_name_" + i.ToString("D3", CultureInfo.InvariantCulture))) + ")",
+        "INSERT (:Big {s: '" + new string('s', 9_000) + "'})",
+        "MATCH (a:X) INSERT (a)-[:BIG {s: '" + new string('s', 9_000) + "'}]->(a)",
+    };
+
+    /// <summary>
+    /// An indexed value past the 1,016-byte index key fails its insertion, and an index build over
+    /// one, with <c>COHDBG008</c>; a search for one matches nothing, since no write can store it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Graph] - Element size: an indexed value past the index key is COHDBG008 to write and matches nothing")]
+    public async Task Execute_OversizedIndexedValue_ShouldFailToWriteAndMatchNothingAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("keys", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string longName = new('n', 600);
+        await session.ExecuteAsync("INSERT (:X {name: 'x'}), (:Y {name: '" + longName + "'})", cancellationToken: CancellationToken.None);
+        var schema = GraphSchema.Open(database, session);
+        await schema.CreateIndexAsync("X", "by_name", "name");
+
+        // Act
+        var insert = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync("INSERT (:X {name: '" + longName + "'})", cancellationToken: CancellationToken.None));
+        var build = await Should.ThrowAsync<DatabaseException>(async () => await schema.CreateIndexAsync("Y", "by_name", "name"));
+        var inline = await ColumnAsync(session, "MATCH (n:X {name: '" + longName + "'}) RETURN n.name");
+        var equality = await ColumnAsync(session, "MATCH (n:X) WHERE n.name = '" + longName + "' RETURN n.name");
+
+        // Assert
+        insert.Message.ShouldStartWith("COHDBG008: An indexed property value encodes to ", Case.Sensitive);
+        insert.Message.ShouldContain("1016-byte index key", Case.Sensitive);
+        build.Message.ShouldStartWith("COHDBG008: ", Case.Sensitive);
+        inline.ShouldBeEmpty();
+        equality.ShouldBeEmpty();
+        (await ColumnAsync(session, "MATCH (n:X {name: 'x'}) RETURN n.name")).ShouldBe(["x"]);
+        (await RowsAsync(session, "SHOW INDEXES")).ShouldHaveSingleItem()[2].ShouldBe("X");
+    }
+
+    /// <summary>
+    /// Anchor selection reads the visible indexes once and each variable's equalities once, so 20
+    /// indexes against a 100-label conjunction and 10,000 equalities plan in linear time, where a
+    /// lookup per label, equality and index took minutes. The choice is unchanged: the first label
+    /// with an index on a key the node has a value for, then that label's key whose value comes
+    /// first, inline properties before WHERE equalities.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Graph] - Planner: anchor selection is linear in labels, equalities and indexes and chooses as before")]
+    public async Task Plan_ManyLabelsEqualitiesAndIndexes_ShouldChooseAnchorInLinearTimeAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("anchor-cost", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string[] hundred = labels.Take(100).ToArray();
+        await session.ExecuteAsync("INSERT (:" + string.Join("&", hundred) + " {name: 'all'}), (:A:B {p: 1, q: 2, name: 'ab'}), " +
+            "(:A {p: 1, q: 3, name: 'a'})", cancellationToken: CancellationToken.None);
+        var schema = GraphSchema.Open(database, session);
+        for (int i = 0; i < 20; i++) { await schema.CreateIndexAsync(hundred[i], "ix" + i.ToString(CultureInfo.InvariantCulture), "zz"); }
+        await schema.CreateIndexAsync("A", "by_q", "q");
+        await schema.CreateIndexAsync("A", "by_p", "p");
+        await schema.CreateIndexAsync("B", "by_p", "p");
+        string conjunction = string.Join("&", hundred);
+        string sameKey = "MATCH (n:" + conjunction + ") WHERE " + string.Join(" AND ", Enumerable.Repeat("n.name = 'all'", chainLength)) + " RETURN n.name";
+        string distinctKeys = "MATCH (n:" + conjunction + ") WHERE " +
+            string.Join(" AND ", Enumerable.Range(0, chainLength).Select(i => "n.k" + i.ToString(CultureInfo.InvariantCulture) + " = 1")) + " RETURN n.name";
+
+        // Act
+        var timer = Stopwatch.StartNew();
+        var same = await ColumnAsync(session, sameKey);
+        var distinct = await ColumnAsync(session, distinctKeys);
+        timer.Stop();
+        var labelOrder = (await PlanAsync(database, session, "MATCH (n:A&B {p: 1}) WHERE n.q = 2 RETURN n.name")).Matches.Single().Anchor;
+        var reversed = (await PlanAsync(database, session, "MATCH (n:B&A {q: 2}) WHERE n.p = 1 RETURN n.name")).Matches.Single().Anchor;
+        var inlineFirst = (await PlanAsync(database, session, "MATCH (n:A {q: 2, p: 1}) RETURN n.name")).Matches.Single().Anchor;
+        var nullInline = (await PlanAsync(database, session, "MATCH (n:A {p: null}) WHERE n.q = 3 AND n.p = 1 RETURN n.name")).Matches.Single().Anchor;
+        var unindexed = (await PlanAsync(database, session, "MATCH (n:" + conjunction + ") WHERE n.name = 'all' RETURN n.name")).Matches.Single().Anchor;
+
+        // Assert
+        timer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(15));
+        same.ShouldBe(["all"]);
+        distinct.ShouldBeEmpty();
+        (labelOrder.Label, labelOrder.Property, labelOrder.Value).ShouldBe(("A", "p", (object?)1L));
+        (reversed.Label, reversed.Property, reversed.Value).ShouldBe(("B", "p", (object?)1L));
+        (inlineFirst.Label, inlineFirst.Property, inlineFirst.Value).ShouldBe(("A", "q", (object?)2L));
+        (nullInline.Label, nullInline.Property, nullInline.Value).ShouldBe(("A", "q", (object?)3L));
+        (unindexed.Label, unindexed.Property).ShouldBe(("L0", null));
+        (await ColumnAsync(session, "MATCH (n:A&B {p: 1}) WHERE n.q = 2 RETURN n.name")).ShouldBe(["ab"]);
+        (await ColumnAsync(session, "MATCH (n:B&A {q: 2}) WHERE n.p = 1 RETURN n.name")).ShouldBe(["ab"]);
+        (await ColumnAsync(session, "MATCH (n:A {p: null}) WHERE n.q = 3 AND n.p = 1 RETURN n.name")).ShouldBeEmpty();
+        (await ColumnAsync(session, "MATCH (n:A) WHERE n.q = 3 AND n.p = 1 RETURN n.name")).ShouldBe(["a"]);
+    }
+
+    /// <summary>
+    /// A diagnostic quotes at most 256 UTF-16 code units of an expression. Where the cut would fall
+    /// between the halves of a surrogate pair it backs off one unit, so the message stays
+    /// well-formed UTF-16 and reaches a wire client without a replacement character.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Graph] - Label chains: a cut diagnostic never splits a surrogate pair")]
+    public async Task Describe_CutInsideSurrogatePair_ShouldKeepWellFormedTextAsync()
+    {
+        // Arrange: the quoted name puts a high surrogate at index 255.
+        string emoji = string.Concat(Enumerable.Repeat("\U0001F600", 200));
+        var expression = new GqlLabelDisjunction([new GqlLabelName(emoji), new GqlLabelName("X")]);
+        await using var engine = GraphDatabaseEngine.Create(new());
+        var database = (IGraphDatabase)await engine.CreateDatabaseAsync("surrogates", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var strict = new UTF8Encoding(false, true);
+
+        // Act
+        string described = GraphLabelEvaluator.Describe(expression);
+        var error = await Should.ThrowAsync<DatabaseException>(async () =>
+            await session.ExecuteAsync("INSERT (:\"" + emoji + "\"|X)", cancellationToken: CancellationToken.None));
+
+        // Assert
+        char.IsHighSurrogate(expression.ToString()[255]).ShouldBeTrue();
+        described.ShouldBe(string.Concat(expression.ToString().AsSpan(0, 255), "..."));
+        Should.NotThrow(() => strict.GetByteCount(described));
+        error.Message.ShouldStartWith("COHDBG001", Case.Sensitive);
+        error.Message.ShouldContain(described, Case.Sensitive);
+        Should.NotThrow(() => strict.GetByteCount(error.Message));
+    }
+
     // all: L0..L199; even: the even ones; x: X; u: unlabeled. all has one T<i> edge to even per type.
     private static async Task<IDatabaseSession> SeedAsync(GraphDatabaseEngine engine)
     {
@@ -368,6 +543,13 @@ public sealed class GqlLabelChainExecutionTests
 
     private static async Task<List<string?>> ColumnAsync(IDatabaseSession session, string gql)
         => (await RowsAsync(session, gql)).Select(row => (string?)row[0]).ToList();
+
+    private static ValueTask<GraphPlan> PlanAsync(IGraphDatabase database, IDatabaseSession session, string gql)
+    {
+        var instance = (GraphDatabaseInstance)database;
+        return instance.RunAsync((GraphDatabaseSession)session, operation => new ValueTask<GraphPlan>(
+            new GraphPlanner(instance, operation.Context.Snapshot).Plan(GraphQueryRequest.FromGql(gql).Statement.GqlExpression)), CancellationToken.None);
+    }
 
     /// <summary>
     /// Runs <paramref name="action"/> to completion on a thread with a 512 KB stack and returns

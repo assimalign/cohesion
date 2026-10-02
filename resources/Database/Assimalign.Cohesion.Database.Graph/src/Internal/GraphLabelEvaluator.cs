@@ -211,14 +211,18 @@ internal static class GraphLabelEvaluator
 
     /// <summary>
     /// The expression as GQL text for a diagnostic, cut to a readable length: a chain of thousands
-    /// of labels would otherwise fill the message.
+    /// of labels would otherwise fill the message. The cut never splits a surrogate pair, so the
+    /// message stays well-formed UTF-16 and encodes to UTF-8 without a replacement character.
     /// </summary>
     /// <param name="expression">The expression to describe.</param>
     /// <returns>The text, ending in <c>...</c> when it was cut.</returns>
     internal static string Describe(GqlLabelExpression expression)
     {
         string text = expression.ToString();
-        return text.Length <= describedLength ? text : string.Concat(text.AsSpan(0, describedLength), "...");
+        if (text.Length <= describedLength) { return text; }
+        int cut = describedLength;
+        if (char.IsHighSurrogate(text[cut - 1])) { cut--; }
+        return string.Concat(text.AsSpan(0, cut), "...");
     }
 
     private static bool Matches(GqlLabelExpression expression, in LabelSet labels)

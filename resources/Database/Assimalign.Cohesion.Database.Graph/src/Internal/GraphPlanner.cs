@@ -28,10 +28,11 @@ internal sealed class GraphPlanner
     {
         var variables = new Dictionary<string, BindingKind>(StringComparer.Ordinal);
         var paths = new List<GraphPathPlan>();
+        var anchors = new AnchorSources(_database, _snapshot, query.Predicate);
         foreach (var path in query.Matches)
         {
             Validate(path, creating: false);
-            paths.Add(new GraphPathPlan(path, ChooseAnchor(path, query.Predicate)));
+            paths.Add(new GraphPathPlan(path, ChooseAnchor(path, anchors)));
         }
         ValidateExpression(query.Predicate);
         foreach (var path in query.Creates) { Validate(path, creating: true); }
@@ -243,55 +244,142 @@ internal sealed class GraphPlanner
     // them all: a pure conjunction. A disjunction, negation or wildcard leaves Labels empty, and a
     // labeled predicate is never an equality, so neither can narrow the candidates and drop rows;
     // such a node scans every node and the executor evaluates the expression on each.
-    private GraphAnchor ChooseAnchor(GqlPathPattern path, GqlExpression? predicate)
+    //
+    // The choice is the first distinct label, in Labels order, that has an index on a key the node
+    // has a value for, and of that label's indexed keys the one whose first non-null value comes
+    // first, inline properties before WHERE equalities. Selection costs the node's labels and values
+    // plus the indexes its labels own, never their product: Neo4j's leaf planner likewise groups the
+    // predicates once and visits only each label's own index descriptors
+    // (cypher-planner .../leafplanner/index/NodeIndexLeafPlanner.scala:184, :201, :248-261, :279-296).
+    private static GraphAnchor ChooseAnchor(GqlPathPattern path, AnchorSources sources)
     {
         for (int i = 0; i < path.Nodes.Count; i++)
         {
             var node = path.Nodes[i];
             if (node.Labels.Count == 0) { continue; }
-            // The candidate values are the same for every label, so they are read once: a long
-            // conjunction against a long AND chain stays linear in each.
-            var values = node.Properties.Concat(Equalities(predicate, node.Variable)).Where(value => value.Value is not null).ToArray();
-            if (values.Length == 0) { continue; }
+            var inline = FirstValues(node.Properties);
+            var equalities = sources.GetEqualities(node.Variable);
+            if (inline.Count == 0 && equalities.Count == 0) { continue; }
+            var indexes = sources.GetIndexedKeys();
+            if (indexes.Count == 0) { break; }
             var tried = new HashSet<string>(StringComparer.Ordinal);
             foreach (string label in node.Labels)
             {
-                if (!tried.Add(label)) { continue; }
-                foreach (var value in values)
+                if (!tried.Add(label) || !indexes.TryGetValue(label, out var keys)) { continue; }
+                string? bestKey = null;
+                FirstValue best = new(int.MaxValue, null!);
+                foreach (string key in keys)
                 {
-                    if (_database.Store.HasIndex(label, value.Key, _snapshot))
-                    { return new GraphAnchor(i, label, value.Key, value.Value); }
+                    // Inline positions precede every equality position, as the properties precede
+                    // the WHERE clause.
+                    FirstValue candidate;
+                    if (inline.TryGetValue(key, out var property)) { candidate = property; }
+                    else if (equalities.TryGetValue(key, out var equality)) { candidate = new(inline.Count + equality.Position, equality.Value); }
+                    else { continue; }
+                    if (candidate.Position < best.Position) { best = candidate; bestKey = key; }
                 }
+                if (bestKey is not null) { return new GraphAnchor(i, label, bestKey, best.Value); }
             }
         }
         return new GraphAnchor(0, path.Nodes[0].Labels.FirstOrDefault(), null, null);
     }
 
-    /// <summary>
-    /// The <c>variable.key = literal</c> equalities an <c>AND</c> chain holds for one variable, in
-    /// source order, through nested chains of any depth. Walks with an explicit stack.
-    /// </summary>
-    private static List<KeyValuePair<string, object?>> Equalities(GqlExpression? predicate, string? variable)
+    /// <summary>Each key's first non-null inline value and its position among the node's non-null values.</summary>
+    private static Dictionary<string, FirstValue> FirstValues(IReadOnlyDictionary<string, object?> properties)
     {
-        var equalities = new List<KeyValuePair<string, object?>>();
-        if (predicate is null) { return equalities; }
-        // Anchors are chosen before the predicate is validated, so a malformed hand-built chain is
-        // skipped here and rejected by validation.
-        var pending = new Stack<GqlExpression?>();
-        pending.Push(predicate);
-        while (pending.TryPop(out var expression))
+        var values = new Dictionary<string, FirstValue>(StringComparer.Ordinal);
+        foreach (var property in properties)
         {
-            if (expression is GqlLogicalExpression { Operator: GqlLogicalOperator.And, Operands: { } operands })
-            {
-                for (int i = operands.Count - 1; i >= 0; i--) { pending.Push(operands[i]); }
-                continue;
-            }
-            if (expression is not GqlBinaryExpression { Operator: "=" } binary) { continue; }
-            if (binary.Left is GqlPropertyExpression left && left.Variable == variable && binary.Right is GqlLiteralExpression right)
-            { equalities.Add(new(left.Property, right.Value)); }
-            if (binary.Right is GqlPropertyExpression property && property.Variable == variable && binary.Left is GqlLiteralExpression literal)
-            { equalities.Add(new(property.Property, literal.Value)); }
+            if (property.Value is not null) { values.TryAdd(property.Key, new FirstValue(values.Count, property.Value)); }
         }
-        return equalities;
+        return values;
+    }
+
+    /// <summary>A candidate anchor value and its source position.</summary>
+    private readonly record struct FirstValue(int Position, object Value);
+
+    /// <summary>
+    /// What anchor selection reads from outside the pattern, each read at most once per plan: the
+    /// visible indexes grouped by label, and every variable's <c>variable.key = literal</c>
+    /// equalities from the <c>WHERE</c> chain.
+    /// </summary>
+    private sealed class AnchorSources
+    {
+        private static readonly Dictionary<string, FirstValue> _none = new(StringComparer.Ordinal);
+        private readonly GraphDatabaseInstance _database;
+        private readonly TransactionSnapshot _snapshot;
+        private readonly GqlExpression? _predicate;
+        private Dictionary<string, List<string>>? _indexedKeys;
+        private Dictionary<string, Dictionary<string, FirstValue>>? _equalities;
+
+        /// <summary>Initializes a new instance of the <see cref="AnchorSources"/> class.</summary>
+        /// <param name="database">The database whose store lists the visible indexes.</param>
+        /// <param name="snapshot">The snapshot the index list observes.</param>
+        /// <param name="predicate">The statement's <c>WHERE</c> predicate, if any.</param>
+        public AnchorSources(GraphDatabaseInstance database, TransactionSnapshot snapshot, GqlExpression? predicate)
+        {
+            _database = database;
+            _snapshot = snapshot;
+            _predicate = predicate;
+        }
+
+        /// <summary>The indexed property keys of each label with at least one visible index.</summary>
+        internal Dictionary<string, List<string>> GetIndexedKeys()
+        {
+            if (_indexedKeys is not null) { return _indexedKeys; }
+            var indexed = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            foreach (var index in _database.Store.GetIndexes(_snapshot))
+            {
+                if (!indexed.TryGetValue(index.Label, out var keys)) { indexed.Add(index.Label, keys = []); }
+                keys.Add(index.PropertyKey);
+            }
+            return _indexedKeys = indexed;
+        }
+
+        /// <summary>
+        /// Each key's first non-null equality value for <paramref name="variable"/>, with its
+        /// position among that variable's non-null equalities, in source order.
+        /// </summary>
+        internal Dictionary<string, FirstValue> GetEqualities(string? variable)
+        {
+            if (variable is null) { return _none; }
+            _equalities ??= Collect(_predicate);
+            return _equalities.TryGetValue(variable, out var values) ? values : _none;
+        }
+
+        /// <summary>
+        /// Walks the predicate's <c>AND</c> chains once, through nested chains of any depth, with an
+        /// explicit stack. Anchors are chosen before the predicate is validated, so a malformed
+        /// hand-built chain or a null name is skipped here and rejected by validation.
+        /// </summary>
+        private static Dictionary<string, Dictionary<string, FirstValue>> Collect(GqlExpression? predicate)
+        {
+            var collected = new Dictionary<string, Dictionary<string, FirstValue>>(StringComparer.Ordinal);
+            if (predicate is null) { return collected; }
+            var pending = new Stack<GqlExpression?>();
+            pending.Push(predicate);
+            while (pending.TryPop(out var expression))
+            {
+                if (expression is GqlLogicalExpression { Operator: GqlLogicalOperator.And, Operands: { } operands })
+                {
+                    for (int i = operands.Count - 1; i >= 0; i--) { pending.Push(operands[i]); }
+                    continue;
+                }
+                if (expression is not GqlBinaryExpression { Operator: "=" } binary) { continue; }
+                if (binary.Left is GqlPropertyExpression left && binary.Right is GqlLiteralExpression right) { Add(left, right.Value); }
+                else if (binary.Right is GqlPropertyExpression property && binary.Left is GqlLiteralExpression literal) { Add(property, literal.Value); }
+            }
+            return collected;
+
+            void Add(GqlPropertyExpression property, object? value)
+            {
+                if (property.Variable is null || property.Property is null || value is null) { return; }
+                if (!collected.TryGetValue(property.Variable, out var values))
+                {
+                    collected.Add(property.Variable, values = new Dictionary<string, FirstValue>(StringComparer.Ordinal));
+                }
+                values.TryAdd(property.Property, new FirstValue(values.Count, value));
+            }
+        }
     }
 }

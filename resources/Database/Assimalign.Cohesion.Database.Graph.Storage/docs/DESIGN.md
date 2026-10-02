@@ -84,9 +84,14 @@ The explicit scalar encoding is:
 | 11 | Decimal, BinaryWriter's four Int32 words |
 | 12, 13 | Finite IEEE-754 Float64, Float32 |
 
-Record length is limited to the shared `SlottedPage.MaxRecordSize`. Unsupported CLR
-objects, non-finite floating values and oversized records fail before insertion. This
-version does not define arrays, nested objects or overflow chains. Nodes and
+Record length is limited to the shared `SlottedPage.MaxRecordSize` (8,092 bytes).
+Unsupported CLR objects, empty or whitespace names and non-finite floating values fail
+with `ArgumentException`, a caller error, before insertion. An oversized record fails
+with the public `GraphElementTooLargeException`, a `StorageException`, before anything
+is written: the size is the element's, not a store fault, so the Graph engine reports it
+as the statement failure `COHDBG008` and keeps the session. This version does not define
+arrays, nested objects or overflow chains; Neo4j spills large label sets to dynamic label
+records and long values to property chains, and an overflow-record format is a follow-up. Nodes and
 relationships are immutable versions; the frozen engine surface has create/delete
 operations and no property-update member.
 
@@ -111,7 +116,15 @@ identity. Keys consist of the shared `DatabaseKeyWriter` scalar encoding followe
 the node identity as eight unsigned big-endian bytes. The scalar encoding is null,
 Boolean, ordinal UTF-16 big-endian string bytes, or Float64 for every numeric CLR type.
 The scalar prefix may occupy at most 1016 bytes, leaving eight bytes within the shared
-1024-byte key limit. Missing properties have no entry; a present null has a null key.
+1024-byte key limit. A node write, or an index build over an existing node, whose indexed
+value encodes past that prefix fails with `GraphElementTooLargeException` before anything
+is written. No entry can therefore hold such a value, so a search for one matches nothing
+instead of failing. Missing properties have no entry; a present null has a null key.
+
+`GetIndexes` lists the definitions a snapshot sees in one pass, so a planner matching many
+labels and property keys reads them once rather than once per pair. The store keeps the
+definition identities apart from its node and relationship directory, so listing them costs
+the definition count, not a pass over every record.
 
 Numeric keys are a candidate projection. Nearby Int64 or Decimal values can map to the
 same Float64 value. Every result is compared to its original scalar: integral/Decimal
