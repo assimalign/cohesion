@@ -831,7 +831,10 @@ record moves with the machinery):
   comparison that fails). A statement nested deeper than the dialect's 128-level
   expression limit is a `ParseFailure` (`SQL0006`); before #1151 a 200,000-term
   expression overflowed the stack and ended the server process, every session with
-  it. Framing/order violations (`ProtocolException`, malformed parameter
+  it. A cascading delete of any depth is an ordinary statement; before #1164 one
+  that cascaded through a 20,000-row self-referencing chain ended the process the
+  same way (see [The cascade walk](#the-cascade-walk-a-worklist-not-a-recursion)).
+  Framing/order violations (`ProtocolException`, malformed parameter
   components) → `ProtocolViolation` **and close**; anything unexpected →
   `Internal` and close. A child-root exception that escapes raw (for example a
   `StorageException` the engine failed to wrap) reaches the wire as `Internal`
@@ -941,8 +944,9 @@ so child-first names and cyclic reference graphs provision deterministically.
 rows, and incoming references on parent deletes or key changes. Checks reject a
 false result; SQL unknown/null passes. Foreign keys with null components are
 not checked (MATCH SIMPLE). A non-null child key needs a parent visible through
-the statement snapshot. Delete defaults to `RESTRICT`; `CASCADE` recursively
-collects child deletions into the same statement apply bracket. Parent key
+the statement snapshot. Delete defaults to `RESTRICT`; `CASCADE` collects the
+transitive closure of child deletions into the same statement apply bracket (see
+[The cascade walk](#the-cascade-walk-a-worklist-not-a-recursion) below). Parent key
 updates are restricted while referenced. `ON UPDATE` is unsupported and returns
 `COHDBL001`.
 
@@ -1003,7 +1007,8 @@ statement reads for constraint purposes, which is compatible with other writers'
 `IntentExclusive` and blocks only table-grain DDL, keeping parent definitions
 stable for the life of the statement. A cascade walks the closure locking as it
 descends — a row is exclusively locked before its children are read — because a
-transitive closure cannot be pre-sorted.
+transitive closure cannot be pre-sorted (the walk itself is described under
+[The cascade walk](#the-cascade-walk-a-worklist-not-a-recursion)).
 
 **Why not component-wide exclusion (the rejected original).** The first cut took
 `Exclusive` on every table in the transitive closure of the reference graph, in
@@ -1035,6 +1040,66 @@ reorder equality values to match its column order. Partial prefixes retain a
 residual comparison for remaining columns; they scan the table only when no
 suitable index exists. A declared index
 whose physical tree is missing fails closed.
+
+### The cascade walk: a worklist, not a recursion
+
+`ON DELETE CASCADE` collects a transitive closure of rows, and the depth of that
+closure is the data's, not the schema's: a self-referencing table (an org chart, a
+thread of replies, a list of versions) cascades as deep as its longest chain. The
+walk (`SqlPlanExecutor.CollectCascadeDeletesAsync`) therefore keeps its path in an
+explicit stack of frames on the heap and never recurses once per level. Until
+#1164 it did: deleting the head of a 20,000-row chain overflowed the stack of the
+thread running the statement (in a debug build 2,000 rows were enough on a 1 MB
+thread), and a stack overflow cannot be caught, so one statement ended the process
+and, over the wire, every session of the server with it. The nesting limit of
+#1151 could not have covered it: expression depth is bounded by the text a
+statement sends, cascade depth by rows already stored. So the cure is the shape of
+the walk, not a limit — **a cascade has no depth limit**; its closure is bounded by
+memory, like the deletion set it fills.
+
+The worklist is the recursion with its frames moved to the heap, and nothing else
+changed:
+
+- **Order.** The walk is depth-first and pre-order. A row joins the deletion set,
+  takes its exclusive row lock (and, the first time the walk reaches its table, the
+  intent locks on the adjacent tables) and collects the references its deletion
+  releases before any row below it is read. Its children are visited reference by
+  reference — child tables in catalog order, each table's references in declaration
+  order — then in the order the child lookup returns them, and a reference's
+  matches are read only once every row below the previous reference has been
+  collected. The deletion set's order — the order rows are locked in,
+  checked for `RESTRICT` and applied in — is therefore the recursion's, and so is
+  which `RESTRICT` violation a statement reports when its closure holds several
+  (`Delete_TwoRestrictViolations_ShouldReportTheDepthFirstOne` pins it).
+- **Cycles.** A row already in the deletion set is skipped, checked just before
+  the walk would descend into it, so a cyclic cascade graph — a ring as deep as the
+  table included — deletes each row once and terminates.
+- **Memory.** A frame holds what a recursive call held: the row, the references
+  into its table, and the materialized matches of the reference being walked. A
+  frame leaves the path as soon as it hands out the last match of its last
+  *cascading* reference — the last one that is `CASCADE` and whose key is not
+  null in that row — because the recursive call had nothing left to do but pass
+  over its `RESTRICT` references and return. A self-referencing chain therefore
+  walks with one frame on the path however long it is, even when `RESTRICT`
+  references into its table follow the self-reference, and the path grows only
+  with rows that still have matches or cascading references left to visit (a
+  second cascading reference into the same table keeps every level's frame, as it
+  must). The deletion set, the row locks and the version ledger stay proportional
+  to the rows deleted, as they always were.
+- **Cancellation.** Every step observes the statement's cancellation token. Child
+  lookups already observe it, but entering a row only takes its locks, and an
+  uncontended grant does not check the token, so a wide fan-out from one lookup
+  into a table with no cascading references would otherwise run to the end.
+
+A deep cascade costs what its rows cost plus one child lookup per row, so the
+referencing columns want an index (the lookup rule above); without one each level
+scans the child table. `SqlCascadeDeleteDepthTests` is the regression guard: a
+100,000-row chain deletes in process and over the wire on the default stack and
+the connection keeps serving; a 20,000-row chain deletes on a 512 KB thread, rolls
+back completely inside `BEGIN`, closes into a ring that deletes once, and still
+fails whole on a `RESTRICT` reference at its far end; and a cascading reference
+that follows a chain's self-reference is still walked for every row whose key is
+not null (`Delete_ChainWithTrailingReferences_ShouldWalkEveryCascadingReference`).
 
 ## Persisted definitions: canonical text, parsed once
 
