@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -192,6 +193,33 @@ public class EndpointBindingTests
 
         response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
         (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("alice");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: an attribute name holding a quote or a backslash binds that exact key")]
+    public async Task Binding_AttributeNameWithQuoteAndBackslash_ShouldBindExactKey()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.AddRouting();
+
+        factory.Application.UseRouting();
+
+        factory.Application.MapGet("/escaped", ([FromQuery(Name = "a\"b")] string quoted, [FromQuery(Name = "c\\d")] string slashed) => $"{quoted}|{slashed}");
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act — the keys arrive percent-encoded: %22 is the quote, %5C the backslash.
+        using HttpResponseMessage bound = await client.GetAsync("/escaped?a%22b=one&c%5Cd=two", cancellation.Token);
+        using HttpResponseMessage missing = await client.GetAsync("/escaped?c%5Cd=two", cancellation.Token);
+
+        // Assert — the declared keys bind, and a missing one is reported under its exact name.
+        bound.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await bound.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("one|two");
+
+        missing.StatusCode.ShouldBe(NetHttpStatusCode.BadRequest);
+        using JsonDocument problem = JsonDocument.Parse(await missing.Content.ReadAsStringAsync(cancellation.Token));
+        problem.RootElement.GetProperty("errors").TryGetProperty("a\"b", out _).ShouldBeTrue();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Api] - Binding: JSON body binds through the serialization registry")]

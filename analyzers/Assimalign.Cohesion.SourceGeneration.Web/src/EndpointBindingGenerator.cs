@@ -1026,7 +1026,7 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
             bool required = parameter.Source == BindingSource.Body || parameter.Required;
 
             items.Add("new global::Assimalign.Cohesion.Web.EndpointParameterMetadata("
-                + SymbolDisplay.FormatLiteral(parameter.Key, quote: true)
+                + Literal(parameter.Key)
                 + ", global::Assimalign.Cohesion.Web.EndpointParameterSource." + source
                 + ", typeof(" + parameter.DescribedType + "), "
                 + (required ? "true" : "false") + ")");
@@ -1211,18 +1211,20 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
     private static void EmitRoute(StringBuilder builder, ParameterBinding parameter, int index, string indent, bool fallbackToQuery)
     {
+        string key = Literal(parameter.Key);
+
         builder.Append(indent).Append(parameter.DeclaredType).Append(" __arg").Append(index).AppendLine(";");
         builder.Append(indent).Append("object? __raw").Append(index).AppendLine(" = null;");
         builder.Append(indent).Append("if (context.TryGetRouteValues(out var __routeValues").Append(index).Append(") && __routeValues")
-            .Append(index).Append(" is not null) { __routeValues").Append(index).Append(".TryGetValue(\"").Append(parameter.Key)
-            .Append("\", out __raw").Append(index).AppendLine("); }");
+            .Append(index).Append(" is not null) { __routeValues").Append(index).Append(".TryGetValue(").Append(key)
+            .Append(", out __raw").Append(index).AppendLine("); }");
 
         if (fallbackToQuery)
         {
             // The visible template does not name the parameter, so a route value comes from a group
             // prefix when the route has one; otherwise the query string supplies it.
-            builder.Append(indent).Append("if (__raw").Append(index).Append(" is null && context.Request.Query.TryGetValue(\"")
-                .Append(parameter.Key).Append("\", out var __query").Append(index).Append(")) { __raw").Append(index)
+            builder.Append(indent).Append("if (__raw").Append(index).Append(" is null && context.Request.Query.TryGetValue(")
+                .Append(key).Append(", out var __query").Append(index).Append(")) { __raw").Append(index)
                 .Append(" = __query").Append(index).AppendLine(".Value; }");
         }
 
@@ -1312,11 +1314,15 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
 
     private static string ReadScalarSource(ParameterBinding parameter, int index) => parameter.Source switch
     {
-        BindingSource.Query => "context.Request.Query.TryGetValue(\"" + parameter.Key + "\", out var __query" + index + ") ? __query" + index + ".Value : null",
-        BindingSource.Header => "context.Request.Headers.GetValue(\"" + parameter.Key + "\")",
-        BindingSource.Form => "__form.TryGetValue(\"" + parameter.Key + "\", out var __field" + index + ") ? __field" + index + ".Value : null",
+        BindingSource.Query => "context.Request.Query.TryGetValue(" + Literal(parameter.Key) + ", out var __query" + index + ") ? __query" + index + ".Value : null",
+        BindingSource.Header => "context.Request.Headers.GetValue(" + Literal(parameter.Key) + ")",
+        BindingSource.Form => "__form.TryGetValue(" + Literal(parameter.Key) + ", out var __field" + index + ") ? __field" + index + ".Value : null",
         _ => "null"
     };
+
+    // A binding key reaches generated code only as a C# string literal. Keys come from attribute Name
+    // values, which may hold any character, so every one is escaped rather than spliced between quotes.
+    private static string Literal(string value) => SymbolDisplay.FormatLiteral(value, quote: true);
 
     private static string ParseExpression(ConversionKind conversion, string coreType, string valueExpression, string target)
     {
@@ -1331,8 +1337,8 @@ public sealed class EndpointBindingGenerator : IIncrementalGenerator
     {
         builder.Append(indent).AppendLine("{");
         builder.Append(indent).AppendLine("    global::Assimalign.Cohesion.Web.ProblemDetails __problem = global::Assimalign.Cohesion.Web.ProblemDetails.FromStatus(global::Assimalign.Cohesion.Http.HttpStatusCode.BadRequest, \"One or more binding errors occurred.\");");
-        builder.Append(indent).Append("    __problem.Extensions[\"errors\"] = new global::System.Collections.Generic.Dictionary<string, object?> { [\"")
-            .Append(key).Append("\"] = new string[] { \"").Append(detail).AppendLine("\" } };");
+        builder.Append(indent).Append("    __problem.Extensions[\"errors\"] = new global::System.Collections.Generic.Dictionary<string, object?> { [")
+            .Append(Literal(key)).Append("] = new string[] { ").Append(Literal(detail)).AppendLine(" } };");
         builder.Append(indent).AppendLine("    await context.Response.WriteProblemDetailsAsync(__problem, context.RequestCancelled);");
         builder.Append(indent).AppendLine("    return;");
         builder.Append(indent).AppendLine("}");

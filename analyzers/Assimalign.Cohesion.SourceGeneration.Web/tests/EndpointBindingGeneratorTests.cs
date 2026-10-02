@@ -160,6 +160,30 @@ public class EndpointBindingGeneratorTests
         generated.ShouldContain("context.Request.Headers.GetValue(\"X-User\")", Case.Sensitive);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: attribute-supplied names with quotes, backslashes and control characters are escaped")]
+    public void Generator_AttributeNamesWithSpecialCharacters_EmitEscapedLiterals()
+    {
+        // Act — each Name holds a character that ends or alters a C# string literal when spliced verbatim.
+        GeneratorRun run = Generate(
+            """
+            app.MapGet("/escape", ([FromQuery(Name = "a\"b")] string quoted, [FromQuery(Name = "c\\d")] int slashed, [FromHeader(Name = "X-\tTab")] string tabbed) => "ok");
+            app.MapPost("/form", ([FromForm(Name = "f\"\\\n")] string field) => "ok");
+            app.MapGroup("api/{tenant}").MapGet("items", ([FromRoute(Name = "t\"enant")] string tenant) => "ok");
+            """);
+
+        // Assert — every read, every error key and every description name is the escaped literal.
+        run.Diagnostics.ShouldBeEmpty(Describe(run.Diagnostics));
+        run.Generated.ShouldContain("context.Request.Query.TryGetValue(\"a\\\"b\", out var __query0)", Case.Sensitive);
+        run.Generated.ShouldContain("context.Request.Query.TryGetValue(\"c\\\\d\", out var __query1)", Case.Sensitive);
+        run.Generated.ShouldContain("context.Request.Headers.GetValue(\"X-\\tTab\")", Case.Sensitive);
+        run.Generated.ShouldContain("__form.TryGetValue(\"f\\\"\\\\\\n\", out var __field0)", Case.Sensitive);
+        run.Generated.ShouldContain("__routeValues0.TryGetValue(\"t\\\"enant\", out __raw0)", Case.Sensitive);
+        run.Generated.ShouldContain("[\"a\\\"b\"] = new string[] { \"The value is required.\" }", Case.Sensitive);
+        run.Generated.ShouldContain("[\"c\\\\d\"] = new string[] { \"The value could not be parsed.\" }", Case.Sensitive);
+        run.Generated.ShouldContain("new global::Assimalign.Cohesion.Web.EndpointParameterMetadata(\"X-\\tTab\"", Case.Sensitive);
+        run.CompileErrors.ShouldBeEmpty(Describe(run.CompileErrors));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.SourceGeneration] - Generator: injections bind context and cancellation directly")]
     public void Generator_Injections_EmitDirectBinding()
     {

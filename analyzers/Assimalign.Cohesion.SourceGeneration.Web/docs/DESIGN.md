@@ -82,6 +82,12 @@ Each interceptor:
 Conversions use `IParsable<T>.TryParse` / `Enum.TryParse<T>` with `InvariantCulture`, so no runtime
 binder helper is required and the emitted code carries no reflection.
 
+Every binding key reaches the emitted code as a C# string literal produced by
+`SymbolDisplay.FormatLiteral` — the route, query, header and form reads, the `errors` key of a 400,
+and the description name alike (#1172). Keys come from attribute `Name` values, which may hold any
+character; spliced between quotes, a `"` or `\` would break the build on code the application did not
+write, or bind a different key than the one declared.
+
 ## Returned Values (#1059)
 
 The return shape is read from the delegate type's `Invoke` method: `void`, `Task` and `ValueTask` are
