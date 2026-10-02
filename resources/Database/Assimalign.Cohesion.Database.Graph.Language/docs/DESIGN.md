@@ -18,8 +18,9 @@ The implemented syntax is an explicitly bounded subset. **`INSERT` is the standa
 verb. `CREATE (pattern)` is a Cohesion compatibility extension**, retained for the phase-5 examples.
 Both compile to the same `Creates` AST. Database-scoped catalog `SHOW` statements are another
 explicit Cohesion extension. Repeated colon labels and `!=` are accepted conveniences: `:A:B`
-builds the same tree as ISO `:A&B`, and mixing repeated colons with label-expression operators
-(`:A:B|C`, `:A|B:C`) is `GQL0002`. Applications seeking portable syntax should write `:A&B` and
+builds the same tree as ISO `:A&B`. The convenience repeats plain names only, so mixing repeated
+colons with label-expression operators or a wildcard (`:A:B|C`, `:A|B:C`, `:%:A`, `:A:%`) is
+`GQL0002`. Applications seeking portable syntax should write `:A&B` and
 `<>`. Database, graph, schema, and session selection statements are outside the profile: all
 evaluation stays inside the already-bound logical database.
 
@@ -85,7 +86,8 @@ every ISO directed edge in full and abbreviated form: `-[r:TYPE]->` or `->`, `<-
 bracketed relationships and edge label expressions such as `-[r:T|U]->`. The lexer reads `<->` as
 `<-` then `>`, and the parser joins the two only when they touch, so `(a)<- >(b)` and `(a)- >(b)` are
 `GQL0002`. An abbreviated edge carries no variable, label expression or property map (`-r->`,
-`-:T->`, `-{k: 1}->` are `GQL0002`). Scalar literals are null, Boolean, signed 64-bit integer,
+`-:T->`, `-IS T->`, `-{k: 1}->` are `GQL0002`; the capability scan reads the names after such a
+`:` or `IS` as labels, so neither `IS` nor a keyword-spelled label reports `COHDBL001` there). Scalar literals are null, Boolean, signed 64-bit integer,
 finite double, and single-quoted string with doubled-quote escaping. Names are case-sensitive;
 keywords are case-insensitive, and a label name may spell a keyword (`(n:Order)`, `n:A|Order`).
 Double-quoted names preserve spaces. A single optional trailing semicolon is accepted. Multiple
@@ -136,7 +138,10 @@ Pattern chains are limited to 64 relationships. Predicates are limited to 128 ne
 128 comparisons and labeled predicates together, bounding left-associated conjunction trees as well
 as parentheses. A label expression is limited to 128 levels of tree depth and 128 levels of
 parentheses (`GQL0005`), and the planner applies the same tree bound to a hand-built AST
-(`COHDBG001`), so evaluation recursion is bounded at 128. Match execution
+(`COHDBG001`), so evaluation recursion is bounded at 128. Each `|`, `&`, `!` or repeated `:` adds
+a level and a chain associates to the left, so one chain holds at most 128 labels: `:L1:...:L128`
+parses and a 129th label is `GQL0005`. Before #1139 the repeated-colon list was a flat list with no
+bound; a node pattern in parsed text now names at most 128 labels. Match execution
 also imposes a materialized-binding limit, documented in the Graph engine design. Quantified paths
 are unsupported, so cycles cannot cause unbounded repetition of a path pattern. The executor's
 trail rule permits repeated nodes but forbids repeated relationship identities within one path.

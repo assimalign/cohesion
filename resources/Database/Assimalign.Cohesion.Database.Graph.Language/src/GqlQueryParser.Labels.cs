@@ -36,7 +36,9 @@ public sealed partial class GqlQueryParser
             Error("GQL0002", "':' cannot follow an IS label expression; write IS A&B.", Current);
             return expression;
         }
-        if (_position != first + 1)
+        // The convenience starts from one plain name: '%' is also one token, so (n:%:A) needs
+        // the type test as well as the token count.
+        if (expression is not GqlLabelName || _position != first + 1)
         {
             Error("GQL0002", mixedColonMessage, Current);
             return expression;
@@ -121,7 +123,7 @@ public sealed partial class GqlQueryParser
         {
             if (++_labelNesting > maximumLabelDepth)
             {
-                Error("GQL0005", "Label-expression nesting cannot exceed 128 levels.", token);
+                Error("GQL0005", "Label-expression parentheses cannot nest more than 128 levels.", token);
                 return (new GqlLabelWildcard(), 1);
             }
             Advance();
@@ -140,13 +142,18 @@ public sealed partial class GqlQueryParser
         return (new GqlLabelWildcard(), 1);
     }
 
-    /// <summary>The depth of a node over operands of the given depths; past 128 it is <c>GQL0005</c>.</summary>
+    /// <summary>
+    /// The depth of a node over operands of the given depths; past 128 it is <c>GQL0005</c>. Every
+    /// operator adds a level, and a chain associates to the left, so one flat chain such as
+    /// <c>:A:B:...</c> or <c>A|B|...</c> holds at most 128 names.
+    /// </summary>
     private int Deepen(int left, int right, Lexeme operation)
     {
         int depth = (left > right ? left : right) + 1;
         if (depth > maximumLabelDepth && !Failed)
         {
-            Error("GQL0005", "Label-expression nesting cannot exceed 128 levels.", operation);
+            Error("GQL0005", "A label expression cannot be more than 128 levels deep; each '|', '&', '!' or repeated ':' " +
+                "adds a level, so one chain holds at most 128 labels.", operation);
         }
         return depth;
     }

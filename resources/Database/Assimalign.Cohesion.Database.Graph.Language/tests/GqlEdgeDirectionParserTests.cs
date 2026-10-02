@@ -64,8 +64,9 @@ public sealed class GqlEdgeDirectionParserTests
 
     /// <summary>
     /// '&lt;-&gt;' lexes as '&lt;-' then '&gt;' and is joined only when the two touch; an
-    /// abbreviated edge carries no variable, label expression or property map; and '&lt;--' and
-    /// '&lt;--&gt;' are not edges.
+    /// abbreviated edge carries no variable, label expression or property map, whether the label
+    /// expression follows ':' or IS (never the unsupported IS clause, and a keyword-spelled label
+    /// there is never a clause); and '&lt;--' and '&lt;--&gt;' are not edges.
     /// </summary>
     /// <param name="gql">A malformed edge.</param>
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Edges: split arrows, filled abbreviated edges and Cypher left arrows report one GQL0002")]
@@ -79,6 +80,14 @@ public sealed class GqlEdgeDirectionParserTests
     [InlineData("MATCH (a)<-:T-(b) RETURN a")]
     [InlineData("MATCH (a)<->[r](b) RETURN a")]
     [InlineData("INSERT (a)->:T(b)")]
+    [InlineData("MATCH (a)-IS T->(b) RETURN a")]
+    [InlineData("MATCH (a)<-IS T-(b) RETURN a")]
+    [InlineData("MATCH (a)->IS T(b) RETURN a")]
+    [InlineData("MATCH (a)<->IS T(b) RETURN a")]
+    [InlineData("MATCH (a)-[r]-IS T->(b) RETURN a")]
+    [InlineData("MATCH (a)-IS Order->(b) RETURN a")]
+    [InlineData("MATCH (a)-:A|Order->(b) RETURN a")]
+    [InlineData("MATCH (a)<-IS (Limit|!Skip)-(b) RETURN a")]
     [InlineData("MATCH (a)<--(b) RETURN a")]
     [InlineData("MATCH (a)<-->(b) RETURN a")]
     [InlineData("MATCH (a)<-[r]->>(b) RETURN a")]

@@ -162,6 +162,16 @@ public sealed partial class GqlQueryParser : QueryParser
                 label = LabelScan.ExpectPrimary;
                 continue;
             }
+            // ':' or IS straight after an abbreviated edge (-IS T->, <-:A|B-) is a label
+            // expression on an edge ISO gives no filler. The parser reports that (GQL0002); the
+            // scan reads the names that follow as labels, so IS is not the unsupported IS clause
+            // and -IS Order-> is not ORDER BY.
+            if (patternDepth == 0 && !inPredicateOrReturn && FollowsEdgeConnector(i) &&
+                (token.Type == TokenType.Colon || IsWordAt(i, "IS")))
+            {
+                label = LabelScan.ExpectPrimary;
+                continue;
+            }
 
             // A tilde edge right after a node pattern is undirected, which the engine cannot
             // store: ~[]~, <~[]~, ~[]~>, ~, <~ and ~> each name one construct.
@@ -387,6 +397,22 @@ public sealed partial class GqlQueryParser : QueryParser
             last = next;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Whether the token at <paramref name="index"/> follows an edge's connector at pattern depth
+    /// zero: <c>-</c>, <c>&lt;-</c>, <c>-&gt;</c>, or the <c>&gt;</c> of a touching <c>&lt;-&gt;</c>.
+    /// Outside <c>WHERE</c> and <c>RETURN</c> those tokens occur only between pattern elements.
+    /// </summary>
+    private bool FollowsEdgeConnector(int index)
+    {
+        if (index == 0) { return false; }
+        return _tokens[index - 1].Type switch
+        {
+            TokenType.Minus or TokenType.LeftArrow or TokenType.RightArrow => true,
+            TokenType.GreaterThan => index >= 2 && _tokens[index - 2].Type == TokenType.LeftArrow && Adjacent(index - 2, index - 1),
+            _ => false,
+        };
     }
 
     /// <summary>Whether two tokens touch, with no whitespace or comment between them.</summary>

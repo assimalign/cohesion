@@ -132,6 +132,10 @@ public sealed class GqlLabelExpressionParserTests
     [InlineData("MATCH (n:A|B:C) RETURN n")]
     [InlineData("MATCH (n:!A:B) RETURN n")]
     [InlineData("MATCH (n:A:!B) RETURN n")]
+    [InlineData("MATCH (n:%:A) RETURN n")]
+    [InlineData("MATCH (n:A:%) RETURN n")]
+    [InlineData("MATCH (n:%:%) RETURN n")]
+    [InlineData("INSERT (n:%:A)")]
     [InlineData("MATCH (n:A|) RETURN n")]
     [InlineData("MATCH (n:&A) RETURN n")]
     [InlineData("MATCH (n:|A) RETURN n")]
@@ -176,7 +180,14 @@ public sealed class GqlLabelExpressionParserTests
         Parse(Chain(128, "|")).Diagnostics.ShouldBeEmpty();
         Parse(Chain(129, "|")).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");
         Parse(Chain(129, "&")).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");
-        Parse(Chain(129, ":")).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");
+        // A flat :A:B list is a left-deep conjunction too, so it holds at most 128 labels, and the
+        // message says so rather than speaking of nesting the text does not have.
+        Parse(Chain(128, ":")).Diagnostics.ShouldBeEmpty();
+        var colons = Parse(Chain(129, ":")).Diagnostics.ShouldHaveSingleItem();
+        colons.Code.ShouldBe("GQL0005");
+        colons.Message.ShouldNotBeNull().ShouldContain("at most 128 labels", Case.Sensitive);
+        Parse(Parenthesized(129)).Diagnostics.ShouldHaveSingleItem().Message
+            .ShouldBe("Label-expression parentheses cannot nest more than 128 levels.");
         Parse("MATCH (n) WHERE n:" + new string('(', 129) + "A" + new string(')', 129) + " RETURN n")
             .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("GQL0005");
         // 128 negations inside 128 groups: the groups fit, the tree is 129 levels deep.
