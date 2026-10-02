@@ -35,9 +35,12 @@ internal sealed class SqlClientTestHarness : IAsyncDisposable
     public static async Task<SqlClientTestHarness> StartAsync(
         Action<SqlDatabaseServerOptions>? configureServer = null,
         Action<DatabaseConnectionSettings>? configureSettings = null,
-        ISqlClientObserver? observer = null)
+        ISqlClientObserver? observer = null,
+        Action<SqlDatabaseEngineOptions>? configureEngine = null)
     {
-        var engine = SqlDatabaseEngine.Create(new SqlDatabaseEngineOptions { EngineName = "sql-typed-client-e2e" });
+        var engineOptions = new SqlDatabaseEngineOptions { EngineName = "sql-typed-client-e2e" };
+        configureEngine?.Invoke(engineOptions);
+        var engine = SqlDatabaseEngine.Create(engineOptions);
 
         var database = await engine.CreateDatabaseAsync(DatabaseName);
 

@@ -35,6 +35,10 @@ public sealed class GraphPathsQueryRequest : QueryRequest<GqlQueryStatement>
     /// <returns>The parsed path request.</returns>
     /// <exception cref="ArgumentException">The statement text is empty.</exception>
     /// <exception cref="DatabaseParseException">The statement has an error diagnostic.</exception>
+    /// <exception cref="DatabaseException">
+    /// The text nests deeper than the calling thread's stack lets the parser follow:
+    /// <c>COHDBG008</c>, statement too complex.
+    /// </exception>
     public static GraphPathsQueryRequest FromGql(string gql, IReadOnlyDictionary<string, object?>? parameters = null)
         => new(GraphQueryRequest.FromGql(gql, parameters).Statement, parameters);
 }

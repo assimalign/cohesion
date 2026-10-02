@@ -196,7 +196,7 @@ internal sealed class SqlSchemaProvisioner
                     constraint.Name,
                     constraint.Kind == SqlCatalogConstraintKind.Reference ? CompiledSchemaConstraintKind.Reference : CompiledSchemaConstraintKind.Check,
                     constraint.Columns, constraint.ReferencedTable, constraint.ReferencedColumns,
-                    constraint.CheckExpression is null ? null : new CompiledSchemaExpression(constraint.CheckExpression),
+                    constraint.CheckExpression is null ? null : new CompiledSchemaExpression(DeclaredCheckText(desiredTable, constraint)),
                     constraint.OnDelete == SqlCatalogReferentialAction.Cascade ? CompiledSchemaReferentialAction.Cascade : CompiledSchemaReferentialAction.Restrict)).ToArray()));
         }
 
@@ -261,7 +261,7 @@ internal sealed class SqlSchemaProvisioner
                     !string.Equals(persisted.ReferencedTable, constraint.ReferencedObject, StringComparison.OrdinalIgnoreCase) ||
                     (persisted.Kind == SqlCatalogConstraintKind.Reference && !string.Equals(persisted.ReferencedSchema, "dbo", StringComparison.OrdinalIgnoreCase)) ||
                     (persisted.OnDelete == SqlCatalogReferentialAction.Cascade) != (constraint.OnDelete == CompiledSchemaReferentialAction.Cascade) ||
-                    !string.Equals(persisted.CheckExpression, constraint.Expression?.CanonicalText, StringComparison.Ordinal))
+                    !string.Equals(persisted.CheckExpression, CanonicalCheck(constraint.Expression?.CanonicalText), StringComparison.Ordinal))
                 {
                     return false;
                 }
@@ -289,6 +289,46 @@ internal sealed class SqlSchemaProvisioner
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// The catalog stores a CHECK as the canonical text of its parsed predicate, while a compiled
+    /// schema carries the predicate as its author wrote it. Comparing the canonical forms keeps a
+    /// re-applied schema a no-op however its predicates are spelled. Text that does not parse
+    /// has no canonical form and therefore matches nothing.
+    /// </summary>
+    private static string? CanonicalCheck(string? declared)
+    {
+        if (declared is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return SqlPersistedExpression.Canonicalize(SqlPersistedExpression.Load(declared, "Compiled CHECK predicate"), "Compiled CHECK predicate");
+        }
+        catch (DatabaseException)
+        {
+            // A thread out of stack is not text that does not parse: its
+            // InsufficientExecutionStackException propagates instead of reading as a changed predicate.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reconstructs a live CHECK's compiled text: the desired schema's own spelling when it is
+    /// the same predicate, so reconciliation plans no change for it, and otherwise the canonical
+    /// text the catalog holds.
+    /// </summary>
+    private static string DeclaredCheckText(CompiledSchemaTable? desiredTable, SqlCatalogConstraint constraint)
+    {
+        var declared = desiredTable?.Constraints.FirstOrDefault(candidate =>
+            candidate.Kind == CompiledSchemaConstraintKind.Check &&
+            string.Equals(candidate.Name, constraint.Name, StringComparison.OrdinalIgnoreCase))?.Expression?.CanonicalText;
+        return declared is not null && string.Equals(CanonicalCheck(declared), constraint.CheckExpression, StringComparison.Ordinal)
+            ? declared
+            : constraint.CheckExpression!;
     }
 
     private void ValidateCatalogOwnership(SqlCompiledSchema schema)

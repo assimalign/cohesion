@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -22,8 +23,14 @@ internal sealed partial class SqlPlanner
     /// </summary>
     internal const string DefaultSchema = "dbo";
 
+    /// <summary>The dialect's name for a row of an INSERT's table value constructor, in diagnostics.</summary>
+    private const string insertValuesClause = "INSERT ... VALUES";
+
     private readonly ISqlCatalog _catalog;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
+
+    /// <summary>Backs <see cref="ScopelessEvaluator"/>.</summary>
+    private SqlExpressionEvaluator? _scopelessEvaluator;
 
     internal SqlPlanner(ISqlCatalog catalog, IReadOnlyDictionary<string, object?>? parameters)
     {
@@ -34,6 +41,7 @@ internal sealed partial class SqlPlanner
     internal SqlPlan Plan(SqlQueryExpression expression)
     {
         SqlSystemViews.EnsureReadOnly(expression);
+        ValidateFunctionCalls(expression);
         return expression switch
         {
             SqlSelectExpression select => PlanSelect(select),
@@ -334,10 +342,15 @@ internal sealed partial class SqlPlanner
         SqlExpression expression,
         Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates)
     {
-        if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.And } conjunction)
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlLogicalExpression { Operator: SqlLogicalOperator.And } conjunction)
         {
-            CollectSargablePredicates(table, conjunction.Left, predicates);
-            CollectSargablePredicates(table, conjunction.Right, predicates);
+            // Every term of the chain at one level; a parenthesized conjunction among them is a
+            // nested chain whose terms are just as mandatory.
+            foreach (var term in conjunction.Operands)
+            {
+                CollectSargablePredicates(table, term, predicates);
+            }
             return;
         }
 
@@ -497,6 +510,7 @@ internal sealed partial class SqlPlanner
 
     private static bool ReferencesAnyColumn(SqlExpression expression)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is SqlColumnReferenceExpression)
         {
             return true;
@@ -549,9 +563,131 @@ internal sealed partial class SqlPlanner
             }
         }
 
+        // A VALUES row is evaluated once, against no row, before anything is written; every
+        // row is checked here so a bad expression in a later row fails before the first one
+        // is inserted (#1165).
+        foreach (var row in insert.Values!)
+        {
+            foreach (var value in row)
+            {
+                ValidateScopelessExpression(value, insertValuesClause, "INSERT ... SELECT to read values from a table");
+            }
+        }
+
         return new SqlInsertPlan(table, targetOrdinals, insert.Values!);
     }
 
+    /// <summary>
+    /// Validates an expression of a clause that has no columns in scope: a row of
+    /// <c>INSERT ... VALUES</c> (ISO SQL's table value constructor of an INSERT, whose
+    /// expressions may not reference a column), and a <c>LIMIT</c> or <c>OFFSET</c> count. Such
+    /// an expression is evaluated against an empty row, so a column reference has nothing to
+    /// bind to: before #1165 a VALUES reference to a target column resolved against the table and
+    /// then indexed the empty row, and the <see cref="IndexOutOfRangeException"/> ended the wire
+    /// session with <c>Internal</c>.
+    /// </summary>
+    /// <remarks>
+    /// The column check runs first, so a reference anywhere in the expression, including under an
+    /// aggregate, a sign or a CAST, reports this rule rather than another error.
+    /// </remarks>
+    /// <param name="expression">The expression to validate.</param>
+    /// <param name="clause">The clause, as diagnostics name it.</param>
+    /// <param name="alternative">The clause's own way to read table columns, or null when it has none.</param>
+    /// <exception cref="SqlEvaluationException">
+    /// The expression references a column (<c>COHSQLE005</c>), or signs an operand the plan
+    /// already knows is not a number (<c>COHSQLE003</c>).
+    /// </exception>
+    /// <exception cref="DatabaseException">
+    /// The expression contains an aggregate, <c>*</c>, a subquery or a niladic datetime function.
+    /// </exception>
+    private void ValidateScopelessExpression(SqlExpression expression, string clause, string? alternative = null)
+    {
+        RejectColumnReferences(expression, clause, alternative);
+        if (ContainsAggregate(expression))
+        {
+            throw new DatabaseException($"Aggregate functions are not allowed in {clause}.");
+        }
+        if (ContainsStar(expression))
+        {
+            throw new DatabaseException($"'*' is not allowed in {clause}.");
+        }
+
+        ValidateExpression(expression, ScopelessEvaluator);
+    }
+
+    /// <summary>
+    /// The empty column scope that VALUES rows and LIMIT/OFFSET counts bind and evaluate against,
+    /// created on first use and shared by the statement.
+    /// </summary>
+    private SqlExpressionEvaluator ScopelessEvaluator => _scopelessEvaluator ??=
+        new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation);
+
+    /// <summary>Whether <c>*</c> appears anywhere in an expression, outside a subquery.</summary>
+    /// <param name="expression">The expression to search.</param>
+    /// <returns><see langword="true"/> when the expression contains <c>*</c>.</returns>
+    internal static bool ContainsStar(SqlExpression expression)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return expression is SqlStarExpression || Children(expression).Any(ContainsStar);
+    }
+
+    /// <summary>Rejects the first column reference in an expression, outside a subquery.</summary>
+    /// <remarks>
+    /// The parser reads a bare niladic datetime function (<c>CURRENT_DATE</c>, <c>CURRENT_TIME</c>,
+    /// <c>CURRENT_TIMESTAMP</c>) as a name, because it takes no parentheses. Those names are the
+    /// dialect's recognized functions, not columns, so an unqualified reference spelled as one
+    /// reports the function as unsupported, the message a call such as <c>NOW()</c> reports, rather
+    /// than advising the caller to replace a column.
+    /// </remarks>
+    /// <param name="expression">The expression to search.</param>
+    /// <param name="clause">The clause, as diagnostics name it.</param>
+    /// <param name="alternative">The clause's own way to read table columns, or null when it has none.</param>
+    /// <exception cref="SqlEvaluationException">The expression references a column (<c>COHSQLE005</c>).</exception>
+    /// <exception cref="DatabaseException">The expression uses a niladic datetime function, which does not execute yet.</exception>
+    internal static void RejectColumnReferences(SqlExpression expression, string clause, string? alternative)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlColumnReferenceExpression column)
+        {
+            if (column is { TableAlias: null, SchemaName: null } && IsNiladicDateTimeFunction(column.ColumnName))
+            {
+                throw new DatabaseException($"Function '{column.ColumnName}' is not supported by the executor yet.");
+            }
+
+            string name = string.Join('.', new[] { column.SchemaName, column.TableAlias, column.ColumnName }
+                .Where(part => part is not null));
+            throw SqlEvaluationException.ColumnReferenceNotAllowed(name, clause, alternative);
+        }
+
+        foreach (var child in Children(expression))
+        {
+            RejectColumnReferences(child, clause, alternative);
+        }
+    }
+
+    /// <summary>
+    /// Whether a name is one of the dialect's niladic datetime functions, which are written
+    /// without parentheses and so reach the planner as unqualified names.
+    /// </summary>
+    /// <param name="name">The unqualified name.</param>
+    /// <returns><see langword="true"/> for <c>CURRENT_DATE</c>, <c>CURRENT_TIME</c> and <c>CURRENT_TIMESTAMP</c>.</returns>
+    private static bool IsNiladicDateTimeFunction(string name)
+        => string.Equals(name, "CURRENT_DATE", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, "CURRENT_TIME", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, "CURRENT_TIMESTAMP", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Binds an UPDATE: each assignment's target column and value, and the row filter.</summary>
+    /// <remarks>
+    /// UPDATE writes one row at a time, so no group exists for an aggregate to summarize: an
+    /// aggregate in an assignment or the WHERE filter fails while planning, as PostgreSQL's parse
+    /// analysis rejects one in <c>EXPR_KIND_UPDATE_SOURCE</c> and <c>EXPR_KIND_WHERE</c>
+    /// (<c>check_agglevels_and_constraints</c>, <c>src/backend/parser/parse_agg.c</c>, SQLSTATE
+    /// 42803). Without the check the statement succeeded over an empty table and failed per row
+    /// over a populated one. The search treats a subquery as opaque, since an aggregate there
+    /// summarizes the subquery's own rows; the dialect admits no subquery in UPDATE or DELETE yet
+    /// (<c>COHDBL001</c> at parse time).
+    /// </remarks>
+    /// <exception cref="DatabaseException">An assignment or the filter contains an aggregate.</exception>
     private SqlUpdatePlan PlanUpdate(SqlUpdateExpression update)
     {
         var table = ResolveTable(update.Table);
@@ -561,28 +697,51 @@ internal sealed partial class SqlPlanner
         foreach (var assignment in update.Assignments)
         {
             int ordinal = FindColumnOrdinal(table, assignment.ColumnName);
+            if (ContainsAggregate(assignment.Value))
+            {
+                throw new DatabaseException("Aggregate functions are not allowed in UPDATE SET.");
+            }
             ValidateExpression(assignment.Value, evaluator);
             assignments.Add((ordinal, assignment.Value));
         }
 
         if (update.Where is not null)
         {
+            RejectAggregateInDmlWhere(update.Where);
             ValidateExpression(update.Where, evaluator);
         }
 
         return new SqlUpdatePlan(table, assignments, update.Where);
     }
 
+    /// <summary>Binds a DELETE's row filter.</summary>
+    /// <remarks>An aggregate in the filter fails while planning, as in UPDATE (see <see cref="PlanUpdate"/>).</remarks>
+    /// <exception cref="DatabaseException">The filter contains an aggregate.</exception>
     private SqlDeletePlan PlanDelete(SqlDeleteExpression delete)
     {
         var table = ResolveTable(delete.Table);
 
         if (delete.Where is not null)
         {
+            RejectAggregateInDmlWhere(delete.Where);
             ValidateExpression(delete.Where, new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation));
         }
 
         return new SqlDeletePlan(table, delete.Where);
+    }
+
+    /// <summary>
+    /// Rejects an aggregate in an UPDATE or DELETE filter. Unlike a SELECT's WHERE, the message
+    /// suggests no HAVING, which these statements do not have.
+    /// </summary>
+    /// <param name="where">The statement's WHERE filter.</param>
+    /// <exception cref="DatabaseException">The filter contains an aggregate.</exception>
+    private static void RejectAggregateInDmlWhere(SqlExpression where)
+    {
+        if (ContainsAggregate(where))
+        {
+            throw new DatabaseException("Aggregate functions are not allowed in WHERE.");
+        }
     }
 
     private SqlCreateTablePlan PlanCreateTable(SqlCreateTableExpression create)
@@ -595,7 +754,7 @@ internal sealed partial class SqlPlanner
         {
             var typeInfo = ResolveTypeName(definition.DataType, definition.ColumnName);
 
-            string? defaultLiteral = ResolveDefaultLiteral(definition);
+            string? defaultLiteral = ResolveDefaultLiteral(definition, $"{schema}.{create.Table.TableName}");
 
             // PRIMARY KEY columns are implicitly NOT NULL.
             bool nullable = definition.IsNullable && !definition.IsPrimaryKey;
@@ -629,11 +788,19 @@ internal sealed partial class SqlPlanner
         return new SqlCreateTablePlan(schema, create.Table.TableName, columns, primaryKey, create.IfNotExists, create.Constraints);
     }
 
-    /// <summary>Rejects unevaluated schema expressions before a DDL plan can mutate the catalog.</summary>
-    private static string? ResolveDefaultLiteral(SqlColumnDefinition definition) => definition.DefaultValue switch
+    /// <summary>
+    /// Rejects unevaluated schema expressions before a DDL plan can mutate the catalog, and
+    /// renders a literal DEFAULT as the canonical SQL text the catalog stores.
+    /// </summary>
+    /// <param name="definition">The parsed column definition.</param>
+    /// <param name="table">The schema-qualified table name, for diagnostics.</param>
+    /// <returns>The canonical DEFAULT text, or null when the column declares none (or <c>DEFAULT NULL</c>).</returns>
+    private static string? ResolveDefaultLiteral(SqlColumnDefinition definition, string table) => definition.DefaultValue switch
     {
         null => null,
-        SqlLiteralExpression literal => literal.LiteralType == SqlLiteralType.Null ? null : literal.Value,
+        SqlLiteralExpression literal => literal.LiteralType == SqlLiteralType.Null
+            ? null
+            : SqlPersistedExpression.Canonicalize(literal, $"DEFAULT of column '{definition.ColumnName}' on table '{table}'"),
         _ => throw new DatabaseException(
             $"Column '{definition.ColumnName}': only literal DEFAULT values are supported."),
     };
@@ -710,7 +877,7 @@ internal sealed partial class SqlPlanner
                     add.Column.ColumnName,
                     ResolveTypeName(add.Column.DataType, add.Column.ColumnName),
                     add.Column.IsNullable && !add.Column.IsPrimaryKey,
-                    ResolveDefaultLiteral(add.Column),
+                    ResolveDefaultLiteral(add.Column, $"{schema}.{alter.Table.TableName}"),
                     ResolveColumnCollation(add.Column, ResolveTypeName(add.Column.DataType, add.Column.ColumnName))),
                 add.Column.Constraints),
             SqlAlterDropColumnAction drop => new SqlDropColumnPlan(schema, alter.Table.TableName, drop.ColumnName),
@@ -759,18 +926,22 @@ internal sealed partial class SqlPlanner
         if (open >= 0)
         {
             name = dataType[..open];
-            string arguments = dataType[(open + 1)..].TrimEnd(')');
-            var parts = arguments.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            var parts = dataType[(open + 1)..].TrimEnd(')').Split(',', StringSplitOptions.TrimEntries);
 
-            if (parts.Length > 0)
+            // The parser normalizes the arguments; this guards the planner seam so a
+            // malformed argument is a statement error, never a raw FormatException that
+            // ends a wire session.
+            int parsedSecond = 0;
+            if (parts.Length > 2 ||
+                !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int parsedFirst) ||
+                (parts.Length == 2 && !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out parsedSecond)))
             {
-                first = int.Parse(parts[0], CultureInfo.InvariantCulture);
+                throw new DatabaseException(
+                    $"Column '{columnName}': type arguments in '{dataType}' must be one or two unsigned integers.");
             }
 
-            if (parts.Length > 1)
-            {
-                second = int.Parse(parts[1], CultureInfo.InvariantCulture);
-            }
+            first = parsedFirst;
+            second = parts.Length == 2 ? parsedSecond : null;
         }
 
         // A second argument is always a scale (DECIMAL(p, s)); SqlTypeNames moves a
@@ -790,8 +961,9 @@ internal sealed partial class SqlPlanner
             return null;
         }
 
-        object? value = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation)
-            .Evaluate(expression, Array.Empty<object?>());
+        // A count has no columns in scope; a reference fails here as COHSQLE005 (#1165).
+        ValidateScopelessExpression(expression, clause);
+        object? value = ScopelessEvaluator.Evaluate(expression, Array.Empty<object?>());
 
         return value switch
         {
@@ -820,6 +992,7 @@ internal sealed partial class SqlPlanner
         IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries = null,
         IReadOnlyDictionary<SqlExpression, int>? boundValues = null)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (boundValues is not null && boundValues.ContainsKey(expression))
         {
             return;
@@ -839,6 +1012,20 @@ internal sealed partial class SqlPlanner
                 break;
             case SqlInExpression { Values: null } when !isBound:
                 throw new DatabaseException("COHDBL001: IN subqueries are supported only in SELECT expressions and INSERT ... SELECT.");
+            case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus } sign
+                when StaticOperandType(sign.Operand, evaluator, boundSubqueries, boundValues) is { } type && !IsNumeric(type):
+                // A sign over a value the plan already knows is not a number fails here, the same
+                // over an empty table as over a populated one; the evaluator raises the same code
+                // for an operand only a row's value reveals.
+                throw SqlEvaluationException.InvalidOperandType(
+                    sign.Operator == SqlUnaryOperator.Plus ? "+" : "-", type.ToString());
+            case SqlUnaryExpression { Operator: SqlUnaryOperator.Negate or SqlUnaryOperator.Plus, Operand: SqlParameterExpression parameter } sign
+                when evaluator.TryGetParameterValue(parameter, out object? value) && value is not null &&
+                    !SqlExpressionEvaluator.IsSignOperand(sign.Operator, value):
+                // A parameter's value is known before any row is read, so its type is checked here
+                // too: the statement fails whether or not the table has rows.
+                throw SqlEvaluationException.InvalidOperandType(
+                    sign.Operator == SqlUnaryOperator.Plus ? "+" : "-", SqlExpressionEvaluator.OperandTypeName(value));
         }
 
         // A bound subquery is its own scope, already planned and validated on its own terms.
@@ -853,10 +1040,50 @@ internal sealed partial class SqlPlanner
         }
     }
 
+    /// <summary>
+    /// The type a sign's operand has whatever row it is evaluated on, when the plan can tell:
+    /// a string or Boolean literal, a column, a COLLATE or CAST, a predicate, a concatenation,
+    /// <c>UPPER</c>/<c>LOWER</c>, or a bound scalar subquery. Null when only the value can tell —
+    /// a parameter (which <see cref="ValidateExpression"/> checks against its supplied value
+    /// instead), arithmetic, other calls, CASE, NULL — or when the node is an ORDER BY value
+    /// bound to an output column.
+    /// </summary>
+    private static DatabaseType? StaticOperandType(SqlExpression expression, SqlExpressionEvaluator evaluator,
+        IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries, IReadOnlyDictionary<SqlExpression, int>? boundValues)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (boundValues is not null && boundValues.ContainsKey(expression))
+        {
+            return null;
+        }
+
+        return expression switch
+        {
+            SqlLiteralExpression { LiteralType: SqlLiteralType.String } => DatabaseType.String,
+            SqlLiteralExpression { LiteralType: SqlLiteralType.Boolean } => DatabaseType.Boolean,
+            SqlColumnReferenceExpression column => evaluator.ResolveColumnType(column),
+            SqlCollateExpression collate => StaticOperandType(collate.Operand, evaluator, boundSubqueries, boundValues),
+            SqlCastExpression { TargetTypeInfo: { } target } => target.Type,
+            SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
+            SqlLogicalExpression => DatabaseType.Boolean,
+            SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => DatabaseType.String,
+            SqlBinaryExpression { Operator: not (SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
+                or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo) } => DatabaseType.Boolean,
+            SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
+            SqlSubqueryExpression when boundSubqueries is not null && boundSubqueries.TryGetValue(expression, out var type) => type,
+            SqlFunctionCallExpression call when SqlFunctionSignatures.FunctionOf(call) is SqlBuiltinFunction.Upper or SqlBuiltinFunction.Lower
+                => DatabaseType.String,
+            _ => null,
+        };
+    }
+
+    private static bool IsNumeric(DatabaseType type) => type is DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32
+        or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal or DatabaseType.Null;
+
     private static bool ContainsAggregate(SqlExpression expression)
     {
-        if (expression is SqlFunctionCallExpression call &&
-            call.FunctionName.ToUpperInvariant() is "COUNT" or "SUM" or "AVG" or "MIN" or "MAX")
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlFunctionCallExpression call && SqlFunctionSignatures.IsAggregate(call.FunctionName))
         {
             return true;
         }
@@ -866,14 +1093,37 @@ internal sealed partial class SqlPlanner
 
     /// <summary>Finds conversions even when wrapped in an unsupported DDL default expression.</summary>
     private static bool ContainsCast(SqlExpression expression)
-        => expression is SqlCastExpression || Children(expression).Any(ContainsCast);
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        return expression is SqlCastExpression || Children(expression).Any(ContainsCast);
+    }
 
+    /// <summary>
+    /// The operand nodes of an expression, in source order; a subquery's own query is opaque.
+    /// </summary>
+    /// <remarks>
+    /// Every walker that recurses through these children calls
+    /// <see cref="RuntimeHelpers.EnsureSufficientExecutionStack"/> before it descends (#1151). A
+    /// parsed tree is at most the engine's configured expression nesting limit deep (256 levels
+    /// by default, at most 4096), so the check fails for a statement within a high limit that the
+    /// thread has too little stack for, or on a thread created with a small stack, and the
+    /// statement then fails with <c>COHSQLE004</c> instead of the process overflowing the stack.
+    /// An <c>AND</c> or <c>OR</c> chain yields all of its terms at one level, so a walker iterates
+    /// a chain of any length instead of recursing once per term. A new walker follows the same
+    /// rule.
+    /// </remarks>
     internal static IEnumerable<SqlExpression> Children(SqlExpression expression)
     {
         switch (expression)
         {
             case SqlCollateExpression collate:
                 yield return collate.Operand;
+                break;
+            case SqlLogicalExpression logical:
+                foreach (var operand in logical.Operands)
+                {
+                    yield return operand;
+                }
                 break;
             case SqlBinaryExpression binary:
                 yield return binary.Left;

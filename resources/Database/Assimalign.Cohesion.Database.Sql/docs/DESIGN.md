@@ -221,7 +221,8 @@ documented by PostgreSQL's implementation of the standard.
 `COLUMNS.DATA_TYPE` reports the canonical SQL name of the catalog's shared type
 identity. The catalog does not preserve the original alias spelling (`INT`
 versus `INTEGER`, for example), so this surface cannot reconstruct it. Declared
-length, precision, scale, nullability, and default text come from catalog fields;
+length, precision, scale, nullability, and default text come from catalog fields
+(the default is the stored canonical literal, reported as is);
 unknown or inapplicable facts are null, including an unknown character octet
 bound. Cohesion types without an ISO spelling, such as `JSONB`, retain their
 documented dialect name.
@@ -278,6 +279,66 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   shape). That promise paid out with index adoption: the IR gained exactly one
   node family (`SqlAccessPath` on the SELECT plan — scan | index seek) and the
   executor seam did not move.
+- **Unknown functions and wrong argument counts fail before binding (#1068,
+  #1189).** `SqlPlanner.Plan` walks the whole statement
+  (`ValidateFunctionCalls`), subqueries, DML values, `CHECK` predicates and
+  `DEFAULT`s included, and resolves every call before it binds the catalog or
+  reads a row: a name outside `SqlLanguageProfile.Instance.Functions` is
+  `Unknown function '<name>'.`, and a call whose arguments its function's
+  signature does not accept fails with `SqlEvaluationException` `COHSQLE006`. The
+  evaluator used to discover an unknown name per row, so the same statement failed
+  on a populated table and succeeded on an empty one, and it evaluated an argument
+  only when a call had exactly one, so `ABS(1, 2)`, `UPPER()` and `COALESCE()`
+  returned NULL and a CHECK built on one never fired. The walk resolves a call's
+  arguments before the call itself, as PostgreSQL's parse analysis does
+  (`transformFuncCall` transforms the arguments and then `ParseFuncOrColumn`
+  resolves the function, `src/backend/parser/parse_expr.c`), so the innermost bad
+  call is the one reported. A declared name that does not execute yet (`NULLIF`,
+  `TRIM`, ...) passes this check and still fails during evaluation; #1103 rejects
+  those at parse time and gives planner rejections structured codes.
+- **One table of function signatures (#1189).** `SqlFunctionSignatures` holds one
+  `SqlFunctionSignature` per executable function: name, scalar or aggregate, the
+  fewest and most arguments a call may pass, whether `*` is accepted (only
+  `COUNT`), and the call forms a diagnostic shows. Its readers are the planner walk
+  above; the evaluator, which resolves each call against it again before computing
+  it (a tree that reaches evaluation unplanned gets the same `COHSQLE006`) and
+  dispatches on the entry instead of comparing upper-cased names per row; the
+  grouping planner and aggregate detection; CHECK validation, which admits exactly
+  the table's scalars; and persisted-definition binding (below). The rule follows
+  PostgreSQL's function resolution: `func_get_detail` keeps only candidates whose
+  argument count matches, and a call none accepts is `function ... does not exist`,
+  SQLSTATE 42883, with the detail "No function of that name accepts the given number
+  of arguments" (`src/backend/parser/parse_func.c`, `ParseFuncOrColumn` and
+  `func_lookup_failure_details`). `COALESCE` takes one or more operands, as
+  PostgreSQL's grammar does (`COALESCE '(' expr_list ')'` in `gram.y`), where ISO
+  requires two; the dialect records the deviation. The T1 functions of #1120 are
+  new entries, and their argument-type rules, result types, NULL rule and
+  determinism new members of `SqlFunctionSignature`, not a second list. Until those
+  members exist, each reader that behaves per function finds the function through
+  the table (`SqlFunctionSignatures.FunctionOf`, or the signature `Resolve` returns)
+  and switches on `SqlBuiltinFunction`; none compares the written name against a
+  literal. Those switches are the evaluator's dispatch, which evaluates inside each
+  function's case only the arguments that function's signature admits; the grouping
+  planner's result types and its SUM/AVG numeric-argument rule; the static operand
+  type; CHECK's Boolean `COALESCE` rule; and the grouping executor's accumulators and
+  `COUNT`'s non-nullable result, where each aggregate of a `SqlGroupPlan` carries
+  the signature the planner bound it to (`SqlGroupAggregate`) and an aggregate entry
+  without an accumulator fails when the plan executes rather than counting rows.
+  #1120 moves those arms into signature members. The SQL parser's own aggregate list
+  (`SqlQueryParser.IsAggregateFunction`, Sql.Language, which cannot read this
+  engine's internal table) is the one name list outside it. The table is a frozen
+  dictionary over a fixed array: no reflection, no runtime code, a case-insensitive
+  lookup that does not allocate.
+- **Aggregates in UPDATE and DELETE.** `PlanUpdate` and `PlanDelete` reject an
+  aggregate in an assignment or a `WHERE` filter while planning (`Aggregate
+  functions are not allowed in UPDATE SET.` / `... in WHERE.`), as `PlanSelectCore`
+  does for a SELECT's `WHERE` and `JOIN ... ON`, and as PostgreSQL's
+  `check_agglevels_and_constraints` does for `EXPR_KIND_UPDATE_SOURCE` and
+  `EXPR_KIND_WHERE` (`src/backend/parser/parse_agg.c`, SQLSTATE 42803). The statements
+  write one row at a time, so no group exists for the aggregate to summarize; without
+  the check they succeeded over an empty table and failed per row, uncoded, over a
+  populated one. The arity walk runs first, so a wrong count still reports
+  `COHSQLE006`.
 - **Access-path selection (rule-based; no cost model — the MVP planner
   contract).** The planner flattens the WHERE clause's top-level `AND`
   conjuncts into per-column sargable predicates — `column op comparand` where
@@ -312,8 +373,8 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   proof surface — the planner suite asserts an indexed equality seek examines
   O(matches) records while the equivalent scan examines O(table).
 - **Row format: MVCC stamps + object-id-prefixed tuple, in per-object page
-  chains (record-space format version 3).** Every data record is
-  `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
+  chains (since record-space format version 3; the current format is 5).**
+  Every data record is `[writer u64][deleter u64]` — a fixed 16-byte version-stamp header, the
   B+Tree leaf-entry design adopted for the record space — followed by the
   shared tuple codec payload (#854): the owning table's object id, then one
   self-describing component per column. Why a fixed binary prefix and not
@@ -328,7 +389,7 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   pages** — O(table), not O(database) — and `DROP TABLE` releases the
   table's whole chain back to the allocator (transactionally, inside the
   statement bracket; the record-byte layout is unchanged from version 2, and
-  the object-id prefix stays as defense in depth and upgrade detection).
+  the object-id prefix stays as defense in depth).
 - **Scans are snapshot-visible.** Every scan filters through the statement's
   snapshot: a version is visible when `IsVisible(writer)` and its deleter — when
   stamped — is *not* admitted (a visible tombstone reads as absence). Updates
@@ -340,26 +401,66 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   images. Deletes tombstone (older snapshots keep the row until the purge
   worker reclaims below every live horizon). DDL row rewrites (DROP COLUMN)
   walk *every* stored version, visible or not, preserving stamps.
-- **Migration rule (record-space format version, catalog-persisted).** The
-  catalog stores the record-space format version (kind-4 record): 1 = the
-  pre-MVCC unstamped layout, 2 = stamped rows in the shared page stream, 3 =
-  stamped rows in per-object page chains. Older databases upgrade in place at
-  open, stage by stage, marker written after both stages so each is
-  idempotent across the two-storage crash window: (1 → 2) every record gains
-  a zeroed stamp header (writer 0 = committed bootstrap data, visible to
-  every snapshot) under one storage transaction — idempotent because a
-  version-1 record always begins with the tuple codec's nonzero Int64 tag
-  byte, so an already-stamped record is provably upgraded and skipped on
-  replay; (2 → 3) rows relocate from the shared (owner-zero) pages into their
-  table's chain, stamps preserved verbatim (visibility unchanged), the
-  emptied shared pages released, and rows whose object id no longer exists in
-  the catalog (residue of pre-chain DROP TABLEs) dropped rather than moved —
-  idempotent because the stage reads only owner-zero pages and a moved record
-  lives on an owner-tagged page. Relocation changes row locations, which is
-  safe at upgrade time: nothing persistent references locations (the
-  version-store ledger dies with the process; index entries reference
-  locations only from format 3 onward, and a version-2 database cannot have
-  SQL indexes).
+- **Format rule (data-storage format version, catalog-persisted): exactly one
+  format, no upgrade path.** The catalog stores the format version of the whole
+  data file set, rows and the index trees that ride it (a kind-4 record for
+  versions 1–3, a kind-8 record from version 4). The engine reads and writes
+  format 5 only: stamped rows in per-object page chains whose index keys use the
+  temporal identity encoding (#1099, below), in index trees of B-tree page format
+  2, which order entries by key, entry reference and writer (#1194,
+  `Database.Indexing` DESIGN). The earlier versions are history —
+  1 = the pre-MVCC unstamped layout, 2 = stamped rows in the shared page stream,
+  3 = per-object chains with the `DateTimeKind` and offset inside temporal keys
+  (written through 10.0.0-preview.1), 4 = format 5's rows over index trees of
+  B-tree page format 1, ordered by key alone (owner decision of 2026-10-02: the
+  page format change takes no upgrade path either). `CreateDatabaseAsync` writes
+  the format-5 marker as soon as the catalog opens, and first checks that the catalog is new
+  (no marker, no tables): `ISqlStorageStrategy.CreateStorage` must refuse
+  existing storage, and a strategy that reopened it instead would otherwise get
+  an older catalog declared current. `OpenDatabaseAsync` refuses a database on
+  any other version, older or newer, with a `DatabaseException` (the internal
+  `SqlDataStorageFormatException`) that names the database, the version found
+  and the version supported. For an older database it says to export the data
+  with the engine that wrote it, drop the database and create it again (create
+  refuses a name whose storage exists). Version 1 means no marker: every
+  released engine stamped one at creation, so an unmarked catalog is a creation
+  interrupted before the stamp (or a pre-release database), and the message says
+  so. **The gate reads the catalog alone.** `OpenDatabaseAsync` opens the
+  catalog file set, loads the catalog and checks the marker before it opens the
+  data file set, so a refused open never opens the data files: no crash replay
+  into them, no journal or backup file created, no close. A database without a
+  catalog storage (an interrupted creation, or one older than the catalog's own
+  file set) is refused before any file is opened, never adopted with an empty
+  catalog. The catalog file set itself gets only what opening any storage does.
+  Cleanly closed, it is left byte-identical, because a storage closed with
+  nothing written through it writes nothing (Storage DESIGN.md). Crashed, it
+  gets the storage layer's physical redo/undo, which is format-agnostic and
+  idempotent, and keeps its journal. That matters because the old engine must
+  still be able to open the database to export its data, including running its
+  own transaction recovery over journals the refused open did not touch.
+  `SqlDataStorageFormatTests` pins both cases: clean images stay byte-identical,
+  and a crashed format-3 image keeps its data files and catalog journal and
+  still recovers (its uncommitted writer scrubbed) once its own engine opens it.
+  **Decision (owner, 2026-10-01): no upgrade path while the line is
+  pre-release.** #1099's first implementation rebuilt temporal indexes on open
+  and carried UNIQUE duplicates the new identity exposed; it was withdrawn
+  together with the earlier in-place stages (1 → 2 stamping, 2 → 3 chain
+  relocation), and upgrades are designed fresh in #1152 (in-place or offline,
+  duplicate handling, crash safety, progress). **Downgrade fence:** engines
+  before format 4 never compared the marker against a newer version, so the
+  format-4 marker is a record kind their catalogs refuse to load; they fail the
+  open instead of writing format-3 keys into a format-4 database. Format-4
+  engines compare the marker for equality, so they refuse a format-5 database as
+  written by a newer engine. **Behind the gate, the index manager checks the trees
+  themselves (#1194).** `Database.Indexing` owns the B-tree page format and checks
+  every tree's root page when `SqlDatabaseInstance` attaches the catalog's
+  registrations, before recovery's scrub or checkpoint writes anything. A marker
+  that does not describe its trees — a damaged root, or pages another engine build
+  wrote — fails the open with `SqlDataStorageFormatException` ("uses data-storage
+  format 5, but one of its index trees does not: COHDBI001: …", the index manager's
+  `IndexFormatException` as its inner exception), and the files are left
+  byte-identical. `SqlDataStorageFormatTests` pins both refusals with real format-1
+  index pages.
 - **Schema evolution (#1023):** `ADD COLUMN` validates the literal default and
   current rows under the exclusive object lock before publishing the complete
   replacement definition in one catalog transaction. Backfill is resolved at
@@ -381,12 +482,168 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   `DROP COLUMN` rewrites positional records, materializing surviving defaults
   while preserving version stamps. DDL is self-committing and refused in explicit
   transactions. Schema-owned tables retain their existing live-session DDL guard.
+  The persisted default is the canonical SQL text of its literal (`'it''s'`, `5`,
+  `TRUE`), and the value every read and INSERT coerces comes from the table
+  version's bound form, parsed once (see [Persisted definitions](#persisted-definitions-canonical-text-parsed-once)).
 - **Expression evaluation** is interpretive with SQL null propagation (nulls
-  reject predicates, comparisons with null are null, `AND`/`OR` are three-valued),
-  numeric promotion to decimal, ordinal string comparison, hand-rolled `LIKE`
+  reject predicates, comparisons with null are null, `AND`/`OR` are three-valued
+  and skip the right operand once `FALSE AND` or `TRUE OR` decides the result),
+  overflow-checked BIGINT arithmetic for exact integers and promotion to decimal
+  otherwise, ordinal string comparison, hand-rolled `LIKE`
   (`%`/`_`), `CASE`, `BETWEEN`, `IN` (lists), `IS NULL`, parameters (`@name`
   bound by bare name), and a small builtin set (`COALESCE`, `UPPER`, `LOWER`,
-  `LENGTH`, `ABS`). Compiled expression plans are a later optimization.
+  `LENGTH`, `ABS`) dispatched through the signature table above. Compiled
+  expression plans are a later optimization.
+- **Arithmetic faults are coded statement failures (#1069).** Division or
+  modulo by zero raises `SqlEvaluationException` with `COHSQLE001`; a result,
+  operand, literal, aggregate or CASE/COALESCE value outside its numeric type
+  raises it with `COHSQLE002` (the dialect's arithmetic fault contract). Each
+  operator, negation and `ABS` codes its own fault at the source. The evaluator's
+  entry point, `Evaluate`, then converts any remaining `ArithmeticException`
+  from the expression tree (an oversized literal, for example), so no raw runtime
+  fault leaves evaluation. Recursion runs through `EvaluateCore`, below that
+  boundary, so `CAST` still reports an operand it cannot represent as a
+  conversion failure. Aggregate accumulation, the result-type normalization of
+  projected values, and store assignment into an integer or `DECIMAL` column
+  (`CoerceForColumn`) code their own overflow the same way. A nonzero REAL or
+  DOUBLE divisor that converts to Decimal zero is out of range, not a division
+  by zero, because zero is judged on the operand as supplied. `SortRows` unwraps
+  the `InvalidOperationException` the runtime sort puts around a throwing
+  comparer, so incomparable `ORDER BY` keys fail the statement with the
+  comparer's own `DatabaseException` instead of ending a wire session. The
+  exception is an internal `DatabaseException` whose message leads with the code, the convention
+  Graph's `COHDBG` codes use, until the area root grows a structured diagnostics
+  carrier. Evaluation runs in a write statement's first phase, before any
+  physical bracket opens, so a fault writes nothing. The session's ordinary
+  failure path then applies: auto-commit rolls back, and an explicit transaction
+  stays active.
+- **The engine's nesting limit and its backstop (#1151).** The owner's decision of
+  2026-10-01 takes a middle course between SQL Server and PostgreSQL (the rule and
+  the comparison are in the dialect's "Expression nesting limit"): genuine nesting
+  counts against one configurable limit, an `AND`/`OR` chain is one n-ary
+  `SqlLogicalExpression` that counts once, and the stack checks below are the
+  backstop. `SqlDatabaseEngineOptions.ExpressionNestingLimit` (also on the engine
+  builder) defaults to 256 and must lie within 32..4096; `SqlDatabaseEngine.Create`
+  validates it before any worker starts and captures it in a private
+  `SqlQueryParserOptions`, so a later change to the options object changes nothing.
+  Every session parses statement text with it (`SqlQueryRequest.FromSql` with the
+  engine's options), and refuses a typed request whose
+  `SqlQueryStatement.ExpressionNestingDepth`, the nesting its own parser measured,
+  exceeds it, with the `SQL0006` the engine's parse would have reported, so the
+  limit holds on every seam. A request over a subquery taken out of a parsed
+  statement carries no parser's measure and is held to the depth of its own tree,
+  which is what the walks recurse through. The `FromSql` overload that takes
+  `SqlQueryParserOptions` is public, so a typed caller parses with the engine's
+  limit and accepts exactly what the text seam accepts; the overload without options
+  parses at the default 256. `ISqlDatabaseEngineBuilder.ExpressionNestingLimit` is an
+  ordinary member that every implementation supplies, the engine's own builder and
+  builders written outside the repository alike; it has no default implementation,
+  because the interface is meant to be implemented elsewhere and nothing has shipped
+  that predates it (owner decision of 2026-10-02). An implementation reports 256 until
+  the value is set and carries it to the engine it builds. A value outside 32..4096
+  fails in `Build()`, not in the setter, with the `ArgumentOutOfRangeException` that
+  `SqlDatabaseEngine.Create` and `SqlDatabaseEngineFactory.Create` throw, so a builder
+  that builds through `SqlDatabaseEngine.Create` needs no range check of its own. A
+  parse that runs out of stack (`SQL0007`) is not a syntax error: `FromSql` raises
+  it as `COHSQLE004`, like any other walk out of stack. Text the engine generates
+  rather than receives (persisted definitions, schema-migration statements) parses
+  at the 4096 ceiling: the executing engine's limit still applies to a migration's
+  requests, and a definition stored under one engine's limit opens under any other.
+- **Walkers iterate chains.** Every walker reaches an `AND`/`OR` chain's terms
+  through `SqlPlanner.Children` or iterates `Operands` itself, so it recurses once
+  per level of the tree and never once per term: the evaluator's `EvaluateLogical`
+  runs the terms first to last and stops at the first that decides the result, which
+  is the order and stopping point of the nested binary operators it replaces, and
+  three-valued logic gives the same result (#1069's short-circuit contract). The
+  sargable and join-equality collectors read every term of a conjunction, a nested
+  parenthesized conjunction included, CHECK validation requires every term to be
+  Boolean, `StaticOperandType` and `GroupExpressionType` type a chain as Boolean, and
+  grouping and persisted-definition equivalence compare operator and term count.
+- **Every recursive walk checks the stack (#1151).** The parser bounds how deep a
+  statement nests, not how much stack the thread that runs it has, and a configured
+  limit of up to 4096 admits trees that no default thread can walk. So every walker
+  that recurses over an expression tree calls
+  `RuntimeHelpers.EnsureSufficientExecutionStack()` before it descends: the
+  session's system-relation scan (`UsesSystemView`), the planner's validators and
+  binders (`ValidateFunctionCalls`, `ValidateExpression`, `StaticOperandType`,
+  `ContainsAggregate`, `ContainsCast`, `ReferencesAnyColumn`, `RejectColumnReferences`,
+  `ContainsStar`, the sargable and join
+  equality collectors, ordering alias binding, grouping binding, `SameGroupExpression`,
+  `GroupExpressionType`, the subquery source walk and `PlanSubqueries`), the
+  evaluator (`EvaluateCore`, `FindCollation`), CHECK validation
+  (`ValidateCheckSyntax`), and persisted-definition binding and comparison
+  (`SqlPersistedExpression.Bind`, `AreEquivalent`, `SqlBoundTableCache`'s column
+  collector). `SqlPlanner.Children` documents the rule for the next walker.
+  `LIKE` matching recurses once per `%` it backtracks through, so its depth follows
+  the values, and both matchers check too. The check costs a stack-pointer
+  comparison per node; a tree within the default limit trips it only on a thread
+  created with a small stack. `SqlDatabaseSession.ExecuteAsync`
+  turns the resulting `InsufficientExecutionStackException` into
+  `SqlEvaluationException` with `COHSQLE004` (ISO SQLSTATE 54001, statement too
+  complex), so it takes the ordinary failure path above instead of ending the
+  process; over the wire it is an `ExecutionFailure` and the session stays ready.
+  The tests prove each check without risking the test process:
+  `SqlExpressionDepthExecutionTests` runs a walk of a 128-level tree, and of a
+  1,000-term chain over one, with a few KB of stack left before the check would
+  fail, measured on that thread with `RuntimeHelpers.TryEnsureSufficientExecutionStack`.
+  A walker that checks as it descends throws within its first levels; one that did
+  not check would carry on into the runtime's reserve, which a 128-level walk fits
+  inside, and complete, so a missing check fails the test rather than the test
+  process. Under a 4096 limit, a 3,000-level statement runs on a 64 MB thread and
+  fails with `COHSQLE004` on a small one, whether its parse or a later walk is what
+  runs out (`Engine_HighLimit_ShouldRunOrFailWithStatementTooComplex`).
+- **Signs require numbers; unary plus is the identity (#1068 follow-up).** The
+  evaluator returns a unary-plus operand unchanged (value and CLR type; NULL
+  propagates), while negation still widens exact integers to BIGINT, and
+  `GroupExpressionType` reports the matching result types. A sign whose operand is
+  not a number raises `SqlEvaluationException` with `COHSQLE003`. When the operand's
+  type is fixed by the plan — a string or Boolean literal, a column, a predicate,
+  `||`, `UPPER`/`LOWER`, a CAST, a bound scalar subquery — `SqlPlanner.ValidateExpression`
+  raises it before execution (`StaticOperandType`), so the result does not depend on
+  whether the table has rows; it and `COHSQLE005` (below) are the planner's own
+  coded rejections, and count evaluation and stack checks can also raise
+  `COHSQLE001`/`002`/`004` while planning. A parameter, CASE or other operand only
+  its value types fails when evaluated, with the same code and message.
+- **VALUES rows and LIMIT/OFFSET counts have no column scope (#1165).** Both are
+  evaluated once, against an empty row: a VALUES row before the INSERT writes
+  anything, a count while planning. ISO SQL forbids a column reference in an
+  INSERT's table value constructor. The planner used to bind no VALUES expression,
+  and the executor evaluated each one with the target table's columns in scope, so
+  `INSERT INTO u (id, a) VALUES (id, 1)` resolved `id` to ordinal 0 and indexed the
+  empty row; the `IndexOutOfRangeException` was not a `DatabaseException`, so over the
+  wire it reached the `Internal` catch-all and closed the session. Now
+  `SqlPlanner.ValidateScopelessExpression` checks every expression of every VALUES row,
+  and each count, before anything executes. It rejects a column reference anywhere
+  (under a sign, CAST, CASE, aggregate or function call, qualified or not) with
+  `SqlEvaluationException` `COHSQLE005`, which names the reference and the clause
+  (ISO SQLSTATE class 42, syntax error or access rule violation). It then rejects an
+  aggregate and `*` with uncoded messages naming the clause, and runs
+  `ValidateExpression` against an empty column scope, which raises `COHSQLE003` for a
+  sign over a non-numeric literal or parameter and `COHDBL001` for a subquery. The
+  column check runs first, so `-a` and `SUM(a)` report the column, not the
+  operand type or the aggregate. Every row is checked before planning returns, so a
+  fault in a later row leaves the earlier rows unwritten. As defense in depth,
+  `ExecuteInsertAsync` evaluates VALUES with an empty column scope too, so its
+  evaluator can never resolve an ordinal the empty row does not have.
+  Parameters and expressions over literals and parameters are unchanged. A count
+  with a column reference already failed while planning, as `Unknown column`, or,
+  inside a subquery, as an error result: `PlanSubqueries` turned the child's
+  `Unknown column` into `SqlUnsupportedQueryException`, which `SqlQueryExecutor`
+  returns as a `QueryResultStatus.Error` result carrying `COHDBL001`'s
+  correlated-subquery diagnosis. It now throws `COHSQLE005` at every nesting level,
+  for a reference to the subquery's own columns or the outer query's: ISO SQL's
+  fetch-first count is a simple value specification, which no column of any scope
+  reaches. (An explicit outer qualifier is still the parser's `COHDBL001`.) A `*` in
+  a count now reports `'*' is not allowed in LIMIT.` (or `OFFSET`) instead of the
+  evaluator's `Expression 'SqlStarExpression' is not supported by the executor yet.`
+  The unqualified
+  `DEFAULT` keyword in VALUES is not in the dialect and parses as a column reference
+  named `DEFAULT`, so it reports `COHSQLE005` too. The niladic datetime functions
+  `CURRENT_DATE`, `CURRENT_TIME` and `CURRENT_TIMESTAMP` also parse as names, because
+  they take no parentheses; `RejectColumnReferences` reports an unqualified name
+  spelled as one of them as the unsupported function (`Function '<name>' is not
+  supported by the executor yet.`, the message `NOW()` gets at evaluation), not as
+  a column, until the parser gives them a function node.
 - **SELECT materializes.** Sorting and `DISTINCT` need the full result anyway at
   this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
   rows. Streaming operators arrive with the planner build-out.
@@ -423,13 +680,13 @@ declared dialect and retain their existing unsupported-clause diagnostics.
 - **Shared record-space composition (#918).** `SqlTransactionRecordSpace`
   supplies row reads, transactional updates/deletes, and the existing packed
   location codec to `RecordSpaceVersionStore` in `Database.Transactions`.
-  `SqlRowCodec` retains SQL tuple encoding and legacy-format migration, while
+  `SqlRowCodec` retains SQL tuple encoding, while
   its stamp operations delegate to the shared `RecordVersionStamp` contract
   ([layout](../../Assimalign.Cohesion.Database.Transactions/docs/DESIGN.md#record-stamp-prefix-the-16-byte-contract)).
   `RecordVersionIndex` in Indexing binds each live secondary index to the
-  shared undo ledger. Recovery ordering is unchanged: re-attach indexes,
-  analyze and scrub records, scrub indexes with the same classification, then
-  complete the deferred checkpoint before the existing format upgrades.
+  shared undo ledger. Recovery ordering is unchanged: check the data-storage
+  format, re-attach indexes, analyze and scrub records, scrub indexes with the
+  same classification, then complete the deferred checkpoint.
 - **Write statements execute in two phases; the physical bracket is per
   statement (§3.8's migration path).** Phase one — no physical bracket: scan
   through the statement snapshot, collect targets, acquire an IntentExclusive
@@ -534,9 +791,28 @@ description + exported registrations), the engine binds them.
   policy); the statement's bracket has rolled back, the session stays usable.
   Unique keys treat nulls as values (stricter than ANSI; consistent with the
   codec's nulls-first ordering — documented dialect decision).
-- **Registrations re-export at persistence points** (root page ids drift on
-  splits): index DDL itself, each checkpoint pass, and instance disposal — each
-  compares against the stored set first, so an idle checkpoint writes nothing.
+- **Registrations re-export at persistence points**: index DDL itself, each
+  checkpoint pass, and instance disposal — each compares against the stored set
+  first, so an idle checkpoint writes nothing. Root splits no longer move a
+  tree's root page (#1159, `Database.Indexing` DESIGN), so outside DDL the
+  comparison is a backstop rather than the way a split reaches the catalog.
+- **Seeks over duplicated keys** (#1159): an index over a low-cardinality column,
+  and every UNIQUE index whose rows are updated (each UPDATE retires one entry
+  and adds another under the same key), holds runs of equal keys that span leaf
+  splits. Seeks, the UNIQUE check, and FOREIGN KEY lookups in both directions
+  reach every entry of such a run; `SqlIndexDuplicateKeyTests` pins seek-versus-
+  scan equivalence for indexes built by `CREATE INDEX` (over insert-only rows
+  and over UPDATE/DELETE history) and maintained by DML.
+- **Index maintenance descends to its entry** (#1194): the trees order entries by
+  key, then the row version's location (the entry reference this engine passes),
+  then the writer, so tombstoning a row version's entries and the logical undo of
+  a ROLLBACK find each entry in one descent however long its key's run. An
+  `ON DELETE CASCADE` over one parent's children is linear in the child count
+  (16,000 children: 6.2 s before, 0.43 s after; `SqlCascadeFanOutTests` guards the
+  growth ratio). The UNIQUE check still reads its key's dead versions until a
+  live one, so a row updated thousands of times under a UNIQUE index slows
+  linearly per update until dead versions are pruned (#1195). Measurements and
+  the design are in the `Database.Indexing` DESIGN ("Entry order").
 
 ## Engine-owned background workers
 
@@ -687,8 +963,12 @@ record moves with the machinery):
   no per-minor branching yet).
 - **Database binding** resolves on the server's one engine: already-open
   databases first (`TryGetDatabase`), then an open attempt; an exact
-  `DatabaseNotFoundException` → wire `DatabaseNotFound` and close. Other open
-  failures propagate to the handshake's internal-error path. (The pre-per-model
+  `DatabaseNotFoundException` → wire `DatabaseNotFound` and close. A database
+  the format gate refuses (`SqlDataStorageFormatException`, #1099) → wire
+  `Unavailable` carrying the engine's refusal message and close, so a remote
+  client learns the format found, the format supported and the remedy; the
+  message is engine-authored and names only the database the client asked for.
+  Other open failures propagate to the handshake's internal-error path. (The pre-per-model
   server probed a *list* of engines in registration order; one engine per server
   removed that ambiguity.)
 - **Authenticate exchange (MVP):** the challenge frame carries no payload (the
@@ -702,7 +982,24 @@ record moves with the machinery):
 - **Error taxonomy per exchange:** statement-level failures keep the session in
   Ready — `DatabaseParseException` → `ParseFailure`, any other
   `DatabaseException` → `ExecutionFailure` (an execution error is not a protocol
-  violation). Framing/order violations (`ProtocolException`, malformed parameter
+  violation). Evaluation faults (division by zero, numeric overflow) are
+  `DatabaseException`s carrying a `COHSQLE` code, so they take this path and
+  the session stays ready (#1069; before that fix a raw `DivideByZeroException`
+  reached the `Internal` catch-all and closed the session, and so did the
+  `InvalidOperationException` the runtime sort wraps around an `ORDER BY` key
+  comparison that fails). A statement nested deeper than the engine's expression
+  nesting limit (256 levels by default) is a `ParseFailure` (`SQL0006`), and one
+  within it whose parse or execution exhausts the server thread's stack is an
+  `ExecutionFailure` (`COHSQLE004`); before #1151 a 200,000-term expression
+  overflowed the stack and ended the server process, every session with it. A
+  10,000-term `AND`/`OR` predicate executes.
+  A column reference in an `INSERT ... VALUES` row is a planning error coded
+  `COHSQLE005` and takes the same path (#1165; before that fix the
+  `IndexOutOfRangeException` it raised during evaluation closed the session as
+  `Internal`). A cascading delete of any depth is an ordinary statement; before #1164 one
+  that cascaded through a 20,000-row self-referencing chain ended the process the
+  same way (see [The cascade walk](#the-cascade-walk-a-worklist-not-a-recursion)).
+  Framing/order violations (`ProtocolException`, malformed parameter
   components) → `ProtocolViolation` **and close**; anything unexpected →
   `Internal` and close. A child-root exception that escapes raw (for example a
   `StorageException` the engine failed to wrap) reaches the wire as `Internal`
@@ -788,8 +1085,9 @@ This limitation and the unavailable interface seam are recorded in
 duplicate both persistence and enforcement and permit the two paths to diverge.
 Named `UNIQUE` declarations keep their name as the index name. Foreign keys and
 checks are table constraint records; their names, ordered columns, reference
-target, delete action and check expression text are persisted in the versioned
-table codec and recovered with the rest of the catalog.
+target, delete action and canonical check expression text are persisted in the
+versioned table codec and recovered with the rest of the catalog (see
+[Persisted definitions](#persisted-definitions-canonical-text-parsed-once)).
 
 Table creation reserves an unpublished object identity, durably builds its
 unique and primary-key backing trees, then publishes the table, constraints,
@@ -811,15 +1109,22 @@ so child-first names and cyclic reference graphs provision deterministically.
 rows, and incoming references on parent deletes or key changes. Checks reject a
 false result; SQL unknown/null passes. Foreign keys with null components are
 not checked (MATCH SIMPLE). A non-null child key needs a parent visible through
-the statement snapshot. Delete defaults to `RESTRICT`; `CASCADE` recursively
-collects child deletions into the same statement apply bracket. Parent key
+the statement snapshot. Delete defaults to `RESTRICT`; `CASCADE` collects the
+transitive closure of child deletions into the same statement apply bracket (see
+[The cascade walk](#the-cascade-walk-a-worklist-not-a-recursion) below). Parent key
 updates are restricted while referenced. `ON UPDATE` is unsupported and returns
 `COHDBL001`.
 
 Checks require Boolean predicates made from supported deterministic row
 expressions. Parameters, subqueries, aggregates, unsupported functions and casts
-are rejected during binding. Multiple unnamed constraints receive distinct
-generated names. Cascades are collected before restriction checks; a child
+are rejected when the DDL declares the check (`SqlPlanExecutor.ValidateCheck`), and a
+call with arguments its function's signature does not accept is rejected while the
+DDL is planned (`COHSQLE006`, #1189); the
+load path binds a stored predicate with `BindPersistedCheck`, which matches calls
+against their signatures but does not apply the declaration rules again (see
+[Persisted definitions](#persisted-definitions-canonical-text-parsed-once)). The
+CHECK shape walk visits each node once, so its cost is linear in the predicate.
+Multiple unnamed constraints receive distinct generated names. Cascades are collected before restriction checks; a child
 already in the complete statement deletion set does not prevent that deletion,
 so physical row order and declaration order do not change the result.
 
@@ -869,7 +1174,8 @@ statement reads for constraint purposes, which is compatible with other writers'
 `IntentExclusive` and blocks only table-grain DDL, keeping parent definitions
 stable for the life of the statement. A cascade walks the closure locking as it
 descends — a row is exclusively locked before its children are read — because a
-transitive closure cannot be pre-sorted.
+transitive closure cannot be pre-sorted (the walk itself is described under
+[The cascade walk](#the-cascade-walk-a-worklist-not-a-recursion)).
 
 **Why not component-wide exclusion (the rejected original).** The first cut took
 `Exclusive` on every table in the transitive closure of the reference graph, in
@@ -901,6 +1207,218 @@ reorder equality values to match its column order. Partial prefixes retain a
 residual comparison for remaining columns; they scan the table only when no
 suitable index exists. A declared index
 whose physical tree is missing fails closed.
+
+### The cascade walk: a worklist, not a recursion
+
+`ON DELETE CASCADE` collects a transitive closure of rows, and the depth of that
+closure is the data's, not the schema's: a self-referencing table (an org chart, a
+thread of replies, a list of versions) cascades as deep as its longest chain. The
+walk (`SqlPlanExecutor.CollectCascadeDeletesAsync`) therefore keeps its path in an
+explicit stack of frames on the heap and never recurses once per level. Until
+#1164 it did: deleting the head of a 20,000-row chain overflowed the stack of the
+thread running the statement (in a debug build 2,000 rows were enough on a 1 MB
+thread), and a stack overflow cannot be caught, so one statement ended the process
+and, over the wire, every session of the server with it. The nesting limit of
+#1151 could not have covered it: expression depth is bounded by the text a
+statement sends, cascade depth by rows already stored. So the cure is the shape of
+the walk, not a limit — **a cascade has no depth limit**; its closure is bounded by
+memory, like the deletion set it fills.
+
+The worklist is the recursion with its frames moved to the heap, and nothing else
+changed:
+
+- **Order.** The walk is depth-first and pre-order. A row joins the deletion set,
+  takes its exclusive row lock (and, the first time the walk reaches its table, the
+  intent locks on the adjacent tables) and collects the references its deletion
+  releases before any row below it is read. Its children are visited reference by
+  reference — child tables in catalog order, each table's references in declaration
+  order — then in the order the child lookup returns them, and a reference's
+  matches are read only once every row below the previous reference has been
+  collected. The deletion set's order — the order rows are locked in,
+  checked for `RESTRICT` and applied in — is therefore the recursion's, and so is
+  which `RESTRICT` violation a statement reports when its closure holds several
+  (`Delete_TwoRestrictViolations_ShouldReportTheDepthFirstOne` pins it).
+- **Cycles.** A row already in the deletion set is skipped, checked just before
+  the walk would descend into it, so a cyclic cascade graph — a ring as deep as the
+  table included — deletes each row once and terminates.
+- **Memory.** A frame holds what a recursive call held: the row, the references
+  into its table, and the materialized matches of the reference being walked. A
+  frame leaves the path as soon as it hands out the last match of its last
+  *cascading* reference — the last one that is `CASCADE` and whose key is not
+  null in that row — because the recursive call had nothing left to do but pass
+  over its `RESTRICT` references and return. A self-referencing chain therefore
+  walks with one frame on the path however long it is, even when `RESTRICT`
+  references into its table follow the self-reference, and the path grows only
+  with rows that still have matches or cascading references left to visit (a
+  second cascading reference into the same table keeps every level's frame, as it
+  must). The deletion set, the row locks and the version ledger stay proportional
+  to the rows deleted, as they always were.
+- **Cancellation.** Every step observes the statement's cancellation token. Child
+  lookups already observe it, but entering a row only takes its locks, and an
+  uncontended grant does not check the token, so a wide fan-out from one lookup
+  into a table with no cascading references would otherwise run to the end.
+
+A deep cascade costs what its rows cost plus one child lookup per row, so the
+referencing columns want an index (the lookup rule above); without one each level
+scans the child table. `SqlCascadeDeleteDepthTests` is the regression guard: a
+100,000-row chain deletes in process and over the wire on the default stack and
+the connection keeps serving; a 20,000-row chain deletes on a 512 KB thread, rolls
+back completely inside `BEGIN`, closes into a ring that deletes once, and still
+fails whole on a `RESTRICT` reference at its far end; and a cascading reference
+that follows a chain's self-reference is still walked for every row whose key is
+not null (`Delete_ChainWithTrailingReferences_ShouldWalkEveryCascadingReference`).
+
+## Persisted definitions: canonical text, parsed once
+
+**The rule (owner decision, 2026-10-01: production-ready regardless of the
+pre-release).** Every SQL expression the catalog persists is stored as canonical
+SQL rendered from its parsed tree, never as the user's text: CHECK predicates and
+literal column DEFAULTs today. Expression DEFAULTs (#1121) and view queries
+(#1124) must take the same path when they land; a new persisted expression may
+not store source text, parse it on a per-row or per-statement path, or grow a
+second renderer or parser entry. The motivation is #1068: tightening the parser
+made text that an older, more lenient parser had accepted unparseable, and because
+the engine stored CHECK as written and re-parsed it on every validated write, such
+a constraint would have failed every write to its table, with "drop the constraint
+and add it again" as the only remedy.
+
+- **One helper, `SqlPersistedExpression`.** `Canonicalize` renders the canonical
+  text with `SqlExpressionRenderer` (Sql.Language), re-parses it, and requires the
+  result to be structurally equal to the declared tree (`AreEquivalent`) before
+  anything is stored; a mismatch fails the DDL as an engine defect instead of
+  writing a definition that would not reload. `Load` parses persisted text as the
+  predicate of a carrier query and requires it to be exactly one expression — a
+  trailing clause or a second statement is damage, not a definition.
+  `LoadDefaultValue` additionally requires one non-NULL literal. `Bind` resolves a
+  loaded expression against the row shape it is evaluated over (below).
+  BindConstraints canonicalizes CHECK; the planner canonicalizes literal DEFAULTs,
+  so `DEFAULT 'it''s'` stores `'it''s'` and `DEFAULT +5` stores `5`. The DEFAULT's
+  runtime meaning is unchanged: the literal's value text is coerced to the column
+  type exactly as before, and CREATE TABLE now proves that coercion succeeds for
+  every column before it reserves the table, as ADD COLUMN already did, so a
+  DEFAULT the column cannot store fails its DDL rather than every later INSERT
+  that omits the column.
+- **Parse once per table version (`SqlBoundTableCache`).** The database owns one
+  cache keyed by the `SqlCatalogTable` instance in a `ConditionalWeakTable`. A
+  catalog table description is immutable and every change publishes a new
+  instance, so the key *is* the table's schema version: ADD/DROP CONSTRAINT,
+  ADD/DROP COLUMN and DROP + CREATE produce new keys, and a replaced version's entry
+  is collected with it — invalidation is structural, with no hook to forget. A
+  `SqlBoundTable` holds the bound CHECK predicates (with the column ordinals a
+  violation reports) and each column's DEFAULT value. `SqlPlanExecutor.ValidateRows`
+  evaluates the cached predicates, `DecodeRow` and the INSERT path resolve defaults
+  from the cached values, and `EnsureCanDropColumn` re-binds the cached predicates
+  against the remaining columns. No write, read or DML statement parses catalog
+  text; `BindCount` lets tests prove it.
+- **Binding is not re-validation.** DDL accepts a CHECK through
+  `SqlPlanExecutor.ValidateCheck`: binding, plus the declaration rules (no casts,
+  no sign over an operand the plan types as non-numeric). Loading binds it through
+  `BindPersistedCheck`: columns and collations resolve (`SqlPersistedExpression.Bind`),
+  every call passes arguments its function's signature accepts, the predicate is a
+  row expression (no parameter, subquery, `*` or aggregate) and a
+  Boolean predicate over the functions the evaluator implements — what evaluating
+  it needs, and nothing more. The engine that stored a predicate accepted it, so a
+  later release that tightens a declaration rule must not turn the predicate into
+  an open failure, as #1068's parser tightening would have done to stored text.
+  `CHECK (-label IS NULL)` on a TEXT column, which DDL now rejects with
+  `COHSQLE003`, still opens and is enforced as stored; a row it cannot evaluate
+  fails its own statement with the evaluator's coded error. The rule for future
+  changes: **a rule that narrows what DDL accepts goes in `ValidateCheck` only; a
+  change that removes the engine's ability to evaluate a construct a stored
+  definition may hold (an evaluator function, an operator) is a catalog-format
+  change** and needs a format version and a migration, never a silent open failure.
+  `EnsureCanDropColumn` binds the same way, so a tightened rule cannot block an
+  unrelated DROP COLUMN.
+- **Argument counts are binding, not a declaration rule (#1189).** A call whose
+  argument count no signature of its function accepts has no value on any row: the
+  evaluator used to evaluate no argument for it and return NULL, so `CHECK (ABS(c, 1)
+  > 0)` admitted every row. Binding therefore matches every call against the
+  signature table (`SqlPersistedExpression.Bind`, after the call's arguments), and a
+  stored CHECK holding such a call fails the open with `COHSQLE006`. By the rule
+  above that is a catalog-format change, and it takes no version bump only because
+  format 4 is unreleased and has no upgrade path (#1152, owner decision of
+  2026-10-01): engine builds before #1189 wrote format-4 catalogs that can hold such a
+  CHECK, and none is carried forward. The open names the database, table and
+  constraint and carries the coded error (the `SqlEvaluationException` is the inner
+  exception of the definition's), and its hint is not the restore-from-backup one,
+  since a backup holds the same definition: it says an engine build that did not
+  check function arguments stored the constraint, and to drop or replace it with
+  that build (`SqlPersistedExpression.UncheckedCallHint`). Once a format has shipped,
+  a narrowing like this one bumps the format version through the format gate.
+- **Linear validation.** `ValidateCheckSyntax` visits each node of a predicate once,
+  passing each child the Boolean requirement its position imposes (AND/OR/NOT
+  operands, and COALESCE arguments and CASE results when the call or CASE must be
+  Boolean). It used to walk a Boolean operand once as a plain child and again as a
+  Boolean one, which doubled the work per AND/OR level: once binding moved to open,
+  a 24-term AND took 22 s to open, and a 40-term one did not finish its DDL in 100 s.
+  `Check_LongConjunction_ShouldDeclareOpenAndEnforceInLinearTime` declares, reopens
+  and enforces a 400-term AND. An AND chain is one n-ary node (#1151), so its
+  length costs no nesting; what bounds it is the catalog record that holds the
+  table's definition, 8,092 bytes with the CHECK text included, and a larger
+  definition fails its DDL with a `SqlCatalogException` and stores nothing.
+- **The nesting limit cannot strand a definition (#1151).** The DDL parses with the
+  engine's configured expression limit, and `Canonicalize` re-parses the canonical
+  text before storing it. The canonical text has the declared tree, and
+  `SqlExpressionRenderer` adds at most one pair of parentheses around a node, so its
+  parentheses nest no deeper than that tree, which the DDL already held to the
+  limit; a definition the DDL accepted therefore always loads at open, even where
+  the renderer adds parentheses the declaration did not have. Persisted text is
+  parsed at the 4096 ceiling (`SqlQueryRequest.CeilingParserOptions`), never at the
+  opening engine's limit: the limit governs which statements an engine accepts, not
+  which databases it opens, so a CHECK stored by an engine configured at 1,000 opens
+  and is enforced under the minimum of 32
+  (`Check_StoredUnderHighLimit_ShouldOpenUnderLowLimit`). A CHECK of 254 signs over a
+  column, which the renderer stores with 253 nested parentheses, declares, reopens
+  and is enforced at the default limit (`Check_AtLimit_ShouldPersistReopenAndEnforce`).
+  Canonical `AND`/`OR` chains render to the text the nested binary form rendered,
+  so text stored before chains were n-ary reads back to the same chain. Reading the
+  deepest definition back needs well under a default thread's stack in a release
+  build (the parser's cost is in the Sql.Language design); on a thread with less, the
+  parser reports `SQL0007` rather than `SQL0006`. `Load` and the bind then raise an
+  `InsufficientExecutionStackException` that names the definition and says the
+  catalog is not damaged, never the restore-from-backup hint, and the caller decides
+  what it means: `BindCatalog` fails the open, adding that the database should be
+  opened on a thread with a larger stack, while inside a statement (a DDL
+  re-parsing canonical text, or a table version bound on first use) the session
+  fails the statement with `COHSQLE004` like any other walk out of stack.
+- **When binding happens.** `SqlDatabaseInstance` binds every table right after
+  the catalog opens and the format checks pass, before recovery or the index
+  manager touch the data file set. Each DDL binds the version it publishes before
+  the statement returns — CREATE TABLE before publishing it, ADD CONSTRAINT and
+  constrained ADD COLUMN through the backfill's validation of the replacement it
+  then publishes, and DROP COLUMN on the instance the catalog returns. DROP
+  CONSTRAINT and unconstrained ADD COLUMN publish the catalog's own copy built from
+  the same column and constraint instances, which adopts the bindings of the
+  version it came from (`Adopt`) without parsing again. A version that reaches a
+  statement unbound (a table a test created through the catalog directly) binds on
+  first use.
+- **Fail fast at open.** Canonical text always reloads, so a definition that does
+  not parse, is more than one expression, is not a literal (DEFAULT), or no longer
+  binds to its table means the catalog is damaged or came from an incompatible
+  engine build. The open fails with `Database '<name>' cannot be opened.`, naming
+  the table and the constraint or column and telling the operator to restore from
+  a backup (a call that fails its signature has its own hint, above); nothing is
+  half-opened, because binding precedes every other
+  component. Canonical storage is part of data-storage format 4, which is
+  unreleased, so there is no further version bump and earlier text is not
+  migrated.
+- **Earlier formats are refused before binding.** A format 1–3 catalog holds
+  definitions as written — a DEFAULT as the literal's bare value — which binding
+  would misread: `true` reloads as the Boolean literal `TRUE` (silently changing a
+  TEXT default, even for old rows that lack the field), `+5` as `5`, and `abc` as
+  a column reference reported as catalog damage. The format gate
+  (`ThrowIfFormatIsNotCurrent`, see "Format rule") refuses every database not on
+  the current format (5; canonical since 4) before `BindCatalog` runs, so no
+  pre-canonical definition is ever bound.
+  `BindCatalog` runs after that gate on open and after the format marker is written
+  on create; keep that order.
+- **Compiled schemas.** A compiled CHECK keeps its author's spelling in the
+  schema document and hash. `SqlSchemaProvisioner` compares it with the catalog
+  by canonical form (`CanonicalCheck`), so reapplying an unchanged schema stays a
+  no-op, and reconstructing the live schema reuses the desired spelling for a
+  canonical-equal predicate so reconciliation plans no change for it.
+- **`INFORMATION_SCHEMA`.** `CHECK_CONSTRAINTS.CHECK_CLAUSE` and
+  `COLUMNS.COLUMN_DEFAULT` report the canonical text.
 
 ## Application composition (Phase 29)
 
@@ -951,9 +1469,24 @@ table and safe offending value. Parse failures
 the root's `DatabaseParseException` so callers — the wire-protocol server in
 particular — can distinguish fix-the-text errors (`ParseFailure` on the wire)
 from execution errors without model knowledge. Opening a database absent from the
-storage strategy throws the root's `DatabaseNotFoundException`; other open failures
+storage strategy throws the root's `DatabaseNotFoundException`; opening one the
+data-storage format gate refuses throws the internal `SqlDataStorageFormatException`
+(a `DatabaseException`, format rule above); other open failures
 retain their own error type. `SqlCatalogException` (a `DatabaseException`) surfaces
-catalog violations unchanged.
+catalog violations unchanged. Arithmetic faults throw the internal
+`SqlEvaluationException` (a `DatabaseException`) whose message leads with
+`COHSQLE001` (division by zero) or `COHSQLE002` (numeric value out of range);
+a sign over a non-numeric operand throws it with `COHSQLE003`, from planning when
+the operand's type is known there or the operand is a parameter whose bound value
+is not a number, and a statement whose walk runs out of stack throws it with
+`COHSQLE004` (#1151). A column reference where no columns are in scope throws it
+with `COHSQLE005` (#1165), and a function call whose arguments its function's
+signature does not accept with `COHSQLE006` (#1189), both while planning. The codes
+are published in the dialect's diagnostics table. A persisted CHECK or DEFAULT that
+does not load fails the open with a `DatabaseException` naming the database, table
+and constraint or column; one whose call fails its signature carries the
+`COHSQLE006` error in its message and as its inner exception. No runtime
+`ArithmeticException` escapes expression evaluation.
 
 ## The MVCC integration (scoped under #862)
 
@@ -982,7 +1515,7 @@ four independently shippable steps:
    visibility is correct by construction, no stable row identity is needed
    (the rejected copy-out design required one to key chains across record
    relocation), and the purge worker reclaims dead versions where they lie.
-   See "Row format" and "Migration rule" under the execution model.
+   See "Row format" and "Format rule" under the execution model.
 3. **Row-grain write conflicts — delivered (#909):** exclusive row locks via
    `ILockManager` (the B+Tree uniqueness-lock precedent) replaced page
    conflicts as the user-visible surface — concurrent writers to disjoint rows
@@ -1083,3 +1616,19 @@ Foreign-key string columns require equal effective collations so forward and rev
 checks agree. Default changes after table creation reject until index rebuild support
 exists. Other model defaults are unaffected. See the design for the legacy
 CompareInfo compatibility escalation and #1026 linguistic-collation boundary.
+
+## Temporal key identity (#1099)
+
+`TIMESTAMP` keys are wall-clock ticks without the `DateTimeKind`; `TIMESTAMPTZ`
+keys are instants without the offset — the identity `SqlValueComparer` compares
+by (explicit `DateTime.Ticks`/`DateTimeOffset.UtcTicks` branches, with matching
+hashes for grouping and DISTINCT). Like collation, the rule is applied once, in
+`SqlRowCodec.AppendKeyValue`, which every key path shares: B+Tree maintenance,
+seek prefixes and range bounds, unique-key locks, and build/backfill duplicate
+detection. The key is the Types identity form (`SpecifyKind(Unspecified)`,
+`ToUniversalTime()`), so the component layout and decoding are unchanged; rows
+keep the round-trip value encoding. Because key equality now equals evaluator
+equality for both types, they are range-sargable and join-seekable. The rule
+changed the on-disk key format to data-storage format 4, and a format-3
+database is refused at open rather than rebuilt (format rule above; upgrades
+are #1152); the dialect contract is DIALECT.md "Temporal value identity".

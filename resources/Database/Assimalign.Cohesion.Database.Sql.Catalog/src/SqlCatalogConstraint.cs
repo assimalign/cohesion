@@ -31,7 +31,10 @@ public sealed class SqlCatalogConstraint
     /// <param name="referencedSchema">The referenced SQL namespace for a foreign key.</param>
     /// <param name="referencedTable">The referenced table for a foreign key.</param>
     /// <param name="referencedColumns">The ordered referenced column names.</param>
-    /// <param name="checkExpression">The SQL Boolean expression for a check constraint.</param>
+    /// <param name="checkExpression">
+    /// The SQL Boolean expression for a check constraint, as the canonical text the SQL engine
+    /// renders from the parsed predicate. The catalog stores it as an opaque string.
+    /// </param>
     /// <param name="onDelete">The action when a referenced parent row is deleted.</param>
     /// <exception cref="ArgumentException">The definition is incomplete or inconsistent.</exception>
     public SqlCatalogConstraint(
@@ -89,7 +92,11 @@ public sealed class SqlCatalogConstraint
     public string? ReferencedTable { get; }
     /// <summary>Gets the ordered referenced column names.</summary>
     public IReadOnlyList<string> ReferencedColumns { get; }
-    /// <summary>Gets the persisted SQL Boolean expression, when applicable.</summary>
+    /// <summary>
+    /// Gets the persisted SQL Boolean expression, when applicable: canonical SQL rendered from
+    /// the parsed predicate (for example <c>qty &gt; 0 AND qty &lt; 100</c>), never the text as
+    /// the user wrote it.
+    /// </summary>
     public string? CheckExpression { get; }
     /// <summary>Gets the action when a referenced parent row is deleted.</summary>
     public SqlCatalogReferentialAction OnDelete { get; }

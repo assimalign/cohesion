@@ -114,7 +114,9 @@ creation; those snapshots use scans.
 
 Saving a document prepares old and new scalar keys, then one shared physical statement bracket
 tombstones prior metadata, inserts new metadata, tombstones old index entries, inserts new index
-entries, and persists changed root registrations. Deletion tombstones metadata and keys in one
+entries, and persists any changed root registration (a backstop: a tree's root page stays fixed
+through splits since #1159, so registrations change only when a tree is created). Deletion
+tombstones metadata and keys in one
 bracket. The surrounding logical transaction also owns all chunk writes/tombstones. The catalog
 publishes its in-memory reference only after the physical bracket succeeds. The shared version
 ledger records record and index mutations, so logical rollback erases the writer's keys and
@@ -122,8 +124,9 @@ restores old tombstones. The caller aborts the logical operation after failure.
 
 Physical tree generations use reserved storage sequences and are never reused. Root registrations
 carry writer/deleter zero because they describe current physical topology, including nodes holding
-uncommitted versions. Root splits and registration updates share one physical bracket. A failure
-reattaches the manager from physically restored registrations. Undo adapters resolve the current
+uncommitted versions. Root splits rewrite the root page in place, and a tree's creation and its
+registration share one physical bracket. A failure reattaches the manager from physically
+restored registrations. Undo adapters resolve the current
 tree instead of holding a stale manager object. Current B+Tree erase/purge removes leaf entries
 without merging nodes or collapsing roots, so undo does not change the persisted root.
 
@@ -146,7 +149,21 @@ it verifies recovery and index scrub without claiming physical durable-flush sup
 Adding/removing fields, changing scalar type, or replacing an object with an array is supported
 without schema migration. Each change creates a new version and updates affected scalar indexes.
 On-disk record-layout changes require a new format version and explicit migration support;
-unknown versions are rejected. Former raw, unstamped DocumentStorage stub files are unsupported
+unknown versions are rejected.
+
+The index trees' pages are not catalog records: `Database.Indexing` owns their B-tree page
+format (2 since #1194, entries ordered by key, entry location and writer) and checks each tree's
+root page when the catalog attaches it. Opening the catalog happens after the coordinator's
+recovery scrub, so `DocumentCatalog.EnsureIndexFormat(storage)` makes the same check first,
+reading only the registration records (which carry no MVCC stamps, so the scrub does not change
+them) and each root page. The Documents engine calls it before recovery and refuses a database
+whose indexes an engine before #1194 wrote with "Database 'x' cannot be opened. COHDBI001: …",
+the `IndexFormatException` as its inner exception. A cleanly closed database is left
+byte-identical; a crashed one has had only the storage layer's format-agnostic journal redo and
+undo, and keeps its journal for the engine that wrote it. There is no upgrade path (owner decision
+of 2026-10-02; #1152). The fence runs one way only: engines before #1194 check neither the page
+format nor anything this catalog changed, so they cannot detect a database this engine wrote and
+must not open one (owner review of #1194). Former raw, unstamped DocumentStorage stub files are unsupported
 as engine databases. Catalog format failures raise `DocumentCatalogException`; shared storage
 corruption remains a storage exception. Invalid JSON/numeric-domain input is rejected by the
 validated storage write helper before publication. Public package APIs require no reflection,

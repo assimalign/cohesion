@@ -16,6 +16,10 @@ internal sealed partial class DefaultGraphStore : IGraphStore
     private readonly object _sync = new();
     private readonly Dictionary<(byte Kind, ulong Id), Reference> _records = new();
 
+    // The identities of the index definitions among _records, so reading the definitions costs
+    // their count rather than a pass over every node and relationship record.
+    private readonly HashSet<ulong> _definitionIds = new();
+
     internal DefaultGraphStore(GraphStorage storage, TransactionCoordinator coordinator)
     {
         _storage = storage;
@@ -27,6 +31,7 @@ internal sealed partial class DefaultGraphStore : IGraphStore
             var record = GraphRecordCodec.Decode(unit.Data);
             var (writer, _) = RecordVersionStamp.ReadStamps(unit.Data.Span);
             _records.Add((record.Kind, record.Id), new Reference(unit.PageId, unit.SlotIndex, writer));
+            if (record.Kind == 3) { _definitionIds.Add(record.Id); }
         }
         OpenIndexes();
     }
@@ -195,12 +200,19 @@ internal sealed partial class DefaultGraphStore : IGraphStore
     private void Add(GraphRecord record, ulong location, TransactionSequence writer)
     {
         var (page, slot) = GraphStorage.UnpackLocation(location);
-        lock (_sync) { _records[(record.Kind, record.Id)] = new Reference(page, slot, writer); }
+        lock (_sync)
+        {
+            _records[(record.Kind, record.Id)] = new Reference(page, slot, writer);
+            if (record.Kind == 3) { _definitionIds.Add(record.Id); }
+        }
     }
 
     private ulong[] Ids(byte kind)
     {
-        lock (_sync) { return _records.Keys.Where(key => key.Kind == kind).Select(key => key.Id).ToArray(); }
+        lock (_sync)
+        {
+            return kind == 3 ? _definitionIds.ToArray() : _records.Keys.Where(key => key.Kind == kind).Select(key => key.Id).ToArray();
+        }
     }
 
     private Found? Find(byte kind, ulong id, TransactionSnapshot snapshot)

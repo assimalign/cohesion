@@ -8,16 +8,25 @@ namespace Assimalign.Cohesion.Database.Storage.Internal;
 /// free list. New pages are appended; freed pages are recycled in first-freed order.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The map is rebuilt when a storage file is opened by scanning page headers: pages
 /// stamped <see cref="PageType.Free"/> return to the free list. A page freed but not
 /// yet flushed when the process stops therefore reappears as allocated after reopen —
 /// a safe leak (the page is unreachable but never handed out twice), never corruption.
+/// </para>
+/// <para>
+/// Every member is serialized by one lock. Allocation, commit-time frees and scans'
+/// allocation checks run on different threads — concurrent storage transactions, and
+/// readers beside an engine's single writer — and an unsynchronized allocator can hand
+/// the same page to two transactions.
+/// </para>
 /// </remarks>
 internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
 {
-    private long _nextPageId;
+    private readonly object _sync = new();
     private readonly Queue<long> _freeQueue = new();
     private readonly HashSet<long> _freeSet = new();
+    private long _nextPageId;
 
     internal StorageFreeSpaceMap()
     {
@@ -25,26 +34,47 @@ internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
     }
 
     /// <inheritdoc />
-    public long TotalPageCount => _nextPageId;
+    public long TotalPageCount
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _nextPageId;
+            }
+        }
+    }
 
     /// <inheritdoc />
-    public long FreePageCount => _freeSet.Count;
+    public long FreePageCount
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _freeSet.Count;
+            }
+        }
+    }
 
     /// <inheritdoc />
     public PageId Allocate()
     {
-        while (_freeQueue.Count > 0)
+        lock (_sync)
         {
-            long recycled = _freeQueue.Dequeue();
-
-            // Entries may be stale when MarkAllocated reclaimed the id during reopen.
-            if (_freeSet.Remove(recycled))
+            while (_freeQueue.Count > 0)
             {
-                return (PageId)recycled;
-            }
-        }
+                long recycled = _freeQueue.Dequeue();
 
-        return (PageId)_nextPageId++;
+                // Entries may be stale when MarkAllocated reclaimed the id during reopen.
+                if (_freeSet.Remove(recycled))
+                {
+                    return (PageId)recycled;
+                }
+            }
+
+            return (PageId)_nextPageId++;
+        }
     }
 
     /// <inheritdoc />
@@ -52,14 +82,17 @@ internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
     {
         long id = (long)pageId;
 
-        if (id >= _nextPageId)
+        lock (_sync)
         {
-            throw new StorageIOException($"Cannot free page {id}: the page was never allocated.");
-        }
+            if (id >= _nextPageId)
+            {
+                throw new StorageIOException($"Cannot free page {id}: the page was never allocated.");
+            }
 
-        if (_freeSet.Add(id))
-        {
-            _freeQueue.Enqueue(id);
+            if (_freeSet.Add(id))
+            {
+                _freeQueue.Enqueue(id);
+            }
         }
     }
 
@@ -67,7 +100,11 @@ internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
     public bool IsAllocated(PageId pageId)
     {
         long id = (long)pageId;
-        return id < _nextPageId && !_freeSet.Contains(id);
+
+        lock (_sync)
+        {
+            return id < _nextPageId && !_freeSet.Contains(id);
+        }
     }
 
     /// <summary>
@@ -79,12 +116,15 @@ internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
     {
         long id = (long)pageId;
 
-        if (id >= _nextPageId)
+        lock (_sync)
         {
-            _nextPageId = id + 1;
-        }
+            if (id >= _nextPageId)
+            {
+                _nextPageId = id + 1;
+            }
 
-        _freeSet.Remove(id);
+            _freeSet.Remove(id);
+        }
     }
 
     /// <summary>
@@ -96,14 +136,17 @@ internal sealed class StorageFreeSpaceMap : IStorageFreeSpaceMap
     {
         long id = (long)pageId;
 
-        if (id >= _nextPageId)
+        lock (_sync)
         {
-            _nextPageId = id + 1;
-        }
+            if (id >= _nextPageId)
+            {
+                _nextPageId = id + 1;
+            }
 
-        if (_freeSet.Add(id))
-        {
-            _freeQueue.Enqueue(id);
+            if (_freeSet.Add(id))
+            {
+                _freeQueue.Enqueue(id);
+            }
         }
     }
 }

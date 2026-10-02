@@ -252,7 +252,7 @@ public sealed class SqlJoinExecutionTests
         {
             var captured = new SqlStatementContext(transaction, database.Coordinator);
             var request = SqlQueryRequest.FromSql("SELECT a.value, b.value FROM a JOIN b ON a.id = b.id;");
-            var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager);
+            var executor = new SqlQueryExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
 
             // Act: replace both ON operands atomically after this statement captured its view.
             var update = await writer.BeginTransactionAsync(cancellationToken: CancellationToken.None);

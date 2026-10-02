@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
@@ -105,10 +106,13 @@ internal sealed partial class SqlPlanner
     private static void CollectJoinEqualities(SqlExpression expression, SqlExpressionEvaluator evaluator,
         List<(int Left, int Right, Collation Collation)> equalities)
     {
-        if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.And } conjunction)
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlLogicalExpression { Operator: SqlLogicalOperator.And } conjunction)
         {
-            CollectJoinEqualities(conjunction.Left, evaluator, equalities);
-            CollectJoinEqualities(conjunction.Right, evaluator, equalities);
+            foreach (var term in conjunction.Operands)
+            {
+                CollectJoinEqualities(term, evaluator, equalities);
+            }
         }
         else if (expression is SqlBinaryExpression { Operator: SqlBinaryOperator.Equal } binary
             && UnwrapCollation(binary.Left) is SqlColumnReferenceExpression left
@@ -120,8 +124,9 @@ internal sealed partial class SqlPlanner
 
     /// <summary>
     /// Requires key equality to match evaluator equality. Floating signed zeros
-    /// share SQL equality; timestamps encode kind/offset tie breakers
-    /// ignored by comparison. Those types must scan even with an index present.
+    /// share SQL equality but not key bytes, so floating keys must scan even with
+    /// an index present. Timestamps qualify: their keys encode only the ticks
+    /// (TIMESTAMP) or the instant (TIMESTAMPTZ), the identity the comparer uses.
     /// </summary>
     private static bool CanSeekJoinEquality(DatabaseType inner, DatabaseType outer)
     {
@@ -130,6 +135,7 @@ internal sealed partial class SqlPlanner
 
         return ExactNumeric(inner) && ExactNumeric(outer)
             || inner == outer && inner is DatabaseType.Boolean or DatabaseType.String or DatabaseType.Json
-                or DatabaseType.Date or DatabaseType.Time or DatabaseType.TimeSpan or DatabaseType.Guid;
+                or DatabaseType.Date or DatabaseType.Time or DatabaseType.DateTime or DatabaseType.DateTimeOffset
+                or DatabaseType.TimeSpan or DatabaseType.Guid;
     }
 }

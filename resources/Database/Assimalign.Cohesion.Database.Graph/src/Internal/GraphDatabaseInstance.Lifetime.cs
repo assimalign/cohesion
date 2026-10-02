@@ -2,8 +2,9 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Assimalign.Cohesion.Database.Transactions;
+using Assimalign.Cohesion.Database.Graph.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 internal sealed partial class GraphDatabaseInstance
 {
@@ -21,11 +22,11 @@ internal sealed partial class GraphDatabaseInstance
             session?.Track(operation);
             return operation;
         }
-        catch
+        catch (Exception error)
         {
             if (operation is not null)
             {
-                await operation.AbortAsync().ConfigureAwait(false);
+                await operation.AbortAsync(error).ConfigureAwait(false);
             }
             throw;
         }
@@ -46,14 +47,42 @@ internal sealed partial class GraphDatabaseInstance
         }
         catch (Exception error)
         {
-            await operation.AbortAsync().ConfigureAwait(false);
-            if (error is TransactionDeadlockException) { throw new DatabaseTransactionDeadlockException(error.Message, error); }
-            if (error is TransactionAbortedException) { throw new DatabaseTransactionAbortedException(error.Message, error); }
-            if (error is StorageException) { throw new DatabaseException("COHDBG006: " + error.Message, error); }
-            if (error is InvalidOperationException) { throw new DatabaseException("COHDBG003: " + error.Message, error); }
-            throw;
+            // An explicit transaction records the error its caller sees as the cause of its abort.
+            var reported = Translate(error);
+            await operation.AbortAsync(reported).ConfigureAwait(false);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
         }
     }
+
+    // Child-root failures cross the engine boundary as the area root's exceptions.
+    private static Exception Translate(Exception error) => TranslateKernelFailure(error) switch
+    {
+        var translated when !ReferenceEquals(translated, error) => translated,
+        _ when error is InvalidOperationException => new DatabaseException("COHDBG003: " + error.Message, error),
+        // A label expression or predicate nested deeper than this thread's stack: the walks
+        // check the stack before they descend, so the statement fails, not the process.
+        _ when error is InsufficientExecutionStackException stack => GraphStatementTooComplex.Create(stack),
+        _ => error,
+    };
+
+    /// <summary>
+    /// Translates a failure of the transaction kernel or the storage child root into the area
+    /// root's exception; any other failure is returned unchanged. Statements and the explicit
+    /// transaction's commit and rollback share it.
+    /// </summary>
+    /// <param name="error">The failure to translate.</param>
+    /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
+    internal static Exception TranslateKernelFailure(Exception error) => error switch
+    {
+        TransactionDeadlockException => new DatabaseTransactionDeadlockException(error.Message, error),
+        TransactionAbortedException => new DatabaseTransactionAbortedException(error.Message, error),
+        // An element whose record or index key outgrows storage fails its statement; the store
+        // wrote nothing for it. It derives from StorageException, so it is matched first.
+        GraphElementTooLargeException => new DatabaseException("COHDBG009: " + error.Message, error),
+        StorageException => new DatabaseException("COHDBG006: " + error.Message, error),
+        _ => error,
+    };
 
     // One database writer at a time is deliberately conservative. The shared
     // lock manager owns waits and releases; readers remain snapshot based.

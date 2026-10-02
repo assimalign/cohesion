@@ -67,7 +67,10 @@ public class StorageStream : Stream, IFileSystemFileHandle
     public override bool CanWrite => _inner.CanWrite;
 
     /// <inheritdoc />
-    public override long Length => _inner.Length;
+    /// <remarks>
+    /// Read through the backing handle, which serializes it with page reads and writes.
+    /// </remarks>
+    public override long Length => _handle.Length;
 
     /// <inheritdoc />
     public override long Position
@@ -139,7 +142,12 @@ public class StorageStream : Stream, IFileSystemFileHandle
     public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
 
     /// <inheritdoc />
-    public override void SetLength(long value) => _inner.SetLength(value);
+    /// <remarks>
+    /// Goes through the backing handle, which serializes it with page reads and writes: an
+    /// in-memory stream replaces its array when it grows, and a page write racing that
+    /// replacement would otherwise be lost.
+    /// </remarks>
+    public override void SetLength(long value) => _handle.SetLength(value);
 
     /// <inheritdoc />
     public override void Write(byte[] buffer, int offset, int count) => _inner.Write(buffer, offset, count);

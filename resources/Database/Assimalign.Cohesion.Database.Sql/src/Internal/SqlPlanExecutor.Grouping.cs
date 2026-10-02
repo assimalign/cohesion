@@ -46,7 +46,7 @@ internal sealed partial class SqlPlanExecutor
             }
             for (int i = 0; i < states.Length; i++)
             {
-                var argument = plan.Aggregates[i].Arguments[0];
+                var argument = plan.Aggregates[i].Call.Arguments[0];
                 states[i].Add(argument is SqlStarExpression ? 1L : sourceEvaluator.Evaluate(argument, row));
             }
         }
@@ -99,13 +99,14 @@ internal sealed partial class SqlPlanExecutor
             Name = projection.Name,
             Ordinal = ordinal,
             Type = projection.Type,
+            // COUNT never returns NULL, even over no rows; every other projection may.
             IsNullable = projection.Expression is not SqlFunctionCallExpression call
-                || !call.FunctionName.Equals("COUNT", StringComparison.OrdinalIgnoreCase),
+                || SqlFunctionSignatures.FunctionOf(call) != SqlBuiltinFunction.Count,
         }).ToArray();
         return new SqlMaterializedResultSet(columns, window.ToList());
 
-        AggregateState[] CreateStates() => plan.Aggregates.Select(call => new AggregateState(call.FunctionName,
-            sourceEvaluator.ResolveCollation(call.Arguments[0]))).ToArray();
+        AggregateState[] CreateStates() => plan.Aggregates.Select(aggregate => new AggregateState(aggregate.Signature,
+            sourceEvaluator.ResolveCollation(aggregate.Call.Arguments[0]))).ToArray();
     }
 
     /// <summary>
@@ -114,18 +115,28 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private sealed class AggregateState
     {
-        private readonly string _function;
+        private readonly SqlBuiltinFunction _function;
+        private readonly string _name;
         private readonly Collation _collation;
         private long _count;
         private decimal _sum;
         private object? _extreme;
 
         /// <summary>Initializes a new instance of the <see cref="AggregateState"/> class.</summary>
-        /// <param name="function">The aggregate function name, matched case-insensitively.</param>
+        /// <param name="signature">The aggregate signature the planner bound the call to.</param>
         /// <param name="collation">The collation MIN and MAX use to compare values.</param>
-        public AggregateState(string function, Collation collation)
+        /// <exception cref="DatabaseException">The signature is not an aggregate this state accumulates.</exception>
+        public AggregateState(SqlFunctionSignature signature, Collation collation)
         {
-            _function = function.ToUpperInvariant();
+            if (signature.Function is not (SqlBuiltinFunction.Count or SqlBuiltinFunction.Sum or SqlBuiltinFunction.Avg
+                or SqlBuiltinFunction.Min or SqlBuiltinFunction.Max))
+            {
+                // An aggregate entry added to the signature table without an accumulator here.
+                throw new DatabaseException($"Function '{signature.Name}' is not supported by the executor yet.");
+            }
+
+            _function = signature.Function;
+            _name = signature.Name;
             _collation = collation;
         }
 
@@ -140,21 +151,21 @@ internal sealed partial class SqlPlanExecutor
                 _count = checked(_count + 1);
                 switch (_function)
                 {
-                    case "SUM":
-                    case "AVG":
+                    case SqlBuiltinFunction.Sum:
+                    case SqlBuiltinFunction.Avg:
                         if (value is not (sbyte or short or int or long or float or double or decimal))
                         {
-                            throw new DatabaseException($"{_function} requires a numeric argument.");
+                            throw new DatabaseException($"{_name} requires a numeric argument.");
                         }
                         _sum = checked(_sum + Convert.ToDecimal(value, CultureInfo.InvariantCulture));
                         break;
-                    case "MIN":
+                    case SqlBuiltinFunction.Min:
                         if (_extreme is null || SqlValueComparer.Compare(value, _extreme, _collation) < 0)
                         {
                             _extreme = value;
                         }
                         break;
-                    case "MAX":
+                    case SqlBuiltinFunction.Max:
                         if (_extreme is null || SqlValueComparer.Compare(value, _extreme, _collation) > 0)
                         {
                             _extreme = value;
@@ -164,17 +175,18 @@ internal sealed partial class SqlPlanExecutor
             }
             catch (OverflowException exception)
             {
-                throw new DatabaseException($"{_function} overflow: the aggregate cannot be represented as a decimal or count.", exception);
+                throw SqlEvaluationException.NumericValueOutOfRange(
+                    $"{_name} overflowed; the aggregate cannot be represented as a decimal or count.", exception);
             }
         }
 
         /// <summary>Decimal division preserves fractional averages, rounding to even when necessary.</summary>
         internal object? Finish() => _function switch
         {
-            "COUNT" => _count,
+            SqlBuiltinFunction.Count => _count,
             _ when _count == 0 => null,
-            "SUM" => _sum,
-            "AVG" => _sum / _count,
+            SqlBuiltinFunction.Sum => _sum,
+            SqlBuiltinFunction.Avg => _sum / _count,
             _ => _extreme,
         };
     }
@@ -219,17 +231,36 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    /// <summary>Alternative numeric CASE/COALESCE branches share the declared output type.</summary>
+    /// <summary>
+    /// Alternative numeric CASE/COALESCE branches share the declared output type. A
+    /// value that does not fit that type (an approximate branch beyond Decimal's range,
+    /// for example) fails the statement as out of range rather than escaping raw.
+    /// </summary>
     private static object? NormalizeGroupValue(object? value, DatabaseType type)
-        => value is not (sbyte or short or int or long or float or double or decimal) ? value : type switch
+    {
+        if (value is not (sbyte or short or int or long or float or double or decimal))
         {
-            DatabaseType.Int8 => Convert.ToSByte(value, CultureInfo.InvariantCulture),
-            DatabaseType.Int16 => Convert.ToInt16(value, CultureInfo.InvariantCulture),
-            DatabaseType.Int32 => Convert.ToInt32(value, CultureInfo.InvariantCulture),
-            DatabaseType.Int64 => Convert.ToInt64(value, CultureInfo.InvariantCulture),
-            DatabaseType.Float32 => Convert.ToSingle(value, CultureInfo.InvariantCulture),
-            DatabaseType.Float64 => Convert.ToDouble(value, CultureInfo.InvariantCulture),
-            DatabaseType.Decimal => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
-            _ => value,
-        };
+            return value;
+        }
+
+        try
+        {
+            return type switch
+            {
+                DatabaseType.Int8 => Convert.ToSByte(value, CultureInfo.InvariantCulture),
+                DatabaseType.Int16 => Convert.ToInt16(value, CultureInfo.InvariantCulture),
+                DatabaseType.Int32 => Convert.ToInt32(value, CultureInfo.InvariantCulture),
+                DatabaseType.Int64 => Convert.ToInt64(value, CultureInfo.InvariantCulture),
+                DatabaseType.Float32 => Convert.ToSingle(value, CultureInfo.InvariantCulture),
+                DatabaseType.Float64 => Convert.ToDouble(value, CultureInfo.InvariantCulture),
+                DatabaseType.Decimal => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
+                _ => value,
+            };
+        }
+        catch (OverflowException exception)
+        {
+            throw SqlEvaluationException.NumericValueOutOfRange(
+                $"{Convert.ToString(value, CultureInfo.InvariantCulture)} does not fit the {type} result type.", exception);
+        }
+    }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 
 using Assimalign.Cohesion.Database.Sql.Language;
 
@@ -70,6 +71,7 @@ internal sealed partial class SqlPlanner
 
         void BindAliases(SqlExpression expression)
         {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
             if (expression is SqlColumnReferenceExpression { TableAlias: null, SchemaName: null } reference
                 && aliases.TryGetValue(reference.ColumnName, out int index))
             {

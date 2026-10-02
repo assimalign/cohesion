@@ -158,18 +158,24 @@ public interface ISqlCatalog
     IReadOnlyList<BTreeIndexRegistration> GetIndexRegistrations();
 
     /// <summary>
-    /// Gets the record-space format version of the database's data storage: 1 =
-    /// the pre-MVCC unstamped row layout (the value reported when no marker is
-    /// persisted), 2 = MVCC-stamped records. The catalog is the marker's home
-    /// because rows are not self-describing across format changes — the engine
-    /// reads this at open and upgrades a version-1 record space in place.
+    /// Gets the record-space format version of the database's data storage (its
+    /// rows and the index trees that share its file set): 1 = the pre-MVCC
+    /// unstamped row layout (the value reported when no marker is persisted),
+    /// 2 = MVCC-stamped records, 3 = per-object page chains, 4 = index keys that
+    /// encode TIMESTAMP and TIMESTAMPTZ values by their SQL identity. The catalog
+    /// is the marker's home because rows and keys are not self-describing across
+    /// format changes — the engine reads this at open and refuses a data storage
+    /// on any version but its own (it has no upgrade path).
     /// </summary>
     int RecordSpaceFormatVersion { get; }
 
     /// <summary>
     /// Persists the record-space format version. Self-committing, like every
-    /// catalog write; called by the engine after a record-space upgrade (or at
-    /// database creation, when the space is born on the current format).
+    /// catalog write; called by the engine at database creation, when the data
+    /// storage is born on the engine's format. From version 4 on, the marker is
+    /// stored in a form that catalogs written before version 4 refuse to load, so
+    /// an older engine fails the open instead of writing older-format data into
+    /// the database.
     /// </summary>
     /// <param name="version">The format version to persist.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>

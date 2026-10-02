@@ -21,14 +21,20 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal static class SqlRowCodec
 {
     /// <summary>
-    /// The current record-space format version, persisted in the catalog: 3 =
-    /// stamped records in per-object page chains (rows live on pages tagged with
-    /// their table's object id); 2 = stamped records in the shared page stream;
-    /// 1 = the pre-MVCC unstamped layout. Older versions upgrade in place when the
-    /// database is opened — stamps first (1 → 2), then chain relocation (2 → 3).
-    /// The record byte layout itself is unchanged since version 2.
+    /// The format version of the database's data storage (rows and the index
+    /// trees that share its file set) this engine reads and writes, persisted in
+    /// the catalog: 5 = stamped records in per-object page chains whose index
+    /// keys encode the temporal identity (<see cref="ToKeyIdentity"/>), in index
+    /// trees of B-tree page format 2, which order entries by key, entry reference
+    /// and writer (#1194). Earlier versions — 4 (the same rows, with index trees
+    /// of B-tree page format 1, ordered by key alone), 3 (the kind and offset
+    /// inside temporal keys), 2 (records in the shared page stream) and 1
+    /// (pre-MVCC unstamped records) — are history: a database is created on this
+    /// version, and an existing one on any other version is refused at open.
+    /// There is no upgrade path (owner decisions of 2026-10-01 and 2026-10-02;
+    /// upgrades are #1152).
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 3;
+    internal const int RecordSpaceFormatVersion = 5;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.
@@ -73,19 +79,6 @@ internal static class SqlRowCodec
     /// </summary>
     internal static byte[] WithoutDeleter(ReadOnlySpan<byte> record)
         => RecordVersionStamp.WithoutDeleter(record);
-
-    /// <summary>
-    /// Prepends a zeroed stamp header to a pre-MVCC (format-version-1) record —
-    /// the in-place migration write. Writer zero reads as visible to every
-    /// snapshot (it precedes every assigned sequence) and deleter zero is "not
-    /// deleted", so migrated rows behave exactly as committed bootstrap data.
-    /// </summary>
-    internal static byte[] UpgradeUnstamped(ReadOnlySpan<byte> record)
-    {
-        var upgraded = new byte[StampHeaderSize + record.Length];
-        record.CopyTo(upgraded.AsSpan(StampHeaderSize));
-        return upgraded;
-    }
 
     /// <summary>
     /// Decodes a stamped record when it belongs to the expected table; returns
@@ -138,9 +131,43 @@ internal static class SqlRowCodec
     }
 
     /// <summary>
+    /// Appends one typed value as an index-key component: the identity encoding
+    /// every key path shares (maintenance, seek bounds, unique-key locks and build
+    /// duplicate detection). Strings encode under the column's effective
+    /// collation and temporal values encode their <see cref="ToKeyIdentity"/>
+    /// form, so for every key type except floating point two keys are byte-equal
+    /// exactly when <see cref="SqlValueComparer"/> calls their values equal.
+    /// Floating keys keep the IEEE bytes, so positive and negative zero stay
+    /// distinct keys although SQL calls them equal; that is why the planner never
+    /// seeks a signed-zero equality or a floating range, and joins never seek
+    /// floating keys.
+    /// </summary>
+    internal static void AppendKeyValue(DatabaseKeyWriter writer, DatabaseType type, object? value, Collation collation)
+        => AppendValue(writer, type, ToKeyIdentity(value), collation);
+
+    /// <summary>
+    /// Maps a value to the canonical member of its SQL equality class for key
+    /// encoding (#1099). A <c>TIMESTAMP</c> keeps its ticks and drops its
+    /// <see cref="DateTimeKind"/> (encoded as <see cref="DateTimeKind.Unspecified"/>;
+    /// no time-zone conversion happens, matching the comparer); a
+    /// <c>TIMESTAMPTZ</c> becomes the same instant at offset zero. Every other
+    /// value is returned unchanged. Rows never pass through this mapping — they
+    /// keep the written kind and offset.
+    /// </summary>
+    internal static object? ToKeyIdentity(object? value) => value switch
+    {
+        DateTime timestamp when timestamp.Kind != DateTimeKind.Unspecified
+            => DateTime.SpecifyKind(timestamp, DateTimeKind.Unspecified),
+        DateTimeOffset instant when instant.Offset != TimeSpan.Zero
+            => instant.ToUniversalTime(),
+        _ => value,
+    };
+
+    /// <summary>
     /// Appends one typed value as a self-describing, order-preserving component —
-    /// shared by row and index encoding. Rows preserve original strings under
-    /// Binary; index callers supply the column's effective collation.
+    /// the row encoding, which round-trips the written value exactly (original
+    /// strings under Binary, DateTime kinds and DateTimeOffset offsets). Index
+    /// keys go through <see cref="AppendKeyValue"/> instead.
     /// </summary>
     internal static void AppendValue(DatabaseKeyWriter writer, DatabaseType type, object? value, Collation? collation = null)
     {

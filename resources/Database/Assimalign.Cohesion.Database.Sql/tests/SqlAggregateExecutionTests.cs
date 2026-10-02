@@ -289,6 +289,51 @@ public sealed class SqlAggregateExecutionTests
         error.Message.ShouldContain("aggregate");
     }
 
+    /// <summary>
+    /// UPDATE and DELETE act on one row at a time, so an aggregate in an assignment or a filter has
+    /// no group to summarize. It fails while planning, as PostgreSQL rejects one in UPDATE and WHERE
+    /// (SQLSTATE 42803): over an empty table as over a populated one, and without changing a row.
+    /// It used to succeed over an empty table and fail per row over a populated one.
+    /// </summary>
+    /// <param name="statement">An UPDATE or DELETE with an aggregate outside any subquery.</param>
+    /// <param name="message">The planner's message.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregates: UPDATE and DELETE reject aggregates before reading rows")]
+    [InlineData("UPDATE metrics SET amount = SUM(amount);", "Aggregate functions are not allowed in UPDATE SET.")]
+    [InlineData("UPDATE metrics SET amount = 1, region = UPPER(MAX(region));", "Aggregate functions are not allowed in UPDATE SET.")]
+    [InlineData("UPDATE metrics SET amount = 0 WHERE COUNT(*) > 1;", "Aggregate functions are not allowed in WHERE.")]
+    [InlineData("DELETE FROM metrics WHERE COUNT(*) > 1;", "Aggregate functions are not allowed in WHERE.")]
+    [InlineData("DELETE FROM metrics WHERE amount > 0 AND min(amount) < 0;", "Aggregate functions are not allowed in WHERE.")]
+    public async Task Aggregates_InUpdateOrDelete_ShouldRejectBeforeReadingRows(string statement, string message)
+    {
+        foreach (bool withRows in new[] { false, true })
+        {
+            // Arrange
+            await using var engine = CreateEngine();
+            var database = await engine.CreateDatabaseAsync("aggregate");
+            await using var session = await database.CreateSessionAsync(cancellationToken: CancellationToken.None);
+            if (withRows)
+            {
+                await SeedAsync(session);
+            }
+            else
+            {
+                (await ExecuteAsync(session, CreateMetrics)).Status.ShouldBe(QueryResultStatus.Success);
+            }
+            var before = await SnapshotAsync(session);
+
+            // Act
+            var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, statement));
+
+            // Assert
+            error.Message.ShouldBe(message, $"withRows: {withRows}");
+            (await SnapshotAsync(session)).ShouldBe(before, $"withRows: {withRows}");
+        }
+
+        static async Task<string[]> SnapshotAsync(IDatabaseSession session)
+            => (await RowsAsync(session, "SELECT id, category, region, amount FROM metrics ORDER BY id;"))
+                .Select(row => string.Join(",", row)).ToArray();
+    }
+
     /// <summary>SUM and AVG reject text explicitly rather than inferring a numeric result from non-null rows.</summary>
     /// <param name="aggregate">The numeric aggregate to validate.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Aggregates: SUM and AVG require numeric arguments")]

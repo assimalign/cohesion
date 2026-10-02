@@ -545,7 +545,7 @@ public sealed class SqlSchemaProvisioningTests : IDisposable
         IDatabase database, IDatabaseTransaction transaction, string statement)
     {
         var instance = (SqlDatabaseInstance)database;
-        var executor = new SqlQueryExecutor(instance.DataStorage, instance.Catalog, instance.IndexManager);
+        var executor = new SqlQueryExecutor(instance.DataStorage, instance.Catalog, instance.IndexManager, instance.Definitions);
         var scope = new SqlStatementContext(((SqlDatabaseTransaction)transaction).Context, instance.Coordinator);
         return executor.ExecuteAsync(SqlQueryRequest.FromSql(statement), scope, TestTimeout.Token());
     }

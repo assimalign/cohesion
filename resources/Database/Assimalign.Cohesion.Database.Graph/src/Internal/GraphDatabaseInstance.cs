@@ -20,6 +20,21 @@ internal sealed partial class GraphDatabaseInstance : IGraphDatabase
         Engine = engine;
         DataStorage = storage;
         Coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
+        // Indexing owns the B-tree page format (#1194) and checks each tree's root
+        // page as it attaches the tree. That happens inside the store's open, after
+        // the recovery scrub has written to the database, so the check runs here
+        // first: a database whose indexes this engine cannot read is refused before
+        // anything is written to it.
+        try
+        {
+            GraphStore.EnsureIndexFormat(storage);
+        }
+        catch (Indexing.IndexFormatException exception)
+        {
+            Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+        }
+
         var recovery = recover ? Coordinator.AnalyzeAndScrub() : null;
         Catalog = GraphCatalog.Open(storage, Coordinator);
         Store = GraphStore.Open(storage, Coordinator);
@@ -57,12 +72,21 @@ internal sealed partial class GraphDatabaseInstance : IGraphDatabase
 
     public ValueTask<GraphNode> CreateNodeAsync(IDatabaseSession session, IReadOnlyList<string> labels,
         IReadOnlyDictionary<string, object?>? properties = null, CancellationToken cancellationToken = default)
-        => RunAsync(RequireSession(session), operation => CreateNodeCoreAsync(operation, labels, properties, cancellationToken), cancellationToken);
+    {
+        var graphSession = RequireSession(session);
+        // Argument validation runs before the statement starts, so it never aborts an explicit
+        // transaction. The catalog rejects the same names inside the statement.
+        ArgumentNullException.ThrowIfNull(labels);
+        foreach (string label in labels)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(label, nameof(labels));
+        }
+        return RunAsync(graphSession, operation => CreateNodeCoreAsync(operation, labels, properties, cancellationToken), cancellationToken);
+    }
 
     internal async ValueTask<GraphNode> CreateNodeCoreAsync(GraphOperation operation, IReadOnlyList<string> labels,
         IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
     {
-        ArgumentNullException.ThrowIfNull(labels);
         await LockWriterAsync(operation.Context, token).ConfigureAwait(false);
         foreach (string label in labels)
         {
@@ -92,7 +116,12 @@ internal sealed partial class GraphDatabaseInstance : IGraphDatabase
 
     public ValueTask<GraphRelationship> CreateRelationshipAsync(IDatabaseSession session, GraphNodeId from, GraphNodeId to,
         string type, IReadOnlyDictionary<string, object?>? properties = null, CancellationToken cancellationToken = default)
-        => RunAsync(RequireSession(session), operation => CreateRelationshipCoreAsync(operation, from, to, type, properties, cancellationToken), cancellationToken);
+    {
+        var graphSession = RequireSession(session);
+        // Argument validation runs before the statement starts, so it never aborts an explicit transaction.
+        ArgumentException.ThrowIfNullOrWhiteSpace(type);
+        return RunAsync(graphSession, operation => CreateRelationshipCoreAsync(operation, from, to, type, properties, cancellationToken), cancellationToken);
+    }
 
     internal async ValueTask<GraphRelationship> CreateRelationshipCoreAsync(GraphOperation operation, GraphNodeId from, GraphNodeId to,
         string type, IReadOnlyDictionary<string, object?>? properties, CancellationToken token)

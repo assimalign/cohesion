@@ -23,6 +23,27 @@ one statement at a time. Result-bearing statements return a header, zero or more
 rows, and completion. Other statements return completion alone. Error ends the
 current exchange without completion. ParseFailure and ExecutionFailure leave the
 session ready; malformed payloads, unknown messages, and bad ordering close it.
+Evaluation faults are ExecutionFailure: division by zero, numeric overflow and a
+sign over a non-numeric operand carry messages that begin with `COHSQLE001:`,
+`COHSQLE002:` and `COHSQLE003:`, and a statement whose parse or walk needs more
+stack than the server's thread has left, such as one within a high configured
+nesting limit or a `LIKE` match that backtracks through more wildcards than the
+stack holds, carries `COHSQLE004:` (see the dialect's diagnostics table). A
+statement nested deeper than the engine's expression nesting limit (256 levels by
+default, configured per engine within 32..4096) is a ParseFailure whose message
+carries `SQL0006`; it is refused before anything executes. A chain of `AND` or `OR`
+terms counts one level however long it is, so a 10,000-term predicate executes (see
+the dialect's expression nesting limit, #1151).
+A column reference in an `INSERT ... VALUES` row or a `LIMIT` or `OFFSET` count,
+a subquery's included, is an ExecutionFailure carrying `COHSQLE005:`, raised while
+planning, so nothing executes and the session stays ready (#1165; a reference to a
+target column in VALUES used to end the session with `Internal`, and one in a
+subquery's count carried `COHDBL001:`).
+A function call whose arguments its function does not accept, such as `ABS(1, 2)`,
+`UPPER()`, `COALESCE()` or `COUNT(a, b)`, is an ExecutionFailure carrying
+`COHSQLE006:`, raised while planning in every expression position, so nothing
+executes and the session stays ready (#1189; such a call used to return NULL, and a
+CHECK built on one was stored and never fired).
 There is no pipelining or multiplexing. Terminate closes; Ping receives Pong while ready.
 
 The model-owned exchange has this order.

@@ -53,7 +53,13 @@ uses those same transforms for uniqueness enforcement.
 - **One record per table.** Columns and the primary key fold into the table's
   record: schema changes rewrite one record (in place when it fits, relocating —
   delete + insert — when it grows). Per-column records would buy nothing at this
-  scale and cost multi-record consistency.
+  scale and cost multi-record consistency. A record lives in one slotted-page slot,
+  so a table definition, an index description or the registration set is limited to
+  `SlottedPage.MaxRecordSize` (8,092 bytes) encoded. The encoders check that limit
+  before storage is touched and throw `SqlCatalogException` naming the object and both
+  sizes; the definition in memory and on disk stays the last one that fit (#1157
+  review — it used to surface as a raw `SlottedPageException` from the relocation's
+  insert). Definitions larger than a page wait for overflow records.
 - **Object identities are catalog-assigned `ulong`s** persisted with a counter
   record, monotonic across reopen (the loader also raises the counter past every
   loaded table, so a torn counter update can never recycle an id). Data rows,
@@ -61,14 +67,15 @@ uses those same transforms for uniqueness enforcement.
 - **Index directory persistence lives here** — the index manager stays a physical
   component (`Database.Indexing`'s documented split): the catalog stores the
   exported `BTreeIndexRegistration` set and hands it back for re-attachment on
-  open. Root page ids drift on splits; the engine re-saves at its persistence
-  points (checkpoint/shutdown).
+  open. A tree's root page stays fixed through splits (#1159), so registrations
+  change through index DDL; the engine still re-saves at its persistence points
+  (checkpoint/shutdown) as a backstop.
 - **Index descriptions are schema metadata, one record per index (kind 5)** —
   `SqlCatalogIndex`: name (unique per table, case-insensitive), owning table
   object id, ordered key columns, uniqueness. The description is deliberately
-  separate from the physical registration: the description is stable while root
-  page ids drift, and the planner needs columns/uniqueness the registration
-  doesn't carry. **Description and registration writes are atomic** —
+  separate from the physical registration: the description is schema, the
+  registration physical identity, and the planner needs columns/uniqueness the
+  registration doesn't carry. **Description and registration writes are atomic** —
   `CreateIndexAsync`/`DropIndexAsync` take the registration set and persist both
   records in one self-committing transaction, because a crash must never leave a
   description promising an index no tree backs (an unenforced UNIQUE) or a
@@ -76,16 +83,33 @@ uses those same transforms for uniqueness enforcement.
   removes the table's descriptions and registrations the same way. Guards:
   dropping an indexed column is rejected (entries key on its values); index
   columns must exist at creation.
-- **The record-space format version lives here** (kind-4 record,
-  `RecordSpaceFormatVersion`): data rows are not self-describing across layout
+- **The record-space format version lives here** (kind-4 record, kind 8 from
+  version 4 as below; `RecordSpaceFormatVersion`): data rows are not self-describing across layout
   changes — a stamped (MVCC, version ≥ 2) record and an unstamped (version 1)
-  record cannot be told apart record-by-record, and version 2 vs 3 (shared page
+  record cannot be told apart record-by-record, version 2 vs 3 (shared page
   stream vs per-object page chains) is a page-placement property no record
-  carries — so the database-grain marker is catalog metadata, read by the
-  engine at open to decide which in-place upgrade stages to run. Absent marker
-  reads as version 1 (pre-marker databases); the engine writes the current
-  version (3) after upgrading (or at creation, when the space is born on the
-  current format).
+  carries, and version 3 vs 4 (index keys with or without the temporal kind and
+  offset, #1099) and 4 vs 5 (index trees in B-tree page format 1, ordered by key
+  alone, or format 2, ordered by key, entry reference and writer, #1194) are
+  properties of the index trees — so the database-grain marker is catalog
+  metadata. (`Database.Indexing` also stamps and checks its own page format on
+  each tree, behind this marker.) The engine writes its version (5) when it
+  creates a database and refuses to open one whose marker reads anything else; it
+  has no upgrade path (owner decisions of 2026-10-01 and 2026-10-02; upgrades are
+  #1152). Version 5 is stored as a kind-8 record like version 4. Absent marker
+  reads as version 1 (pre-marker databases, or a creation interrupted before the
+  engine stamped the marker).
+- **From version 4 the marker is a kind-8 record (downgrade fence, #1099).**
+  Catalogs before format 4 (through 10.0.0-preview.1) load kinds 1–7 and throw
+  `SqlCatalogException` on any other kind, but their engines did not refuse a
+  marker newer than they understood. Left at kind 4, a format-4 marker would
+  let such an engine open the database and write format-3 temporal keys into
+  it, and the newer engine would trust those keys because the marker still
+  reads 4. `SetRecordSpaceFormatVersionAsync` therefore rewrites the single
+  marker record in place as kind 8 for any version of 4 or more (and as kind 4
+  below that); `Load` reads either kind. An older engine now fails the open
+  with "Malformed catalog record of kind 8" instead of corrupting the indexes;
+  downgrade is unsupported.
 - **The applied compiled-schema state lives here** (kind-6 records). The catalog
   stores the lowercase content hash together with the complete canonical schema
   document. Documents are strict UTF-8 and chunked into bounded records; replacing
@@ -128,9 +152,10 @@ remain internal and are used only by catalog tests.
 Table records now append a versioned constraint extension after ownership: version
 `1`, constraint count, and each immutable foreign-key/check definition. A reference
 stores its ordered local and target columns, target SQL namespace/table, and
-`RESTRICT` or `CASCADE` delete action. A check stores its SQL expression. Records
-ending after the original primary keys or ownership suffix still load with no
-constraints. Unknown extension versions and malformed definitions fail closed.
+`RESTRICT` or `CASCADE` delete action. A check stores its predicate as canonical
+SQL text (below). Records ending after the original primary keys or ownership
+suffix still load with no constraints. Unknown extension versions and malformed
+definitions fail closed.
 Column changes retain constraints, and add/drop constraint rewrites use the same
 WAL-backed, self-committing record replacement as existing catalog metadata.
 
@@ -160,6 +185,35 @@ Index records have their own version-`1` trailing extension carrying `IsPrimaryK
 This identifies the physical index enforcing primary-key metadata, allowing schema
 reconciliation to distinguish it from a separately declared unique index on the
 same columns. Older index records have no marker and load as ordinary indexes.
+
+## Persisted SQL expressions are canonical text
+
+Every SQL expression this catalog stores — `SqlCatalogConstraint.CheckExpression`
+and `SqlCatalogColumn.DefaultLiteral` today, and any expression default or view
+query added later — is **canonical SQL that the engine rendered from the parsed
+tree** (`SqlExpressionRenderer`, Sql.Language), never the text a user wrote. A check
+declared as `QTY>0   and qty<100` is stored as `QTY > 0 AND qty < 100`; a default
+declared as `'it''s'` or `+5` is stored as `'it''s'` or `5`, the SQL literal rather
+than its bare value. New persisted expressions must follow the same rule; storing
+source text is not an option, because a stored definition must mean the same thing
+under every later parser.
+
+The catalog itself stays SQL-agnostic: it has no reference to the language package,
+stores the text as an opaque string in the same tuple fields as before, and validates
+only shape (a check needs non-blank text; a reference needs its columns). The SQL
+engine owns the rule end to end. It renders and verifies the canonical text before
+publishing a definition, and when it opens a database it parses and binds every
+stored check and default once per table version, before any statement runs. A stored
+definition that does not load fails that open, naming the table and the constraint or
+column, instead of failing a later write; DDL inside the engine never stores text
+that would not reload. Opening binds a stored definition (its columns resolve, and it
+is something the engine can evaluate) without re-applying the rules DDL uses to accept
+one, so a later release that narrows those rules never makes a stored definition fail
+the open. Canonical storage is part of data-storage format 4, so it needed no further
+format bump; text stored by earlier formats is not migrated, and the engine refuses an
+earlier-format database whose catalog holds a check or default with a format error. The
+engine's [persisted-definition design](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#persisted-definitions-canonical-text-parsed-once)
+has the details.
 
 ## Single source for SQL system views (C1)
 

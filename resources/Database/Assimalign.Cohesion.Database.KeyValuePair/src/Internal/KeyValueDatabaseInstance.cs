@@ -40,25 +40,41 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
         _catalog = KeyValueCatalog.Open(catalogStorage);
         _coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, new KeyValueTransactionRecordSpace(storage));
 
-        if (_catalog.EntrySpaceFormatVersion > KeyValueRecordCodec.EntrySpaceFormatVersion)
+        // The format gate reads the catalog alone, before the primary index is
+        // attached or recovery writes anything.
+        try
         {
-            throw new DatabaseException(
-                $"Database '{name}' uses entry-space format version {_catalog.EntrySpaceFormatVersion}, " +
-                $"newer than this engine understands ({KeyValueRecordCodec.EntrySpaceFormatVersion}).");
+            ThrowIfFormatIsNotCurrent(name, _catalog);
+        }
+        catch
+        {
+            _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            throw;
         }
 
         // Re-attach the persisted primary index before recovery: the open-time
         // scrub must be able to purge unproven writers' entries out of the tree.
         // Index pages live in the SAME data file set as entry records (the
         // transactional page surface), so storage recovery has already replayed
-        // them by the time the manager attaches.
-        _indexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+        // them by the time the manager attaches. The manager checks the tree's
+        // page format as it attaches it (Indexing owns that format, #1194): a
+        // primary index written in another B-tree page format refuses the open
+        // here, before recovery writes anything.
+        try
         {
-            Storage = storage,
-            TransactionSource = new StatementTransactionSource(_coordinator),
-            LockManager = _coordinator.LockManager,
-            ExistingIndexes = _catalog.GetIndexRegistrations(),
-        });
+            _indexManager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+            {
+                Storage = storage,
+                TransactionSource = new StatementTransactionSource(_coordinator),
+                LockManager = _coordinator.LockManager,
+                ExistingIndexes = _catalog.GetIndexRegistrations(),
+            });
+        }
+        catch (IndexFormatException exception)
+        {
+            _coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            throw new DatabaseException($"Database '{name}' cannot be opened. {exception.Message}", exception);
+        }
 
         if (recover)
         {
@@ -90,8 +106,8 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     /// orphaned tree root — a safe leak, the SQL index-DDL posture). The
     /// bootstrap bracket commits durably (the self-committing DDL posture: the
     /// catalog registration commits independently and must never describe a tree
-    /// a crash could revert), and the registration + format marker persist as
-    /// catalog self-commits after it.
+    /// a crash could revert), and the format marker, then the registration, persist
+    /// as catalog self-commits after it.
     /// </summary>
     private IIndex EnsurePrimaryIndex()
     {
@@ -129,12 +145,52 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
             throw;
         }
 
-        _catalog.SaveIndexRegistrationsAsync(((IIndexRegistry)_indexManager).ExportRegistrations())
-            .AsTask().GetAwaiter().GetResult();
+        // The marker first: a catalog that registers a primary index then always
+        // carries the format of the engine that built it, which is what the format
+        // gate relies on (a crash between the two leaves a marker and no
+        // registration, and the next open bootstraps again).
         _catalog.SetEntrySpaceFormatVersionAsync(KeyValueRecordCodec.EntrySpaceFormatVersion)
+            .AsTask().GetAwaiter().GetResult();
+        _catalog.SaveIndexRegistrationsAsync(((IIndexRegistry)_indexManager).ExportRegistrations())
             .AsTask().GetAwaiter().GetResult();
 
         return index;
+    }
+
+    /// <summary>
+    /// The format gate: refuses a database whose catalog marker is not this engine's
+    /// entry-space format (<see cref="KeyValueRecordCodec.EntrySpaceFormatVersion"/>),
+    /// before the primary index is attached or recovery writes anything. An engine
+    /// before #1194 refuses this engine's databases the same way, because it rejects a
+    /// marker newer than its own.
+    /// </summary>
+    /// <remarks>
+    /// A catalog that registers no primary index describes a creation interrupted
+    /// before the registration persisted. Nothing can have been written through such
+    /// a database, since every write goes through the primary index, so the open goes
+    /// on to bootstrap the index and stamp the current marker, whatever older or absent
+    /// marker it read (an absent marker reads as 1). Every other database must carry
+    /// exactly the current marker: this engine stamps it before it registers the index.
+    /// </remarks>
+    /// <exception cref="DatabaseException">The database is on another entry-space format.</exception>
+    private static void ThrowIfFormatIsNotCurrent(string name, IKeyValueCatalog catalog)
+    {
+        int version = catalog.EntrySpaceFormatVersion;
+        int current = KeyValueRecordCodec.EntrySpaceFormatVersion;
+
+        if (version == current || (version < current && catalog.GetIndexRegistrations().Count == 0))
+        {
+            return;
+        }
+
+        string remedy = version < current
+            ? "This engine does not upgrade databases written in an older format: export its data with the engine that " +
+              "wrote it, drop the database (DropDatabaseAsync) and create it again with this engine, then reload the data " +
+              "(on-disk format upgrades are tracked by assimalign/cohesion#1152)."
+            : "The database was written by a newer engine; open it with that engine.";
+
+        throw new DatabaseException(
+            $"Database '{name}' uses entry-space format {version}, but this engine supports only format {current}. {remedy}");
     }
 
     /// <inheritdoc />
@@ -171,10 +227,11 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     internal TransactionCoordinator Coordinator => _coordinator;
 
     /// <summary>
-    /// Persists the index manager's current registrations when they drifted from
-    /// the stored set — root page ids change on splits, so this runs at the
-    /// engine's persistence points (checkpoint passes and disposal) in addition
-    /// to the creation bootstrap itself.
+    /// Persists the index manager's current registrations when they differ from
+    /// the stored set. A tree's root page stays fixed through splits (#1159), so
+    /// this normally finds nothing to write; it runs at the engine's persistence
+    /// points (checkpoint passes and disposal), in addition to the creation
+    /// bootstrap itself, as a backstop.
     /// </summary>
     internal void SaveIndexRegistrationsIfChanged()
     {

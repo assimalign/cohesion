@@ -21,6 +21,7 @@ public sealed class SqlCastExpression : SqlExpression
         Operand = operand;
         TargetType = targetType;
         TargetTypeInfo = targetTypeInfo;
+        Depth = 1 + operand.Depth;
     }
 
     /// <summary>

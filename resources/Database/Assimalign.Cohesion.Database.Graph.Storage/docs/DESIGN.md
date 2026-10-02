@@ -84,18 +84,38 @@ The explicit scalar encoding is:
 | 11 | Decimal, BinaryWriter's four Int32 words |
 | 12, 13 | Finite IEEE-754 Float64, Float32 |
 
-Record length is limited to the shared `SlottedPage.MaxRecordSize`. Unsupported CLR
-objects, non-finite floating values and oversized records fail before insertion. This
-version does not define arrays, nested objects or overflow chains. Nodes and
+Record length is limited to the shared `SlottedPage.MaxRecordSize` (8,092 bytes).
+Unsupported CLR objects, empty or whitespace names and non-finite floating values fail
+with `ArgumentException`, a caller error, before insertion. An oversized record fails
+with the public `GraphElementTooLargeException`, a `StorageException`, before anything
+is written: the size is the element's, not a store fault, so the Graph engine reports it
+as the statement failure `COHDBG009` and keeps the session. This version does not define
+arrays, nested objects or overflow chains; Neo4j spills large label sets to dynamic label
+records and long values to property chains, and an overflow-record format is a follow-up. Nodes and
 relationships are immutable versions; the frozen engine surface has create/delete
 operations and no property-update member.
 
 Owner-one physical registration records are exactly 34 bytes: a zero stamp prefix,
 kind `4`, version `1`, UInt64 object ID, and Int64 root page ID. Every tree is named
-`graph`; its object ID distinguishes it. Root registrations change in the same bracket
-as a split and are reloaded after physical statement rollback. They are physical
+`graph`; its object ID distinguishes it. A tree's root page stays fixed through splits
+(#1159), so a registration changes only when a tree is created; every mutation bracket
+still saves changed registrations as a backstop, and registrations are reloaded after
+physical statement rollback. They are physical
 infrastructure, so logical rollback leaves an unused tree available for recovery;
 logical property-index definitions remain stamped and determine visibility.
+
+The trees' pages carry `Database.Indexing`'s own B-tree page format (2 since #1194: entries
+ordered by key, record location and writer), which the index manager checks on each tree's root
+page when the store attaches it. The store opens after the coordinator's recovery scrub, so
+`GraphStore.EnsureIndexFormat(storage)` makes the same check first from the registration records
+(zero-stamped, so the scrub never changes them) and the root pages, writing nothing. The Graph
+engine calls it before recovery and refuses a database whose indexes an engine before #1194 wrote
+with "Database 'x' cannot be opened. COHDBI001: …" (the `IndexFormatException` as its inner
+exception). A cleanly closed database is left byte-identical; a crashed one has had only the
+storage layer's format-agnostic journal redo and undo, and keeps its journal for the engine that
+wrote it. There is no upgrade path (owner decision of 2026-10-02; #1152). The fence runs one way
+only: engines before #1194 check neither the page format nor anything this store changed, so they
+cannot detect a database this engine wrote and must not open one (owner review of #1194).
 
 Physical references use the high 48 bits for the page ID and low 16 bits for the slot.
 Readers check page allocation, data-page owner, record identity and writer stamp before
@@ -109,7 +129,15 @@ identity. Keys consist of the shared `DatabaseKeyWriter` scalar encoding followe
 the node identity as eight unsigned big-endian bytes. The scalar encoding is null,
 Boolean, ordinal UTF-16 big-endian string bytes, or Float64 for every numeric CLR type.
 The scalar prefix may occupy at most 1016 bytes, leaving eight bytes within the shared
-1024-byte key limit. Missing properties have no entry; a present null has a null key.
+1024-byte key limit. A node write, or an index build over an existing node, whose indexed
+value encodes past that prefix fails with `GraphElementTooLargeException` before anything
+is written. No entry can therefore hold such a value, so a search for one matches nothing
+instead of failing. Missing properties have no entry; a present null has a null key.
+
+`GetIndexes` lists the definitions a snapshot sees in one pass, so a planner matching many
+labels and property keys reads them once rather than once per pair. The store keeps the
+definition identities apart from its node and relationship directory, so listing them costs
+the definition count, not a pass over every record.
 
 Numeric keys are a candidate projection. Nearby Int64 or Decimal values can map to the
 same Float64 value. Every result is compared to its original scalar: integral/Decimal

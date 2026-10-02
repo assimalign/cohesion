@@ -59,6 +59,11 @@ public abstract class Storage : IStorage
     private Name _name;
     private bool _disposed;
 
+    // The journal position and sequence counter an existing file set opened at,
+    // once recovery finished; null for a file set this instance created. Shutdown
+    // compares against it to recognize a storage nothing was written through.
+    private (long Lsn, long Sequence)? _openedAt;
+
     /// <summary>
     /// Initializes the storage with the specified backing streams for data, journal, and backup.
     /// </summary>
@@ -360,6 +365,8 @@ public abstract class Storage : IStorage
         {
             Checkpoint();
         }
+
+        _openedAt = (_journal.LastLsn, _nextTransactionSequence);
     }
 
     /// <inheritdoc />
@@ -658,7 +665,7 @@ public abstract class Storage : IStorage
         // the complete before-image and leaves its owner directory intact.
         var page = handle.Page;
         ulong pageOwner = page.OwnerId;
-        page.AsBodySpan().Clear();
+        ClearBody(page);
         page.Type = PageType.Free;
         page.OwnerId = 0;
         slotted.Initialize();
@@ -770,7 +777,7 @@ public abstract class Storage : IStorage
             // scan rebuilds both the free-space map and the directory accordingly.
             using var handle = TouchPage(owner, (PageId)pageId);
             var page = handle.Page;
-            page.AsBodySpan().Clear();
+            ClearBody(page);
             page.Type = PageType.Free;
             page.OwnerId = 0;
 
@@ -984,9 +991,23 @@ public abstract class Storage : IStorage
     /// of any stolen page, so recovery undoes abandoned transactions in available
     /// backing bytes. Non-durable mode makes no promise that those bytes survive.
     /// </summary>
+    /// <remarks>
+    /// An opened file set that nothing was written through writes nothing on
+    /// shutdown: the files stay byte-identical, and a journal whose open-time
+    /// checkpoint the owner deferred (to analyze it first) is not truncated
+    /// unanalyzed — closing then is equivalent to a crash right after recovery,
+    /// which the next open already handles. That is what lets an engine refuse a
+    /// database at open (an unsupported format, say) without writing to it on the
+    /// way out; the open's own recovery has still run.
+    /// </remarks>
     private void ShutdownFlush()
     {
         if (_pageManager is null || _journal is null)
+        {
+            return;
+        }
+
+        if (IsUnwrittenSinceOpen())
         {
             return;
         }
@@ -1008,6 +1029,31 @@ public abstract class Storage : IStorage
             Data.Flush(durable: RequiresDurableFlush);
             _journal.Flush(forceDurable: RequiresDurableFlush);
         }
+    }
+
+    /// <summary>
+    /// Whether nothing has been written through this opened file set: every
+    /// transaction appends its begin record and every checkpoint its checkpoint
+    /// record, so an unchanged journal position, an unchanged sequence counter (no
+    /// reservation either) and no active transaction mean no page was dirtied and
+    /// no header field moved since recovery finished.
+    /// </summary>
+    private bool IsUnwrittenSinceOpen()
+    {
+        if (_openedAt is not { } openedAt)
+        {
+            return false;
+        }
+
+        lock (_transactionLock)
+        {
+            if (_activeTransactionCount > 0 || _nextTransactionSequence != openedAt.Sequence)
+            {
+                return false;
+            }
+        }
+
+        return _journal!.LastLsn == openedAt.Lsn;
     }
 
     private bool RequiresDurableFlush => CommitDurability != StorageCommitDurability.None;
@@ -1130,6 +1176,14 @@ public abstract class Storage : IStorage
         var page = handle.Page;
         page.Lsn = lsn;
     }
+
+    /// <summary>
+    /// Zeroes a pooled page's body. The length is the pool buffer's fixed size, never the
+    /// overflow size recorded in the page's own header: a header is page content, and a
+    /// corrupt one must not decide how far past the buffer a clear runs.
+    /// </summary>
+    private static unsafe void ClearBody(Page page)
+        => new Span<byte>(page.Pointer + Page.HeaderSize, Page.Size - Page.HeaderSize).Clear();
 
     private void ReleasePageWriteLocks(StorageTransaction transaction)
     {

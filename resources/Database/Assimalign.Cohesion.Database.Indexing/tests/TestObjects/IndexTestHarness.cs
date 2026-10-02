@@ -110,6 +110,33 @@ public sealed class IndexTestHarness : IStorageTransactionSource, IAsyncDisposab
         await Manager.RollbackAsync(context);      // releases locks, purges versions
     }
 
+    /// <summary>
+    /// Rolls a transaction back the way a model engine does after its statement
+    /// brackets already committed (a multi-statement ROLLBACK): the transaction's
+    /// physical writes stay durable, the caller's logical undo runs in a fresh
+    /// bracket while the transaction still holds its locks, and only then does the
+    /// transaction leave the active table as aborted.
+    /// </summary>
+    public async Task LogicalRollbackAsync(ITransactionContext context, Func<IStorageTransaction, Task> undo)
+    {
+        IStorageTransaction storageTransaction;
+        lock (_sync)
+        {
+            storageTransaction = _pairs[context];
+            _pairs.Remove(context);
+        }
+
+        storageTransaction.Commit();
+
+        using (var bracket = Storage.BeginTransaction())
+        {
+            await undo(bracket);
+            bracket.Commit();
+        }
+
+        await Manager.RollbackAsync(context);
+    }
+
     /// <inheritdoc />
     public IStorageTransaction GetStorageTransaction(ITransactionContext context)
     {

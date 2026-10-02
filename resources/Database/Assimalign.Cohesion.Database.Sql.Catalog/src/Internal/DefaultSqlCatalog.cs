@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Storage;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Catalog.Internal;
@@ -27,6 +28,15 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     private const int indexRecordKind = 5;
     private const int schemaStateRecordKind = 6;
     private const int defaultCollationRecordKind = 7;
+
+    // The record-space format marker from version 4 on (#1099). Catalogs written
+    // before format 4 (through 10.0.0-preview.1) load kinds 1-7 only and refuse
+    // any other kind, so persisting a format-4 marker under a new kind makes those
+    // engines fail the open instead of accepting the database and writing
+    // format-3 index keys into it. Versions 1-3 keep the kind-4 record.
+    private const int fencedRecordSpaceFormatKind = 8;
+    private const int firstFencedRecordSpaceFormatVersion = 4;
+
     private const int schemaStateChunkSize = 3 * 1024;
 
     private static readonly Encoding _strictUtf8 = new UTF8Encoding(
@@ -516,8 +526,11 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
 
         lock (_sync)
         {
+            int kind = version >= firstFencedRecordSpaceFormatVersion
+                ? fencedRecordSpaceFormatKind
+                : recordSpaceFormatKind;
             var writer = new DatabaseKeyWriter();
-            writer.AppendInt32(recordSpaceFormatKind).AppendInt32(version);
+            writer.AppendInt32(kind).AppendInt32(version);
             byte[] record = writer.ToArray();
 
             using (var transaction = _storage.BeginTransaction())
@@ -622,6 +635,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                     break;
 
                 case recordSpaceFormatKind:
+                case fencedRecordSpaceFormatKind:
                     _recordSpaceFormatVersion = reader.ReadInt32();
                     _formatLocation = (unit.PageId, unit.SlotIndex);
                     break;
@@ -760,7 +774,32 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
 
     // ── Record codec (shared self-describing tuple encoding) ──────────
 
+    /// <summary>
+    /// Refuses a catalog record that cannot be stored. Every catalog record lives in one
+    /// slotted-page slot, so a definition encoded past <see cref="SlottedPage.MaxRecordSize"/>
+    /// can never be written. Failing here, before the storage is touched, reports the
+    /// definition that outgrew a page as a catalog error rather than letting a storage
+    /// failure reach the client half-way through a relocation.
+    /// </summary>
+    /// <param name="record">The encoded record.</param>
+    /// <param name="description">What the record describes, for the message.</param>
+    /// <returns><paramref name="record"/>.</returns>
+    /// <exception cref="SqlCatalogException">The record exceeds the maximum record size.</exception>
+    private static byte[] EnsureStorable(byte[] record, string description)
+    {
+        if (record.Length > SlottedPage.MaxRecordSize)
+        {
+            throw new SqlCatalogException(
+                $"The definition of {description} encodes to {record.Length} bytes, more than the {SlottedPage.MaxRecordSize} bytes a catalog record can hold.");
+        }
+
+        return record;
+    }
+
     private static byte[] EncodeTable(SqlCatalogTable table)
+        => EnsureStorable(EncodeTableRecord(table), $"table '{table.Schema}.{table.Name}'");
+
+    private static byte[] EncodeTableRecord(SqlCatalogTable table)
     {
         var writer = new DatabaseKeyWriter();
         writer.AppendInt32(tableRecordKind)
@@ -927,6 +966,9 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
     }
 
     private static byte[] EncodeIndex(SqlCatalogIndex index)
+        => EnsureStorable(EncodeIndexRecord(index), $"index '{index.Name}'");
+
+    private static byte[] EncodeIndexRecord(SqlCatalogIndex index)
     {
         var writer = new DatabaseKeyWriter();
         writer.AppendInt32(indexRecordKind)
@@ -1225,7 +1267,7 @@ internal sealed class DefaultSqlCatalog : ISqlCatalog
                   .AppendInt64(registration.RootPageId);
         }
 
-        return writer.ToArray();
+        return EnsureStorable(writer.ToArray(), $"the database's {registrations.Count} index registrations");
     }
 
     private static IReadOnlyList<BTreeIndexRegistration> DecodeRegistrations(ref DatabaseKeyReader reader)

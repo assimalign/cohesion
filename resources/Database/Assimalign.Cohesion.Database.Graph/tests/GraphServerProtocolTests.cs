@@ -9,6 +9,7 @@ using Xunit;
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
@@ -68,6 +69,28 @@ public sealed class GraphServerProtocolTests
         });
     }
 
+    /// <summary>
+    /// A Cypher arrow is a parse failure that names GQL0008 on either exchange (#1139), and the
+    /// session stays ready: the next Ping gets Pong.
+    /// </summary>
+    /// <param name="paths">Whether the statement goes through ExecutePaths rather than Execute.</param>
+    [Theory(DisplayName = "Cohesion Test [Database.Graph] - Server: a Cypher arrow is a GQL0008 parse failure and keeps the session ready")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Execute_CypherArrow_ShouldReturnGql0008AndKeepSessionReady(bool paths)
+    {
+        await WithServerAsync(async (channel, token) =>
+        {
+            await WriteAsync(channel, (ProtocolMessageType)(paths ? GraphProtocolMessageType.ExecutePaths : GraphProtocolMessageType.Execute),
+                GraphProtocolExecuteMessage.Create("MATCH (a)-->(b) RETURN a").Encode(), token);
+            var error = await ReadErrorAsync(channel, token);
+            error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
+            error.Message.ShouldContain("GQL0008", Case.Sensitive);
+            await WriteAsync(channel, ProtocolMessageType.Ping, [], token);
+            (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Pong);
+        });
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Graph] - Server: malformed parameter components terminate either exchange")]
     [InlineData(false)]
     [InlineData(true)]
@@ -84,7 +107,55 @@ public sealed class GraphServerProtocolTests
         });
     }
 
-    private static async Task WithServerAsync(Func<ProtocolChannel, CancellationToken, Task> action)
+    /// <summary>
+    /// After a failed statement aborts the explicit transaction, both exchanges are refused with a
+    /// COHDBG007 ExecutionFailure and the session stays ready (#1188). An empty statement is no
+    /// statement, so it is a ParseFailure that leaves an active transaction untouched. The wire has
+    /// no transaction control, so the test opens the transaction on the server's engine session.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Server: an aborted transaction refuses both exchanges and keeps the session ready")]
+    public async Task Execute_AbortedTransaction_ShouldRefuseBothExchangesAndKeepSessionReady()
+    {
+        await WithServerAsync(async (server, channel, token) =>
+        {
+            var transaction = await server.Context.Sessions.ShouldHaveSingleItem().DatabaseSession.ShouldNotBeNull()
+                .BeginTransactionAsync(token);
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
+                GraphProtocolExecuteMessage.Create("INSERT (:Pending)").Encode(), token);
+            (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
+                GraphProtocolExecuteMessage.Create(" ").Encode(), token);
+            (await ReadErrorAsync(channel, token)).Code.ShouldBe(ProtocolErrorCode.ParseFailure);
+            transaction.State.ShouldBe(TransactionState.Active);
+
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute,
+                GraphProtocolExecuteMessage.Create("MATCH (n:Missing) RETURN n.name").Encode(), token);
+            (await ReadErrorAsync(channel, token)).Message.ShouldStartWith("COHDBG002", Case.Sensitive);
+            foreach (var type in new[] { GraphProtocolMessageType.Execute, GraphProtocolMessageType.ExecutePaths })
+            {
+                await WriteAsync(channel, (ProtocolMessageType)type, GraphProtocolExecuteMessage.Create("MATCH (n) RETURN n").Encode(), token);
+                var refused = await ReadErrorAsync(channel, token);
+                refused.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
+                refused.Message.ShouldStartWith("COHDBG007", Case.Sensitive);
+                refused.Message.ShouldContain("COHDBG002", Case.Sensitive);
+            }
+            await WriteAsync(channel, ProtocolMessageType.Ping, [], token);
+            (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Pong);
+
+            transaction.State.ShouldBe(TransactionState.Faulted);
+            await transaction.RollbackAsync(token);
+            await WriteAsync(channel, (ProtocolMessageType)GraphProtocolMessageType.ExecutePaths,
+                GraphProtocolExecuteMessage.Create("MATCH (n) RETURN n").Encode(), token);
+            var complete = await ReadAsync(channel, token);
+            complete.Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.PathsComplete);
+            GraphProtocolPathsCompleteMessage.Decode(complete.Payload.Span).PathCount.ShouldBe(0);
+        });
+    }
+
+    private static Task WithServerAsync(Func<ProtocolChannel, CancellationToken, Task> action)
+        => WithServerAsync((_, channel, token) => action(channel, token));
+
+    private static async Task WithServerAsync(Func<GraphDatabaseServer, ProtocolChannel, CancellationToken, Task> action)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
@@ -100,7 +171,7 @@ public sealed class GraphServerProtocolTests
         (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Authenticate);
         await WriteAsync(channel, ProtocolMessageType.AuthenticateResponse, [], token);
         (await ReadAsync(channel, token)).Type.ShouldBe(ProtocolMessageType.Ready);
-        await action(channel, token);
+        await action(server, channel, token);
     }
 
     private static async Task WriteAsync(ProtocolChannel channel, ProtocolMessageType type, byte[] payload, CancellationToken token)

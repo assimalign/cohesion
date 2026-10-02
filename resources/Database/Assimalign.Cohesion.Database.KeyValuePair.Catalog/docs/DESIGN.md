@@ -27,9 +27,19 @@ that has none.
   instances, both trivial — the extraction threshold is the third model).
 - **Format version named `EntrySpaceFormatVersion`, not `RecordSpaceFormatVersion`.**
   The key-value model was born on format 1 (MVCC-stamped entries in the key
-  space's page chain); the name scopes the marker to the model's own vocabulary.
-  There is no upgrade machinery because there is no older format — the engine
-  writes the marker at creation and rejects unknown newer versions at open.
+  space's page chain, indexed by a tree of B-tree page format 1); the name scopes
+  the marker to the model's own vocabulary. The marker describes the whole data
+  file set, entry records and the primary index tree that rides it, so #1194's
+  B-tree page format 2 (entries ordered by key, entry location and writer) made
+  it 2 although the records did not change. The engine writes the marker at
+  creation, before it registers the primary index, and refuses a database that
+  registers one on any other version, older or newer; there is no upgrade
+  machinery (owner decision of 2026-10-02; #1152). An absent marker reads as 1.
+  Bumping the marker, rather than relying only on `Database.Indexing`'s own page
+  stamp (which it checks on the tree's root when the engine attaches the
+  registration this catalog persists), is what fences engines from before #1194:
+  they reject a marker newer than 1 but cannot read the page stamp. The catalog
+  itself is unchanged: the marker is an opaque integer here.
 
 ## Query-time introspection captures (C2)
 

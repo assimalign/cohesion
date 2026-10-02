@@ -54,11 +54,15 @@ public sealed class SqlMigrationScriptStep
     {
         Operation = operation;
         StatementText = statementText;
-        Request = SqlQueryRequest.FromSql(statementText);
+
+        // Parsed at the dialect's ceiling, not the default limit: the engine that executes the
+        // step applies its own configured limit to the request (#1151), so a schema written for
+        // an engine with a high limit is not cut short here.
+        Request = SqlQueryRequest.FromSql(statementText, null, SqlQueryRequest.CeilingParserOptions);
         RollbackStatementText = rollbackStatementText;
         RollbackRequest = rollbackStatementText is null
             ? null
-            : SqlQueryRequest.FromSql(rollbackStatementText);
+            : SqlQueryRequest.FromSql(rollbackStatementText, null, SqlQueryRequest.CeilingParserOptions);
     }
 
     /// <summary>Gets the portable operation represented by this step.</summary>

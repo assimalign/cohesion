@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -6,6 +7,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Indexing.Tests.TestObjects;
@@ -43,9 +45,13 @@ public class BTreeIndexTests
         return results;
     }
 
+    /// <summary>
+    /// Decodes the order-preserving value in a key's last eight bytes: the whole of an
+    /// <see cref="IndexKey.FromInt64"/> key, and the tail of a <see cref="WideKey"/>.
+    /// </summary>
     private static long DecodeInt64(IndexKey key)
     {
-        ulong folded = System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(key.Encoded.Span);
+        ulong folded = System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(key.Encoded.Span[^8..]);
         return (long)(folded ^ 0x8000_0000_0000_0000UL);
     }
 
@@ -404,6 +410,200 @@ public class BTreeIndexTests
         // Assert: redo rebuilt every split page from the journal.
         results.Count.ShouldBe(800);
         results.Select(x => x.Key).ShouldBe(Enumerable.Range(0, 800).Select(i => (long)i));
+    }
+
+    /// <summary>
+    /// A 508-byte key: a 500-byte constant prefix, then the order-preserving value. About
+    /// fifteen entries fit on a leaf, and since adjacent keys first differ past the
+    /// prefix, suffix truncation keeps separators over 500 bytes long: about fifteen fit
+    /// on an internal node too, so a few thousand inserts grow the tree several levels.
+    /// </summary>
+    private static IndexKey WideKey(long value)
+    {
+        var bytes = new byte[508];
+        bytes.AsSpan(0, 500).Fill(0x2E);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(bytes.AsSpan(500), (ulong)value ^ 0x8000_0000_0000_0000UL);
+        return new IndexKey(bytes);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Recovery: a rolled-back root split leaves the root in place and the tree usable")]
+    public async Task Rollback_RootSplits_ShouldKeepRootPageAndTree()
+    {
+        // Arrange: a committed single-leaf tree.
+        var (harness, index) = await CreateIndexAsync();
+        await using var harnessLifetime = harness;
+        var registry = (IIndexRegistry)harness.IndexManager;
+
+        var setup = await harness.BeginAsync();
+        for (long i = 0; i < 10; i++)
+        {
+            await index.InsertAsync(setup, WideKey(i), (ulong)i);
+        }
+        await harness.CommitAsync(setup);
+        long root = registry.ExportRegistrations().Single().RootPageId;
+
+        // Act: a transaction grows the tree three levels — the root splits as a leaf
+        // and again as an internal node — then rolls back physically.
+        var doomed = await harness.BeginAsync();
+        for (long i = 100; i < 3_100; i++)
+        {
+            await index.InsertAsync(doomed, WideKey(i), (ulong)i);
+        }
+        await harness.RollbackAsync(doomed);
+
+        // Assert: the committed tree is intact, and it keeps growing normally.
+        var reader = await harness.BeginAsync();
+        (await ScanAsync(index, reader, IndexKeyRange.All)).Select(x => x.Reference).ShouldBe(Enumerable.Range(0, 10).Select(i => (ulong)i));
+
+        var writer = await harness.BeginAsync();
+        for (long i = 10; i < 3_000; i++)
+        {
+            await index.InsertAsync(writer, WideKey(i), (ulong)i);
+        }
+        await harness.CommitAsync(writer);
+
+        var after = await harness.BeginAsync();
+        (await ScanAsync(index, after, IndexKeyRange.All)).Select(x => x.Reference).ShouldBe(Enumerable.Range(0, 3_000).Select(i => (ulong)i));
+        registry.ExportRegistrations().Single().RootPageId.ShouldBe(root);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Recovery: committed root splits survive a restart from registrations exported before them")]
+    public async Task Recovery_RootSplitsAfterLastExport_ShouldSurviveRestart()
+    {
+        // Arrange: the catalog exports the registration while the tree is one leaf;
+        // the same committed transaction then splits the root repeatedly with no
+        // further export — a crash before the catalog's next persistence point.
+        // (The writes ride the first transaction because the reopened harness
+        // restarts its in-memory sequence space, and its first reader, sequence 1,
+        // sees sequence 1's writes as its own.)
+        var data = new CrashSimulationStream(writeThrough: false);
+        var journal = new CrashSimulationStream(writeThrough: false);
+        var harness = new IndexTestHarness(data, journal);
+
+        var setup = await harness.BeginAsync();
+        var index = await harness.IndexManager.CreateIndexAsync(setup, 1, new IndexDefinition("ix_root"));
+        var registrations = ((IIndexRegistry)harness.IndexManager).ExportRegistrations();
+
+        for (long i = 0; i < 2_000; i++)
+        {
+            await index.InsertAsync(setup, WideKey(i), (ulong)i);
+        }
+        await harness.CommitAsync(setup);
+
+        byte[] crashedData = data.CaptureDurable();
+        byte[] crashedJournal = journal.CaptureDurable();
+
+        // Act
+        await using var recovered = IndexTestHarness.Reopen(crashedData, crashedJournal, registrations);
+        recovered.IndexManager.TryGetIndex(1, "ix_root", out var recoveredIndex).ShouldBeTrue();
+
+        // Assert: the registered root still routes every lookup — a full scan, a
+        // point seek, and a range seek deep in the tree's right half…
+        var reader = await recovered.BeginAsync();
+        (await ScanAsync(recoveredIndex, reader, IndexKeyRange.All)).Select(x => x.Reference)
+            .ShouldBe(Enumerable.Range(0, 2_000).Select(i => (ulong)i));
+        (await ScanAsync(recoveredIndex, reader, new IndexKeyRange(WideKey(1_234), WideKey(1_234), true, true)))
+            .Select(x => x.Reference).ShouldBe(new[] { 1_234UL });
+        (await ScanAsync(recoveredIndex, reader, new IndexKeyRange(WideKey(1_500), WideKey(1_510), true, false)))
+            .Select(x => x.Reference).ShouldBe(Enumerable.Range(1_500, 10).Select(i => (ulong)i));
+        await recovered.RollbackAsync(reader);
+
+        // …and new keys at both ends land in order.
+        var writer = await recovered.BeginAsync();
+        await recoveredIndex.InsertAsync(writer, WideKey(5_000), 5_000);
+        await recoveredIndex.InsertAsync(writer, WideKey(-1), 9_999);
+        await recovered.CommitAsync(writer);
+
+        var after = await recovered.BeginAsync();
+        var keys = (await ScanAsync(recoveredIndex, after, IndexKeyRange.All)).Select(x => x.Key).ToList();
+        keys.Count.ShouldBe(2_002);
+        keys.ShouldBe(keys.Order().ToList());
+    }
+
+    // Offsets from BTreeNode's documented body layout, page format 2 (kind at 3, entry
+    // count at 4, directory at 32; an internal entry is [u16 keyLen | tiebreaker << 14]
+    // [key][tiebreaker attributes][i64 child]). The corruption test below writes a
+    // node directly, which needs exactly these.
+    private const int NodeKindOffset = 3;
+    private const int NodeCountOffset = 4;
+    private const int NodeDirectoryOffset = 32;
+    private const byte InternalNodeKind = 2;
+
+    /// <summary>
+    /// Overwrites the key bytes of the only separator of the internal node on
+    /// <paramref name="pageId"/> with the same number of leading bytes of
+    /// <paramref name="replacement"/>, committed in its own bracket. The separator
+    /// must keep no tiebreaker (its neighbours' keys differ), so its key bytes alone
+    /// decide its order.
+    /// </summary>
+    private static void OverwriteOnlySeparator(IStorage storage, long pageId, IndexKey replacement)
+    {
+        using var bracket = storage.BeginTransaction();
+        using (var handle = storage.OpenPageForWrite(bracket, pageId))
+        {
+            var body = handle.Page.AsBodySpan();
+            body[NodeKindOffset].ShouldBe(InternalNodeKind);
+            BinaryPrimitives.ReadUInt16LittleEndian(body[NodeCountOffset..]).ShouldBe((ushort)1);
+
+            int entry = BinaryPrimitives.ReadUInt16LittleEndian(body[NodeDirectoryOffset..]);
+            int field = BinaryPrimitives.ReadUInt16LittleEndian(body[entry..]);
+            (field >> 14).ShouldBe(0, "the separator keeps no tiebreaker");
+            int length = field & 0x3FFF;
+            length.ShouldBeLessThanOrEqualTo(replacement.Length);
+            replacement.Encoded.Span[..length].CopyTo(body[(entry + 2)..]);
+            handle.MarkDirty();
+        }
+
+        bracket.Commit();
+    }
+
+    private static int NodeEntryCount(IStorage storage, long pageId)
+    {
+        using var handle = storage.PageManager.GetPage(pageId);
+        return BinaryPrimitives.ReadUInt16LittleEndian(handle.Page.AsBodySpan()[NodeCountOffset..]);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Splits: a separator that would misorder its parent fails the insert, and rollback discards the half-done split")]
+    public async Task Split_SeparatorMisorderingParent_ShouldThrowAndRollBack()
+    {
+        // Arrange: twenty wide keys in ascending order split the root once, leaving
+        // one separator over two leaves; the right leaf holds thirteen entries.
+        var (harness, index) = await CreateIndexAsync();
+        await using var harnessLifetime = harness;
+
+        var setup = await harness.BeginAsync();
+        for (long i = 0; i < 20; i++)
+        {
+            await index.InsertAsync(setup, WideKey(i * 100), (ulong)i);
+        }
+        await harness.CommitAsync(setup);
+
+        // The defect this guards against, simulated: the separator now sorts above
+        // every key of the child to its right. Keys past it route to that child, and
+        // the child's next split promotes one of its own keys, which sorts below the
+        // separator it would be placed after.
+        long root = ((IIndexRegistry)harness.IndexManager).ExportRegistrations().Single().RootPageId;
+        OverwriteOnlySeparator(harness.Storage, root, WideKey(5_000));
+
+        // Act
+        var writer = await harness.BeginAsync();
+        var failure = await Should.ThrowAsync<IndexException>(async () =>
+        {
+            for (long value = 5_001; value < 5_100; value++)
+            {
+                await index.InsertAsync(writer, WideKey(value), (ulong)value);
+            }
+        });
+        await harness.RollbackAsync(writer);
+
+        // Assert: the split failed in this build configuration rather than writing
+        // the separator, and the rollback took back the leaf it had already split.
+        failure.ShouldBeOfType<IndexException>().Message.ShouldContain("misorder");
+        NodeEntryCount(harness.Storage, root).ShouldBe(1);
+
+        var reader = await harness.BeginAsync();
+        (await ScanAsync(index, reader, IndexKeyRange.All)).Select(x => x.Key)
+            .ShouldBe(Enumerable.Range(0, 20).Select(i => i * 100L));
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Manager: duplicate names rejected, drop removes, registry exports")]

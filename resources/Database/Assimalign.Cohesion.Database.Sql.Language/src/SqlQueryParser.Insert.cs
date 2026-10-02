@@ -18,13 +18,7 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
         }
 
-        // Table reference
-        SqlTableReference? table = null;
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-        {
-            table = ParseTableReference(ref lexer);
-        }
-        table ??= new SqlTableReference("?", null, null);
+        var table = ParseRequiredTableReference(ref lexer);
 
         // Optional column list: (col1, col2, ...)
         IReadOnlyList<string>? columns = null;
@@ -48,37 +42,42 @@ public sealed partial class SqlQueryParser
         {
             selectSource = ParseSelect(ref lexer);
         }
+        else
+        {
+            AddExpectedDiagnostic(ref lexer, "VALUES or SELECT");
+        }
 
         return new SqlInsertExpression(table, columns, values, selectSource, null,
             Location.Create(1, 1, pos, _lastTokenEnd));
     }
 
+    /// <summary>
+    /// Parses <c>(column [, column]*)</c>. Every element must name a column:
+    /// <c>(id, name,, age)</c> and <c>()</c> used to parse with the empty element dropped.
+    /// </summary>
     private List<string> ParseInsertColumnList(ref TokenLexer lexer)
     {
         var columns = new List<string>();
         Advance(ref lexer); // consume (
 
-        if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
+        while (true)
         {
+            if (!IsNameToken(ref lexer))
+            {
+                AddExpectedDiagnostic(ref lexer, "a column name");
+                break;
+            }
+
             columns.Add(CurrentIdentifierText(ref lexer));
             Advance(ref lexer);
-
-            while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
+            if (lexer.Current.Type != TokenType.Comma)
             {
-                Advance(ref lexer);
-                if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer))
-                {
-                    columns.Add(CurrentIdentifierText(ref lexer));
-                    Advance(ref lexer);
-                }
+                break;
             }
-        }
-
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-        {
             Advance(ref lexer);
         }
 
+        SkipToClosingParenthesis(ref lexer);
         return columns;
     }
 
@@ -97,16 +96,24 @@ public sealed partial class SqlQueryParser
         return rows;
     }
 
+    /// <summary>
+    /// Parses <c>(value [, value]*)</c>. The parentheses and at least one value are
+    /// required; an empty row <c>()</c> is a syntax error here rather than a binder error.
+    /// </summary>
     private List<SqlExpression> ParseSingleValueRow(ref TokenLexer lexer)
     {
         var values = new List<SqlExpression>();
 
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.LeftParen)
+        if (!Expect(ref lexer, TokenType.LeftParen, "'(' before the VALUES row"))
         {
-            Advance(ref lexer);
+            return values;
         }
 
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.RightParen)
+        if (lexer.Current.Type == TokenType.RightParen)
+        {
+            AddSyntaxDiagnostic(ref lexer, "Expected a value in the VALUES row; an empty row is not allowed.");
+        }
+        else
         {
             values.Add(ParseExpression(ref lexer));
             while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Comma)
@@ -116,11 +123,7 @@ public sealed partial class SqlQueryParser
             }
         }
 
-        if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.RightParen)
-        {
-            Advance(ref lexer);
-        }
-
+        Expect(ref lexer, TokenType.RightParen, "')' after the VALUES row");
         return values;
     }
 }

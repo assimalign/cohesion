@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -28,6 +29,7 @@ internal sealed partial class SqlPlanExecutor
     private readonly SqlStorage _storage;
     private readonly ISqlCatalog _catalog;
     private readonly IIndexManager _indexManager;
+    private readonly SqlBoundTableCache _definitions;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
     /// <summary>
@@ -36,11 +38,22 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private IReadOnlyDictionary<SqlExpression, SqlExpression[]>? _subqueryValues;
 
-    internal SqlPlanExecutor(SqlStorage storage, ISqlCatalog catalog, IIndexManager indexManager, IReadOnlyDictionary<string, object?>? parameters)
+    /// <summary>Initializes an executor for one statement.</summary>
+    /// <param name="storage">The database's data storage.</param>
+    /// <param name="catalog">The database's catalog.</param>
+    /// <param name="indexManager">The database's index manager.</param>
+    /// <param name="definitions">
+    /// The database's bound table versions: the parsed CHECK predicates and DEFAULT values every
+    /// write and every read of a missing trailing field use.
+    /// </param>
+    /// <param name="parameters">The statement's bound parameter values.</param>
+    internal SqlPlanExecutor(SqlStorage storage, ISqlCatalog catalog, IIndexManager indexManager, SqlBoundTableCache definitions,
+        IReadOnlyDictionary<string, object?>? parameters)
     {
         _storage = storage;
         _catalog = catalog;
         _indexManager = indexManager;
+        _definitions = definitions;
         _parameters = parameters;
     }
 
@@ -234,8 +247,18 @@ internal sealed partial class SqlPlanExecutor
             }
         }
 
-        return ordered!.Select(x => x.Row).ToList();
-
+        try
+        {
+            return ordered!.Select(x => x.Row).ToList();
+        }
+        catch (InvalidOperationException exception) when (exception.InnerException is DatabaseException inner)
+        {
+            // The runtime sort wraps a throwing comparer in InvalidOperationException.
+            // Two keys the value order cannot compare are a statement error, so the
+            // comparer's own DatabaseException is the failure, not a session-ending fault.
+            ExceptionDispatchInfo.Throw(inner);
+            throw;
+        }
     }
 
     /// <summary>Hashes each projected string with exactly the collation used for its equality.</summary>
@@ -270,7 +293,10 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task<QueryResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        var evaluator = new SqlExpressionEvaluator(plan.Table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
+        // A VALUES row has no columns in scope: the planner rejects column references (#1165), and
+        // the evaluator's scope matches the empty row it is given, so no reference can resolve to an
+        // ordinal that row does not have.
+        var evaluator = new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, subqueryValues: _subqueryValues);
         var values = new List<object?[]>(plan.Rows.Count);
         foreach (var valueRow in plan.Rows)
         {
@@ -411,7 +437,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var target in targets)
         {
             await CollectCascadeDeletesAsync(plan.Table, target.Location, target.Values, deletions, scannedTables, released,
-                arrivedBy: null, statement, cancellationToken).ConfigureAwait(false);
+                statement, cancellationToken).ConfigureAwait(false);
         }
 
         // Every deleted row releases the references it held; the shared locks are
@@ -533,8 +559,9 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>
     /// Builds an index key from a row's values: one order-preserving component
-    /// per key column, transformed under the column's effective collation
-    /// (null components participate — nulls sort first and count as key values).
+    /// per key column, transformed under the column's effective collation and
+    /// temporal identity (null components participate — nulls sort first and
+    /// count as key values).
     /// </summary>
     private IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
     {
@@ -542,7 +569,7 @@ internal sealed partial class SqlPlanExecutor
 
         foreach (int ordinal in keyOrdinals)
         {
-            SqlRowCodec.AppendValue(writer, table.Columns[ordinal].Type.Type, values[ordinal],
+            SqlRowCodec.AppendKeyValue(writer, table.Columns[ordinal].Type.Type, values[ordinal],
                 table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
         }
 
@@ -755,6 +782,7 @@ internal sealed partial class SqlPlanExecutor
         }
 
         var updated = await _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken).ConfigureAwait(false);
+        _definitions.Get(updated);
 
         return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, bracket =>
         {
@@ -1104,6 +1132,7 @@ internal sealed partial class SqlPlanExecutor
     {
         var range = BuildSeekRange(table, seek);
         var snapshot = snapshotOverride ?? statement.Snapshot;
+        var defaults = _definitions.Get(table).DefaultValues;
 
         // The cursor materializes under the tree's read latch; synchronous
         // drain is the in-process fast path.
@@ -1131,7 +1160,7 @@ internal sealed partial class SqlPlanExecutor
                     continue;
                 }
 
-                var values = DecodeRow(record.Span, table, out var writer, out var deleter);
+                var values = DecodeRow(record.Span, table, defaults, out var writer, out var deleter);
 
                 if (values is null)
                 {
@@ -1159,10 +1188,11 @@ internal sealed partial class SqlPlanExecutor
 
     /// <summary>
     /// Encodes the seek's key range: the equality prefix (encoded exactly like
-    /// the maintenance path encodes keys), extended by the optional range bounds
-    /// on the next key column. Prefix semantics ride the codec's
-    /// order-preservation: every composite key starting with prefix P sorts in
-    /// [P, successor(P)), where successor increments the last non-0xFF byte.
+    /// the maintenance path encodes keys, temporal identity included), extended
+    /// by the optional range bounds on the next key column. Prefix semantics
+    /// ride the codec's order-preservation: every composite key starting with
+    /// prefix P sorts in [P, successor(P)), where successor increments the last
+    /// non-0xFF byte.
     /// </summary>
     private IndexKeyRange BuildSeekRange(SqlCatalogTable table, SqlIndexSeekPath seek)
     {
@@ -1171,7 +1201,7 @@ internal sealed partial class SqlPlanExecutor
         for (int i = 0; i < seek.EqualityValues.Count; i++)
         {
             int ordinal = FindColumnOrdinal(table, seek.Index.ColumnNames[i]);
-            SqlRowCodec.AppendValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i],
+            SqlRowCodec.AppendKeyValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i],
                 table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
         }
 
@@ -1225,7 +1255,7 @@ internal sealed partial class SqlPlanExecutor
     private static byte[] AppendComponent(byte[] prefix, DatabaseType type, object? value, Collation collation)
     {
         var writer = new DatabaseKeyWriter();
-        SqlRowCodec.AppendValue(writer, type, value, collation);
+        SqlRowCodec.AppendKeyValue(writer, type, value, collation);
         byte[] component = writer.ToArray();
 
         var combined = new byte[prefix.Length + component.Length];
@@ -1300,6 +1330,7 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken,
         SqlStatementMetrics? metrics = null)
     {
+        var defaults = _definitions.Get(table).DefaultValues;
         using var iterator = _storage.GetUnitIterator(table.ObjectId);
 
         while (iterator.MoveNext())
@@ -1307,7 +1338,7 @@ internal sealed partial class SqlPlanExecutor
             cancellationToken.ThrowIfCancellationRequested();
 
             var unit = iterator.Current;
-            var values = DecodeRow(unit.Data.Span, table, out var writer, out var deleter);
+            var values = DecodeRow(unit.Data.Span, table, defaults, out var writer, out var deleter);
 
             if (values is not null)
             {
@@ -1392,6 +1423,14 @@ internal sealed partial class SqlPlanExecutor
                 },
                 _ => throw new DatabaseException($"Column type {column.Type.Type} cannot store values yet."),
             };
+        }
+        catch (OverflowException exception) when (column.Type.Type is DatabaseType.Int8 or DatabaseType.Int16
+            or DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64 or DatabaseType.Decimal)
+        {
+            // ISO store assignment: a value the numeric column cannot hold is a numeric
+            // value out of range (SQLSTATE 22003), the same fault as an overflowing result.
+            throw SqlEvaluationException.NumericValueOutOfRange(
+                $"value '{Convert.ToString(value, CultureInfo.InvariantCulture)}' does not fit column '{column.Name}' of type {column.Type.Type}.", exception);
         }
         catch (Exception exception) when (exception is FormatException or OverflowException or InvalidCastException)
         {

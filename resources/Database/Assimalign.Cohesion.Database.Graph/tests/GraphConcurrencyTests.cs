@@ -134,7 +134,12 @@ public sealed class GraphConcurrencyTests
         await schema.SaveLabelAsync(label);
         await using var transaction = await stale.BeginTransactionAsync();
         await schema.SavePropertyKeyAsync(new GraphPropertyKeyMetadata(label.Id, "age", DatabaseType.Int64, true));
-        await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await database.CreateNodeAsync(stale, ["Person"]));
+        var conflict = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () => await database.CreateNodeAsync(stale, ["Person"]));
+        // The engine aborted the explicit transaction: it stays Faulted and refuses work until the caller rolls back (#1188).
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        (await Should.ThrowAsync<DatabaseException>(async () => await database.CreateNodeAsync(stale, ["Person"])))
+            .InnerException.ShouldBeSameAs(conflict);
+        await transaction.RollbackAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await database.CreateNodeAsync(writer, ["Person"], new Dictionary<string, object?> { ["age"] = 42L })).Properties["age"].ShouldBe(42L);
     }
@@ -165,6 +170,8 @@ public sealed class GraphConcurrencyTests
             else { await schema.DropLabelAsync("Person"); }
         });
         error.Message.ShouldContain("in use");
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        await transaction.RollbackAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
         (await writerSchema.GetLabelsAsync()).ShouldHaveSingleItem().Name.ShouldBe("Person");
         (await writerSchema.GetRelationshipTypesAsync()).ShouldHaveSingleItem().Name.ShouldBe("FRIEND");

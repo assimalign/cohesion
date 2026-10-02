@@ -218,6 +218,13 @@ public interface IStorage : IAsyncDisposable, IDisposable
     /// rule: durable storage makes the journal durable past each page's LSN before
     /// the page is written; non-durable storage flushes it ordinarily first.
     /// </summary>
+    /// <remarks>
+    /// Pinned dirty pages are skipped: a pin is how a writer changes a page, so only an
+    /// unpinned page is written as the complete image its last writer left. A skipped page
+    /// stays dirty until a later pass, an eviction, or a checkpoint writes it. The return
+    /// value can therefore be smaller than <paramref name="maxPages"/> while dirty pages
+    /// remain, and a return of zero does not mean the pool is clean.
+    /// </remarks>
     /// <param name="maxPages">The maximum number of dirty pages to write in this pass.</param>
     /// <returns>The number of pages written.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxPages"/> is not positive.</exception>
