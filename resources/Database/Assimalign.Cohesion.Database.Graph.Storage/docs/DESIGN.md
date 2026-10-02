@@ -92,8 +92,10 @@ operations and no property-update member.
 
 Owner-one physical registration records are exactly 34 bytes: a zero stamp prefix,
 kind `4`, version `1`, UInt64 object ID, and Int64 root page ID. Every tree is named
-`graph`; its object ID distinguishes it. Root registrations change in the same bracket
-as a split and are reloaded after physical statement rollback. They are physical
+`graph`; its object ID distinguishes it. A tree's root page stays fixed through splits
+(#1159), so a registration changes only when a tree is created; every mutation bracket
+still saves changed registrations as a backstop, and registrations are reloaded after
+physical statement rollback. They are physical
 infrastructure, so logical rollback leaves an unused tree available for recovery;
 logical property-index definitions remain stamped and determine visibility.
 

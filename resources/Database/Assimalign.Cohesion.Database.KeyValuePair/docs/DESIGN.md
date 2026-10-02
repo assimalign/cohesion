@@ -204,7 +204,9 @@ The same five-worker inventory as the SQL engine, spawned at creation on
 engine-owned threads, quiesced on dispose (engines are data machines; R10):
 group-commit WAL flusher (signal-driven), paced page write-back, checkpointer
 (both file sets; data set through the coordinator so truncating checkpoint
-records carry in-flight sequences; re-exports index registrations when drifted),
+records carry in-flight sequences; re-exports index registrations when they
+changed — a backstop, since the B+Tree keeps its root page fixed through splits,
+#1159),
 **version purge — live** (the KV MVCC binding is real from the first cut, so the
 purge duty is real: aborted-undo retries + reclamation below the minimum
 snapshot floor), and the index-maintenance **stub** (the index layer has no

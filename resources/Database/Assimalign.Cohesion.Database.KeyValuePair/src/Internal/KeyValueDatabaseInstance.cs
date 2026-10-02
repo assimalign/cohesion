@@ -171,10 +171,11 @@ internal sealed class KeyValueDatabaseInstance : IKeyValueDatabase
     internal TransactionCoordinator Coordinator => _coordinator;
 
     /// <summary>
-    /// Persists the index manager's current registrations when they drifted from
-    /// the stored set — root page ids change on splits, so this runs at the
-    /// engine's persistence points (checkpoint passes and disposal) in addition
-    /// to the creation bootstrap itself.
+    /// Persists the index manager's current registrations when they differ from
+    /// the stored set. A tree's root page stays fixed through splits (#1159), so
+    /// this normally finds nothing to write; it runs at the engine's persistence
+    /// points (checkpoint passes and disposal), in addition to the creation
+    /// bootstrap itself, as a backstop.
     /// </summary>
     internal void SaveIndexRegistrationsIfChanged()
     {

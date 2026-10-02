@@ -46,9 +46,10 @@ internal sealed class KeyValueCheckpointWorker : DatabaseEngineWorker
 
             try
             {
-                // Re-export the index registrations first when they drifted —
-                // root page ids change on splits, and the checkpoint pass is the
-                // engine's persistence point for re-attachment metadata.
+                // Re-export the index registrations first when they changed —
+                // a backstop: root pages stay fixed through splits (#1159), and
+                // the checkpoint pass is the engine's persistence point for
+                // re-attachment metadata.
                 database.SaveIndexRegistrationsIfChanged();
 
                 // The data storage checkpoints through the transaction

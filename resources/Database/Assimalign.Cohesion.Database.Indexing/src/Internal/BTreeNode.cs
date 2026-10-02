@@ -21,8 +21,16 @@ namespace Assimalign.Cohesion.Database.Indexing.Internal;
 /// <para>
 /// Leaf entry: <c>[u16 keyLen][key][u64 entryRef][u64 writer][u64 deleter]</c> —
 /// the writer/deleter stamps carry MVCC visibility; deleter 0 means live.
-/// Internal entry: <c>[u16 keyLen][key][i64 child]</c> where the key is the
-/// minimum key of the child subtree to its right.
+/// Internal entry: <c>[u16 keyLen][key][i64 child]</c> where the key (the
+/// separator) was the first key of the child subtree to its right when that
+/// subtree split away.
+/// </para>
+/// <para>
+/// Keys are not unique: a run of equal keys may split, so a key equal to a
+/// separator can sit on either side of it. Child <c>i</c> holds keys in the closed
+/// range <c>[separator(i), separator(i + 1)]</c>, and equal separators are
+/// normal. A child is addressed by its <em>slot</em>: <c>-1</c> for the leftmost
+/// child, <c>i</c> for the child to the right of separator <c>i</c>.
 /// </para>
 /// </remarks>
 internal readonly ref struct BTreeNode
@@ -39,6 +47,11 @@ internal readonly ref struct BTreeNode
 
     internal const byte LeafKind = 1;
     internal const byte InternalKind = 2;
+
+    /// <summary>
+    /// The bytes one directory slot occupies.
+    /// </summary>
+    internal const int DirectorySlotSize = 2;
 
     /// <summary>
     /// The largest key accepted, chosen so a fresh node always holds several entries
@@ -103,7 +116,30 @@ internal readonly ref struct BTreeNode
         set => BinaryPrimitives.WriteInt64LittleEndian(_body[leftmostChildOffset..], value);
     }
 
-    internal int FreeSpace => DataStart - (directoryOffset + 2 * (EntryCount + 1));
+    /// <summary>
+    /// Gets the bytes available for one more entry: the gap between the directory
+    /// (with a slot reserved for that entry) and the entry data.
+    /// </summary>
+    internal int FreeSpace => DataStart - (directoryOffset + DirectorySlotSize * (EntryCount + 1));
+
+    /// <summary>
+    /// Gets the entry-data bytes no directory slot references any more — space
+    /// <see cref="RemoveLeafEntry"/> leaves behind, recoverable by rebuilding the
+    /// node. Linear in the entry count; meant for the full-node path only.
+    /// </summary>
+    internal int OrphanedLeafBytes
+    {
+        get
+        {
+            int referenced = 0;
+            for (int index = 0; index < EntryCount; index++)
+            {
+                referenced += LeafEntrySize(GetKey(index).Length);
+            }
+
+            return _body.Length - DataStart - referenced;
+        }
+    }
 
     private ushort GetEntryOffset(int index)
         => BinaryPrimitives.ReadUInt16LittleEndian(_body[(directoryOffset + 2 * index)..]);
@@ -163,11 +199,10 @@ internal readonly ref struct BTreeNode
     }
 
     /// <summary>
-    /// Resolves the child page to descend into for <paramref name="key"/> on an
-    /// internal node: the child of the greatest separator not exceeding the key,
-    /// or the leftmost child when the key precedes every separator.
+    /// Finds the upper bound: the first directory index whose key is greater than
+    /// <paramref name="key"/>; <see cref="EntryCount"/> when no key is greater.
     /// </summary>
-    internal long FindChild(ReadOnlySpan<byte> key)
+    internal int FindUpperBound(ReadOnlySpan<byte> key)
     {
         int low = 0;
         int high = EntryCount;
@@ -185,8 +220,32 @@ internal readonly ref struct BTreeNode
             }
         }
 
-        return low == 0 ? LeftmostChild : GetChild(low - 1);
+        return low;
     }
+
+    /// <summary>
+    /// Resolves the slot of the leftmost child that can hold <paramref name="key"/>
+    /// on an internal node: the child left of the first separator not less than the
+    /// key. Entries equal to a separator may sit to its left (a run of equal keys
+    /// that split), so every lookup that must see all of a key's entries starts
+    /// here and walks right along the leaf chain.
+    /// </summary>
+    internal int FindFirstChildSlot(ReadOnlySpan<byte> key) => FindLowerBound(key) - 1;
+
+    /// <summary>
+    /// Resolves the slot of the rightmost child that can hold <paramref name="key"/>
+    /// on an internal node: the child of the last separator not exceeding the key.
+    /// Inserts route here (any child whose range admits the key keeps the tree
+    /// ordered), and so do scans that start strictly after the key — nothing to the
+    /// left of this child is greater than it.
+    /// </summary>
+    internal int FindLastChildSlot(ReadOnlySpan<byte> key) => FindUpperBound(key) - 1;
+
+    /// <summary>
+    /// Gets the child page in <paramref name="slot"/>: <c>-1</c> is the leftmost
+    /// child, <c>i</c> the child to the right of separator <c>i</c>.
+    /// </summary>
+    internal long GetChildAt(int slot) => slot < 0 ? LeftmostChild : GetChild(slot);
 
     internal int LeafEntrySize(int keyLength) => 2 + keyLength + 8 + 8 + 8;
 
@@ -239,9 +298,10 @@ internal readonly ref struct BTreeNode
 
     /// <summary>
     /// Removes a leaf entry from the sorted directory. The entry's data bytes stay
-    /// orphaned in the body until the node is rebuilt (a split) or vacuumed — the
-    /// removal exists for the rare undo paths (aborted-writer purge), where the
-    /// bounded space cost beats a full node rewrite per removed entry.
+    /// orphaned in the body until the node is rebuilt (a split, or the compaction an
+    /// insert performs when only the orphaned bytes stand between it and a split) or
+    /// vacuumed — the removal exists for the rare undo paths (aborted-writer purge),
+    /// where the bounded space cost beats a full node rewrite per removed entry.
     /// </summary>
     internal void RemoveLeafEntry(int index)
     {

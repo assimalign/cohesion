@@ -638,9 +638,22 @@ description + exported registrations), the engine binds them.
   policy); the statement's bracket has rolled back, the session stays usable.
   Unique keys treat nulls as values (stricter than ANSI; consistent with the
   codec's nulls-first ordering — documented dialect decision).
-- **Registrations re-export at persistence points** (root page ids drift on
-  splits): index DDL itself, each checkpoint pass, and instance disposal — each
-  compares against the stored set first, so an idle checkpoint writes nothing.
+- **Registrations re-export at persistence points**: index DDL itself, each
+  checkpoint pass, and instance disposal — each compares against the stored set
+  first, so an idle checkpoint writes nothing. Root splits no longer move a
+  tree's root page (#1159, `Database.Indexing` DESIGN), so outside DDL the
+  comparison is a backstop rather than the way a split reaches the catalog.
+- **Seeks over duplicated keys** (#1159): an index over a low-cardinality column,
+  and every UNIQUE index whose rows are updated (each UPDATE retires one entry
+  and adds another under the same key), holds runs of equal keys that span leaf
+  splits. Seeks, the UNIQUE check, and FOREIGN KEY lookups in both directions
+  reach every entry of such a run; `SqlIndexDuplicateKeyTests` pins seek-versus-
+  scan equivalence for indexes built by `CREATE INDEX` (over insert-only rows
+  and over UPDATE/DELETE history) and maintained by DML. The cost is linear in
+  the run, dead versions included, so a row updated thousands of times under a
+  UNIQUE index, or a cascade over thousands of children of one parent, slows
+  quadratically until the index gains an entry tiebreaker and version pruning
+  (`Database.Indexing` DESIGN, "Known limit").
 
 ## Engine-owned background workers
 

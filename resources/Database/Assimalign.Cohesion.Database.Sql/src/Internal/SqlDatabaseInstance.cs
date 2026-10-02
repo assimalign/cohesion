@@ -223,10 +223,11 @@ internal sealed class SqlDatabaseInstance : ISqlDatabase
     internal SqlBoundTableCache Definitions => _definitions;
 
     /// <summary>
-    /// Persists the index manager's current registrations when they drifted from
-    /// the stored set — root page ids change on splits, so this runs at the
-    /// engine's persistence points (checkpoint passes and disposal) in addition
-    /// to index DDL itself.
+    /// Persists the index manager's current registrations when they differ from
+    /// the stored set. A tree's root page stays fixed through splits (#1159), so
+    /// outside index DDL this normally finds nothing to write; it runs at the
+    /// engine's persistence points (checkpoint passes and disposal), in addition
+    /// to index DDL itself, as a backstop.
     /// </summary>
     internal void SaveIndexRegistrationsIfChanged()
     {
