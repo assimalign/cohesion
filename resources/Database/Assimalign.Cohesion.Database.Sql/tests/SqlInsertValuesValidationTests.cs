@@ -197,7 +197,10 @@ public sealed class SqlInsertValuesValidationTests
 
     /// <summary>
     /// <c>LIMIT</c> and <c>OFFSET</c> counts are evaluated while planning against no row, so a column
-    /// reference there is the same coded error, over an empty result as over a full one.
+    /// reference there is the same coded error, over an empty result as over a full one. A subquery's
+    /// count is no different: a reference to its own columns or to the outer query's fails with the
+    /// same code, thrown like any other planning error, where it used to come back as an error result
+    /// carrying <c>COHDBL001</c>'s correlated-subquery diagnosis.
     /// </summary>
     /// <param name="sql">The query.</param>
     /// <param name="reference">The reference as the diagnostic names it.</param>
@@ -208,6 +211,10 @@ public sealed class SqlInsertValuesValidationTests
     [InlineData("SELECT a FROM v OFFSET 1 + id", "id", "OFFSET")]
     [InlineData("SELECT a, COUNT(*) FROM v GROUP BY a LIMIT a", "a", "LIMIT")]
     [InlineData("SELECT v.a FROM v JOIN w ON v.id = w.id LIMIT w.id", "w.id", "LIMIT")]
+    [InlineData("SELECT a FROM v WHERE id IN (SELECT id FROM w LIMIT a)", "a", "LIMIT")]
+    [InlineData("SELECT a FROM v WHERE id IN (SELECT id FROM w LIMIT id)", "id", "LIMIT")]
+    [InlineData("SELECT a FROM v WHERE id IN (SELECT id FROM w LIMIT w.id)", "w.id", "LIMIT")]
+    [InlineData("SELECT a FROM v WHERE EXISTS (SELECT id FROM w OFFSET id)", "id", "OFFSET")]
     public async Task ExecuteAsync_ColumnReferenceInCount_ShouldFailWhilePlanning(string sql, string reference, string clause)
     {
         // Arrange
@@ -226,19 +233,54 @@ public sealed class SqlInsertValuesValidationTests
             .ShouldHaveSingleItem().ShouldBe(new object?[] { 10 });
     }
 
-    /// <summary>An aggregate in a count is rejected while planning with the clause named.</summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - LIMIT: an aggregate is rejected while planning")]
-    public async Task ExecuteAsync_AggregateInLimit_ShouldFailWhilePlanning()
+    /// <summary>An aggregate or a bare <c>*</c> in a count is rejected while planning with the clause named.</summary>
+    /// <param name="sql">The query.</param>
+    /// <param name="message">The planning error.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - LIMIT/OFFSET: an aggregate or * is rejected while planning")]
+    [InlineData("SELECT a FROM v LIMIT COUNT(*)", "Aggregate functions are not allowed in LIMIT.")]
+    [InlineData("SELECT a FROM v OFFSET SUM(1)", "Aggregate functions are not allowed in OFFSET.")]
+    [InlineData("SELECT a FROM v LIMIT *", "'*' is not allowed in LIMIT.")]
+    public async Task ExecuteAsync_AggregateOrStarInCount_ShouldFailWhilePlanning(string sql, string message)
     {
         // Arrange
         await using var engine = CreateEngine();
         await using var session = await SeedAsync(engine);
 
         // Act
-        var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync("SELECT a FROM v LIMIT COUNT(*)").AsTask());
+        var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql).AsTask());
 
         // Assert
-        failure.Message.ShouldBe("Aggregate functions are not allowed in LIMIT.");
+        failure.Message.ShouldBe(message);
+        session.State.ShouldBe(SessionState.Open);
+    }
+
+    /// <summary>
+    /// <c>CURRENT_DATE</c>, <c>CURRENT_TIME</c> and <c>CURRENT_TIMESTAMP</c> take no parentheses, so
+    /// they reach the planner as names. They are the dialect's recognized functions, not columns, and
+    /// report the unsupported function, as <c>NOW()</c> does, rather than a column reference; nothing
+    /// is inserted.
+    /// </summary>
+    /// <param name="sql">The statement.</param>
+    /// <param name="function">The function as written.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - INSERT VALUES/LIMIT: a niladic datetime function reports the function, not a column")]
+    [InlineData("INSERT INTO v (id, a) VALUES (2, CURRENT_TIMESTAMP)", "CURRENT_TIMESTAMP")]
+    [InlineData("INSERT INTO v (id, name) VALUES (2, 'x'), (3, CAST(current_date AS VARCHAR(20)))", "current_date")]
+    [InlineData("INSERT INTO v (id, name) VALUES (2, CAST(CURRENT_TIME AS VARCHAR(20)))", "CURRENT_TIME")]
+    [InlineData("SELECT a FROM v LIMIT CURRENT_DATE", "CURRENT_DATE")]
+    public async Task ExecuteAsync_NiladicDateTimeFunctionWithoutScope_ShouldReportUnsupportedFunction(string sql, string function)
+    {
+        // Arrange
+        await using var engine = CreateEngine();
+        await using var session = await SeedAsync(engine);
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql).AsTask());
+
+        // Assert
+        failure.ShouldNotBeOfType<SqlEvaluationException>();
+        failure.Message.ShouldBe($"Function '{function}' is not supported by the executor yet.");
+        session.State.ShouldBe(SessionState.Open);
+        (await RowsAsync(session, "SELECT COUNT(*) FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L });
     }
 
     /// <summary>

@@ -489,9 +489,10 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   type is fixed by the plan — a string or Boolean literal, a column, a predicate,
   `||`, `UPPER`/`LOWER`, a CAST, a bound scalar subquery — `SqlPlanner.ValidateExpression`
   raises it before execution (`StaticOperandType`), so the result does not depend on
-  whether the table has rows; besides `COHSQLE005` (below), it is the one coded
-  fault raised at plan time. A parameter, CASE or other operand only its value
-  types fails when evaluated, with the same code and message.
+  whether the table has rows; it and `COHSQLE005` (below) are the planner's own
+  coded rejections, and count evaluation and stack checks can also raise
+  `COHSQLE001`/`002`/`004` while planning. A parameter, CASE or other operand only
+  its value types fails when evaluated, with the same code and message.
 - **VALUES rows and LIMIT/OFFSET counts have no column scope (#1165).** Both are
   evaluated once, against an empty row: a VALUES row before the INSERT writes
   anything, a count while planning. ISO SQL forbids a column reference in an
@@ -514,10 +515,24 @@ declared dialect and retain their existing unsupported-clause diagnostics.
   `ExecuteInsertAsync` evaluates VALUES with an empty column scope too, so its
   evaluator can never resolve an ordinal the empty row does not have.
   Parameters and expressions over literals and parameters are unchanged. A count
-  with a column reference already failed while planning, as `Unknown column`; it
-  now carries the same code. The unqualified `DEFAULT` keyword in VALUES is not in
-  the dialect and parses as a column reference named `DEFAULT`, so it reports
-  `COHSQLE005` too.
+  with a column reference already failed while planning, as `Unknown column`, or,
+  inside a subquery, as an error result: `PlanSubqueries` turned the child's
+  `Unknown column` into `SqlUnsupportedQueryException`, which `SqlQueryExecutor`
+  returns as a `QueryResultStatus.Error` result carrying `COHDBL001`'s
+  correlated-subquery diagnosis. It now throws `COHSQLE005` at every nesting level,
+  for a reference to the subquery's own columns or the outer query's: ISO SQL's
+  fetch-first count is a simple value specification, which no column of any scope
+  reaches. (An explicit outer qualifier is still the parser's `COHDBL001`.) A `*` in
+  a count now reports `'*' is not allowed in LIMIT.` (or `OFFSET`) instead of the
+  evaluator's `Expression 'SqlStarExpression' is not supported by the executor yet.`
+  The unqualified
+  `DEFAULT` keyword in VALUES is not in the dialect and parses as a column reference
+  named `DEFAULT`, so it reports `COHSQLE005` too. The niladic datetime functions
+  `CURRENT_DATE`, `CURRENT_TIME` and `CURRENT_TIMESTAMP` also parse as names, because
+  they take no parentheses; `RejectColumnReferences` reports an unqualified name
+  spelled as one of them as the unsupported function (`Function '<name>' is not
+  supported by the executor yet.`, the message `NOW()` gets at evaluation), not as
+  a column, until the parser gives them a function node.
 - **SELECT materializes.** Sorting and `DISTINCT` need the full result anyway at
   this stage; `SqlMaterializedResultSet` carries typed columns and evaluated
   rows. Streaming operators arrive with the planner build-out.

@@ -29,9 +29,10 @@ sign over a non-numeric operand carry messages that begin with `COHSQLE001:`,
 the server's thread has left, such as a `LIKE` match that backtracks through more
 wildcards than the stack holds, carries `COHSQLE004:` (see the dialect's
 diagnostics table). A column reference in an `INSERT ... VALUES` row or a `LIMIT`
-or `OFFSET` count is an ExecutionFailure carrying `COHSQLE005:`, raised while
-planning, so nothing executes and the session stays ready (#1165; a reference to
-a target column in VALUES used to end the session with `Internal`). A statement
+or `OFFSET` count, a subquery's included, is an ExecutionFailure carrying
+`COHSQLE005:`, raised while planning, so nothing executes and the session stays
+ready (#1165; a reference to a target column in VALUES used to end the session with
+`Internal`, and one in a subquery's count carried `COHDBL001:`). A statement
 nested deeper than the dialect's 128-level expression limit is a ParseFailure whose
 message carries `SQL0006`; it is refused before anything executes (see the
 dialect's expression nesting limit, #1151).

@@ -23,6 +23,9 @@ internal sealed partial class SqlPlanner
     /// </summary>
     internal const string DefaultSchema = "dbo";
 
+    /// <summary>The dialect's name for a row of an INSERT's table value constructor, in diagnostics.</summary>
+    private const string insertValuesClause = "INSERT ... VALUES";
+
     private readonly ISqlCatalog _catalog;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
 
@@ -563,15 +566,12 @@ internal sealed partial class SqlPlanner
         {
             foreach (var value in row)
             {
-                ValidateScopelessExpression(value, InsertValuesClause, "INSERT ... SELECT to read values from a table");
+                ValidateScopelessExpression(value, insertValuesClause, "INSERT ... SELECT to read values from a table");
             }
         }
 
         return new SqlInsertPlan(table, targetOrdinals, insert.Values!);
     }
-
-    /// <summary>The dialect's name for a row of an INSERT's table value constructor, in diagnostics.</summary>
-    private const string InsertValuesClause = "INSERT ... VALUES";
 
     /// <summary>
     /// Validates an expression of a clause that has no columns in scope: a row of
@@ -593,7 +593,9 @@ internal sealed partial class SqlPlanner
     /// The expression references a column (<c>COHSQLE005</c>), or signs an operand the plan
     /// already knows is not a number (<c>COHSQLE003</c>).
     /// </exception>
-    /// <exception cref="DatabaseException">The expression contains an aggregate, <c>*</c> or a subquery.</exception>
+    /// <exception cref="DatabaseException">
+    /// The expression contains an aggregate, <c>*</c>, a subquery or a niladic datetime function.
+    /// </exception>
     private void ValidateScopelessExpression(SqlExpression expression, string clause, string? alternative = null)
     {
         RejectColumnReferences(expression, clause, alternative);
@@ -626,15 +628,28 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>Rejects the first column reference in an expression, outside a subquery.</summary>
+    /// <remarks>
+    /// The parser reads a bare niladic datetime function (<c>CURRENT_DATE</c>, <c>CURRENT_TIME</c>,
+    /// <c>CURRENT_TIMESTAMP</c>) as a name, because it takes no parentheses. Those names are the
+    /// dialect's recognized functions, not columns, so an unqualified reference spelled as one
+    /// reports the function as unsupported, the message a call such as <c>NOW()</c> reports, rather
+    /// than advising the caller to replace a column.
+    /// </remarks>
     /// <param name="expression">The expression to search.</param>
     /// <param name="clause">The clause, as diagnostics name it.</param>
     /// <param name="alternative">The clause's own way to read table columns, or null when it has none.</param>
     /// <exception cref="SqlEvaluationException">The expression references a column (<c>COHSQLE005</c>).</exception>
+    /// <exception cref="DatabaseException">The expression uses a niladic datetime function, which does not execute yet.</exception>
     internal static void RejectColumnReferences(SqlExpression expression, string clause, string? alternative)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is SqlColumnReferenceExpression column)
         {
+            if (column is { TableAlias: null, SchemaName: null } && IsNiladicDateTimeFunction(column.ColumnName))
+            {
+                throw new DatabaseException($"Function '{column.ColumnName}' is not supported by the executor yet.");
+            }
+
             string name = string.Join('.', new[] { column.SchemaName, column.TableAlias, column.ColumnName }
                 .Where(part => part is not null));
             throw SqlEvaluationException.ColumnReferenceNotAllowed(name, clause, alternative);
@@ -645,6 +660,17 @@ internal sealed partial class SqlPlanner
             RejectColumnReferences(child, clause, alternative);
         }
     }
+
+    /// <summary>
+    /// Whether a name is one of the dialect's niladic datetime functions, which are written
+    /// without parentheses and so reach the planner as unqualified names.
+    /// </summary>
+    /// <param name="name">The unqualified name.</param>
+    /// <returns><see langword="true"/> for <c>CURRENT_DATE</c>, <c>CURRENT_TIME</c> and <c>CURRENT_TIMESTAMP</c>.</returns>
+    private static bool IsNiladicDateTimeFunction(string name)
+        => string.Equals(name, "CURRENT_DATE", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, "CURRENT_TIME", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(name, "CURRENT_TIMESTAMP", StringComparison.OrdinalIgnoreCase);
 
     private SqlUpdatePlan PlanUpdate(SqlUpdateExpression update)
     {
