@@ -63,7 +63,9 @@ internal sealed class TransactionBar : ContentView
     public void Refresh()
     {
         string? text = _workspace?.TransactionText;
-        _indicator.Text = text is null ? "no transaction" : $"ACTIVE: {text}";
+        _indicator.Text = text is null ? "no transaction"
+            : _workspace!.TransactionAborted ? $"ABORTED, roll back: {text}"
+            : $"ACTIVE: {text}";
         _indicator.TextColor = text is null ? Ui.Muted : Ui.Bad;
     }
 

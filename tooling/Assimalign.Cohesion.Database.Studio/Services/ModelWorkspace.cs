@@ -73,8 +73,15 @@ internal abstract class ModelWorkspace : IAsyncDisposable
 
     public bool InTransaction => TransactionText is not null;
 
-    /// <summary>Null when no transaction is active; otherwise a short description.</summary>
-    public virtual string? TransactionText => Session?.CurrentTransaction is { State: TransactionState.Active } transaction
+    /// <summary>
+    /// True when the session's open transaction is aborted (Faulted): a graph session keeps it open
+    /// after a failed statement and refuses statements until it is rolled back.
+    /// </summary>
+    public bool TransactionAborted => Mode == ConnectionMode.Embedded
+        && Session?.CurrentTransaction is { State: TransactionState.Faulted };
+
+    /// <summary>Null when no transaction is open; otherwise a short description.</summary>
+    public virtual string? TransactionText => Session?.CurrentTransaction is { State: TransactionState.Active or TransactionState.Faulted } transaction
         ? $"{transaction.IsolationLevel} {transaction.Id}"
         : null;
 

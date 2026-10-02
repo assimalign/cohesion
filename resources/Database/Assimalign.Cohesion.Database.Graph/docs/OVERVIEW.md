@@ -37,7 +37,9 @@ For real path results, pass `GraphPathsQueryRequest.FromGql(...)` to the existin
 one-node path, a single relationship includes its stored endpoints, and
 `MATCH p = (a)-[r:KNOWS]->(b) RETURN p` preserves the matched traversal order. Scalar and mutation
 requests continue to use ordinary execution. Explicit transactions remain available through the
-in-process session API; Graph wire transaction control is deliberately deferred.
+in-process session API; Graph wire transaction control is deliberately deferred. A statement that
+fails inside an explicit transaction aborts the whole transaction: the session refuses further
+statements with `COHDBG007` until the caller rolls back, and a commit fails without committing.
 
 `GraphDatabaseEngine.CreateBuilder()` returns the same model builder for
 standalone composition or the concrete hosting builder's build-aware engine

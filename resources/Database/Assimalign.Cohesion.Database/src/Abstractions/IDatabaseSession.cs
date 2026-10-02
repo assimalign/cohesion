@@ -29,8 +29,14 @@ public interface IDatabaseSession : IAsyncDisposable
     SessionState State { get; }
 
     /// <summary>
-    /// Gets the currently active transaction, or null if no transaction is active.
+    /// Gets the session's open explicit transaction, or null when none is open.
     /// </summary>
+    /// <remarks>
+    /// An engine whose statements cannot be undone individually may keep a transaction open after
+    /// a failed statement, with <see cref="IDatabaseTransaction.State"/> reporting
+    /// <see cref="TransactionState.Faulted"/>, until the caller rolls it back. See the engine's
+    /// design notes.
+    /// </remarks>
     IDatabaseTransaction? CurrentTransaction { get; }
 
     /// <summary>
