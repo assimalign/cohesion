@@ -30,18 +30,25 @@ using Assimalign.Cohesion.Database.Language;
 /// </remarks>
 public sealed class SqlLogicalExpression : SqlExpression
 {
+    private List<SqlExpression> _operands;
+
     /// <summary>
-    /// Initializes a new <see cref="SqlLogicalExpression"/>.
+    /// Initializes a new <see cref="SqlLogicalExpression"/> that takes ownership of
+    /// <paramref name="operands"/>.
     /// </summary>
     /// <param name="op">The operator joining the operands.</param>
     /// <param name="operands">The operands in source order; at least two.</param>
+    /// <param name="operandDepth">
+    /// The greatest <see cref="SqlExpression.Depth"/> among <paramref name="operands"/>. The
+    /// parser tracks it as it adds each operand, so building a node never rescans its list.
+    /// </param>
     /// <param name="location">The source location: the first operator of the chain.</param>
-    internal SqlLogicalExpression(SqlLogicalOperator op, IReadOnlyList<SqlExpression> operands, Location? location)
+    internal SqlLogicalExpression(SqlLogicalOperator op, List<SqlExpression> operands, int operandDepth, Location? location)
         : base(location)
     {
         Operator = op;
-        Operands = operands;
-        Depth = 1 + DepthOf(operands);
+        _operands = operands;
+        Depth = 1 + operandDepth;
     }
 
     /// <summary>
@@ -52,5 +59,24 @@ public sealed class SqlLogicalExpression : SqlExpression
     /// <summary>
     /// Gets the operands in source order. A parsed chain has at least two.
     /// </summary>
-    public IReadOnlyList<SqlExpression> Operands { get; }
+    public IReadOnlyList<SqlExpression> Operands => _operands;
+
+    /// <summary>
+    /// Hands this node's operand list to the chain that absorbs it, which appends its own terms
+    /// to the list instead of copying it (#1151). Only the parser calls this, on a parenthesized
+    /// chain that opens a chain of the same operator, and it drops this node afterwards; the node
+    /// is left with no operands.
+    /// </summary>
+    /// <remarks>
+    /// Copying the list instead made <c>((X AND t) AND t) ... AND t</c> cost the length of
+    /// <c>X</c> once per pair of parentheses, in time and in memory. A single statement of a few
+    /// megabytes could then parse for seconds and allocate gigabytes.
+    /// </remarks>
+    /// <returns>The operand list, which the caller now owns.</returns>
+    internal List<SqlExpression> DetachOperands()
+    {
+        var operands = _operands;
+        _operands = [];
+        return operands;
+    }
 }

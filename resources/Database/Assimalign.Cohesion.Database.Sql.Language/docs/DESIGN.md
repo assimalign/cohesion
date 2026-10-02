@@ -220,6 +220,17 @@ checks stay as PostgreSQL's backstop. The parser reports nesting past the limit 
   positions too, as PostgreSQL's planner does, would make `a AND (b AND c)` and its
   canonical text change shape, and would let the top-down depth count, which charges
   the nested chain's node while its terms parse, disagree with the final tree.
+- **A chain costs its own terms, however it is grouped.** A chain that absorbs the
+  parenthesized chain opening it takes over that chain's operand list
+  (`SqlLogicalExpression.DetachOperands`) and appends to it, and it tracks its
+  deepest operand as it adds each term, so building the node never rescans the list
+  (the internal constructor takes the operand depth). The absorbed node is dropped.
+  The first n-ary pass copied the list at every merge and recomputed the depth over
+  it, so `((X AND t) AND t) ... AND t` cost the length of `X` once per pair of
+  parentheses: a 1.45 MB statement under the 4096 ceiling parsed in 17 s and
+  allocated 9.6 GB, against 0.5 s and 81 MB for the same chain written flat, and any
+  wire client could send it. `SqlExpressionDepthTests` pins the parse of a
+  20,000-term chain under 4,095 merges to the allocation of the flat chain.
 - **Why only `AND` and `OR`.** They are associative under three-valued logic, and
   left-to-right short-circuit visits the terms of `(a AND b) AND c` and of
   `a AND b AND c` in the same order and stops at the same term, so one node changes

@@ -170,6 +170,79 @@ public sealed class SqlExpressionDepthTests
         Shape(where).ShouldBe(expected);
     }
 
+    /// <summary>
+    /// A chain that absorbs a parenthesized chain tracks its deepest operand as it goes rather
+    /// than rescanning its operands, so its depth is exactly the depth of the tree it holds.
+    /// </summary>
+    /// <param name="predicate">The predicate as written.</param>
+    /// <param name="depth">The depth of its tree.</param>
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: a merged chain's depth is the depth of its deepest operand plus one")]
+    [InlineData("(a AND b) AND c", 2)]
+    [InlineData("(a AND (b OR c)) AND d", 3)]
+    [InlineData("((a AND (b OR (c AND (d OR e)))) AND f) AND g", 5)]
+    [InlineData("(a OR b) OR (c AND (d OR e)) OR f", 4)]
+    [InlineData("((a AND b) AND NOT NOT NOT c) AND d", 5)]
+    [InlineData("((a AND b) AND c) AND (d OR (e AND f))", 4)]
+    public void Parse_MergedChain_ShouldTrackItsDepth(string predicate, int depth)
+    {
+        // Act
+        var where = Parse($"SELECT id FROM t WHERE {predicate};").SqlExpression.ShouldBeOfType<SqlSelectExpression>().Where.ShouldNotBeNull();
+
+        // Assert
+        where.Depth.ShouldBe(depth);
+        where.Depth.ShouldBe(TreeDepth(where));
+    }
+
+    /// <summary>
+    /// A chain absorbs the parenthesized chain that opens it by taking over its operand list, so a
+    /// long chain wrapped in parentheses level after level costs what the same chain written flat
+    /// costs. Copying the list at every level made <c>((X AND t) AND t) ... AND t</c> cost the
+    /// chain's length times its parentheses, in time and in memory: gigabytes for a statement of a
+    /// few megabytes, which any wire client could send.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Nesting: merging parenthesized chains costs what the flat chain costs")]
+    public void Parse_NestedChainMerges_ShouldCostWhatTheFlatChainCosts()
+    {
+        // Arrange: a 20,000-term chain under 4,095 left-nested parentheses, each adding a term.
+        const int Terms = 20_000;
+        const int Levels = SqlQueryParserOptions.MaximumExpressionNestingLimit - 1;
+        string chain = string.Join(" AND ", Enumerable.Range(1, Terms).Select(term => $"a = {Number(term)}"));
+        string added = string.Concat(Enumerable.Range(1, Levels).Select(level => $" AND b = {Number(level)}"));
+        string flat = $"SELECT id FROM t WHERE {chain}{added};";
+        string nested = "SELECT id FROM t WHERE " + new string('(', Levels) + chain +
+            string.Concat(Enumerable.Range(1, Levels).Select(level => $") AND b = {Number(level)}")) + ";";
+        var parser = new SqlQueryParser(new SqlQueryParserOptions { ExpressionNestingLimit = SqlQueryParserOptions.MaximumExpressionNestingLimit });
+
+        // Act: each parse is measured on the thread that runs it, after a parse that warms up both
+        // shapes. Each level of parentheses runs the whole precedence ladder, about 6 KB of stack
+        // in a debug build.
+        var (measured, failure) = RunOnThread(64 * 1024, () =>
+        {
+            parser.Parse("SELECT id FROM t WHERE ((a = 1 AND a = 2) AND b = 1) AND b = 2;");
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            var flatStatement = (SqlQueryStatement)parser.Parse(flat);
+            long flatBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            before = GC.GetAllocatedBytesForCurrentThread();
+            var nestedStatement = (SqlQueryStatement)parser.Parse(nested);
+            long nestedBytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            return (Flat: flatStatement, FlatBytes: flatBytes, Nested: nestedStatement, NestedBytes: nestedBytes);
+        });
+
+        // Assert
+        failure.ShouldBeNull();
+        Errors(measured.Flat).ShouldBeEmpty();
+        Errors(measured.Nested).ShouldBeEmpty();
+        var flatWhere = measured.Flat.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Where.ShouldBeOfType<SqlLogicalExpression>();
+        var nestedWhere = measured.Nested.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Where.ShouldBeOfType<SqlLogicalExpression>();
+        nestedWhere.Operands.Count.ShouldBe(Terms + Levels);
+        nestedWhere.Depth.ShouldBe(3);
+        measured.Nested.ExpressionNestingDepth.ShouldBe(Levels);
+        SqlExpressionRenderer.Render(nestedWhere).ShouldBe(SqlExpressionRenderer.Render(flatWhere));
+
+        // The nested text adds 8,190 parentheses and nothing else; the copies added gigabytes.
+        measured.NestedBytes.ShouldBeLessThan(measured.FlatBytes * 3 / 2);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Nesting: parentheses nest at most as deep as the limit")]
     [InlineData(1, false)]
     [InlineData(Limit, false)]
@@ -693,6 +766,15 @@ public sealed class SqlExpressionDepthTests
         SqlBetweenExpression between => $"Between({Shape(between.Operand)})",
         SqlColumnReferenceExpression column => column.ColumnName,
         _ => expression?.GetType().Name ?? "null",
+    };
+
+    /// <summary>Recomputes the depth of a predicate over single-letter columns from its nodes.</summary>
+    private static int TreeDepth(SqlExpression expression) => expression switch
+    {
+        SqlLogicalExpression logical => 1 + logical.Operands.Max(TreeDepth),
+        SqlUnaryExpression unary => 1 + TreeDepth(unary.Operand),
+        SqlColumnReferenceExpression => 1,
+        _ => throw new ArgumentOutOfRangeException(nameof(expression), expression.GetType().Name, "Not a node these predicates use."),
     };
 
     private static (T? Result, Exception? Failure) RunOnThread<T>(int stackKilobytes, Func<T> work)

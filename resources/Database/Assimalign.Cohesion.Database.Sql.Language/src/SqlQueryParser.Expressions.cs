@@ -70,6 +70,12 @@ public sealed partial class SqlQueryParser
     /// associativity read it before; one in a later position, <c>a AND (b AND c)</c>, stays a
     /// nested node. The tree is therefore the one the binary form had, with each run of links
     /// collapsed, and the canonical text the renderer stores for it is unchanged.
+    /// <para>
+    /// Parsing a chain costs its own terms only. The chain takes over the operand list of the
+    /// chain it absorbs rather than copying it, and tracks the deepest operand as it adds each
+    /// one, so <c>((X AND t) AND t) ... AND t</c> is linear in its length however many
+    /// parentheses wrap <c>X</c>.
+    /// </para>
     /// </remarks>
     /// <param name="lexer">The lexer, at the chain's first operator.</param>
     /// <param name="first">The first operand, parsed before the chain was known.</param>
@@ -78,30 +84,29 @@ public sealed partial class SqlQueryParser
     {
         int position = lexer.Current.Position;
         var opening = first is SqlLogicalExpression group && group.Operator == op ? group : null;
-        if (!TryOpenChain(ref lexer, opening is null ? first.Depth : opening.Depth - 1))
+
+        // The deepest operand so far: the first, or the deepest one of the chain it absorbs.
+        int operandDepth = opening is null ? first.Depth : opening.Depth - 1;
+        if (!TryOpenChain(ref lexer, operandDepth))
         {
             return first;
         }
 
-        var operands = new List<SqlExpression>();
-        if (opening is null)
-        {
-            operands.Add(first);
-        }
-        else
-        {
-            operands.AddRange(opening.Operands);
-        }
+        // The absorbed chain is dropped, so its list is taken over rather than copied: a copy
+        // per pair of parentheses made the parse cost terms times parentheses.
+        List<SqlExpression> operands = opening is null ? [first] : opening.DetachOperands();
 
         string keyword = op == SqlLogicalOperator.And ? "AND" : "OR";
         var rule = op == SqlLogicalOperator.And ? OperandRule.Not : OperandRule.And;
         while (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, keyword))
         {
             Advance(ref lexer);
-            operands.Add(ParseOperand(ref lexer, rule));
+            var operand = ParseOperand(ref lexer, rule);
+            operands.Add(operand);
+            operandDepth = Math.Max(operandDepth, operand.Depth);
         }
 
-        return Nest(ref lexer, new SqlLogicalExpression(op, operands, Location.Create(1, 1, position, position)));
+        return Nest(ref lexer, new SqlLogicalExpression(op, operands, operandDepth, Location.Create(1, 1, position, position)));
     }
 
     private SqlExpression ParseNot(ref TokenLexer lexer)
